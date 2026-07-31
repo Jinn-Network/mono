@@ -57,6 +57,10 @@ export {
   verifyBaselineCounts,
   type EnvironmentVerificationStatement,
 } from "./statement.js";
+export {
+  buildEnvironmentCandidatesFromRows,
+  type UpstreamEnvironmentRow,
+} from "./import-source.js";
 export { buildEnvironmentVerificationSubjects } from "./subject.js";
 export {
   DEFAULT_VERIFICATION_CONTROLS,

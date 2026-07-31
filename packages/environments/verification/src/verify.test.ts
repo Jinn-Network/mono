@@ -4,12 +4,14 @@ import { parseDsseEnvelope, recordDigest } from "@jinn-network/trust-core";
 import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
+import { buildConformanceRecord } from "./import-source.js";
 import { canonicalOutcomeSetBytes, outcomeSetDigest, type OutcomeSet } from "./outcome-set.js";
 import type { ArtifactStore, Clock, ContainerRuntime } from "./ports.js";
 import type { VerifierIdentity } from "./predicate.js";
 import { verifyEnvironment } from "./verify.js";
 
-export const IMAGE_DIGEST = `sha256:${"c".repeat(64)}` as Sha256Digest;
+const RECORD = buildConformanceRecord();
+export const IMAGE_DIGEST = RECORD.image.manifestDigest as Sha256Digest;
 
 const OUTCOMES: OutcomeSet = {
   "tests/test_a.py::test_one": "pass",
@@ -21,34 +23,6 @@ const VERIFIER: VerifierIdentity = {
   version: "0.1.0",
   digest: `sha256:${"d".repeat(64)}`,
 };
-
-function stubRecord() {
-  return {
-    kind: "https://jinn.network/records/environment/1.0",
-    source: {
-      repo: "owner/name",
-      repoUrl: "https://github.com/owner/name",
-      commit: "0".repeat(40),
-    },
-    image: {
-      manifestDigest: IMAGE_DIGEST,
-      platform: "linux/amd64",
-      reference: `registry.test/owner/name@${IMAGE_DIGEST}`,
-    },
-    workspace: "/testbed",
-    invocations: {
-      test: [{ bin: "pytest", args: ["-q", "tests"] }],
-    },
-    parser: {
-      id: "pytest",
-      version: "1.0.0",
-      digest: `sha256:${"e".repeat(64)}`,
-      uri: "https://example.test/parsers/pytest-1.0.0.tar.gz",
-    },
-    build: { reproducibilityTier: 0 },
-    rights: { sourceLicense: "MIT", basis: "upstream-permissive-filter" },
-  };
-}
 
 function scriptedRuntime(outcomesPerRun: readonly OutcomeSet[]): ContainerRuntime & {
   readonly containerIds: string[];
@@ -111,7 +85,7 @@ describe("verifyEnvironment — stable path", () => {
     const artifactStore = memoryStore();
     const attestation = await verifyEnvironment(
       { containerRuntime: runtime, artifactStore, signer, clock: fixedClock(), verifier: VERIFIER },
-      stubRecord() as never,
+      RECORD,
     );
 
     const { predicate } = attestation.statement;
@@ -155,7 +129,7 @@ describe("verifyEnvironment — stable path", () => {
         clock: fixedClock(),
         verifier: VERIFIER,
       },
-      stubRecord() as never,
+      RECORD,
       { runCount: 4 },
     )).rejects.toThrow(/at least 5 runs/u);
     expect(runtime.containerIds).toHaveLength(0);
@@ -175,7 +149,7 @@ describe("verifyEnvironment — stable path", () => {
         clock: fixedClock(),
         verifier: VERIFIER,
       },
-      stubRecord() as never,
+      RECORD,
     )).rejects.toThrow(/Artifact store returned/u);
   });
 });
@@ -193,7 +167,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
   it("signs an unstable attestation when run 3 of 5 diverges", async () => {
     const runtime = scriptedRuntime([OUTCOMES, OUTCOMES, DIVERGENT, OUTCOMES, OUTCOMES]);
     const store = memoryStore();
-    const attestation = await verifyEnvironment(deps(runtime, store), stubRecord() as never);
+    const attestation = await verifyEnvironment(deps(runtime, store), RECORD);
     const { predicate } = attestation.statement;
 
     expect(predicate.result).toBe("unstable");
@@ -224,7 +198,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
         throw new Error("unreachable");
       },
     };
-    const attestation = await verifyEnvironment(deps(runtime), stubRecord() as never);
+    const attestation = await verifyEnvironment(deps(runtime), RECORD);
     const { predicate } = attestation.statement;
 
     expect(predicate.result).toBe("error");
@@ -249,7 +223,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
         throw new Error("unreachable");
       },
     };
-    const { predicate } = (await verifyEnvironment(deps(runtime), stubRecord() as never)).statement;
+    const { predicate } = (await verifyEnvironment(deps(runtime), RECORD)).statement;
     expect(predicate.result).toBe("error");
     expect(predicate.failure?.reason).toBe("image-digest-mismatch");
     expect(predicate.failure?.stage).toBe("acquire");
@@ -271,7 +245,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
         };
       },
     };
-    const install = (await verifyEnvironment(deps(installFailure), stubRecord() as never)).statement;
+    const install = (await verifyEnvironment(deps(installFailure), RECORD)).statement;
     expect(install.predicate.failure?.reason).toBe("install-command-failed");
     expect(install.predicate.failure?.stage).toBe("install");
 
@@ -290,7 +264,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
         };
       },
     };
-    const empty = (await verifyEnvironment(deps(emptyOutcomes), stubRecord() as never)).statement;
+    const empty = (await verifyEnvironment(deps(emptyOutcomes), RECORD)).statement;
     expect(empty.predicate.failure?.reason).toBe("parser-produced-no-outcomes");
     expect(empty.predicate.failure?.stage).toBe("run");
   });
@@ -303,7 +277,7 @@ describe("verifyEnvironment — negative attestations are first-class", () => {
         async runContainer() { throw new Error("unreachable"); },
       } as ContainerRuntime,
     ]) {
-      const attestation = await verifyEnvironment(deps(runtime), stubRecord() as never);
+      const attestation = await verifyEnvironment(deps(runtime), RECORD);
       expect(parseDsseEnvelope(attestation.envelopeBytes).signatures).toHaveLength(1);
     }
   });
