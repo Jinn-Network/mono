@@ -4,7 +4,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { createEoaTestSigner } from "@jinn-network/trust-testing";
-import { dssePreAuthEncoding, type DsseSigner } from "@jinn-network/trust-core";
+import {
+  dssePreAuthEncoding,
+  recoverEip191Address,
+  type DsseSigner,
+} from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
 import { EnvironmentVerificationPredicateSchema } from "./predicate.js";
@@ -22,7 +26,14 @@ const signer: DsseSigner = async (request) => [{
   ),
 }];
 
-describeEnvironmentVerificationConformance({ signer });
+describeEnvironmentVerificationConformance({
+  signer,
+  // The verification leg design §5.5 asks for: recover the signing address from
+  // the kit's re-derived pre-authentication encoding and compare it against the
+  // keyid the sealed envelope claims.
+  verifySignature: ({ preAuthEncoding, signature, keyid }) =>
+    recoverEip191Address(preAuthEncoding, signature) === keyid,
+});
 
 describe("predicate fixture corpus", () => {
   const root = fileURLToPath(new URL("../fixtures/predicate-v1/", import.meta.url));

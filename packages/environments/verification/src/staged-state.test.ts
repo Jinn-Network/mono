@@ -62,6 +62,37 @@ describe("staged state algebra", () => {
     expect(dueStagedJobs(file, T1)).toHaveLength(0);
   });
 
+  it("records the digest of the attestation a terminal failure published", () => {
+    // Design §6: `quarantined` maps to a published `unstable` attestation and a
+    // parked `failed_infrastructure` job to a published `error` one. Both are
+    // published records, so both must be nameable by digest from the state file.
+    let file = upsertStagedJobs(createStagedStateFile(T0), [DIGEST_A], T0);
+    file = recordStagedFailure(file, DIGEST_A, "outcome-set-divergence", T1, 60_000, DIGEST_B);
+    expect(file.jobs[DIGEST_A]!.disposition).toBe("quarantined");
+    expect(file.jobs[DIGEST_A]!.attestationDigest).toBe(DIGEST_B);
+  });
+
+  it("attaches no attestation digest to a job that is still retrying", () => {
+    let file = upsertStagedJobs(createStagedStateFile(T0), [DIGEST_A], T0);
+    file = recordStagedFailure(file, DIGEST_A, "image-unresolvable", T0, 60_000, DIGEST_B);
+    expect(file.jobs[DIGEST_A]!.disposition).toBe("retrying");
+    expect(file.jobs[DIGEST_A]!.attestationDigest).toBeUndefined();
+  });
+
+  it("refuses a timestamp that is not an RFC 3339 UTC instant", () => {
+    const file = upsertStagedJobs(createStagedStateFile(T0), [DIGEST_A], T0);
+    expect(() => createStagedStateFile("yesterday")).toThrow(EnvironmentVerificationError);
+    expect(() => upsertStagedJobs(file, [DIGEST_B], "2026-07-31 09:00:00"))
+      .toThrow(EnvironmentVerificationError);
+    expect(() => advanceStagedJob(file, DIGEST_A, "running", "2026-02-30T09:00:00.000Z"))
+      .toThrow(EnvironmentVerificationError);
+    expect(() => dueStagedJobs(file, "soon")).toThrow(EnvironmentVerificationError);
+    expect(() => parseStagedStateFile(serializeStagedStateFile({
+      ...file,
+      jobs: { [DIGEST_A]: { ...file.jobs[DIGEST_A]!, createdAt: "soon" } },
+    }))).toThrow(EnvironmentVerificationError);
+  });
+
   it("orders due jobs by creation time then key, and honors the retry fence", () => {
     let file = upsertStagedJobs(createStagedStateFile(T0), [DIGEST_B, DIGEST_A], T0);
     expect(dueStagedJobs(file, T0).map((job) => job.key)).toEqual([DIGEST_A, DIGEST_B]);

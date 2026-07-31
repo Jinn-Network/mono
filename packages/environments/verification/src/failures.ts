@@ -20,9 +20,9 @@ export const VERIFICATION_FAILURE_REASONS = [
 export type VerificationFailureReason = (typeof VERIFICATION_FAILURE_REASONS)[number];
 
 /**
- * The four-way disposition the legacy harvest state machine used
- * (`client/src/solver-types/_swe-rebench-v2-harvest-state.ts`, reference only),
- * rewritten over this package's closed vocabulary. Design §6: `quarantined`
+ * The four-way disposition the legacy SWE-rebench harvest state machine used
+ * (in the operator tree, read for reference only), rewritten over this
+ * package's closed vocabulary. Design §6: `quarantined`
  * publishes an `unstable` attestation; `failed_infrastructure` retries, then
  * publishes an `error` attestation.
  */

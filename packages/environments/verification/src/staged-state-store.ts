@@ -4,7 +4,7 @@
 // argument, never ambient: nothing here reads the ambient environment, and the guard's
 // filesystem allowlist names exactly this file (Findings F-C2-5).
 
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
@@ -16,15 +16,18 @@ import {
 
 const STATE_FILE = "staged-state.json";
 
+/** Process-wide, so two stores over one directory never pick the same name. */
+let temporarySequence = 0;
+
 /**
- * Crash-safe staged-state persistence: write to a unique temporary file, then
- * rename it over the state file. A crash mid-write leaves the previous state
- * intact and an abandoned `.tmp` sibling that no read ever consults.
+ * Crash-safe staged-state persistence: write and fsync a unique temporary file,
+ * rename it over the state file, then fsync the directory so the rename itself
+ * survives power loss. A crash mid-write leaves the previous state intact and
+ * an abandoned `.tmp` sibling that no read ever consults.
  */
 export function createFileStagedStateStore(directory: string): StagedStateStore {
   const root = resolve(directory);
   const file = join(root, STATE_FILE);
-  let sequence = 0;
 
   return {
     async read(): Promise<StagedStateFile | null> {
@@ -40,11 +43,23 @@ export function createFileStagedStateStore(directory: string): StagedStateStore 
 
     async write(state: StagedStateFile): Promise<void> {
       await mkdir(root, { recursive: true, mode: 0o700 });
-      sequence += 1;
-      const temporary = `${file}.${process.pid}.${sequence}.tmp`;
+      temporarySequence += 1;
+      const temporary = `${file}.${process.pid}.${temporarySequence}.tmp`;
       try {
-        await writeFile(temporary, serializeStagedStateFile(state), { mode: 0o600 });
+        const handle = await open(temporary, "wx", 0o600);
+        try {
+          await handle.writeFile(serializeStagedStateFile(state));
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
         await rename(temporary, file);
+        const directoryHandle = await open(root, "r");
+        try {
+          await directoryHandle.sync();
+        } finally {
+          await directoryHandle.close();
+        }
       } finally {
         await rm(temporary, { force: true });
       }

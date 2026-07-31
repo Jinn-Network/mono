@@ -5,7 +5,7 @@ import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 import type { z } from "zod";
 
 import type { OutcomeSet } from "./outcome-set.js";
-import type { VerifierIdentity } from "./predicate.js";
+import type { VerificationControls, VerifierIdentity } from "./predicate.js";
 
 /** The record's shell-free command shape (C1's `CommandSpecSchema`). */
 export type CommandSpec = z.infer<typeof CommandSpecSchema>;
@@ -63,6 +63,12 @@ export interface ContainerRunRequest {
   readonly parser: EnvironmentParserIdentity;
   /** Declared controls, already flattened to environment variables. */
   readonly env: Readonly<Record<string, string>>;
+  /**
+   * The declared test-ordering control, forwarded so implementations can apply
+   * it. It is inside the signed attestation, so an implementation that ignores
+   * it makes the attestation state a control the runs did not have.
+   */
+  readonly order: VerificationControls["order"];
   readonly network: "none";
   readonly timeoutSeconds: number;
   readonly signal?: AbortSignal;

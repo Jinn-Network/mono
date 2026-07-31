@@ -18,15 +18,30 @@ const FORBIDDEN = [
   /\breliable environment\b/iu,
 ];
 
+/** Every file under `directory`, recursively, as `directory`-relative paths. */
+async function filesUnder(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => `${entry.parentPath.replace(/\/*$/u, "/")}${entry.name}`);
+}
+
 describe("bounded claims", () => {
-  it("no source file over-claims", async () => {
-    // This file is the only exception: it must spell the banned words to ban them.
-    const names = (await readdir(SOURCE_ROOT))
-      .filter((name) => name.endsWith(".ts") && name !== "bounded-claims.test.ts");
-    for (const name of names) {
-      const text = await readFile(`${SOURCE_ROOT}${name}`, "utf8");
+  it("no shipped file over-claims", async () => {
+    // Source, the scripts that generate and smoke the published artifacts, and the
+    // fixture corpus itself -- every file a third party reads. This file is the only
+    // exception: it must spell the banned words to ban them.
+    const paths = [
+      ...await filesUnder(SOURCE_ROOT),
+      ...await filesUnder(`${PACKAGE_ROOT}scripts`),
+      ...await filesUnder(`${PACKAGE_ROOT}fixtures`),
+    ].filter((path) => !path.endsWith("bounded-claims.test.ts"));
+    expect(paths.some((path) => path.includes("/scripts/"))).toBe(true);
+    expect(paths.some((path) => path.includes("/fixtures/"))).toBe(true);
+    for (const path of paths) {
+      const text = await readFile(path, "utf8");
       for (const pattern of FORBIDDEN) {
-        expect(pattern.test(text), `${name} matches ${String(pattern)}`).toBe(false);
+        expect(pattern.test(text), `${path} matches ${String(pattern)}`).toBe(false);
       }
     }
   });

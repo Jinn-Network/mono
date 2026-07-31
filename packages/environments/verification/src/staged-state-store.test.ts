@@ -48,6 +48,18 @@ describe("file staged-state store", () => {
     expect(await store.read()).toEqual(file);
   });
 
+  it("does not let two stores over one directory collide on a temporary name", async () => {
+    // Both stores live in this process, so a pid-scoped, per-instance temporary
+    // name would be the same name twice: one write would clobber the other's
+    // temporary file and the loser's rename would fail.
+    const first = createFileStagedStateStore(directory);
+    const second = createFileStagedStateStore(directory);
+    const file = upsertStagedJobs(createStagedStateFile(T0), [DIGEST_A], T0);
+    await Promise.all([first.write(file), second.write(file)]);
+    expect(await first.read()).toEqual(file);
+    expect(await readdir(directory)).toEqual(["staged-state.json"]);
+  });
+
   it("fails loud on a corrupt state file rather than starting clean", async () => {
     await writeFile(join(directory, "staged-state.json"), "{ not json", "utf8");
     await expect(createFileStagedStateStore(directory).read())

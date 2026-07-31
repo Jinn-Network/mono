@@ -4,11 +4,12 @@ import { parseDsseEnvelope, recordDigest } from "@jinn-network/trust-core";
 import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
 
+import { EnvironmentVerificationError } from "./errors.js";
 import { buildConformanceRecord } from "./import-source.js";
 import { canonicalOutcomeSetBytes, outcomeSetDigest, type OutcomeSet } from "./outcome-set.js";
-import type { ArtifactStore, Clock, ContainerRuntime } from "./ports.js";
-import type { VerifierIdentity } from "./predicate.js";
-import { verifyEnvironment } from "./verify.js";
+import type { ArtifactStore, Clock, ContainerRunRequest, ContainerRuntime } from "./ports.js";
+import type { VerificationControls, VerifierIdentity } from "./predicate.js";
+import { DEFAULT_VERIFICATION_CONTROLS, verifyEnvironment } from "./verify.js";
 
 const RECORD = buildConformanceRecord();
 export const IMAGE_DIGEST = RECORD.image.manifestDigest as Sha256Digest;
@@ -26,15 +27,19 @@ const VERIFIER: VerifierIdentity = {
 
 function scriptedRuntime(outcomesPerRun: readonly OutcomeSet[]): ContainerRuntime & {
   readonly containerIds: string[];
+  readonly runRequests: ContainerRunRequest[];
 } {
   const containerIds: string[] = [];
+  const runRequests: ContainerRunRequest[] = [];
   let index = 0;
   return {
     containerIds,
+    runRequests,
     async pullByDigest(request) {
       return { resolvedManifestDigest: request.manifestDigest };
     },
-    async runContainer() {
+    async runContainer(request) {
+      runRequests.push(request);
       const containerId = `container-${index}`;
       containerIds.push(containerId);
       const outcomes = outcomesPerRun[index] ?? outcomesPerRun[outcomesPerRun.length - 1]!;
@@ -151,6 +156,127 @@ describe("verifyEnvironment — stable path", () => {
       },
       RECORD,
     )).rejects.toThrow(/Artifact store returned/u);
+  });
+});
+
+describe("verifyEnvironment — declared controls are applied, not merely signed", () => {
+  function deps(runtime: ContainerRuntime) {
+    return {
+      containerRuntime: runtime,
+      artifactStore: memoryStore(),
+      signer,
+      clock: fixedClock(),
+      verifier: VERIFIER,
+    };
+  }
+
+  it("applies every declared control to every run request", async () => {
+    const runtime = scriptedRuntime([OUTCOMES]);
+    const controls: VerificationControls = {
+      network: "none",
+      seeds: { PYTHONHASHSEED: "7" },
+      order: "fixed",
+      parallelism: 1,
+      locale: "en_US.UTF-8",
+      tz: "Europe/Berlin",
+    };
+    const { statement } = await verifyEnvironment(deps(runtime), RECORD, { controls });
+
+    expect(statement.predicate.controls).toEqual(controls);
+    expect(runtime.runRequests).toHaveLength(5);
+    for (const request of runtime.runRequests) {
+      expect(request.order).toBe("fixed");
+      expect(request.network).toBe("none");
+      expect(request.env).toEqual({
+        PYTHONHASHSEED: "7",
+        LC_ALL: "en_US.UTF-8",
+        LANG: "en_US.UTF-8",
+        TZ: "Europe/Berlin",
+      });
+    }
+  });
+
+  it("refuses a parallelism the sequential profile cannot apply, before touching any port",
+    async () => {
+      const runtime = scriptedRuntime([OUTCOMES]);
+      await expect(verifyEnvironment(deps(runtime), RECORD, {
+        controls: { ...DEFAULT_VERIFICATION_CONTROLS, parallelism: 16 },
+      })).rejects.toThrow(/parallelism/u);
+      expect(runtime.runRequests).toHaveLength(0);
+    });
+
+  it("refuses malformed controls rather than signing them", async () => {
+    const runtime = scriptedRuntime([OUTCOMES]);
+    await expect(verifyEnvironment(deps(runtime), RECORD, {
+      controls: {
+        ...DEFAULT_VERIFICATION_CONTROLS,
+        order: "shuffled",
+      } as unknown as VerificationControls,
+    })).rejects.toThrow(EnvironmentVerificationError);
+    expect(runtime.runRequests).toHaveLength(0);
+  });
+});
+
+describe("verifyEnvironment — raw logs become evidence", () => {
+  function loggingRuntime(logFor: (index: number) => Uint8Array | undefined, options: {
+    readonly failInstallAtRun?: number;
+  } = {}): ContainerRuntime {
+    let index = 0;
+    return {
+      async pullByDigest(request) {
+        return { resolvedManifestDigest: request.manifestDigest };
+      },
+      async runContainer() {
+        const current = index;
+        index += 1;
+        const log = logFor(current);
+        return {
+          containerId: `container-${current}`,
+          installExitCodes: options.failInstallAtRun === current ? [127] : [],
+          testExitCodes: [1],
+          outcomes: OUTCOMES,
+          wallSeconds: 10,
+          timedOut: false,
+          ...(log === undefined ? {} : { log }),
+        };
+      },
+    };
+  }
+
+  function deps(runtime: ContainerRuntime, artifactStore = memoryStore()) {
+    return { containerRuntime: runtime, artifactStore, signer, clock: fixedClock(), verifier: VERIFIER };
+  }
+
+  it("records one retrievable descriptor per run that returned a log", async () => {
+    const store = memoryStore();
+    const log = (index: number) => new TextEncoder().encode(`run ${index} log`);
+    const { statement } = await verifyEnvironment(deps(loggingRuntime(log), store), RECORD);
+
+    expect(statement.predicate.evidence?.map((descriptor) => descriptor.name))
+      .toEqual(["log-run-0", "log-run-1", "log-run-2", "log-run-3", "log-run-4"]);
+    for (let index = 0; index < 5; index += 1) {
+      const digest = recordDigest(log(index));
+      expect(statement.predicate.evidence?.[index]?.digest)
+        .toEqual({ sha256: digest.slice("sha256:".length) });
+      expect(store.bytes.get(digest)).toEqual(log(index));
+    }
+  });
+
+  it("omits evidence entirely when the runtime returns no logs", async () => {
+    const { statement } = await verifyEnvironment(deps(loggingRuntime(() => undefined)), RECORD);
+    expect(statement.predicate.evidence).toBeUndefined();
+  });
+
+  it("carries the partial evidence of a failed run on an error attestation", async () => {
+    const log = () => new TextEncoder().encode("install exploded");
+    const { statement } = await verifyEnvironment(
+      deps(loggingRuntime(log, { failInstallAtRun: 0 })),
+      RECORD,
+    );
+    expect(statement.predicate.result).toBe("error");
+    expect(statement.predicate.failure?.reason).toBe("install-command-failed");
+    expect(statement.predicate.evidence?.map((descriptor) => descriptor.name))
+      .toEqual(["log-run-0"]);
   });
 });
 

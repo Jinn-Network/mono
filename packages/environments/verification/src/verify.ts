@@ -28,10 +28,11 @@ import {
   type OutcomeSet,
 } from "./outcome-set.js";
 import type { ArtifactStore, ContainerRunResult, VerificationDeps } from "./ports.js";
-import type {
-  EnvironmentVerificationPredicate,
-  RunObservation,
-  VerificationControls,
+import {
+  VerificationControlsSchema,
+  type EnvironmentVerificationPredicate,
+  type RunObservation,
+  type VerificationControls,
 } from "./predicate.js";
 import {
   buildEnvironmentVerificationStatement,
@@ -42,7 +43,10 @@ export type { VerificationDeps } from "./ports.js";
 
 /**
  * The v1 profile's controls. Truthful by construction: `verifyEnvironment`
- * applies exactly these to every run request rather than merely declaring them.
+ * applies each of these rather than merely declaring it -- `network` and
+ * `order` travel on every run request, `seeds`/`locale`/`tz` are flattened into
+ * that request's environment, and `parallelism` is the sequential loop itself,
+ * which is why any value but 1 is refused (design §5.3 step 3).
  */
 export const DEFAULT_VERIFICATION_CONTROLS: VerificationControls = Object.freeze({
   network: "none",
@@ -82,12 +86,17 @@ interface RunRecord {
 }
 
 type Observation =
-  | { readonly kind: "runs"; readonly runs: readonly RunRecord[] }
+  | {
+    readonly kind: "runs";
+    readonly runs: readonly RunRecord[];
+    readonly evidence: readonly ResourceDescriptor[];
+  }
   | {
     readonly kind: "error";
     readonly reason: VerificationFailureReason;
     readonly detail?: string;
     readonly containerIds: readonly string[];
+    readonly evidence: readonly ResourceDescriptor[];
   };
 
 function toRfc3339Utc(instant: Date): string {
@@ -105,16 +114,42 @@ function controlsToEnv(controls: VerificationControls): Record<string, string> {
   };
 }
 
+/**
+ * Refuses controls this profile cannot apply, before any port is touched.
+ * Everything the predicate declares is applied, so a caller may not declare a
+ * control the driver would then quietly drop: the parse rejects a malformed
+ * block, and `parallelism` is pinned to the sequential loop of design §5.3
+ * step 3.
+ */
+function applicableControls(value: VerificationControls): VerificationControls {
+  const parsed = VerificationControlsSchema.safeParse(value);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    invalidInput(
+      first
+        ? `Invalid verification controls at /${first.path.join("/")}: ${first.message}`
+        : "Invalid verification controls.",
+    );
+  }
+  if (parsed.data.parallelism !== 1) {
+    invalidInput(
+      "The v1 profile runs the K runs sequentially, so controls.parallelism must be 1; "
+      + `received ${String(parsed.data.parallelism)}.`,
+    );
+  }
+  return parsed.data;
+}
+
 function describeCause(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-async function storeOutcomes(
+async function storeArtifact(
   artifactStore: ArtifactStore,
-  outcomes: OutcomeSet,
+  bytes: Uint8Array,
+  descriptor: { readonly name: string; readonly mediaType: string },
   signal: AbortSignal | undefined,
 ): Promise<ResourceDescriptor> {
-  const bytes = canonicalOutcomeSetBytes(outcomes);
   const expected = recordDigest(bytes);
   const receipt = await artifactStore.putArtifact(
     bytes,
@@ -125,7 +160,20 @@ async function storeOutcomes(
       `Artifact store returned ${receipt.digest} for bytes digesting to ${expected}.`,
     );
   }
-  return { name: "outcomes", mediaType: "application/json", digest: toDigestSet(expected) };
+  return { ...descriptor, digest: toDigestSet(expected) };
+}
+
+async function storeOutcomes(
+  artifactStore: ArtifactStore,
+  outcomes: OutcomeSet,
+  signal: AbortSignal | undefined,
+): Promise<ResourceDescriptor> {
+  return storeArtifact(
+    artifactStore,
+    canonicalOutcomeSetBytes(outcomes),
+    { name: "outcomes", mediaType: "application/json" },
+    signal,
+  );
 }
 
 /**
@@ -150,7 +198,7 @@ export async function verifyEnvironment(
       `The v1 profile requires at least ${MINIMUM_RUN_COUNT} runs; received ${String(options.runCount)}.`,
     );
   }
-  const controls = options.controls ?? DEFAULT_VERIFICATION_CONTROLS;
+  const controls = applicableControls(options.controls ?? DEFAULT_VERIFICATION_CONTROLS);
   const timeoutSeconds = options.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
 
   // Subject identity: re-seal the parsed record. Sealing is a pure JCS-once
@@ -178,6 +226,7 @@ export async function verifyEnvironment(
       controls,
       timeoutSeconds,
       observation.runs,
+      observation.evidence,
       options.signal,
     );
 
@@ -217,6 +266,9 @@ async function observe(
   options: ObserveOptions,
 ): Promise<Observation> {
   const manifestDigest = record.image.manifestDigest as Sha256Digest;
+  // Raw run logs, stored as they arrive so that a run which then fails still
+  // contributes its partial evidence to the error attestation (design §5.2).
+  const evidence: ResourceDescriptor[] = [];
 
   // Step 1: resolve and pull by digest. `reference` is advisory only.
   let pulled;
@@ -233,6 +285,7 @@ async function observe(
       reason: "image-unresolvable",
       detail: describeCause(cause),
       containerIds: [],
+      evidence,
     };
   }
   if (pulled.resolvedManifestDigest !== manifestDigest) {
@@ -241,6 +294,7 @@ async function observe(
       reason: "image-digest-mismatch",
       detail: `registry resolved ${pulled.resolvedManifestDigest}`,
       containerIds: [],
+      evidence,
     };
   }
 
@@ -260,6 +314,7 @@ async function observe(
         testCommands: record.invocations.test,
         parser: record.parser,
         env,
+        order: options.controls.order,
         network: "none",
         timeoutSeconds: options.timeoutSeconds,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -270,9 +325,18 @@ async function observe(
         reason: "run-command-failed",
         detail: `run ${index}: ${describeCause(cause)}`,
         containerIds,
+        evidence,
       };
     }
     containerIds.push(result.containerId);
+    if (result.log !== undefined) {
+      evidence.push(await storeArtifact(
+        deps.artifactStore,
+        result.log,
+        { name: `log-run-${index}`, mediaType: "application/octet-stream" },
+        options.signal,
+      ));
+    }
 
     if (result.timedOut) {
       return {
@@ -280,6 +344,7 @@ async function observe(
         reason: "runtime-timeout",
         detail: `run ${index} exceeded ${options.timeoutSeconds}s`,
         containerIds,
+        evidence,
       };
     }
     const failedInstall = result.installExitCodes.findIndex((code) => code !== 0);
@@ -289,6 +354,7 @@ async function observe(
         reason: "install-command-failed",
         detail: `run ${index}: install command ${failedInstall} exited ${result.installExitCodes[failedInstall]}`,
         containerIds,
+        evidence,
       };
     }
     // A non-zero *test* exit code is not a failure: expected-fail baselines are
@@ -299,6 +365,7 @@ async function observe(
         reason: "parser-produced-no-outcomes",
         detail: `run ${index} produced no parsed outcomes`,
         containerIds,
+        evidence,
       };
     }
 
@@ -313,7 +380,7 @@ async function observe(
     });
   }
 
-  return { kind: "runs", runs };
+  return { kind: "runs", runs, evidence };
 }
 
 function buildErrorPredicate(
@@ -335,6 +402,7 @@ function buildErrorPredicate(
       reason: observation.reason,
       ...(observation.detail === undefined ? {} : { detail: observation.detail }),
     },
+    ...(observation.evidence.length === 0 ? {} : { evidence: observation.evidence }),
   } as EnvironmentVerificationPredicate;
 }
 
@@ -344,6 +412,7 @@ async function buildRunsPredicate(
   controls: VerificationControls,
   timeoutSeconds: number,
   runs: readonly RunRecord[],
+  evidence: readonly ResourceDescriptor[],
   signal: AbortSignal | undefined,
 ): Promise<EnvironmentVerificationPredicate> {
   const reference = runs[0]!;
@@ -371,6 +440,7 @@ async function buildRunsPredicate(
       timeoutSeconds,
     },
     verifier: deps.verifier,
+    ...(evidence.length === 0 ? {} : { evidence }),
   };
 
   if (divergent.length === 0) {

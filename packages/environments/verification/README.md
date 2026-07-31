@@ -22,6 +22,16 @@ The protocol exercises the **image** at `image.manifestDigest`. At reproducibili
 it does not check that the image's workspace corresponds to `source.repo@source.commit`;
 that binding is a declaration this protocol does not check (design §5.2).
 
+## Declared controls are applied controls
+
+The `controls` block sits inside the signed payload, so `verifyEnvironment` applies every
+field rather than merely declaring it: `network` and `order` travel on each run request,
+`seeds` / `locale` / `tz` are flattened into that request's environment, and `parallelism`
+*is* the sequential run loop of design §5.3 — any value but `1` is refused before a port is
+touched, as are controls that do not parse. A `ContainerRuntime` implementation must honor
+the `order` and `network` it receives, or the attestation states a control the runs did not
+have.
+
 ## Ports
 
 Everything that touches the world is injected: `containerRuntime` (pull by digest, run a

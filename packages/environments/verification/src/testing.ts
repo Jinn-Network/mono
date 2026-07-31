@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import {
+  dssePreAuthEncoding,
   parseDsseEnvelope,
   recordDigest,
   type DsseSigner,
@@ -15,7 +16,7 @@ import {
 
 import { buildConformanceRecord } from "./import-source.js";
 import { canonicalOutcomeSetBytes, outcomeSetDigest, type OutcomeSet } from "./outcome-set.js";
-import type { ArtifactStore, Clock, ContainerRuntime } from "./ports.js";
+import type { ArtifactStore, Clock, ContainerRunRequest, ContainerRuntime } from "./ports.js";
 import type { VerifierIdentity } from "./predicate.js";
 import { parseEnvironmentVerificationStatement } from "./statement.js";
 import { verifyEnvironment, type VerifyEnvironmentOptions } from "./verify.js";
@@ -48,6 +49,9 @@ export interface ScriptedContainerRuntime extends ContainerRuntime {
   /** Container ids handed out, in run order. Distinct ids prove each run got a
    * fresh container. */
   readonly containerIds: readonly string[];
+  /** Every run request, in run order. Recorded so the kit can check that the
+   * signed controls are the controls the runs actually received. */
+  readonly runRequests: readonly ContainerRunRequest[];
   readonly pullCount: number;
 }
 
@@ -59,12 +63,16 @@ export function createScriptedContainerRuntime(
   scenario: ScriptedScenario,
 ): ScriptedContainerRuntime {
   const containerIds: string[] = [];
+  const runRequests: ContainerRunRequest[] = [];
   let pullCount = 0;
   let runIndex = 0;
 
   return {
     get containerIds() {
       return containerIds;
+    },
+    get runRequests() {
+      return runRequests;
     },
     get pullCount() {
       return pullCount;
@@ -76,7 +84,8 @@ export function createScriptedContainerRuntime(
       }
       return { resolvedManifestDigest: request.manifestDigest };
     },
-    async runContainer() {
+    async runContainer(request) {
+      runRequests.push(request);
       const containerId = `conformance-container-${runIndex}`;
       containerIds.push(containerId);
       const diverges = scenario.kind === "flaky-on-run-3" && runIndex === 2;
@@ -129,10 +138,36 @@ export async function loadGoldenStatement(name: GoldenStatementName): Promise<un
   return JSON.parse(await readFile(path, "utf8")) as unknown;
 }
 
+export interface DsseSignatureCheck {
+  /** Re-derived by the kit from the sealed envelope, never taken on trust. */
+  readonly preAuthEncoding: Uint8Array;
+  readonly signature: Uint8Array;
+  readonly keyid?: string;
+}
+
 export interface EnvironmentVerificationConformanceOptions {
   /** The host's signer. The kit holds no key material of its own. */
   readonly signer: DsseSigner;
+  /**
+   * Verifies one signature for the host's key type. Supplying it turns on the
+   * DSSE verification leg of design §5.5: the kit re-derives the
+   * pre-authentication encoding from the sealed envelope, asserts every
+   * signature verifies over it, and asserts a one-byte payload edit no longer
+   * does. The algorithm is the host's -- this package holds no key material and
+   * cannot know it.
+   */
+  readonly verifySignature?: (check: DsseSignatureCheck) => boolean;
   readonly verifyOptions?: VerifyEnvironmentOptions;
+}
+
+/** Base64 -> bytes, for the signature the sealed envelope carries as text. */
+function decodeBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 /**
@@ -206,6 +241,52 @@ export function describeEnvironmentVerificationConformance(
           JSON.parse(new TextDecoder().decode(envelope.payloadBytes)),
         )).toEqual(attestation.statement);
         expect(attestation.attestationDigest).toBe(recordDigest(attestation.envelopeBytes));
+      }
+    });
+
+    it("verifies every signature against the re-derived pre-authentication encoding",
+      async function verifiesSignatures() {
+        const { verifySignature } = options;
+        if (verifySignature === undefined) return;
+        const { attestation } = await run({ kind: "stable" });
+        const envelope = parseDsseEnvelope(attestation.envelopeBytes);
+        const preAuthEncoding = dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes);
+
+        for (const signature of envelope.signatures) {
+          expect(verifySignature({
+            preAuthEncoding,
+            signature: decodeBase64(signature.sig),
+            ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
+          })).toBe(true);
+        }
+
+        // The same signature over a one-byte-different payload must not verify:
+        // otherwise the check above proves nothing about what was signed.
+        const tampered = new Uint8Array(envelope.payloadBytes);
+        tampered[tampered.length - 1] = (tampered[tampered.length - 1]! + 1) % 256;
+        const tamperedEncoding = dssePreAuthEncoding(envelope.payloadType, tampered);
+        for (const signature of envelope.signatures) {
+          expect(verifySignature({
+            preAuthEncoding: tamperedEncoding,
+            signature: decodeBase64(signature.sig),
+            ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
+          })).toBe(false);
+        }
+      });
+
+    it("applies the declared controls to every run request", async () => {
+      const { attestation, containerRuntime } = await run({ kind: "stable" });
+      const { controls } = attestation.statement.predicate;
+      expect(containerRuntime.runRequests).toHaveLength(5);
+      for (const request of containerRuntime.runRequests) {
+        expect(request.network).toBe(controls.network);
+        expect(request.order).toBe(controls.order);
+        expect(request.env["LC_ALL"]).toBe(controls.locale);
+        expect(request.env["LANG"]).toBe(controls.locale);
+        expect(request.env["TZ"]).toBe(controls.tz);
+        for (const [name, value] of Object.entries(controls.seeds)) {
+          expect(request.env[name]).toBe(value);
+        }
       }
     });
 

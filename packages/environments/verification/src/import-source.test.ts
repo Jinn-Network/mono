@@ -86,6 +86,34 @@ describe("buildEnvironmentCandidatesFromRows", () => {
     ])).toThrow(/lineage/u);
   });
 
+  it("refuses a group whose rows disagree on a field the record emits verbatim", () => {
+    // The grouping key is design §6's identity tuple and stays that tuple. These
+    // fields sit outside it but are still emitted into the signed record from one
+    // member, so taking the first row's value would attribute every instance to a
+    // workspace, license, or origin it never declared.
+    const divergences: [string, Partial<UpstreamEnvironmentRow>][] = [
+      ["workspace", { workspace: "/app" }],
+      ["source license", { source_license: "GPL-3.0-only" }],
+      ["source repository URL", { repo_url: "https://gitlab.test/owner/name" }],
+      ["image provider", { image_provider_id: "swe-smith" }],
+    ];
+    for (const [label, override] of divergences) {
+      expect(() => buildEnvironmentCandidatesFromRows([
+        row(),
+        row({ instance_id: "owner__name-2", ...override }),
+      ]), label).toThrow(new RegExp(label, "u"));
+    }
+  });
+
+  it("keeps grouping rows that merely spell the same origin differently", () => {
+    const records = buildEnvironmentCandidatesFromRows([
+      row(),
+      row({ instance_id: "owner__name-2", repo_url: "https://github.com/owner/name" }),
+    ]);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.lineage?.upstream.keys).toEqual(["owner__name-1", "owner__name-2"]);
+  });
+
   it("refuses a row with no declared source license", () => {
     expect(() => buildEnvironmentCandidatesFromRows([
       row({ source_license: undefined }),

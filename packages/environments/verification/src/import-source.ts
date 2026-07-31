@@ -127,6 +127,41 @@ function partsFor(row: UpstreamEnvironmentRow): CandidateParts {
   return { identity, row, manifestDigest: digestMatch[1]!, platform, invocations, parser };
 }
 
+function resolveRepoUrl(row: UpstreamEnvironmentRow): string {
+  if (row.repo_url !== undefined) return row.repo_url;
+  if (!REPO_SLUG.test(row.repo)) {
+    invalidInput(`Row ${row.instance_id}: repo_url is required for non-slug repo "${row.repo}".`);
+  }
+  return `https://github.com/${row.repo}`;
+}
+
+function describeProvider(row: UpstreamEnvironmentRow): string {
+  return row.image_provider_id === undefined
+    ? ""
+    : `${row.image_provider_id}@${row.image_provider_version ?? "unversioned"}`;
+}
+
+/**
+ * Refuses a group whose members disagree on a field the emitted record carries
+ * verbatim from one of them. The grouping key is design §6's identity tuple and
+ * stays that tuple; these fields sit outside it, so the honest move on
+ * divergence is to refuse -- otherwise one row's workspace, license, or origin
+ * is signed on behalf of every instance the record attributes.
+ */
+function refuseDivergence(
+  label: string,
+  members: readonly CandidateParts[],
+  read: (row: UpstreamEnvironmentRow) => string,
+): void {
+  const values = new Set(members.map((member) => read(member.row)));
+  if (values.size > 1) {
+    invalidInput(
+      `Rows sharing environment identity disagree on ${label}: `
+      + `${[...values].sort(compareCodeUnitStrings).join(", ")}.`,
+    );
+  }
+}
+
 /**
  * Groups upstream rows into candidate environment records by full record
  * identity: one record per distinct environment, never one per row. Divergence
@@ -148,18 +183,13 @@ export function buildEnvironmentCandidatesFromRows(
     const first = members[0]!;
     const row = first.row;
 
-    const datasets = new Set(members.map((member) => member.row.dataset ?? ""));
-    const revisions = new Set(members.map((member) => member.row.revision ?? ""));
-    if (datasets.size > 1 || revisions.size > 1) {
-      invalidInput(
-        `Rows sharing environment identity disagree on upstream lineage `
-        + `(datasets: ${[...datasets].join(", ")}; revisions: ${[...revisions].join(", ")}).`,
-      );
-    }
+    refuseDivergence("upstream lineage dataset", members, (member) => member.dataset ?? "");
+    refuseDivergence("upstream lineage revision", members, (member) => member.revision ?? "");
+    refuseDivergence("workspace", members, (member) => member.workspace ?? DEFAULT_WORKSPACE);
+    refuseDivergence("source license", members, (member) => member.source_license!);
+    refuseDivergence("source repository URL", members, resolveRepoUrl);
+    refuseDivergence("image provider", members, describeProvider);
 
-    if (row.repo_url === undefined && !REPO_SLUG.test(row.repo)) {
-      invalidInput(`Row ${row.instance_id}: repo_url is required for non-slug repo "${row.repo}".`);
-    }
     const keys = members
       .map((member) => member.row.instance_id)
       .sort(compareCodeUnitStrings);
@@ -168,7 +198,7 @@ export function buildEnvironmentCandidatesFromRows(
       kind: "https://jinn.network/records/environment/1.0",
       source: {
         repo: row.repo,
-        repoUrl: row.repo_url ?? `https://github.com/${row.repo}`,
+        repoUrl: resolveRepoUrl(row),
         commit: row.base_commit,
       },
       image: {
