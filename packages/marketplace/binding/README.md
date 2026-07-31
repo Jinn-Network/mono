@@ -40,6 +40,31 @@ Finding F1 for the full reasoning: a Submission-document-field realization is im
 the deterministic URI depends on `attemptIndex`, known only at claim time; a separate `engage()`
 method is disallowed by ruling §7.18).
 
+## The requester on-ramp adapters (D7, Finding F2)
+
+`postTask` has always taken its ports as parameters; until now the only implementations that
+existed were the in-memory intent store and a broadcast port assembled inside the Anvil-fork
+conformance harness. These four adapters close that gap, landed here rather than in a consuming
+application because the requester on-ramp is binding-tree work (verified-environment supply design
+§8 D7, finding F2):
+
+- `createEoaBroadcastPort(publicClient, walletClient)` — the production `SafeBroadcastPort`: one
+  direct EOA transaction plus the `TaskCreated` receipt decode, serialized per port so one EOA
+  nonce sequence is not raced. Today-mode `createTask` is a plain `payable` function keyed on
+  `msg.sender`, so it is not Safe-gated. **Safe-routing arrives with the work client** — the
+  marketplace consumption-boundary design owns posting mechanics, and this adapter is the piece a
+  posting application swaps out at that client's mint.
+- `createFilePostingIntentStore(dir)` — the durable WAL: `open(…, "wx")` for the atomic claim,
+  temp-file plus `rename` for resolution, fsync on both, owner tokens persisted so a restarted
+  process resumes the same ownership. Same claim/fence/resolve/lookup/scanPending semantics as the
+  in-memory store; one suite (`posting-intent-store-conformance.test.ts`) runs against both.
+- `scanForOnChainMatch(publicClient, config)` — the chain half of `recoverPostingIntents`: a
+  windowed `TaskCreated` scan keyed on the indexed creator plus the `taskCidDigest`.
+- `DEFAULT_POSTING_TERMS` + `postingEscrowValueWei` + `assertMaxClaimsAgreement` — the escrow
+  formula in one place, with `maxClaims` named explicitly. `postTask` takes its multiplier from
+  the sealed Submission's `attempts.maxTotal`, falling back to 1; `assertMaxClaimsAgreement`
+  throws on an absent `maxTotal` so a posting application cannot reach that fallback by accident.
+
 ## A note on the package.json dependency graph
 
 This package's own production dependencies are exactly the five it needs for M0-M1 source:
