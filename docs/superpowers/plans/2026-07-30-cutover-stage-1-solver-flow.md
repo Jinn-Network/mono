@@ -102,7 +102,7 @@ Every file under `client/src/daemon/` and `client/src/harnesses/engine/`, plus t
 | `client/src/daemon/evidence-join.ts` | **Created** (Task 11) |
 | `client/src/daemon/composition-root.ts` | **Created** (Task 12) |
 | `client/src/daemon/engagement-ledger.ts` | **Created** (Task 6) |
-| `client/src/daemon/mech-deliver.ts` | **Created** (Task 8) |
+| `client/src/daemon/mech-deliver.ts` | **Not created** — coordinator amendment 2 rehomed Task 8 to `packages/marketplace/venue-base/src/deliver-leg.ts` |
 | `client/src/daemon/bridge-legacy-delivery.ts` | **Created** (Task 15) |
 | `client/src/daemon/creator.ts` | **Kept** — retires at stage 3; its tx leg re-points through venue-base (Task 7) |
 | `client/src/daemon/delivery-watcher.ts` | **Kept** — retires at stage 2 |
@@ -4804,3 +4804,85 @@ should not stand. **Fix:** pin `viem` in client's `resolutions`, following the `
   testnet cutover, so this is consistent, but it is a constraint the plan never states.
 - `selectProvisioner`'s git-worktree branch needs per-call `referenceRepository` / `oid` that no
   `JinnConfig` field carries; the composition root always builds the plain-directory provisioner.
+
+### E23 — the evidence rollup crossed the api → daemon boundary (found in the end-of-plan battery, fixed)
+
+Task 11 threaded the `/v1/status` indexing rollup by importing `EvidenceDriverLoop` and
+`EvidenceIndexingStatus` from `src/daemon/` into `src/api/gather-status.ts` and
+`src/api/status-build.ts`. `client/test/architecture/api-daemon-boundary.test.ts` (#1584) forbids
+that, **type-only imports included** — which is why `yarn typecheck` stayed at zero errors and
+every targeted suite the executor ran stayed green. Only the full suite caught it. **Disposition:**
+the rollup shapes moved to `client/src/types/evidence-indexing.ts`, which both tiers may import,
+and `gather-status.ts` now depends on a narrow `EvidenceIndexingSource` port (`failures()` +
+`pending()`) that `EvidenceDriverLoop` satisfies structurally without the API tier naming the
+class. The lesson generalizes: an architecture guard that lives in the test suite is invisible to
+a per-task executor running targeted suites, so the coordinator's full-suite pass is the only
+place it can surface.
+
+### E24 — the bridge exists but production never populates it (**F2 is not actually closed**)
+
+Task 15 built the ratified D3 mechanism correctly — the `deliveryExtensions` hook is additive,
+namespaced, key-validated, reserved-key-safe, and it round-trips through `sealDelivery` — and
+Task 14's fixtures now prove a legacy evaluator can parse the annotated Delivery. But the
+composition root supplies `deliveryExtensions: () => ({})`. **No delivery this daemon produces
+carries the annotation**, so finding F2's gap is closed in mechanism and open in fact.
+
+Two concrete blockers, both recorded by the Task 15 executor rather than papered over:
+
+1. The hook must be **synchronous** (it is called inside `backend.ts`'s synchronous `sealDelivery`
+   path), but `CompositionRootInput` carries only an async `WalletClient` — there is no sync
+   signer port, and the legacy envelope must be signed.
+2. There is **no reachable mapping from a sealed `TaskSpecification` back to the
+   `ExecutionWiringEntry` / `workKind` that produced it**. `workKind` is computed once at claim
+   time by `mapAnnouncedSubmissionToFacts` and never threaded through `backend.submit`.
+
+`buildLegacyExecutionEnvelope` is therefore **unexercised beyond typecheck**, and it fills
+`task.onchainCreationTx` / `onchainCreationBlock` / `requestId` with bridge-era placeholders
+because the hook has no access to the attempt's on-chain creation facts. **Disposition:** a
+follow-up needs a sync signer port plus a workKind-carrying seam. Until then, stage 1 must not be
+described as bridging deliveries to the legacy evaluator — it can, but it does not.
+
+### E25 — single-broadcaster audit: the rule holds for the Safe, and every survivor is EOA-level
+
+Contract 1 says venue-base's Safe broadcast is the only transaction path. Audited by grepping
+every `writeContract` / `sendTransaction` / `sendRawTransaction` in `client/src`. Verdict: **no
+surviving legacy path broadcasts from the Safe outside the venue broadcaster.** Every survivor is
+a different nonce stack with its own lock, which is what the rule actually protects:
+
+- `client/src/main.ts` (checkpoint) and `client/src/tx-retry.ts` — **master/operator EOA**, guarded
+  by `withEoaBroadcastLock`. Not the Safe.
+- `client/src/erc8004/reputation.ts:512` — the EOA fallback taken only when no `safeAddress` is
+  configured; the Safe branch at `:494` goes through `executeSafeTransaction`. Correct.
+- `client/src/erc8004/validation.ts:145,185` — `ValidationRegistry` writes are **EOA-only and were
+  never Safe-mediated**, so they never passed through `executeSafeTransaction` even before this
+  stage. This is a **third** ERC-8004 surface that finding E6's "seven call sites" count did not
+  reach, because it was never a call site at all. Consistent with contract 1, worth naming so the
+  next audit does not treat it as a regression.
+- `client/src/earning/**` — the bootstrap, which runs before any composition root and whose job
+  includes deploying the Safe. It cannot route through a Safe broadcaster by definition.
+
+### Verification state at end of plan (2026-07-31)
+
+- `client` typecheck: **0 errors**. `yarn lint:no-late-mount`: clean.
+- Touched package suites: `marketplace/pipeline` **52 passed**, `marketplace/venue-base`
+  **166 passed**, `task-execution/backend-local/assembly` **96 passed / 1 skipped**; all three
+  typecheck at 0 errors.
+- Guard trios, both trees: marketplace source-boundaries **13/13**, package-inventory **2/2**,
+  packed-types **1/1**; task-execution source-boundaries **7/7**, package-inventory **3/3**,
+  packed-types **1/1**.
+- `client` full suite (`--no-file-parallelism`, before the E23 fix): 807 files
+  (792 passed / 6 failed / 9 skipped), 7170 tests (7125 passed / 16 failed / 29 skipped).
+  Of the six red files, **one was ours** (E23, fixed). The other five are network- or
+  resource-dependent and pass in isolation: `_support/chain/anvil.test.ts` +
+  `_support/chain/olas-funding.test.ts` (fork Base over the network — re-run alone: 3/3 green),
+  `scripts/build-anvil-snapshot-entrypoint.test.ts` (subprocess timeout under load — alone: 1/1
+  green), `venues/hyperliquid/client.test.ts` (9 tests against a live testnet API), and
+  `cli/commands/create.test.ts` (runs `yarn install` in a scaffold). **No commit in this stage
+  touches any of those five files.**
+- `e2e:daemon-harness` with `JINN_E2E_HARNESS=prediction-v1-baseline`: **FAILED**, identically on
+  3/3 runs, at `bootstrapStakedOperator` — `stOLAS stake() tx failed for service 1` on the live
+  Base-mainnet Anvil fork, inside `client/src/earning/bootstrap.ts`, which no commit in this stage
+  touches. The gate therefore never reached any stage-1 code. `anvil --version`: 1.6.0-nightly.
+  `JINN_E2E_HARNESS=claude-code` skipped cleanly (no `ANTHROPIC_API_KEY`) as designed.
+- The **testnet closed-loop gate (Task 19 step 4) was NOT run** — it is the human deploy gate, and
+  E20 means it could not pass regardless.
