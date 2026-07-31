@@ -5068,7 +5068,7 @@ git commit -m "feat(plugin-runtime): expose the corpus as a runtime capability w
 - Consumes: `validateAndProjectEvidenceRecord` from `@jinn-network/evidence-discovery/indexer`; `createEvidenceIndexer`; every C5 surface.
 - Produces: `interface SeededMirror { aliceReferences: readonly EvidenceRecordReference[]; malloryReference: EvidenceRecordReference; localRepository: EvidenceRepository }`; `seedMirror(paths, source): Promise<SeededMirror>`; `executionProjection(overrides): ExecutionEvidenceProjection`.
 
-- [ ] **Step 1: Import the golden record fixture rather than authoring one**
+- [x] **Step 1: Import the golden record fixture rather than authoring one**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)"
@@ -5097,7 +5097,7 @@ Regenerate with:
 These fixtures are test-only and are not in the package's `files` list.
 ```
 
-- [ ] **Step 2: Verify the fixture validates before building anything on it**
+- [x] **Step 2: Verify the fixture validates before building anything on it**
 
 ```bash
 cd plugin/runtime
@@ -5111,7 +5111,7 @@ console.log(JSON.stringify({ conforms: report.conforms, diagnostics: report.diag
 ```
 Expected: `{"conforms":true,"diagnostics":[]}`. If it is false, the wrong file was copied — fix before continuing.
 
-- [ ] **Step 3: Extend the fixture helper with `seedMirror`**
+- [x] **Step 3: Extend the fixture helper with `seedMirror`**
 
 Append to `src/corpus/testing-fixture.ts`:
 
@@ -5236,7 +5236,7 @@ Add `src/corpus/testing-fixture.test.ts` asserting each of the three variants va
 
 `executionProjection(overrides)` is a thin helper returning a valid `ExecutionEvidenceProjection` for the `producerIdOf` unit test; build it from `validateAndProjectEvidenceRecord` over a seeded variant rather than by hand.
 
-- [ ] **Step 4: Write the end-to-end integration test**
+- [x] **Step 4: Write the end-to-end integration test**
 
 `src/corpus/corpus.integration.test.ts`:
 
@@ -5422,7 +5422,7 @@ describe("corpus end to end", () => {
 
 > If constructing a real signed policy chain proves to cost more than the assertion is worth, use `createTrustPolicyAdmission`'s `verifyChain` seam instead and record the substitution in the test's own comment. Do **not** weaken production code to make the test easier.
 
-- [ ] **Step 5: Run everything**
+- [x] **Step 5: Run everything**
 
 ```bash
 cd plugin/runtime && yarn typecheck && yarn test
@@ -5432,7 +5432,7 @@ cd ../.. && node --test .github/scripts/plugin-tree-package-inventory.test.mjs \
 ```
 Expected: all green — 15 C5 suites (config, errors, high-water-mark, lock, admission, chain-verification, announcements, repositories, store, mirror, read, retrieve, capability, testing-fixture, integration) plus all three guards.
 
-- [ ] **Step 6: Run the consumed stack packages' kits**
+- [x] **Step 6: Run the consumed stack packages' kits**
 
 Per the program's §9.4 rule — the product carries no kit of its own, but it runs the kits of what it composes:
 
@@ -5445,7 +5445,7 @@ cd ../../trust/core && yarn test
 ```
 Expected: all green. A red here means C5's usage revealed a defect in a consumed package — file it as a finding against that package, do not work around it.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add plugin/runtime/fixtures plugin/runtime/src/corpus
@@ -5583,3 +5583,21 @@ Surfaced by the C5 sub-coordinator against accepted C3 head `ec57b5a2f` before T
 **C5-P1 — `RuntimeConfigFileSchema` rejects `corpus`.** C3's `z.strictObject({ home, logLevel })` fails any Task 1 test that passes `file: { corpus: … }` before `resolveCorpusConfig` runs. **Disposition (applied in Task 1 Step 3):** add `corpus: z.unknown().optional()` to `RuntimeConfigFileSchema`; keep real validation in `CorpusConfigSchema` / `resolveCorpusConfig` so file-only authority stays there.
 
 **C5-P2 — closed-world exact maps omit C5 deps.** C3 R-C3-63/64 enforce `APPROVED_RUNTIME_DEPENDENCIES` / `DEV_DEPENDENCIES` / `RESOLUTIONS` in `plugin-tree-guard-common.mjs`. Updating only `JINN_DEPENDENCY_GRAPH` leaves Task 1 red on `validateExactDependencySections`, undeclared deps, and portal resolutions. **Disposition (applied in Task 1 Steps 5–6, 9):** extend those three maps with C5's exact versions and portal entries; pin `@types/better-sqlite3` at `7.6.11` (no `^`); include `plugin-tree-guard-common.mjs` in the Task 1 commit and shared-file ownership table. The same gap applies to C4 — amended in the C4 plan in parallel.
+
+## 2026-07-31 implementation-time finding (C5-P3)
+
+**C5-P3 — C5 production corpus modules violate C3 source-boundary custody (blocking).**
+Accepted C3 head forbids `node:fs` / `node:fs/promises` and ambient `process.pid` in production source outside `src/bin.ts` (AST custody scanner, R-C3-*). Tasks 3/4/9 of this plan (and the verbatim implementations) use those APIs directly in:
+
+- `plugin/runtime/src/corpus/high-water-mark.ts` (`node:fs/promises`, `process.pid`)
+- `plugin/runtime/src/corpus/lock.ts` (`node:fs`, `node:fs/promises`)
+- `plugin/runtime/src/corpus/store.ts` (`node:fs/promises`)
+
+After Task 14, `yarn typecheck` and `yarn test` are green (251/251), inventory and packed-types guards pass, but `plugin-tree-source-boundaries.test.mjs` fails 37/38 with the six violations above. Missed earlier because source-boundaries was last green-checked at Task 1, before durable I/O landed.
+
+**Proposed disposition (custody-aligned, preferred):** inject a narrow filesystem / process port from the composition root (`bin.ts` or capability factory) into `createFileHighWaterMarkStore`, `tryAcquireSyncLock`, and `openCorpusMirrorStore` — same pattern as contract 11 (chain-facing deps injected outside the runtime library). Replace `process.pid` with an injected nonce/`crypto.randomUUID()` for temp paths. Do **not** broaden the C3 allowlist for library modules.
+
+**Alternate (weaker):** extend AST custody allowlists for named corpus files — requires C3/program ratification; not recommended.
+
+**Status:** blocking PR / acceptance until resolved. Repair is a fresh implementer task after coordinator ratification.
+
