@@ -12,6 +12,7 @@ export interface CapturePaths {
   readonly captureDirectory: string;
   readonly sessionsDirectory: string;
   readonly workspacesDirectory: string;
+  readonly derivationLinksDirectory: string;
   readonly retentionWatermarkPath: string;
 }
 
@@ -20,6 +21,7 @@ export function resolveCapturePaths(config: RuntimeConfig): CapturePaths {
     captureDirectory: config.captureDirectory,
     sessionsDirectory: join(config.captureDirectory, "sessions"),
     workspacesDirectory: join(config.captureDirectory, "workspaces"),
+    derivationLinksDirectory: join(config.captureDirectory, "derivation-links"),
     retentionWatermarkPath: join(config.captureDirectory, "retention.json"),
   };
 }

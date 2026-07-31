@@ -33,6 +33,7 @@ describe("capture paths", () => {
     expect(paths.captureDirectory).toBe(join(home, "capture"));
     expect(paths.sessionsDirectory).toBe(join(home, "capture", "sessions"));
     expect(paths.workspacesDirectory).toBe(join(home, "capture", "workspaces"));
+    expect(paths.derivationLinksDirectory).toBe(join(home, "capture", "derivation-links"));
     expect(paths.retentionWatermarkPath).toBe(join(home, "capture", "retention.json"));
   });
 

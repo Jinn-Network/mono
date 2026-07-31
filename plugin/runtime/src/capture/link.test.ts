@@ -1,8 +1,23 @@
-import { describe, expect, test } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, test, afterEach, beforeEach } from "vitest";
 
 import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trajectory";
+import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 
-import { loadTrajectoryRecord, trajectoryReferenceFromRecordBytes } from "./link.js";
+import { PluginRuntimeError } from "../errors.js";
+import { resolveRuntimeConfig } from "../config.js";
+import {
+  derivationLinkPath,
+  loadTrajectoryDerivationAttestation,
+  loadTrajectoryRecord,
+  readTrajectoryDerivationAttestationLink,
+  trajectoryReferenceFromRecordBytes,
+  writeTrajectoryDerivationAttestationLink,
+} from "./link.js";
+import { resolveCapturePaths } from "./paths.js";
 
 const DIGEST = `sha256:${"d".repeat(64)}` as const;
 
@@ -90,5 +105,95 @@ describe("loadTrajectoryRecord", () => {
       getArtifact: async () => null,
     } as unknown as Parameters<typeof loadTrajectoryRecord>[0];
     await expect(loadTrajectoryRecord(repository, { digest: DIGEST })).rejects.toThrow(/not present/u);
+  });
+});
+
+const EXECUTION_DIGEST = `sha256:${"b".repeat(64)}` as const;
+const TRAJECTORY_DIGEST = `sha256:${"c".repeat(64)}` as const;
+const ATTESTATION_DIGEST = `sha256:${"a".repeat(64)}` as const;
+const NATIVE_DIGEST = `sha256:${"d".repeat(64)}` as const;
+
+const sampleLink = () => ({
+  version: 1 as const,
+  executionDigest: EXECUTION_DIGEST,
+  trajectoryDigest: TRAJECTORY_DIGEST,
+  attestationDigest: ATTESTATION_DIGEST,
+  nativeTraceDigest: NATIVE_DIGEST,
+  derivedAt: "2026-07-30T09:00:06Z",
+});
+
+let home: string;
+
+beforeEach(async () => {
+  home = await mkdtemp(join(tmpdir(), "jinn-capture-link-"));
+});
+afterEach(async () => {
+  await rm(home, { recursive: true, force: true });
+});
+
+describe("derivation attestation link", () => {
+  test("derives the link path from the execution digest", () => {
+    const paths = resolveCapturePaths(resolveRuntimeConfig({ env: {}, homeDirectory: home }));
+    expect(derivationLinkPath(paths, EXECUTION_DIGEST)).toBe(
+      join(paths.derivationLinksDirectory, "b".repeat(64) + ".json"),
+    );
+  });
+
+  test("round-trips a link through write and read", async () => {
+    const paths = resolveCapturePaths(resolveRuntimeConfig({ env: {}, homeDirectory: home }));
+    const link = sampleLink();
+    await writeTrajectoryDerivationAttestationLink(paths, link);
+    expect(await readTrajectoryDerivationAttestationLink(paths, EXECUTION_DIGEST)).toEqual(link);
+  });
+
+  test("returns null when no link exists", async () => {
+    const paths = resolveCapturePaths(resolveRuntimeConfig({ env: {}, homeDirectory: home }));
+    expect(await readTrajectoryDerivationAttestationLink(paths, EXECUTION_DIGEST)).toBeNull();
+  });
+
+  test("duplicate write of the same link succeeds", async () => {
+    const paths = resolveCapturePaths(resolveRuntimeConfig({ env: {}, homeDirectory: home }));
+    const link = sampleLink();
+    await writeTrajectoryDerivationAttestationLink(paths, link);
+    await expect(writeTrajectoryDerivationAttestationLink(paths, link)).resolves.toBeUndefined();
+  });
+
+  test("rejects a mismatched rewrite", async () => {
+    const paths = resolveCapturePaths(resolveRuntimeConfig({ env: {}, homeDirectory: home }));
+    await writeTrajectoryDerivationAttestationLink(paths, sampleLink());
+    await expect(
+      writeTrajectoryDerivationAttestationLink(paths, {
+        ...sampleLink(),
+        trajectoryDigest: `sha256:${"e".repeat(64)}`,
+      }),
+    ).rejects.toMatchObject({ code: "capture-derivation-link-mismatch" });
+  });
+
+  test("loads attestation bytes and statement from the archive", async () => {
+    const { buildTrajectoryDerivationStatement, sealTrajectoryDerivationAttestation, TRAJECTORY_VOCABULARY_PROFILE } =
+      await import("@jinn-network/evidence-trajectory");
+    const statement = buildTrajectoryDerivationStatement({
+      producerId: "https://jinn.network/software/plugin-runtime",
+      executionDigest: EXECUTION_DIGEST,
+      trajectoryDigest: TRAJECTORY_DIGEST,
+      nativeTraceDigest: NATIVE_DIGEST,
+      formatIri: "https://jinn.network/formats/agent-session-feed/v1",
+      decoderId: "agent-session-feed",
+      decoderVersion: "1.0.0",
+      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      timebase: "source-epoch-ns",
+      linkageMode: "forward-linked",
+      derivedAt: "2026-07-30T09:00:06Z",
+    });
+    const sealed = await sealTrajectoryDerivationAttestation({
+      statement,
+      signer: async () => [{ signature: new Uint8Array([9]), keyid: "k" }],
+    });
+    const repository = new InMemoryEvidenceRepository();
+    await repository.putArtifact(sealed.envelopeBytes);
+    const link = { ...sampleLink(), attestationDigest: sealed.digest };
+    const loaded = await loadTrajectoryDerivationAttestation(repository, link);
+    expect(loaded.envelopeBytes).toEqual(sealed.envelopeBytes);
+    expect(loaded.statement.predicate.derivedAt).toBe("2026-07-30T09:00:06Z");
   });
 });
