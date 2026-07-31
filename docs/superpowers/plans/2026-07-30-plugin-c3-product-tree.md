@@ -1898,7 +1898,7 @@ git commit -m "feat(plugin-runtime): health report surface and the doctor check 
 
 The lifecycle rules fixed here are what C4–C7 build against: capabilities start in array order and stop in reverse; a failing `start` unwinds what already started; `stop` is idempotent and best-effort; `health` before `start` is an error rather than a misleading empty report.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `plugin/runtime/src/runtime.test.ts`:
 
@@ -2134,12 +2134,12 @@ describe("createPluginRuntime", () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `cd plugin/runtime && yarn test`
 Expected: FAIL — `Failed to resolve import "./capability.js"`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 `plugin/runtime/src/capability.ts`:
 
@@ -2317,7 +2317,7 @@ export function createPluginRuntime(options: PluginRuntimeOptions): PluginRuntim
 }
 ```
 
-- [ ] **Step 4: Fix the deliberate defect the tests catch**
+- [x] **Step 4: Fix the deliberate defect the tests catch**
 
 The `start` loop above calls `capability.start?.()` without the context, so the "passes the config and a logger to each capability" test fails with `seen.home` undefined. Replace the two lines
 
@@ -2332,12 +2332,12 @@ with
           if (capability.start !== undefined) await capability.start(context);
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `cd plugin/runtime && yarn test && yarn typecheck`
 Expected: PASS — 15 new tests (42 total).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add plugin/runtime/src
