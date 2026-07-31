@@ -955,7 +955,7 @@ Nothing to commit — the gate is evidence, not code. Capture both outputs for t
 - Consumes: every re-point from Tasks 3–8; the shim from Task 2.
 - Produces: proof that **every** re-pointed consumer works with the shim absent — i.e. that #2294's deletion of `apps/jinn-agent` (which takes the symlink with it) breaks nothing outside the fork.
 
-- [ ] **Step 1: Confirm no consumer still names the old path**
+- [x] **Step 1: Confirm no consumer still names the old path**
 
 Run:
 
@@ -969,7 +969,7 @@ Expected: no output.
 
 (The `DO NOT EDIT HERE` exclusion covers the two intentional historical-marker sites: `.github/scripts/jinn-plugin-split.mjs:192` and `.github/scripts/jinn-plugin-split.test.mjs:305`. Dated design documents under `docs/` and `spec/` are **not** re-pointed — they are historical records under the American-English/dated-document rule and describe the pre-relocation world truthfully.)
 
-- [ ] **Step 2: Park the shim and run every re-pointed check**
+- [x] **Step 2: Park the shim and run every re-pointed check**
 
 Run:
 
@@ -992,7 +992,7 @@ Expected: the coherence line; four green `node --test` suites; 3 passing vitest 
 
 This is the answer to "what breaks when #2294 lands": nothing outside `apps/jinn-agent` itself.
 
-- [ ] **Step 3: Prove the fork still works with the shim in place**
+- [x] **Step 3: Prove the fork still works with the shim in place**
 
 Run:
 
@@ -1011,7 +1011,7 @@ Expected: a path ending `apps/jinn-agent/plugins/jinn/__init__.py`, then `FORK S
 
 (The fork's full pytest suite runs in CI: the `jinn-agent CI` workflow triggers on `apps/jinn-agent/**`, which this branch touches, and the four test slices cover `tests/plugins/test_jinn_*.py`. Do not attempt the full `uv sync` locally; let CI be the gate and check it before requesting review.)
 
-- [ ] **Step 4: The freeze proof — a pure-rename diff**
+- [x] **Step 4: The freeze proof — a pure-rename diff**
 
 Run:
 
@@ -1024,7 +1024,7 @@ Expected: 21 `rename apps/jinn-agent/plugins/jinn/{…} => plugin/frozen/{…} (
 
 Paste both into the PR description under a heading "Freeze proof (pure renames)". A reviewer confirms the freeze by reading these two outputs plus the tree-identity line from Task 9 Step 3 — no file-by-file reading required.
 
-- [ ] **Step 5: Full branch diff review**
+- [x] **Step 5: Full branch diff review**
 
 Run: `git diff origin/integration/evidence-v1...HEAD --stat`
 
@@ -1044,7 +1044,7 @@ packages/layer/test/architecture/package-contract.test.ts
 
 Anything else means scope crept — remove it.
 
-- [ ] **Step 6: Push and open the PR against the base branch**
+- [x] **Step 6: Push and open the PR against the base branch**
 
 ```bash
 git push -u origin plugin/c0-adapter-relocation
@@ -1067,7 +1067,7 @@ The PR body must carry, in this order:
 
 Do **not** self-merge (AI workflow rule 4).
 
-- [ ] **Step 7: Post the #2294 status comment**
+- [x] **Step 7: Post the #2294 status comment**
 
 ```bash
 gh issue comment 2294 --body-file /tmp/c0-2294-status.md
