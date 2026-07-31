@@ -1402,6 +1402,9 @@ test('evidence source boundaries remain one-way across the approved graph', () =
   const trajectoryTestingEntry = join(trajectorySource, 'testing.ts');
   const trajectoryFixtureLoaders = join(trajectorySource, 'fixtures.ts');
   const trajectoryConformance = join(trajectorySource, 'derivation-conformance.ts');
+  const trajectoryThirdReviewProbes = join(trajectorySource, 'third-review-probes.ts');
+  const trajectoryConformanceCaseManifest = join(trajectorySource, 'conformance-case-manifest.ts');
+  const trajectoryConformanceCaseRunner = join(trajectorySource, 'conformance-case-runner.ts');
   const trajectoryExecutionFixtures = join(trajectorySource, 'execution-fixtures.ts');
   const trajectoryTestRegex = /\.test\.[cm]?[jt]sx?$/u;
   const trajectorySourceFiles = files(trajectorySource);
@@ -1409,6 +1412,9 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     file === trajectoryTestingEntry
       || file === trajectoryFixtureLoaders
       || file === trajectoryConformance
+      || file === trajectoryThirdReviewProbes
+      || file === trajectoryConformanceCaseManifest
+      || file === trajectoryConformanceCaseRunner
       || file === trajectoryExecutionFixtures
       || trajectoryTestRegex.test(file));
   const trajectoryProductionFiles = trajectorySourceFiles.filter((file) =>
@@ -1486,7 +1492,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     forbiddenImportsInFiles(
       [join(trajectorySource, 'index.ts')],
       [],
-      [trajectoryTestingEntry, trajectoryFixtureLoaders, trajectoryConformance],
+      [trajectoryTestingEntry, trajectoryFixtureLoaders, trajectoryConformance, trajectoryThirdReviewProbes, trajectoryConformanceCaseManifest, trajectoryConformanceCaseRunner],
     ),
     [],
     'the Trajectory root entrypoint must not export testing.ts or fixtures.ts',

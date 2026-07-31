@@ -7,6 +7,7 @@ export {
   TRAJECTORY_RECORD_KIND,
   TRAJECTORY_VOCABULARY_PROFILE,
   TRAJECTORY_DERIVATION_PREDICATE_TYPE,
+  TRAJECTORY_DERIVATION_STATEMENT_KIND,
   TRAJECTORY_SUBJECT_NAME,
   TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
   LINKAGE_MODES,
@@ -75,6 +76,7 @@ export {
   sealTrajectoryDerivationAttestation,
   verifyTrajectoryDerivationAttestation,
   TrajectoryDerivationCancelledError,
+  TrajectoryDerivationStatementSchema,
 } from "./derivation.js";
 export type {
   BuildTrajectoryDerivationStatementInput,

@@ -2,12 +2,12 @@
 
 import { z } from "zod";
 
-import { topLevelRecordSchema, closedObjectSchema } from "./extensions.js";
+import { topLevelRecordCoreSchema, closedObjectCoreSchema } from "./extensions.js";
 import { TRAJECTORY_PROTOCOL, TRAJECTORY_VOCABULARY_PROFILE } from "./identifiers.js";
 import { deriveSpanId, deriveTraceId } from "./identity.js";
 import { type SealedRecord, parseExactWithSchema, sealWithSchema } from "./sealing.js";
 import { preflightCanonicalInput } from "./preflight.js";
-import { SpanSchema } from "./span.js";
+import { SpanCoreSchema } from "./span.js";
 import { TIMEBASES } from "./timebase.js";
 
 const LowercaseSha256Hex = z
@@ -19,7 +19,7 @@ const AbsoluteIri = z
   .regex(/^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/u, "must be an absolute IRI");
 
 /** A digest-bound reference: acquisition hints may vary, identity may not. */
-const DigestBearingDescriptorSchema = closedObjectSchema({
+const DigestBearingDescriptorSchema = closedObjectCoreSchema({
   name: z.string().min(1).optional(),
   mediaType: z.string().min(1).optional(),
   uri: z.string().min(1).optional(),
@@ -46,13 +46,13 @@ const CompletenessSchema = z.strictObject({
   reason: z.string().min(1).optional(),
 });
 
-const TrajectoryRecordCoreSchema = topLevelRecordSchema({
+const TrajectoryRecordCoreSchema = topLevelRecordCoreSchema({
   protocol: z.literal(TRAJECTORY_PROTOCOL),
   source: SourceSchema,
   derivation: DerivationSchema,
   timebase: z.enum(TIMEBASES),
   traceId: z.string().regex(/^[0-9a-f]{32}$/),
-  spans: z.array(SpanSchema),
+  spans: z.array(SpanCoreSchema),
   completeness: CompletenessSchema,
 }).superRefine((record, ctx) => {
   const expectedTraceId = deriveTraceId({

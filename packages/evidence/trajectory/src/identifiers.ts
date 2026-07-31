@@ -24,6 +24,9 @@ export const TRAJECTORY_VOCABULARY_PROFILE =
 export const TRAJECTORY_DERIVATION_PREDICATE_TYPE =
   "https://jinn.network/attestations/trajectory-derivation/v1" as const;
 
+export const TRAJECTORY_DERIVATION_STATEMENT_KIND =
+  "https://jinn.network/records/trajectory-derivation-statement/1.0" as const;
+
 export const TRAJECTORY_SUBJECT_NAME = "trajectory.json" as const;
 
 /** C1 owns this IRI. Forward-link PropertyValue.value MUST be a repository digest. */

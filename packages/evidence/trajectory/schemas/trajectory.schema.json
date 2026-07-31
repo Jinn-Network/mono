@@ -155,11 +155,11 @@
           },
           "startTimeUnixNano": {
             "type": "string",
-            "pattern": "^(0|[1-9]\\d*)$"
+            "pattern": "^(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$"
           },
           "endTimeUnixNano": {
             "type": "string",
-            "pattern": "^(0|[1-9]\\d*)$"
+            "pattern": "^(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$"
           },
           "attributes": {
             "type": "array",
@@ -255,7 +255,7 @@
               "properties": {
                 "timeUnixNano": {
                   "type": "string",
-                  "pattern": "^(0|[1-9]\\d*)$"
+                  "pattern": "^(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$"
                 },
                 "name": {
                   "type": "string",
@@ -527,7 +527,7 @@
           "properties": {
             "intValue": {
               "type": "string",
-              "pattern": "^-?(0|[1-9]\\d*)$"
+              "pattern": "^-?(0|[1-9]\\d{0,18}|1[0-7]\\d{0,18}|18[0-3]\\d{0,17}|184[0-3]\\d{0,16}|1844[0-6]\\d{0,15}|18446[0-6]\\d{0,14}|184467[0-3]\\d{0,13}|1844674[0-3]\\d{0,12}|18446744[0-0]\\d{0,11}|184467440[0-6]\\d{0,10}|1844674407[0-2]\\d{0,9}|18446744073[0-6]\\d{0,8}|184467440737[0-0]\\d{0,7}|1844674407370[0-8]\\d{0,6}|18446744073709[0-4]\\d{0,5}|184467440737095[0-4]\\d{0,4}|1844674407370955[0-1]\\d{0,3}|18446744073709551[0-5]\\d{0,2}|184467440737095516[0-1]\\d{0,1}|1844674407370955161[0-5])$"
             }
           },
           "additionalProperties": false
@@ -641,5 +641,5 @@
       }
     }
   ],
-  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link. JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991). AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue)."
+  "$comment": "Structural validation only. Runtime refinements not expressible here: traceId must equal the value derived from source.nativeTrace.digest, formatIri, and derivation; each spanId must equal the value derived from traceId and its ordinal; parentSpanId must reference an earlier span in this record; attributes must be sorted by key and unique; source.execution is removed — execution binding is via derivation attestation and forward link. JsonExtensionValue numbers are I-JSON safe integers only (±9007199254740991). AnyValue must carry exactly one OTLP variant (stringValue, boolValue, intValue, or doubleValue). OTLP uint64 timestamps are decimal strings 0..18446744073709551615; intValue is int64 decimal."
 }

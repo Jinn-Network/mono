@@ -2,7 +2,14 @@
 
 import { z } from "zod";
 
+import {
+  DECIMAL_SIGNED_PATTERN,
+  DECIMAL_UNSIGNED_PATTERN,
+  isValidDecimalInt64,
+  isValidDecimalUint64,
+} from "./otlp-bounds.js";
 import { compareCodeUnitStrings } from "./order.js";
+import { hardenedSchema } from "./schema-facade.js";
 import { isAdmittedAttributeKey } from "./vocabulary.js";
 
 /** OTLP `SpanKind` enum values; OTLP JSON encodes enums as integers. */
@@ -23,7 +30,17 @@ export const STATUS_CODE = Object.freeze({
 
 const DecimalUnsigned = z
   .string()
-  .regex(/^(0|[1-9]\d*)$/, "must be an unsigned decimal string");
+  .regex(DECIMAL_UNSIGNED_PATTERN, "must be an unsigned decimal string")
+  .refine(isValidDecimalUint64, {
+    message: "must be a uint64 decimal in 0..18446744073709551615",
+  });
+
+const DecimalInt64 = z
+  .string()
+  .regex(DECIMAL_SIGNED_PATTERN, "must be a signed decimal string")
+  .refine(isValidDecimalInt64, {
+    message: "must be an int64 decimal in -9223372036854775808..9223372036854775807",
+  });
 
 const HexId = (length: number) =>
   z.string().regex(new RegExp(`^[0-9a-f]{${length}}$`), `must be ${length} lowercase hex digits`);
@@ -32,23 +49,27 @@ const HexId = (length: number) =>
  * The OTLP AnyValue subset this profile admits. Exactly one variant must be present;
  * `bytesValue` is excluded because a trajectory span never carries opaque payloads.
  */
-export const AnyValueSchema = z
+export const AnyValueCoreSchema = z
   .strictObject({
     stringValue: z.string().optional(),
     boolValue: z.boolean().optional(),
-    intValue: z.string().regex(/^-?(0|[1-9]\d*)$/).optional(),
+    intValue: DecimalInt64.optional(),
     doubleValue: z.string().regex(/^-?\d+(\.\d+)?$/).optional(),
   })
   .refine((value) => Object.values(value).filter((entry) => entry !== undefined).length === 1, {
     message: "an AnyValue must carry exactly one variant",
   });
 
-export const AttributeSchema = z.strictObject({
+export const AnyValueSchema = hardenedSchema(AnyValueCoreSchema);
+
+export const AttributeCoreSchema = z.strictObject({
   key: z.string().min(1).refine(isAdmittedAttributeKey, {
     message: "attribute key is not admitted by the trajectory vocabulary profile",
   }),
-  value: AnyValueSchema,
+  value: AnyValueCoreSchema,
 });
+
+export const AttributeSchema = hardenedSchema(AttributeCoreSchema);
 
 const sortedUniqueByKey = (attributes: readonly { key: string }[]): boolean => {
   for (let index = 1; index < attributes.length; index += 1) {
@@ -59,19 +80,21 @@ const sortedUniqueByKey = (attributes: readonly { key: string }[]): boolean => {
   return true;
 };
 
-const AttributeListSchema = z
-  .array(AttributeSchema)
+const AttributeListCoreSchema = z
+  .array(AttributeCoreSchema)
   .refine(sortedUniqueByKey, {
     message: "attributes must be sorted by key and unique (OTLP defines no ordering; this profile fixes one)",
   });
 
-export const SpanEventSchema = z.strictObject({
+export const SpanEventCoreSchema = z.strictObject({
   timeUnixNano: DecimalUnsigned,
   name: z.string().min(1),
-  attributes: AttributeListSchema,
+  attributes: AttributeListCoreSchema,
 });
 
-export const SpanStatusSchema = z.strictObject({
+export const SpanEventSchema = hardenedSchema(SpanEventCoreSchema);
+
+export const SpanStatusCoreSchema = z.strictObject({
   code: z.union([
     z.literal(STATUS_CODE.UNSET),
     z.literal(STATUS_CODE.OK),
@@ -80,7 +103,9 @@ export const SpanStatusSchema = z.strictObject({
   message: z.string().optional(),
 });
 
-export const SpanSchema = z
+export const SpanStatusSchema = hardenedSchema(SpanStatusCoreSchema);
+
+export const SpanCoreSchema = z
   .strictObject({
     spanId: HexId(16),
     parentSpanId: HexId(16).nullable(),
@@ -94,9 +119,9 @@ export const SpanSchema = z
     ]),
     startTimeUnixNano: DecimalUnsigned,
     endTimeUnixNano: DecimalUnsigned,
-    attributes: AttributeListSchema,
-    events: z.array(SpanEventSchema),
-    status: SpanStatusSchema,
+    attributes: AttributeListCoreSchema,
+    events: z.array(SpanEventCoreSchema),
+    status: SpanStatusCoreSchema,
   })
   .refine((span) => {
     const start = DecimalUnsigned.safeParse(span.startTimeUnixNano);
@@ -108,8 +133,10 @@ export const SpanSchema = z
     path: ["endTimeUnixNano"],
   });
 
-export type AnyValue = z.infer<typeof AnyValueSchema>;
-export type Attribute = z.infer<typeof AttributeSchema>;
-export type SpanEvent = z.infer<typeof SpanEventSchema>;
-export type SpanStatus = z.infer<typeof SpanStatusSchema>;
-export type Span = z.infer<typeof SpanSchema>;
+export const SpanSchema = hardenedSchema(SpanCoreSchema);
+
+export type AnyValue = z.infer<typeof AnyValueCoreSchema>;
+export type Attribute = z.infer<typeof AttributeCoreSchema>;
+export type SpanEvent = z.infer<typeof SpanEventCoreSchema>;
+export type SpanStatus = z.infer<typeof SpanStatusCoreSchema>;
+export type Span = z.infer<typeof SpanCoreSchema>;

@@ -3,6 +3,9 @@
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { describe, expect, test, vi } from "vitest";
 
+import { caseTest, caseTestManifestIntegrity } from "./conformance-case-runner.js";
+import { registerThirdReviewProbes } from "./third-review-probes.js";
+
 import {
   buildTrajectoryDerivationStatement,
   sealTrajectoryDerivationAttestation,
@@ -186,7 +189,8 @@ async function verifyWith(
 /** Public derivation-attestation attack matrix for packed conformance consumers. */
 export function describeTrajectoryDerivationAttestationConformance(): void {
   describe("Trajectory derivation attestation conformance", () => {
-    test("build rejects non-calendar-strict derivedAt", () => {
+    registerThirdReviewProbes();
+    caseTest("build-rejects-non-calendar-strict-derived-at", () => {
       expect(() =>
         buildTrajectoryDerivationStatement({
           ...buildStatementFields(
@@ -199,7 +203,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       ).toThrow(InvalidDocumentError);
     });
 
-    test("build rejects missing linkageMode", () => {
+    caseTest("build-rejects-missing-linkage-mode", () => {
       const input = buildStatementFields(
         `sha256:${"c".repeat(64)}`,
         `sha256:${"b".repeat(64)}`,
@@ -211,7 +215,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       );
     });
 
-    test("build input getter is not invoked during preflight", () => {
+    caseTest("build-input-getter-not-invoked-during-preflight", () => {
       let getterCalls = 0;
       const input = buildStatementFields(
         `sha256:${"c".repeat(64)}`,
@@ -230,7 +234,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(getterCalls).toBe(0);
     });
 
-    test("malformed envelope fails L1 and does not call authority verifier", async () => {
+    caseTest("malformed-envelope-fails-l1-no-authority", async () => {
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
       );
@@ -249,7 +253,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(verifyAuthority).not.toHaveBeenCalled();
     });
 
-    test("authority verified:false fails L2", async () => {
+    caseTest("authority-verified-false-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
         verifyAuthority: async () => ({ verified: false, reason: "bad signature" }),
@@ -261,7 +265,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       }
     });
 
-    test("bad execution digest fails L3", async () => {
+    caseTest("bad-execution-digest-fails-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       const tamperedExecution = new Uint8Array(executionBytes);
@@ -277,7 +281,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!tampered.ok) expect(tampered.code).toBe("l3-execution-digest-mismatch");
     });
 
-    test("missing forward link fails L3", async () => {
+    caseTest("missing-forward-link-fails-l3", async () => {
       const trajectorySealed = sealTrajectory(buildTrajectoryRecord());
       const goldenBase = await loadExecutionGoldenBase();
       const executionObject = patchExecutionGolden(goldenBase, {
@@ -307,7 +311,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-forward-link-missing");
     });
 
-    test("signed-but-unfaithful spans pass L1-L3 with L4 not-evaluated", async () => {
+    caseTest("signed-unfaithful-spans-pass-l1-l3-l4-not-evaluated", async () => {
       const unfaithfulTrajectory = sealTrajectory(
         buildTrajectoryRecord({
           spans: [{ ...buildTrajectoryRecord().spans[0], name: "substituted span content" }],
@@ -332,7 +336,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       }
     });
 
-    test("sealed-parent golden execution passes L1-L3", async () => {
+    caseTest("sealed-parent-golden-passes-l1-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         linkageMode: "sealed-parent",
       });
@@ -340,7 +344,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(result.ok).toBe(true);
     });
 
-    test("forward link on sealed-parent fails L3", async () => {
+    caseTest("forward-link-on-sealed-parent-fails-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         linkageMode: "sealed-parent",
         executionPatch: (base, ctx) =>
@@ -355,7 +359,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-forward-link-present");
     });
 
-    test("valid attestation passes L1-L3 and leaves L4 not-evaluated", async () => {
+    caseTest("valid-attestation-passes-l1-l3-l4-not-evaluated", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(true);
@@ -364,7 +368,6 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
         expect(result.signerKeyIds).toEqual(["test-key"]);
       }
     });
-  });
 
   describe("exact DSSE envelope identity", () => {
     test.each([
@@ -389,7 +392,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(verifyAuthority).not.toHaveBeenCalled();
     });
 
-    test("duplicate JSON key bytes fail L1 without calling authority", async () => {
+    caseTest("duplicate-json-key-bytes-fail-l1", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
@@ -440,7 +443,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
   });
 
   describe("unambiguous native-trace forward link", () => {
-    test("decoy native-trace File with attestation naming decoy digest fails L3", async () => {
+    caseTest("decoy-native-trace-file-fails-l3", async () => {
       const decoySha = "d".repeat(64);
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) =>
@@ -468,7 +471,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-source-mismatch");
     });
 
-    test("duplicate forward links on primary native trace fail L3", async () => {
+    caseTest("duplicate-forward-links-fail-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) => {
           const document = patchExecutionGolden(base, {
@@ -498,7 +501,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-forward-link-duplicate");
     });
 
-    test("correct and wrong forward links on primary native trace fail L3", async () => {
+    caseTest("correct-and-wrong-forward-links-fail-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) => {
           const document = patchExecutionGolden(base, {
@@ -528,7 +531,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-forward-link-duplicate");
     });
 
-    test("malformed forward link value fails L3", async () => {
+    caseTest("malformed-forward-link-value-fails-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) => {
           const document = patchExecutionGolden(base, {
@@ -548,10 +551,10 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       });
       const result = await verifyWith(sealed, trajectorySealed, executionBytes);
       expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("l3-forward-link-mismatch");
+      if (!result.ok) expect(result.code).toBe("l3-forward-link-malformed");
     });
 
-    test("wrong digest forward link fails L3", async () => {
+    caseTest("wrong-digest-forward-link-fails-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) => {
           const document = patchExecutionGolden(base, {
@@ -574,7 +577,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-forward-link-mismatch");
     });
 
-    test("attestation naming decoy digest while decoy carries forward link fails L3", async () => {
+    caseTest("attestation-naming-decoy-digest-fails-l3", async () => {
       const decoySha = "b".repeat(64);
       const { trajectorySealed, executionBytes } = await buildValidAttestation({
         executionPatch: (base, ctx) =>
@@ -599,7 +602,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l3-source-mismatch");
     });
 
-    test("primary native trace with wrong entity type fails L3", async () => {
+    caseTest("primary-native-trace-wrong-type-fails-l3", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation({
         executionPatch: (base, ctx) => {
           const document = patchExecutionGolden(base, {
@@ -620,24 +623,26 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
   });
 
   describe("authority result validation and cancellation", () => {
-    test.each([
-      ["string", "not-an-object"],
-      ["number", 1],
-      ["array", []],
-      ["verified string", { verified: "true", signerKeyIds: ["test-key"] }],
-      ["verified false without reason", { verified: false }],
-      ["forged signerKeyIds", { verified: true, signerKeyIds: ["forged-key"] }],
-      ["unknown key", { verified: true, signerKeyIds: ["test-key"], extra: "bad" }],
-    ] as const)("malformed authority %s fails L2 as malformed", async (_label, value) => {
-      const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
-      const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
-        verifyAuthority: async () => value as never,
+    for (const [caseId, value] of [
+      ["authority-malformed-string", "not-an-object"],
+      ["authority-malformed-number", 1],
+      ["authority-malformed-array", []],
+      ["authority-malformed-verified-string", { verified: "true", signerKeyIds: ["test-key"] }],
+      ["authority-malformed-verified-false-without-reason", { verified: false }],
+      ["authority-malformed-forged-signer-key-ids", { verified: true, signerKeyIds: ["forged-key"] }],
+      ["authority-malformed-unknown-key", { verified: true, signerKeyIds: ["test-key"], extra: "bad" }],
+    ] as const) {
+      caseTest(caseId, async () => {
+        const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
+        const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
+          verifyAuthority: async () => value as never,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
       });
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
-    });
+    }
 
-    test("non-enumerable authority field fails L2 malformed without invoking getter", async () => {
+    caseTest("non-enumerable-authority-field-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       let getterCalls = 0;
       const resultObject: Record<string, unknown> = {
@@ -660,7 +665,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(getterCalls).toBe(0);
     });
 
-    test("symbol authority key fails L2 malformed", async () => {
+    caseTest("symbol-authority-key-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const resultObject: Record<string | symbol, unknown> = {
         verified: true,
@@ -674,7 +679,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
 
-    test("cyclic signerKeyIds array fails L2 malformed", async () => {
+    caseTest("cyclic-signer-key-ids-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const cyclic: string[] = ["test-key"];
       cyclic.push(cyclic as unknown as string);
@@ -685,7 +690,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
 
-    test("authority callback throw fails L2 as error", async () => {
+    caseTest("authority-callback-throw-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
         verifyAuthority: async () => {
@@ -696,7 +701,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-error");
     });
 
-    test("pre-aborted signal throws cancellation", async () => {
+    caseTest("pre-aborted-signal-cancellation", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const controller = new AbortController();
       controller.abort();
@@ -705,7 +710,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       ).rejects.toBeInstanceOf(TrajectoryDerivationCancelledError);
     });
 
-    test("abort during authority await throws cancellation", async () => {
+    caseTest("abort-during-authority-cancellation", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const controller = new AbortController();
       await expect(
@@ -719,7 +724,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       ).rejects.toBeInstanceOf(TrajectoryDerivationCancelledError);
     });
 
-    test("AbortError from authority rethrows cancellation", async () => {
+    caseTest("authority-abort-error-cancellation", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const abort = new DOMException("aborted", "AbortError");
       await expect(
@@ -731,7 +736,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       ).rejects.toBeInstanceOf(TrajectoryDerivationCancelledError);
     });
 
-    test("proxy authority result fails L2 malformed", async () => {
+    caseTest("proxy-authority-result-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const proxy = new Proxy({ verified: true, signerKeyIds: ["test-key"] }, {});
       const result = await verifyWith(sealed, trajectorySealed, executionBytes, {
@@ -741,7 +746,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
 
-    test("accessor authority result fails L2 malformed", async () => {
+    caseTest("accessor-authority-result-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const withGetter: Record<string, unknown> = {};
       Object.defineProperty(withGetter, "verified", {
@@ -759,7 +764,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
   });
 
   describe("R18-R20 port, array, and schema-law probes", () => {
-    test("verify port accessor on envelopeBytes throws invalid-input without L1", async () => {
+    caseTest("verify-port-accessor-envelope-bytes", async () => {
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
       );
@@ -784,7 +789,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(getterCalls).toBe(0);
     });
 
-    test("sparse signerKeyIds fails L2 malformed", async () => {
+    caseTest("sparse-signer-key-ids-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const sparse: string[] = Array.from({ length: 2 });
       sparse[1] = "test-key";
@@ -795,7 +800,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
 
-    test("augmented signerKeyIds fails L2 malformed", async () => {
+    caseTest("augmented-signer-key-ids-fails-l2", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const augmented = ["test-key"];
       Object.defineProperty(augmented, "extra", { value: "x", enumerable: true });
@@ -806,7 +811,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       if (!result.ok) expect(result.code).toBe("l2-authority-malformed");
     });
 
-    test("unknown statement field fails seal without calling signer", async () => {
+    caseTest("unknown-statement-field-seal-no-signer", async () => {
       const statement = buildTrajectoryDerivationStatement(
         buildStatementFields(
           `sha256:${"c".repeat(64)}`,
@@ -824,7 +829,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(signer).not.toHaveBeenCalled();
     });
 
-    test("alternate payload escaping fails L1 without calling authority", async () => {
+    caseTest("alternate-payload-escaping-fails-l1", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
@@ -842,7 +847,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
   });
 
   describe("R24-R29 packed kit probes", () => {
-    test("TrajectoryRecordSchema.safeParse does not invoke hostile getters", async () => {
+    caseTest("trajectory-record-schema-hostile-getters", async () => {
       let getterCalls = 0;
       const document = await loadGoldenJson("valid");
       Object.defineProperty(document, "forged", {
@@ -857,7 +862,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(getterCalls).toBe(0);
     });
 
-    test("non-callable verifyAuthority fails verify port before L1", async () => {
+    caseTest("non-callable-verify-authority-fails-port", async () => {
       const verifyAuthority = vi.fn();
       let getterCalls = 0;
       const input: Record<string, unknown> = {
@@ -880,7 +885,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(getterCalls).toBe(0);
     });
 
-    test("proxy-throwing authority error normalizes without instanceof", async () => {
+    caseTest("proxy-throwing-authority-error", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       let descriptorTraps = 0;
       let prototypeTraps = 0;
@@ -904,7 +909,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(prototypeTraps).toBe(0);
     });
 
-    test("genuine AbortSignal with own aborted getter uses native cancellation state", async () => {
+    caseTest("genuine-abort-signal-native-cancellation", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
@@ -929,7 +934,7 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(ownAbortedGetterCalls).toBe(0);
     });
 
-    test("fake AbortSignal with getter aborted is rejected before authority", async () => {
+    caseTest("fake-abort-signal-rejected", async () => {
       const { trajectorySealed, executionBytes, sealed } = await buildValidAttestation();
       const verifyAuthority = vi.fn(async () =>
         ({ verified: true as const, signerKeyIds: ["test-key"] }),
@@ -953,5 +958,8 @@ export function describeTrajectoryDerivationAttestationConformance(): void {
       expect(verifyAuthority).not.toHaveBeenCalled();
       expect(abortedGetterCalls).toBe(0);
     });
+  });
+
+  caseTestManifestIntegrity();
   });
 }

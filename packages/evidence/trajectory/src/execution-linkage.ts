@@ -25,6 +25,8 @@ export type ExecutionLinkageSuccess = {
 
 export type ExecutionLinkageResult = ExecutionLinkageSuccess | ExecutionLinkageFailure;
 
+const C1_PROPERTY_VALUE_KEYS = ["@type", "propertyID", "value"] as const;
+
 function entityTypes(entity: JsonEntity): readonly string[] {
   const type = entity["@type"];
   if (type === undefined) return [];
@@ -43,16 +45,20 @@ function refId(value: unknown): string | undefined {
   return undefined;
 }
 
-function refIds(value: unknown): readonly string[] {
-  if (value === undefined) return [];
+function collectSubjectOfTraceIds(value: unknown): readonly string[] | "malformed" {
+  if (value === undefined || value === null) return [];
   if (Array.isArray(value)) {
-    return value.flatMap((entry) => {
+    if (value.length === 0) return [];
+    const ids: string[] = [];
+    for (const entry of value) {
       const id = refId(entry);
-      return id === undefined ? [] : [id];
-    });
+      if (id === undefined) return "malformed";
+      ids.push(id);
+    }
+    return ids;
   }
   const id = refId(value);
-  return id === undefined ? [] : [id];
+  return id === undefined ? "malformed" : [id];
 }
 
 function identifierEntries(entity: JsonEntity): readonly JsonEntity[] {
@@ -65,10 +71,42 @@ function identifierEntries(entity: JsonEntity): readonly JsonEntity[] {
   );
 }
 
-function c1ForwardLinks(entity: JsonEntity): readonly JsonEntity[] {
+function isCompleteC1ForwardLink(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return false;
+  const object = entry as Record<string, unknown>;
+  const keys = Object.keys(object);
+  if (keys.length !== C1_PROPERTY_VALUE_KEYS.length) return false;
+  for (const key of C1_PROPERTY_VALUE_KEYS) {
+    if (!keys.includes(key)) return false;
+  }
+  if (object["@type"] !== "PropertyValue") return false;
+  if (object["propertyID"] !== TRAJECTORY_RECORD_IDENTIFIER_PROPERTY) return false;
+  if (typeof object["value"] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(object["value"])) {
+    return false;
+  }
+  return true;
+}
+
+function c1ForwardLinkCandidates(entity: JsonEntity): readonly JsonEntity[] {
   return identifierEntries(entity).filter(
     (identifier) => identifier["propertyID"] === TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
   );
+}
+
+function validateC1ForwardLinks(
+  entity: JsonEntity,
+): { readonly ok: true; readonly links: readonly JsonEntity[] } | ExecutionLinkageFailure {
+  const candidates = c1ForwardLinkCandidates(entity);
+  for (const candidate of candidates) {
+    if (!isCompleteC1ForwardLink(candidate)) {
+      return {
+        ok: false,
+        code: "l3-forward-link-malformed",
+        message: "C1 trajectory forward link must be a complete PropertyValue shape",
+      };
+    }
+  }
+  return { ok: true, links: candidates.filter(isCompleteC1ForwardLink) };
 }
 
 export function resolvePrimaryNativeTrace(
@@ -95,13 +133,23 @@ export function resolvePrimaryNativeTrace(
     };
   }
 
-  const mentionedIds = refIds(roots[0]!["mentions"]);
-  const executions = mentionedIds
+  const mentionedIds = roots[0]!["mentions"];
+  const mentionList = Array.isArray(mentionedIds)
+    ? mentionedIds
+    : mentionedIds === undefined
+      ? []
+      : [mentionedIds];
+  const mentionedRefIds = mentionList.flatMap((entry) => {
+    const id = refId(entry);
+    return id === undefined ? [] : [id];
+  });
+
+  const executions = mentionedRefIds
     .map((id) => byId.get(id))
     .filter((entity): entity is JsonEntity => entity !== undefined)
     .filter((entity) => hasType(entity, "CreateAction") && hasType(entity, "prov:Activity"));
 
-  if (mentionedIds.length !== 1 || executions.length !== 1) {
+  if (mentionedRefIds.length !== 1 || executions.length !== 1) {
     return {
       ok: false,
       code: "l3-execution-nonconforming",
@@ -110,15 +158,24 @@ export function resolvePrimaryNativeTrace(
   }
 
   const execution = executions[0]!;
-  const traceId = refId(execution["subjectOf"]);
-  if (traceId === undefined) {
+  const subjectRefs = collectSubjectOfTraceIds(execution["subjectOf"]);
+  if (subjectRefs === "malformed" || subjectRefs.length === 0) {
     return {
       ok: false,
       code: "l3-native-trace-missing",
       message: "primary Execution has no subjectOf native trace",
     };
   }
+  const uniqueRefs = new Set(subjectRefs);
+  if (uniqueRefs.size !== 1) {
+    return {
+      ok: false,
+      code: "l3-native-trace-missing",
+      message: "primary Execution subjectOf must resolve to exactly one native trace",
+    };
+  }
 
+  const traceId = subjectRefs[0]!;
   const trace = byId.get(traceId);
   if (trace === undefined || !hasType(trace, "File")) {
     return {
@@ -162,7 +219,11 @@ export function verifyExecutionLinkage(
     };
   }
 
-  const forwardLinks = c1ForwardLinks(resolved.nativeTraceEntity);
+  const forwardLinkValidation = validateC1ForwardLinks(resolved.nativeTraceEntity);
+  if (!forwardLinkValidation.ok) {
+    return { code: forwardLinkValidation.code, message: forwardLinkValidation.message };
+  }
+  const forwardLinks = forwardLinkValidation.links;
 
   if (linkageMode === "sealed-parent") {
     if (forwardLinks.length > 0) {

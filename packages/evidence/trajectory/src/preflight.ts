@@ -17,7 +17,8 @@ function trapMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "property-descriptor trap";
 }
 
-function isPlainDataObject(value: object): boolean {
+function isPlainDataObject(value: object, path: string): boolean {
+  if (isProxy(value)) unsupported("proxy", path);
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
@@ -27,7 +28,7 @@ function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>
   seen.add(value);
 
   if (isProxy(value)) unsupported("proxy", path);
-  if (!isPlainDataObject(value)) unsupported("non-plain object", path);
+  if (!isPlainDataObject(value, path)) unsupported("non-plain object", path);
 
   let descriptors: PropertyDescriptorMap;
   try {
@@ -74,7 +75,7 @@ function inspectOwnProperties(value: object, path: string, seen: WeakSet<object>
 function inspectExtensionObject(value: object, path: string, seen: WeakSet<object>): void {
   if (seen.has(value)) unsupported("cycle", path);
   if (isProxy(value)) unsupported("proxy", path);
-  if (!isPlainDataObject(value)) unsupported("non-plain object", path);
+  if (!isPlainDataObject(value, path)) unsupported("non-plain object", path);
 
   let descriptors: PropertyDescriptorMap;
   try {
@@ -107,6 +108,7 @@ function inspectExtensionObject(value: object, path: string, seen: WeakSet<objec
 }
 
 function inspectArray(value: unknown[], path: string, seen: WeakSet<object>): void {
+  if (isProxy(value)) unsupported("proxy", path);
   if (seen.has(value)) unsupported("cycle", path);
   seen.add(value);
 
@@ -140,13 +142,14 @@ function inspectValue(value: unknown, path: string, seen: WeakSet<object>): void
   }
   if (typeof value === "bigint") unsupported("bigint", path);
   if (typeof value === "function" || typeof value === "symbol") unsupported(typeof value, path);
-  if (value instanceof Date) unsupported("Date", path);
-  if (value instanceof Map || value instanceof Set) unsupported(value.constructor.name, path);
-  if (Array.isArray(value)) {
-    inspectArray(value, path, seen);
-    return;
-  }
   if (typeof value === "object") {
+    if (isProxy(value)) unsupported("proxy", path);
+    if (value instanceof Date) unsupported("Date", path);
+    if (value instanceof Map || value instanceof Set) unsupported(value.constructor.name, path);
+    if (Array.isArray(value)) {
+      inspectArray(value, path, seen);
+      return;
+    }
     inspectOwnProperties(value, path, seen);
   }
 }

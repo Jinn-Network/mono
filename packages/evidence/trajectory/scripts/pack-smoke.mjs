@@ -30,6 +30,7 @@ const REQUIRED_ENTRIES = [
   "package/dist/testing.js",
   "package/dist/testing.d.ts",
   "package/schemas/trajectory.schema.json",
+  "package/schemas/trajectory-derivation-statement.schema.json",
   "package/fixtures/trajectory/valid.json",
   "package/fixtures/trajectory/valid.sha256",
   "package/fixtures/adversarial-v1/manifest.json",
@@ -92,6 +93,11 @@ try {
     { cwd: packageRoot },
   );
 
+  const {
+    TRAJECTORY_DERIVATION_CONFORMANCE_CASE_COUNT: expectedCaseCount,
+    TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS: expectedCaseIds,
+  } = await import(join(packageRoot, "dist", "conformance-case-manifest.js"));
+
   const entries = (await output("tar", ["-tzf", trajectoryArchive]))
     .split(/\r?\n/u)
     .filter(Boolean);
@@ -150,12 +156,18 @@ try {
 import assert from "node:assert/strict";
 import * as root from "@jinn-network/evidence-trajectory";
 
+const EXPECTED_CONFORMANCE_CASE_COUNT = ${expectedCaseCount};
+const EXPECTED_CONFORMANCE_CASE_IDS = ${JSON.stringify([...expectedCaseIds])};
+
 assert.equal(typeof root.sealTrajectory, "function");
 assert.equal(typeof root.parseTrajectory, "function");
 assert.equal(typeof root.verifyTrajectoryDerivationAttestation, "function");
+assert.equal(typeof root.TrajectoryDerivationStatementSchema, "object");
 assert.equal(root.TRAJECTORY_RECORD_KIND, "https://jinn.network/records/trajectory/1.0");
 assert.equal("canonicalJsonBytes" in root, false);
 assert.equal("sha256Digest" in root, false);
+assert.equal(EXPECTED_CONFORMANCE_CASE_COUNT, ${expectedCaseCount});
+assert.deepEqual(EXPECTED_CONFORMANCE_CASE_IDS, ${JSON.stringify([...expectedCaseIds])});
 `,
   );
   await run(process.execPath, [join(rootConsumer, "smoke.mjs")], {
@@ -216,6 +228,7 @@ assert.equal("sha256Digest" in root, false);
         typescript: "5.9.3",
         vite: "6.4.3",
         vitest: "4.1.8",
+        ajv: "8.17.1",
       },
     }),
   );
@@ -236,7 +249,13 @@ assert.equal("sha256Digest" in root, false);
   await writeFile(
     join(testingConsumer, "conformance.test.ts"),
     `
-import { describeTrajectoryDerivationAttestationConformance, describeTrajectoryRecordConformance } from "@jinn-network/evidence-trajectory/testing";
+import { describeTrajectoryDerivationAttestationConformance, describeTrajectoryRecordConformance, TRAJECTORY_DERIVATION_CONFORMANCE_CASE_COUNT, TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS } from "@jinn-network/evidence-trajectory/testing";
+import { expect, test } from "vitest";
+
+test("packed testing export exposes the pinned conformance case manifest", () => {
+  expect(TRAJECTORY_DERIVATION_CONFORMANCE_CASE_COUNT).toBe(${expectedCaseCount});
+  expect([...TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS]).toEqual(${JSON.stringify([...expectedCaseIds])});
+});
 
 describeTrajectoryRecordConformance();
 describeTrajectoryDerivationAttestationConformance();

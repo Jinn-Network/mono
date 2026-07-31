@@ -6,6 +6,7 @@ import {
   inspectDenseArrayDescriptors,
   readDenseArrayElement,
 } from "./dense-array.js";
+import { safeGetPrototypeOf } from "./hostile-reflection.js";
 
 type TrajectoryDerivationAuthorityVerifierResult =
   | { readonly verified: true; readonly signerKeyIds: readonly string[]; readonly detail?: string }
@@ -32,7 +33,7 @@ function trapMessage(cause: unknown): string {
 
 function isPlainOrdinaryObject(value: object): boolean {
   if (isProxy(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  const prototype = safeGetPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 

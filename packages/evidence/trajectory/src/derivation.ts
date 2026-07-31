@@ -16,6 +16,7 @@ import {
 import { z } from "zod";
 
 import { validateAuthorityResult } from "./authority-validation.js";
+import { defensiveCopy } from "./bytes.js";
 import {
   type BareSha256Hex,
   type RepositorySha256Digest,
@@ -43,6 +44,7 @@ import { InvalidDocumentError } from "./sealing.js";
 import { parseTrajectory } from "./schema.js";
 import { preflightCanonicalInput } from "./preflight.js";
 import { snapshotBuildPort, snapshotSealPort, snapshotVerifyPort } from "./port-snapshot.js";
+import { hardenedSchema } from "./schema-facade.js";
 import { type Timebase, TIMEBASES } from "./timebase.js";
 
 export class TrajectoryDerivationCancelledError extends Error {
@@ -126,7 +128,7 @@ const TrajectoryDerivationPredicateSchema = z.strictObject({
   linkageMode: z.enum(LINKAGE_MODES),
 });
 
-const TrajectoryDerivationStatementSchema = z.strictObject({
+const TrajectoryDerivationStatementCoreSchema = z.strictObject({
   _type: z.literal(IN_TOTO_STATEMENT_TYPE),
   subject: z.tuple([
     z.strictObject({
@@ -138,6 +140,11 @@ const TrajectoryDerivationStatementSchema = z.strictObject({
   predicateType: z.literal(TRAJECTORY_DERIVATION_PREDICATE_TYPE),
   predicate: TrajectoryDerivationPredicateSchema,
 });
+
+/** Public facade for derivation-statement structural validation. */
+export const TrajectoryDerivationStatementSchema = hardenedSchema(
+  TrajectoryDerivationStatementCoreSchema,
+);
 
 export interface BuildTrajectoryDerivationStatementInput {
   readonly producerId: string;
@@ -276,7 +283,7 @@ function parseStatementBytes(payloadBytes: Uint8Array): TrajectoryDerivationStat
   } catch {
     invalidInput("attestation payload is not valid UTF-8 JSON");
   }
-  const parsed = TrajectoryDerivationStatementSchema.safeParse(decoded);
+  const parsed = TrajectoryDerivationStatementCoreSchema.safeParse(decoded);
   if (!parsed.success) {
     invalidInput("attestation payload is not a valid Trajectory derivation statement");
   }
@@ -334,7 +341,7 @@ export function buildTrajectoryDerivationStatement(
     },
   };
 
-  const validated = TrajectoryDerivationStatementSchema.safeParse(statement);
+  const validated = TrajectoryDerivationStatementCoreSchema.safeParse(statement);
   if (!validated.success) invalidInput("built statement failed structural validation");
   return validated.data;
 }
@@ -343,17 +350,40 @@ export async function sealTrajectoryDerivationAttestation(
   input: SealTrajectoryDerivationAttestationInput,
 ): Promise<SealedTrajectoryDerivationAttestation> {
   const port = snapshotSealPort(input);
+  assertNotCancelled(port.signal);
   preflightAttestationJson(port.statement, "derivation attestation statement");
-  const validated = TrajectoryDerivationStatementSchema.safeParse(port.statement);
+  const validated = TrajectoryDerivationStatementCoreSchema.safeParse(port.statement);
   if (!validated.success) invalidInput("statement failed structural validation");
   if (!isCalendarStrictRfc3339(validated.data.predicate.derivedAt)) {
     invalidInput("predicate.derivedAt must be calendar-strict RFC 3339");
   }
 
+  const guardedSigner: DsseSigner = async (request) => {
+    assertNotCancelled(port.signal);
+    try {
+      const signatures = await port.signer({
+        payloadType: request.payloadType,
+        payloadBytes: defensiveCopy(request.payloadBytes),
+        preAuthEncoding: defensiveCopy(request.preAuthEncoding),
+        ...(request.signal === undefined ? {} : { signal: request.signal }),
+      });
+      assertNotCancelled(port.signal);
+      return signatures;
+    } catch (error) {
+      if (isTrajectoryDerivationCancelled(error)) throw error;
+      if (port.signal !== undefined && readAbortSignalAborted(port.signal)) {
+        throw new TrajectoryDerivationCancelledError();
+      }
+      if (isAbortLikeError(error)) throw new TrajectoryDerivationCancelledError();
+      throw error;
+    }
+  };
+
+  assertNotCancelled(port.signal);
   const sealed = await sealSignedRecord({
     record: validated.data,
     payloadType: DSSE_PAYLOAD_TYPE,
-    signer: port.signer,
+    signer: guardedSigner,
     ...(port.signal === undefined ? {} : { signal: port.signal }),
   });
 
@@ -436,7 +466,9 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  if (!statementPayloadMatchesCanonical(statement, parsedEnvelope.payloadBytes)) {
+  const privatePayloadBytes = defensiveCopy(parsedEnvelope.payloadBytes);
+
+  if (!statementPayloadMatchesCanonical(statement, privatePayloadBytes)) {
     const message = "attestation payload is not the canonical encoding of the validated statement";
     return {
       ok: false,
@@ -453,16 +485,16 @@ export async function verifyTrajectoryDerivationAttestation(
     };
   }
 
-  const preAuthEncoding = dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, parsedEnvelope.payloadBytes);
+  const preAuthEncoding = dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, privatePayloadBytes);
   const envelopeKeyIds = envelopeSignerKeyIds(parsedEnvelope.signatures);
   let authorityResult: TrajectoryDerivationAuthorityVerifierResult;
   try {
     assertNotCancelled(port.signal);
     const rawAuthorityResult = await port.verifyAuthority({
-      envelopeBytes: port.envelopeBytes,
+      envelopeBytes: defensiveCopy(port.envelopeBytes),
       payloadType: DSSE_PAYLOAD_TYPE,
-      payloadBytes: parsedEnvelope.payloadBytes,
-      preAuthEncoding,
+      payloadBytes: defensiveCopy(privatePayloadBytes),
+      preAuthEncoding: defensiveCopy(preAuthEncoding),
       producerId: statement.predicate.producer.id,
       derivedAt: statement.predicate.derivedAt,
       ...(port.signal === undefined ? {} : { signal: port.signal }),

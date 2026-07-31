@@ -7,7 +7,9 @@ import type { DsseSigner } from "@jinn-network/trust-core";
 import {
   isGenuineAbortSignal,
   isGenuineUint8Array,
+  safeGetPrototypeOf,
 } from "./hostile-reflection.js";
+import { defensiveCopy } from "./bytes.js";
 import { InvalidDocumentError } from "./sealing.js";
 import type { LinkageMode } from "./identifiers.js";
 import type { Timebase } from "./timebase.js";
@@ -22,7 +24,7 @@ function trapMessage(cause: unknown): string {
 
 function isPlainOrdinaryObject(value: object): boolean {
   if (isProxy(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
+  const prototype = safeGetPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 
@@ -93,7 +95,7 @@ function requireUint8Array(value: unknown, field: string, context: string): Uint
   if (!isGenuineUint8Array(value)) {
     invalidPort(`${context}.${field} must be a Uint8Array`);
   }
-  return value;
+  return defensiveCopy(value);
 }
 
 function requireFunction<T extends (...args: never[]) => unknown>(

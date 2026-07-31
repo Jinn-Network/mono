@@ -151,3 +151,8 @@ export function describeTrajectoryRecordConformance(): void {
 }
 
 export { describeTrajectoryDerivationAttestationConformance } from "./derivation-conformance.js";
+export {
+  TRAJECTORY_DERIVATION_CONFORMANCE_CASE_COUNT,
+  TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS,
+} from "./conformance-case-manifest.js";
+export type { TrajectoryDerivationConformanceCaseId } from "./conformance-case-manifest.js";

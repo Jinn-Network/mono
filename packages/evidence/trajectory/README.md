@@ -40,7 +40,16 @@ Both modes share the same Execution primary-trace resolution, digest binding, an
 - Identity: `deriveTraceId`, `deriveSpanId` (order/reference only)
 - Attestation: `buildTrajectoryDerivationStatement`, `sealTrajectoryDerivationAttestation`,
   `verifyTrajectoryDerivationAttestation`
-- Conformance: `describeTrajectoryRecordConformance` from `@jinn-network/evidence-trajectory/testing`
+- Conformance: `describeTrajectoryRecordConformance`, `describeTrajectoryDerivationAttestationConformance`,
+  and the frozen `TRAJECTORY_DERIVATION_CONFORMANCE_CASE_IDS` manifest from `@jinn-network/evidence-trajectory/testing`
+
+## Published JSON Schemas
+
+- `schemas/trajectory.schema.json` — draft-2020-12 Trajectory record (pin with `yarn check:schemas`)
+- `schemas/trajectory-derivation-statement.schema.json` — draft-2020-12 decoded derivation attestation
+  payload (required `linkageMode`, closed predicate/subject shape; no envelope-signature trust claim)
+
+Regenerate both with `yarn generate:schemas`.
 
 See `../../../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md` §7.2 and
 `../../../docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md` §2026-07-31.

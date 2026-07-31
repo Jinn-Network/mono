@@ -27,6 +27,23 @@ describe("canonical preflight", () => {
     );
   });
 
+  test("rejects getPrototypeOf trap before instanceof object operations", () => {
+    let prototypeTraps = 0;
+    const trapped = new Proxy(
+      { label: "x" },
+      {
+        getPrototypeOf() {
+          prototypeTraps += 1;
+          throw new Error("getPrototypeOf trap");
+        },
+      },
+    );
+    expect(() => preflightCanonicalInput({ value: trapped })).toThrow(
+      UnsupportedCanonicalValueError,
+    );
+    expect(prototypeTraps).toBe(0);
+  });
+
   test("rejects cycles", () => {
     const cycle: { self?: unknown } = {};
     cycle.self = cycle;

@@ -81,12 +81,31 @@ function setupNodeStepsInJob(jobBlock) {
   return [...jobBlock.matchAll(/uses: actions\/setup-node@v4[\s\S]*?node-version:\s*([^\n]+)/g)];
 }
 
+function checkoutStepsInJob(jobBlock) {
+  return [...jobBlock.matchAll(/uses: actions\/checkout@v4/g)];
+}
+
+function stepUsesCheckout(step) {
+  return step.lines.some((line) => line.includes("uses: actions/checkout@v4"));
+}
+
+function stepUsesSetupNode(step) {
+  return step.lines.some((line) => line.includes("uses: actions/setup-node@v4"));
+}
+
 export function validateEvidenceCiWorkflow(source) {
   const jobs = parseJobs(source);
 
   for (const jobId of REQUIRED_SETUP_NODE_JOBS) {
     assert.ok(jobs.has(jobId), `missing required setup-node job ${jobId}`);
-    const setupNodes = setupNodeStepsInJob(jobs.get(jobId));
+    const jobBlock = jobs.get(jobId);
+    const checkouts = checkoutStepsInJob(jobBlock);
+    assert.equal(
+      checkouts.length,
+      1,
+      `${jobId} must have exactly one checkout step (found ${String(checkouts.length)})`,
+    );
+    const setupNodes = setupNodeStepsInJob(jobBlock);
     assert.equal(
       setupNodes.length,
       1,
@@ -96,6 +115,16 @@ export function validateEvidenceCiWorkflow(source) {
       setupNodes[0][1].trim(),
       NODE_VERSION,
       `${jobId} setup-node must pin ${NODE_VERSION}`,
+    );
+
+    const steps = parseSteps(jobBlock);
+    const checkoutIndex = steps.findIndex((step) => stepUsesCheckout(step));
+    const setupIndex = steps.findIndex((step) => stepUsesSetupNode(step));
+    assert.notEqual(checkoutIndex, -1, `${jobId} must declare checkout in steps`);
+    assert.notEqual(setupIndex, -1, `${jobId} must declare setup-node in steps`);
+    assert.ok(
+      checkoutIndex < setupIndex,
+      `${jobId} checkout must precede setup-node (checkout=${String(checkoutIndex)} setup=${String(setupIndex)})`,
     );
   }
 
@@ -111,8 +140,20 @@ export function validateEvidenceCiWorkflow(source) {
   for (const [jobId, block] of jobs.entries()) {
     if (!PACK_SMOKE_JOB_IDS.includes(jobId)) continue;
     const steps = parseSteps(block);
+    const checkoutIndex = steps.findIndex((step) => stepUsesCheckout(step));
+    const setupIndex = steps.findIndex((step) => stepUsesSetupNode(step));
+    assert.notEqual(checkoutIndex, -1, `${jobId} pack-smoke job must declare checkout`);
+    assert.notEqual(setupIndex, -1, `${jobId} pack-smoke job must declare setup-node`);
+    assert.ok(
+      checkoutIndex < setupIndex,
+      `${jobId} checkout must precede setup-node before pack:smoke`,
+    );
     const npmStepIndex = steps.findIndex((step) => step.name === NPM_STEP_NAME);
     assert.notEqual(npmStepIndex, -1, `${jobId} must include the named npm install step`);
+    assert.ok(
+      setupIndex < npmStepIndex,
+      `${jobId} setup-node must precede npm pin step`,
+    );
     const npmBody = steps[npmStepIndex].lines.join('\n');
     assert.match(npmBody, /npm install -g npm@11\.19\.0/);
     assert.match(npmBody, /GITHUB_PATH/);
@@ -253,6 +294,30 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
     mutant,
     /architecture must have exactly one setup-node step \(found 2\)/,
   );
+});
+
+test('mutation: setup-node before checkout in trajectory job fails', () => {
+  const mutant = workflow.replace(
+    /(  trajectory:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n$2',
+  );
+  expectValidationFailure(mutant, /trajectory checkout must precede setup-node/);
+});
+
+test('mutation: duplicate checkout in foundation job fails', () => {
+  const mutant = workflow.replace(
+    /(  foundation:[\s\S]*?      - uses: actions\/checkout@v4\n)/,
+    '$1      - uses: actions/checkout@v4\n',
+  );
+  expectValidationFailure(mutant, /foundation must have exactly one checkout step \(found 2\)/);
+});
+
+test('mutation: missing checkout in derivation job fails', () => {
+  const mutant = workflow.replace(
+    /(  derivation:[\s\S]*?steps:\n)      - uses: actions\/checkout@v4\n/,
+    '$1',
+  );
+  expectValidationFailure(mutant, /derivation must have exactly one checkout step \(found 0\)/);
 });
 
 test('mutation: wrong setup-node version in foundation job fails', () => {
