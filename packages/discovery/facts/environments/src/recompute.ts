@@ -16,10 +16,10 @@ import { ENVIRONMENT_RECORD_KIND } from "./identifiers.js";
  * Every field here is native: it is read out of this record's own bytes. `image.manifestDigest`
  * is declared *reference-bearing* in the profile so discovery's `referrers` relation inverts
  * it — but an OCI image is not an announceable record, so there are no referenced bytes to
- * fetch, re-hash, and parse. The fail-closed `ReferencedBytes` path that record-to-record
+ * retrieve, re-hash, and parse. The fail-closed `ReferencedBytes` path that record-to-record
  * digests use (see `facts/benchmarking`) therefore does not apply, and the field is emitted
  * directly. Reference-bearing labels an indexing relation; it does not by itself imply a
- * fetchable record.
+ * retrievable record.
  */
 export const environmentRecompute: RecordFactRecompute = async (bytes) => {
   try {
