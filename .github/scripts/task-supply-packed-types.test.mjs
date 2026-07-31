@@ -12,6 +12,7 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
   ['admission', '@jinn-network/task-admission'],
+  ['curation', '@jinn-network/task-curation'],
   ['derivation', '@jinn-network/task-derivation'],
   ['posting', '@jinn-network/task-posting'],
 ];
@@ -19,6 +20,7 @@ const packages = [
 const codeEntrypoints = [
   '@jinn-network/task-admission',
   '@jinn-network/task-admission/testing',
+  '@jinn-network/task-curation',
   '@jinn-network/task-derivation',
   '@jinn-network/task-derivation/testing',
   '@jinn-network/task-posting',

@@ -28,7 +28,7 @@ same code, no fork.** Filed as F7 in
 `docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md` §13. The swap point is
 the injected `PostingDeps.postTask` and `PostingDeps.ports`; no policy code changes with it.
 
-## Reported to the program: F-C5-8 (open — needs a ruling)
+## Reported to the program: F-C5-8 (resolved — ruling R10)
 
 **The pool listing this package is pinned to consume is not `PostingPoolEntry`, and one field of
 `PostingPoolEntry` has no producer anywhere in the stack.** The C5 plan's Task B5 pins
@@ -52,7 +52,7 @@ public-specification evaluation legs only") in both `planPosting` (the `evaluati
 skip) and `buildDispatchSubmission` (`assertPublicSpecEvaluationLeg`). A boolean nobody produces
 makes every D5 refusal a caller's claim rather than a fact about the sealed bytes.
 
-**What this branch does in the interim.** `PostingPoolEntry` is untouched — it is exactly what the
+**What this package does.** `PostingPoolEntry` is untouched — it is exactly what the
 plan pins, and it was not widened. The reconciliation lives in one named, tested adapter,
 `postingPoolEntry(entry, options)`, which carries C4's `receiptDigest` into
 `admissionReceiptDigest` and **derives** `evaluationSpecPublic` from the sealed EvaluationSpec
@@ -62,16 +62,26 @@ failing closed on an unstamped specification, a private stamp, a non-string stam
 are not a JSON document. `src/pool-shape.test.ts` pins C4's stored entry against the adapter's
 input type at compile time, so a rename on either side stops the build.
 
-**What the program still has to rule on**, before the tier-4 ops note is written against this
-surface:
+**How the program ruled (R10).** The C5 plan was wrong on every count; C4 is unchanged.
 
-1. rename C4's `receiptDigest` to `admissionReceiptDigest` (or have posting accept both), so the
-   listing element is postable without an adapter; and
-2. where `evaluationSpecPublic` is owned — derived at the posting boundary as it is here, or
-   modelled on the pool entry by C4 and carried; and
-3. whether the adapter (`postingPoolEntry`, `evaluationSpecIsPublic`, `SuppliedPoolEntry`) stays on
-   this package's public surface, which is a name the program's §4 "C5 produces" list does not
-   carry.
+1. **`receiptDigest` stays C4's name** — it is what the program pinned (§4, ruling R5). Posting
+   renames at its own boundary. The plan's alternative, renaming C4 to match the plan's guess,
+   would have churned a pinned interface to spare this package one adapter.
+2. **`evaluationSpecPublic` is derived here, permanently** — never modelled on the pool entry and
+   never carried. Deriving it from the sealed bytes is what makes a D5 refusal a fact about the
+   specification rather than a claim by whoever produced the entry; a carried boolean would be a
+   silent downgrade of the gate. `src/pool-shape.test.ts` pin (d) fails the build if any producer
+   grows such a field, and the fix in that case is to keep deriving, not to start trusting it.
+3. **The adapter stays on the public surface.** `postingPoolEntry`, `evaluationSpecIsPublic`, and
+   `SuppliedPoolEntry` are exported: the tier-4 composition is the only place holding both a pool
+   and this application, so it is the caller that needs them, and exporting the tested adapter is
+   what stops each composition from inventing a looser one. The program's §4 "C5 produces" list is
+   amended accordingly.
+
+The plan's Task B5 identity assertion is likewise amended: it pins the two-step join
+(`SupplyPool.get()` → `SuppliedPoolEntry` → `PostingPoolEntry`) rather than the listing element,
+because a listing that carried every pair's sealed bytes would be the wrong contract for a pool
+that exists to be enumerated cheaply.
 
 ## What v1 does not do
 

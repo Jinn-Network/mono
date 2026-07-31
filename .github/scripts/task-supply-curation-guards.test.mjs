@@ -1,3 +1,16 @@
+// Curation's package-specific contract, and only that.
+//
+// The tree-wide guards own everything a task-supply package shares: the package inventory and
+// dependency graph (`task-supply-package-inventory`), the import boundary and the ambient-network
+// and host-locale sweeps (`task-supply-source-boundaries`), and the packed-consumer canary
+// (`task-supply-packed-types`). Curation is registered in all three; the duplicate inventory and
+// boundary assertions that lived here while C6 was a branch off integration were removed when the
+// branches merged.
+//
+// What stays here is what only curation can assert: that a PROJECTION never becomes a record. It
+// has no clock, seals nothing, claims no record kind, mirrors upstream shapes it does not import,
+// and never calls an observed pass rate a difficulty score.
+
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -20,23 +33,6 @@ function productionSources() {
   return out;
 }
 
-test('inventory: standalone leaf with zero Jinn dependencies', () => {
-  const manifest = JSON.parse(readFileSync(join(pkg, 'package.json'), 'utf8'));
-  assert.equal(manifest.name, '@jinn-network/task-curation');
-  assert.equal(manifest.type, 'module');
-  assert.equal(manifest.packageManager, 'yarn@4.13.0');
-  assert.deepEqual(Object.keys(manifest.dependencies ?? {}), ['zod']);
-  assert.equal(manifest.resolutions, undefined, 'a portal resolution means a Jinn dependency crept in');
-  for (const bag of ['dependencies', 'devDependencies', 'peerDependencies']) {
-    for (const name of Object.keys(manifest[bag] ?? {})) {
-      assert.ok(!name.startsWith('@jinn-network/'), `${bag} must not name ${name}`);
-    }
-  }
-  assert.ok(existsSync(join(pkg, 'yarn.lock')), 'standalone yarn project needs its own lockfile');
-  assert.equal(readFileSync(join(pkg, '.yarnrc.yml'), 'utf8').trim(), 'nodeLinker: node-modules');
-});
-
-// Constraints 4 + 15: pure projector. `Date.parse` is the one allowlisted time primitive.
 test('custody: no ambient authority and no clock in production source', () => {
   const banned = [
     /\bDate\.now\b/, /\bnew Date\s*\(\s*\)/, /\bperformance\.now\b/, /\bMath\.random\b/,
@@ -67,20 +63,6 @@ test('no-record: nothing here seals, hashes, or claims a record kind', () => {
 });
 
 // Program §5 contract 5 + 12.
-test('boundaries: no legacy or product-tier imports', () => {
-  const banned = [
-    /@jinn-network\/core\b/, /@jinn-network\/plugin\b/, /@jinn-network\/jinn-layer\b/,
-    /from\s+["'][^"']*\/client\/src\//,
-  ];
-  for (const file of productionSources()) {
-    const text = readFileSync(file, 'utf8');
-    for (const pattern of banned) {
-      assert.ok(!pattern.test(text), `${file} matches banned import ${pattern}`);
-    }
-  }
-});
-
-// Constraint 18: bounded language.
 test('bounded language: an observed pass rate is never a difficulty score', () => {
   const banned = [
     /difficulty score/i, /task difficulty/i, /intrinsic difficulty/i,

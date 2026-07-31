@@ -6,26 +6,28 @@ import type { PostingPoolEntry } from "./types.js";
 
 // The one place this package names C4's contract.
 //
-// STOP-AND-REPORT, filed as F-C5-8 against the C5 plan's Task B5 (contract 11). The report is on
-// the record in this package's README ("Reported to the program: F-C5-8"), which carries the
-// options the program has to rule between; this file carries the compile-time half.
+// F-C5-8 is RESOLVED by program ruling R10 (see the program plan §8 and this package's README).
+// The finding reported that the C5 plan's Task B5 assertion
+// `(entry: PoolListing[number]) => PostingPoolEntry` does not compile against C4, because
+// `SupplyPool.list()` yields `PoolEntrySummary`, which:
+//   1. carries no `taskBytes` -- the sealed bytes live on `PoolEntry`, read through
+//      `SupplyPool.get()`;
+//   2. names the admission receipt `receiptDigest`, not `admissionReceiptDigest`;
+//   3. models no `evaluationSpecPublic` at all.
 //
-//   The plan asserts `(entry: PoolListing[number]) => PostingPoolEntry`. On
-//   `supply/c4-task-derivation` that assertion does NOT compile. `SupplyPool.list()` yields
-//   `PoolEntrySummary`, which differs from `PostingPoolEntry` in three ways:
-//     1. no `taskBytes` -- the sealed bytes live on `PoolEntry`, read through `SupplyPool.get()`;
-//     2. the admission receipt is named `receiptDigest`, not `admissionReceiptDigest`;
-//     3. `evaluationSpecPublic` does not exist in C4 at all.
-//   The plan's own pre-flight gate admits (1): it stops only when the pool exposes neither the
-//   bytes "or a way to read them" nor a per-entry receipt digest, and C4 exposes both.
+// R10 ruled the plan wrong on all three counts, and C4 unchanged:
+//   1. the two-step join IS the pool's contract -- listing stays cheap, bytes are fetched when a
+//      caller actually needs them -- so the identity assertion belongs at `get()`, pinned at (b);
+//   2. `receiptDigest` is the program-pinned name (§4, ruling R5); posting renames at its own
+//      boundary, in `postingPoolEntry`;
+//   3. publicness is DERIVED from the sealed EvaluationSpec bytes and never carried as a field.
+//      D5 stamps `accessClass: "public"` on every access-classified descriptor at seal time, and
+//      `evaluationSpecIsPublic` reads those stamps back, fail-closed. This is the load-bearing
+//      half: a carried boolean would make every D5 refusal a caller's assertion, where a derived
+//      one is a fact about the bytes the entry's own digest addresses.
 //
-// Until the program rules on (2) and (3), `PostingPoolEntry` stays exactly as the plan pins it and
-// the reconciliation lives in one named, tested adapter -- `postingPoolEntry` -- rather than in
-// whatever each caller invents. That adapter is what closes the gap the finding named: D5's
-// publicness is read off the sealed EvaluationSpec bytes the entry addresses, so the refusal is a
-// fact about the bytes rather than a caller's assertion. Every pin below is a tripwire: if C4
-// renames a field, drops one, or grows the two posting needs, one of these stops compiling and
-// F-C5-8 is revisited.
+// So `postingPoolEntry` is the settled design, not an interim workaround, and the pins below are
+// permanent tripwires rather than a gap being tracked.
 type PoolListing = Awaited<ReturnType<SupplyPool["list"]>>;
 type PoolListingEntry = PoolListing[number];
 type PoolStoredEntry = NonNullable<Awaited<ReturnType<SupplyPool["get"]>>>;
@@ -46,17 +48,16 @@ const _storedEntryIsSuppliable: (entry: PoolStoredEntry) => SuppliedPoolEntry = 
 const _suppliedEntryIsPostable: (entry: SuppliedPoolEntry) => PostingPoolEntry = (entry) =>
   postingPoolEntry(entry);
 
-// (d) The two fields C4 does not model. Written as key assertions so this file fails to compile the
-// moment C4 grows either one -- at which point the listing element itself becomes postable and the
-// adapter's rename half falls away.
+// (d) Publicness is never carried on a pool entry. This is a safety property under R10, not a gap:
+// if C4 (or any future producer) grew an `evaluationSpecPublic` field, this stops compiling, and
+// the fix is to keep deriving from bytes rather than to start trusting the field. A carried flag
+// would silently downgrade D5's gate from "proven from the sealed specification" to "the producer
+// said so".
+//
+// The rename half needs no pin of its own: (b) already fails to compile if C4 renames
+// `receiptDigest`, because `SuppliedPoolEntry` requires that exact name.
 type PoolEntryKeys = keyof PoolListingEntry | keyof PoolStoredEntry;
-const _admissionReceiptDigestIsNotYetModelled: Extract<
-  PoolEntryKeys,
-  "admissionReceiptDigest"
-> extends never
-  ? true
-  : false = true;
-const _evaluationSpecPublicIsNotYetModelled: Extract<
+const _publicnessIsNeverCarriedOnThePoolEntry: Extract<
   PoolEntryKeys,
   "evaluationSpecPublic"
 > extends never
@@ -85,8 +86,7 @@ describe("pool shape", () => {
       _evaluationSpecDigestIsShared,
       _storedEntryIsSuppliable,
       _suppliedEntryIsPostable,
-      _admissionReceiptDigestIsNotYetModelled,
-      _evaluationSpecPublicIsNotYetModelled,
-    ]).toHaveLength(6);
+      _publicnessIsNeverCarriedOnThePoolEntry,
+    ]).toHaveLength(5);
   });
 });
