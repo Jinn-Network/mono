@@ -19,7 +19,11 @@ import {
   CLAUDE_CODE_HARNESS,
   harnessNameMatches,
 } from '../names.js';
-import type { ImplRegistry } from './engine.js';
+
+/** Dispatch surface previously owned by TaskEngine; kept for HarnessRegistry consumers. */
+export interface ImplRegistry {
+  findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined;
+}
 
 // Harness dispatch defaults shared by the daemon and operator diagnostics.
 export const DEFAULT_HARNESS = CLAUDE_CODE_HARNESS;
