@@ -32,6 +32,13 @@ export {
 } from "./failures.js";
 
 export {
+  establishBaseline,
+  type ChainEnvironmentRecordDraft,
+  type ConnectedBaseline,
+  type ExtractionRequest,
+} from "./baseline.js";
+
+export {
   captureAnchor,
   confirmAnchorUnchanged,
   type AnchorCapture,
@@ -126,3 +133,5 @@ export {
   type VerifiedChainMaterializer,
   type VerifierIdentity,
 } from "./ports.js";
+
+export type { FixtureMutationDeclaration } from "@jinn-network/chain-environment-verification";
