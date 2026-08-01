@@ -28,8 +28,17 @@ export {
   type VerifyCryptoEnvironmentOptions,
 } from "./composite.js";
 
-export function createAnvilMaterializer(): void {}
-
-export function createProbeExecutor(): void {}
-
-export function createScriptReplayer(): void {}
+export {
+  createAnvilMaterializer,
+  type AnvilMaterializerConfig,
+  type PinnedRuntimeIdentity,
+  type VerifiedChainMaterializer,
+} from "./anvil.js";
+export { createProbeExecutor, type ProbeExecutorConfig } from "./probes.js";
+export { createScriptReplayer, type ScriptReplayerConfig } from "./replay.js";
+export type {
+  ProcessHost,
+  RpcTransport,
+  SpawnedProcess,
+  WorkspaceHost,
+} from "./runtime-hosts.js";
