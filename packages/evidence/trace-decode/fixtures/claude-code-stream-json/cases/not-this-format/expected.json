@@ -1,0 +1,12 @@
+{
+  "sourceDigest": "sha256:010eaf57e81e21e5e8aca3ce95c25d5e718ea85a5681161f947e5e864778a50f",
+  "traceId": "0b8263a641de063263c5370093016cc0",
+  "timebase": "synthetic-ordinal",
+  "completeness": {
+    "decoded": "empty",
+    "skipped": 3,
+    "reason": "no interpretable stream records"
+  },
+  "spans": [],
+  "recordDigest": "sha256:335276891b12fb51c03c7d9719e3c941191a4707f7a8596311748dd4d1ffb12f"
+}

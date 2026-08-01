@@ -62,7 +62,7 @@ function releaseFixture(overrides = {}) {
     ...overrides.layer,
   });
   writeJson(
-    resolve(fixture, 'apps/jinn-agent/plugins/jinn/layer-runtime.json'),
+    resolve(fixture, 'plugin/frozen/layer-runtime.json'),
     {
       package: '@jinn-network/jinn-layer',
       version,

@@ -113,6 +113,7 @@ test('smoke installs stock Hermes and Jinn only from pinned published channels',
   assert.doesNotMatch(workflow, /actions\/checkout/);
   assert.doesNotMatch(workflow, /file:\/\//);
   assert.doesNotMatch(workflow, /apps\/jinn-agent\/plugins\/jinn/);
+  assert.doesNotMatch(workflow, /plugin\/frozen/);
 });
 
 test('full doctor output is converted into a real non-advisory gate', () => {
