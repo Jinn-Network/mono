@@ -65,6 +65,21 @@ export {
   assertTemplateHardened,
 } from "./hardening.js";
 export {
+  CHAIN_SCENARIO_ENVELOPE_VIOLATION_CLASS,
+  CHAIN_SCENARIO_MISSING_SOLUTION_SCRIPT_CLASS,
+  CHAIN_SCENARIO_REPLAY_INFRASTRUCTURE_CLASS,
+  CHAIN_WORK_PROFILE_URI,
+  buildChainWorkProfile,
+  buildScenarioEvaluationSpec,
+  buildSealedScenarioPair,
+  buildSealedScenarioTask,
+} from "./seal-pair.js";
+export type {
+  SealedEvaluationSpec,
+  SealedScenarioPair,
+  SealedScenarioTask,
+} from "./seal-pair.js";
+export {
   computeScenarioCommitment,
   parameterDigest,
   parameterize,
