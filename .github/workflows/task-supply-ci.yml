@@ -10,6 +10,7 @@ on:
       - ".github/scripts/task-supply-*.test.mjs"
       - ".github/workflows/task-supply-ci.yml"
       - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+      - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
 
 permissions:
   contents: read
@@ -124,6 +125,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  chain-scenarios:
+    needs: [architecture, admission, derivation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/task-supply/derivation && yarn install --immutable && yarn build)
+      - name: Verify Chain Scenarios
+        working-directory: packages/task-supply/chain-scenarios
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Chain Scenarios distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-supply-chain-scenarios-dist
+          path: packages/task-supply/chain-scenarios/dist
+          if-no-files-found: error
+          retention-days: 1
+
   posting:
     needs: [architecture, derivation]
     runs-on: ubuntu-latest
@@ -165,7 +204,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, admission, curation, derivation, posting]
+    needs: [architecture, admission, curation, derivation, chain-scenarios, posting]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -175,6 +214,7 @@ jobs:
           ADMISSION_RESULT: ${{ needs.admission.result }}
           CURATION_RESULT: ${{ needs.curation.result }}
           DERIVATION_RESULT: ${{ needs.derivation.result }}
+          CHAIN_SCENARIOS_RESULT: ${{ needs.chain-scenarios.result }}
           POSTING_RESULT: ${{ needs.posting.result }}
         run: |
           for result in \
@@ -182,6 +222,7 @@ jobs:
             "$ADMISSION_RESULT" \
             "$CURATION_RESULT" \
             "$DERIVATION_RESULT" \
+            "$CHAIN_SCENARIOS_RESULT" \
             "$POSTING_RESULT"; do
             test "$result" = "success"
           done
@@ -206,6 +247,8 @@ jobs:
           cp -R .task-supply-dist/task-supply-curation-dist/. packages/task-supply/curation/dist/
           mkdir -p packages/task-supply/derivation/dist
           cp -R .task-supply-dist/task-supply-derivation-dist/. packages/task-supply/derivation/dist/
+          mkdir -p packages/task-supply/chain-scenarios/dist
+          cp -R .task-supply-dist/task-supply-chain-scenarios-dist/. packages/task-supply/chain-scenarios/dist/
           mkdir -p packages/task-supply/posting/dist
           cp -R .task-supply-dist/task-supply-posting-dist/. packages/task-supply/posting/dist/
       - name: Build cross-tree portal dependencies from source
@@ -217,6 +260,7 @@ jobs:
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/environments/chain-record && yarn install --immutable && yarn build)
           (cd packages/marketplace/binding && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/task-supply-packed-types.test.mjs
