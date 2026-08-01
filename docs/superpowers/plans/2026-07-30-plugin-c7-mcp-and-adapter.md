@@ -7009,3 +7009,7 @@ Reviewed defect head: `08dc460219081f01743c3b86c498d0bb535c42c6`. This is the on
 
 - **W1-1:** Match `plugin/runtime/scripts/pack-smoke.mjs` `portals` order exactly for the shared cross-tree set.
 - **W1-3:** Prefer default CLI role → `tools`. Session remains explicit (`--role session` or `jinn-plugin-runtime-session`). Update USAGE, `parseRole`, and `bin.test.ts` accordingly. Keep explicit `--role session` without signer as a clear F-C4-T13-2 failure (and optionally name the session-host bin).
+
+### Acceptance
+
+**acceptance-complete** (2026-08-01) at exact head `90c9983d8ce075feeaaaa4b53de6294607c3d7f5`. Scoped wave-2 rereview of C7-W1-1..4: **CLEAN**. PR comment: https://github.com/Jinn-Network/mono/pull/2347#issuecomment-5148500794. Named residuals (F-C7-T20-1 local captureSigner custody ≠ HSM; published-registry = C8) deferred; do not block dependents.
