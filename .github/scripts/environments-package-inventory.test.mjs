@@ -13,6 +13,7 @@ const ENVIRONMENT_PACKAGES = [
   ['record', '@jinn-network/environment-record'],
   ['verification', '@jinn-network/environment-verification'],
   ['chain-record', '@jinn-network/chain-environment-record'],
+  ['chain-verification', '@jinn-network/chain-environment-verification'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
@@ -61,6 +62,20 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['chain-record', {
     dependencies: [],
     devDependencies: ['@jinn-network/environment-record', '@jinn-network/evidence-protocol'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-verification` is tier 3 and takes exactly the two package edges design §3 gives
+  // it: the record kinds it verifies, and trust/core for DSSE + JCS + hashing + ordering.
+  // `trust-testing` is a test-only devDependency (the kit signs with real deterministic
+  // keys); `trust-resolve` is install-graph only, because a portal's own resolutions do not
+  // apply and `trust-testing`'s Jinn dependency must be resolved from here.
+  ['chain-verification', {
+    dependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/trust-core',
+    ],
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
     optionalDependencies: [],
     peerDependencies: [],
   }],
@@ -144,6 +159,7 @@ test('every environments package declares Vitest as an exact optional peer where
     ['record', ['.', './fixtures/*', './schemas/*', './testing']],
     ['verification', ['.', './fixtures/*', './testing']],
     ['chain-record', ['.', './fixtures/*', './schemas/*', './testing']],
+    ['chain-verification', ['.', './fixtures/*', './testing']],
   ]);
   assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
   for (const [directory] of ENVIRONMENT_PACKAGES) {

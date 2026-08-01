@@ -1,0 +1,110 @@
+[
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000aa",
+      "signature": "getReserveData(address)",
+      "args": [
+        "0x00000000000000000000000000000000000000bb"
+      ],
+      "returns": [
+        "uint256"
+      ],
+      "state": "baseline"
+    },
+    "key": "sha256:cdb76048a09817bf3c29f695b18e0e329ed19810c678c6b18e80821d317715bd"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000aa",
+      "signature": "getReserveData(address)",
+      "args": [
+        "0x00000000000000000000000000000000000000bb"
+      ],
+      "returns": [
+        "uint256"
+      ],
+      "state": "post-replay"
+    },
+    "key": "sha256:305333fb3a2f8b4686d7823e3c9d27c1429c5f68bf3a11867e7c3a907b7269dc"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000cc",
+      "signature": "balanceOf(address)",
+      "args": [
+        "0x00000000000000000000000000000000000000dd"
+      ],
+      "returns": [
+        "uint256"
+      ],
+      "state": "baseline"
+    },
+    "key": "sha256:ea9237fab5434e45988e8df77e54d9c7060eee4abd5089639d1a323a857c76ba"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000aa",
+      "signature": "getReserveData(address,uint256)",
+      "args": [
+        "0x00000000000000000000000000000000000000bb",
+        "1"
+      ],
+      "returns": [
+        "uint256",
+        "uint128"
+      ],
+      "state": "baseline"
+    },
+    "key": "sha256:6899d14f1f44baf21201b431b91dc64a23a64aca83939b252f109dc36df01bc8"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000aa",
+      "signature": "read(bytes32)",
+      "args": [
+        "0x1111111111111111111111111111111111111111111111111111111111111111"
+      ],
+      "returns": [
+        "bytes32"
+      ],
+      "state": "baseline"
+    },
+    "key": "sha256:740b9931086eb63eac6a22d6aab9e40e9c40a2db462bf8aca86e71a83798ae53"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000ee",
+      "signature": "totalSupply()",
+      "args": [],
+      "returns": [
+        "uint256"
+      ],
+      "state": "post-replay"
+    },
+    "key": "sha256:00581eb657fdf2b9fbd181d914747fe503553562846daedabbaa1e9a715133b1"
+  },
+  {
+    "request": {
+      "to": "0x00000000000000000000000000000000000000ff",
+      "signature": "symbol()",
+      "args": [],
+      "returns": [
+        "string"
+      ],
+      "state": "baseline"
+    },
+    "key": "sha256:fcf50cb614c7abd812aac2ebc7ed23f752df2254020f3de6ebb6b3d1c8d696fe"
+  },
+  {
+    "request": {
+      "to": "0x0000000000000000000000000000000000000101",
+      "signature": "getOwners()",
+      "args": [],
+      "returns": [
+        "address[]"
+      ],
+      "state": "post-replay"
+    },
+    "key": "sha256:64fae85dd6d6b2590fb7716a4a8e965a1e49da7fa5ea92deda10d02aca5db4f7"
+  }
+]

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record', 'verification', 'chain-record'];
+const environmentDirectories = ['record', 'verification', 'chain-record', 'chain-verification'];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -68,6 +68,61 @@ const CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES = [
   '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
 const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
+// `packages/environments/chain-verification` is tier 3: it runs the closed-state and archive
+// protocols and seals the attestation. Design §3 gives it exactly two package edges — the
+// record kinds it verifies, and trust/core for DSSE + JCS + hashing — so `@jinn-network/
+// trust-*` is lifted from the foreign list for this package only.
+const CHAIN_VERIFICATION_ALLOWED_EXTERNALS = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/trust-core',
+  '@noble/hashes',
+  'zod',
+];
+const CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/trust-core',
+  '@noble/hashes',
+  'zod',
+];
+const CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@types/node',
+  // Test-only differential oracle for the hand-rolled ABI encoder (ruling CR8), exactly as
+  // `canonicalize` and `ajv` are test-only oracles for the record package above. Production
+  // source never imports it -- the externals assertion below scans production files only.
+  'ox',
+  'typescript',
+  'vitest',
+];
+const CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_VERIFICATION_FOREIGN_PACKAGES = [
+  ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
+  '@jinn-network/trust-resolve',
+];
+// Finding F-CE3-6: the staged-state file store is this package's only production filesystem
+// surface, and it takes its directory as an argument rather than as ambient authority. The
+// three test files below read this package's own shipped fixtures and source. Every path is
+// named one by one so a new filesystem user needs a deliberate edit here.
+const CHAIN_VERIFICATION_FILESYSTEM_SOURCES = [
+  'chain-verification/src/staged-state-store.ts',
+  'chain-verification/src/testing.ts',
+  // The ABI vector corpus loader, shared by the unit and differential suites.
+  'chain-verification/src/abi-vectors.ts',
+  'chain-verification/src/abi-encode.differential.test.ts',
+  'chain-verification/src/staged-state-store.test.ts',
+  'chain-verification/src/testing.test.ts',
+  'chain-verification/src/bounded-claims.test.ts',
+  'chain-verification/src/fixture-keys.test.ts',
+  'chain-verification/src/ports.test.ts',
+];
+// Finding F-CE3-7: design §10's caveats are measured against a real pinned Anvil, which needs
+// a process. Exactly one opt-in test file may spawn one; it is excluded from the default
+// vitest project, so a machine without Foundry still runs the whole kit.
+const CHAIN_VERIFICATION_PROCESS_SOURCES = [
+  'chain-verification/src/anvil-caveats.anvil.test.ts',
+];
 
 // `packages/environments/verification` is tier 3: it executes the K-run protocol and seals
 // the attestation. Design §3.3 gives it exactly two package edges — the record kind it
@@ -566,6 +621,92 @@ test('environment-verification takes exactly its two approved package edges', ()
     [...new Set(externals)].sort().filter((name) => !VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
     [],
     'environment-verification production source imports an unapproved external package',
+  );
+});
+
+test('chain-environment-verification takes exactly its two approved package edges', () => {
+  const verification = join(packages, 'chain-verification');
+  const verificationSource = join(verification, 'src');
+  const testingEntry = join(verificationSource, 'testing.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(verificationSource);
+  const testingFiles = allFiles.filter((file) => file === testingEntry || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...CHAIN_VERIFICATION_FOREIGN_PACKAGES, ...NODE_IO_MODULES, 'vitest'],
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ).filter((finding) => !CHAIN_VERIFICATION_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    )),
+    [],
+    'chain-environment-verification production source must take only its two approved package edges',
+  );
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      CHAIN_VERIFICATION_FOREIGN_PACKAGES,
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ),
+    [],
+    'chain-environment-verification testing files must not cross into foreign package roots',
+  );
+
+  const fsUsers = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !CHAIN_VERIFICATION_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
+    ));
+  assert.deepEqual(fsUsers, [],
+    `only ${CHAIN_VERIFICATION_FILESYSTEM_SOURCES.join(' and ')} may touch the filesystem, and only `
+    + 'through a directory supplied as an argument');
+  const fsCarveOutUses = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !finding.includes('node:fs/promises'))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
+    ));
+  assert.deepEqual(fsCarveOutUses, [],
+    'the filesystem carve-out covers node:fs/promises only; no other I/O module is admitted');
+
+  const processUsers = forbiddenImportsInFiles(allFiles, ['node:child_process', 'node:http'])
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ));
+  assert.deepEqual(processUsers, [],
+    `only ${CHAIN_VERIFICATION_PROCESS_SOURCES.join(' and ')} may spawn a process or dial HTTP`);
+
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(verificationSource, 'index.ts')], [], [testingEntry]),
+    [],
+    'the root entrypoint must not re-export testing.ts',
+  );
+
+  const manifest = JSON.parse(readFileSync(join(verification, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !CHAIN_VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'chain-environment-verification production source imports an unapproved external package',
   );
 });
 
