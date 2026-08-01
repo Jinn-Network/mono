@@ -1,0 +1,3 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"dup","name":"First","input":{}},{"type":"tool_use","id":"dup","name":"Second","input":{}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"dup","content":"once"}]}}
+{"type":"result","subtype":"success"}

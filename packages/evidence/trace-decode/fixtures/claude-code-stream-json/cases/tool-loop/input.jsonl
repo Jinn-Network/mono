@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"sess-tool-loop","model":"synthetic-model-a"}
+{"type":"user","message":{"role":"user","content":"make the suite pass"}}
+{"type":"assistant","message":{"role":"assistant","model":"synthetic-model-a","content":[{"type":"thinking","thinking":"consider"},{"type":"text","text":"reading"},{"type":"tool_use","id":"call_1","name":"Read","input":{"path":"module.py"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"def load(): pass"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"applying the fix"}]}}
+{"type":"result","subtype":"success","usage":{"input_tokens":4200,"output_tokens":380}}

@@ -1,0 +1,4 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"call_a","name":"Read","input":{"path":"a"}},{"type":"tool_use","id":"call_b","name":"Grep","input":{"pattern":"b"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_b","content":"hit"}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_a","is_error":true,"content":"no such file"}]}}
+{"type":"result","subtype":"success"}

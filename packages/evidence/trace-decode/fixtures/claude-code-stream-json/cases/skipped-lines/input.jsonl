@@ -1,0 +1,4 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}
+not valid json at all {{{
+{"subtype":"init"}
+{"type":"result","subtype":"success"}
