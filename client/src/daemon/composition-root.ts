@@ -156,6 +156,11 @@ import {
 // Consumes block implies, by `@jinn-network/task-execution-workspace`, which does not export
 // it at all).
 import type { ProfileStore } from '@jinn-network/task-execution-profiles';
+import {
+  buildRepositoryWorkProfile,
+  REPOSITORY_WORK_PROFILE_URI,
+  sealTaskProfile,
+} from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import type {
@@ -173,7 +178,7 @@ import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
 import { getTaskCidDigest } from '../adapters/mech/contracts.js';
 import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
-import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY } from './bridge-legacy-delivery.js';
+import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesizeLegacyExecutionDocuments } from './bridge-legacy-delivery.js';
 import { EngagementLedger } from './engagement-ledger.js';
 import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
 import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
@@ -184,6 +189,7 @@ import { ProjectorLoop } from './projector-loop.js';
 import type { ProjectorPortsInput } from './projector-ports.js';
 import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } from './work-loop.js';
 import { buildArchiveSubscription } from './archive-subscription.js';
+import { parseSignedTaskV1 } from '../types/task-document.js';
 
 export interface OperatorComposition {
   readonly backend: TaskExecutionBackend;
@@ -1015,6 +1021,39 @@ export async function buildOperatorComposition(
     if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {
       throw new Error(`readSealedDocuments: card carries no valid taskDigest fact (${card.chain.submission})`);
     }
+
+    if (card.derivationKind === 'legacy') {
+      const legacyBytes = await fetchIpfsBytes(taskDigest as `sha256:${string}`);
+      if (legacyBytes === undefined) {
+        throw new Error(`readSealedDocuments: could not resolve legacy SignedTaskV1 for ${card.chain.submission}`);
+      }
+      let legacyTask;
+      try {
+        legacyTask = parseSignedTaskV1(JSON.parse(new TextDecoder().decode(legacyBytes)));
+      } catch {
+        throw new Error(`readSealedDocuments: legacy bytes are not a valid SignedTaskV1 (${card.chain.submission})`);
+      }
+      const sealedRepoProfile = sealTaskProfile(buildRepositoryWorkProfile());
+      if (input.profileStore.get(sealedRepoProfile.digest) === undefined) {
+        throw new Error(
+          `readSealedDocuments: repository-work profile not resolvable in profileStore (${card.chain.submission})`,
+        );
+      }
+      const profileUri = card.facts['taskProfileUri'];
+      if (typeof profileUri !== 'string' || profileUri !== REPOSITORY_WORK_PROFILE_URI) {
+        throw new Error(
+          `readSealedDocuments: legacy card carries unsupported taskProfileUri (${String(profileUri)})`,
+        );
+      }
+      return synthesizeLegacyExecutionDocuments({
+        task: legacyTask,
+        taskBytes: legacyBytes,
+        submissionUri: card.chain.submission,
+        nonce: card.chain.nonce,
+        profile: { uri: REPOSITORY_WORK_PROFILE_URI, digest: sealedRepoProfile.digest },
+      });
+    }
+
     const [taskBytes, submissionBytes] = await Promise.all([
       fetchIpfsBytes(taskDigest as `sha256:${string}`),
       fetchIpfsBytes(card.record.digest),

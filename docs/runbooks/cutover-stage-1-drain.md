@@ -2,17 +2,17 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** Leg H (2026-07-31) closed E39 (claim now fires) and E40
-> (anvil-fork finality). The loop still does not settle. The remaining named blocker:
+> **Do not run this runbook yet.** Leg H (2026-07-31) closed E39 (claim now fires), E40
+> (anvil-fork finality), and E41 (bridge-era execution documents). The loop should now progress
+> past `pipeline:submit-rejected:invalid-document`; re-run the gate before deploying.
 >
-> - **E41** — `pipeline:submit-rejected:invalid-document`. `readSealedDocuments` hands the
->   legacy `SignedTaskV1` bytes to `LocalTaskExecutionBackend.submit`, which requires sealed TEP
->   Task + Submission. Projector-side Submission synthesis (E32) does not produce backend-valid
->   sealed documents, and inventing new TEP bytes would diverge from the on-chain
->   `facts.taskDigest` already claimed. Needs a bridge ruling of the same kind E32 got.
+> **E41 disposition:** `synthesizeLegacyExecutionDocuments` (`bridge-legacy-delivery.ts`) is the
+> sole remaining SignedTaskV1→solve bridge — legacy cards only, retires with stage 5. Everything
+> else on the solve path is new-stack TEP. The legacy `CreatorLoop` still *posts* SignedTaskV1
+> until stage 3; that is posting, not a second solve stack.
 >
 > See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's gate
-> cannot pass until E41 lands. The runbook is settled and ready for when it does.
+> must pass before deploy.
 
 ## 1. Stop claiming (previous canary, no new build)
 

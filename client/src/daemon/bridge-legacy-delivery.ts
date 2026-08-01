@@ -9,7 +9,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { RECORD_KINDS_SUBMISSION, type AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
-import { documentDigest } from '@jinn-network/task-execution-protocol';
+import {
+  documentDigest,
+  sealSubmission,
+  sealTask,
+} from '@jinn-network/task-execution-protocol';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
 import { keccak256 } from 'viem';
@@ -104,6 +108,70 @@ export function synthesizeLegacyTaskProjection(input: {
     taskDigest,
     effectiveDeadline: new Date(input.task.window.endTs * 1000).toISOString(),
   };
+}
+
+const TEP_PROTOCOL_URI = 'https://jinn.network/profiles/task-execution/1.0' as const;
+const LEGACY_SIGNED_TASK_INPUT_NAME = 'legacy-signed-task-v1.json' as const;
+
+/**
+ * Bridge-era execution documents (finding E41, ruling E41): synthesizes sealed TEP Task +
+ * Submission bytes from a legacy-posted `SignedTaskV1` so `LocalTaskExecutionBackend.submit`
+ * accepts them. On-chain / claim identity stays the legacy digest (`facts.taskDigest` =
+ * `sha256(SignedTaskV1)`); these derived bytes are for backend execution only. Digest divergence
+ * is licensed the same way E32 licensed projector-side synthesis — today-mode settlement binds via
+ * engagement-ledger `dispatchBinding` + executor DSSE (`settlement-grade.ts`), not via
+ * `delivery.task === facts.taskDigest`.
+ *
+ * This is the **only** remaining SignedTaskV1→solve path. TaskEngine solution claiming is retired
+ * (stage 1 Task 16). The legacy `CreatorLoop` still *posts* SignedTaskV1 until stage 3 — that is
+ * posting, not a second solve stack. Retires with `legacyManifestDigest` after stage 5.
+ */
+export function synthesizeLegacyExecutionDocuments(input: {
+  readonly task: SignedTaskV1;
+  readonly taskBytes: Uint8Array;
+  readonly submissionUri: `urn:uuid:${string}`;
+  readonly nonce: string;
+  readonly profile: { readonly uri: string; readonly digest: `sha256:${string}` };
+}): { readonly taskBytes: Uint8Array; readonly submissionBytes: Uint8Array } {
+  const legacyDigestHex = documentDigest(input.taskBytes).slice('sha256:'.length);
+  const legacyInputContent = Buffer.from(input.taskBytes).toString('base64');
+
+  const taskDocument = {
+    protocol: TEP_PROTOCOL_URI,
+    profile: {
+      uri: input.profile.uri,
+      digest: { sha256: input.profile.digest.slice('sha256:'.length) },
+    },
+    instructions: input.task.description,
+    inputs: [
+      {
+        name: LEGACY_SIGNED_TASK_INPUT_NAME,
+        mediaType: 'application/json',
+        content: legacyInputContent,
+        digest: { sha256: legacyDigestHex },
+      },
+    ],
+    outputs: [
+      { name: 'prediction-v1-solution.json', mediaType: 'application/json', required: true },
+      { name: 'structured-output.json', mediaType: 'application/json', required: false },
+    ],
+  };
+
+  const taskBytes = sealTask(taskDocument);
+  const synthesizedTaskDigest = documentDigest(taskBytes).slice('sha256:'.length);
+  const deadline = new Date(input.task.window.endTs * 1000).toISOString();
+
+  const submissionBytes = sealSubmission({
+    protocol: TEP_PROTOCOL_URI,
+    submission: input.submissionUri,
+    task: { digest: { sha256: synthesizedTaskDigest } },
+    requester: input.task.creator.safeAddress,
+    idempotencyKey: input.submissionUri,
+    nonce: input.nonce,
+    deadline,
+  });
+
+  return { taskBytes, submissionBytes };
 }
 
 /** Reads the bridge annotation off sealed Delivery bytes. `undefined` when absent. */

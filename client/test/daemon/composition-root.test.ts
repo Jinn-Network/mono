@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
+import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
+import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
 import { Store } from '../../src/store/store.js';
+import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
 import { ProjectorLoop } from '../../src/daemon/projector-loop.js';
 
@@ -716,5 +719,111 @@ describe('buildEngagementLedgerDispatchContextPort (gap a, second half CLOSED, f
     await expect(
       resolveDispatchContext({ chainId: CHAIN_ID, taskCoordinator: TASK_COORDINATOR, taskId: 2n }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('readSealedDocuments legacy bridge (E41)', () => {
+  const CREATOR = '0x5555555555555555555555555555555555555555' as const;
+
+  function legacyTaskBytes(): Uint8Array {
+    return new TextEncoder().encode(JSON.stringify({
+      schemaVersion: 'task.v1',
+      id: 'legacy-task-1',
+      solverType: 'prediction.v1',
+      solverNetManifestCid: 'bafySolverNetManifest',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      role: 'restoration',
+      description: 'restore service health',
+      window: { startTs: 1000, endTs: 2000 },
+      spec: { consensusSnapshot: { probabilityYes: '0.75', source: 'polymarket-clob' } },
+      eligibility: {},
+      claimPolicy: { maxClaims: 2 },
+      creator: { safeAddress: CREATOR, agentEoa: CREATOR },
+      createdAt: 1000,
+      signature: {
+        algo: 'secp256k1',
+        signer: CREATOR,
+        hash: `0x${'a'.repeat(64)}`,
+        sig: `0x${'b'.repeat(130)}`,
+      },
+    }));
+  }
+
+  it('synthesizes sealed TEP documents for legacy cards via profileStore', async () => {
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-read-sealed-'));
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-read-sealed-evidence-'));
+    const store = new Store(':memory:');
+    const taskBytes = legacyTaskBytes();
+    const taskDigest = documentDigest(taskBytes);
+    const card = synthesizeLegacyFactsCard({
+      taskId: 1n,
+      manifestDigest: 'QmSolver',
+      taskCidDigest: `0x${taskDigest.slice('sha256:'.length)}`,
+      taskBytes,
+      solutionBudgetWei: 100n,
+    });
+    const profileDocuments = [buildRepositoryWorkProfile()];
+    const profilesByDigest = new Map(profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]));
+    const publicClient = { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) };
+    const chain = {
+      chainId: 84532,
+      taskCoordinator: '0x3333333333333333333333333333333333333333',
+      jinnRouter: '0x4444444444444444444444444444444444444444',
+      mechMarketplace: '0x5555555555555555555555555555555555555555',
+      activityChecker: '0x6666666666666666666666666666666666666666',
+      generation: 'today',
+    };
+
+    const composition = await buildOperatorComposition({
+      config: {
+        ipfsGatewayUrl: 'http://fixture-ipfs',
+        ipfsRegistryUrl: 'http://fixture-registry',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: [],
+        claimPolicy: { mode: 'parallel', maxClaims: 1, maxClaimsPerOperator: 1 },
+      } as never,
+      publicClient: publicClient as never,
+      walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
+      safeAddress: '0x1111111111111111111111111111111111111111',
+      mechAddress: '0x2222222222222222222222222222222222222222',
+      chain: chain as never,
+      stateRoot,
+      evidenceRoot,
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      store,
+    });
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(taskDigest.slice('sha256:'.length))) {
+        return new Response(taskBytes);
+      }
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+
+    try {
+      const sealed = await composition.readSealedDocuments(card);
+      const reparsedTask = JSON.parse(new TextDecoder().decode(sealed.taskBytes));
+      const reparsedSubmission = JSON.parse(new TextDecoder().decode(sealed.submissionBytes));
+      expect(sealTask(reparsedTask)).toEqual(sealed.taskBytes);
+      expect(sealSubmission(reparsedSubmission)).toEqual(sealed.submissionBytes);
+      expect(documentDigest(sealed.taskBytes)).not.toBe(taskDigest);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await composition.close();
+      store.close();
+    }
   });
 });

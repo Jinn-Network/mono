@@ -5416,7 +5416,7 @@ claim permanently unfinalizable (`awaitFinalized` hung until timeout). Depth fal
 fires when `latest - finalized > depthFallback`. The e2e mines 121 blocks after claim so the
 default 120-block floor can cover it.
 
-### E41 — `pipeline:submit-rejected:invalid-document` (**precisely located, handoff**)
+### E41 — `pipeline:submit-rejected:invalid-document` (**closed, leg H**)
 
 Final gate state after E39/E40:
 
@@ -5427,13 +5427,18 @@ daemon claimed task: requestId=0x9a7a… tx=0x31fa…
  "cards":[{"reason":"pipeline:submit-rejected:invalid-document"}]}
 ```
 
-`readSealedDocuments` fetches the legacy `SignedTaskV1` bytes for both task and submission
+`readSealedDocuments` was fetching the legacy `SignedTaskV1` bytes for both task and submission
 digests. `LocalTaskExecutionBackend.decodeAndSealCheck` requires sealed TEP Task + Submission
 (`sealTask` / `sealSubmission` byte-identity). A `SignedTaskV1` fails that check, submit rejects,
-the ledger abandons (then `already-engaged` forever via `INSERT OR IGNORE` — secondary).
+the ledger abandons.
 
-This is the residual of E32: projector-side Submission synthesis exists; **backend-side sealed
-TEP documents for the work loop do not**. Synthesizing new TEP bytes would also change
-`documentDigest`, which diverges from the `facts.taskDigest` already claimed on chain — a
-protocol-bridge ruling is required, not a silent cast. Next session owns that ruling + the
-abandon/re-admit seam for pre-claim abandons.
+**Ruling (E41, locked):** on-chain / claim identity stays the legacy digest
+(`facts.taskDigest` = `sha256(SignedTaskV1)`). Backend execution uses a **derived** sealed TEP
+Task + Submission synthesized under `derivationKind: 'legacy'` via
+`synthesizeLegacyExecutionDocuments` (`bridge-legacy-delivery.ts`), wired in `readSealedDocuments`
+(`composition-root.ts`) for legacy cards only. Digest divergence is licensed the same way E32
+licensed projector-side synthesis — today-mode settlement binds via engagement-ledger
+`dispatchBinding` + executor DSSE (`settlement-grade.ts`), not via
+`delivery.task === facts.taskDigest`. This bridge is the **only** remaining SignedTaskV1→solve
+path; the legacy `CreatorLoop` still *posts* SignedTaskV1 until stage 3 (posting, not a second
+solve stack). Retires with `legacyManifestDigest` after stage 5.
