@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "attempt-uri-agreement.json",
+      "sha256": "5e0c3255d8b2baf1b0a327c47ba6480093216f8950c0c4fa91f7c438dde0b721"
+    },
+    {
+      "id": "canonical-equivalence.json",
+      "sha256": "e4430f3b49a10bb5b16be2dc89ddf7bdc1e37e3fc956e2a9660c93bb4572194c"
+    }
+  ],
+  "errata": []
+}

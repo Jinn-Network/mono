@@ -35,7 +35,8 @@
     "./revised-contract-conformance": {
       "import": "./dist/revised-contract-conformance.js",
       "types": "./dist/revised-contract-conformance.d.ts"
-    }
+    },
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",

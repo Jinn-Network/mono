@@ -582,18 +582,17 @@ clauses of this section are amended by what implementation planning established:
    a package, never a platform record kind, so nothing collides.
 3. **The integrity hash chain is superseded, not carried.** Derived identity does the same
    work more simply: the record is sealed, and each span identifier is derived from
-   `(traceId, ordinal)` where `traceId` itself derives from the source digest, format IRI,
-   and the decoder identity — so excision, reordering, or insertion breaks validation with
-   no chain field. *(Superseded 2026-07-31: span IDs are reference/order identifiers only,
-   not anti-forgery; see operator-ratified correction below.)* Redaction-receipt
+   `(traceId, ordinal)` where `traceId` itself derives from the source digest and the
+   decoder identity — so excision, reordering, or insertion breaks validation with no chain
+   field, and fabricated spans over a real source digest are refused. Redaction-receipt
    hooks remain an extension point with no v1 consumer (nothing leaves the machine in the
    approved scope); the namespaced-extension discipline admits them later without a schema
    change.
 4. **Record-level DSSE signing is not implemented.** Identity is the digest, and
    attributability arrives through discovery announcements, which are already DSSE-signed
-   and carry record references. *(Superseded 2026-07-31: Trajectory derivation attestation
-   replaces record-level DSSE of Trajectory JSON; see operator-ratified correction below.)*
-   Direct DSSE envelopes stay available via the
+   and carry record references. A second signing scheme at the record layer would duplicate
+   that machinery for no threat the model names, since the forgery defense is the derived
+   identity and does not depend on a signature. Direct DSSE envelopes stay available via the
    trust layer for a future consumer that requires them.
 
 Three further clauses were settled after the component plans were written
@@ -607,156 +606,37 @@ Three further clauses were settled after the component plans were written
    record as an identifier on the native-trace entity, which is an existing typed surface
    rather than a workaround. Tier-2 status never required an evidence record-family slot;
    benchmarking's record kinds are the precedent.
-6. **A declared timebase is a first-class field** (C2 finding F9; **ratified 2026-07-31**).
-   Determinism forbids a decoder consulting a clock, but real formats — `claude-code-stream-json`
-   among them — carry no timestamps, and the frozen parser synthesized them with `Date.now()`.
-   A record whose source lacks timestamps must therefore declare the timebase its span times
-   are expressed against (`source-epoch-ns` | `synthetic-ordinal`), so the times are
-   interpretable and the output stays reproducible. The namespaced extension key
-   `network.jinn.trajectory.timebase` is **deprecated** in favor of the required top-level
-   `timebase` field.
+6. **A declared timebase is a first-class field** (C2 finding F9). Determinism forbids a
+   decoder consulting a clock, but real formats — `claude-code-stream-json` among them —
+   carry no timestamps, and the frozen parser synthesized them with `Date.now()`. A record
+   whose source lacks timestamps must therefore declare the timebase its span times are
+   expressed against, so the times are interpretable and the output stays reproducible.
 7. **The attribute vocabulary is closed** (C2). Only the profile's declared keys are
    admissible, which turns §7.4's "content is referenced, not inlined" from a discipline
    into a guard: a decoder cannot emit `message.content`, `tool.args`, or `tool.result`
    even by accident.
 
+The two-level verification statement below is unchanged and is what the record's kit
+asserts.
+
 **Derivation integrity rules (adversarial-review finding, resolved in-text):**
 
-- The sealed record carries derivation provenance **inside itself**: the source
-  native-trace digest, the format IRI, the decoder identity + version, the vocabulary
-  profile, and the declared timebase. A trajectory record without these fields is
-  invalid. The Execution↔Trajectory relationship is **not** carried inside the Trajectory
-  record (see the 2026-07-31 correction below).
+- The sealed record carries the full derivation provenance **inside itself**: the source
+  native-trace digest, the parent execution record reference, the format IRI, the
+  decoder identity + version, and the pinned semconv version its vocabulary conforms to.
+  A trajectory record without these fields is invalid.
 - **Decoder determinism is a contract:** per (format IRI, decoder version), identical
   input bytes produce identical span output — enforced by the §7.1 kit's byte→span
   golden fixtures, which are the determinism proof, not just examples. Decoder version
   bumps produce *new* records; they never claim identity with records sealed under a
   prior version.
-- **Cryptographic binding** between Execution and Trajectory is via a **Trajectory
-  derivation attestation** (DSSE-wrapped in-toto Statement), not record-level DSSE
-  signing of the Trajectory JSON (see the 2026-07-31 correction below).
-- **Verification is four-layer, stated honestly** (see the 2026-07-31 correction below).
-
-*Corrected 2026-07-31 (operator-ratified, C1 trajectory attestation correction).*
-The following clauses of this section are superseded; the numbered corrections below are
-law for implementers.
-
-**Supersessions (what the 2026-07-30 text claimed, and what replaces it):**
-
-1. **Clause 3 — anti-forgery overclaim.** The original text stated that "fabricated spans
-   over a real source digest are refused" and that derived span identifiers provide
-   forgery defense. **Superseded.** Span IDs (`deriveSpanId(traceId, ordinal)`) are
-   deterministic reference/order identifiers. They catch naive ID/reordering errors when a
-   consumer recomputes them from the record; they do **not** prevent tail truncation,
-   append, span-content substitution, or wholesale fabrication if an adversary recomputes
-   public IDs. Security: the artifact digest binds bytes; the DSSE attestation attributes
-   claims; L4 decoder replay refutes unfaithful claims.
-2. **Clause 4 — "Record-level DSSE signing is not implemented."** **Superseded.** Identity
-   of the Trajectory record remains the content digest (JCS-once sealed JSON). Attribution
-   and Execution↔Trajectory binding arrive through a **typed Trajectory derivation
-   attestation** — an in-toto Statement v1 (`IN_TOTO_STATEMENT_TYPE`) with DSSE envelope
-   (`DSSE_PAYLOAD_TYPE` = `application/vnd.in-toto+json`), predicate type
-   `TRAJECTORY_DERIVATION_PREDICATE_TYPE` =
-   `https://jinn.network/attestations/trajectory-derivation/v1`. This is **not** a fourth
-   `EVIDENCE_RECORD_FAMILIES` member and **not** DSSE signing of the Trajectory JSON as its
-   own payload media type; it binds Execution, Trajectory, and native-trace digests plus
-   producer and decoder metadata. Signer is injected (`DsseSigner`); no package acquires key
-   material.
-3. **Parent execution record reference inside the sealed Trajectory.** **Superseded.**
-   `source.execution` is **removed** from the Trajectory schema. Discovery/traversal uses the
-   Execution record's forward link (trajectory identifier on the native-trace entity, per
-   C4). Cryptographic binding uses the derivation attestation.
-4. **Two-level verification.** **Superseded** by four layers (honestly named):
-   - **L1** — canonical bytes/digests → exact object identity
-   - **L2** — DSSE signature + trust binding → who asserted the derivation
-   - **L3** — reference checks → statement names exact Execution, Trajectory, and
-     native-trace digests **and** the Execution record's native-trace entity names the
-     Trajectory digest (forward link)
-   - **L4** — deterministic decoder/builder replay against digest-bound source → span
-     faithfulness (attributable producer claim; only layer that refutes unfaithful spans)
-   C1's conformance kit asserts layer distinctions (e.g. validly signed unfaithful claim
-   passes L2/L3 with L4 `not-evaluated`; unsigned/unbound fails L2).
-5. **Timebase as namespaced extension only (F9).** **Superseded.** `timebase` is a
-   **required first-class field** on the Trajectory record (`TIMEBASES` =
-   `["source-epoch-ns", "synthetic-ordinal"]`). Repeated and bound in the attestation
-   predicate. Semantics: `source-epoch-ns` — span times are Unix epoch nanoseconds from the
-   source; `synthetic-ordinal` — trace-relative ordinal ticks (first tick `"0"`), not wall
-   clock; durations are orderings, not elapsed time.
-6. **Attribute vocabulary.** Closed: only declared `GEN_AI_ATTRIBUTES` and `JINN_ATTRIBUTES`
-   keys are valid. Explicit adversarial rejection for `message.content`, `tool.args`,
-   `tool.result`, retired `gen_ai.system`, and arbitrary keys. Content is referenced, never
-   inlined.
-7. **Integrity hash chain.** Remains **superseded**; whole-artifact sealed digest replaces
-   per-span chain for byte integrity. Span/trace IDs remain ordering/reference only.
-8. **Storage and discoverability.** Trajectory is stored as a digest-bound artifact
-   (`putArtifact`); Execution carries the forward link via
-   `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` (C1-owned IRI). Because the attestation is created
-   **after** both digests exist, it cannot be forward-linked from an already-sealed Execution
-   without another digest cycle. **Discoverability:** durable sidecar at
-   `<captureDirectory>/derivation-links/<64-hex>.json` (C4-owned; contract 13 lifetime).
-   No new evidence record family (§13).
-9. **Trace identity.** `deriveTraceId` inputs include load-bearing `formatIri` in addition
-   to `sourceDigest`, `decoderId`, `decoderVersion`, `vocabularyProfile`. Execution
-   relationship belongs in attestation, not `traceId`.
-10. **Digest algorithm.** v1 restricts digest claims to **sha256** only (algorithms actually
-    verified).
-
-### Interface closure (2026-07-31)
-
-**DSSE dependency.** C1 (`@jinn-network/evidence-trajectory`) adds a tier-correct direct
-dependency on `@jinn-network/trust-core` (`portal:../../trust/core`). Reuse trust-core:
-`DsseSigner`, `dssePreAuthEncoding`, `sealDsseEnvelope`, `parseExactDsseEnvelope` (or
-`parseSignedRecordEnvelope` with `DSSE_PAYLOAD_TYPE`), `DSSE_PAYLOAD_TYPE`,
-`isCalendarStrictRfc3339`, digest hashing. Keep `@jinn-network/evidence-protocol` for
-`IN_TOTO_STATEMENT_TYPE` and execution-record conventions used in L3. **`@jinn-network/attestation-issuer`
-is forbidden** — no fourth `EVIDENCE_RECORD_FAMILIES` member.
-
-**`derivedAt`.** Required on `BuildTrajectoryDerivationStatementInput` and
-`TrajectoryDerivationPredicate`. Calendar-strict RFC 3339 (trust-core
-`isCalendarStrictRfc3339`). Distinct from span `timebase`. C4 supplies the capture
-finalization instant (same moment as finalize `endedAt` / seal time); C1 never reads a wall
-clock. C2 callers supply `derivedAt` when building handoff input.
-
-**One subject source of truth.** Statement `subject` is exactly one entry:
-`name: "trajectory.json"`, bare hex `digest.sha256`, `mediaType: TRAJECTORY_MEDIA_TYPE`.
-Predicate carries `trajectorySubject: "trajectory.json"` and **no** Trajectory digest field.
-Execution and native-trace appear only in predicate as ResourceDescriptor-shaped objects with
-bare hex digests (`execution.json`, `native-trace.bin`).
-
-**Forward-link IRI.** C1 owns `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY` =
-`https://jinn.network/schemes/trajectory-record-sha256`. C4 imports from
-`@jinn-network/evidence-trajectory`. `PropertyValue.value` is `RepositorySha256Digest`.
-
-**Four-layer verify semantics (C1 `verifyTrajectoryDerivationAttestation`):**
-- **L1** — structural parse of envelope/statement; supplied bytes match statement digests.
-  Malformed envelope → L1 fail; **`verifyAuthority` MUST NOT be called**.
-- **L2** — injected `TrajectoryDerivationAuthorityVerifier` (C5/C7 wires trust-layer
-  signature + key-binding); C1 MUST NOT claim L2 pass unless `verified: true`.
-- **L3** — execution/trajectory/native-trace digest match; Trajectory fields match statement;
-  Execution forward link exact (one `TRAJECTORY_RECORD_IDENTIFIER_PROPERTY`, correct value).
-  Deterministic codes: `l3-execution-digest-mismatch`, `l3-trajectory-digest-mismatch`,
-  `l3-source-mismatch`, `l3-forward-link-missing`, `l3-forward-link-duplicate`,
-  `l3-forward-link-mismatch`.
-- **L4** — always `{ status: "not-evaluated", reason: "replay-required" }` from this API.
-
-**Throw vs return.** Build/seal/verify throw typed errors on invalid *caller* input
-(malformed digests, non-calendar-strict `derivedAt`, aborted signal). Verification failures of
-supplied bytes return `{ ok: false, failedLayer, … }`.
-
-**C2 handoff.** Pure handoff — C2 returns `BuildTrajectoryDerivationStatementInput` (or helper
-to assemble it); C2 does **not** seal. C4 fills `derivedAt`, injects signer, calls C1
-build+seal, persists envelope + durable link.
-
-**C4 durable path.** `<captureDirectory>/derivation-links/<64-hex>.json` where `<64-hex>` =
-bare hex of execution digest. Owner-only; atomic write (temp + rename); written **before**
-`sealed.json`; seal incomplete without attestation artifact + link + marker; retention MUST
-NOT delete `derivation-links/**`.
-
-**F8 disposition.** Whole-artifact sealed digest supersedes per-span hash chain for **byte
-integrity**. Ordinal span/trace IDs remain **ordering/reference only** (not anti-forgery). DSSE
-derivation attestation provides **attribution**. L4 replay provides **factual verification**.
-
-Full TypeScript definitions: C1 plan §Interface closure (2026-07-31).
+- The record is **DSSE-signed** by its producer, per the stack-wide rule.
+- **Verification is two-level, stated honestly:** seal, signature, and reference
+  integrity are third-party-verifiable without running Jinn code (the tier-2 property);
+  span *faithfulness* to the native bytes is an attributable producer claim, verifiable
+  only by re-running the pinned decoder against the digest-bound source. Fabricated
+  spans over a real trace digest are therefore not free — they are attributable and
+  refutable.
 
 ### 7.3 Local retention/eviction — finding against `evidence/local-runtime`
 
