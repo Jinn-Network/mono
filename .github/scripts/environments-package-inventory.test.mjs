@@ -14,6 +14,7 @@ const ENVIRONMENT_PACKAGES = [
   ['verification', '@jinn-network/environment-verification'],
   ['chain-record', '@jinn-network/chain-environment-record'],
   ['chain-verification', '@jinn-network/chain-environment-verification'],
+  ['chain-extraction', '@jinn-network/chain-state-extraction'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
@@ -75,6 +76,21 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/chain-environment-record',
       '@jinn-network/trust-core',
     ],
+    devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-extraction` is tier 3. Design §3: it invokes chain-verification's closure check
+  // as a library and depends on the record kind it drafts; its only network dependency is
+  // the injected `ArchiveRpcPort`, which is a type, not a package.
+  ['chain-extraction', {
+    dependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
+      '@jinn-network/trust-core',
+    ],
+    // `trust-resolve` is install-graph only (a portal's own resolutions do not apply, so
+    // `trust-testing`'s Jinn dependency is resolved here). Importing it is banned below.
     devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
     optionalDependencies: [],
     peerDependencies: [],
@@ -160,6 +176,7 @@ test('every environments package declares Vitest as an exact optional peer where
     ['verification', ['.', './fixtures/*', './testing']],
     ['chain-record', ['.', './fixtures/*', './schemas/*', './testing']],
     ['chain-verification', ['.', './fixtures/*', './testing']],
+    ['chain-extraction', ['.', './fixtures/*', './testing']],
   ]);
   assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
   for (const [directory] of ENVIRONMENT_PACKAGES) {
