@@ -14,3 +14,15 @@ export {
   toBareHex,
 } from "./digest.js";
 export type { Sha256Digest } from "./digest.js";
+export {
+  WELL_KNOWN_DEV_ADDRESSES,
+  assertFreshFixtureAddress,
+  createFixtureAddressLedger,
+  normalizeAddress,
+} from "./fixture-accounts.js";
+export type {
+  FixtureAddressLedger,
+  ScenarioAccount,
+  ScenarioAccountPort,
+  ScenarioAccountRequest,
+} from "./fixture-accounts.js";
