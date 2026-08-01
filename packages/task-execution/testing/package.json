@@ -23,7 +23,8 @@
     "./backend-local": {
       "import": "./dist/backend-local/index.js",
       "types": "./dist/backend-local/index.d.ts"
-    }
+    },
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",

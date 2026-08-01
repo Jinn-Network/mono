@@ -30,7 +30,7 @@ describe('@jinn-network/jinn-layer package contract', () => {
     const pkg = json('package.json');
     const runtime = JSON.parse(
       readFileSync(
-        resolve(repoRoot, 'apps/jinn-agent/plugins/jinn/layer-runtime.json'),
+        resolve(repoRoot, 'plugin/frozen/layer-runtime.json'),
         'utf8',
       ),
     ) as Record<string, unknown>;

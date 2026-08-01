@@ -55,7 +55,7 @@ try {
   const plugin = readJson('packages/plugin/package.json');
   const core = readJson('packages/core/package.json');
   const layer = readJson('packages/layer/package.json');
-  const runtime = readJson('apps/jinn-agent/plugins/jinn/layer-runtime.json');
+  const runtime = readJson('plugin/frozen/layer-runtime.json');
 
   requireVersion(plugin, '@jinn-network/plugin');
   requireVersion(core, '@jinn-network/core');
