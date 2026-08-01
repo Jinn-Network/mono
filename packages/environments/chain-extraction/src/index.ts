@@ -27,3 +27,33 @@ export {
   type ExtractionFailureReason,
   type ExtractionStage,
 } from "./failures.js";
+
+export {
+  HexAddressSchema,
+  Hex32Schema,
+  HexBytesSchema,
+  HexQuantitySchema,
+  isEmptyBytes,
+  normalizeAddress,
+  normalizeBytes,
+  normalizeHex32,
+  normalizeQuantity,
+  normalizeSlot,
+  type Hex32,
+  type HexAddress,
+  type HexBytes,
+  type HexQuantity,
+} from "./hex.js";
+
+export {
+  differenceKeySets,
+  emptyKeySet,
+  keySetDigest,
+  keySetIsEmpty,
+  keySetSize,
+  keySetWithAccount,
+  keySetWithCode,
+  keySetWithSlot,
+  unionKeySets,
+  type StateKeySet,
+} from "./key-set.js";
