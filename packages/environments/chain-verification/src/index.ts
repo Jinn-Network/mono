@@ -20,9 +20,13 @@ export {
   type SealedAttestation,
   type VerifyChainEnvironmentOptions,
 } from "./verify.js";
-
-// Scaffold placeholders for the public runtime surface; replaced in later tasks.
-export function verifyCryptoEnvironment(): void {}
+export {
+  assessOriginRouting,
+  verifyCryptoEnvironment,
+  type RoutingCollision,
+  type RoutingEntry,
+  type VerifyCryptoEnvironmentOptions,
+} from "./composite.js";
 
 export function createAnvilMaterializer(): void {}
 
