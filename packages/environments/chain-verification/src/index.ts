@@ -9,9 +9,14 @@ export {
   MINIMUM_RUN_COUNT,
 } from "./identifiers.js";
 
-// Scaffold placeholders for the public runtime surface; replaced in later tasks.
-export function verifyChainEnvironment(): void {}
+export type { ChainVerificationDeps } from "./ports.js";
+export {
+  verifyChainEnvironment,
+  type SealedAttestation,
+  type VerifyChainEnvironmentOptions,
+} from "./verify.js";
 
+// Scaffold placeholders for the public runtime surface; replaced in later tasks.
 export function verifyCryptoEnvironment(): void {}
 
 export function createAnvilMaterializer(): void {}

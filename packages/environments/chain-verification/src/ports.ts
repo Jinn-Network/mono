@@ -4,7 +4,6 @@ import type {
   ChainInstance,
   ChainMaterializer,
   NetworkPolicy,
-  ProbeExecutor,
 } from "@jinn-network/chain-environment-record";
 import type { DsseSigner, Sha256Digest } from "@jinn-network/trust-core";
 
@@ -50,6 +49,25 @@ export interface ResolvedResource {
   readonly size: number;
 }
 
+export interface ChainProbeExecutionRequest {
+  readonly instance: ChainInstance;
+  readonly probeSuiteBytes: Uint8Array;
+  readonly comparatorBytes: Uint8Array;
+  readonly timeoutSeconds: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface ChainProbeExecutionResult<Observation = unknown> {
+  readonly observation: Observation;
+  readonly observationDigest: Sha256Digest;
+  readonly timedOut: boolean;
+  readonly cost: { readonly wallSeconds: number };
+}
+
+export interface ChainProbeExecutor<Observation = unknown> {
+  execute(request: ChainProbeExecutionRequest): Promise<ChainProbeExecutionResult<Observation>>;
+}
+
 /**
  * The chain plane's runtime. Two ports, not one: a consumer that only wants to materialize a
  * world (a solver's local runner) supplies a materializer and never a probe executor, which
@@ -57,7 +75,7 @@ export interface ResolvedResource {
  */
 export interface ChainRuntime {
   readonly materializer: ChainMaterializer;
-  readonly probes: ProbeExecutor;
+  readonly probes: ChainProbeExecutor;
 }
 
 /**
