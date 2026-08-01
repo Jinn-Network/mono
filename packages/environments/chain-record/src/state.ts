@@ -15,7 +15,7 @@ export const CONSTRUCTION_METHODS = Object.freeze([
 ] as const);
 
 /**
- * The only closure class eligible for durable verified supply (§4.2). Named as a constant so
+ * The only closure class eligible for durable attested supply (§4.2). Named as a constant so
  * consumers filter on it rather than on a string literal they may spell differently — and so
  * that eligibility is one grep away from the rule that grants it.
  */

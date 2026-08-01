@@ -37,7 +37,7 @@ const CHAIN_GOLDEN: readonly ChainGoldenName[] = ["closed-anchored-subset", "clo
 const COMPOSITE_GOLDEN: readonly CompositeGoldenName[] = ["chain-only", "composed", "extension"];
 
 /** Field names a sealed record must not carry: assurance is derived, never stored (§4.5). */
-const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "expiresAt", "verified", "outcome"];
+const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "expiresAt", "verified", "outcome"]; // never present
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

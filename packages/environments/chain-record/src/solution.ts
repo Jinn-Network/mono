@@ -32,7 +32,7 @@ const SolutionOperationSchema = z.discriminatedUnion("kind", [
 export type ChainSolutionOperation = z.infer<typeof SolutionOperationSchema>;
 
 /**
- * An ordered, deterministic script, bound by digest to the environment it replays against.
+ * An ordered, replay-order-stable script, bound by digest to the environment it replays against.
  *
  * Bounded claim, stated once and meant literally: replaying this script on a fresh instance of
  * that environment is what the verdict grades. Nothing here binds the script to the trajectory

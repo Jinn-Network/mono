@@ -9,7 +9,7 @@ import type { CapabilityEnvelope } from "./envelope.js";
 import type { ChainSolutionScript } from "./solution.js";
 
 /**
- * Every byte a materialization needs, already resolved and digest-verified by the caller,
+ * Every byte a materialization needs, already resolved with digest integrity checked by the caller,
  * keyed by the record-body digest spelling. Resolution is the caller's business precisely
  * because it is the step that touches the network: a materializer that fetched its own inputs
  * would hold ambient authority, and no closure claim over it would mean anything.

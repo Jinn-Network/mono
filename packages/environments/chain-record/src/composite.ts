@@ -87,8 +87,8 @@ export const CompositionSchema = z.strictObject({
  * The composite a task references (E14). A chain-only world is a composite with an empty
  * `informationWorlds` list, so the common v1 case pays one indirection and nothing else.
  *
- * Components are sealed and verified independently and their attestations are reusable; the
- * composite is verified as a whole because routing collisions and whole-world closure only
+ * Components are sealed and attested independently and those attestations are reusable; the
+ * composite receives attestation as a whole because routing collisions and whole-world closure only
  * exist in combination. Neither attestation substitutes for the other, and neither lives here.
  */
 export const CryptoEnvironmentRecordSchema = topLevelRecordSchema({
