@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -25,7 +26,11 @@ const packages = [
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
+  ['trajectory', '@jinn-network/evidence-trajectory'],
+  ['trace-decode', '@jinn-network/evidence-trace-decode'],
 ];
+
+const trustCoreArchiveName = '@jinn-network/trust-core';
 
 const codeEntrypoints = [
   '@jinn-network/evidence-protocol',
@@ -55,6 +60,10 @@ const codeEntrypoints = [
   '@jinn-network/evidence-retrieval/testing',
   '@jinn-network/evidence-contribution',
   '@jinn-network/evidence-contribution/testing',
+  '@jinn-network/evidence-trajectory',
+  '@jinn-network/evidence-trajectory/testing',
+  '@jinn-network/evidence-trace-decode',
+  '@jinn-network/evidence-trace-decode/testing',
 ];
 
 function run(command, args, options = {}) {
@@ -83,8 +92,33 @@ function run(command, args, options = {}) {
 }
 
 try {
+  const trustCoreRoot = join(evidenceRoot, '..', 'trust', 'core');
+  const packedTypesSource = await readFile(
+    join(root, '.github', 'scripts', 'evidence-packed-types.test.mjs'),
+    'utf8',
+  );
+  const installIndex = packedTypesSource.indexOf('yarn install --immutable');
+  const buildIndex = packedTypesSource.indexOf('yarn@4.13.0", "build"');
+  assert.ok(installIndex >= 0, 'packed-types script must run trust-core yarn install --immutable');
+  assert.ok(buildIndex >= 0, 'packed-types script must build trust-core');
+  assert.ok(
+    installIndex < buildIndex,
+    'trust-core yarn install --immutable must precede trust-core build in packed-types script',
+  );
+
+  await run('corepack', ['yarn@4.13.0', 'install', '--immutable'], { cwd: trustCoreRoot });
+  await run('corepack', ['yarn@4.13.0', 'build'], { cwd: trustCoreRoot });
   await mkdir(archivesRoot);
   const archives = new Map();
+  const trustCorePacked = JSON.parse(await run(
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
+    { cwd: join(evidenceRoot, '..', 'trust', 'core') },
+  ));
+  if (trustCorePacked.length !== 1 || typeof trustCorePacked[0]?.filename !== 'string') {
+    throw new Error('npm pack returned an unexpected result for @jinn-network/trust-core');
+  }
+  archives.set(trustCoreArchiveName, join(archivesRoot, trustCorePacked[0].filename));
   for (const [directory, name] of packages) {
     const packed = JSON.parse(await run(
       'npm',
@@ -103,6 +137,7 @@ try {
     type: 'module',
     dependencies: Object.fromEntries([
       ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
+      [trustCoreArchiveName, `file:${archives.get(trustCoreArchiveName)}`],
       ['@types/better-sqlite3', '7.6.13'],
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],

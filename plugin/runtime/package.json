@@ -42,9 +42,12 @@
   "dependencies": {
     "@jinn-network/evidence-catalog-sqlite": "0.1.0",
     "@jinn-network/evidence-discovery": "0.1.0",
+    "@jinn-network/evidence-local-runtime": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
     "@jinn-network/evidence-repository": "0.1.0",
     "@jinn-network/evidence-retrieval": "0.1.0",
+    "@jinn-network/evidence-trajectory": "0.1.0",
+    "@jinn-network/execution-recorder": "0.1.0",
     "@jinn-network/record-discovery-client": "0.1.0",
     "@jinn-network/record-discovery-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
@@ -60,12 +63,15 @@
   "resolutions": {
     "@jinn-network/evidence-catalog-sqlite": "portal:../../packages/evidence/catalog-sqlite",
     "@jinn-network/evidence-discovery": "portal:../../packages/evidence/discovery",
+    "@jinn-network/evidence-local-runtime": "portal:../../packages/evidence/local-runtime",
     "@jinn-network/evidence-protocol": "portal:../../packages/evidence/protocol",
     "@jinn-network/evidence-repository": "portal:../../packages/evidence/repository",
+    "@jinn-network/evidence-trajectory": "portal:../../packages/evidence/trajectory",
+    "@jinn-network/execution-recorder": "portal:../../packages/evidence/execution-recorder",
+    "@jinn-network/trust-core": "portal:../../packages/trust/core",
+    "vite": "6.4.3",
     "@jinn-network/evidence-retrieval": "portal:../../packages/evidence/retrieval",
     "@jinn-network/record-discovery-client": "portal:../../packages/discovery/client",
-    "@jinn-network/record-discovery-protocol": "portal:../../packages/discovery/protocol",
-    "@jinn-network/trust-core": "portal:../../packages/trust/core",
-    "vite": "6.4.3"
+    "@jinn-network/record-discovery-protocol": "portal:../../packages/discovery/protocol"
   }
 }

@@ -51,11 +51,11 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     dependencies: [
       '@jinn-network/evidence-catalog-sqlite',
       '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-local-runtime',
       '@jinn-network/evidence-protocol',
       '@jinn-network/evidence-repository',
-      '@jinn-network/evidence-retrieval',
-      '@jinn-network/record-discovery-client',
-      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/evidence-trajectory',
+      '@jinn-network/execution-recorder',
       '@jinn-network/trust-core',
     ],
     devDependencies: [],
@@ -63,10 +63,6 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     peerDependencies: [],
   }],
 ]);
-
-const COMPLETE_RUNTIME_DEPENDENCIES = { ...APPROVED_RUNTIME_DEPENDENCIES };
-const COMPLETE_RUNTIME_DEV_DEPENDENCIES = { ...APPROVED_RUNTIME_DEV_DEPENDENCIES };
-const COMPLETE_RUNTIME_RESOLUTIONS = { ...APPROVED_RUNTIME_RESOLUTIONS };
 
 function jinnDependencyNames(manifest, section) {
   return Object.keys(manifest[section] ?? {})
@@ -209,24 +205,22 @@ test('closed-world dependency and resolution maps reject undeclared and ranged e
     ['devDependencies:typescript=^5.9.3'],
   );
   assert.deepEqual(
-    resolutionViolations(
-      { resolutions: { ...COMPLETE_RUNTIME_RESOLUTIONS, vite: '^6.4.3' } },
-      APPROVED_RUNTIME_RESOLUTIONS,
-    ),
-    ['resolutions:vite=^6.4.3'],
-  );
-  const { vite: _vite, ...resolutionsWithoutVite } = COMPLETE_RUNTIME_RESOLUTIONS;
-  assert.deepEqual(
-    resolutionViolations({ resolutions: resolutionsWithoutVite }, APPROVED_RUNTIME_RESOLUTIONS),
-    ['resolutions:vite=<missing>'],
+    resolutionViolations({ resolutions: { vite: '^6.4.3' } }, APPROVED_RUNTIME_RESOLUTIONS),
+    Object.keys(APPROVED_RUNTIME_RESOLUTIONS)
+      .filter((name) => name !== 'vite')
+      .map((name) => `resolutions:${name}=<missing>`)
+      .concat(['resolutions:vite=^6.4.3'])
+      .sort(compareCodeUnit),
   );
   assert.deepEqual(
-    unconsumedApprovedEntries(
-      { devDependencies: { typescript: '5.9.3' } },
-      APPROVED_RUNTIME_DEV_DEPENDENCIES,
-      'devDependencies',
-    ),
-    ['devDependencies:@types/better-sqlite3', 'devDependencies:@types/node', 'devDependencies:vitest'],
+    resolutionViolations({ resolutions: {} }, APPROVED_RUNTIME_RESOLUTIONS),
+    Object.keys(APPROVED_RUNTIME_RESOLUTIONS)
+      .map((name) => `resolutions:${name}=<missing>`)
+      .sort(compareCodeUnit),
+  );
+  assert.deepEqual(
+    unconsumedApprovedEntries({ devDependencies: { typescript: '5.9.3' } }, APPROVED_RUNTIME_DEV_DEPENDENCIES, 'devDependencies'),
+    ['devDependencies:@types/node', 'devDependencies:vitest'],
   );
 });
 
@@ -248,11 +242,25 @@ test('dependency version probes reject wrong external, sibling, and portal forms
 });
 
 test('R-C3-63 rejects duplicate and ranged entries in every dependency section', () => {
-  const completeDev = { ...COMPLETE_RUNTIME_DEV_DEPENDENCIES };
-  const completeDeps = { ...COMPLETE_RUNTIME_DEPENDENCIES };
+  const completeRuntimeDeps = {
+    '@jinn-network/evidence-catalog-sqlite': '0.1.0',
+    '@jinn-network/evidence-discovery': '0.1.0',
+    '@jinn-network/evidence-local-runtime': '0.1.0',
+    '@jinn-network/evidence-protocol': '0.1.0',
+    '@jinn-network/evidence-repository': '0.1.0',
+    '@jinn-network/evidence-trajectory': '0.1.0',
+    '@jinn-network/execution-recorder': '0.1.0',
+    '@jinn-network/trust-core': '0.1.0',
+    zod: '4.4.3',
+  };
+  const completeDev = {
+    '@types/node': '22.20.1',
+    typescript: '5.9.3',
+    vitest: '4.1.10',
+  };
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: completeDeps,
+      dependencies: completeRuntimeDeps,
       devDependencies: completeDev,
       optionalDependencies: { zod: '4.4.3' },
     }),
@@ -260,7 +268,7 @@ test('R-C3-63 rejects duplicate and ranged entries in every dependency section',
   );
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: completeDeps,
+      dependencies: completeRuntimeDeps,
       devDependencies: completeDev,
       peerDependencies: { zod: '^4.4.3' },
     }),
@@ -268,7 +276,7 @@ test('R-C3-63 rejects duplicate and ranged entries in every dependency section',
   );
   assert.deepEqual(
     validateExactDependencySections({
-      dependencies: { ...completeDeps, zod: '^4.4.3' },
+      dependencies: { ...completeRuntimeDeps, zod: '^4.4.3' },
       devDependencies: completeDev,
     }),
     ['dependencies:zod=^4.4.3'],

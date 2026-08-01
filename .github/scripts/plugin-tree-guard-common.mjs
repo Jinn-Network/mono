@@ -14,9 +14,12 @@ const BUILD_ARTIFACTS = new Set(['node_modules', 'dist', 'coverage', '.git']);
 export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
   '@jinn-network/evidence-catalog-sqlite': '0.1.0',
   '@jinn-network/evidence-discovery': '0.1.0',
+  '@jinn-network/evidence-local-runtime': '0.1.0',
   '@jinn-network/evidence-protocol': '0.1.0',
   '@jinn-network/evidence-repository': '0.1.0',
   '@jinn-network/evidence-retrieval': '0.1.0',
+  '@jinn-network/evidence-trajectory': '0.1.0',
+  '@jinn-network/execution-recorder': '0.1.0',
   '@jinn-network/record-discovery-client': '0.1.0',
   '@jinn-network/record-discovery-protocol': '0.1.0',
   '@jinn-network/trust-core': '0.1.0',
@@ -36,9 +39,12 @@ export const APPROVED_RUNTIME_DEV_DEPENDENCIES = Object.freeze({
 export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   '@jinn-network/evidence-catalog-sqlite': 'portal:../../packages/evidence/catalog-sqlite',
   '@jinn-network/evidence-discovery': 'portal:../../packages/evidence/discovery',
+  '@jinn-network/evidence-local-runtime': 'portal:../../packages/evidence/local-runtime',
   '@jinn-network/evidence-protocol': 'portal:../../packages/evidence/protocol',
   '@jinn-network/evidence-repository': 'portal:../../packages/evidence/repository',
   '@jinn-network/evidence-retrieval': 'portal:../../packages/evidence/retrieval',
+  '@jinn-network/evidence-trajectory': 'portal:../../packages/evidence/trajectory',
+  '@jinn-network/execution-recorder': 'portal:../../packages/evidence/execution-recorder',
   '@jinn-network/record-discovery-client': 'portal:../../packages/discovery/client',
   '@jinn-network/record-discovery-protocol': 'portal:../../packages/discovery/protocol',
   '@jinn-network/trust-core': 'portal:../../packages/trust/core',
@@ -46,10 +52,14 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
 });
 
 /** Exact optionalDependency versions approved for C3 runtime (empty closed map). */
-export const APPROVED_RUNTIME_OPTIONAL_DEPENDENCIES = Object.freeze({});
+export const APPROVED_RUNTIME_OPTIONAL_DEPENDENCIES = Object.freeze({
+
+});
 
 /** Exact peerDependency versions approved for C3 runtime (empty closed map). */
-export const APPROVED_RUNTIME_PEER_DEPENDENCIES = Object.freeze({});
+export const APPROVED_RUNTIME_PEER_DEPENDENCIES = Object.freeze({
+
+});
 
 export const DEPENDENCY_SECTIONS = Object.freeze([
   'dependencies',
@@ -64,7 +74,7 @@ export const INSTALL_TIME_SECTIONS = Object.freeze([
   'peerDependencies',
 ]);
 
-export const NON_NPM_DIRECTORIES = Object.freeze(['frozen', 'adapter-hermes']);
+export const NON_NPM_DIRECTORIES = Object.freeze(['adapter-hermes', 'frozen']);
 
 /** Ephemeral guard self-test dir prefix — must never exist under live plugin/ during discovery. */
 export const GUARD_FIXTURE_DIR_PREFIX = '.plugin-tree-';
