@@ -1,8 +1,18 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { vi, type Mock } from 'vitest';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
-import type { VerdictObservationGateInput } from '@jinn-network/marketplace-binding';
+import {
+  BASE_SEPOLIA_TODAY,
+  computeRawCodecCid,
+  createInMemoryPostingIntentStore,
+  deriveMarketplaceAttemptUri,
+  keccakEvidenceHash,
+  type VerdictObservationGateInput,
+} from '@jinn-network/marketplace-binding';
+import type { VerdictPorts } from '@jinn-network/marketplace-venue-base';
+import type { DeliveryRef, TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import { buildNamedCheckFixture } from '@jinn-network/marketplace-testing/named-check-fixtures';
 import {
   EVALUATION_SPEC_FORMAT_URI,
@@ -10,6 +20,10 @@ import {
   sealEvaluationSpec,
   deriveEvaluationTask,
   buildEvaluationTaskProfile,
+  canonicalJsonBytes,
+  IN_TOTO_STATEMENT_TYPE,
+  RESULT_EVALUATION_PREDICATE_TYPE,
+  VERDICT_DSSE_PAYLOAD_TYPE,
   type EvaluationSpec,
 } from '@jinn-network/task-execution-profiles';
 import {
@@ -33,6 +47,9 @@ import {
   type BridgeSubject,
 } from '../../src/evaluator/bridge-subject.js';
 import type { SubjectMaterial } from '../../src/evaluator/subject-material.js';
+import { createOpportunitySource } from '../../src/evaluator/opportunities.js';
+import type { EvaluatorLoopConfig } from '../../src/daemon/evaluator-loop.js';
+import type { Store } from '../../src/store/store.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
@@ -375,3 +392,321 @@ provisionInputFixture.setupArgs = (input: {
   }
   return [state.view, state.paths, []];
 };
+
+/** Subject material built from an arbitrary EvaluationSpec (public, private, grant-bearing). */
+export async function subjectMaterialWithSpec(spec: EvaluationSpec): Promise<SubjectMaterial> {
+  const sealedSpec = sealEvaluationSpec(spec);
+  const specBytes = sealedSpec.bytes;
+  const resultBytes = new TextEncoder().encode('evaluation-fixture-result');
+  const taskBytes = sealTask({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    profile: {
+      uri: PROFILE_URI,
+      digest: { sha256: PROFILE_DIGEST_HEX },
+    },
+    instructions: 'Evaluation fixture subject task.',
+    outputs: [{ name: 'patch', mediaType: 'text/plain', required: true }],
+    evaluation: {
+      name: 'evaluation-spec.json',
+      digest: { sha256: sealedSpec.digest.slice('sha256:'.length) },
+    },
+  });
+  const deliveryBytes = sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: 'urn:uuid:00000000-0000-4000-8000-000000000004',
+    task: documentDigest(taskBytes),
+    outputs: [{
+      name: 'patch',
+      digest: { sha256: documentDigest(resultBytes).slice('sha256:'.length) },
+    }],
+    outcome: 'fulfilled',
+    createdAt: '2026-07-30T00:00:00Z',
+  });
+
+  return {
+    task: { name: 'task', digest: documentDigest(taskBytes), bytes: taskBytes },
+    delivery: { name: 'delivery', digest: documentDigest(deliveryBytes), bytes: deliveryBytes },
+    results: [{
+      name: 'patch',
+      digest: documentDigest(resultBytes),
+      bytes: resultBytes,
+    }],
+    evaluationSpec: { digest: sealedSpec.digest, bytes: specBytes },
+  };
+}
+
+function buildFailVerdictEnvelopeBytes(specDigest: `sha256:${string}`): Uint8Array {
+  const specDigestHex = specDigest.slice('sha256:'.length);
+  const statement = {
+    _type: IN_TOTO_STATEMENT_TYPE,
+    subject: [{ name: 'verdict', digest: { sha256: '1'.repeat(64) } }],
+    predicateType: RESULT_EVALUATION_PREDICATE_TYPE,
+    predicate: {
+      evaluatedAt: '2026-07-30T00:00:00.000Z',
+      evaluator: { id: 'https://agents.example/jinn/evaluator-fixture' },
+      evaluationSpecification: {
+        name: 'evaluation-spec.json',
+        digest: { sha256: specDigestHex },
+      },
+      taskSubject: 'task',
+      resultSubjects: ['patch'],
+      verdict: 'fail',
+      measurements: [{ name: 'passed', value: false }],
+    },
+  };
+  const envelope = {
+    payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
+    payload: Buffer.from(canonicalJsonBytes(statement)).toString('base64'),
+    signatures: [{ keyid: 'test:verdict', sig: Buffer.from([1, 2, 3]).toString('base64') }],
+  };
+  return new TextEncoder().encode(JSON.stringify(envelope));
+}
+
+function buildEvaluationDeliveryBytes(input: {
+  readonly attemptUri: `urn:uuid:${string}`;
+  readonly taskDigest: `sha256:${string}`;
+  readonly specDigest: `sha256:${string}`;
+}): Uint8Array {
+  const verdictEnvelopeBytes = buildFailVerdictEnvelopeBytes(input.specDigest);
+  return sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: input.attemptUri,
+    task: input.taskDigest,
+    outputs: [{
+      name: 'verdict',
+      digest: { sha256: documentDigest(verdictEnvelopeBytes).slice('sha256:'.length) },
+      content: Buffer.from(verdictEnvelopeBytes).toString('base64'),
+      mediaType: VERDICT_DSSE_PAYLOAD_TYPE,
+    }],
+    outcome: 'fulfilled',
+    createdAt: '2026-07-30T00:00:00.000Z',
+  });
+}
+
+const HARNESS_TASK_ID = 7n;
+const HARNESS_ATTEMPT_INDEX = 1;
+const HARNESS_VERDICT_INDEX = 0;
+const HARNESS_REQUEST_ID = `0x${'cd'.repeat(32)}` as const;
+const HARNESS_OPERATOR = '0xCCccCCccCCccCCccCCccCCccCCccCCccCCccCCcc';
+const HARNESS_IDENTITY = {
+  safeAddress: '0xAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaaAAaa',
+  agentEoa: '0xBBbbBBbbBBbbBBbbBBbbBBbbBBbbBBbbBBbbBBbb',
+  agentIri: 'https://agents.example/jinn/operator-1',
+};
+
+export interface EvaluatorLoopHarness {
+  readonly config: EvaluatorLoopConfig;
+  readonly venue: { readonly verdict: Record<keyof VerdictPorts, Mock> };
+  readonly backend: { readonly submit: Mock };
+  readonly order: string[];
+  readonly skips: Array<{ readonly kind: string; readonly detail?: string }>;
+  emitOpportunity(): void;
+  emitOwnSolutionOpportunity(): void;
+  settled(): Promise<void>;
+  idle(): Promise<void>;
+}
+
+export async function evaluatorLoopHarness(
+  options: { readonly spec?: 'public' | 'private' } = {},
+): Promise<EvaluatorLoopHarness> {
+  const spec = options.spec === 'private' ? privateSpec() : publicSpec();
+  const material = await subjectMaterialWithSpec(spec);
+  const deliveryCid = computeRawCodecCid(material.delivery.bytes).cid;
+  const bytesByDigest = new Map<string, Uint8Array>([
+    [material.task.digest, material.task.bytes],
+    [material.delivery.digest, material.delivery.bytes],
+    [material.evaluationSpec.digest, material.evaluationSpec.bytes],
+    ...material.results.map((result) => [result.digest, result.bytes] as const),
+  ]);
+
+  const order: string[] = [];
+  const skips: Array<{ readonly kind: string; readonly detail?: string }> = [];
+  let idleResolve: (() => void) | null = null;
+  let settledResolve: (() => void) | null = null;
+  let idlePromise: Promise<void> = Promise.resolve();
+  let settledPromise: Promise<void> = Promise.resolve();
+
+  const finishProcessing = (): void => {
+    idleResolve?.();
+    idleResolve = null;
+  };
+
+  const finishSettled = (): void => {
+    settledResolve?.();
+    settledResolve = null;
+    finishProcessing();
+  };
+
+  const beginWait = (): void => {
+    idlePromise = new Promise<void>((resolve) => { idleResolve = resolve; });
+    settledPromise = new Promise<void>((resolve) => { settledResolve = resolve; });
+  };
+
+  const verdictPorts = {
+    canOpenVerdictAttempt: vi.fn(async () => ({ ok: true as const })),
+    openVerdictAttempt: vi.fn(async () => {
+      order.push('open-verdict');
+      return {
+        requestId: HARNESS_REQUEST_ID,
+        verdictIndex: HARNESS_VERDICT_INDEX,
+        txHash: `0x${'ee'.repeat(32)}`,
+      };
+    }),
+    deliverVerdictToMarketplace: vi.fn(async () => ({ txHash: `0x${'ff'.repeat(32)}` })),
+    claimVerdictDelivery: vi.fn(async () => {
+      finishSettled();
+      return { status: 'settled' as const };
+    }),
+  } satisfies Record<keyof VerdictPorts, Mock>;
+
+  const attemptUri = deriveMarketplaceAttemptUri({
+    chainId: BASE_SEPOLIA_TODAY.chainId,
+    coordinator: BASE_SEPOLIA_TODAY.taskCoordinator,
+    taskId: HARNESS_TASK_ID,
+    attemptIndex: HARNESS_VERDICT_INDEX,
+  });
+  const evaluationDeliveryBytes = buildEvaluationDeliveryBytes({
+    attemptUri,
+    taskDigest: material.task.digest,
+    specDigest: material.evaluationSpec.digest,
+  });
+  let storedDelivery: Uint8Array | undefined;
+
+  const backend = {
+    submit: vi.fn(async () => {
+      storedDelivery = evaluationDeliveryBytes;
+      return { accepted: true as const, submission: 'urn:uuid:50000000-0000-4000-8000-000000000005' as const, digest: material.task.digest };
+    }),
+    deliveries: vi.fn(async () => (
+      storedDelivery === undefined
+        ? []
+        : [{ digest: documentDigest(storedDelivery), attempt: attemptUri } satisfies DeliveryRef]
+    )),
+    fetchDelivery: vi.fn(async () => {
+      if (storedDelivery === undefined) throw new Error('no delivery');
+      return storedDelivery;
+    }),
+  } satisfies Pick<TaskExecutionBackend, 'submit' | 'deliveries' | 'fetchDelivery'>;
+
+  const ledger = {
+    admitIntent: vi.fn(async () => {
+      order.push('ledger');
+    }),
+  };
+
+  const intents = createInMemoryPostingIntentStore();
+  const store = {
+    config: new Map<string, string>(),
+    events: [] as unknown[],
+    setConfigValue(key: string, value: string) {
+      this.config.set(key, value);
+    },
+    getConfigValue(key: string) {
+      return this.config.get(key) ?? null;
+    },
+    recordActivityEvent(event: unknown) {
+      this.events.push(event);
+    },
+  } as unknown as Store;
+
+  let emitObservation: (event: never) => void = () => {};
+  const opportunities = createOpportunitySource({
+    subscribeObservations: (handler) => {
+      emitObservation = handler as never;
+      return () => { emitObservation = () => {}; };
+    },
+    identity: HARNESS_IDENTITY,
+    onSkip: (reason) => {
+      skips.push({ kind: reason });
+      finishProcessing();
+    },
+  });
+
+  const config: EvaluatorLoopConfig = {
+    chain: {
+      chainId: BASE_SEPOLIA_TODAY.chainId,
+      taskCoordinator: BASE_SEPOLIA_TODAY.taskCoordinator,
+    },
+    venue: { verdict: verdictPorts },
+    backend: backend as TaskExecutionBackend,
+    opportunities,
+    fetcher: {
+      async byCid(cid: string) {
+        if (cid === deliveryCid) return material.delivery.bytes;
+        throw new Error(`unknown cid ${cid}`);
+      },
+      async byDigest(digest: `sha256:${string}`) {
+        const bytes = bytesByDigest.get(digest);
+        if (bytes === undefined) throw new Error(`unknown digest ${digest}`);
+        return bytes;
+      },
+    },
+    ledger,
+    intents,
+    creatorSafe: HARNESS_IDENTITY.safeAddress as `0x${string}`,
+    pin: { pin: vi.fn(async () => undefined) },
+    store,
+    bridgeSigner: testDsseSigner('admission'),
+    admissionAgentIri: 'https://agents.example/jinn/admission-fixture',
+    requesterAgentIri: 'https://agents.example/jinn/requester-fixture',
+    evaluatorAgentIri: 'https://agents.example/jinn/evaluator-fixture',
+    wiring: {
+      workKind: 'evaluation-fixture',
+      harness: 'evaluation-harness',
+      model: 'fixture',
+      plugins: [],
+      credentialRef: 'cred-eval',
+      isolationPolicy: 'process',
+    },
+    evaluationDeadline: '2099-01-01T00:00:00.000Z',
+    pollIntervalMs: 5,
+    onSkip: (reason, _opportunity, detail) => {
+      skips.push({ kind: reason, ...(detail === undefined ? {} : { detail }) });
+      finishProcessing();
+    },
+  };
+
+  function solutionClaimed(operator: string) {
+    const { sha256Digest } = computeRawCodecCid(material.delivery.bytes);
+    return {
+      event: 'SolutionDeliveryClaimed',
+      facts: {
+        taskId: HARNESS_TASK_ID,
+        attemptIndex: HARNESS_ATTEMPT_INDEX,
+        requestId: `0x${'ab'.repeat(32)}`,
+        operator,
+      },
+      derivation: { chainId: BASE_SEPOLIA_TODAY.chainId, blockHash: `0x${'ee'.repeat(32)}` },
+      projection: {
+        deliveryCorrespondence: {
+          sha256Digest,
+          keccakEvidenceHash: keccakEvidenceHash(material.delivery.bytes),
+          onChainSha256CidDigest: sha256Digest,
+          onChainKeccak: `0x${'cc'.repeat(32)}`,
+        },
+      },
+    } as never;
+  }
+
+  return {
+    config,
+    venue: { verdict: verdictPorts },
+    backend,
+    order,
+    skips,
+    emitOpportunity() {
+      beginWait();
+      emitObservation(solutionClaimed(HARNESS_OPERATOR));
+    },
+    emitOwnSolutionOpportunity() {
+      beginWait();
+      emitObservation(solutionClaimed(HARNESS_IDENTITY.safeAddress));
+    },
+    settled() {
+      return settledPromise;
+    },
+    idle() {
+      return idlePromise;
+    },
+  };
+}

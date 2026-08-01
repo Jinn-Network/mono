@@ -47,6 +47,7 @@ export const LOOP_REGISTRY = [
   { name: 'projector', intervalMs: 5000, floorMs: 300_000 },
   { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000 },
   { name: 'work', intervalMs: 5000, floorMs: 300_000 },
+  { name: 'evaluator', intervalMs: 5000, floorMs: 300_000 },
 ] as const;
 
 export const LOOP_NAMES = LOOP_REGISTRY.map(r => r.name);
