@@ -71,13 +71,15 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
           ...chainInstance.publicClient,
           getLogs,
           getBlock,
-        } as typeof chainInstance.publicClient,
+        } as unknown as typeof chainInstance.publicClient,
       }),
     );
     try {
       await venue.logSource.logsInRange(0n, 10n);
       expect(getLogs).toHaveBeenCalled();
-      const call = getLogs.mock.calls[0]![0] as { address: readonly Address[] };
+      const calls = getLogs.mock.calls as unknown as Array<[ { address: readonly Address[] } ]>;
+      expect(calls.length).toBeGreaterThan(0);
+      const call = calls[0]![0];
       expect(call.address.map((a) => a.toLowerCase())).toContain(priorityMech.toLowerCase());
     } finally {
       venue.close();

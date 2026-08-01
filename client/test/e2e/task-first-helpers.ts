@@ -26,11 +26,11 @@ import { base, baseSepolia } from 'viem/chains';
 import {
   callDeliverToMarketplace,
   claimDelivery,
-  claimEvaluation,
   claimTask,
   getMechDeliveryRate,
   getTimeoutBounds,
 } from '../../src/adapters/mech/contracts.js';
+import { claimEvaluation } from './_claim-evaluation.js';
 import { JINN_ROUTER_ABI, MECH_ABI } from '../../src/adapters/mech/types.js';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';

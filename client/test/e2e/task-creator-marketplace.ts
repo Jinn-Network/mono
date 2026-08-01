@@ -84,7 +84,8 @@ import { KNOWN_MANIFEST_CID } from '../release/tier-2/fixtures/known-instance.js
 import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
-import { getMechDeliveryRate, getTimeoutBounds, claimEvaluation, claimDelivery, callDeliverToMarketplace } from '../../src/adapters/mech/contracts.js';
+import { getMechDeliveryRate, getTimeoutBounds, claimDelivery, callDeliverToMarketplace } from '../../src/adapters/mech/contracts.js';
+import { claimEvaluation } from './_claim-evaluation.js';
 import { createClients } from '../../src/adapters/mech/safe.js';
 import { VerdictCode } from '../../src/adapters/mech/verdict-code.js';
 import { uploadToIpfs } from '../../src/adapters/mech/ipfs.js';
