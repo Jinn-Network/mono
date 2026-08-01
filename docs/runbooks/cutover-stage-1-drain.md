@@ -19,6 +19,17 @@ Contract 10. Run in order. Do not deploy with step 2 unfinished.
 > **Composition signer fix:** `buildOperatorComposition` must receive the **agent** walletClient
 > (service Safe owner), not `masterWallet` — master-as-signer caused GS026 on every venue claim.
 
+## Before this deploy PR merges
+
+- [ ] Confirm the fleet's current image / npm pin so rollback names a known value.
+      Recorded rollback pin at open time: `@jinn-network/client@0.2.2-canary.sha.9b01706bc82437536b11f33efaeb013fb7fa2a2a`
+      (npm `canary` as of 2026-08-01). Re-check before merge if the fleet has moved.
+- [ ] Stop posting new tasks against the fleet's manifest digests (pause launched-record
+      generators). Record the stop time in the deploy PR thread.
+- [ ] Confirm the bridge fixture gate is green:
+      `client/test/bridge/converged-delivery-legacy-parse.test.ts`.
+- [ ] Confirm the single-broadcaster architecture test reports zero offenders.
+
 ## 1. Stop claiming (previous canary, no new build)
 
 - [ ] On every fleet operator, make `claimPolicy.mode` unreachable by setting `joinedSolverNets`
@@ -80,11 +91,22 @@ E22):
 | verdictCode | `2` |
 | finishedAt | `2026-08-01T10:08:23.317Z` |
 
+## After deploy
+
+- [ ] Watch the projector's durable cursor advance; the work loop issues no claim until it
+      reaches the finalized chain head.
+- [ ] Confirm one claim → deliver → settle cycle on the fleet.
+- [ ] Confirm the two chain readers running in parallel (the retiring discovery floor until
+      stage 4, plus the new projector) are not storming RPC quota — this window is accepted
+      explicitly and kept short.
+
 ## Rollback
 
-Revert the stage-1 PR train or pin the previous canary image. Rollback is symmetric and honest:
-chain state stays consistent (claims are chain facts; the backend journal persists), but the
-reverted daemon does not resume the new flow's in-flight engagements. The engagement ledger rows
-stay at `claimed`; the same unreleased-attempt state message names them. The migrated config is
-forward- and backward-compatible: the pre-cutover daemon boots from it because `joinedSolverNets`
-was never removed.
+> Rollback is reverting this deploy PR train and pinning the previous canary image
+> `@jinn-network/client@0.2.2-canary.sha.9b01706bc82437536b11f33efaeb013fb7fa2a2a`
+> (re-confirm the live fleet pin before executing). Chain state stays consistent — claims are
+> chain facts and the backend journal persists — but the reverted daemon does **not** resume
+> the new flow's in-flight engagements. Those engagements are abandoned and are named by the
+> unreleased-attempt state message. The config migration is additive and the legacy
+> `joinedSolverNets` keys survive until stage 5, so a rolled-back daemon generation boots from
+> the migrated file and claims exactly as it did before.
