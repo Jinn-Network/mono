@@ -11,6 +11,11 @@ export {
 
 export type { ChainVerificationDeps } from "./ports.js";
 export {
+  observeArchiveEnvironment,
+  type ArchiveProviderSpec,
+  type ObserveArchiveOptions,
+} from "./archive.js";
+export {
   verifyChainEnvironment,
   type SealedAttestation,
   type VerifyChainEnvironmentOptions,
