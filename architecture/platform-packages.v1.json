@@ -1763,8 +1763,12 @@
       },
       "publicSurface": {
         "schemas": [],
-        "profiles": [],
-        "fixtures": [],
+        "profiles": [
+          "profile"
+        ],
+        "fixtures": [
+          "profile/v1/fixtures"
+        ],
         "conformance": []
       },
       "supersedes": [],

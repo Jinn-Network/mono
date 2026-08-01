@@ -17,13 +17,15 @@ const SHA = 'e'.repeat(40);
 
 function controlledRepo(packages) {
   const catalog = fixtureCatalog();
-  const replacementIndexes = catalog.packages
+  const availableCoreIndexes = catalog.packages
     .map((pkg, index) => ({ pkg, index }))
     .filter(({ pkg }) => pkg.name.startsWith('@jinn-network/fixture-core-'))
     .map(({ index }) => index);
   const manifests = {};
-  packages.forEach(({ directory, name, manifest }, index) => {
-    catalog.packages[replacementIndexes[index]] = packageEntry(name, directory);
+  packages.forEach(({ directory, name, manifest, catalog: catalogOverrides = {} }) => {
+    const namedIndex = catalog.packages.findIndex((pkg) => pkg.name === name);
+    const replacementIndex = namedIndex >= 0 ? namedIndex : availableCoreIndexes.shift();
+    catalog.packages[replacementIndex] = packageEntry(name, directory, catalogOverrides);
     manifests[directory] = { name, version: '0.1.0', ...manifest };
   });
   return fixtureRepo({ catalog, manifests });
@@ -35,6 +37,7 @@ function scratchRepo(extraPackages = []) {
       directory: 'packages/evidence/protocol',
       name: '@jinn-network/evidence-protocol',
       manifest: { files: ['dist/', 'profiles/'] },
+      catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
     },
     ...extraPackages,
   ]);
@@ -87,6 +90,7 @@ test('a colliding served path across two packages is refused', () => {
     directory: 'packages/trust/core',
     name: '@jinn-network/trust-core',
     manifest: { files: ['profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
   }]);
   const second = join(root, 'packages/trust/core');
   mkdirSync(join(second, 'profiles/execution-evidence/1.0'), { recursive: true });
@@ -108,6 +112,7 @@ test('a document is served at its declared $id, not its directory location', () 
     directory: 'packages/evidence/repository-ipfs',
     name: '@jinn-network/evidence-repository-ipfs',
     manifest: { files: ['dist/', 'profile/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profile'], fixtures: [], conformance: [] } },
   }]);
   const packageDir = join(root, 'packages/evidence/repository-ipfs');
   mkdirSync(join(packageDir, 'profile/v1'), { recursive: true });
@@ -135,6 +140,7 @@ test('a record-discovery facts profile document is served at its declared "profi
     directory: 'packages/discovery/facts/evidence',
     name: '@jinn-network/record-discovery-facts-evidence',
     manifest: { files: ['dist/', 'profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
   }]);
   const packageDir = join(root, 'packages/discovery/facts/evidence');
   mkdirSync(join(packageDir, 'profiles'), { recursive: true });
@@ -166,6 +172,7 @@ test('a .sha256 sidecar next to a remapped document is dropped from the profile 
     directory: 'packages/task-execution/profiles',
     name: '@jinn-network/task-execution-profiles',
     manifest: { files: ['dist/', 'profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
   }]);
   const packageDir = join(root, 'packages/task-execution/profiles');
   mkdirSync(join(packageDir, 'profiles/task-profiles/repository-work/1.0'), { recursive: true });
@@ -196,6 +203,7 @@ test('a fixture that reuses a "profile" value as test data is never treated as s
     directory: 'packages/task-execution/profiles',
     name: '@jinn-network/task-execution-profiles',
     manifest: { files: ['dist/', 'profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
   }]);
   const packageDir = join(root, 'packages/task-execution/profiles');
   mkdirSync(join(packageDir, 'profiles/fixtures/task-profile/golden'), { recursive: true });
@@ -235,6 +243,190 @@ test('a flat top-level schemas/ directory is not part of the profile root', () =
   }
 });
 
+test('only catalog-declared schema, profile, and fixture paths are walked', () => {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/protocol',
+    name: '@jinn-network/evidence-protocol',
+    manifest: { files: ['dist/', 'api/', 'profiles/'] },
+    catalog: {
+      publicSurface: {
+        schemas: ['api/schema-documents'],
+        profiles: [],
+        fixtures: ['api/examples'],
+        conformance: [],
+      },
+    },
+  }]);
+  const packageDir = join(root, 'packages/evidence/protocol');
+  mkdirSync(join(packageDir, 'api/schema-documents'), { recursive: true });
+  mkdirSync(join(packageDir, 'api/examples'), { recursive: true });
+  mkdirSync(join(packageDir, 'profiles'), { recursive: true });
+  writeFileSync(
+    join(packageDir, 'api/schema-documents/declared.schema.json'),
+    JSON.stringify({ $id: 'https://jinn.network/schemas/declared' }),
+    'utf8',
+  );
+  writeFileSync(
+    join(packageDir, 'api/examples/profile-shaped.json'),
+    JSON.stringify({ profile: 'https://jinn.network/fixtures/not-an-identity' }),
+    'utf8',
+  );
+  writeFileSync(join(packageDir, 'profiles/undeclared.json'), '{}', 'utf8');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((document) => document.path), [
+      '@jinn-network/evidence-protocol/api/examples/profile-shaped.json',
+      'schemas/declared',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('fixture paths are package-qualified so equal package-relative names stay distinct', () => {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/trajectory',
+    name: '@jinn-network/evidence-trajectory',
+    manifest: { files: ['fixtures/'] },
+    catalog: {
+      publicSurface: { schemas: [], profiles: [], fixtures: ['fixtures'], conformance: [] },
+    },
+  }, {
+    directory: 'packages/benchmarking/records',
+    name: '@jinn-network/benchmarking-records',
+    manifest: { files: ['fixtures/'] },
+    catalog: {
+      publicSurface: { schemas: [], profiles: [], fixtures: ['fixtures'], conformance: [] },
+    },
+  }]);
+  for (const packagePath of ['evidence/trajectory', 'benchmarking/records']) {
+    mkdirSync(join(root, 'packages', packagePath, 'fixtures'), { recursive: true });
+    writeFileSync(join(root, 'packages', packagePath, 'fixtures/example.json'), packagePath, 'utf8');
+  }
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((document) => document.path), [
+      '@jinn-network/benchmarking-records/fixtures/example.json',
+      '@jinn-network/evidence-trajectory/fixtures/example.json',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('nested catalog declarations copy each source file once', () => {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/trajectory',
+    name: '@jinn-network/evidence-trajectory',
+    manifest: { files: ['schemas/'] },
+    catalog: {
+      publicSurface: {
+        schemas: ['schemas', 'schemas/v1'],
+        profiles: [],
+        fixtures: [],
+        conformance: [],
+      },
+    },
+  }]);
+  const packageDir = join(root, 'packages/evidence/trajectory');
+  mkdirSync(join(packageDir, 'schemas/v1'), { recursive: true });
+  writeFileSync(join(packageDir, 'schemas/v1/trajectory.schema.json'), '{}', 'utf8');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((document) => document.path), [
+      'schemas/v1/trajectory.schema.json',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('duplicate self-identifier claims fail even within one package', () => {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/trajectory',
+    name: '@jinn-network/evidence-trajectory',
+    manifest: { files: ['schemas/'] },
+    catalog: {
+      publicSurface: { schemas: ['schemas'], profiles: [], fixtures: [], conformance: [] },
+    },
+  }]);
+  const packageDir = join(root, 'packages/evidence/trajectory/schemas');
+  mkdirSync(packageDir, { recursive: true });
+  const duplicate = JSON.stringify({ $id: 'https://jinn.network/records/trajectory/1.0/schema' });
+  writeFileSync(join(packageDir, 'one.schema.json'), duplicate, 'utf8');
+  writeFileSync(join(packageDir, 'two.schema.json'), duplicate, 'utf8');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /records\/trajectory\/1\.0\/schema is claimed more than once/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('release-group selection includes core trajectory schemas and isolates experimental environment schemas', () => {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/trajectory',
+    name: '@jinn-network/evidence-trajectory',
+    manifest: { files: ['schemas/'] },
+    catalog: {
+      publicSurface: { schemas: ['schemas'], profiles: [], fixtures: [], conformance: [] },
+    },
+  }, {
+    directory: 'packages/environments/record',
+    name: '@jinn-network/environment-record',
+    manifest: { files: ['schemas/'] },
+    catalog: {
+      releaseGroup: 'experimental-environment-supply',
+      publishPolicy: 'disabled',
+      stability: 'experimental',
+      publicSurface: { schemas: ['schemas'], profiles: [], fixtures: [], conformance: [] },
+    },
+  }]);
+  mkdirSync(join(root, 'packages/evidence/trajectory/schemas'), { recursive: true });
+  mkdirSync(join(root, 'packages/environments/record/schemas'), { recursive: true });
+  writeFileSync(
+    join(root, 'packages/evidence/trajectory/schemas/trajectory.schema.json'),
+    JSON.stringify({ $id: 'https://jinn.network/records/trajectory/1.0/schema' }),
+    'utf8',
+  );
+  writeFileSync(
+    join(root, 'packages/environments/record/schemas/environment.schema.json'),
+    JSON.stringify({ $id: 'https://jinn.network/records/environment/1.0/schema' }),
+    'utf8',
+  );
+  const coreOut = mkdtempSync(join(tmpdir(), 'jinn-profile-core-out-'));
+  const experimentalOut = mkdtempSync(join(tmpdir(), 'jinn-profile-experimental-out-'));
+  try {
+    const core = buildProfileRoot({ repoRoot: root, outDir: coreOut, commit: SHA });
+    assert.deepEqual(core.documents.map((document) => document.path), [
+      'records/trajectory/1.0/schema',
+    ]);
+    const experimental = buildProfileRoot({
+      repoRoot: root,
+      outDir: experimentalOut,
+      commit: SHA,
+      releaseGroup: 'experimental-environment-supply',
+    });
+    assert.deepEqual(experimental.documents.map((document) => document.path), [
+      'records/environment/1.0/schema',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(coreOut, { recursive: true, force: true });
+    rmSync(experimentalOut, { recursive: true, force: true });
+  }
+});
+
 test('manifestBytes are canonical and stable', () => {
   const manifest = { version: 1, generatedFrom: { repository: 'Jinn-Network/mono', commit: SHA }, documents: [] };
   assert.equal(manifestBytes(manifest), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -252,6 +444,45 @@ test('the real repository produces a non-empty profile root', () => {
     }
   } finally {
     rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('the real core root serves trajectory identities and excludes the experimental environment surface', () => {
+  const coreOut = mkdtempSync(join(tmpdir(), 'jinn-profile-core-out-'));
+  const experimentalOut = mkdtempSync(join(tmpdir(), 'jinn-profile-experimental-out-'));
+  const experimentalPackages = new Set([
+    '@jinn-network/record-discovery-facts-environments',
+    '@jinn-network/environment-record',
+    '@jinn-network/environment-verification',
+    '@jinn-network/task-admission',
+    '@jinn-network/task-curation',
+    '@jinn-network/task-derivation',
+    '@jinn-network/task-posting',
+  ]);
+  try {
+    const core = buildProfileRoot({ repoRoot, outDir: coreOut, commit: SHA });
+    const corePaths = new Set(core.documents.map((document) => document.path));
+    assert.ok(corePaths.has('records/trajectory/1.0/schema'));
+    assert.ok(corePaths.has('records/trajectory-derivation-statement/1.0/schema'));
+    assert.equal(corePaths.has('records/environment/1.0/schema'), false);
+    assert.deepEqual(
+      core.documents.filter((document) => experimentalPackages.has(document.sourcePackage)),
+      [],
+    );
+
+    const experimental = buildProfileRoot({
+      repoRoot,
+      outDir: experimentalOut,
+      commit: SHA,
+      releaseGroup: 'experimental-environment-supply',
+    });
+    assert.ok(experimental.documents.some(
+      (document) => document.path === 'records/environment/1.0/schema'
+        && document.sourcePackage === '@jinn-network/environment-record',
+    ));
+  } finally {
+    rmSync(coreOut, { recursive: true, force: true });
+    rmSync(experimentalOut, { recursive: true, force: true });
   }
 });
 
