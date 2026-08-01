@@ -3,7 +3,7 @@ import { z } from "zod";
 // Independently authored structural mirror of TEP's in-toto v1 ResourceDescriptor (§6.4).
 // Profiles imports only the `ResourceDescriptor` *type* from task-execution-protocol (Global
 // Constraints: imports protocol only, no shared runtime schema dependency) — the same
-// re-implementation philosophy sealing follows: shape-compatible with the protocol type, proven
+// re-implementation philosophy sealing follows: shape-compatible with the protocol type, shown
 // by fixtures, never by a runtime import of protocol's own zod schema.
 export const RESOURCE_DESCRIPTOR_SHAPE = {
   name: z.string().optional(),

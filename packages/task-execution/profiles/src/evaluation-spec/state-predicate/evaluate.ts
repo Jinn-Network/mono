@@ -19,10 +19,10 @@ import { sourceReadKey, stateReadKey } from "./reads.js";
 import type { Predicate, PredicateComparator, PredicateKind } from "./vocabulary.js";
 
 /** A predicate is `satisfied` or `violated` **against the named information contract**, or
- * `unevaluable` when the observation does not carry what the predicate needs. Nothing here is
- * "verified" or "correct": the outcome states what the sealed world showed under the block's
- * criteria, and `resolvedAgainst` names the environment record and information worlds those
- * criteria resolve in (design §6.2 E16). */
+ * `unevaluable` when the observation does not carry what the predicate needs. Outcomes state
+ * what the sealed world showed under the block's criteria — not absolute truth — and
+ * `resolvedAgainst` names the environment record and information worlds those criteria resolve
+ * in (design §6.2 E16). */
 export type PredicateState = "satisfied" | "violated" | "unevaluable";
 
 export type PredicateUnevaluableReason =
