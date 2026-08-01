@@ -90,6 +90,10 @@ export {
   type StateArtifactAccount,
 } from "./artifact.js";
 
+export { decodeRlp, type RlpItem } from "./rlp.js";
+
+export { verifyAccountProof, type ProofVerdict } from "./proof.js";
+
 export {
   asChainStateBackend,
   type ArchiveAccountProof,

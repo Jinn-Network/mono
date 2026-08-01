@@ -88,6 +88,7 @@ __metadata:
     "@jinn-network/trust-core": "npm:0.1.0"
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@jinn-network/trust-testing": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"

@@ -109,6 +109,7 @@ const CHAIN_EXTRACTION_ALLOWED_EXTERNALS = [
   '@jinn-network/chain-environment-record',
   '@jinn-network/chain-environment-verification',
   '@jinn-network/trust-core',
+  '@noble/hashes',
   'zod',
 ];
 const CHAIN_EXTRACTION_ALLOWED_DEPENDENCIES = [...CHAIN_EXTRACTION_ALLOWED_EXTERNALS];
