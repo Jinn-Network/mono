@@ -28,6 +28,7 @@ import {
 import { base } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { SignedEnvelopeSchema, type SignedEnvelope } from '../../src/types/envelope.js';
+import { legacyRestorationResultFromDelivery } from '../../src/daemon/bridge-legacy-delivery.js';
 import {
   KNOWN_INSTANCE_ID,
   KNOWN_REPO,
@@ -2057,8 +2058,16 @@ export async function waitForDelivery(
             break;
           }
 
-          // Parse and validate as SignedEnvelope.
-          const envelope = SignedEnvelopeSchema.parse(envelopeJson);
+          // E43: bridge-era Deliver pins the sealed marketplace Delivery. Prefer the
+          // `deliveryExtensions` legacy envelope when present (Contract 9); fall back to a
+          // bare SignedEnvelope for pre-bridge payloads.
+          const bridgedJson = legacyRestorationResultFromDelivery(
+            new TextEncoder().encode(JSON.stringify(envelopeJson)),
+          );
+          const envelopeBody: unknown = bridgedJson !== undefined
+            ? JSON.parse(bridgedJson)
+            : envelopeJson;
+          const envelope = SignedEnvelopeSchema.parse(envelopeBody);
           const solverHarnessName = envelope.executor.implName;
 
           return {
@@ -2170,6 +2179,25 @@ export async function waitForDaemonClaim(
     `waitForDaemonClaim: timed out after ${timeoutMs}ms waiting for TaskAttemptCreated ` +
     `(taskId=${task.taskId}, operator=${operator.safeAddress})`,
   );
+}
+
+/**
+ * Whether the V3 router has accepted `claimSolutionDelivery` for this request.
+ * This is the stage-1 solver-flow settlement proof under the tokenless-OLAS
+ * loop-completion gate (activity weight is credited only on the first verdict).
+ */
+export async function isSolutionDeliveryClaimed(
+  fixture: DaemonHarnessFixture,
+  v3Env: TaskV3Env,
+  requestId: `0x${string}`,
+): Promise<boolean> {
+  const result = await fixture.publicClient.readContract({
+    address: v3Env.routerAddress as Address,
+    abi: parseAbi(['function claimed(bytes32 requestId) view returns (bool)']),
+    functionName: 'claimed',
+    args: [requestId],
+  });
+  return Boolean(result);
 }
 
 /**

@@ -54,11 +54,20 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     lock,
     ...(config.broadcast === undefined ? {} : { options: config.broadcast }),
   });
+  // E43: settlement's `readMechDeliveryFacts` scans this log source for Mech `Deliver` events.
+  // Those events are emitted on the operator's mech (`priorityMech`), not on the marketplace —
+  // omitting it made every post-deliver settlement throw "no Deliver event … refusing to fabricate".
+  // Matches `createProjectorLogSource`'s mechAddresses rule (projector-log-source.ts).
   const logSource = createChainLogSource({
     chain: config.chain,
     publicClient: config.publicClient,
     state,
-    addresses: [config.chain.jinnRouter, config.chain.taskCoordinator, config.chain.mechMarketplace],
+    addresses: [
+      config.chain.jinnRouter,
+      config.chain.taskCoordinator,
+      config.chain.mechMarketplace,
+      config.priorityMech,
+    ],
     ...(config.logSource === undefined ? {} : { options: config.logSource }),
   });
   const observe = createProjectorObservePort({

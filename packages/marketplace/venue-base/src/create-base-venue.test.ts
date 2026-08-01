@@ -56,6 +56,34 @@ function baseConfig(
 }
 
 describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)", () => {
+  test("includes priorityMech in the venue logSource address list (E43)", async () => {
+    const chainInstance = buildScriptedChain();
+    const priorityMech = "0x3333333333333333333333333333333333333333" as Address;
+    const getLogs = vi.fn(async () => []);
+    const getBlock = vi.fn(async () => ({
+      number: 10n,
+      hash: `0x${"ab".repeat(32)}` as Hex,
+    }));
+    const venue = createBaseVenue(
+      baseConfig(BASE_SEPOLIA_TODAY, chainInstance, {
+        priorityMech,
+        publicClient: {
+          ...chainInstance.publicClient,
+          getLogs,
+          getBlock,
+        } as typeof chainInstance.publicClient,
+      }),
+    );
+    try {
+      await venue.logSource.logsInRange(0n, 10n);
+      expect(getLogs).toHaveBeenCalled();
+      const call = getLogs.mock.calls[0]![0] as { address: readonly Address[] };
+      expect(call.address.map((a) => a.toLowerCase())).toContain(priorityMech.toLowerCase());
+    } finally {
+      venue.close();
+    }
+  });
+
   test("returns all ten named members plus close, each typed against its own port", () => {
     const chainInstance = buildScriptedChain();
     const venue = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainInstance));

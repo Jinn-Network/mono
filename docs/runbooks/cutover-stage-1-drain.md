@@ -2,14 +2,22 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** Leg H closed E39–E42. After E41 (sealed TEP bridge) and E42
-> (`prediction-v1-baseline` accepts string `probabilityYes`), re-run the gate before deploying.
+> **e2e half of the gate is green (E43).** `JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`
+> closes claim → Deliver → `claimSolutionDelivery` (`router.claimed` true; activity weight stays
+> flat until verdict per V3 tokenless-OLAS loop-completion gate). Leg H E39–E42 remain on tip.
+>
+> **Still open for step 4:** one real task closed-loop on **testnet** (fleet), including the
+> verdict leg via the still-legacy evaluator on a second operator. Record those tx hashes in the
+> deploy PR before deploying.
 >
 > **E41 disposition:** `synthesizeLegacyExecutionDocuments` is the sole remaining SignedTaskV1→solve
 > bridge — legacy cards only, retires with stage 5.
 >
-> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's gate
-> must pass before deploy.
+> **E43 disposition:** venue logSource includes `priorityMech`; Deliver digest is raw 32-byte;
+> bridge-aware envelope read; delivery-watcher skips bridged solution claims (work-loop settles).
+>
+> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's fleet
+> gate must pass before deploy.
 
 ## 1. Stop claiming (previous canary, no new build)
 

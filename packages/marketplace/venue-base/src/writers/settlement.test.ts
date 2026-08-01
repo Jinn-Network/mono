@@ -126,7 +126,20 @@ function baseInput(overrides: Partial<SettlementWriterInput> = {}): SettlementWr
 }
 
 describe("readMechDeliveryFacts", () => {
-  test("scans the log source (never a bare unbounded getLogs) and decodes the requestId's sha256 raw-CID digest", async () => {
+  test("scans the log source (never a bare unbounded getLogs) and decodes a raw 32-byte Deliver digest (E43)", async () => {
+    const { sha256Digest } = computeRawCodecCid(new TextEncoder().encode("solution-bytes"));
+    const dataHex = `0x${sha256Digest.slice("sha256:".length)}` as Hex;
+    const logSource = mockLogSource([todayDeliverLog({ requestId: REQUEST_ID, dataHex })]);
+    const input = baseInput({ logSource, publicClient: { getBlockNumber: async () => 100n } as unknown as PublicClient });
+    const ports = createSettlementPorts(input);
+
+    const facts = await ports.readMechDeliveryFacts({ requestId: REQUEST_ID, config: BASE_SEPOLIA_TODAY });
+
+    expect(facts).toEqual({ requestId: REQUEST_ID, sha256CidDigest: sha256Digest });
+    expect(logSource.logsInRange).toHaveBeenCalledWith(0n, 100n);
+  });
+
+  test("also accepts a UTF-8 raw-codec CID Deliver payload (legacy layout)", async () => {
     const { cid, sha256Digest } = computeRawCodecCid(new TextEncoder().encode("solution-bytes"));
     const dataHex = toHex(new TextEncoder().encode(cid));
     const logSource = mockLogSource([todayDeliverLog({ requestId: REQUEST_ID, dataHex })]);
@@ -136,7 +149,6 @@ describe("readMechDeliveryFacts", () => {
     const facts = await ports.readMechDeliveryFacts({ requestId: REQUEST_ID, config: BASE_SEPOLIA_TODAY });
 
     expect(facts).toEqual({ requestId: REQUEST_ID, sha256CidDigest: sha256Digest });
-    expect(logSource.logsInRange).toHaveBeenCalledWith(0n, 100n);
   });
 
   test("throws, naming the requestId, when no Deliver event exists", async () => {

@@ -1604,6 +1604,8 @@ export class MechAdapter implements ExecutionAdapter {
     evidenceHash: Hex | undefined;
     kind: 'solution' | 'verdict';
     verdictCode?: VerdictCode;
+    /** E43: bridged marketplace Delivery — work-loop owns solution settlement. */
+    skipSolutionClaim?: true;
   }> {
     const fallbackKind = this.requestKinds.get(requestId) ?? 'solution';
     if (this.config.routerClaimDeliveryVariant !== 'v2' && this.config.routerClaimDeliveryVariant !== 'v3') {
@@ -1622,8 +1624,17 @@ export class MechAdapter implements ExecutionAdapter {
       envelopeCid,
       this.ipfsFetchOpts(),
     );
-    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-    const rawSigned = rawEnvelope as Record<string, unknown>;
+    // E43: bridge-era Deliver pins the sealed marketplace Delivery (sha256 of those bytes).
+    // Prefer the `deliveryExtensions` legacy envelope when present; fall back to a bare
+    // SignedEnvelope for pre-bridge / non-converged payloads.
+    const bridgedJson = legacyRestorationResultFromDelivery(
+      new TextEncoder().encode(JSON.stringify(rawEnvelope)),
+    );
+    const envelopeBody: unknown = bridgedJson !== undefined
+      ? JSON.parse(bridgedJson)
+      : rawEnvelope;
+    const parsed = SignedEnvelopeSchema.parse(envelopeBody);
+    const rawSigned = envelopeBody as Record<string, unknown>;
     const { signature: _rawSignature, ...unsignedBody } = rawSigned;
     const signature = parsed.signature;
     const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
@@ -1648,6 +1659,7 @@ export class MechAdapter implements ExecutionAdapter {
       evidenceHash: recomputed as Hex,
       kind,
       verdictCode,
+      ...(bridgedJson !== undefined && kind === 'solution' ? { skipSolutionClaim: true as const } : {}),
     };
   }
 
@@ -1690,6 +1702,17 @@ export class MechAdapter implements ExecutionAdapter {
         err,
       );
       return 'retry';
+    }
+
+    // E43: bridge-era converged Deliveries are settled by the work loop with the Delivery's
+    // keccakEvidenceHash. Claiming here with the bridged envelope's keccak races that write
+    // and lands digest-divergence on the work-loop settlement. Skip solution claims for
+    // bridged payloads; verdict claims still flow through until stage 2 retires this path.
+    if (claimOptions.skipSolutionClaim === true) {
+      console.log(
+        `[mech] skipping delivery-watcher solution claim for ${requestId} — bridged Delivery is work-loop settled`,
+      );
+      return 'skipped';
     }
 
     try {

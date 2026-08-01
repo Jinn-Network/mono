@@ -195,6 +195,13 @@ function describeOutcome(outcome: WorkLoopOutcome): string {
       return `pipeline:submit-rejected:${result.detail}`;
     case 'delivery-wait-failed':
       return `pipeline:delivery-wait-failed:${result.waitKind}`;
+    case 'settlement-failed': {
+      // E43: surface the SettlementResult's machine-readable kind (digest-divergence,
+      // verificationFailure, …) the same way not-claimed/submit-rejected already do — without
+      // this the e2e gate collapses every settlement refusal to an opaque "settlement-failed".
+      const detail = 'kind' in result.result ? String(result.result.kind) : result.result.state;
+      return `pipeline:settlement-failed:${detail}`;
+    }
     default:
       return `pipeline:${result.kind}`;
   }
