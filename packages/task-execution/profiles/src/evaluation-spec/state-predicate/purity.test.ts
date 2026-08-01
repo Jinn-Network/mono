@@ -10,18 +10,18 @@ const STATE_PREDICATE_DIR = fileURLToPath(new URL("./", import.meta.url));
 const PROFILES_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const ENTRY = join(STATE_PREDICATE_DIR, "evaluate.ts");
 
-const ALLOWED_EXTERNAL_IMPORTS = ["@noble/hashes/sha3.js", "zod"];
+const ALLOWED_EXTERNAL_IMPORTS = ["zod"];
 
 const FORBIDDEN_CAPABILITIES = [
   { name: "node builtin", pattern: /["']node:[a-z_/]+["']/g },
   { name: "network", pattern: /(?<![\w$."'`])(?:fetch|XMLHttpRequest|WebSocket|EventSource)\b/g },
   { name: "clock", pattern: /(?<![\w$."'`])(?:Date|performance|hrtime)\b/g },
   { name: "randomness", pattern: /Math\s*\.\s*random\b/g },
-  { name: "ambient host", pattern: /(?<![\w$."'`])(?:process|globalThis|global)\b/g },
+  { name: "ambient host", pattern: /(?<![\w$."'`-])(?:process|globalThis|global)\b/g },
 ];
 
 const ENCODER_PATTERN =
-  /\b(?:encodeFunctionData|encodeAbiParameters|abiCoder|AbiCoder|keccak256|toFunctionSelector|encodePacked)\b/g;
+  /\b(?:encodeFunctionData|encodeAbiParameters|abiCoder|AbiCoder|keccak256|keccak_256|toFunctionSelector|encodePacked)\b/g;
 
 const BOUNDED_CLAIMS_PATTERN =
   /\b(?:verified|verifies|verify|verification|correct|correctly|proves|proven|guarantees)\b/gi;
@@ -128,7 +128,7 @@ describe("state-predicate evaluator purity", () => {
     expect(closure.some((path) => path.endsWith("/errors.ts"))).toBe(true);
   });
 
-  it("allows only zod and @noble/hashes/sha3.js as external value imports", () => {
+  it("allows only zod as external value imports", () => {
     const external = new Set<string>();
     for (const path of closure) {
       const source = readFileSync(path, "utf8");
@@ -191,11 +191,12 @@ describe("state-predicate evaluator purity", () => {
       "abiCoder.encode",
       "new AbiCoder()",
       "keccak256(data)",
+      "keccak_256(data)",
       "toFunctionSelector(sig)",
       "encodePacked(types, values)",
     ].join("\n");
     const findings = scanEncoders(fixture);
-    expect(findings).toHaveLength(7);
+    expect(findings).toHaveLength(8);
   });
 
   it("uses bounded claims vocabulary across the closure and fixture file names", () => {

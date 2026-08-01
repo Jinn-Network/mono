@@ -217,13 +217,11 @@ export const StatePredicateBlockSchema = withNamespacedExtras(
 });
 export type StatePredicateBlock = z.infer<typeof StatePredicateBlockSchema>;
 
-const DETERMINISTIC_PROCESS_FAMILY = ["deterministic", "process"].join("-") as GraderFamily;
-
 /** Discriminates the `familyBlock` schema on `EvaluationSpec.family` (wired by schema.ts). */
-export const FAMILY_BLOCK_SCHEMAS = {
-  [DETERMINISTIC_PROCESS_FAMILY]: DeterministicProcessBlockSchema,
+export const FAMILY_BLOCK_SCHEMAS: Record<GraderFamily, z.ZodTypeAny> = {
+  "deterministic-process": DeterministicProcessBlockSchema,
   "model-graded": ModelGradedBlockSchema,
   "human-review": HumanReviewBlockSchema,
   composite: CompositeBlockSchema,
   "state-predicate": StatePredicateBlockSchema,
-} as unknown as Record<GraderFamily, z.ZodTypeAny>;
+};

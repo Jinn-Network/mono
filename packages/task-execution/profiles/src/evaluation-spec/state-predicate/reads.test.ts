@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { StatePredicateBlock } from "../family-blocks.js";
 import { CRYPTO_ENVIRONMENT_MEDIA_TYPE } from "./vocabulary.js";
-import { stateReadKey, stateReadRequests } from "./reads.js";
+import { sourceReadKey, stateReadKey, stateReadRequests } from "./reads.js";
 
 const ADDR1 = "0x0000000000000000000000000000000000000001";
 const ADDR2 = "0x0000000000000000000000000000000000000002";
@@ -187,5 +187,15 @@ describe("stateReadRequests", () => {
     expect(requests[1].key).toBe(
       `call|${TOKEN}|abi|${ABI_DIGEST}|balanceOf(address)|address:${ADDR2}`,
     );
+  });
+});
+
+describe("sourceReadKey", () => {
+  it("escapes delimiter characters so distinct predicates cannot collide (B3 regression)", () => {
+    const keyA = sourceReadKey({ world: "a|b", requestKey: "c", selector: "d" });
+    const keyB = sourceReadKey({ world: "a", requestKey: "b|c", selector: "d" });
+    expect(keyA).not.toBe(keyB);
+    expect(keyA).toBe("source|a\\|b|c|d");
+    expect(keyB).toBe("source|a|b\\|c|d");
   });
 });

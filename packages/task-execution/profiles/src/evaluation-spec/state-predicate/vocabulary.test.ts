@@ -31,7 +31,7 @@ const MINIMAL_BY_KIND = {
     topic0: HEX32,
     countCmp: { cmp: "gte", value: "1" },
   },
-  eventForbidden: { kind: "eventForbidden", signature: "Transfer(address,address,uint256)" },
+  eventForbidden: { kind: "eventForbidden", topic0: HEX32 },
   nativeBalance: { kind: "nativeBalance", account: ADDR1, cmp: "eq", value: "0" },
   reportedValue: {
     kind: "reportedValue",
@@ -134,22 +134,49 @@ describe("closed state-predicate vocabulary", () => {
     ).toBe(false);
   });
 
-  it("rejects eventEmitted with both topic0 and signature", () => {
+  it("rejects eventEmitted without topic0", () => {
     expect(
       PredicateSchema.safeParse({
         kind: "eventEmitted",
-        topic0: HEX32,
-        signature: "Transfer(address,address,uint256)",
         countCmp: { cmp: "gte", value: "1" },
       }).success,
     ).toBe(false);
   });
 
-  it("rejects eventEmitted with neither topic0 nor signature", () => {
+  it("rejects eventForbidden without topic0", () => {
     expect(
       PredicateSchema.safeParse({
-        kind: "eventEmitted",
-        countCmp: { cmp: "gte", value: "1" },
+        kind: "eventForbidden",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects abiRef without digest.sha256", () => {
+    expect(
+      PredicateSchema.safeParse({
+        kind: "callResult",
+        to: TOKEN,
+        call: {
+          abiRef: { uri: "https://example.org/abi.json" },
+          function: "balanceOf(address)",
+          args: [{ type: "address", value: ADDR1 }],
+        },
+        decode: "uint256",
+        cmp: "eq",
+        value: "0",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects sourceValue boolean with ordered comparator", () => {
+    expect(
+      PredicateSchema.safeParse({
+        kind: "sourceValue",
+        world: "test",
+        requestKey: "key1",
+        selector: "value",
+        cmp: "lt",
+        value: true,
       }).success,
     ).toBe(false);
   });

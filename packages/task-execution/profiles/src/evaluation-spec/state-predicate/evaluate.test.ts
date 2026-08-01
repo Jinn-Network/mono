@@ -2,9 +2,11 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadFixtureFamily, runStructuralCheck } from "../../testing.js";
+import { EvaluationSpecSchema } from "../schema.js";
 import type { StatePredicateBlock } from "../family-blocks.js";
 import type { CanonicalChainObservation } from "./observation.js";
 import { evaluatePredicates } from "./evaluate.js";
+import { sourceReadKey } from "./reads.js";
 
 const familyDir = fileURLToPath(new URL("../../../fixtures/state-predicate-evaluation", import.meta.url));
 
@@ -145,6 +147,144 @@ describe("evaluatePredicates", () => {
       expected: "1000",
     });
     expect(declarativeOutcome.evaluations[0]).toEqual(encodedOutcome.evaluations[0]);
+  });
+
+  it("honors ne comparator for boolean sourceValue (B1 regression)", () => {
+    const observation = {
+      observationVersion: "1",
+      environmentRecord: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      informationWorlds: ["corpus-world"],
+      replay: { status: "completed" },
+      timeline: {
+        initialBlockNumber: "100",
+        initialChainTimestamp: "1700000000",
+        finalStateChangingBlockNumber: "100",
+        finalStateChangingChainTimestamp: "1700000000",
+      },
+      transactions: [],
+      blocks: [],
+      touchedState: [],
+      traceProjectionDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      finalStateCommitment: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      errorClasses: [],
+      stateReads: [],
+      sourceReads: [{
+        key: sourceReadKey({ world: "test", requestKey: "key1", selector: "flag" }),
+        resolution: "resolved",
+        value: true,
+      }],
+      sourceConsultations: [],
+      reports: [],
+    } satisfies CanonicalChainObservation;
+
+    const block = {
+      environmentRecord: {
+        digest: { sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        mediaType: "application/vnd.jinn.crypto-environment.v1+json",
+      },
+      predicateSemanticsVersion: "1",
+      successPredicates: [{
+        kind: "sourceValue" as const,
+        world: "test",
+        requestKey: "key1",
+        selector: "flag",
+        cmp: "ne" as const,
+        value: true,
+      }],
+      safetyConstraints: [],
+      measurements: [],
+      timeout: 600,
+    } satisfies StatePredicateBlock;
+
+    const outcome = evaluatePredicates(observation, block);
+    expect(outcome.evaluations[0]).toMatchObject({
+      state: "violated",
+      observed: true,
+      expected: true,
+    });
+  });
+
+  it("fails closed on approval logs with empty data when noUnlimited is set (B2 regression)", () => {
+    const observation = {
+      observationVersion: "1",
+      environmentRecord: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      informationWorlds: ["corpus-world"],
+      replay: { status: "completed" },
+      timeline: {
+        initialBlockNumber: "100",
+        initialChainTimestamp: "1700000000",
+        finalStateChangingBlockNumber: "100",
+        finalStateChangingChainTimestamp: "1700000000",
+      },
+      transactions: [{
+        index: "0",
+        hash: "0x0000000000000000000000000000000000000000000000000000000000000001",
+        from: ADDR2,
+        to: TOKEN,
+        valueWei: "0",
+        status: "success",
+        gasUsed: "21000",
+        returnData: "0x",
+        logs: [{
+          index: "0",
+          address: TOKEN,
+          topics: [
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+            `0x${"0".repeat(24)}${ADDR2.slice(2)}`,
+            `0x${"0".repeat(24)}${ADDR2.slice(2)}`,
+          ],
+          data: "0x",
+        }],
+        blockNumber: "100",
+        blockTimestamp: "1700000000",
+      }],
+      blocks: [],
+      touchedState: [],
+      traceProjectionDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      finalStateCommitment: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      errorClasses: [],
+      stateReads: [],
+      sourceReads: [],
+      sourceConsultations: [],
+      reports: [],
+    } satisfies CanonicalChainObservation;
+
+    const block = {
+      environmentRecord: {
+        digest: { sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        mediaType: "application/vnd.jinn.crypto-environment.v1+json",
+      },
+      predicateSemanticsVersion: "1",
+      successPredicates: [{ kind: "txOutcome" as const, selector: { all: true }, status: "success" }],
+      safetyConstraints: [{ kind: "approvalConstraint" as const, noUnlimited: true }],
+      measurements: [],
+      timeout: 600,
+    } satisfies StatePredicateBlock;
+
+    const outcome = evaluatePredicates(observation, block);
+    expect(outcome.unevaluable).toBe(true);
+    expect(outcome.evaluations.find((e) => e.kind === "approvalConstraint")).toMatchObject({
+      state: "unevaluable",
+      reason: "value-not-decodable",
+    });
+  });
+
+  it("rejects EvaluationSpec with hand-rolled verdictRule at schema level (M4 regression)", async () => {
+    const golden = JSON.parse(await readFile(
+      new URL("../../../fixtures/evaluation-spec/golden/state-predicate-minimal.json", import.meta.url),
+      "utf8",
+    ));
+    const bad = {
+      ...golden,
+      verdictRule: {
+        all: [
+          golden.verdictRule.all[0],
+          golden.verdictRule.all[1],
+        ],
+      },
+    };
+    const parsed = EvaluationSpecSchema.safeParse(bad);
+    expect(parsed.success).toBe(false);
   });
 
   it("is deterministic and does not mutate its inputs", async () => {

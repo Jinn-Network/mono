@@ -1,4 +1,3 @@
-import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ProfilesError } from "../../errors.js";
 import { StatePredicateBlockSchema, type StatePredicateBlock } from "../family-blocks.js";
 import type { MeasurementMap } from "../verdict-rule.js";
@@ -497,7 +496,13 @@ function evaluateSourceValue(
   const observed = entry.value;
   const expected = predicate.value;
   if (typeof observed === "boolean" || typeof expected === "boolean") {
-    const satisfied = observed === expected;
+    if (typeof observed !== "boolean" || typeof expected !== "boolean") {
+      return { state: "unevaluable", reason: "value-not-decodable", observed, expected };
+    }
+    if (predicate.cmp !== "eq" && predicate.cmp !== "ne") {
+      return { state: "unevaluable", reason: "value-not-decodable", observed, expected };
+    }
+    const satisfied = predicate.cmp === "eq" ? observed === expected : observed !== expected;
     return {
       state: satisfied ? "satisfied" : "violated",
       observed,
@@ -583,14 +588,26 @@ function evaluateApprovalConstraint(
       }
 
       const amountWord = dataWord(log.data, 0);
-      if (amountWord === undefined) continue;
+      if (amountWord === undefined) {
+        if (predicate.noUnlimited || predicate.maxAllowance !== undefined) {
+          return { state: "unevaluable", reason: "value-not-decodable" };
+        }
+        continue;
+      }
 
       if (predicate.noUnlimited && amountWord === UNLIMITED_UINT256_WORD) {
         return { state: "violated", observed: amountWord, expected: "finite allowance" };
       }
 
-      if (predicate.allowedSpenders !== undefined && log.topics[2] !== undefined) {
-        const spender = topicWordToAddress(log.topics[2]);
+      if (predicate.allowedSpenders !== undefined) {
+        const spenderTopic = log.topics[2];
+        if (spenderTopic === undefined) {
+          return { state: "unevaluable", reason: "value-not-decodable" };
+        }
+        const spender = topicWordToAddress(spenderTopic);
+        if (spender === undefined) {
+          return { state: "unevaluable", reason: "value-not-decodable", observed: spenderTopic };
+        }
         if (!predicate.allowedSpenders.includes(spender)) {
           return { state: "violated", observed: spender };
         }
@@ -696,8 +713,7 @@ function evaluateTimeBound(
 
 type EventMatcher = {
   source?: string;
-  topic0?: string;
-  signature?: string;
+  topic0: string;
   argFilters?: Array<{
     on: "topic";
     index: 1 | 2 | 3;
@@ -712,8 +728,7 @@ type EventMatcher = {
 };
 
 function countMatchingLogs(observation: CanonicalChainObservation, matcher: EventMatcher): number {
-  const topic0 = resolveTopic0(matcher);
-  if (topic0 === undefined) return 0;
+  const topic0 = matcher.topic0;
 
   let count = 0;
   for (const transaction of observation.transactions) {
@@ -725,17 +740,6 @@ function countMatchingLogs(observation: CanonicalChainObservation, matcher: Even
     }
   }
   return count;
-}
-
-function resolveTopic0(matcher: EventMatcher): string | undefined {
-  if (matcher.topic0 !== undefined) return matcher.topic0;
-  if (matcher.signature !== undefined) return signatureToTopic0(matcher.signature);
-  return undefined;
-}
-
-function signatureToTopic0(signature: string): string {
-  const hash = keccak_256(new TextEncoder().encode(signature));
-  return `0x${Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function argFiltersMatch(
@@ -839,13 +843,18 @@ function dataWord(data: string, wordIndex: number): string | undefined {
   const start = wordIndex * 64;
   const slice = hex.slice(start, start + 64);
   if (slice.length === 0) return undefined;
-  return `0x${slice.padEnd(64, "0")}`;
+  if (slice.length < 64) return undefined;
+  return `0x${slice}`;
 }
 
 function addressToTopicWord(address: string): string {
   return `0x${"0".repeat(24)}${address.slice(2)}`;
 }
 
-function topicWordToAddress(topic: string): string {
-  return `0x${topic.slice(-40)}`;
+function topicWordToAddress(topic: string): string | undefined {
+  const hex = topic.startsWith("0x") ? topic.slice(2) : topic;
+  if (hex.length !== 64) return undefined;
+  const prefix = hex.slice(0, 24);
+  if (prefix !== "0".repeat(24)) return undefined;
+  return `0x${hex.slice(24)}`;
 }

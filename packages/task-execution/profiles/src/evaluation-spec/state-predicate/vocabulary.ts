@@ -131,12 +131,24 @@ const AbiArgSchema = z.discriminatedUnion("type", [
 ]);
 export type AbiArg = z.infer<typeof AbiArgSchema>;
 
+/** ABI reference for declarative call targets — digest authoritative, bare-hex DigestSet. */
+export const AbiRefDescriptorSchema = ResourceDescriptorSchema.superRefine((descriptor, ctx) => {
+  const sha256 = descriptor.digest?.["sha256"];
+  if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/.test(sha256)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["digest", "sha256"],
+      message: "abiRef requires digest.sha256 as bare lowercase hex (in-toto DigestSet).",
+    });
+  }
+});
+
 export const CallTargetSchema = z.union([
   z.strictObject({ encodedCall: HexSchema }),
   z.strictObject({
     // Which ABI the author read this function out of — digest authoritative, bare-hex DigestSet,
     // never inlined. Same descriptor discipline as `environmentRecord`.
-    abiRef: ResourceDescriptorSchema,
+    abiRef: AbiRefDescriptorSchema,
     // The canonical Solidity signature, e.g. "balanceOf(address)" — no spaces, no parameter
     // names, no return clause. Rejected otherwise, so the producer's selector derivation and
     // this module's key derivation cannot disagree about what the author meant.
@@ -177,30 +189,9 @@ const ArgFilterSchema = z.discriminatedUnion("on", [
   ),
 ]);
 
-function refineEventMatcher<T extends z.ZodTypeAny>(schema: T): T {
-  return schema.superRefine((matcher, ctx) => {
-    const { topic0, signature } = matcher as { topic0?: string; signature?: string };
-    const hasTopic = topic0 !== undefined;
-    const hasSignature = signature !== undefined;
-    if (hasTopic && hasSignature) {
-      ctx.addIssue({
-        code: "custom",
-        message: "exactly one of topic0 or signature must be present, not both.",
-      });
-    }
-    if (!hasTopic && !hasSignature) {
-      ctx.addIssue({
-        code: "custom",
-        message: "exactly one of topic0 or signature is required.",
-      });
-    }
-  }) as unknown as T;
-}
-
 const EventMatcherFields = {
   source: AddressSchema.optional(),
-  topic0: Hex32Schema.optional(),
-  signature: z.string().optional(),
+  topic0: Hex32Schema,
   argFilters: z.array(ArgFilterSchema).optional(),
 } as const;
 
@@ -261,22 +252,18 @@ const StorageValuePredicateSchema = refineTolerance(
   ),
 );
 
-const EventEmittedPredicateSchema = refineEventMatcher(
-  z.strictObject({
-    kind: z.literal("eventEmitted"),
-    label: z.string().optional(),
-    ...EventMatcherFields,
-    countCmp: CountCmpSchema,
-  }),
-);
+const EventEmittedPredicateSchema = z.strictObject({
+  kind: z.literal("eventEmitted"),
+  label: z.string().optional(),
+  ...EventMatcherFields,
+  countCmp: CountCmpSchema,
+});
 
-const EventForbiddenPredicateSchema = refineEventMatcher(
-  z.strictObject({
-    kind: z.literal("eventForbidden"),
-    label: z.string().optional(),
-    ...EventMatcherFields,
-  }),
-);
+const EventForbiddenPredicateSchema = z.strictObject({
+  kind: z.literal("eventForbidden"),
+  label: z.string().optional(),
+  ...EventMatcherFields,
+});
 
 const TxOutcomePredicateSchema = z.strictObject({
   kind: z.literal("txOutcome"),
@@ -342,6 +329,23 @@ const SourceValuePredicateSchema = refineTolerance(
     cmp: z.enum(PREDICATE_COMPARATORS),
     value: z.union([z.string(), z.boolean()]),
     tolerance: DecimalStringSchema.optional(),
+  }).superRefine((predicate, ctx) => {
+    if (typeof predicate.value === "boolean") {
+      if (predicate.cmp !== "eq" && predicate.cmp !== "ne") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["cmp"],
+          message: `boolean sourceValue admits only eq/ne comparators; got "${predicate.cmp}".`,
+        });
+      }
+      if (predicate.tolerance !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["tolerance"],
+          message: "boolean sourceValue must not carry a tolerance.",
+        });
+      }
+    }
   }),
 );
 
@@ -353,12 +357,10 @@ export const SourceConsultedPredicateSchema = z.strictObject({
   countCmp: CountCmpSchema.optional(),
 });
 
-export const EventCountObservationSchema = refineEventMatcher(
-  z.strictObject({
-    kind: z.literal("eventEmitted"),
-    ...EventMatcherFields,
-  }),
-);
+export const EventCountObservationSchema = z.strictObject({
+  kind: z.literal("eventEmitted"),
+  ...EventMatcherFields,
+});
 
 export const PredicateSchema = z.discriminatedUnion("kind", [
   AddressForbiddenPredicateSchema,

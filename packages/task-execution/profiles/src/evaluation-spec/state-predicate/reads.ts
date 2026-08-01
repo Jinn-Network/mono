@@ -1,6 +1,11 @@
 import type { StatePredicateBlock } from "../family-blocks.js";
 import type { AbiArg, CallTarget, Predicate } from "./vocabulary.js";
 
+/** Escape author-controlled key segments so delimiter characters cannot collide across fields. */
+function escapeKeySegment(segment: string): string {
+  return segment.replace(/\\/g, "\\\\").replace(/[|,;]/g, (char) => `\\${char}`);
+}
+
 export type StateRead =
   | { kind: "nativeBalance"; account: string }
   | { kind: "erc20Balance"; token: string; account: string }
@@ -42,7 +47,10 @@ export function stateReadKey(read: StateRead): string {
  */
 function callTargetKey(target: CallTarget): string {
   if ("encodedCall" in target) return `encoded|${target.encodedCall}`;
-  const abiDigest = target.abiRef.digest?.["sha256"] ?? "";
+  const abiDigest = target.abiRef.digest?.["sha256"];
+  if (abiDigest === undefined) {
+    throw new Error("abiRef requires digest.sha256 for read-key derivation");
+  }
   return `abi|${abiDigest}|${target.function}|${target.args.map(abiArgKey).join(",")}`;
 }
 
@@ -50,11 +58,13 @@ function callTargetKey(target: CallTarget): string {
  * values are already canonical strings (lowercase hex, decimal, "true"/"false") by schema, so
  * this is projection, never formatting. */
 function abiArgKey(arg: AbiArg): string {
-  return "values" in arg ? `${arg.type}:[${arg.values.join(";")}]` : `${arg.type}:${String(arg.value)}`;
+  return "values" in arg
+    ? `${arg.type}:[${arg.values.map((value) => escapeKeySegment(String(value))).join(";")}]`
+    : `${arg.type}:${escapeKeySegment(String(arg.value))}`;
 }
 
 export function sourceReadKey(read: { world: string; requestKey: string; selector: string }): string {
-  return `source|${read.world}|${read.requestKey}|${read.selector}`;
+  return `source|${escapeKeySegment(read.world)}|${escapeKeySegment(read.requestKey)}|${escapeKeySegment(read.selector)}`;
 }
 
 /**
