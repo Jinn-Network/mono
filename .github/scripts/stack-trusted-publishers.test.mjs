@@ -5,14 +5,32 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
+import { fixtureRepo } from './platform-catalog-test-fixture.mjs';
 import { buildRegistrationList, renderRegistrationMarkdown } from './stack-trusted-publishers.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const script = resolve(import.meta.dirname, 'stack-trusted-publishers.mjs');
 
-test('every platform package gets one registration bound to this repo and workflow', () => {
+test('controlled registrations select exactly the fixture catalog platform-v1 group', () => {
+  const root = fixtureRepo();
+  try {
+    assert.deepEqual(
+      buildRegistrationList(root).map((registration) => registration.package),
+      loadCatalogPackages(root, { releaseGroup: 'platform-v1' }).map((pkg) => pkg.name).sort(),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('every canonical platform-v1 package gets one registration bound to this repo and workflow', () => {
   const registrations = buildRegistrationList(repoRoot);
-  assert.ok(registrations.length >= 45);
+  const expectedPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+    .map((pkg) => pkg.name)
+    .sort();
+  assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
+  assert.equal(registrations.length, 50);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {
     assert.equal(registration.provider, 'GitHub Actions');
@@ -22,6 +40,19 @@ test('every platform package gets one registration bound to this repo and workfl
     assert.equal(registration.environment, '', 'the optional npmjs Environment field must be blank');
     assert.ok(registration.package.startsWith('@jinn-network/'));
   }
+});
+
+test('registrations exclude every experimental, legacy, and product package', () => {
+  const registered = new Set(buildRegistrationList(repoRoot).map((registration) => registration.package));
+  const excluded = loadPlatformCatalog(repoRoot).packages.filter((pkg) => (
+    pkg.releaseGroup === 'experimental-environment-supply'
+    || pkg.releaseGroup === 'legacy-product-lines'
+    || pkg.classification === 'product'
+    || pkg.classification === 'product-support'
+  ));
+  assert.ok(excluded.length > 0);
+  assert.deepEqual(excluded.filter((pkg) => registered.has(pkg.name)).map((pkg) => pkg.name), []);
+  assert.equal(registered.has('@jinn-network/record-discovery-facts-environments'), false);
 });
 
 test('the markdown rendering states the blank-environment rule and one row per package', () => {
@@ -37,7 +68,7 @@ test('the CLI writes both artifact files', () => {
     const result = spawnSync(process.execPath, [script, '--out', out, '--root', repoRoot], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const json = JSON.parse(readFileSync(join(out, 'trusted-publishers.json'), 'utf8'));
-    assert.ok(json.length >= 45);
+    assert.equal(json.length, 50);
     assert.match(readFileSync(join(out, 'trusted-publishers.md'), 'utf8'), /Environment field MUST be blank/);
   } finally {
     rmSync(out, { recursive: true, force: true });
