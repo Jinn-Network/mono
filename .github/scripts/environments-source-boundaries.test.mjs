@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record', 'verification'];
+const environmentDirectories = ['record', 'verification', 'chain-record'];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -54,6 +54,20 @@ const RECORD_ALLOWED_DEV_DEPENDENCIES = [
   '@jinn-network/evidence-protocol', '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
 ];
 const RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
+// `packages/environments/chain-record` is tier 2 with the same purity rules as `record`: zod +
+// noble-class primitives only, no ports, no I/O outside the fixture loaders. Two Jinn packages
+// are admitted into the TESTING REGION only, for the seal-equivalence legs (program §4
+// contract 3): `evidence-protocol` for the evidence tree's digest spelling, and
+// `environment-record` for the SWE sibling this package's primitives were materialized from.
+// The chain kind is a SIBLING of the SWE kind, never an extension of it, so a production
+// import of `environment-record` is a boundary failure and the guard below says so by name.
+const CHAIN_RECORD_ALLOWED_DEPENDENCIES = ['@noble/hashes', 'zod'];
+const CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
+  '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
+];
+const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 
 // `packages/environments/verification` is tier 3: it executes the K-run protocol and seals
 // the attestation. Design §3.3 gives it exactly two package edges — the record kind it
@@ -399,6 +413,84 @@ test('environments source boundaries remain one-way across the approved graph', 
   assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
 });
 
+test('chain-environment-record stays pure and keeps the SWE kind out of production source', () => {
+  const chainRecord = join(packages, 'chain-record');
+  const source = join(chainRecord, 'src');
+  const testingEntry = join(source, 'testing.ts');
+  const fixtureLoaders = join(source, 'fixtures.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(source);
+  const testingFiles = allFiles.filter((file) =>
+    file === testingEntry || file === fixtureLoaders || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  // Production source: no Jinn package at all -- including the in-tree SWE record package,
+  // which is named explicitly because it is NOT covered by ENVIRONMENTS_FOREIGN_PACKAGES.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...ENVIRONMENTS_FOREIGN_PACKAGES, '@jinn-network/environment-record',
+        '@jinn-network/environment-verification', ...NODE_IO_MODULES, 'vitest'],
+      [...FORBIDDEN_ROOTS, join(packages, 'record'), join(packages, 'verification')],
+    ),
+    [],
+    'chain-environment-record production source must not import any Jinn package, vitest, or I/O module',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(source, 'index.ts')], [], [testingEntry, fixtureLoaders]),
+    [],
+    'the root entrypoint must not re-export testing.ts or fixtures.ts',
+  );
+
+  // Testing region: evidence-protocol and environment-record are admitted for seal equivalence;
+  // nothing else Jinn, and no other tree by relative path.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/evidence-*'),
+      FORBIDDEN_ROOTS,
+    ),
+    [],
+    'chain-environment-record testing files must not cross into foreign package roots',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(testingFiles, ['@jinn-network/environment-verification']),
+    [],
+    'the verification capability is never a dependency of a record package, in any region',
+  );
+
+  // `node:fs/promises` is permitted in exactly one file.
+  const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])
+    .filter((finding) => !finding.startsWith(relative(root, fixtureLoaders)));
+  assert.deepEqual(fsUsers, [],
+    'only src/fixtures.ts may touch the filesystem, and only to read this package\'s own corpus');
+
+  // `src/ports.ts` declares TYPES only. A value export there would make four consumers depend
+  // on an implementation, which is the whole reason the port types live in this package.
+  const portsSource = readFileSync(join(source, 'ports.ts'), 'utf8');
+  assert.match(portsSource, /^import type /mu,
+    'ports.ts must import types only');
+  assert.deepEqual(
+    [...portsSource.matchAll(/^export\s+(?!type\b|interface\b)/gmu)].map((match) => match[0]),
+    [],
+    'ports.ts must export only types and interfaces; a runtime value there breaks the contract-only seam',
+  );
+
+  // Manifest shape.
+  const manifest = JSON.parse(readFileSync(join(chainRecord, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(),
+    ['.', './fixtures/*', './schemas/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+});
+
 test('environment-verification takes exactly its two approved package edges', () => {
   const verification = join(packages, 'verification');
   const verificationSource = join(verification, 'src');
@@ -624,6 +716,10 @@ test('environments source and docs make no unqualified determinism or verificati
     ...files(join(record, 'src')).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
     join(record, 'README.md'),
     join(record, 'schemas', 'environment.schema.json'),
+    ...files(join(packages, 'chain-record', 'src')).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
+    join(packages, 'chain-record', 'README.md'),
+    join(packages, 'chain-record', 'schemas', 'chain-environment.schema.json'),
+    join(packages, 'chain-record', 'schemas', 'crypto-environment.schema.json'),
   ].filter((file) => existsSync(file));
 
   const findings = candidates.flatMap((file) => readFileSync(file, 'utf8')

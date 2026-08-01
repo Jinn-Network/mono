@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/benchmarking', 'facts/environments', 'sources/evidence-journal', 'transport-http'];   // grows per package task
+const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/benchmarking', 'facts/environments', 'facts/chain-environments', 'sources/evidence-journal', 'transport-http'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -20,6 +20,8 @@ const PROTOCOL_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/environment-record',
+  '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // testing may import only record-discovery-protocol; no serve/client/facts
 // leaves, and (like protocol) no TEP/Evidence record packages.
@@ -29,6 +31,7 @@ const TESTING_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
   '@jinn-network/environment-record',
 ];
 // serve depends on protocol (production) + testing (dev, conformance kit
@@ -39,6 +42,7 @@ const SERVE_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // client depends on protocol (production) + trust-core (production, the
 // verification driver) + testing (dev, conformance kit only); no serve, no
@@ -53,6 +57,7 @@ const CLIENT_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-discovery', '@jinn-network/task-execution-protocol',
   '@jinn-network/task-execution-profiles',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/evidence carries the one sanctioned edge between the discovery tree
 // and the Evidence Protocol record-kind tree (design §12; plan Task 22):
@@ -66,6 +71,7 @@ const FACTS_EVIDENCE_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/trust carries the one sanctioned edge between the discovery tree
 // and the Trust Layer record-kind tree (design §12; plan Task 23): protocol
@@ -78,6 +84,7 @@ const FACTS_TRUST_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/task-execution carries the one sanctioned edge between the
 // discovery tree and the Task Execution Protocol record-kind tree (design
@@ -94,6 +101,7 @@ const FACTS_TASK_EXECUTION_FORBIDDEN_PACKAGES = [
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/benchmarking carries the one sanctioned edge between the discovery
 // tree and the Benchmarking Application record-kind tree (design §11/§15;
@@ -110,6 +118,7 @@ const FACTS_BENCHMARKING_FORBIDDEN_PACKAGES = [
   '@jinn-network/marketplace-binding', '@jinn-network/marketplace-projector',
   '@jinn-network/marketplace-pipeline', '@jinn-network/marketplace-testing',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/environments carries the one sanctioned edge between the discovery tree and the
 // environments record-kind tree (discovery design §12): protocol + environment-record are
@@ -122,6 +131,29 @@ const FACTS_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
   '@jinn-network/benchmarking-records',
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
+  '@jinn-network/record-discovery-facts-chain-environments',
+];
+// facts/chain-environments carries the one sanctioned edge between the discovery tree and the
+// chain-environment record-kind tree (discovery design §12): protocol + chain-environment-record
+// are allowed; no serve/client, no other facts/* leaf, no TEP, no evidence, no benchmarking, and
+// not the SWE environment-record package either — the chain kinds are siblings of it, not
+// extensions of it.
+const FACTS_CHAIN_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-serve',
+  '@jinn-network/record-discovery-client',
+  '@jinn-network/record-discovery-facts-evidence',
+  '@jinn-network/record-discovery-facts-trust',
+  '@jinn-network/record-discovery-facts-task-execution',
+  '@jinn-network/record-discovery-facts-benchmarking',
+  '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-source-evidence-journal',
+  '@jinn-network/environment-record',
+  '@jinn-network/environment-verification',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/evidence-protocol',
+  '@jinn-network/benchmarking-records',
+  '@jinn-network/trust-core',
 ];
 // sources/evidence-journal carries the rule-widened sanctioned edge between
 // the discovery tree and the Evidence Protocol record-kind tree at the
@@ -139,6 +171,7 @@ const SOURCE_EVIDENCE_JOURNAL_FORBIDDEN_PACKAGES = [
   '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
   '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 
 // transport-http is the tier-3 HTTP adapter: it implements serve's
@@ -159,6 +192,8 @@ const TRANSPORT_HTTP_FORBIDDEN_PACKAGES = [
   '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
   '@jinn-network/marketplace-binding', '@jinn-network/marketplace-projector',
   '@jinn-network/marketplace-pipeline', '@jinn-network/marketplace-testing',
+  '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
 ];
 
 // Finding F1 (plan docs/superpowers/plans/2026-07-30-discovery-transport-http.md):
@@ -384,6 +419,10 @@ test('record-discovery-facts-benchmarking production source stays within its arc
 
 test('record-discovery-facts-environments production source stays within its architecture boundary', () => {
   assertBoundary(join(packages, 'facts', 'environments', 'src'), FACTS_ENVIRONMENTS_FORBIDDEN_PACKAGES);
+});
+
+test('record-discovery-facts-chain-environments production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'facts', 'chain-environments', 'src'), FACTS_CHAIN_ENVIRONMENTS_FORBIDDEN_PACKAGES);
 });
 
 test('record-discovery-source-evidence-journal production source stays within its architecture boundary', () => {

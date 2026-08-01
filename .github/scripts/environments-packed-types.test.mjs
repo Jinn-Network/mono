@@ -13,6 +13,7 @@ const consumerRoot = join(temporaryRoot, 'consumer');
 const packages = [
   ['record', '@jinn-network/environment-record'],
   ['verification', '@jinn-network/environment-verification'],
+  ['chain-record', '@jinn-network/chain-environment-record'],
 ];
 
 const codeEntrypoints = [
@@ -20,6 +21,8 @@ const codeEntrypoints = [
   '@jinn-network/environment-record/testing',
   '@jinn-network/environment-verification',
   '@jinn-network/environment-verification/testing',
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-record/testing',
 ];
 
 // `@jinn-network/environment-record` has NO Jinn runtime dependency.

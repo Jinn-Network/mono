@@ -20,6 +20,7 @@ const packages = [
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
   ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
+  ['facts/chain-environments', '@jinn-network/record-discovery-facts-chain-environments'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
   ['transport-http', '@jinn-network/record-discovery-transport-http'],
 ];
@@ -34,6 +35,7 @@ const codeEntrypoints = [
   '@jinn-network/record-discovery-facts-task-execution',
   '@jinn-network/record-discovery-facts-benchmarking',
   '@jinn-network/record-discovery-facts-environments',
+  '@jinn-network/record-discovery-facts-chain-environments',
   '@jinn-network/record-discovery-source-evidence-journal',
   '@jinn-network/record-discovery-transport-http',
 ];
@@ -59,6 +61,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
+  ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
 ];
 
 function run(command, args, options = {}) {
