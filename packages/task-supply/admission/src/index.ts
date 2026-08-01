@@ -2,6 +2,9 @@
 
 export * from "./admit.js";
 export * from "./candidate-spec.js";
+export * from "./chain-observations.js";
+export * from "./chain-refusals.js";
+export * from "./chain-spec-reader.js";
 export * from "./identifiers.js";
 export * from "./inline-match.js";
 export * from "./observations.js";
