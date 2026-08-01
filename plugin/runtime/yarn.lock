@@ -254,6 +254,21 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/evidence-retrieval@portal:../../packages/evidence/retrieval::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-retrieval@portal:../../packages/evidence/retrieval::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
@@ -294,16 +309,41 @@ __metadata:
     "@jinn-network/evidence-local-runtime": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/evidence-retrieval": "npm:0.1.0"
     "@jinn-network/evidence-trajectory": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
+    "@jinn-network/record-discovery-client": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
+    "@types/better-sqlite3": "npm:7.6.11"
     "@types/node": "npm:22.20.1"
+    better-sqlite3: "npm:13.0.1"
     typescript: "npm:5.9.3"
     vitest: "npm:4.1.10"
     zod: "npm:4.4.3"
   bin:
     jinn-plugin-runtime: ./dist/bin.js
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/record-discovery-client@portal:../../packages/discovery/client::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-client@portal:../../packages/discovery/client::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-protocol@portal:../../packages/discovery/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-protocol@portal:../../packages/discovery/protocol::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
   linkType: soft
 
 "@jinn-network/trust-core@portal:../../packages/trust/core::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
@@ -521,6 +561,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@types/better-sqlite3@npm:7.6.11":
+  version: 7.6.11
+  resolution: "@types/better-sqlite3@npm:7.6.11"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/6a7b8e5765f872404242ff9626edf4b4dd7974047144ba7254a59f4f1c196d05f8001323d0b526e8bbb3842bf541e341d74ca0164e50bd38fceaf3ef5d2a673d
+  languageName: node
+  linkType: hard
+
 "@types/chai@npm:^5.2.2":
   version: 5.2.3
   resolution: "@types/chai@npm:5.2.3"
@@ -542,6 +591,15 @@ __metadata:
   version: 1.0.9
   resolution: "@types/estree@npm:1.0.9"
   checksum: 10c0/3ad3286ca2988cd550dafb8f2ad599c8474868e954fa601a36655bdfefd8039f7c714b8c1c7f2ae219ffbd58bd4660e66fa7479a0120fc02d4777057d4865387
+  languageName: node
+  linkType: hard
+
+"@types/node@npm:*":
+  version: 26.1.2
+  resolution: "@types/node@npm:26.1.2"
+  dependencies:
+    undici-types: "npm:~8.3.0"
+  checksum: 10c0/a45503222c7db8f374afd5c9381db63dd95b6b1f703abea0890dd3d4a09eeb41da489e08a1a45baf18fe89fb77fbf310ff2789f680c490b04dafc41a60800a86
   languageName: node
   linkType: hard
 
@@ -1207,6 +1265,13 @@ __metadata:
   version: 6.21.0
   resolution: "undici-types@npm:6.21.0"
   checksum: 10c0/c01ed51829b10aa72fc3ce64b747f8e74ae9b60eafa19a7b46ef624403508a54c526ffab06a14a26b3120d055e1104d7abe7c9017e83ced038ea5cf52f8d5e04
+  languageName: node
+  linkType: hard
+
+"undici-types@npm:~8.3.0":
+  version: 8.3.0
+  resolution: "undici-types@npm:8.3.0"
+  checksum: 10c0/c8aa7e2fbebfce519654dafadc0ece59be888d2ccaf180fb4495da875e7b536d2456345c384069c7e6f3e9c9ab7435f074957da306f142343eee86ff8048855a
   languageName: node
   linkType: hard
 
