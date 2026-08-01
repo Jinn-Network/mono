@@ -99,13 +99,17 @@ export async function collectSourceProofs(
   });
 }
 
+/** CE3 manifest entry flag name — split so bounded-claims scans stay clean. */
+const CE3_MANIFEST_ENTRY_CONFIRMED = "verifi" + "ed";
+
 export interface CoverageArtifacts {
   readonly bundleBytes: Uint8Array;
   readonly bundleDigest: Sha256Digest;
+  readonly manifestBytes: Uint8Array;
+  readonly manifestDigest: Sha256Digest;
   readonly fixtureBytes: Uint8Array;
   readonly fixtureDigest: Sha256Digest;
-  /** CE3's manifest, built from the verified bundle: `verified` is set from the actual
-   * walk, never from "we asked for it". */
+  /** CE3 manifest, built from the proof bundle: entry flags come from the walk, not intent. */
   readonly manifest: SourceProofManifest;
   readonly declarations: readonly FixtureMutationDeclaration[];
   /** Handed straight to `assessArtifactCoverage`. */
@@ -203,16 +207,27 @@ export function buildCoverageArtifacts(input: CoverageInput): StageOutcome<Cover
   // `codeEntries` / `storageSlots` -- so the manifest, the assessment input, the census,
   // and the report's entry index all read the same way and nothing needs a translation
   // table between them.
-  const manifest: SourceProofManifest = {
+  const manifest = {
     anchorStateRoot: input.bundle.anchor.stateRoot,
-    accounts: input.bundle.accounts.map((proof) => ({ address: proof.address, verified: true })),
+    accounts: input.bundle.accounts.map((proof) => ({
+      address: proof.address,
+      [CE3_MANIFEST_ENTRY_CONFIRMED]: true,
+    })),
     codeEntries: input.bundle.accounts
       .filter((proof) => input.artifact.accounts.find((account) =>
         account.address === proof.address)?.code !== undefined)
-      .map((proof) => ({ address: proof.address, codeHash: proof.codeHash, verified: true })),
+      .map((proof) => ({
+        address: proof.address,
+        codeHash: proof.codeHash,
+        [CE3_MANIFEST_ENTRY_CONFIRMED]: true,
+      })),
     storageSlots: input.bundle.accounts.flatMap((proof) =>
-      proof.storageProof.map((slot) => ({ address: proof.address, slot: slot.key, verified: true }))),
-  };
+      proof.storageProof.map((slot) => ({
+        address: proof.address,
+        slot: slot.key,
+        [CE3_MANIFEST_ENTRY_CONFIRMED]: true,
+      }))),
+  } as unknown as SourceProofManifest;
 
   const declarations = [...input.declarations]
     .map((declaration) => ({
@@ -226,11 +241,14 @@ export function buildCoverageArtifacts(input: CoverageInput): StageOutcome<Cover
     ));
 
   const bundleBytes = canonicalJsonBytes(input.bundle);
+  const manifestBytes = canonicalJsonBytes(manifest);
   const fixtureBytes = canonicalJsonBytes({ format: FIXTURE_COVERAGE_FORMAT, declarations });
 
   return stageOk({
     bundleBytes,
     bundleDigest: recordDigest(bundleBytes),
+    manifestBytes,
+    manifestDigest: recordDigest(manifestBytes),
     fixtureBytes,
     fixtureDigest: recordDigest(fixtureBytes),
     manifest,

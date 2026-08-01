@@ -137,6 +137,7 @@ export async function extractEnvironment(
     journal: archive.journal(),
     anchor,
     ...(instanceId === undefined ? {} : { instanceId }),
+    ...(deps.stateDump === undefined ? {} : { dump: deps.stateDump }),
   });
   if (!harvestOutcome.ok) {
     return failFromStage(harvestOutcome, archive.usage());

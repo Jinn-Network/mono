@@ -19,7 +19,6 @@ import {
   buildCoverageArtifacts,
   collectSourceProofs,
   PROOF_BUNDLE_FORMAT,
-  type ProofBundle,
 } from "./coverage.js";
 import {
   classifyExtractionFailure,
@@ -135,33 +134,13 @@ function anchorFromArtifact(
   };
 }
 
-async function loadSourceProofManifest(
-  deps: Pick<ExtractionDeps, "artifactStore">,
+function loadSourceProofManifest(
   candidate: ChainEnvironmentCandidate,
-): Promise<ce3.SourceProofManifest | undefined> {
-  const proofsDescriptor = candidate.record.stateMaterialization.sourceProofManifest?.proofs;
-  if (proofsDescriptor === undefined) return undefined;
-  const bytes = await deps.artifactStore.getArtifact(proofsDescriptor as {
-    digest: { sha256: string };
-    name?: string;
-    uri?: string;
-    mediaType?: string;
-  });
-  const bundle = JSON.parse(new TextDecoder().decode(bytes)) as ProofBundle;
-  return {
-    anchorStateRoot: bundle.anchor.stateRoot,
-    accounts: bundle.accounts.map((proof) => ({ address: proof.address, verified: true })),
-    codeEntries: bundle.accounts
-      .filter((proof) => candidate.artifact.accounts.some((account) =>
-        account.address === proof.address && account.code !== undefined))
-      .map((proof) => ({ address: proof.address, codeHash: proof.codeHash, verified: true })),
-    storageSlots: bundle.accounts.flatMap((proof) =>
-      proof.storageProof.map((slot) => ({
-        address: proof.address,
-        slot: slot.key,
-        verified: true,
-      }))),
-  };
+): ce3.SourceProofManifest | undefined {
+  if (candidate.record.stateMaterialization.fidelityClass === "local") {
+    return undefined;
+  }
+  return JSON.parse(new TextDecoder().decode(candidate.coverage.manifestBytes)) as ce3.SourceProofManifest;
 }
 
 function isWidenableOutcome(outcome: ce3.ChainVerificationOutcome): boolean {
@@ -354,6 +333,7 @@ async function widenCandidate(
   for (const entry of input.missing.storage) newAddresses.add(entry.address);
   const sourceAddresses = [...new Set([
     ...input.request.sourceAddresses,
+    ...input.candidate.artifact.accounts.map((account) => account.address),
     ...newAddresses,
   ])];
 
@@ -386,15 +366,15 @@ async function widenCandidate(
   });
   if (!coverageOutcome.ok) return coverageOutcome;
 
-  const stored = await storeExtractionArtifacts(deps.artifactStore, artifact, coverageOutcome.value);
-  if (!stored.ok) return stored;
+  const provisionalStored = await storeExtractionArtifacts(deps.artifactStore, artifact, coverageOutcome.value);
+  if (!provisionalStored.ok) return provisionalStored;
 
   const provisional = buildClosedStateRecord(
     input.request,
     anchor,
     artifact,
     coverageOutcome.value,
-    stored.value,
+    provisionalStored.value,
     input.candidate.record.stateMaterialization.initialStateCommitment as `0x${string}`,
   );
 
@@ -451,7 +431,7 @@ export async function widenAndReverify(
 
   for (let index = 0; index <= maxWidenings; index += 1) {
     const callsAtRoundStart = archive.usage().calls;
-    const manifest = await loadSourceProofManifest(deps, candidate);
+    const manifest = loadSourceProofManifest(candidate);
 
     const coverage = ce3.assessArtifactCoverage({
       fidelityClass: candidate.record.stateMaterialization.fidelityClass,

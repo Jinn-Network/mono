@@ -69,6 +69,12 @@ const minimalBytes = serializeStateArtifact(MINIMAL);
 await emit("artifacts-v1/minimal.json", minimalBytes);
 await emit("artifacts-v1/minimal.sha256", `${stateArtifactDigest(minimalBytes)}\n`);
 
+const world = buildFakeTrieWorld();
+const convergedArtifact = fakeStateArtifact(world.stateRoot);
+const convergedBytes = serializeStateArtifact(convergedArtifact);
+await emit("artifacts-v1/converged.json", convergedBytes);
+await emit("artifacts-v1/converged.sha256", `${stateArtifactDigest(convergedBytes)}\n`);
+
 const uppercased = JSON.parse(new TextDecoder().decode(minimalBytes));
 uppercased.accounts[0].address = A.toUpperCase().replace("0X", "0x");
 await emit("adversarial-v1/uppercase-hex.json", `${JSON.stringify(uppercased)}\n`);
@@ -80,7 +86,6 @@ unsorted.accounts[0].storage = [
 ];
 await emit("adversarial-v1/unsorted-slots.json", `${JSON.stringify(unsorted)}\n`);
 
-const world = buildFakeTrieWorld();
 const archive = createBudgetedArchivePort(world.archive(), { maxCalls: 100, maxBytes: 5_000_000 });
 const artifact = fakeStateArtifact(world.stateRoot);
 const proofs = await collectSourceProofs(archive, artifact, {

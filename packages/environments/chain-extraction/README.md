@@ -36,3 +36,19 @@ makes the divergence signal decidable rather than flaky.
 `ArchiveRpcPort` is injected, is used at authoring time only, and is wrapped in a budget
 before any module sees it: `maxCalls`, `maxBytes`, and `maxWidenings`, all ceilinged. No
 file in `src/` opens a socket, holds a URL, or names a provider.
+
+## Conformance kit
+
+The published kit lives at `@jinn-network/chain-state-extraction/testing`. It runs on fakes
+only — no Anvil, Docker, or network — and drives the full extract → widen loop through CE3's
+real `verifyChainEnvironment`.
+
+Exports include `buildFakeTrieWorld`, `createFakeArchive`, `createFakeChainRuntime`,
+`createFakeStateDumpPort`, `createInMemoryArtifactStore`, `createFixedClock`,
+`createFakeExtractionDeps`, `fakeExtractionRequest`, `fakeStateArtifact`, `fakeBaseline`,
+the `FAKE_*` constants, and `describeChainExtractionConformance({ signer })`. The host
+supplies a `DsseSigner`; the kit holds no key material.
+
+Five scenarios are asserted end-to-end: first-pass convergence, convergence after two
+widenings, bound exhaustion under infinite hidden reads, archive self-disagreement refusal,
+and dump omission detection without shipping a broken artifact.

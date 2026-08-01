@@ -3,17 +3,60 @@
 // The published conformance kit. `node:fs/promises` appears here (fixture loading only) and
 // is allowlisted for this file in the tree guard. Grows task by task.
 
-import type { ChainEnvironmentRecord } from "@jinn-network/chain-environment-record";
+import type {
+  ChainEnvironmentRecord,
+  ChainInstance,
+  MaterializationReport,
+  MaterializationRequest,
+  NetworkPolicy,
+  ProbeExecutionRequest,
+  ScriptReplayer,
+} from "@jinn-network/chain-environment-record";
+import {
+  fromDigestSet,
+  type DigestSet,
+} from "@jinn-network/chain-environment-verification";
+import {
+  buildCanonicalChainObservation,
+  chainObservationDigest,
+  CHAIN_OBSERVATION_SCHEMA_ID,
+  type CanonicalChainObservation,
+} from "@jinn-network/chain-environment-verification";
+import { canonicalJsonBytes, compareCodeUnitStrings, recordDigest, type DsseSigner, type Sha256Digest } from "@jinn-network/trust-core";
+
+import type { ExtractionRequest } from "./baseline.js";
+import { establishBaseline, type ConnectedBaseline } from "./baseline.js";
+import { captureAnchor } from "./anchor.js";
+import { createBudgetedArchivePort } from "./budget.js";
+import {
+  parseStateArtifact,
+  serializeStateArtifact,
+  stateArtifactDigest,
+  stateArtifactEntryCounts,
+  stateArtifactKeySet,
+  type StateArtifact,
+} from "./artifact.js";
+import { PROVISIONAL_COMMITMENT } from "./candidate.js";
+import { extractEnvironment } from "./extract.js";
+import { DEFAULT_ARCHIVE_BUDGET } from "./identifiers.js";
+import { keySetIsEmpty } from "./key-set.js";
+import { widenAndReverify } from "./widen.js";
+import type {
+  ArchiveAccountProof,
+  ArchiveRpcPort,
+  ArtifactStore,
+  BlockSelector,
+  ChainStateBackend,
+  Clock,
+  ExtractionDeps,
+  StateDumpPort,
+  VerifierIdentity,
+} from "./ports.js";
 import { BLACKHOLE_EGRESS_POLICY_ID } from "@jinn-network/chain-environment-record";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { createRequire } from "node:module";
-
-import type { ExtractionRequest } from "./baseline.js";
-
-import type { StateArtifact } from "./artifact.js";
 import { STATE_ARTIFACT_SCHEMA_VERSION } from "./identifiers.js";
 import { normalizeAddress, normalizeHex32, normalizeQuantity, normalizeSlot, type Hex32, type HexAddress } from "./hex.js";
-import type { ArchiveAccountProof, ArchiveRpcPort } from "./ports.js";
 import type { RlpItem } from "./rlp.js";
 
 const require = createRequire(import.meta.url);
@@ -29,6 +72,7 @@ export const FAKE_TOKEN = "0xdddddddddddddddddddddddddddddddddddddddd";
 export const FAKE_ACTOR = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 export const FAKE_SLOT_1 = `0x${"0".repeat(63)}1`;
 export const FAKE_SLOT_2 = `0x${"0".repeat(63)}2`;
+export const FAKE_SEALED_COMMITMENT = `0x${"5".repeat(64)}` as `0x${string}`;
 
 const EMPTY_HASH = keccak_256(new Uint8Array(0));
 const EMPTY_TRIE_ROOT = keccak_256(new Uint8Array([0x80]));
@@ -388,15 +432,21 @@ export function buildFakeTrieWorld(options: FakeTrieWorldOptions = {}): FakeTrie
   };
 
   const archive = (): ArchiveRpcPort => {
-    const header = {
+    const baseHeader = {
       number: 1,
       hash: normalizeHex32(`0x${"1".repeat(64)}`),
       parentHash: normalizeHex32(`0x${"2".repeat(64)}`),
       stateRoot: normalizeHex32(toHex(stateTrie.root)),
       timestamp: 1,
     };
+    const headerFor = (selector: BlockSelector) => {
+      if (selector === "finalized" || selector === "latest") {
+        return { ...baseHeader, number: Math.max(baseHeader.number, 21_000_000) };
+      }
+      return { ...baseHeader, number: selector };
+    };
     return {
-      getBlockHeader: async () => header,
+      getBlockHeader: async (selector) => headerFor(selector),
       getAccount: async (address) => {
         const normalized = normalizeAddress(address);
         const account = accounts.get(normalized);
@@ -449,6 +499,10 @@ function fakeArchiveDependentDraft(): ChainEnvironmentRecord {
       ...draft.verificationContract,
       closureCheckRequired: true,
     },
+    stateMaterialization: {
+      ...draft.stateMaterialization,
+      initialStateCommitment: PROVISIONAL_COMMITMENT,
+    },
   };
 }
 
@@ -494,4 +548,707 @@ export function fakeStateArtifact(stateRoot?: Hex32): StateArtifact {
       },
     ],
   };
+}
+
+export interface FakeArchiveOptions {
+  /** The anchor cannot be served at all. */
+  readonly anchorPruned?: boolean;
+  /** After N calls, the archive starts answering the anchor header differently. */
+  readonly anchorDriftsAfterCall?: number;
+  /** `eth_getProof` is not offered. */
+  readonly proofUnsupported?: boolean;
+}
+
+export function createFakeArchive(options: FakeArchiveOptions = {}): ArchiveRpcPort {
+  const world = buildFakeTrieWorld();
+  const inner = world.archive();
+  let anchorHeaderReads = 0;
+  return {
+    async getBlockHeader(selector, signal) {
+      if (options.anchorPruned) {
+        throw new Error("missing trie node 0xabc (path ) state 0xdef");
+      }
+      const header = await inner.getBlockHeader(selector, signal);
+      if (options.anchorDriftsAfterCall !== undefined && typeof selector === "number") {
+        anchorHeaderReads += 1;
+        if (anchorHeaderReads > options.anchorDriftsAfterCall) {
+          return { ...header, stateRoot: normalizeHex32(`0x${"7".repeat(64)}`) };
+        }
+      }
+      return header;
+    },
+    getAccount: (address, block, signal) => inner.getAccount(address, block, signal),
+    getCode: (address, block, signal) => inner.getCode(address, block, signal),
+    getStorageAt: (address, slot, block, signal) => inner.getStorageAt(address, slot, block, signal),
+    async getProof(address, slots, block, signal) {
+      if (options.proofUnsupported) {
+        throw new Error("the method eth_getProof does not exist");
+      }
+      return inner.getProof(address, slots, block, signal);
+    },
+  };
+}
+
+export interface FakeRuntimeOptions {
+  readonly observationDriftOnRun?: number;
+  readonly hiddenReads?: number;
+  readonly blackholeUnstable?: boolean;
+  readonly divergeWithoutReads?: boolean;
+  readonly dumpOmits?: readonly string[];
+}
+
+interface ReadEntry {
+  readonly key: string;
+  readonly value: string;
+}
+
+interface FakeRuntimeInstance extends ChainInstance {
+  readonly observation: CanonicalChainObservation;
+}
+
+const HIDDEN_READ_GROUPS = [
+  { address: FAKE_ORACLE, slots: [FAKE_SLOT_1] as const },
+  { address: FAKE_TOKEN, slots: [FAKE_SLOT_1] as const },
+] as const;
+
+const CONFORMANCE_VERIFIER: VerifierIdentity = Object.freeze({
+  id: "https://jinn.network/chain-state-extraction/conformance",
+  version: "0.1.0",
+  digest: `sha256:${"c".repeat(64)}`,
+}) as VerifierIdentity;
+
+function readKey(kind: string, address: string, slot?: string): string {
+  return slot === undefined
+    ? `${kind}:${normalizeAddress(address)}`
+    : `${kind}:${normalizeAddress(address)}:${normalizeSlot(slot)}`;
+}
+
+function artifactAccount(
+  artifact: StateArtifact | undefined,
+  address: string,
+): StateArtifact["accounts"][number] | undefined {
+  return artifact?.accounts.find((account) => normalizeAddress(account.address) === normalizeAddress(address));
+}
+
+function hiddenGroupSatisfied(
+  artifact: StateArtifact | undefined,
+  group: (typeof HIDDEN_READ_GROUPS)[number],
+): boolean {
+  const account = artifactAccount(artifact, group.address);
+  if (account === undefined) return false;
+  return group.slots.every((slot) => account.storage.some(
+    (entry) => normalizeSlot(entry.slot) === normalizeSlot(slot),
+  ));
+}
+
+function hiddenReadsRemaining(
+  options: FakeRuntimeOptions,
+  artifact: StateArtifact | undefined,
+): number {
+  if (options.hiddenReads === undefined || options.hiddenReads === 0) return 0;
+
+  if (options.hiddenReads === Infinity) {
+    return 1;
+  }
+
+  const limit = Math.min(options.hiddenReads, HIDDEN_READ_GROUPS.length);
+  for (let index = 0; index < limit; index += 1) {
+    const group = HIDDEN_READ_GROUPS[index];
+    if (group !== undefined && !hiddenGroupSatisfied(artifact, group)) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
+function appendSyntheticHiddenReads(
+  log: ReadEntry[],
+  options: FakeRuntimeOptions,
+  remaining: number,
+): void {
+  if (options.hiddenReads !== Infinity || remaining <= 0) return;
+  for (let index = 0; index < remaining; index += 1) {
+    log.push({ key: `synthetic:${HIDDEN_READ_GROUPS.length + index}`, value: "1" });
+  }
+}
+
+async function readPoolFromBackend(
+  backend: ChainStateBackend,
+  blockNumber: number,
+  log: ReadEntry[],
+): Promise<void> {
+  const pool = normalizeAddress(FAKE_POOL);
+  const zero = `0x${"0".repeat(64)}`;
+  await backend.getBlockHeader(blockNumber);
+  const account = await backend.getAccount(pool, blockNumber);
+  log.push({ key: readKey("account", pool), value: account?.nonce ?? "0x0" });
+  const code = await backend.getCode(pool, blockNumber);
+  log.push({ key: readKey("code", pool), value: code ?? "0x" });
+  for (const slot of [FAKE_SLOT_1, FAKE_SLOT_2]) {
+    const value = await backend.getStorageAt(pool, normalizeSlot(slot), blockNumber);
+    log.push({ key: readKey("slot", pool, slot), value: value ?? zero });
+  }
+}
+
+function readPoolFromArtifact(artifact: StateArtifact | undefined, log: ReadEntry[]): void {
+  const pool = normalizeAddress(FAKE_POOL);
+  const account = artifactAccount(artifact, pool);
+  const zero = `0x${"0".repeat(64)}`;
+  log.push({ key: readKey("account", pool), value: account?.nonce ?? "0x0" });
+  log.push({ key: readKey("code", pool), value: account?.code ?? "0x" });
+  for (const slot of [FAKE_SLOT_1, FAKE_SLOT_2]) {
+    const entry = account?.storage.find((one) => normalizeSlot(one.slot) === normalizeSlot(slot));
+    log.push({ key: readKey("slot", pool, slot), value: entry?.value ?? zero });
+  }
+}
+
+function readHiddenGroup(
+  group: (typeof HIDDEN_READ_GROUPS)[number],
+  artifact: StateArtifact | undefined,
+  log: ReadEntry[],
+): void {
+  const address = normalizeAddress(group.address);
+  const account = artifactAccount(artifact, address);
+  const zero = `0x${"0".repeat(64)}`;
+  log.push({ key: readKey("account", address), value: account?.nonce ?? "0x0" });
+  log.push({ key: readKey("code", address), value: account?.code ?? "0x" });
+  for (const slot of group.slots) {
+    const entry = account?.storage.find((one) => normalizeSlot(one.slot) === normalizeSlot(slot));
+    log.push({ key: readKey("slot", address, slot), value: entry?.value ?? zero });
+  }
+}
+
+async function readUnsatisfiedHiddenGroupsFromBackend(
+  backend: ChainStateBackend,
+  blockNumber: number,
+  log: ReadEntry[],
+  options: FakeRuntimeOptions,
+  artifact: StateArtifact | undefined,
+): Promise<void> {
+  const zero = `0x${"0".repeat(64)}`;
+  let remaining = hiddenReadsRemaining(options, artifact);
+  for (const group of HIDDEN_READ_GROUPS) {
+    if (remaining <= 0) break;
+    if (!hiddenGroupSatisfied(artifact, group)) {
+      const address = normalizeAddress(group.address);
+      const account = await backend.getAccount(address, blockNumber);
+      log.push({ key: readKey("account", address), value: account?.nonce ?? "0x0" });
+      const code = await backend.getCode(address, blockNumber);
+      log.push({ key: readKey("code", address), value: code ?? "0x" });
+      for (const slot of group.slots) {
+        const value = await backend.getStorageAt(address, normalizeSlot(slot), blockNumber);
+        log.push({ key: readKey("slot", address, slot), value: value ?? zero });
+      }
+      remaining -= 1;
+    }
+  }
+  appendSyntheticHiddenReads(log, options, remaining);
+}
+
+function readUnsatisfiedHiddenGroupsFromArtifact(
+  log: ReadEntry[],
+  artifact: StateArtifact | undefined,
+  options: FakeRuntimeOptions,
+): void {
+  let remaining = hiddenReadsRemaining(options, artifact);
+  for (const group of HIDDEN_READ_GROUPS) {
+    if (remaining <= 0) break;
+    if (!hiddenGroupSatisfied(artifact, group)) {
+      readHiddenGroup(group, artifact, log);
+      remaining -= 1;
+    }
+  }
+  appendSyntheticHiddenReads(log, options, remaining);
+}
+
+function loadStateArtifactFromRequest(request: MaterializationRequest): StateArtifact | undefined {
+  const descriptor = request.record.stateMaterialization.stateArtifact;
+  if (descriptor === undefined) return undefined;
+  const digest = fromDigestSet(descriptor.descriptor.digest as DigestSet);
+  const bytes = request.resources.byDigest.get(digest);
+  if (bytes === undefined) return undefined;
+  return parseStateArtifact(bytes);
+}
+
+function commitmentFor(request: MaterializationRequest): `0x${string}` {
+  const declared = request.record.stateMaterialization.initialStateCommitment;
+  const sealed = request.stateBackend === undefined;
+  if (sealed && declared === PROVISIONAL_COMMITMENT) {
+    return FAKE_SEALED_COMMITMENT;
+  }
+  return declared as `0x${string}`;
+}
+
+const SEALED_BOUNDARY_PROBE = {
+  id: "out-of-slice-read-is-empty",
+  receiptStatus: "not-executed" as const,
+  gasUsed: "0",
+  logs: [],
+  returnData: "0x",
+  expectedErrorClass: "empty-account" as const,
+  observedErrorClass: "empty-account" as const,
+};
+
+function observationFromReadLog(
+  readLog: readonly ReadEntry[],
+  world: ReturnType<typeof buildFakeTrieWorld>,
+  finalStateCommitment: `0x${string}` = FAKE_SEALED_COMMITMENT,
+): CanonicalChainObservation {
+  const sorted = [...readLog].sort((left, right) => compareCodeUnitStrings(left.key, right.key));
+  const fingerprint = recordDigest(canonicalJsonBytes({ reads: sorted }));
+  return buildCanonicalChainObservation({
+    schema: CHAIN_OBSERVATION_SCHEMA_ID,
+    probes: [SEALED_BOUNDARY_PROBE],
+    touchedState: [],
+    stateReads: [],
+    traceProjectionDigest: fingerprint,
+    finalStateCommitment,
+    blocks: [{
+      number: "1",
+      hash: `0x${"1".repeat(64)}`,
+      stateRoot: world.stateRoot,
+      timestamp: "1",
+    }],
+  });
+}
+
+function buildFakeMaterializationReport(
+  record: ChainEnvironmentRecord,
+  networkPolicy: NetworkPolicy,
+  loadedResources: readonly `sha256:${string}`[],
+  postFixtureCommitment: `0x${string}`,
+): MaterializationReport {
+  const controls = record.determinismControls;
+  const entryCounts = record.stateMaterialization.stateArtifact?.entryCounts ?? {
+    accounts: 0,
+    codeEntries: 0,
+    storageSlots: 0,
+  };
+  return {
+    runtimeIdentity: {
+      imageManifestDigest: record.runtime.image.manifestDigest as `sha256:${string}`,
+      platform: record.runtime.image.platform,
+      reportedVersion: record.runtime.version,
+      binaryDigest: record.runtime.binary.digest as `sha256:${string}`,
+      evmConfigurationDigest: record.runtime.binary.digest as `sha256:${string}`,
+      chainId: record.runtime.evm.sandboxChainId,
+      appliedControls: {
+        miningMode: controls.miningMode,
+        orderingPolicy: controls.orderingPolicy,
+        resetMechanism: controls.resetMechanism,
+      },
+      unsupportedControls: [],
+    },
+    artifactEntries: {
+      accounts: Array.from({ length: entryCounts.accounts }, () => normalizeAddress(FAKE_POOL)),
+      codeEntries: Array.from({ length: entryCounts.codeEntries }, () => normalizeAddress(FAKE_POOL)),
+      storageSlots: Array.from({ length: entryCounts.storageSlots }, () => ({
+        address: normalizeAddress(FAKE_POOL),
+        slot: normalizeSlot(FAKE_SLOT_1),
+      })),
+    },
+    postFixtureCommitment,
+    loadedResources: [...loadedResources],
+    isolation: {
+      networkPolicy,
+      egressAttempts: networkPolicy.forkBackend === "present"
+        ? [{ target: "https://archive.example/rpc", outcome: "refused" as const }]
+        : [],
+      forbiddenProbes: [],
+      exposedSignerAccounts: record.fixtures.accounts
+        .filter((account) => account.role === "agent")
+        .map((account) => account.address),
+      ceilingChecks: [
+        { name: "maxTransactions", enforced: true },
+        { name: "maxAggregateGas", enforced: true },
+        { name: "maxExecutionDurationMs", enforced: true },
+      ],
+    },
+    cost: { wallSeconds: 0 },
+  };
+}
+
+let blackholeRunCounter = 0;
+
+export function createFakeChainRuntime(
+  options: FakeRuntimeOptions = {},
+): ExtractionDeps["runtime"] {
+  const world = buildFakeTrieWorld();
+  return {
+    materializer: {
+      async materialize(request: MaterializationRequest) {
+        if (request.networkPolicy.forkBackend === "absent" && request.stateBackend !== undefined) {
+          throw new Error("a sealed materialization must have no state backend");
+        }
+        const blockNumber = request.record.sourceAnchor?.blockNumber ?? 1;
+        const artifact = loadStateArtifactFromRequest(request);
+        const log: ReadEntry[] = [];
+        if (request.stateBackend !== undefined) {
+          await readPoolFromBackend(request.stateBackend, blockNumber, log);
+          if (artifact !== undefined) {
+            await readUnsatisfiedHiddenGroupsFromBackend(
+              request.stateBackend,
+              blockNumber,
+              log,
+              options,
+              artifact,
+            );
+          }
+        } else {
+          readPoolFromArtifact(artifact, log);
+          readUnsatisfiedHiddenGroupsFromArtifact(log, artifact, options);
+        }
+        const postFixtureCommitment = commitmentFor(request);
+        let observation = observationFromReadLog(log, world);
+        if (options.divergeWithoutReads === true && request.stateBackend === undefined) {
+          observation = observationFromReadLog(log, world, `0x${"d".repeat(64)}`);
+        }
+        if (options.blackholeUnstable === true && request.stateBackend === undefined) {
+          blackholeRunCounter += 1;
+          if (blackholeRunCounter % 2 === 0) {
+            observation = observationFromReadLog(log, world, `0x${"e".repeat(64)}`);
+          }
+        }
+        if (options.observationDriftOnRun !== undefined
+          && request.stateBackend !== undefined
+          && blackholeRunCounter >= options.observationDriftOnRun) {
+          observation = observationFromReadLog(log, world, `0x${"b".repeat(64)}`);
+        }
+        const loadedResources = [...request.resources.byDigest.keys()];
+        const instance: FakeRuntimeInstance = {
+          instanceId: request.instanceId,
+          rpcEndpoint: "http://127.0.0.1:0",
+          report: buildFakeMaterializationReport(
+            request.record,
+            request.networkPolicy,
+            loadedResources,
+            postFixtureCommitment,
+          ),
+          observation,
+          async stop() {},
+        };
+        return instance;
+      },
+      async reset(instance: ChainInstance) {
+        return instance.report!.postFixtureCommitment;
+      },
+    },
+    probes: {
+      async execute(request: ProbeExecutionRequest) {
+        const observation = (request.instance as FakeRuntimeInstance).observation;
+        return {
+          observation,
+          observationDigest: chainObservationDigest(observation),
+          timedOut: false,
+          cost: { wallSeconds: 0 },
+        };
+      },
+    },
+  } as unknown as ExtractionDeps["runtime"];
+}
+
+export function createFakeStateDumpPort(
+  options: Pick<FakeRuntimeOptions, "dumpOmits"> = {},
+): StateDumpPort {
+  const omitSet = new Set(options.dumpOmits ?? []);
+  return {
+    async dump() {
+      const artifact = fakeStateArtifact(buildFakeTrieWorld().stateRoot);
+      const accounts: Record<string, {
+        balance: string;
+        nonce: string;
+        code?: string;
+        storage?: Record<string, string>;
+      }> = {};
+      for (const account of artifact.accounts) {
+        const storage: Record<string, string> = {};
+        for (const entry of account.storage) {
+          const omitKey = `${account.address}/${entry.slot}`;
+          if (!omitSet.has(omitKey)) {
+            storage[entry.slot] = entry.value;
+          }
+        }
+        accounts[account.address] = {
+          balance: account.balance,
+          nonce: account.nonce,
+          ...(account.code === undefined ? {} : { code: account.code }),
+          storage,
+        };
+      }
+      return { accounts };
+    },
+  };
+}
+
+export interface InMemoryArtifactStore extends ArtifactStore {
+  readonly artifacts: ReadonlyMap<Sha256Digest, Uint8Array>;
+}
+
+function conformanceArtifactNames(record: ChainEnvironmentRecord): string[] {
+  const names = ["materializer", "probe-suite", "comparator", "state-artifact"];
+  if (record.stateMaterialization.sourceProofManifest !== undefined) {
+    names.push("source-proof-manifest");
+  }
+  if (record.stateMaterialization.fixtureCoverage?.manifest !== undefined) {
+    names.push("fixture-coverage-manifest");
+  }
+  if (record.sourceAnchor?.headerProof !== undefined) {
+    names.push("header-proof");
+  }
+  record.fixtures.modules.forEach((module, index) => {
+    names.push(`fixture-${index}-${module.id}`);
+  });
+  return names;
+}
+
+export function createInMemoryArtifactStore(
+  options?: { readonly missing?: readonly Sha256Digest[] },
+): InMemoryArtifactStore {
+  const { conformanceArtifactBytes } = require(
+    "../../chain-verification/dist/conformance-records.js",
+  ) as { conformanceArtifactBytes: (name: string) => Uint8Array };
+  const record = buildConformanceChainRecord({ closureClass: "archive-dependent" });
+  const byDigest = new Map<string, Uint8Array>();
+  for (const name of conformanceArtifactNames(record)) {
+    const bytes = conformanceArtifactBytes(name);
+    byDigest.set(recordDigest(bytes), bytes);
+  }
+  const stored = new Map<Sha256Digest, Uint8Array>();
+  const missing = new Set(options?.missing ?? []);
+  return {
+    artifacts: stored,
+    async getArtifact(descriptor) {
+      const digest = fromDigestSet(descriptor.digest as DigestSet);
+      if (missing.has(digest)) {
+        throw new Error(`artifact unavailable for ${digest}`);
+      }
+      const bytes = byDigest.get(digest) ?? stored.get(digest);
+      if (bytes === undefined) {
+        throw new Error(`artifact unavailable for ${digest}`);
+      }
+      return bytes;
+    },
+    async putArtifact(bytes) {
+      const digest = recordDigest(bytes);
+      stored.set(digest, bytes);
+      return { digest, size: bytes.length };
+    },
+  };
+}
+
+export function createFixedClock(
+  startedAt = "2026-07-31T09:00:00.000Z",
+  endedAt = "2026-07-31T09:04:00.000Z",
+): Clock {
+  const instants = [new Date(startedAt), new Date(endedAt)];
+  let index = 0;
+  return {
+    now() {
+      const instant = instants[Math.min(index, instants.length - 1)]!;
+      index += 1;
+      return instant;
+    },
+  };
+}
+
+function fakeReplayer(): ScriptReplayer {
+  return {
+    async replay() {
+      return {
+        status: "replayed",
+        observation: {},
+        observationDigest: `sha256:${"f".repeat(64)}`,
+        reportedValues: {},
+      };
+    },
+  };
+}
+
+export interface FakeExtractionDepsOptions {
+  readonly signer: DsseSigner;
+  readonly archive?: ArchiveRpcPort;
+  readonly runtime?: ExtractionDeps["runtime"];
+  readonly stateDump?: StateDumpPort;
+  readonly verifier?: VerifierIdentity;
+}
+
+export function createFakeExtractionDeps(options: FakeExtractionDepsOptions): ExtractionDeps {
+  return {
+    archive: options.archive ?? createFakeArchive(),
+    forkBackend: { kind: "injected-port" },
+    runtime: options.runtime ?? createFakeChainRuntime(),
+    replayer: fakeReplayer(),
+    artifactStore: createInMemoryArtifactStore(),
+    signer: options.signer,
+    clock: createFixedClock(),
+    verifier: options.verifier ?? CONFORMANCE_VERIFIER,
+    ...(options.stateDump === undefined ? {} : { stateDump: options.stateDump }),
+  };
+}
+
+export async function fakeBaseline(
+  deps: ExtractionDeps,
+  request: ExtractionRequest = fakeExtractionRequest(),
+): Promise<ConnectedBaseline> {
+  const archive = createBudgetedArchivePort(deps.archive, {
+    maxCalls: request.budget?.maxCalls ?? DEFAULT_ARCHIVE_BUDGET.maxCalls,
+    maxBytes: request.budget?.maxBytes ?? DEFAULT_ARCHIVE_BUDGET.maxBytes,
+  });
+  const anchorOutcome = await captureAnchor(archive, {
+    blockNumber: request.anchorBlockNumber,
+  }, deps.clock);
+  if (!anchorOutcome.ok) {
+    throw new Error(anchorOutcome.detail);
+  }
+  const baselineOutcome = await establishBaseline(deps, request, archive, anchorOutcome.value);
+  if (!baselineOutcome.ok) {
+    throw new Error(baselineOutcome.detail);
+  }
+  return baselineOutcome.value;
+}
+
+export interface ChainExtractionConformanceOptions {
+  readonly signer: DsseSigner;
+}
+
+function conformanceRequest(): ExtractionRequest {
+  return {
+    ...fakeExtractionRequest(),
+    fixtureDeclarations: [{ address: FAKE_ACTOR, kind: "account" }],
+    budget: { maxCalls: 500, maxBytes: 5_000_000 },
+  };
+}
+
+export function describeChainExtractionConformance(
+  options: ChainExtractionConformanceOptions,
+): void {
+  const { describe, expect, it } = globalThis as unknown as typeof import("vitest");
+
+  describe("chain extraction conformance", () => {
+    it("converges on the first pass", async () => {
+      blackholeRunCounter = 0;
+      const deps = createFakeExtractionDeps({
+        signer: options.signer,
+        runtime: createFakeChainRuntime({ hiddenReads: 0 }),
+      });
+      const extracted = await extractEnvironment(deps, conformanceRequest());
+      expect(extracted.status).toBe("candidate");
+      if (extracted.status !== "candidate") return;
+
+      const result = await widenAndReverify(deps, {
+        candidate: extracted.candidate,
+        request: conformanceRequest(),
+      });
+      expect(result.status).toBe("converged");
+      if (result.status !== "converged") return;
+      expect(result.rounds).toHaveLength(1);
+      expect(result.rounds[0]!.matchedBaseline).toBe(true);
+      expect(result.attestation.outcome).toBe("closed-reproducible");
+    });
+
+    it("converges after two widenings", async () => {
+      blackholeRunCounter = 0;
+      const deps = createFakeExtractionDeps({
+        signer: options.signer,
+        runtime: createFakeChainRuntime({ hiddenReads: 2 }),
+      });
+      const extracted = await extractEnvironment(deps, conformanceRequest());
+      expect(extracted.status).toBe("candidate");
+      if (extracted.status !== "candidate") return;
+
+      const result = await widenAndReverify(deps, {
+        candidate: extracted.candidate,
+        request: conformanceRequest(),
+      }, { maxWidenings: 2 });
+      expect(result.status).toBe("converged");
+      if (result.status !== "converged") return;
+      expect(result.rounds).toHaveLength(3);
+      expect(result.rounds[0]!.matchedBaseline).toBe(false);
+      expect(result.rounds[1]!.matchedBaseline).toBe(false);
+      expect(result.rounds[2]!.matchedBaseline).toBe(true);
+      const digests = result.rounds.map((round) => round.recordDigest);
+      expect(new Set(digests).size).toBe(3);
+      expect(stateArtifactEntryCounts(result.candidate.artifact).accounts).toBeGreaterThan(1);
+      expect(keySetIsEmpty(stateArtifactKeySet(result.candidate.artifact))).toBe(false);
+    });
+
+    it("never converges, and terminates under the bound", async () => {
+      blackholeRunCounter = 0;
+      const deps = createFakeExtractionDeps({
+        signer: options.signer,
+        runtime: createFakeChainRuntime({ hiddenReads: Infinity }),
+      });
+      const extracted = await extractEnvironment(deps, conformanceRequest());
+      expect(extracted.status).toBe("candidate");
+      if (extracted.status !== "candidate") return;
+
+      const result = await widenAndReverify(deps, {
+        candidate: extracted.candidate,
+        request: conformanceRequest(),
+      }, { maxWidenings: 2 });
+      expect(result.status).toBe("failed");
+      if (result.status !== "failed") return;
+      expect(result.reason).toBe("widen-bound-exhausted");
+      expect(result.archiveUsage.calls).toBeLessThan(result.archiveUsage.limits.maxCalls);
+      expect(result.archiveUsage.bytes).toBeLessThan(result.archiveUsage.limits.maxBytes);
+    });
+
+    it("refuses an archive that disagrees with itself between calls", async () => {
+      blackholeRunCounter = 0;
+      const deps = createFakeExtractionDeps({
+        signer: options.signer,
+        archive: createFakeArchive({ anchorDriftsAfterCall: 1 }),
+        runtime: createFakeChainRuntime(),
+      });
+      const result = await extractEnvironment(deps, conformanceRequest());
+      expect(result.status).toBe("failed");
+      if (result.status !== "failed") return;
+      expect(result.reason).toBe("archive-self-disagreement");
+      expect(result.disposition).toBe("provider-disagreement");
+    });
+
+    it("is not fooled by a dump that silently omits state the run touched", async () => {
+      blackholeRunCounter = 0;
+      const omitKey = `${FAKE_POOL}/${FAKE_SLOT_2}`;
+      const depsWithDump = createFakeExtractionDeps({
+        signer: options.signer,
+        runtime: createFakeChainRuntime({ hiddenReads: 0 }),
+        stateDump: createFakeStateDumpPort({ dumpOmits: [omitKey] }),
+      });
+      const withDump = await extractEnvironment(depsWithDump, conformanceRequest());
+      expect(withDump.status).toBe("candidate");
+      if (withDump.status !== "candidate") return;
+      expect(withDump.dumpOmissions.storage).toEqual([
+        { address: FAKE_POOL, slots: [FAKE_SLOT_2] },
+      ]);
+      const artifact = withDump.candidate.artifact.accounts.find(
+        (account) => normalizeAddress(account.address) === normalizeAddress(FAKE_POOL),
+      );
+      expect(artifact?.storage.some((entry) => normalizeSlot(entry.slot) === normalizeSlot(FAKE_SLOT_2))).toBe(true);
+
+      const convergedWithDump = await widenAndReverify(depsWithDump, {
+        candidate: withDump.candidate,
+        request: conformanceRequest(),
+      });
+      expect(convergedWithDump.status).toBe("converged");
+      if (convergedWithDump.status !== "converged") return;
+
+      const depsWithoutDump = createFakeExtractionDeps({
+        signer: options.signer,
+        runtime: createFakeChainRuntime({ hiddenReads: 0 }),
+      });
+      const withoutDump = await extractEnvironment(depsWithoutDump, conformanceRequest());
+      expect(withoutDump.status).toBe("candidate");
+      if (withoutDump.status !== "candidate") return;
+      const convergedWithoutDump = await widenAndReverify(depsWithoutDump, {
+        candidate: withoutDump.candidate,
+        request: conformanceRequest(),
+      });
+      expect(convergedWithoutDump.status).toBe("converged");
+      if (convergedWithoutDump.status !== "converged") return;
+      expect(stateArtifactDigest(serializeStateArtifact(convergedWithDump.candidate.artifact))).toBe(
+        stateArtifactDigest(serializeStateArtifact(convergedWithoutDump.candidate.artifact)),
+      );
+    });
+  });
 }

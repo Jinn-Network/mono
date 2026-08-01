@@ -53,6 +53,8 @@ interface StoredExtractionArtifacts {
   readonly artifactSize: number;
   readonly bundleDigest: Sha256Digest;
   readonly bundleSize: number;
+  readonly manifestDigest: Sha256Digest;
+  readonly manifestSize: number;
   readonly fixtureDigest: Sha256Digest;
   readonly fixtureSize: number;
 }
@@ -108,6 +110,8 @@ export async function storeExtractionArtifacts(
   if (!storedArtifact.ok) return storedArtifact;
   const storedBundle = await putChecked(store, coverage.bundleBytes, "source proof bundle");
   if (!storedBundle.ok) return storedBundle;
+  const storedManifest = await putChecked(store, coverage.manifestBytes, "source proof manifest");
+  if (!storedManifest.ok) return storedManifest;
   const storedFixture = await putChecked(store, coverage.fixtureBytes, "fixture coverage");
   if (!storedFixture.ok) return storedFixture;
   return stageOk({
@@ -115,6 +119,8 @@ export async function storeExtractionArtifacts(
     artifactSize: storedArtifact.value.size,
     bundleDigest: storedBundle.value.digest,
     bundleSize: storedBundle.value.size,
+    manifestDigest: storedManifest.value.digest,
+    manifestSize: storedManifest.value.size,
     fixtureDigest: storedFixture.value.digest,
     fixtureSize: storedFixture.value.size,
   });
@@ -156,8 +162,8 @@ export function buildClosedStateRecord(
             proofFormat: "eip-1186" as const,
             proofs: {
               name: "source-proofs",
-              digest: { sha256: bareHexDigest(stored.bundleDigest) },
-              size: stored.bundleSize,
+              digest: { sha256: bareHexDigest(stored.manifestDigest) },
+              size: stored.manifestSize,
             },
             coverage: coverage.proofCoverage,
           },
