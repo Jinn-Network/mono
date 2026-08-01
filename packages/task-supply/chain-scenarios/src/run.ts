@@ -78,7 +78,7 @@ function toChainAdmissionCandidate(
     statementDigest: candidate.sourceCommitment as `sha256:${string}`,
     referenceScriptDigest: referenceScriptDigest as `sha256:${string}`,
     evaluationSpecBytes: spec.bytes,
-    evalSemanticsVersion: spec.document.semanticsVersion,
+    evalSemanticsVersion: candidate.predicateBlock.predicateSemanticsVersion,
   };
 }
 

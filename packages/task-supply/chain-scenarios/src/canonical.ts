@@ -45,7 +45,7 @@ export function serializeCanonicalJson(value: CanonicalJsonValue): string {
     if (!Number.isSafeInteger(value)) {
       throw new ScenarioError(
         "invalid-input",
-        `Canonical JSON numbers must be exact I-JSON safe integers; got ${value}. `
+        `Canonical JSON numbers must be exact I-JSON integers within the IEEE-754 representable range; got ${value}. `
           + "Encode fractional values as decimal strings.",
       );
     }

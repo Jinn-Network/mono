@@ -76,9 +76,9 @@ describe("a template whose predicates do not honor its own checklist is refused"
   });
 });
 
-describe("the checklist is a mitigation, not a guarantee", () => {
+describe("the checklist is a mitigation with acknowledged residual risk", () => {
   it("says so in its own residual-risk field, which every shipped template must fill", () => {
     expect(lendingLifecycleTemplate.hardening.acknowledgedResidualRisk)
-      .toMatch(/not.*(guarantee|un-gameable|proof)/i);
+      .toMatch(/does not guarantee|proves nothing about non-gameability/i);
   });
 });

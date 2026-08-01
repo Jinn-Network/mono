@@ -11,15 +11,15 @@ import {
   sealChainEnvironmentRecord,
   sealCryptoEnvironmentRecord,
 } from "@jinn-network/chain-environment-record";
+import type {
+  ChainAdmissionReceiptV1,
+  ChainAdmissionRefusalCode,
+  ChainAdmissionResult,
+  ChainObservation,
+} from "@jinn-network/task-admission";
 import {
   admitChainCandidate,
   verifyChainAdmissionReceiptV1,
-  type ChainAdmissionReceiptV1,
-  type ChainAdmissionRefusalCode,
-  type ChainAdmissionResult,
-  type ChainObservation,
-} from "@jinn-network/task-admission";
-import {
   goldenChainCandidate,
   goldenChainReceipt,
   scriptedChainPort,

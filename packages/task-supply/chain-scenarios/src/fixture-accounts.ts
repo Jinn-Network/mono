@@ -73,7 +73,7 @@ export interface FixtureAddressLedger {
 
 /**
  * Program contract 8's second half: never reused across records. In-memory and per-run —
- * this is a within-run structural guarantee, not a global registry, and the doc says so
+ * this is a within-run structural invariant, not a global registry, and the doc says so
  * rather than implying a durability this holds none of.
  */
 export function createFixtureAddressLedger(): FixtureAddressLedger {
