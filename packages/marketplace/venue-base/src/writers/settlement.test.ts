@@ -139,6 +139,19 @@ describe("readMechDeliveryFacts", () => {
     expect(logSource.logsInRange).toHaveBeenCalledWith(0n, 100n);
   });
 
+  // E44: production deliver-leg writes a raw 32-byte sha256 digest, not UTF-8 CID text.
+  test("decodes a raw 32-byte sha256 digest from Deliver.data (production deliver-leg shape)", async () => {
+    const digestHex = "a".repeat(64);
+    const dataHex = `0x${digestHex}` as Hex;
+    const logSource = mockLogSource([todayDeliverLog({ requestId: REQUEST_ID, dataHex })]);
+    const input = baseInput({ logSource, publicClient: { getBlockNumber: async () => 100n } as unknown as PublicClient });
+    const ports = createSettlementPorts(input);
+
+    const facts = await ports.readMechDeliveryFacts({ requestId: REQUEST_ID, config: BASE_SEPOLIA_TODAY });
+
+    expect(facts).toEqual({ requestId: REQUEST_ID, sha256CidDigest: `sha256:${digestHex}` });
+  });
+
   test("throws, naming the requestId, when no Deliver event exists", async () => {
     const logSource = mockLogSource([]);
     const input = baseInput({ logSource, publicClient: { getBlockNumber: async () => 100n } as unknown as PublicClient });

@@ -175,13 +175,16 @@ function mechDeliverDataField(chain: MarketplaceChainConfig): "data" | "delivery
 }
 
 /**
- * Decodes a Mech `Deliver` event's opaque `data`/`deliveryData` bytes as the UTF-8 text of a
- * raw-codec CID (the convention `computeRawCodecCid`/`decodeRawCodecCidDigestHex` establish),
- * recovering the sha256 digest embedded in that CID. Unverified against a real on-chain payload
- * (see task report); the exact byte layout the deployed mech emits is the second largest open
- * assumption in this file.
+ * Decodes a Mech `Deliver` event's opaque `data`/`deliveryData` bytes.
+ *
+ * Production `deliver-leg` writes a raw 32-byte sha256 digest. Older / test fixtures write the
+ * UTF-8 text of a raw-codec CID (`computeRawCodecCid`). Accept both; refuse anything else.
  */
 function decodeMechDeliverDigest(dataHex: Hex): `sha256:${string}` {
+  const hex = dataHex.startsWith("0x") ? dataHex.slice(2) : dataHex;
+  if (/^[0-9a-fA-F]{64}$/.test(hex)) {
+    return `sha256:${hex.toLowerCase()}`;
+  }
   const cidString = hexToString(dataHex);
   return `sha256:${decodeRawCodecCidDigestHex(cidString)}`;
 }

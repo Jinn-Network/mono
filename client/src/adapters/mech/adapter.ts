@@ -1225,28 +1225,30 @@ export class MechAdapter implements ExecutionAdapter {
       solutionEnvelopeCid,
       this.ipfsFetchOpts(),
     ) as Record<string, unknown>;
-    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(resultPayload);
-    if (!creationProvenance && typeof resultPayload.data === 'string') {
+    // E43/E44: IPFS may hold a sealed TEP Delivery with the bridge envelope nested. Unwrap
+    // before reading provenance / result data (same preference as deliveryClaimForDelivery).
+    const envelopeDocument = signedEnvelopeJsonFromDeliveryOrRaw(resultPayload) as Record<string, unknown>;
+    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(envelopeDocument);
+    if (!creationProvenance && typeof envelopeDocument.data === 'string') {
       try {
         creationProvenance = taskCreationProvenanceFromSolutionEnvelope(
-          JSON.parse(resultPayload.data),
+          JSON.parse(envelopeDocument.data),
         );
       } catch {
         // Legacy non-envelope result payload. The fail-closed check below
         // keeps it out of the new provenance-bearing writer path.
       }
     }
-    if (!creationProvenance) {
-      throw new Error(
-        `evaluation opportunity ${solution.requestId} is missing canonical TaskCreated provenance in its solution envelope`,
-      );
-    }
     const canonicalCreationProvenance =
       await this.canonicalTaskCreationForEvaluation(
         solution.taskId,
         solution.blockNumber,
       );
-    if (
+    // Bridge-era envelopes (buildLegacyExecutionEnvelope) carry placeholder creation tx/block;
+    // when the nested envelope lacks valid provenance, trust the on-chain TaskCreated SoT.
+    if (!creationProvenance) {
+      creationProvenance = canonicalCreationProvenance;
+    } else if (
       creationProvenance.onchainCreationTx.toLowerCase()
         !== canonicalCreationProvenance.onchainCreationTx.toLowerCase()
       || creationProvenance.onchainCreationBlock
@@ -1264,7 +1266,9 @@ export class MechAdapter implements ExecutionAdapter {
       new TextEncoder().encode(JSON.stringify(resultPayload)),
     );
     const resultData =
-      bridgedResultData ?? (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+      bridgedResultData
+      ?? (typeof envelopeDocument.data === 'string' ? envelopeDocument.data : undefined)
+      ?? JSON.stringify(envelopeDocument);
     let autopilotEvaluationContext: Record<string, unknown> | undefined;
     if (
       restoration.task.spec?.['source'] === 'autopilot-session'

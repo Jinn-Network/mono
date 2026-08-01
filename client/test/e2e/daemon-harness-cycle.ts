@@ -7,11 +7,14 @@
  * Spans:
  *   Anvil fork → earning bootstrap → production Daemon (MechAdapter)
  *   → prediction.v1 task post → daemon claims + executes (real harness)
- *   → on-chain deliver tx → activity counter increments.
+ *   → on-chain deliver tx → self-eval verdict → activity counter increments.
  *
  * Pick harness via JINN_E2E_HARNESS=prediction-v1-baseline|hermes-agent|claude-code|codex.
  * Defaults to prediction-v1-baseline (deterministic, no API key required).
  * Skips cleanly if the selected harness's API key isn't available.
+ *
+ * Activity credit on V3 is verdict-gated (`claimVerdictDelivery` → recordSolutionDelivery),
+ * not solution Deliver — see readActivityCount docstring.
  */
 import {
   harnessSelectorFromEnv,
@@ -25,6 +28,7 @@ import {
   postPredictionV1Task,
   waitForDaemonClaim,
   waitForDelivery,
+  waitForVerdict,
   readActivityCount,
   ANVIL_PRIVATE_KEYS,
 } from './_daemon-harness-helpers.js';
@@ -139,12 +143,17 @@ async function main(): Promise<void> {
       }
       console.log(`  ✓ envelope.executor.implName = ${delivered.solverHarnessName}`);
 
+      // V3 activity increments on the first verdict, not on solution Deliver. Wait for the
+      // operator to self-evaluate (allowSolverSelfEvaluation: true on the posted task).
+      const verdict = await waitForVerdict(fixture, posted, operator, v3Env);
+      console.log(`verdict claimed: tx=${verdict.verdictTxHash}`);
+
       // Task 7 assertion: daemon's settle tx must have incremented the operator's
       // on-chain activity counter. The V3 router calls
       // `recordSolutionDelivery(safeAddress, solutionDigest)` on our locally-deployed
-      // TaskActivityCheckerV3, which increments `eligibleActivityWeight[safeAddress]`.
-      // Poll for up to 60s — the claimSolutionDelivery tx may execute slightly after
-      // the Deliver event we already observed.
+      // TaskActivityCheckerV3 from claimVerdictDelivery when the attempt finalizes.
+      // Poll for up to 60s — the claimVerdictDelivery tx may execute slightly after
+      // the VerdictDeliveryClaimed event we already observed.
       let activityAfter = activityBefore;
       const deadline = Date.now() + 60_000;
       while (Date.now() < deadline && activityAfter <= activityBefore) {
