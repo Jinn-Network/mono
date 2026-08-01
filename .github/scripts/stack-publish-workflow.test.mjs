@@ -130,6 +130,20 @@ test('the stable lane refuses a release tag that is not on origin at the checked
   assert.match(workflow, /Release tag \$\{RELEASE_TAG\} points at/);
 });
 
+test('the Phase A convergence hold prevents every real stack publication', () => {
+  const convergenceGate = "env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'";
+  assert.match(workflow, /PHASE_A_STACK_CONVERGENCE_VERIFIED: 'false'/);
+
+  const publicationSteps = workflow
+    .split(/^      - name: /m)
+    .filter((step) => step.includes('node .github/scripts/publish-stack.mjs') && !step.includes('--dry-run'));
+
+  assert.equal(publicationSteps.length, 2, 'canary and stable are the only real stack-publication steps');
+  for (const step of publicationSteps) {
+    assert.match(step, new RegExp(`if: .*${convergenceGate}`), 'each real stack-publication step must require the false-by-default convergence gate');
+  }
+});
+
 test('both lanes run external acceptance after publishing', () => {
   const occurrences = workflow.split('name: Registry consumer acceptance').length - 1;
   assert.equal(occurrences, 2, 'canary and stable lanes must each run external acceptance');

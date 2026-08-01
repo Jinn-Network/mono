@@ -26,6 +26,11 @@ permissions:
   id-token: write
   checks: read
 
+# Phase A publication remains fail-closed until the final workflow can verify
+# the complete stack in the same run before npm is reachable.
+env:
+  PHASE_A_STACK_CONVERGENCE_VERIFIED: 'false'
+
 concurrency:
   # Canary lane (push) is deliberately branch-agnostic: the whole 45-package
   # set republishes on every push regardless of which tree changed, so a push
@@ -153,14 +158,14 @@ jobs:
             }
 
       - name: Publish the platform package set
-        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push' && env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
           node .github/scripts/publish-stack.mjs --mode canary --sha "${JINN_BUILD_COMMIT}"
 
       - name: Wait for the platform set on the registry
-        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push' && env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -178,7 +183,7 @@ jobs:
           exit 1
 
       - name: Registry consumer acceptance
-        if: steps.guard.outputs.present == 'true' && github.event_name == 'push'
+        if: steps.guard.outputs.present == 'true' && github.event_name == 'push' && env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -229,12 +234,14 @@ jobs:
           node .github/scripts/fixture-immutability.mjs --registry-baseline --version "${RELEASE_TAG#stack-v}"
 
       - name: Publish the stable platform set
+        if: env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
           node .github/scripts/publish-stack.mjs --mode stable --release-tag "${RELEASE_TAG}" --sha "${JINN_BUILD_COMMIT}"
 
       - name: Wait for the platform set on the registry
+        if: env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -251,6 +258,7 @@ jobs:
           exit 1
 
       - name: Registry consumer acceptance
+        if: env.PHASE_A_STACK_CONVERGENCE_VERIFIED == 'true'
         shell: bash
         run: |
           set -euo pipefail
