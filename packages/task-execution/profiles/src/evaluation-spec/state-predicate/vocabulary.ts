@@ -429,6 +429,13 @@ export const EnvelopeTighteningsSchema = z.strictObject({
 /** The composite crypto-environment record, by digest. No environment content is inlined
  * (E11) — `content` is rejected outright. `digest.sha256` is an in-toto DigestSet value:
  * BARE lowercase hex, never `sha256:`-prefixed (program §4.6). */
+/** Reserved by the state-predicate verdict rule (design §6.2); authors must not declare these. */
+export const STATE_PREDICATE_RESERVED_MEASUREMENTS = [
+  "safetyConstraintsViolated",
+  "statePredicateUnevaluable",
+  "successPredicatesSatisfied",
+] as const;
+
 export const EnvironmentRecordDescriptorSchema = ResourceDescriptorSchema.superRefine((descriptor, ctx) => {
   if (descriptor.content !== undefined) {
     ctx.addIssue({ code: "custom", path: ["content"], message: "environmentRecord must be referenced by digest; no environment content is inlined (E11)." });

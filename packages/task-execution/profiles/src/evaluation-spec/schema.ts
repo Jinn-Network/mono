@@ -5,12 +5,15 @@ import { VerdictRuleSchema } from "./verdict-rule.js";
 import { UnscorableSchema } from "./unscorable.js";
 import { FAMILY_BLOCK_SCHEMAS } from "./family-blocks.js";
 
-/** Grader families (4, frozen, §7.1). */
+/** Grader families (5, §7.1 + chain-environment design §6/CF1: `state-predicate` added
+ * additively — an enum amendment plus a typed block, proposed explicitly, never an appeal to
+ * extension rules the profiles design does not carry). */
 export const GRADER_FAMILIES = [
   "deterministic-process",
   "model-graded",
   "human-review",
   "composite",
+  "state-predicate",
 ] as const;
 export type GraderFamily = (typeof GRADER_FAMILIES)[number];
 

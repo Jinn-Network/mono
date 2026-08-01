@@ -43,6 +43,7 @@ export const FIXTURE_FAMILIES: string[] = [
   "resolution",
   "result-evaluation",
   "schema-hardening",
+  "state-predicate-block",
   "sub-profile",
   "swe-rebench-golden",
   "task-profile",

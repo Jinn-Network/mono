@@ -2,6 +2,16 @@ import { z } from "zod";
 import { accessClassifiedResourceDescriptor, ResourceDescriptorSchema } from "../resource-descriptor.js";
 import { COMPOSITE_MAX_FANOUT } from "./composite.js";
 import type { GraderFamily } from "./schema.js";
+import {
+  EnvironmentRecordDescriptorSchema,
+  EnvelopeTighteningsSchema,
+  MEASUREMENT_ONLY_KINDS,
+  PREDICATE_SEMANTICS_VERSION,
+  PredicateSchema,
+  SAFETY_CONSTRAINT_KINDS,
+  STATE_PREDICATE_RESERVED_MEASUREMENTS,
+  StatePredicateMeasurementSchema,
+} from "./state-predicate/vocabulary.js";
 
 const Sha256DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 
@@ -153,10 +163,65 @@ export const CompositeBlockSchema = withNamespacedExtras(
 );
 export type CompositeBlock = z.infer<typeof CompositeBlockSchema>;
 
+// --- state-predicate (chain-environment design §6.1/§6.2, CF1) ---
+
+export const STATE_PREDICATE_FAMILY = "state-predicate" as const;
+
+const STATE_PREDICATE_SHAPE = {
+  // The COMPOSITE crypto-environment record, by digest (E11). Never inlined: this family has
+  // no inline-match rule to enforce because there is nothing inline to match.
+  environmentRecord: EnvironmentRecordDescriptorSchema,
+  predicateSemanticsVersion: z.literal(PREDICATE_SEMANTICS_VERSION),
+  successPredicates: z.array(PredicateSchema).min(1),
+  safetyConstraints: z.array(PredicateSchema),
+  measurements: z.array(StatePredicateMeasurementSchema),
+  envelopeTightenings: EnvelopeTighteningsSchema.optional(),
+  timeout: z.number().int().positive(),
+};
+
+export const StatePredicateBlockSchema = withNamespacedExtras(
+  z.looseObject(STATE_PREDICATE_SHAPE),
+  Object.keys(STATE_PREDICATE_SHAPE),
+).superRefine((block, ctx) => {
+  block.successPredicates.forEach((predicate, index) => {
+    if ((MEASUREMENT_ONLY_KINDS as readonly string[]).includes(predicate.kind)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["successPredicates", index, "kind"],
+        message: `"${predicate.kind}" records what the agent read; it never gates (design §6.2).`,
+      });
+    }
+  });
+  block.safetyConstraints.forEach((predicate, index) => {
+    if (!(SAFETY_CONSTRAINT_KINDS as readonly string[]).includes(predicate.kind)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["safetyConstraints", index, "kind"],
+        message:
+          `safetyConstraints are bounded to log- and transaction-observable kinds in v1 `
+          + `(${SAFETY_CONSTRAINT_KINDS.join(", ")}); "${predicate.kind}" reads state, and `
+          + "per-operation state snapshots are a parked extension (design §6.2).",
+      });
+    }
+  });
+  const names = new Set<string>();
+  for (const [index, measurement] of block.measurements.entries()) {
+    if ((STATE_PREDICATE_RESERVED_MEASUREMENTS as readonly string[]).includes(measurement.name)) {
+      ctx.addIssue({ code: "custom", path: ["measurements", index, "name"], message: `"${measurement.name}" is reserved by the state-predicate verdict rule.` });
+    }
+    if (names.has(measurement.name)) {
+      ctx.addIssue({ code: "custom", path: ["measurements", index, "name"], message: `duplicate measurement name "${measurement.name}".` });
+    }
+    names.add(measurement.name);
+  }
+});
+export type StatePredicateBlock = z.infer<typeof StatePredicateBlockSchema>;
+
 /** Discriminates the `familyBlock` schema on `EvaluationSpec.family` (wired by schema.ts). */
 export const FAMILY_BLOCK_SCHEMAS: Record<GraderFamily, z.ZodTypeAny> = {
   "deterministic-process": DeterministicProcessBlockSchema,
   "model-graded": ModelGradedBlockSchema,
   "human-review": HumanReviewBlockSchema,
   composite: CompositeBlockSchema,
+  "state-predicate": StatePredicateBlockSchema,
 };
