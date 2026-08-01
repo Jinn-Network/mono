@@ -39,6 +39,12 @@ export {
 } from "./baseline.js";
 
 export {
+  harvestTouchedState,
+  type HarvestOptions,
+  type HarvestResult,
+} from "./harvest.js";
+
+export {
   captureAnchor,
   confirmAnchorUnchanged,
   type AnchorCapture,
