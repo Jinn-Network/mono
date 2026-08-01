@@ -14,7 +14,11 @@ import {
 import { recordDigest } from "@jinn-network/trust-core";
 
 import { CHAIN_OBSERVATION_SCHEMA_ID } from "./identifiers.js";
-import type { CanonicalChainObservation } from "./observation.js";
+import {
+  buildCanonicalChainObservation,
+  chainObservationDigest,
+  type CanonicalChainObservation,
+} from "./observation.js";
 import type { Clock } from "./ports.js";
 import type { StructuredReadRequest } from "./state-reads.js";
 import { resolveStateReads } from "./state-reads.js";
@@ -194,7 +198,7 @@ export function createScriptReplayer(
           { state: "post-replay" },
         );
 
-      const observation: CanonicalChainObservation = {
+      const observation = buildCanonicalChainObservation({
         schema: CHAIN_OBSERVATION_SCHEMA_ID,
         probes: [],
         touchedState: [],
@@ -202,13 +206,13 @@ export function createScriptReplayer(
         traceProjectionDigest: recordDigest(new Uint8Array()),
         finalStateCommitment: `0x${"0".repeat(64)}`,
         blocks: [],
-      };
+      });
 
       void config.clock.now();
       return {
         status: "replayed",
         observation,
-        observationDigest: recordDigest(new TextEncoder().encode(JSON.stringify(observation))),
+        observationDigest: chainObservationDigest(observation),
         reportedValues,
       };
     },

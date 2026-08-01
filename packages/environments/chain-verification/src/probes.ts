@@ -3,6 +3,10 @@
 import { recordDigest } from "@jinn-network/trust-core";
 
 import { CHAIN_OBSERVATION_SCHEMA_ID } from "./identifiers.js";
+import {
+  buildCanonicalChainObservation,
+  chainObservationDigest,
+} from "./observation.js";
 import type { ChainProbeExecutionRequest, ChainProbeExecutionResult, Clock } from "./ports.js";
 import type { StructuredReadRequest } from "./state-reads.js";
 import { resolveStateReads } from "./state-reads.js";
@@ -63,26 +67,20 @@ export function createProbeExecutor(config: ProbeExecutorConfig): {
         ...(request.signal === undefined ? {} : { signal: request.signal }),
       });
 
-      const observation = typeof raw === "object" && raw !== null
-        ? {
-          ...(raw as Record<string, unknown>),
-          schema: CHAIN_OBSERVATION_SCHEMA_ID,
-          stateReads: baselineReads,
-        }
-        : {
-          schema: CHAIN_OBSERVATION_SCHEMA_ID,
-          probes: [],
-          touchedState: [],
-          stateReads: baselineReads,
-          traceProjectionDigest: recordDigest(new Uint8Array()),
-          finalStateCommitment: `0x${"0".repeat(64)}`,
-          blocks: [],
-        };
-
+      const observation = buildCanonicalChainObservation({
+        schema: CHAIN_OBSERVATION_SCHEMA_ID,
+        probes: [],
+        touchedState: [],
+        traceProjectionDigest: recordDigest(new Uint8Array()),
+        finalStateCommitment: `0x${"0".repeat(64)}`,
+        blocks: [],
+        ...(typeof raw === "object" && raw !== null ? raw as Record<string, unknown> : {}),
+        stateReads: baselineReads,
+      });
       const wallSeconds = Math.max(0, (config.clock.now().getTime() - started) / 1000);
       return {
         observation,
-        observationDigest: recordDigest(new TextEncoder().encode(JSON.stringify(observation))),
+        observationDigest: chainObservationDigest(observation),
         timedOut: false,
         cost: { wallSeconds },
       };

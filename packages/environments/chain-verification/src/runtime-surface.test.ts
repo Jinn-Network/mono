@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { recordDigest } from "@jinn-network/trust-core";
 
 import { createAnvilMaterializer } from "./anvil.js";
 import { buildConformanceChainRecord } from "./conformance-records.js";
 import { ChainVerificationError } from "./errors.js";
 import { DEFAULT_BLACKHOLE_POLICY } from "./ports.js";
 import type { Clock } from "./ports.js";
+import {
+  buildCanonicalChainObservation,
+  chainObservationDigest,
+} from "./observation.js";
 import { createProbeExecutor } from "./probes.js";
 import { createScriptReplayer, parseChainSolutionScript, SOLUTION_OPERATION_KINDS } from "./replay.js";
 import {
@@ -146,7 +151,7 @@ describe("createAnvilMaterializer", () => {
 });
 
 describe("createProbeExecutor", () => {
-  it("returns a raw observation the caller canonicalizes, and reports its own cost", async () => {
+  it("returns a canonical observation and reports its own cost", async () => {
     const executor = createProbeExecutor({
       rpcTransport: fakeRpcTransport("probe-suite"),
       clock: createFixedClock(),
@@ -160,6 +165,26 @@ describe("createProbeExecutor", () => {
     expect(result.timedOut).toBe(false);
     expect(result.cost.wallSeconds).toBeGreaterThanOrEqual(0);
     expect(result.observation).toBeTypeOf("object");
+  });
+
+  it("digests the canonical observation, not JSON.stringify", async () => {
+    const executor = createProbeExecutor({
+      rpcTransport: fakeRpcTransport("probe-permuted"),
+      clock: createFixedClock(),
+    });
+    const result = await executor.execute({
+      instance: fakeInstance(),
+      probeSuiteBytes: new TextEncoder().encode(JSON.stringify({ probes: [] })),
+      comparatorBytes: new TextEncoder().encode("{}"),
+      timeoutSeconds: 30,
+    });
+    const canonical = buildCanonicalChainObservation(result.observation);
+    expect(result.observation).toEqual(canonical);
+    expect(result.observationDigest).toBe(chainObservationDigest(canonical));
+    const legacyDigest = recordDigest(
+      new TextEncoder().encode(JSON.stringify(result.observation)),
+    );
+    expect(result.observationDigest).not.toBe(legacyDigest);
   });
 });
 
@@ -208,6 +233,25 @@ describe("createScriptReplayer", () => {
     // @ts-expect-error discriminated union not narrowed across vitest expect()
     expect(result.refusal.detail).toContain("timeWarp");
   });
+
+  it("digests the canonical replay observation via chainObservationDigest", async () => {
+    const replayer = createScriptReplayer({
+      rpcTransport: fakeRpcTransport("healthy"),
+      clock: createFixedClock(),
+    });
+    const result = await replayer.replay({
+      instance: fakeInstance(),
+      script: { operations: [{ op: "report", name: "balance", value: "42" }] },
+      timeoutSeconds: 30,
+    });
+    expect(result.status).toBe("replayed");
+    if (result.status !== "replayed") return;
+    expect(result.observationDigest).toBe(chainObservationDigest(result.observation));
+    const legacyDigest = recordDigest(
+      new TextEncoder().encode(JSON.stringify(result.observation)),
+    );
+    expect(result.observationDigest).not.toBe(legacyDigest);
+  });
 });
 
 function fakeProcessHost(): ProcessHost & {
@@ -253,7 +297,7 @@ function fakeProcessHost(): ProcessHost & {
 }
 
 function fakeRpcTransport(
-  script: "healthy" | "partial-load" | "probe-suite",
+  script: "healthy" | "partial-load" | "probe-suite" | "probe-permuted",
 ): RpcTransport {
   return {
     async send(request) {
@@ -279,6 +323,27 @@ function fakeRpcTransport(
         };
       }
       if (request.method === "jinn_probeObservation") {
+        if (script === "probe-permuted") {
+          return {
+            probes: [],
+            touchedState: [
+              {
+                address: "0x00000000000000000000000000000000000000bb",
+                nonce: "1",
+                balance: "1",
+                codeHash: `0x${"3".repeat(64)}`,
+                storage: [{ slot: `0x${"0".repeat(63)}2`, value: `0x${"0".repeat(63)}9` }],
+              },
+              {
+                address: "0x00000000000000000000000000000000000000aa",
+                nonce: "0",
+                balance: "0",
+                codeHash: `0x${"4".repeat(64)}`,
+                storage: [],
+              },
+            ],
+          };
+        }
         return { probes: [], touchedState: [] };
       }
       if (request.method === "eth_sendRawTransaction") return `0x${"e".repeat(64)}`;
