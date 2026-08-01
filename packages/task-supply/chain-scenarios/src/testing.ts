@@ -19,6 +19,10 @@ import {
 
 import { toBareHex } from "./digest.js";
 import {
+  ApprovalHygieneParamsSchema,
+  type ApprovalHygieneParams,
+} from "./families/approval-hygiene.js";
+import {
   LendingLifecycleParamsSchema,
   type LendingLifecycleParams,
 } from "./families/lending-lifecycle.js";
@@ -30,6 +34,8 @@ import { resolveRoleAddress } from "./template.js";
 const STUB_ABI_DIGEST = "a".repeat(64);
 const BORROW_SIGNATURE = "Borrow(address,address,address,uint256,uint8,uint256,uint16)";
 const SUPPLY_SIGNATURE = "Supply(address,address,address,uint256,uint16)";
+const APPROVAL_SIGNATURE = "Approval(address,address,uint256)";
+const UNSAFE_ALLOWANCE = 10_000_000_000_000_000_000n;
 
 function roleAddress(byte: string): string {
   return `0x${byte.repeat(20)}`;
@@ -184,6 +190,140 @@ export function fixtureEnvironment(): ChainDerivationEnvironment {
 }
 
 export const LENDING_PARAMS: LendingLifecycleParams = LendingLifecycleParamsSchema.parse({});
+export const APPROVAL_HYGIENE_PARAMS: ApprovalHygieneParams = ApprovalHygieneParamsSchema.parse({});
+
+export function approvalHygieneFixtureEnvironment(): ChainDerivationEnvironment {
+  const chainRecord = parseChainEnvironmentRecord(sealChainEnvironmentRecord({
+    kind: CHAIN_ENVIRONMENT_KIND,
+    runtime: {
+      family: "anvil",
+      version: "1.3.7",
+      image: { manifestDigest: `sha256:${"1".repeat(64)}`, platform: "linux/amd64" },
+      binary: { name: "anvil", digest: `sha256:${"2".repeat(64)}` },
+      evm: { hardfork: "cancun", sandboxChainId: 1, nonDefaultSettings: {} },
+      launch: { options: { "no-mining": true } },
+    },
+    sourceAnchor: {
+      caip2ChainId: "eip155:1",
+      nativeChainId: 1,
+      genesisHash: `0x${"d".repeat(64)}`,
+      blockNumber: 21_000_000,
+      blockHash: `0x${"e".repeat(64)}`,
+      stateRoot: `0x${"f".repeat(64)}`,
+      timestamp: 1_735_689_600,
+      finalityPolicy: "finalized",
+    },
+    stateMaterialization: {
+      closureClass: "closed-state",
+      fidelityClass: "anchored-subset",
+      constructionMethod: "archive-extraction",
+      materializer: { id: "anvil-state-loader", version: "0.4.1", digest: `sha256:${"3".repeat(64)}` },
+      stateArtifact: {
+        descriptor: { name: "state.json", digest: { sha256: "4".repeat(64) } },
+        format: { id: "jinn.chain-state-slice", version: "1" },
+        entryCounts: { accounts: 5, storageSlots: 20, codeEntries: 2 },
+      },
+      sourceProofManifest: {
+        proofFormat: "eip-1186",
+        proofs: { name: "proofs.json", digest: { sha256: "5".repeat(64) } },
+        coverage: { accounts: 3, storageSlots: 18, codeEntries: 2 },
+      },
+      fixtureCoverage: {
+        manifest: { name: "mutations.json", digest: { sha256: "6".repeat(64) } },
+        declared: { accounts: 2, storageSlots: 2, codeEntries: 0 },
+        mutatedProofCoveredAccounts: 0,
+      },
+      mutatesSourceProtocolState: false,
+      initialStateCommitment: `0x${"7".repeat(64)}`,
+    },
+    fixtures: {
+      modules: [
+        { id: "accounts", kind: "funded-accounts", module: { name: "a", digest: { sha256: "8".repeat(64) } } },
+      ],
+      accounts: [
+        { role: "token", address: roleAddress("11"), nativeBalanceWei: "10000000000000000000" },
+        { role: "owner", address: roleAddress("12"), nativeBalanceWei: "10000000000000000000" },
+        { role: "unsafe-spender-a", address: roleAddress("13"), nativeBalanceWei: "10000000000000000000" },
+        { role: "unsafe-spender-b", address: roleAddress("14"), nativeBalanceWei: "10000000000000000000" },
+        { role: "retained-spender", address: roleAddress("15"), nativeBalanceWei: "10000000000000000000" },
+        { role: "token-minter", address: roleAddress("16"), nativeBalanceWei: "10000000000000000000" },
+      ],
+    },
+    determinismControls: {
+      miningMode: "manual",
+      orderingPolicy: "fifo",
+      mempoolPolicy: "none",
+      initialBlockNumber: 21_000_001,
+      initialTimestamp: 1_735_689_612,
+      blockTimeProgression: { mode: "fixed-increment", secondsPerBlock: 12 },
+      baseFeePolicy: { mode: "fixed", weiPerGas: "1000000000" },
+      gasPricePolicy: { mode: "fixed", weiPerGas: "1000000000" },
+      blockGasLimit: "30000000",
+      perTransactionGasCeiling: "15000000",
+      coinbase: `0x${"c0".repeat(20)}`,
+      prevrandao: `0x${"9".repeat(64)}`,
+      replacementPolicy: "reject",
+      noncePolicy: "strict",
+      timeoutClock: "chain-time",
+      timeWarp: { maxSecondsPerOperation: 86_400, maxAggregateSeconds: 2_592_000, maxBlocksPerOperation: 7200 },
+      resetMechanism: "fresh-process",
+    },
+    capabilityEnvelope: {
+      toolInterfaces: [
+        { id: "jinn.chain-tools", version: "1.0", schema: { name: "t", digest: { sha256: "a".repeat(64) } } },
+      ],
+      rpc: { readMethods: ["eth_call"], stateChangingMethods: ["eth_sendRawTransaction"] },
+      signerRoles: [{ role: "owner", accounts: [roleAddress("12")] }],
+      permittedChainId: 1,
+      limits: {
+        maxTransactions: 25,
+        maxAggregateNativeValueWei: "5000000000000000000",
+        tokenSpendPolicies: [],
+        maxGasPerTransaction: "5000000",
+        maxAggregateGas: "60000000",
+        maxExecutionDurationMs: 600_000,
+        maxBlockAdvance: 500,
+        maxChainSecondsAdvance: 604_800,
+      },
+      egressPolicyId: "jinn.egress.blackhole/1",
+    },
+    verificationContract: {
+      probeSuite: {
+        descriptor: { name: "probes", digest: { sha256: "b".repeat(64) } },
+        format: { id: "jinn.chain-probes", version: "1" },
+      },
+      observationSchema: { name: "obs", digest: { sha256: "c".repeat(64) } },
+      baselineObservationDigest: `sha256:${"d".repeat(64)}`,
+      comparator: { id: "canonical-observation-eq", version: "1.0.0", digest: `sha256:${"e".repeat(64)}` },
+      closureCheckRequired: true,
+      resetRequirements: { freshInstancePerRun: true, minimumRuns: 5 },
+      fixtureProbeCoverage: [{ fixtureId: "accounts", probeIds: ["balances"] }],
+      policyId: "jinn.chain-verification-policy/1",
+    },
+  }));
+
+  const chainBytes = sealChainEnvironmentRecord(chainRecord);
+  const compositeBytes = sealCryptoEnvironmentRecord({
+    kind: CRYPTO_ENVIRONMENT_KIND,
+    chainWorld: {
+      kind: CHAIN_ENVIRONMENT_KIND,
+      record: {
+        name: "chain",
+        digest: { sha256: chainEnvironmentRecordDigest(chainBytes).slice("sha256:".length) },
+      },
+    },
+    informationWorlds: [],
+    serviceRuntimes: [],
+    composition: {
+      originRouting: [],
+      missPolicy: { mode: "declared-response", status: 404 },
+      endpointAllowlist: [],
+      requestBudget: { maxRequests: 0, maxResponseBytes: 0 },
+    },
+  });
+
+  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
+}
 
 function healthFactorReadKey(pool: string, borrower: string): string {
   return stateReadKey({
@@ -350,6 +490,147 @@ export function referenceObservation(): CanonicalChainObservation {
       value: uint256Word(borrowAmount),
     },
   ];
+  return observation;
+}
+
+function allowanceReadKey(token: string, owner: string, spender: string): string {
+  return stateReadKey({
+    kind: "call",
+    to: token,
+    call: {
+      abiRef: { digest: { sha256: STUB_ABI_DIGEST } },
+      function: "allowance(address,address)",
+      args: [
+        { type: "address", value: owner },
+        { type: "address", value: spender },
+      ],
+    },
+  });
+}
+
+function tokenBalanceReadKey(token: string, account: string): string {
+  return stateReadKey({ kind: "erc20Balance", token, account });
+}
+
+function approvalLog(
+  token: string,
+  owner: string,
+  spender: string,
+  amount: bigint,
+): CanonicalChainObservation["transactions"][number]["logs"][number] {
+  return {
+    index: "0",
+    address: token,
+    topics: [
+      eventSignatureTopic0(APPROVAL_SIGNATURE),
+      addressIndexedTopic(owner),
+      addressIndexedTopic(spender),
+    ],
+    data: uint256Word(amount),
+  };
+}
+
+function ownerTransaction(
+  index: number,
+  to: string,
+  logs: CanonicalChainObservation["transactions"][number]["logs"],
+): CanonicalChainObservation["transactions"][number] {
+  return {
+    index: String(index),
+    hash: `0x${String(index).padStart(64, "0")}`,
+    from: roleAddress("12"),
+    to,
+    valueWei: "0",
+    status: "success",
+    gasUsed: "100000",
+    returnData: "0x",
+    logs,
+    blockNumber: "21000002",
+    blockTimestamp: "1735689624",
+  };
+}
+
+function approvalHygieneStateReads(
+  env: ChainDerivationEnvironment,
+  params: ApprovalHygieneParams,
+  allowances: {
+    readonly unsafe: bigint;
+    readonly retained: bigint;
+  },
+): CanonicalChainObservation["stateReads"] {
+  const token = resolveRoleAddress(env, params.tokenRole);
+  const owner = resolveRoleAddress(env, params.ownerRole);
+  const retainedSpender = resolveRoleAddress(env, params.retainedSpenderRole);
+  const startingBalance = BigInt(params.startingTokenBalance);
+  const reads: CanonicalChainObservation["stateReads"] = [
+    {
+      key: tokenBalanceReadKey(token, owner),
+      state: "post-replay",
+      resolution: "resolved",
+      value: uint256Word(startingBalance),
+    },
+    {
+      key: allowanceReadKey(token, owner, retainedSpender),
+      state: "post-replay",
+      resolution: "resolved",
+      value: uint256Word(allowances.retained),
+    },
+  ];
+  for (const spenderRole of params.unsafeSpenderRoles) {
+    const spender = resolveRoleAddress(env, spenderRole);
+    reads.push({
+      key: allowanceReadKey(token, owner, spender),
+      state: "post-replay",
+      resolution: "resolved",
+      value: uint256Word(allowances.unsafe),
+    });
+  }
+  return reads;
+}
+
+export function approvalBaselineObservation(): CanonicalChainObservation {
+  const env = approvalHygieneFixtureEnvironment();
+  const observation = observationShell(env);
+  observation.stateReads = approvalHygieneStateReads(env, APPROVAL_HYGIENE_PARAMS, {
+    unsafe: UNSAFE_ALLOWANCE,
+    retained: BigInt(APPROVAL_HYGIENE_PARAMS.retainedAllowance),
+  });
+  return observation;
+}
+
+export function approvalReferenceObservation(): CanonicalChainObservation {
+  const env = approvalHygieneFixtureEnvironment();
+  const token = resolveRoleAddress(env, APPROVAL_HYGIENE_PARAMS.tokenRole);
+  const owner = resolveRoleAddress(env, APPROVAL_HYGIENE_PARAMS.ownerRole);
+  const observation = observationShell(env);
+  observation.timeline.finalStateChangingBlockNumber = "21000004";
+  observation.timeline.finalStateChangingChainTimestamp = "1735689648";
+  observation.transactions = APPROVAL_HYGIENE_PARAMS.unsafeSpenderRoles.map((spenderRole, index) => {
+    const spender = resolveRoleAddress(env, spenderRole);
+    return ownerTransaction(index, token, [approvalLog(token, owner, spender, 0n)]);
+  });
+  observation.stateReads = approvalHygieneStateReads(env, APPROVAL_HYGIENE_PARAMS, {
+    unsafe: 0n,
+    retained: BigInt(APPROVAL_HYGIENE_PARAMS.retainedAllowance),
+  });
+  return observation;
+}
+
+export function approvalOverRevokedObservation(): CanonicalChainObservation {
+  const env = approvalHygieneFixtureEnvironment();
+  const token = resolveRoleAddress(env, APPROVAL_HYGIENE_PARAMS.tokenRole);
+  const owner = resolveRoleAddress(env, APPROVAL_HYGIENE_PARAMS.ownerRole);
+  const retainedSpender = resolveRoleAddress(env, APPROVAL_HYGIENE_PARAMS.retainedSpenderRole);
+  const observation = approvalReferenceObservation();
+  const nextIndex = observation.transactions.length;
+  observation.transactions = [
+    ...observation.transactions,
+    ownerTransaction(nextIndex, token, [approvalLog(token, owner, retainedSpender, 0n)]),
+  ];
+  observation.stateReads = approvalHygieneStateReads(env, APPROVAL_HYGIENE_PARAMS, {
+    unsafe: 0n,
+    retained: 0n,
+  });
   return observation;
 }
 

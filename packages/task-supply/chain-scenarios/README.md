@@ -16,3 +16,14 @@ so the task demands the reference supply/borrow path. Hardening requires pool `B
 advancement, and excludes treasury/whale signer roles.
 
 Export: `lendingLifecycleTemplate`, `LendingLifecycleParamsSchema`.
+
+### `approval-hygiene` (Family B)
+
+Revoke unsafe ERC-20 allowances while preserving a designated retained spender allowance.
+Admission checks the **conjunction**: the retained allowance is already satisfied at baseline,
+but revoked-* and revoke-event-* predicates are not, so the task demands selective revocation.
+Hardening requires owner-initiated `Approval(owner, spender, 0)` events per unsafe spender,
+forbids routing through unsafe spender contracts, bounds chain-time advancement, and excludes
+unsafe-spender and token-minter signer roles.
+
+Export: `approvalHygieneTemplate`, `ApprovalHygieneParamsSchema`.

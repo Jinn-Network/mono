@@ -116,6 +116,11 @@ export {
   LendingLifecycleParamsSchema,
   type LendingLifecycleParams,
 } from "./families/lending-lifecycle.js";
+export {
+  approvalHygieneTemplate,
+  ApprovalHygieneParamsSchema,
+  type ApprovalHygieneParams,
+} from "./families/approval-hygiene.js";
 export type {
   ChainAdmissionPort,
   ChainAdmissionRequest,
