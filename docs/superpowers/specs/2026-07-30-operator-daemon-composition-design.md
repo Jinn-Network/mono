@@ -427,6 +427,15 @@ The ratified bridge is an optional namespaced `deliveryExtensions` hook on
 §21.3) carrying the legacy envelope content, plus a read-path preference in the mech
 adapter; both retire with the `legacyManifestDigest` bridge after stage 5.*
 
+*Addendum 2026-08-01 (stage-2 evaluator flow, Finding 3 — coordinator ruled):* a third
+bridge-era document rule joins the facts-card and converged-Delivery rules above. Until stage
+3, the evaluator loop reconstructs the subject `Submission` and its admission-receipt
+descriptor deterministically from the anchored legacy task (`derivation: 'legacy'`, binding
+`{ chainId, taskId, blockHash }`); the fleet admission agent seals the receipt. Two operators
+observing the same anchor MUST derive byte-identical Submission bytes. This synthesis retires
+at stage 3 when the posting flow supplies real sealed Submissions — delete
+`client/src/evaluator/bridge-subject.ts` and its tests in that stage's PR.
+
 **Drain rules (every retiring flow).** A hard swap is preceded by a drain: the retiring
 flow stops accepting new work and runs until its in-flight items reach terminal states
 before the swap deploys (bounded by the operator's patience — remaining stragglers strand
