@@ -1,0 +1,74 @@
+{
+  "name": "@jinn-network/chain-environment-verification",
+  "version": "0.1.0",
+  "description": "Closed-state and archive observation protocols for chain environments, their in-toto attestation, and the public materialize/probe/replay runtime surface.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/environments/chain-verification"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "ANVIL-CAVEATS.md",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:anvil": "vitest run --config vitest.anvil.config.ts",
+    "goldens": "node scripts/generate-goldens.mjs",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/chain-environment-record": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@jinn-network/trust-resolve": "0.1.0",
+    "@jinn-network/trust-testing": "0.1.0",
+    "@types/node": "^22.0.0",
+    "ox": "^0.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/chain-environment-record": "portal:../chain-record",
+    "@jinn-network/trust-core": "portal:../../trust/core",
+    "@jinn-network/trust-resolve": "portal:../../trust/resolve",
+    "@jinn-network/trust-testing": "portal:../../trust/testing"
+  }
+}

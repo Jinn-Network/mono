@@ -1,0 +1,5 @@
+{
+  "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
+  "outcome": "closed-reproducible",
+  "scope": "component"
+}

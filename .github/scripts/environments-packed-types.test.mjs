@@ -14,6 +14,7 @@ const packages = [
   ['record', '@jinn-network/environment-record'],
   ['verification', '@jinn-network/environment-verification'],
   ['chain-record', '@jinn-network/chain-environment-record'],
+  ['chain-verification', '@jinn-network/chain-environment-verification'],
 ];
 
 const codeEntrypoints = [
@@ -23,6 +24,8 @@ const codeEntrypoints = [
   '@jinn-network/environment-verification/testing',
   '@jinn-network/chain-environment-record',
   '@jinn-network/chain-environment-record/testing',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/chain-environment-verification/testing',
 ];
 
 // `@jinn-network/environment-record` has NO Jinn runtime dependency.

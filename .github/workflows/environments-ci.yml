@@ -12,6 +12,7 @@ on:
       - "docs/superpowers/plans/2026-07-31-supply-c1-environment-record.md"
       - "docs/superpowers/plans/2026-07-31-supply-c2-environment-verification.md"
       - "docs/superpowers/plans/2026-07-31-chain-ce1-chain-record.md"
+      - "docs/superpowers/plans/2026-07-31-chain-ce3-chain-verification.md"
       - "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md"
 
 permissions:
@@ -130,8 +131,40 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  chain-verification:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build the packages this capability depends on
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/trust/testing && yarn install --immutable && yarn build)
+          (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+      - name: Verify Chain Environment Verification
+        working-directory: packages/environments/chain-verification
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Chain Environment Verification distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: environments-chain-verification-dist
+          path: packages/environments/chain-verification/dist
+          if-no-files-found: error
+          retention-days: 1
+
   verify:
-    needs: [architecture, record, verification, chain-record]
+    needs: [architecture, record, verification, chain-record, chain-verification]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -141,12 +174,14 @@ jobs:
           RECORD_RESULT: ${{ needs.record.result }}
           VERIFICATION_RESULT: ${{ needs.verification.result }}
           CHAIN_RECORD_RESULT: ${{ needs.chain-record.result }}
+          CHAIN_VERIFICATION_RESULT: ${{ needs.chain-verification.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$RECORD_RESULT" \
             "$VERIFICATION_RESULT" \
-            "$CHAIN_RECORD_RESULT"; do
+            "$CHAIN_RECORD_RESULT" \
+            "$CHAIN_VERIFICATION_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -170,6 +205,8 @@ jobs:
           cp -R .environments-dist/environments-chain-record-dist/. packages/environments/chain-record/dist/
           mkdir -p packages/environments/verification/dist
           cp -R .environments-dist/environments-verification-dist/. packages/environments/verification/dist/
+          mkdir -p packages/environments/chain-verification/dist
+          cp -R .environments-dist/environments-chain-verification-dist/. packages/environments/chain-verification/dist/
       - name: Build the cross-tree dependency the packed consumer resolves
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
