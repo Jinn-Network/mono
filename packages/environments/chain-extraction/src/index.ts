@@ -158,3 +158,13 @@ export {
   extractEnvironment,
   type ExtractionResult,
 } from "./extract.js";
+
+export {
+  createLayeredStateBackend,
+  localizeMissingState,
+  widenAndReverify,
+  type ConvergenceResult,
+  type LayeredStateBackend,
+  type WidenOptions,
+  type WideningRound,
+} from "./widen.js";
