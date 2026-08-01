@@ -131,4 +131,45 @@ describe('synthesizeLegacyExecutionDocuments (E41 bridge-era execution documents
     expect(submission.nonce).toBe(nonce);
     expect(submission.task.digest.sha256).toBe(documentDigest(taskBytes).slice('sha256:'.length));
   });
+
+  it('accepts the daemon-harness e2e SignedTaskV1 window shape (millisecond timestamps)', () => {
+    const now = Date.now();
+    const signed = legacySignedTaskV1({
+      id: 'daemon-harness-e2e-task-4',
+      window: { startTs: now - 5_000, endTs: now + 600_000 },
+      spec: {
+        consensusSnapshot: {
+          sampledAt: new Date(now - 10_000).toISOString(),
+          probabilityYes: '0.75',
+          method: 'best-bid-ask-midpoint',
+          source: 'polymarket-clob',
+        },
+      },
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 10,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+        claimWindowStartTs: Math.floor(now / 1000) - 5,
+        claimWindowEndTs: Math.floor(now / 1000) + 300,
+        submissionDeadlineTs: Math.floor(now / 1000) + 900,
+      },
+      createdAt: now,
+    });
+    const signedBytes = new TextEncoder().encode(JSON.stringify(signed));
+
+    let thrown: unknown;
+    try {
+      synthesizeLegacyExecutionDocuments({
+        task: signed,
+        taskBytes: signedBytes,
+        submissionUri: 'urn:uuid:cf05af68-1c77-137b-6c7e-155cc5bfa9b8',
+        nonce: '0xcf05af681c77137b6c7e155cc5bfa9b8489490f4fb78f36d3ad9e9e07b49f160',
+        profile,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeUndefined();
+  });
 });

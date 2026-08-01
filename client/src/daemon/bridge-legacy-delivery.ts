@@ -94,6 +94,18 @@ export function synthesizeLegacyFactsCard(anchored: {
  * `CreatorLoop` posts sealed TEP Submissions, `resolveTaskProjection` resolves a real Submission
  * on its first attempt and never reaches this fallback.
  */
+/** RFC 3339 deadline for a legacy SignedTaskV1 (seconds in claimPolicy, mixed units in window). */
+function legacyEffectiveDeadline(task: SignedTaskV1): string {
+  const submissionDeadlineTs = task.claimPolicy.submissionDeadlineTs;
+  if (typeof submissionDeadlineTs === 'number') {
+    return new Date(submissionDeadlineTs * 1000).toISOString();
+  }
+  const endTs = task.window.endTs;
+  // Harness/e2e fixtures store millisecond timestamps in `window`; older fixtures use seconds.
+  const endMs = endTs > 1_000_000_000_000 ? endTs : endTs * 1000;
+  return new Date(endMs).toISOString();
+}
+
 export function synthesizeLegacyTaskProjection(input: {
   readonly task: SignedTaskV1;
   readonly taskBytes: Uint8Array;
@@ -106,7 +118,7 @@ export function synthesizeLegacyTaskProjection(input: {
   return {
     submission: uuidFromDigest(taskDigest),
     taskDigest,
-    effectiveDeadline: new Date(input.task.window.endTs * 1000).toISOString(),
+    effectiveDeadline: legacyEffectiveDeadline(input.task),
   };
 }
 
@@ -159,7 +171,7 @@ export function synthesizeLegacyExecutionDocuments(input: {
 
   const taskBytes = sealTask(taskDocument);
   const synthesizedTaskDigest = documentDigest(taskBytes).slice('sha256:'.length);
-  const deadline = new Date(input.task.window.endTs * 1000).toISOString();
+  const deadline = legacyEffectiveDeadline(input.task);
 
   const submissionBytes = sealSubmission({
     protocol: TEP_PROTOCOL_URI,
