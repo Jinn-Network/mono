@@ -1,0 +1,24 @@
+{
+  "input": {
+    "family": "state-predicate",
+    "block": {
+      "environmentRecord": {
+        "content": "{\"chainId\":84532}",
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        {
+          "kind": "nativeBalance",
+          "account": "0x0000000000000000000000000000000000000001",
+          "cmp": "eq",
+          "value": "0"
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

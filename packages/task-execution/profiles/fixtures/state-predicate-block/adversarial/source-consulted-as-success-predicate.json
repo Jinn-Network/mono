@@ -1,0 +1,23 @@
+{
+  "input": {
+    "family": "state-predicate",
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        {
+          "kind": "sourceConsulted",
+          "world": "test",
+          "requestKey": "key1"
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600
+    }
+  },
+  "expect": { "ok": false, "code": "invalid-document" }
+}

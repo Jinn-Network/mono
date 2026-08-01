@@ -11,6 +11,11 @@ import { checkMeasurementCoverage } from "./evaluation-spec/measurements.js";
 import { checkVerdictConsistency } from "./evaluation-spec/verdict-consistency.js";
 import { checkAllOfConstruction, resolveFamilyUri } from "./task-profile/sub-profile.js";
 import { deriveEvaluationTask } from "./documents/evaluation-task-1.0.js";
+import { evaluatePredicates } from "./evaluation-spec/state-predicate/evaluate.js";
+import {
+  checkStatePredicateBlock,
+  checkStatePredicateSpec,
+} from "./evaluation-spec/state-predicate/spec-checks.js";
 
 // Re-exported conformance-kit surface (design §12, plan Task 15): the structural checks a
 // downstream consumer runs the fixture families of `FIXTURE_FAMILIES` against, all reachable
@@ -19,8 +24,11 @@ export {
   checkAdmissionReceipt,
   checkAllOfConstruction,
   checkMeasurementCoverage,
+  checkStatePredicateBlock,
+  checkStatePredicateSpec,
   checkVerdictConsistency,
   deriveEvaluationTask,
+  evaluatePredicates,
   resolveFamilyUri,
 };
 
@@ -43,6 +51,8 @@ export const FIXTURE_FAMILIES: string[] = [
   "resolution",
   "result-evaluation",
   "schema-hardening",
+  "state-predicate-block",
+  "state-predicate-evaluation",
   "sub-profile",
   "swe-rebench-golden",
   "task-profile",
