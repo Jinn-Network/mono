@@ -76,11 +76,13 @@ const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 const CHAIN_VERIFICATION_ALLOWED_EXTERNALS = [
   '@jinn-network/chain-environment-record',
   '@jinn-network/trust-core',
+  '@noble/hashes',
   'zod',
 ];
 const CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES = [
   '@jinn-network/chain-environment-record',
   '@jinn-network/trust-core',
+  '@noble/hashes',
   'zod',
 ];
 const CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
