@@ -129,6 +129,20 @@ export interface ScenarioTemplate<TParams> {
   readonly timeout: number;
 }
 
+export function isScenarioTemplate(value: unknown): value is ScenarioTemplate<never> {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as ScenarioTemplate<never>;
+  return typeof candidate.id === "string"
+    && typeof candidate.version === "string"
+    && candidate.compatibility !== undefined
+    && candidate.parameterSchema !== undefined
+    && typeof candidate.instructionTemplate === "function"
+    && typeof candidate.predicateTemplate === "function"
+    && typeof candidate.referenceSolution === "function"
+    && candidate.hardening !== undefined
+    && typeof candidate.timeout === "number";
+}
+
 export function resolveRoleAddress(
   env: ChainDerivationEnvironment,
   role: string,

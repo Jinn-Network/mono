@@ -1,34 +1,74 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
-  CHAIN_ENVIRONMENT_KIND,
-  CRYPTO_ENVIRONMENT_KIND,
   CRYPTO_ENVIRONMENT_MEDIA_TYPE,
   chainEnvironmentRecordDigest,
-  cryptoEnvironmentRecordDigest,
-  parseChainEnvironmentRecord,
-  parseCryptoEnvironmentRecord,
   sealChainEnvironmentRecord,
   sealCryptoEnvironmentRecord,
 } from "@jinn-network/chain-environment-record";
+import {
+  admitChainCandidate,
+  verifyChainAdmissionReceiptV1,
+  type ChainAdmissionReceiptV1,
+  type ChainAdmissionRefusalCode,
+  type ChainAdmissionResult,
+  type ChainObservation,
+} from "@jinn-network/task-admission";
+import {
+  goldenChainCandidate,
+  goldenChainReceipt,
+  scriptedChainPort,
+  describeChainAdmissionConformance,
+} from "@jinn-network/task-admission/testing";
+import {
+  assertEntryDigests,
+  poolEntryConflictKeyBytes,
+  type PoolEntry,
+  type PoolEntrySummary,
+  type SupplyPool,
+} from "@jinn-network/task-derivation";
+import { describeSupplyPoolConformance } from "@jinn-network/task-derivation/testing";
 import type { CanonicalChainObservation, StatePredicateBlock } from "@jinn-network/task-execution-profiles";
 import {
+  evaluatePredicates,
   PREDICATE_SEMANTICS_VERSION,
   stateReadKey,
 } from "@jinn-network/task-execution-profiles";
+import { readFileSync } from "node:fs";
 
-import { toBareHex } from "./digest.js";
+import { documentDigest, toBareHex } from "./digest.js";
+import { ScenarioError } from "./errors.js";
+import {
+  type ScenarioAccount,
+  type ScenarioAccountPort,
+} from "./fixture-accounts.js";
+import type { ChainAdmissionPort, ChainAdmissionRequest } from "./run.js";
+import { CHAIN_SCENARIO_STRATEGY_ID } from "./strategy.js";
+import type { ChainDerivationEnvironment, ScenarioTemplate } from "./template.js";
+import {
+  buildApprovalChainRecordBody,
+  buildCompositeRecordBody,
+  buildLendingChainRecordBody,
+  fixtureRoleAddress,
+  type FixtureSourceBundle,
+} from "./fixture-sources.js";
 import {
   ApprovalHygieneParamsSchema,
   type ApprovalHygieneParams,
 } from "./families/approval-hygiene.js";
 import {
   LendingLifecycleParamsSchema,
+  lendingLifecycleTemplate,
   type LendingLifecycleParams,
 } from "./families/lending-lifecycle.js";
 import { eventSignatureTopic0, addressIndexedTopic } from "./predicates.js";
 import { loadChainDerivationEnvironment } from "./strategy.js";
-import type { ChainDerivationEnvironment, ScenarioTemplate, StatePredicateDraft } from "./template.js";
+import type { StatePredicateDraft } from "./template.js";
 import { resolveRoleAddress } from "./template.js";
 
 const STUB_ABI_DIGEST = "a".repeat(64);
@@ -37,13 +77,79 @@ const SUPPLY_SIGNATURE = "Supply(address,address,address,uint256,uint16)";
 const APPROVAL_SIGNATURE = "Approval(address,address,uint256)";
 const UNSAFE_ALLOWANCE = 10_000_000_000_000_000_000n;
 
+const FIXTURES_ROOT = fileURLToPath(new URL("../fixtures/", import.meta.url));
+
 function roleAddress(byte: string): string {
-  return `0x${byte.repeat(20)}`;
+  return fixtureRoleAddress(byte);
 }
 
-function uint256Word(value: bigint): `0x${string}` {
-  return `0x${value.toString(16).padStart(64, "0")}` as `0x${string}`;
+async function readFixtureBytes(rel: string): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(join(FIXTURES_ROOT, rel)));
 }
+
+export function buildLendingFixtureSource(): FixtureSourceBundle {
+  const chain = buildLendingChainRecordBody();
+  const chainBytes = sealChainEnvironmentRecord(chain);
+  const chainDigestBare = chainEnvironmentRecordDigest(chainBytes).slice("sha256:".length);
+  return { chain, composite: buildCompositeRecordBody(chainDigestBare) };
+}
+
+export function buildApprovalFixtureSource(): FixtureSourceBundle {
+  const chain = buildApprovalChainRecordBody();
+  const chainBytes = sealChainEnvironmentRecord(chain);
+  const chainDigestBare = chainEnvironmentRecordDigest(chainBytes).slice("sha256:".length);
+  return { chain, composite: buildCompositeRecordBody(chainDigestBare) };
+}
+
+async function loadSealedEnvironment(
+  compositeRel: string,
+  chainRel: string,
+): Promise<ChainDerivationEnvironment> {
+  const compositeBytes = await readFixtureBytes(compositeRel);
+  const chainBytes = await readFixtureBytes(chainRel);
+  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
+}
+
+export function fixtureEnvironment(): ChainDerivationEnvironment {
+  const { chain, composite } = buildLendingFixtureSource();
+  const chainBytes = sealChainEnvironmentRecord(chain);
+  const compositeBytes = sealCryptoEnvironmentRecord(composite);
+  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
+}
+
+export function approvalHygieneFixtureEnvironment(): ChainDerivationEnvironment {
+  const { chain, composite } = buildApprovalFixtureSource();
+  const chainBytes = sealChainEnvironmentRecord(chain);
+  const compositeBytes = sealCryptoEnvironmentRecord(composite);
+  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
+}
+
+export async function loadPinnedLendingEnvironment(): Promise<ChainDerivationEnvironment> {
+  return loadSealedEnvironment("environment/record.sealed.json", "environment/chain.sealed.json");
+}
+
+export async function loadPinnedApprovalEnvironment(): Promise<ChainDerivationEnvironment> {
+  return loadSealedEnvironment(
+    "environment/approval-record.sealed.json",
+    "environment/approval-chain.sealed.json",
+  );
+}
+
+export function fixtureFiles(): string[] {
+  const files: string[] = [];
+  function walk(dir: string): void {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else files.push(path);
+    }
+  }
+  walk(FIXTURES_ROOT);
+  return files;
+}
+
+export const LENDING_PARAMS: LendingLifecycleParams = LendingLifecycleParamsSchema.parse({});
+export const APPROVAL_HYGIENE_PARAMS: ApprovalHygieneParams = ApprovalHygieneParamsSchema.parse({});
 
 function stripSignerRoles(
   tightenings: StatePredicateDraft["envelopeTightenings"],
@@ -54,275 +160,8 @@ function stripSignerRoles(
   return rest;
 }
 
-export function fixtureEnvironment(): ChainDerivationEnvironment {
-  const chainRecord = parseChainEnvironmentRecord(sealChainEnvironmentRecord({
-    kind: CHAIN_ENVIRONMENT_KIND,
-    runtime: {
-      family: "anvil",
-      version: "1.3.7",
-      image: { manifestDigest: `sha256:${"1".repeat(64)}`, platform: "linux/amd64" },
-      binary: { name: "anvil", digest: `sha256:${"2".repeat(64)}` },
-      evm: { hardfork: "cancun", sandboxChainId: 1, nonDefaultSettings: {} },
-      launch: { options: { "no-mining": true } },
-    },
-    sourceAnchor: {
-      caip2ChainId: "eip155:1",
-      nativeChainId: 1,
-      genesisHash: `0x${"d".repeat(64)}`,
-      blockNumber: 21_000_000,
-      blockHash: `0x${"e".repeat(64)}`,
-      stateRoot: `0x${"f".repeat(64)}`,
-      timestamp: 1_735_689_600,
-      finalityPolicy: "finalized",
-    },
-    stateMaterialization: {
-      closureClass: "closed-state",
-      fidelityClass: "anchored-subset",
-      constructionMethod: "archive-extraction",
-      materializer: { id: "anvil-state-loader", version: "0.4.1", digest: `sha256:${"3".repeat(64)}` },
-      stateArtifact: {
-        descriptor: { name: "state.json", digest: { sha256: "4".repeat(64) } },
-        format: { id: "jinn.chain-state-slice", version: "1" },
-        entryCounts: { accounts: 5, storageSlots: 20, codeEntries: 2 },
-      },
-      sourceProofManifest: {
-        proofFormat: "eip-1186",
-        proofs: { name: "proofs.json", digest: { sha256: "5".repeat(64) } },
-        coverage: { accounts: 3, storageSlots: 18, codeEntries: 2 },
-      },
-      fixtureCoverage: {
-        manifest: { name: "mutations.json", digest: { sha256: "6".repeat(64) } },
-        declared: { accounts: 2, storageSlots: 2, codeEntries: 0 },
-        mutatedProofCoveredAccounts: 0,
-      },
-      mutatesSourceProtocolState: false,
-      initialStateCommitment: `0x${"7".repeat(64)}`,
-    },
-    fixtures: {
-      modules: [
-        { id: "accounts", kind: "funded-accounts", module: { name: "a", digest: { sha256: "8".repeat(64) } } },
-      ],
-      accounts: [
-        { role: "pool", address: roleAddress("01"), nativeBalanceWei: "10000000000000000000" },
-        { role: "collateral-token", address: roleAddress("02"), nativeBalanceWei: "10000000000000000000" },
-        { role: "debt-token", address: roleAddress("03"), nativeBalanceWei: "10000000000000000000" },
-        { role: "price-oracle", address: roleAddress("04"), nativeBalanceWei: "10000000000000000000" },
-        { role: "whale", address: roleAddress("05"), nativeBalanceWei: "10000000000000000000" },
-        { role: "treasury", address: roleAddress("06"), nativeBalanceWei: "10000000000000000000" },
-        { role: "dex-router", address: roleAddress("07"), nativeBalanceWei: "10000000000000000000" },
-        { role: "borrower", address: roleAddress("08"), nativeBalanceWei: "10000000000000000000" },
-      ],
-    },
-    determinismControls: {
-      miningMode: "manual",
-      orderingPolicy: "fifo",
-      mempoolPolicy: "none",
-      initialBlockNumber: 21_000_001,
-      initialTimestamp: 1_735_689_612,
-      blockTimeProgression: { mode: "fixed-increment", secondsPerBlock: 12 },
-      baseFeePolicy: { mode: "fixed", weiPerGas: "1000000000" },
-      gasPricePolicy: { mode: "fixed", weiPerGas: "1000000000" },
-      blockGasLimit: "30000000",
-      perTransactionGasCeiling: "15000000",
-      coinbase: `0x${"c0".repeat(20)}`,
-      prevrandao: `0x${"9".repeat(64)}`,
-      replacementPolicy: "reject",
-      noncePolicy: "strict",
-      timeoutClock: "chain-time",
-      timeWarp: { maxSecondsPerOperation: 86_400, maxAggregateSeconds: 2_592_000, maxBlocksPerOperation: 7200 },
-      resetMechanism: "fresh-process",
-    },
-    capabilityEnvelope: {
-      toolInterfaces: [
-        { id: "jinn.chain-tools", version: "1.0", schema: { name: "t", digest: { sha256: "a".repeat(64) } } },
-      ],
-      rpc: { readMethods: ["eth_call"], stateChangingMethods: ["eth_sendRawTransaction"] },
-      signerRoles: [{ role: "borrower", accounts: [roleAddress("08")] }],
-      permittedChainId: 1,
-      limits: {
-        maxTransactions: 25,
-        maxAggregateNativeValueWei: "5000000000000000000",
-        tokenSpendPolicies: [],
-        maxGasPerTransaction: "5000000",
-        maxAggregateGas: "60000000",
-        maxExecutionDurationMs: 600_000,
-        maxBlockAdvance: 500,
-        maxChainSecondsAdvance: 604_800,
-      },
-      egressPolicyId: "jinn.egress.blackhole/1",
-    },
-    verificationContract: {
-      probeSuite: {
-        descriptor: { name: "probes", digest: { sha256: "b".repeat(64) } },
-        format: { id: "jinn.chain-probes", version: "1" },
-      },
-      observationSchema: { name: "obs", digest: { sha256: "c".repeat(64) } },
-      baselineObservationDigest: `sha256:${"d".repeat(64)}`,
-      comparator: { id: "canonical-observation-eq", version: "1.0.0", digest: `sha256:${"e".repeat(64)}` },
-      closureCheckRequired: true,
-      resetRequirements: { freshInstancePerRun: true, minimumRuns: 5 },
-      fixtureProbeCoverage: [{ fixtureId: "accounts", probeIds: ["balances"] }],
-      policyId: "jinn.chain-verification-policy/1",
-    },
-  }));
-
-  const chainBytes = sealChainEnvironmentRecord(chainRecord);
-  const compositeBytes = sealCryptoEnvironmentRecord({
-    kind: CRYPTO_ENVIRONMENT_KIND,
-    chainWorld: {
-      kind: CHAIN_ENVIRONMENT_KIND,
-      record: {
-        name: "chain",
-        digest: { sha256: chainEnvironmentRecordDigest(chainBytes).slice("sha256:".length) },
-      },
-    },
-    informationWorlds: [],
-    serviceRuntimes: [],
-    composition: {
-      originRouting: [],
-      missPolicy: { mode: "declared-response", status: 404 },
-      endpointAllowlist: [],
-      requestBudget: { maxRequests: 0, maxResponseBytes: 0 },
-    },
-  });
-
-  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
-}
-
-export const LENDING_PARAMS: LendingLifecycleParams = LendingLifecycleParamsSchema.parse({});
-export const APPROVAL_HYGIENE_PARAMS: ApprovalHygieneParams = ApprovalHygieneParamsSchema.parse({});
-
-export function approvalHygieneFixtureEnvironment(): ChainDerivationEnvironment {
-  const chainRecord = parseChainEnvironmentRecord(sealChainEnvironmentRecord({
-    kind: CHAIN_ENVIRONMENT_KIND,
-    runtime: {
-      family: "anvil",
-      version: "1.3.7",
-      image: { manifestDigest: `sha256:${"1".repeat(64)}`, platform: "linux/amd64" },
-      binary: { name: "anvil", digest: `sha256:${"2".repeat(64)}` },
-      evm: { hardfork: "cancun", sandboxChainId: 1, nonDefaultSettings: {} },
-      launch: { options: { "no-mining": true } },
-    },
-    sourceAnchor: {
-      caip2ChainId: "eip155:1",
-      nativeChainId: 1,
-      genesisHash: `0x${"d".repeat(64)}`,
-      blockNumber: 21_000_000,
-      blockHash: `0x${"e".repeat(64)}`,
-      stateRoot: `0x${"f".repeat(64)}`,
-      timestamp: 1_735_689_600,
-      finalityPolicy: "finalized",
-    },
-    stateMaterialization: {
-      closureClass: "closed-state",
-      fidelityClass: "anchored-subset",
-      constructionMethod: "archive-extraction",
-      materializer: { id: "anvil-state-loader", version: "0.4.1", digest: `sha256:${"3".repeat(64)}` },
-      stateArtifact: {
-        descriptor: { name: "state.json", digest: { sha256: "4".repeat(64) } },
-        format: { id: "jinn.chain-state-slice", version: "1" },
-        entryCounts: { accounts: 5, storageSlots: 20, codeEntries: 2 },
-      },
-      sourceProofManifest: {
-        proofFormat: "eip-1186",
-        proofs: { name: "proofs.json", digest: { sha256: "5".repeat(64) } },
-        coverage: { accounts: 3, storageSlots: 18, codeEntries: 2 },
-      },
-      fixtureCoverage: {
-        manifest: { name: "mutations.json", digest: { sha256: "6".repeat(64) } },
-        declared: { accounts: 2, storageSlots: 2, codeEntries: 0 },
-        mutatedProofCoveredAccounts: 0,
-      },
-      mutatesSourceProtocolState: false,
-      initialStateCommitment: `0x${"7".repeat(64)}`,
-    },
-    fixtures: {
-      modules: [
-        { id: "accounts", kind: "funded-accounts", module: { name: "a", digest: { sha256: "8".repeat(64) } } },
-      ],
-      accounts: [
-        { role: "token", address: roleAddress("11"), nativeBalanceWei: "10000000000000000000" },
-        { role: "owner", address: roleAddress("12"), nativeBalanceWei: "10000000000000000000" },
-        { role: "unsafe-spender-a", address: roleAddress("13"), nativeBalanceWei: "10000000000000000000" },
-        { role: "unsafe-spender-b", address: roleAddress("14"), nativeBalanceWei: "10000000000000000000" },
-        { role: "retained-spender", address: roleAddress("15"), nativeBalanceWei: "10000000000000000000" },
-        { role: "token-minter", address: roleAddress("16"), nativeBalanceWei: "10000000000000000000" },
-      ],
-    },
-    determinismControls: {
-      miningMode: "manual",
-      orderingPolicy: "fifo",
-      mempoolPolicy: "none",
-      initialBlockNumber: 21_000_001,
-      initialTimestamp: 1_735_689_612,
-      blockTimeProgression: { mode: "fixed-increment", secondsPerBlock: 12 },
-      baseFeePolicy: { mode: "fixed", weiPerGas: "1000000000" },
-      gasPricePolicy: { mode: "fixed", weiPerGas: "1000000000" },
-      blockGasLimit: "30000000",
-      perTransactionGasCeiling: "15000000",
-      coinbase: `0x${"c0".repeat(20)}`,
-      prevrandao: `0x${"9".repeat(64)}`,
-      replacementPolicy: "reject",
-      noncePolicy: "strict",
-      timeoutClock: "chain-time",
-      timeWarp: { maxSecondsPerOperation: 86_400, maxAggregateSeconds: 2_592_000, maxBlocksPerOperation: 7200 },
-      resetMechanism: "fresh-process",
-    },
-    capabilityEnvelope: {
-      toolInterfaces: [
-        { id: "jinn.chain-tools", version: "1.0", schema: { name: "t", digest: { sha256: "a".repeat(64) } } },
-      ],
-      rpc: { readMethods: ["eth_call"], stateChangingMethods: ["eth_sendRawTransaction"] },
-      signerRoles: [{ role: "owner", accounts: [roleAddress("12")] }],
-      permittedChainId: 1,
-      limits: {
-        maxTransactions: 25,
-        maxAggregateNativeValueWei: "5000000000000000000",
-        tokenSpendPolicies: [],
-        maxGasPerTransaction: "5000000",
-        maxAggregateGas: "60000000",
-        maxExecutionDurationMs: 600_000,
-        maxBlockAdvance: 500,
-        maxChainSecondsAdvance: 604_800,
-      },
-      egressPolicyId: "jinn.egress.blackhole/1",
-    },
-    verificationContract: {
-      probeSuite: {
-        descriptor: { name: "probes", digest: { sha256: "b".repeat(64) } },
-        format: { id: "jinn.chain-probes", version: "1" },
-      },
-      observationSchema: { name: "obs", digest: { sha256: "c".repeat(64) } },
-      baselineObservationDigest: `sha256:${"d".repeat(64)}`,
-      comparator: { id: "canonical-observation-eq", version: "1.0.0", digest: `sha256:${"e".repeat(64)}` },
-      closureCheckRequired: true,
-      resetRequirements: { freshInstancePerRun: true, minimumRuns: 5 },
-      fixtureProbeCoverage: [{ fixtureId: "accounts", probeIds: ["balances"] }],
-      policyId: "jinn.chain-verification-policy/1",
-    },
-  }));
-
-  const chainBytes = sealChainEnvironmentRecord(chainRecord);
-  const compositeBytes = sealCryptoEnvironmentRecord({
-    kind: CRYPTO_ENVIRONMENT_KIND,
-    chainWorld: {
-      kind: CHAIN_ENVIRONMENT_KIND,
-      record: {
-        name: "chain",
-        digest: { sha256: chainEnvironmentRecordDigest(chainBytes).slice("sha256:".length) },
-      },
-    },
-    informationWorlds: [],
-    serviceRuntimes: [],
-    composition: {
-      originRouting: [],
-      missPolicy: { mode: "declared-response", status: 404 },
-      endpointAllowlist: [],
-      requestBudget: { maxRequests: 0, maxResponseBytes: 0 },
-    },
-  });
-
-  return loadChainDerivationEnvironment(compositeBytes, chainBytes);
+function uint256Word(value: bigint): `0x${string}` {
+  return `0x${value.toString(16).padStart(64, "0")}` as `0x${string}`;
 }
 
 function healthFactorReadKey(pool: string, borrower: string): string {
@@ -662,4 +501,210 @@ export function predicateBlockFromTemplate<TParams>(
 ): StatePredicateBlock {
   const draft = template.predicateTemplate(params, env);
   return predicateBlockFromDraft(draft, env, template.timeout);
+}
+
+export const overRevokedObservation = approvalOverRevokedObservation;
+
+export function scriptedAccountPort(addresses: readonly string[]): ScenarioAccountPort {
+  let index = 0;
+  return async (request): Promise<ScenarioAccount> => {
+    if (index >= addresses.length) {
+      throw new ScenarioError(
+        "invalid-input",
+        `scripted account port exhausted at role ${request.role}`,
+      );
+    }
+    const address = addresses[index++];
+    return { role: request.role, address };
+  };
+}
+
+export interface StubChainAdmissionOptions {
+  readonly refuse?: Record<string, ChainAdmissionRefusalCode>;
+  readonly throwOn?: string;
+  readonly receiptBindingOverrides?: {
+    readonly taskDocumentDigest?: string;
+    readonly evaluationSpecDigest?: string;
+    readonly compositeRecordDigest?: string;
+    readonly referenceScriptDigest?: string;
+  };
+}
+
+export interface ExportedStubChainAdmissionPort extends ChainAdmissionPort {
+  readonly seen: ChainAdmissionRequest[];
+  readonly published: string[];
+  readonly receipts: ChainAdmissionReceiptV1[];
+}
+
+function buildStubReceipt(
+  request: ChainAdmissionRequest,
+  overrides: StubChainAdmissionOptions["receiptBindingOverrides"] = {},
+): ChainAdmissionReceiptV1 {
+  const specDigest = documentDigest(request.candidate.evaluationSpecBytes);
+  const referenceScriptDigest = (overrides.referenceScriptDigest
+    ?? request.candidate.referenceScriptDigest) as `sha256:${string}`;
+  const base = goldenChainReceipt();
+  const referenceObservation = {
+    ...base.observations.reference[0]!,
+    appliedScriptDigest: referenceScriptDigest,
+  };
+  return {
+    ...base,
+    issuer: "urn:jinn:test:stub-chain-admission",
+    task: {
+      documentDigest: (overrides.taskDocumentDigest
+        ?? request.candidate.taskDocumentDigest) as `sha256:${string}`,
+      evaluationSpecDigest: (overrides.evaluationSpecDigest ?? specDigest) as `sha256:${string}`,
+      statementDigest: request.candidate.statementDigest,
+    },
+    referenceScriptDigest,
+    observations: {
+      doNothing: base.observations.doNothing,
+      reference: [referenceObservation, referenceObservation],
+    },
+    environment: {
+      compositeRecordDigest: (overrides.compositeRecordDigest
+        ?? request.environmentCompositeDigest) as `sha256:${string}`,
+    },
+    evalSemanticsVersion: request.candidate.evalSemanticsVersion,
+  };
+}
+
+export function stubChainAdmissionPort(
+  options: StubChainAdmissionOptions = {},
+): ExportedStubChainAdmissionPort {
+  const seen: ChainAdmissionRequest[] = [];
+  const published: string[] = [];
+  const receipts: ChainAdmissionReceiptV1[] = [];
+  let counter = 0;
+
+  return {
+    seen,
+    published,
+    receipts,
+    async admit(request: ChainAdmissionRequest): Promise<ChainAdmissionResult> {
+      seen.push(request);
+      if (options.throwOn !== undefined && request.candidateId === options.throwOn) {
+        throw new Error("admission port unavailable");
+      }
+      const refusalCode = options.refuse?.[request.candidateId];
+      if (refusalCode !== undefined) {
+        return { refusal: { code: refusalCode, detail: "scripted refusal" } };
+      }
+      const receipt = buildStubReceipt(request, options.receiptBindingOverrides);
+      receipts.push(receipt);
+      return { receipt };
+    },
+    async publishReceipt() {
+      counter += 1;
+      const digest = `sha256:${String(counter).padStart(64, "0")}` as const;
+      published.push(digest);
+      return { digest };
+    },
+  };
+}
+
+export function inMemorySupplyPool(): SupplyPool {
+  const store = new Map<string, PoolEntry>();
+
+  return {
+    async put(entry: PoolEntry): Promise<PoolEntrySummary> {
+      assertEntryDigests(entry);
+      const key = new TextDecoder().decode(poolEntryConflictKeyBytes(entry));
+      store.set(key, entry);
+      const { taskBytes: _taskBytes, evaluationSpecBytes: _specBytes, ...summary } = entry;
+      return summary;
+    },
+    async get(taskDigest: string): Promise<PoolEntry | undefined> {
+      for (const entry of store.values()) {
+        if (entry.taskDigest === taskDigest) return entry;
+      }
+      return undefined;
+    },
+    async list(): Promise<readonly PoolEntrySummary[]> {
+      return [...store.values()].map(
+        ({ taskBytes: _taskBytes, evaluationSpecBytes: _specBytes, ...summary }) => summary,
+      );
+    },
+  };
+}
+
+let cachedConformanceEntry: PoolEntry | undefined;
+
+export function buildConformancePoolEntry(): PoolEntry {
+  if (cachedConformanceEntry === undefined) {
+    const taskBytes = new Uint8Array(
+      readFileSync(join(FIXTURES_ROOT, "golden/lending-lifecycle/task.bytes")),
+    );
+    const specBytes = new Uint8Array(
+      readFileSync(join(FIXTURES_ROOT, "golden/lending-lifecycle/evaluation-spec.bytes")),
+    );
+    const env = fixtureEnvironment();
+    const taskDigest = documentDigest(taskBytes);
+    const specDigest = documentDigest(specBytes);
+    cachedConformanceEntry = {
+      taskDigest,
+      taskBytes,
+      evaluationSpecDigest: specDigest,
+      evaluationSpecBytes: specBytes,
+      receiptDigest: `sha256:${"7".repeat(64)}`,
+      environmentRecordDigest: env.recordDigest,
+      strategyId: CHAIN_SCENARIO_STRATEGY_ID,
+      provenance: {
+        kind: "synthetic",
+        sourceCommitment: taskDigest,
+        lineage: {
+          templateId: lendingLifecycleTemplate.id,
+          templateVersion: lendingLifecycleTemplate.version,
+          parameterDigest: taskDigest,
+          environmentRecordDigest: env.recordDigest,
+        },
+      },
+      rights: { sourceLicense: lendingLifecycleTemplate.rights.sourceLicense },
+    };
+  }
+  return cachedConformanceEntry;
+}
+
+export function chainObservationFromCanonical(
+  observation: CanonicalChainObservation,
+  block: StatePredicateBlock,
+  appliedScriptDigest: `sha256:${string}` | null,
+): ChainObservation {
+  const outcome = evaluatePredicates(observation, block);
+  const successPredicates = outcome.evaluations
+    .filter((entry) => entry.slot === "success")
+    .map((entry) => ({
+      id: entry.label ?? `${entry.slot}-${entry.index}`,
+      satisfied: entry.state === "satisfied",
+    }));
+  const safetyConstraints = outcome.evaluations
+    .filter((entry) => entry.slot === "safety")
+    .map((entry) => ({
+      id: entry.label ?? `${entry.slot}-${entry.index}`,
+      satisfied: entry.state === "satisfied",
+    }));
+  return {
+    successPredicates,
+    safetyConstraints,
+    conjunction: outcome.successPredicatesSatisfied,
+    outOfSliceReads: 0,
+    envelopeExceeded: false,
+    appliedScriptDigest,
+  };
+}
+
+export function describeChainScenarioConformance(label: string): void {
+  describeSupplyPoolConformance({
+    name: `${label} in-memory pool`,
+    createPool: async () => ({ pool: inMemorySupplyPool() }),
+    buildEntry: () => buildConformancePoolEntry(),
+  });
+  describeChainAdmissionConformance(label, {
+    admitChainCandidate,
+    goldenChainCandidate,
+    goldenChainReceipt,
+    scriptedChainPort,
+    verifyChainReceipt: verifyChainAdmissionReceiptV1,
+  });
 }

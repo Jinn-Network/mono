@@ -104,6 +104,7 @@ export type {
   ScenarioTemplate,
   StatePredicateDraft,
 } from "./template.js";
+export { isScenarioTemplate } from "./template.js";
 export {
   CHAIN_SCENARIO_STRATEGY_ID,
   chainScenarioStrategy,
