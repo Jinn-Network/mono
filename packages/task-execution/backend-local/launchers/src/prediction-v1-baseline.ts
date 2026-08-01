@@ -38,7 +38,11 @@ function walk(dir) {
         const snap = doc.spec && doc.spec.consensusSnapshot
           || doc.task && doc.task.spec && doc.task.spec.consensusSnapshot
           || doc.payload && doc.payload.spec && doc.payload.spec.consensusSnapshot;
-        if (snap && typeof snap.probabilityYes === 'number') return { doc, snap, source: doc.spec && doc.spec.source || {} };
+        // prediction.v1 posts probabilityYes as a decimal string ('0.75'); accept number too.
+        if (snap && snap.probabilityYes !== undefined && snap.probabilityYes !== null
+            && Number.isFinite(Number(snap.probabilityYes))) {
+          return { doc, snap, source: (doc.spec && doc.spec.source) || (doc.task && doc.task.spec && doc.task.spec.source) || {} };
+        }
       } catch {}
     }
   }

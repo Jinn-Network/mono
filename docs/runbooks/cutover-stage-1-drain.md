@@ -2,14 +2,11 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** Leg H (2026-07-31) closed E39 (claim now fires), E40
-> (anvil-fork finality), and E41 (bridge-era execution documents). The loop should now progress
-> past `pipeline:submit-rejected:invalid-document`; re-run the gate before deploying.
+> **Do not run this runbook yet.** Leg H closed E39–E42. After E41 (sealed TEP bridge) and E42
+> (`prediction-v1-baseline` accepts string `probabilityYes`), re-run the gate before deploying.
 >
-> **E41 disposition:** `synthesizeLegacyExecutionDocuments` (`bridge-legacy-delivery.ts`) is the
-> sole remaining SignedTaskV1→solve bridge — legacy cards only, retires with stage 5. Everything
-> else on the solve path is new-stack TEP. The legacy `CreatorLoop` still *posts* SignedTaskV1
-> until stage 3; that is posting, not a second solve stack.
+> **E41 disposition:** `synthesizeLegacyExecutionDocuments` is the sole remaining SignedTaskV1→solve
+> bridge — legacy cards only, retires with stage 5.
 >
 > See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's gate
 > must pass before deploy.

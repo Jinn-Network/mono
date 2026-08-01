@@ -5442,3 +5442,19 @@ licensed projector-side synthesis — today-mode settlement binds via engagement
 `delivery.task === facts.taskDigest`. This bridge is the **only** remaining SignedTaskV1→solve
 path; the legacy `CreatorLoop` still *posts* SignedTaskV1 until stage 3 (posting, not a second
 solve stack). Retires with `legacyManifestDigest` after stage 5.
+
+### E42 — `pipeline:delivery-wait-failed:backend-terminal` (**closed, leg H**)
+
+After E41, submit accepted; the attempt went terminal with no Delivery:
+
+```
+daemon claimed task: …
+[work] unreleased attempt …: delivery-wait-failed did not release the venue reservation
+{"cards":[{"reason":"pipeline:delivery-wait-failed:backend-terminal"}]}
+```
+
+`prediction-v1-baseline` launcher required `typeof snap.probabilityYes === 'number'`, but
+prediction.v1 / the daemon-harness fixture posts a decimal **string** (`'0.75'`), matching
+`PredictionV1TaskSchema` and the in-process `PredictionV1BaselineImpl`. The runner exited 2
+(`no consensusSnapshot in input`) → backend `failed` → `backend-terminal`. Fixed to accept any
+finite numeric `probabilityYes` (string or number).
