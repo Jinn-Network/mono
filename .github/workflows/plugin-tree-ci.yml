@@ -62,9 +62,11 @@ jobs:
       # dependency, matching benchmarking-ci.yml.
       - name: Build cross-tree portal dependencies from source
         run: |
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          for package in protocol repository discovery catalog-sqlite execution-recorder local-runtime trajectory; do
-            (cd "packages/evidence/$package" && yarn install --immutable && yarn build)
+          for pkg in trust/core discovery/protocol discovery/client \
+                     evidence/protocol evidence/derivation evidence/repository evidence/discovery \
+                     evidence/catalog-sqlite evidence/execution-recorder \
+                     evidence/local-runtime evidence/trajectory evidence/trace-decode evidence/retrieval; do
+            (cd "packages/$pkg" && yarn install --immutable && yarn build)
           done
       - name: Verify Plugin Runtime
         working-directory: plugin/runtime
@@ -74,6 +76,14 @@ jobs:
           yarn test
           yarn build
           yarn pack:smoke
+      - name: Adversarial gate (C6)
+        working-directory: plugin/runtime
+        run: yarn test test/adversarial.test.ts
+      - name: Consumed stack kits
+        run: |
+          cd packages/evidence/derivation && yarn install --immutable && yarn test && cd -
+          cd packages/evidence/trace-decode && yarn install --immutable && yarn test && cd -
+          cd packages/evidence/trajectory && yarn install --immutable && yarn test && cd -
       - name: Upload Plugin Runtime distribution
         uses: actions/upload-artifact@v4
         with:

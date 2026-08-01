@@ -16,8 +16,16 @@ const LogLevelSchema = z.enum(["silent", "error", "warn", "info", "debug"]);
 export const RuntimeConfigFileSchema = z.strictObject({
   home: z.string().min(1).optional(),
   logLevel: LogLevelSchema.optional(),
+  captureRetentionDays: z.number().int().positive().optional(),
+  captureArchiveBusyTimeoutMs: z.number().int().positive().optional(),
   /** C5 — opaque here; `resolveCorpusConfig` owns validation (file-only authority). */
   corpus: z.unknown().optional(),
+  /** C6 — opaque here; `resolveRelevanceConfig` owns validation. */
+  relevance: z.unknown().optional(),
+  /** C6 — opaque here; `resolveProjectionConfig` owns validation. */
+  projection: z.unknown().optional(),
+  /** C6 — opaque here; `resolveSensitivityConfig` owns validation. */
+  sensitivity: z.unknown().optional(),
 });
 
 export type RuntimeConfigFile = z.infer<typeof RuntimeConfigFileSchema>;
@@ -38,6 +46,12 @@ export interface RuntimeConfigSource {
 export interface RuntimeConfig {
   readonly homeDirectory: string;
   readonly archiveDirectory: string;
+  /** Product-owned staging for session feeds and recorder workspaces. Never inside `archiveDirectory`. */
+  readonly captureDirectory: string;
+  /** Days of raw staging material kept before the sweep removes it. */
+  readonly captureRetentionDays: number;
+  /** How long `sealSession` waits for an archive another process holds. */
+  readonly captureArchiveBusyTimeoutMs: number;
   readonly catalogPath: string;
   readonly indexPath: string;
   readonly mirrorStatePath: string;
@@ -49,6 +63,12 @@ export interface RuntimeConfig {
   /** C5 — the exclusive advisory lock guarding mirror sync (cross-plan contract 5). */
   readonly mirrorLockPath: string;
   readonly corpus: CorpusConfig;
+  /** C6 — local relevance ranking limits. */
+  readonly relevance: RelevanceConfig;
+  /** C6 — budgeted context projection limits. */
+  readonly projection: ProjectionConfig;
+  /** C6 — index-time sensitivity exclusion settings. */
+  readonly sensitivity: SensitivityConfig;
 }
 
 export const ENVIRONMENT_KEYS = Object.freeze({
@@ -69,6 +89,30 @@ function present(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/**
+ * Coerces an env override through zod rather than `Number()`, so a non-numeric value fails
+ * loudly as `config-invalid` naming its field — the same shape as the `logLevel` path.
+ */
+function positiveIntegerSetting(
+  envKey: string,
+  envValue: string | undefined,
+  fileValue: number | undefined,
+  fallback: number,
+): number {
+  if (envValue === undefined) return fileValue ?? fallback;
+  const parsed = z
+    .string()
+    .regex(/^[1-9]\d*$/u)
+    .safeParse(envValue);
+  if (!parsed.success) {
+    throw new PluginRuntimeError(
+      "config-invalid",
+      `${envKey} must be a positive integer, received ${JSON.stringify(envValue)}.`,
+    );
+  }
+  return Number(parsed.data);
 }
 
 function parseFile(file: unknown): RuntimeConfigFile {
@@ -196,6 +240,71 @@ function resolveCorpusConfig(file: unknown, homeDirectory: string): CorpusConfig
   };
 }
 
+// --- C6: relevance, projection, sensitivity --------------------------------
+
+const RelevanceConfigSchema = z.strictObject({
+  maxTerms: z.number().int().min(1).max(32).default(10),
+  floor: z.number().int().min(1).max(10).default(2),
+  searchLimit: z.number().int().min(1).max(200).default(20),
+});
+
+const ProjectionConfigSchema = z.strictObject({
+  maxChars: z.number().int().min(200).max(64_000).default(3_500),
+  maxRecords: z.number().int().min(1).max(10).default(2),
+});
+
+const SensitivityConfigFileSchema = z.strictObject({
+  knownIdentities: z.array(z.string().min(1)).default([]),
+});
+
+export type RelevanceConfig = z.infer<typeof RelevanceConfigSchema>;
+export type ProjectionConfig = z.infer<typeof ProjectionConfigSchema>;
+
+export interface SensitivityConfig {
+  readonly knownIdentities: readonly string[];
+  /** Derived from `homeDirectory`; not overridable from the config file. */
+  readonly noncePath: string;
+}
+
+function configSectionError(section: string, error: z.ZodError): PluginRuntimeError {
+  return new PluginRuntimeError(
+    RUNTIME_ERROR_CODES.configInvalid,
+    `${section} configuration is invalid: ${error.issues
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join("; ")}`,
+  );
+}
+
+function resolveRelevanceConfig(file: unknown): RelevanceConfig {
+  const raw = (file as { readonly relevance?: unknown } | undefined)?.relevance;
+  const parsed = RelevanceConfigSchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    throw configSectionError("relevance", parsed.error);
+  }
+  return parsed.data;
+}
+
+function resolveProjectionConfig(file: unknown): ProjectionConfig {
+  const raw = (file as { readonly projection?: unknown } | undefined)?.projection;
+  const parsed = ProjectionConfigSchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    throw configSectionError("projection", parsed.error);
+  }
+  return parsed.data;
+}
+
+function resolveSensitivityConfig(file: unknown, homeDirectory: string): SensitivityConfig {
+  const raw = (file as { readonly sensitivity?: unknown } | undefined)?.sensitivity;
+  const parsed = SensitivityConfigFileSchema.safeParse(raw ?? {});
+  if (!parsed.success) {
+    throw configSectionError("sensitivity", parsed.error);
+  }
+  return {
+    knownIdentities: parsed.data.knownIdentities,
+    noncePath: join(homeDirectory, "sensitivity-nonce"),
+  };
+}
+
 /**
  * Resolve the runtime's configuration. Precedence: defaults, then the configuration file,
  * then the environment. Pure — no filesystem, no clock, no ambient reads.
@@ -222,6 +331,22 @@ export function resolveRuntimeConfig(source: RuntimeConfigSource): RuntimeConfig
   return Object.freeze({
     homeDirectory,
     archiveDirectory: join(homeDirectory, "archive"),
+    // Product-owned staging. Deliberately NOT under archiveDirectory: `local-runtime` and the
+    // filesystem repository assert exclusive ownership and 0700 on that tree, and it is under
+    // an exclusive lock whenever a capture is sealing.
+    captureDirectory: join(homeDirectory, "capture"),
+    captureRetentionDays: positiveIntegerSetting(
+      "JINN_PLUGIN_CAPTURE_RETENTION_DAYS",
+      present(source.env.JINN_PLUGIN_CAPTURE_RETENTION_DAYS),
+      file?.captureRetentionDays,
+      30,
+    ),
+    captureArchiveBusyTimeoutMs: positiveIntegerSetting(
+      "JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS",
+      present(source.env.JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS),
+      file?.captureArchiveBusyTimeoutMs,
+      10_000,
+    ),
     catalogPath: join(homeDirectory, "catalog.sqlite"),
     indexPath: join(homeDirectory, "index.sqlite"),
     mirrorStatePath: join(homeDirectory, "mirror-state.json"),
@@ -230,5 +355,8 @@ export function resolveRuntimeConfig(source: RuntimeConfigSource): RuntimeConfig
     mirrorObjectsDirectory: join(homeDirectory, "mirror", "objects"),
     mirrorLockPath: join(homeDirectory, "mirror-sync.lock"),
     corpus: resolveCorpusConfig(source.file, homeDirectory),
+    relevance: resolveRelevanceConfig(source.file),
+    projection: resolveProjectionConfig(source.file),
+    sensitivity: resolveSensitivityConfig(source.file, homeDirectory),
   });
 }

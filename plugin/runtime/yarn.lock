@@ -206,6 +206,24 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/evidence-derivation@portal:../../packages/evidence/derivation::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-derivation@portal:../../packages/evidence/derivation::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@noble/hashes": "npm:2.2.0"
+    "@secretlint/core": "npm:13.0.4"
+    "@secretlint/secretlint-rule-preset-recommend": "npm:13.0.4"
+    canonicalize: "npm:3.0.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/evidence-discovery@portal:../../packages/evidence/discovery::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-discovery@portal:../../packages/evidence/discovery::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
@@ -269,6 +287,19 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/evidence-trace-decode@portal:../../packages/evidence/trace-decode::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-trace-decode@portal:../../packages/evidence/trace-decode::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-trajectory": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
@@ -305,17 +336,19 @@ __metadata:
   resolution: "@jinn-network/plugin-runtime@workspace:."
   dependencies:
     "@jinn-network/evidence-catalog-sqlite": "npm:0.1.0"
+    "@jinn-network/evidence-derivation": "npm:0.1.0"
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-local-runtime": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/evidence-retrieval": "npm:0.1.0"
+    "@jinn-network/evidence-trace-decode": "npm:0.1.0"
     "@jinn-network/evidence-trajectory": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
-    "@types/better-sqlite3": "npm:7.6.11"
+    "@types/better-sqlite3": "npm:7.6.13"
     "@types/node": "npm:22.20.1"
     better-sqlite3: "npm:13.0.1"
     typescript: "npm:5.9.3"
@@ -554,6 +587,39 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@secretlint/core@npm:13.0.4":
+  version: 13.0.4
+  resolution: "@secretlint/core@npm:13.0.4"
+  dependencies:
+    "@secretlint/profiler": "npm:13.0.4"
+    "@secretlint/types": "npm:13.0.4"
+    debug: "npm:^4.4.3"
+    structured-source: "npm:^4.0.0"
+  checksum: 10c0/ed46a697b893220e421260b8604df6f4f46f9ee36ede289ae2c85ab2394ac7155171f42484cb977387b6fdc032fee984ac37e5fc4f14f9ad28276d3264a72c6f
+  languageName: node
+  linkType: hard
+
+"@secretlint/profiler@npm:13.0.4":
+  version: 13.0.4
+  resolution: "@secretlint/profiler@npm:13.0.4"
+  checksum: 10c0/0cfe8b8f23fd9354a03446c2da4e762436b2dbd8d8b513bf74cc373515310951b1273de1753b1c35c872a06347031656d7c71e9e0d7305ff5b0a93ef687f8c0f
+  languageName: node
+  linkType: hard
+
+"@secretlint/secretlint-rule-preset-recommend@npm:13.0.4":
+  version: 13.0.4
+  resolution: "@secretlint/secretlint-rule-preset-recommend@npm:13.0.4"
+  checksum: 10c0/9b571baff73baa0d56e5cb31532dab88da4f5608ca378716a5c91da8c9c99b641486a029dd7a9b84d0218d8489b13a3b8ece6f2497646f2dfeb38bd24febde06
+  languageName: node
+  linkType: hard
+
+"@secretlint/types@npm:13.0.4":
+  version: 13.0.4
+  resolution: "@secretlint/types@npm:13.0.4"
+  checksum: 10c0/3b154d2543bc88610cca02471085fb25f9c844096c32018fb8a3c14d05d5997de08726477edbb755456b8a8c44fcad47257ff89aebaa85973475ef8f43d2ee6b
+  languageName: node
+  linkType: hard
+
 "@standard-schema/spec@npm:^1.1.0":
   version: 1.1.0
   resolution: "@standard-schema/spec@npm:1.1.0"
@@ -561,12 +627,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/better-sqlite3@npm:7.6.11":
-  version: 7.6.11
-  resolution: "@types/better-sqlite3@npm:7.6.11"
+"@types/better-sqlite3@npm:7.6.13":
+  version: 7.6.13
+  resolution: "@types/better-sqlite3@npm:7.6.13"
   dependencies:
     "@types/node": "npm:*"
-  checksum: 10c0/6a7b8e5765f872404242ff9626edf4b4dd7974047144ba7254a59f4f1c196d05f8001323d0b526e8bbb3842bf541e341d74ca0164e50bd38fceaf3ef5d2a673d
+  checksum: 10c0/c4336e7b92343eb0e988ded007c53fa9887b98a38d61175226e86124a1a2c28b1a4e3892873c5041e350b7bfa2901f85c82db1542c4f0eed1d3a899682c92106
   languageName: node
   linkType: hard
 
@@ -730,6 +796,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"boundary@npm:^2.0.0":
+  version: 2.0.0
+  resolution: "boundary@npm:2.0.0"
+  checksum: 10c0/dbe3bd68f1a7d6b13f83c12ef2e763d9c1514e3454640a64b5b24a096aaa78846582af517da92e96bb4d19194d0670e5fe87e9f4ff42e9134253ec5c75d58cde
+  languageName: node
+  linkType: hard
+
+"canonicalize@npm:3.0.0":
+  version: 3.0.0
+  resolution: "canonicalize@npm:3.0.0"
+  bin:
+    canonicalize: bin/canonicalize.js
+  checksum: 10c0/d197ce019d12f41f9d81a79e04015b8e8ca5fda78d0d67c3d1f309dd09f32a039d4654c5a2563d884385ae151c6f56a79f38e900020e2921f7dbe093f29dc4ac
+  languageName: node
+  linkType: hard
+
 "chai@npm:^6.2.2":
   version: 6.2.2
   resolution: "chai@npm:6.2.2"
@@ -748,6 +830,18 @@ __metadata:
   version: 2.0.0
   resolution: "convert-source-map@npm:2.0.0"
   checksum: 10c0/8f2f7a27a1a011cc6cc88cc4da2d7d0cfa5ee0369508baae3d98c260bb3ac520691464e5bbe4ae7cdf09860c1d69ecc6f70c63c6e7c7f7e3f18ec08484dc7d9b
+  languageName: node
+  linkType: hard
+
+"debug@npm:^4.4.3":
+  version: 4.4.3
+  resolution: "debug@npm:4.4.3"
+  dependencies:
+    ms: "npm:^2.1.3"
+  peerDependenciesMeta:
+    supports-color:
+      optional: true
+  checksum: 10c0/d79136ec6c83ecbefd0f6a5593da6a9c91ec4d7ddc4b54c883d6e71ec9accb5f67a1a5e96d00a328196b5b5c86d365e98d8a3a70856aaf16b4e7b1985e67f5a6
   languageName: node
   linkType: hard
 
@@ -965,6 +1059,13 @@ __metadata:
   dependencies:
     minipass: "npm:^7.1.2"
   checksum: 10c0/5aad75ab0090b8266069c9aabe582c021ae53eb33c6c691054a13a45db3b4f91a7fb1bd79151e6b4e9e9a86727b522527c0a06ec7d45206b745d54cd3097bcec
+  languageName: node
+  linkType: hard
+
+"ms@npm:^2.1.3":
+  version: 2.1.3
+  resolution: "ms@npm:2.1.3"
+  checksum: 10c0/d924b57e7312b3b63ad21fc5b3dc0af5e78d61a1fc7cfb5457edaf26326bf62be5307cc87ffb6862ef1c2b33b0233cdb5d4f01c4c958cc0d660948b65a287a48
   languageName: node
   linkType: hard
 
@@ -1194,6 +1295,15 @@ __metadata:
   version: 4.2.0
   resolution: "std-env@npm:4.2.0"
   checksum: 10c0/40ac525ce7b7c556abc332a7376f14356eeb1a7f17f6ff9a003eb9f52326ff1f3745d3e1b43452675b1ec6fcc319f1b1d6f3b0d386cf3f91058479ad883cff69
+  languageName: node
+  linkType: hard
+
+"structured-source@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "structured-source@npm:4.0.0"
+  dependencies:
+    boundary: "npm:^2.0.0"
+  checksum: 10c0/5573b074bb0c28aa7545df6925098b28cd45fb7f56c8df1a255ea8b2f9dc8434390d50eb4d3f56d8673e5618928435e0e6f0851c328bf51c9f8e04d6668dbae0
   languageName: node
   linkType: hard
 

@@ -1,0 +1,29 @@
+{
+  "fixtures": [
+    {
+      "file": "genuine.json",
+      "attack": "none — the control record every other fixture is ranked against",
+      "expectation": "ranks first for a genuine query and projects normally"
+    },
+    {
+      "file": "instruction-bearing.json",
+      "attack": "prompt injection: an imperative addressed to the model, with an exfiltration target",
+      "expectation": "may be retrieved, but every line is quoted inside the provenance fence and none reaches column 0"
+    },
+    {
+      "file": "fence-breakout.json",
+      "attack": "delimiter injection: a forged closing fence intended to end the quoted block early",
+      "expectation": "the derived fence differs from the forged one, so the block does not end early"
+    },
+    {
+      "file": "stuffed-metadata.json",
+      "attack": "keyword stuffing by repetition, the weaponised #1791 distractor-collision class",
+      "expectation": "coverage counts the term once, so it stays below the relevance floor and is never projected"
+    },
+    {
+      "file": "planted-secret.json",
+      "attack": "a live credential inside otherwise relevant material, testing re-injection",
+      "expectation": "the credential-bearing excerpt is excluded at index time; the record's clean excerpt still projects"
+    }
+  ]
+}

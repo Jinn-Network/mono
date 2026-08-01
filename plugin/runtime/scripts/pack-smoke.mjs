@@ -35,9 +35,19 @@ const portals = [
     archive: "evidence-repository.tgz",
   },
   {
+    name: "@jinn-network/execution-recorder",
+    root: join(repoRoot, "packages", "evidence", "execution-recorder"),
+    archive: "execution-recorder.tgz",
+  },
+  {
     name: "@jinn-network/evidence-discovery",
     root: join(repoRoot, "packages", "evidence", "discovery"),
     archive: "evidence-discovery.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-derivation",
+    root: join(repoRoot, "packages", "evidence", "derivation"),
+    archive: "evidence-derivation.tgz",
   },
   {
     name: "@jinn-network/evidence-retrieval",
@@ -48,6 +58,21 @@ const portals = [
     name: "@jinn-network/evidence-catalog-sqlite",
     root: join(repoRoot, "packages", "evidence", "catalog-sqlite"),
     archive: "evidence-catalog-sqlite.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-local-runtime",
+    root: join(repoRoot, "packages", "evidence", "local-runtime"),
+    archive: "evidence-local-runtime.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-trajectory",
+    root: join(repoRoot, "packages", "evidence", "trajectory"),
+    archive: "evidence-trajectory.tgz",
+  },
+  {
+    name: "@jinn-network/evidence-trace-decode",
+    root: join(repoRoot, "packages", "evidence", "trace-decode"),
+    archive: "evidence-trace-decode.tgz",
   },
   {
     name: "@jinn-network/record-discovery-client",
