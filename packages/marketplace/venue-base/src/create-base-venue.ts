@@ -58,7 +58,15 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     chain: config.chain,
     publicClient: config.publicClient,
     state,
-    addresses: [config.chain.jinnRouter, config.chain.taskCoordinator, config.chain.mechMarketplace],
+    addresses: [
+      config.chain.jinnRouter,
+      config.chain.taskCoordinator,
+      config.chain.mechMarketplace,
+      // Mech Deliver events are emitted by the priority mech, not the marketplace. Settlement's
+      // readMechDeliveryFacts scans this same logSource; omitting the mech made Deliver invisible
+      // while delivery-watcher / e2e waitForDelivery (direct getLogs on mech) still saw it (E44).
+      config.priorityMech,
+    ],
     ...(config.logSource === undefined ? {} : { options: config.logSource }),
   });
   const observe = createProjectorObservePort({

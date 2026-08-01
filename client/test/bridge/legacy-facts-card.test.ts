@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapAnnouncedSubmissionToFacts } from '@jinn-network/marketplace-pipeline';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
-import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
+import { synthesizeLegacyFactsCard, LEGACY_ENVELOPE_EXTENSION_KEY, signedEnvelopeJsonFromDeliveryOrRaw } from '../../src/daemon/bridge-legacy-delivery.js';
 
 const ANCHORED_TASK = {
   taskId: 77n,
@@ -51,5 +51,21 @@ describe('bridge-era legacy facts card', () => {
         acceptLegacyCards: false,
       }).ok,
     ).toBe(false);
+  });
+});
+
+describe('signedEnvelopeJsonFromDeliveryOrRaw (E43)', () => {
+  it('unwraps the nested bridge envelope from a sealed Delivery-shaped document', () => {
+    const nested = { schemaVersion: 'jinn.execution.v1', solverType: 'prediction.v1', role: 'solution' };
+    const delivery = {
+      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      [LEGACY_ENVELOPE_EXTENSION_KEY]: JSON.stringify(nested),
+    };
+    expect(signedEnvelopeJsonFromDeliveryOrRaw(delivery)).toEqual(nested);
+  });
+
+  it('passes through a bare SignedEnvelope (pre-bridge fixtures)', () => {
+    const bare = { schemaVersion: 'jinn.execution.v1', solverType: 'prediction.v1' };
+    expect(signedEnvelopeJsonFromDeliveryOrRaw(bare)).toBe(bare);
   });
 });

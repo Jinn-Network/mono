@@ -127,7 +127,20 @@ export class ProjectorLoop {
       previousEntryDigest: cursor?.entryDigest ?? null,
       initialSequence: cursor?.entryDigest != null ? BigInt(cursor.sequence) + 1n : undefined,
     });
-    const result = await projectAnnouncements(transition, ports);
+    // Announcement publication can refuse or throw on roles the composition has not wired yet
+    // (e.g. evaluation-delivery resolveRecord gap b). A throw must not discard the reducer's
+    // observations or leave the chain-log cursor ahead of the projection cursor — that would
+    // permanently drop TaskCreated facts the work loop needs for the next claim.
+    let result: Awaited<ReturnType<typeof projectAnnouncements>>;
+    try {
+      result = await projectAnnouncements(transition, ports);
+    } catch (err) {
+      this.config.logger?.warn(
+        `[projector] announcement publication failed (non-fatal): `
+          + `${err instanceof Error ? err.message : String(err)}`,
+      );
+      result = { announcements: [], entries: [], pages: [], refusals: [] };
+    }
 
     const nextSequence = result.head?.sequence ?? cursor?.sequence ?? NO_ANNOUNCEMENTS_SEQUENCE;
     const nextEntryDigest = result.head?.entry ?? cursor?.entryDigest ?? null;

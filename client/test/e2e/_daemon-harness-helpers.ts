@@ -57,6 +57,7 @@ import {
   decodeFirstEvent,
 } from './task-first-helpers.js';
 import { Daemon } from '../../src/daemon/daemon.js';
+import { signedEnvelopeJsonFromDeliveryOrRaw } from '../../src/daemon/bridge-legacy-delivery.js';
 import { MechAdapter } from '../../src/adapters/mech/adapter.js';
 import { getMechDeliveryRate, getTimeoutBounds } from '../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
@@ -2057,8 +2058,11 @@ export async function waitForDelivery(
             break;
           }
 
-          // Parse and validate as SignedEnvelope.
-          const envelope = SignedEnvelopeSchema.parse(envelopeJson);
+          // Parse and validate as SignedEnvelope. E43: IPFS may hold a sealed TEP Delivery
+          // with the legacy envelope nested under the bridge extension — unwrap first.
+          const envelope = SignedEnvelopeSchema.parse(
+            signedEnvelopeJsonFromDeliveryOrRaw(envelopeJson),
+          );
           const solverHarnessName = envelope.executor.implName;
 
           return {

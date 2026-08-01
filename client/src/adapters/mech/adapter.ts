@@ -31,11 +31,16 @@ import {
   fetchFromIpfs,
   fetchSignedTaskFromIpfs,
   fetchSignedEnvelopeFromIpfs,
+  fetchRawBytesFromIpfs,
   digestHexToGatewayUrl,
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
-import { legacyRestorationResultFromDelivery } from '../../daemon/bridge-legacy-delivery.js';
+import {
+  deliveryClaimEvidenceHash,
+  legacyRestorationResultFromDelivery,
+  signedEnvelopeJsonFromDeliveryOrRaw,
+} from '../../daemon/bridge-legacy-delivery.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -1225,28 +1230,30 @@ export class MechAdapter implements ExecutionAdapter {
       solutionEnvelopeCid,
       this.ipfsFetchOpts(),
     ) as Record<string, unknown>;
-    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(resultPayload);
-    if (!creationProvenance && typeof resultPayload.data === 'string') {
+    // E43/E44: IPFS may hold a sealed TEP Delivery with the bridge envelope nested. Unwrap
+    // before reading provenance / result data (same preference as deliveryClaimForDelivery).
+    const envelopeDocument = signedEnvelopeJsonFromDeliveryOrRaw(resultPayload) as Record<string, unknown>;
+    let creationProvenance = taskCreationProvenanceFromSolutionEnvelope(envelopeDocument);
+    if (!creationProvenance && typeof envelopeDocument.data === 'string') {
       try {
         creationProvenance = taskCreationProvenanceFromSolutionEnvelope(
-          JSON.parse(resultPayload.data),
+          JSON.parse(envelopeDocument.data),
         );
       } catch {
         // Legacy non-envelope result payload. The fail-closed check below
         // keeps it out of the new provenance-bearing writer path.
       }
     }
-    if (!creationProvenance) {
-      throw new Error(
-        `evaluation opportunity ${solution.requestId} is missing canonical TaskCreated provenance in its solution envelope`,
-      );
-    }
     const canonicalCreationProvenance =
       await this.canonicalTaskCreationForEvaluation(
         solution.taskId,
         solution.blockNumber,
       );
-    if (
+    // Bridge-era envelopes (buildLegacyExecutionEnvelope) carry placeholder creation tx/block;
+    // when the nested envelope lacks valid provenance, trust the on-chain TaskCreated SoT.
+    if (!creationProvenance) {
+      creationProvenance = canonicalCreationProvenance;
+    } else if (
       creationProvenance.onchainCreationTx.toLowerCase()
         !== canonicalCreationProvenance.onchainCreationTx.toLowerCase()
       || creationProvenance.onchainCreationBlock
@@ -1264,7 +1271,9 @@ export class MechAdapter implements ExecutionAdapter {
       new TextEncoder().encode(JSON.stringify(resultPayload)),
     );
     const resultData =
-      bridgedResultData ?? (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+      bridgedResultData
+      ?? (typeof envelopeDocument.data === 'string' ? envelopeDocument.data : undefined)
+      ?? JSON.stringify(envelopeDocument);
     let autopilotEvaluationContext: Record<string, unknown> | undefined;
     if (
       restoration.task.spec?.['source'] === 'autopilot-session'
@@ -1617,29 +1626,32 @@ export class MechAdapter implements ExecutionAdapter {
       ? deliveryDataHex.slice(2)
       : deliveryDataHex;
     const envelopeCid = `f01551220${deliveryDigest}`;
-    const rawEnvelope = await fetchSignedEnvelopeFromIpfs(
+    const exactFetchedBytes = await fetchRawBytesFromIpfs(
       this.config.ipfsGatewayUrl,
       envelopeCid,
       this.ipfsFetchOpts(),
     );
-    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-    const rawSigned = rawEnvelope as Record<string, unknown>;
-    const { signature: _rawSignature, ...unsignedBody } = rawSigned;
-    const signature = parsed.signature;
-    const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
-    const recomputed = keccak256(jcsBytes);
-    if (recomputed !== signature.hash) {
-      throw new Error(
-        `recomputed hash ${recomputed} !== envelope.signature.hash ${signature.hash}`,
-      );
+    // E46: bridged TEP Deliveries settle on keccakEvidenceHash(exact bytes); bare envelopes
+    // keep envelope JCS keccak (evaluation / legacy TaskEngine path).
+    const recomputed = deliveryClaimEvidenceHash(exactFetchedBytes);
+    let parsedDocument: unknown;
+    try {
+      parsedDocument = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(exactFetchedBytes));
+    } catch {
+      throw new Error('delivery claim: IPFS payload is not valid JSON');
     }
+    // E43: converged Deliveries pin a sealed TEP Delivery with the legacy envelope nested
+    // under the bridge extension — unwrap before SignedEnvelopeSchema (same preference as
+    // the evaluation read path above). Bare envelopes (pre-bridge fixtures) pass through.
+    const envelopeSource = signedEnvelopeJsonFromDeliveryOrRaw(parsedDocument);
+    const parsed = SignedEnvelopeSchema.parse(envelopeSource);
 
     const role = normalizeEnvelopeRole(parsed.role);
     if (role === 'capture') {
       throw new Error(`unsupported delivery envelope role=capture for requestId ${requestId}`);
     }
     const kind = role === 'verdict' ? 'verdict' : 'solution';
-    const payload = rawSigned['payload'];
+    const payload = (envelopeSource as Record<string, unknown>)['payload'];
     const verdictCode = kind === 'verdict'
       ? this.verdictCodeFromEnvelopePayload(parsed.solverType, payload)
       : undefined;

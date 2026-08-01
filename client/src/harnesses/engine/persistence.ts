@@ -948,6 +948,13 @@ export class TaskRunPersistence {
     ).run(consumedRefsJson, requestId);
   }
 
+  /** Persist manifestCid without a state transition (work-loop delivered corpus, #1393). */
+  setManifestCid(requestId: string, manifestCid: string): void {
+    this.db.prepare(
+      'UPDATE task_runs SET manifest_cid = ? WHERE request_id = ?',
+    ).run(manifestCid, requestId);
+  }
+
   /**
    * Persist `manifestGeneratedAt` for the first time without triggering a
    * state transition. Used by pack() to lock in the generatedAt timestamp
