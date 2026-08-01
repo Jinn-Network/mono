@@ -33,6 +33,7 @@ function envelopeCidFromSignedEnvelope(envelope: ReturnType<typeof SignedEnvelop
 
 function minimalTaskForWorkLoop(facts: SubmissionFacts): Task {
   return {
+    id: facts.taskId.toString(),
     solverType: facts.workKind,
     role: 'restoration',
     description: `work-loop ${facts.workKind}`,
@@ -51,7 +52,7 @@ function ensureWorkLoopTaskRunRow(
   if (persistence.getByRequestId(requestId) !== null) return;
   persistence.insertDiscovered({
     requestId,
-    taskId: facts.taskId,
+    taskId: facts.taskId.toString(),
     taskCid: facts.taskDigest,
     onchainCreationTx: '0x',
     onchainCreationBlock: 0,
