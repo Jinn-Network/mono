@@ -141,3 +141,20 @@ export {
 } from "./ports.js";
 
 export type { FixtureMutationDeclaration } from "@jinn-network/chain-environment-verification";
+
+export {
+  PROVISIONAL_COMMITMENT,
+  assertClosedStatePreconditions,
+  assembleCandidate,
+  buildClosedStateRecord,
+  computeSealedInitialCommitment,
+  resolveClosedStateResources,
+  storeExtractionArtifacts,
+  type AssembleCandidateInput,
+  type ChainEnvironmentCandidate,
+} from "./candidate.js";
+
+export {
+  extractEnvironment,
+  type ExtractionResult,
+} from "./extract.js";

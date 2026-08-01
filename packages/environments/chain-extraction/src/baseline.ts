@@ -28,6 +28,8 @@ export type ChainEnvironmentRecordDraft = ChainEnvironmentRecord;
 
 export interface ExtractionRequest {
   readonly draft: ChainEnvironmentRecordDraft;
+  /** Fallback when the draft's `sourceAnchor` omits `caip2ChainId`. */
+  readonly caip2ChainId?: string;
   readonly anchorBlockNumber: number;
   readonly fidelityClass: "local" | "anchored-subset" | "full-state";
   /** Addresses whose artifact entries the author claims come from the source chain. */

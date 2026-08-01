@@ -433,12 +433,6 @@ export function fakeStateArtifact(stateRoot?: Hex32): StateArtifact {
     },
     accounts: [
       {
-        address: FAKE_ACTOR,
-        balance: "0xde0b6b3a7640000",
-        nonce: "0x0",
-        storage: [],
-      },
-      {
         address: FAKE_POOL,
         balance: "0x0",
         nonce: "0x1",
@@ -447,6 +441,12 @@ export function fakeStateArtifact(stateRoot?: Hex32): StateArtifact {
           { slot: FAKE_SLOT_1, value: `0x${"0".repeat(63)}7` },
           { slot: FAKE_SLOT_2, value: `0x${"0".repeat(63)}3` },
         ],
+      },
+      {
+        address: FAKE_ACTOR,
+        balance: "0xde0b6b3a7640000",
+        nonce: "0x0",
+        storage: [],
       },
     ],
   };
