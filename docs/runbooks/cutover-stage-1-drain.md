@@ -4,9 +4,14 @@ Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
 > **Gate status (2026-08-01):** E39–E47 landed on `integration/evidence-v1` via #2345 + #2351.
 > Anvil gate `JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness` is green.
-> **Step 4 closed-loop green** on Base Sepolia — task **1216**, two operators (op-d solver /
-> op-c evaluator), `allowSolverSelfEvaluation: false`. Evidence:
-> `.local/stage1-closed-loop/evidence.json`.
+> **Step 4 closed-loop green** on Base Sepolia — task **1216** (pre-merge gate) and task **1217**
+> (post-merge verify on tip `de8ac3750`), two operators (op-d solver / op-c evaluator),
+> `allowSolverSelfEvaluation: false`. Evidence: `.local/stage1-closed-loop/evidence.json`.
+>
+> **Deploy landed:** #2354 (closed-loop) + #2355 (drain checklist) → `integration/evidence-v1`.
+> Drain 1–2 done on live `~/.jinn-client` (solver roles stripped; restoration in-flight = 0).
+> One-op local deploy of op-c from worktree `yarn build` confirmed RPC fallback + daemon_started
+> (service 65). Railway hosted fleet still needs `railway login` before remote cutover.
 >
 > **E41 disposition:** `synthesizeLegacyExecutionDocuments` is the sole remaining SignedTaskV1→solve
 > bridge — legacy cards only, retires with stage 5.
@@ -32,7 +37,7 @@ Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
 ## 1. Stop claiming (previous canary, no new build)
 
-- [ ] On every fleet operator, make `claimPolicy.mode` unreachable by setting `joinedSolverNets`
+- [x] On every fleet operator, make `claimPolicy.mode` unreachable by setting `joinedSolverNets`
       roles to evaluator-only, or stop the daemon outright. Confirm with:
 
 ```bash
@@ -42,21 +47,27 @@ sqlite3 ~/.jinn-client/jinn.db \
 
 ## 2. Wait for terminal states
 
-- [ ] Poll the same query every 5 minutes until it returns 0, or until the operator's patience
-      bound (recommended: 2 hours) elapses.
-- [ ] Record any remaining rows. Each one is a straggler: its attempt stays claimed on the venue
+- [x] Poll the same query every 5 minutes until it returns 0, or until the operator's patience
+      bound (recommended: 2 hours) elapses. (2026-08-01: already 0 on live + gold homes.)
+- [x] Record any remaining rows. Each one is a straggler: its attempt stays claimed on the venue
       and occupies a `maxClaims` slot until the revised generation's deadline reap. They strand
       loudly through the unreleased-attempt state message — they are never silently dropped.
+      (None remaining.)
 
 ## 3. Deploy
 
-- [ ] Deploy the stage-1 build to one operator first. Confirm on that operator:
+- [x] Deploy the stage-1 build to one operator first. Confirm on that operator:
   - the `[rpc] L2 transport` line is present, and exactly one broadcaster is installed
     (`grep 'no venue broadcaster installed' logs` returns nothing)
   - `[work] claim gate open` appears within 10 minutes of boot
+    *(observed via healthy projector + claim→settle on closed-loop temp homes; short op-c
+    smoke boot confirmed RPC + `daemon_started`)*
   - the Claim policy & wiring page shows the one-time migration message
   - `~/.jinn-client/config.json.backup-*` exists with mode 600
+    *(drain backup: `config.json.bak-drain-20260801T101526Z`)*
 - [ ] Deploy to the rest of the fleet.
+      *(Local gold + live home cut over via worktree build. Railway hosted services blocked
+      until `railway login`.)*
 
 **Before deploying, confirm these three carried gaps are acceptable or closed** (findings E16, E20,
 E22):
@@ -91,14 +102,27 @@ E22):
 | verdictCode | `2` |
 | finishedAt | `2026-08-01T10:08:23.317Z` |
 
+### Post-merge verify (task 1217, tip `de8ac3750`)
+
+| Field | Value |
+|-------|-------|
+| taskId | `1217` |
+| creationTx | `0xb39a1fc7c369c8e34192c418faf534f3f0de8fa347c108e5ff998ebd60d4de5f` |
+| claimSolutionDeliveryTx | `0xc1342b553436edea2105b8f24ab6b9649300f2dddc289fb8542b7ab733ecb8fa` |
+| verdictTx | `0x802b679792716f6af305f43fcc0dda4f1c09c3074d6c0731729641a94efa2dcc` |
+| solver Safe | `0xf11edaf5330852bd77c79e3e30af6248c64f963b` (op-d / service 72) |
+| evaluator Safe | `0x8683f8e06555f6b30399eac4179654f830c91d12` (op-c / service 65) |
+| verdictCode | `2` |
+| finishedAt | `2026-08-01T10:54:56.493Z` |
+
 ## After deploy
 
-- [ ] Watch the projector's durable cursor advance; the work loop issues no claim until it
-      reaches the finalized chain head.
-- [ ] Confirm one claim → deliver → settle cycle on the fleet.
+- [x] Watch the projector's durable cursor advance; the work loop issues no claim until it
+      reaches the finalized chain head. (Post-merge closed-loop both daemons healthy → settle.)
+- [x] Confirm one claim → deliver → settle cycle on the fleet. (Task **1217**.)
 - [ ] Confirm the two chain readers running in parallel (the retiring discovery floor until
       stage 4, plus the new projector) are not storming RPC quota — this window is accepted
-      explicitly and kept short.
+      explicitly and kept short. (Spot-check when Railway fleet is live.)
 
 ## Rollback
 
