@@ -1,9 +1,8 @@
 /**
  * Task 16 (cutover stage 1 — docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md):
  * the TaskEngine solution path retires. `canAcceptTask({ taskRole: 'restoration', ... })` always
- * refuses with a named reason, `watchForTasks()` yields only evaluation announcements, and
- * `joinedSolverNets` stops gating claims. See `test/daemon/evaluation-path-regression.test.ts`
- * for the companion pin — the evaluation path must stay behaviourally identical.
+ * refuses with a named reason. Cutover stage 2 retires the mech evaluation machinery too —
+ * `watchForTasks()` no longer yields evaluation announcements.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Store } from '../../src/store/store.js';
@@ -99,23 +98,33 @@ describe('solution path retired at stage 1', () => {
     expect(rows.filter((row) => row.taskRole === 'restoration')).toEqual([]);
   });
 
-  it('yields no restoration announcements from watchForTasks', async () => {
-    const adapter = adapterFixture({ routerLogs: ['TaskCreated', 'SolutionDeliveryClaimed'] });
-    const yielded: string[] = [];
-    for await (const announcement of adapter.watchForTasks()) {
-      yielded.push(announcement.task.role as string);
-      if (yielded.length >= 1) break;
-    }
-    expect(yielded).toEqual(['evaluation']);
+  it('yields no task announcements from watchForTasks', async () => {
+    const adapter = adapterFixture({ routerLogs: ['TaskCreated', 'SolutionDeliveryClaimed'], pollIntervalMs: 10 });
+    const yielded: unknown[] = [];
+    const consume = async () => {
+      for await (const announcement of adapter.watchForTasks()) {
+        yielded.push(announcement);
+      }
+    };
+    const consumer = consume();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await adapter.stop();
+    await consumer;
+    expect(yielded).toEqual([]);
   });
 
-  it('claims regardless of joinedSolverNets — the predicate is the authority', async () => {
-    const adapter = adapterFixture({ joinedSolverNets: {}, routerLogs: ['SolutionDeliveryClaimed'] });
+  it('does not gate router polling on joinedSolverNets', async () => {
+    const adapter = adapterFixture({ joinedSolverNets: {}, routerLogs: ['TaskCreated'], pollIntervalMs: 10 });
     const yielded: unknown[] = [];
-    for await (const announcement of adapter.watchForTasks()) {
-      yielded.push(announcement);
-      break;
-    }
-    expect(yielded).toHaveLength(1);
+    const consume = async () => {
+      for await (const _announcement of adapter.watchForTasks()) {
+        yielded.push(_announcement);
+      }
+    };
+    const consumer = consume();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await adapter.stop();
+    await consumer;
+    expect(yielded).toEqual([]);
   });
 });

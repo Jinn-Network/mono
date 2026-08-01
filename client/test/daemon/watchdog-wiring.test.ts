@@ -62,13 +62,9 @@ describe('#1043 Daemon watchdog wiring', () => {
     daemon = makeDaemon(store, tmp, { autoRestart: false });
     await daemon.start();
 
-    // Loops that always start: creator, engine-tick, engine-watcher,
-    // delivery-watcher. With LocalAdapter the for-await loops do not heartbeat,
-    // but start() seeds every started loop so the watchdog never trips on boot.
+    // Minimal daemon starts creator only; engine-tick/engine-watcher retired from
+    // LOOP_REGISTRY at cutover stage 2.
     expect(getLoopTick(store, 'creator')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-tick')).not.toBeNull();
-    expect(getLoopTick(store, 'engine-watcher')).not.toBeNull();
-    expect(getLoopTick(store, 'delivery-watcher')).not.toBeNull();
 
     expect(daemon.getShutdownState()).toBe('running');
 

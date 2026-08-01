@@ -3,7 +3,6 @@ import type { ExecutionAdapter } from '../adapters/adapter.js';
 import type { Runner } from '../runner/runner.js';
 import { Store } from '../store/store.js';
 import { CreatorLoop } from './creator.js';
-import { DeliveryWatcherLoop } from './delivery-watcher.js';
 import { startApiServer, type ApiServer } from '../api/server.js';
 import type { StatusGatherConfig } from '../api/gather-status.js';
 import { PeerSync } from './peer-sync.js';
@@ -286,7 +285,6 @@ export class Daemon {
   private creatorLoop: CreatorLoop;
   private restorationEngine: TaskEngine;
   private engineStopped = false;
-  private deliveryWatcherLoop: DeliveryWatcherLoop;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
@@ -337,12 +335,6 @@ export class Daemon {
       config.creatorSafeAddress,
       config.sweRebenchV2StateDir,
     );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
-      this.adapter,
-      this.store,
-      config.sweRebenchV2StateDir,
-    );
-
     this.restorationEngine = new TaskEngine({
       ...config.restorationEngine,
       store: this.store,
@@ -503,15 +495,6 @@ export class Daemon {
           kind: 'error',
           message: 'engine-tick loop crashed',
           errorCode: 'engine_tick_crashed',
-          details: { error: err instanceof Error ? err.message : String(err) },
-        });
-      }),
-      this.deliveryWatcherLoop.run().catch(err => {
-        console.error('[daemon] delivery-watcher crashed:', err);
-        emitStructured({
-          kind: 'error',
-          message: 'delivery-watcher loop crashed',
-          errorCode: 'delivery_watcher_crashed',
           details: { error: err instanceof Error ? err.message : String(err) },
         });
       }),
@@ -703,7 +686,6 @@ export class Daemon {
         details: { error: err instanceof Error ? err.message : String(err) },
       });
     });
-    this.deliveryWatcherLoop.stop();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();
