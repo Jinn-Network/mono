@@ -7,6 +7,7 @@ import { PrefixedSha256Schema, ResourceDescriptorSchema } from "./digests.js";
 import { invalidInput } from "./errors.js";
 import {
   CHAIN_ENVIRONMENT_VERIFICATION_PROTOCOL_URI,
+  ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT,
   MINIMUM_RUN_COUNT,
 } from "./identifiers.js";
 import {
@@ -122,9 +123,9 @@ export type RunObservation = z.infer<typeof RunObservationSchema>;
 
 export const RunsBlockSchema = z
   .strictObject({
-    count: z.number().int().min(MINIMUM_RUN_COUNT),
+    count: z.number().int().min(ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT),
     observationDigest: PrefixedSha256Schema,
-    perRun: z.array(RunObservationSchema).min(MINIMUM_RUN_COUNT),
+    perRun: z.array(RunObservationSchema).min(ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT),
     allObservationsEqual: z.boolean(),
     freshInstances: z.boolean(),
   })
@@ -430,6 +431,12 @@ export const ChainEnvironmentVerificationPredicateSchema = PredicateShapeSchema.
     if (predicate.outcome === "closed-reproducible") {
       if (predicate.environment.closureClass !== "closed-state") {
         issue("closed-reproducible is a closed-state claim", ["environment", "closureClass"]);
+      }
+      if (predicate.runs !== undefined && predicate.runs.count < MINIMUM_RUN_COUNT) {
+        issue(
+          `closed-reproducible requires at least ${MINIMUM_RUN_COUNT} runs`,
+          ["runs", "count"],
+        );
       }
       predicate.runs?.perRun.forEach((run, index) => {
         if (run.observationDigest !== predicate.runs?.observationDigest) {

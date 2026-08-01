@@ -25,6 +25,13 @@ export const COMPOSITE_OBSERVATION_SCHEMA_ID =
  */
 export const MINIMUM_RUN_COUNT = 5;
 
+/**
+ * Archive observation (design §5.2) may run with fewer materializations when the caller
+ * establishes a connected baseline (CE4 `BASELINE_RUN_COUNT`). Closed-state verification
+ * still requires `MINIMUM_RUN_COUNT`.
+ */
+export const ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT = 2;
+
 /** Per-instance probe-suite wall-clock ceiling in seconds for the v1 profile. */
 export const DEFAULT_PROBE_TIMEOUT_SECONDS = 600;
 

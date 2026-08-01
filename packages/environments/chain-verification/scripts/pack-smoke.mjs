@@ -66,17 +66,33 @@ try {
   if (leaked.length > 0) throw new Error(`test files leaked into tarball: ${leaked.join(", ")}`);
 
   await mkdir(consumer);
+  // Relative file: tarballs — Yarn 4 resolves absolute file: URLs against the registry.
+  const recordLocal = join(consumer, "chain-environment-record.tgz");
+  const trustLocal = join(consumer, "trust-core.tgz");
+  const verificationLocal = join(consumer, "chain-environment-verification.tgz");
+  await run("cp", [recordArchive, recordLocal]);
+  await run("cp", [trustCoreArchive, trustLocal]);
+  await run("cp", [verificationArchive, verificationLocal]);
   await writeFile(join(consumer, "package.json"), JSON.stringify({
     private: true,
     type: "module",
+    packageManager: "yarn@4.13.0",
     dependencies: {
-      "@jinn-network/chain-environment-record": `file:${recordArchive}`,
-      "@jinn-network/trust-core": `file:${trustCoreArchive}`,
-      "@jinn-network/chain-environment-verification": `file:${verificationArchive}`,
+      "@jinn-network/chain-environment-record": "file:./chain-environment-record.tgz",
+      "@jinn-network/trust-core": "file:./trust-core.tgz",
+      "@jinn-network/chain-environment-verification": "file:./chain-environment-verification.tgz",
       vitest: "4.1.8",
     },
+    resolutions: {
+      "@jinn-network/chain-environment-record": "file:./chain-environment-record.tgz",
+      "@jinn-network/trust-core": "file:./trust-core.tgz",
+    },
   }));
-  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
+  await writeFile(join(consumer, ".yarnrc.yml"), [
+    "nodeLinker: node-modules",
+    "enableGlobalCache: false",
+  ].join("\n") + "\n");
+  await run("corepack", ["yarn@4.13.0", "install"], { cwd: consumer });
   await writeFile(join(consumer, "packed-imports.test.mjs"), `
 import assert from "node:assert/strict";
 import {

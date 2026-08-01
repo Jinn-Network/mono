@@ -40,6 +40,7 @@ import { conformanceFailure, invalidInput } from "./errors.js";
 import {
   CHAIN_ENVIRONMENT_VERIFICATION_PROTOCOL_URI,
   DEFAULT_PROBE_TIMEOUT_SECONDS,
+  ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT,
   MINIMUM_RUN_COUNT,
 } from "./identifiers.js";
 import {
@@ -417,9 +418,9 @@ export async function observeArchiveEnvironment(
     invalidInput("observeArchiveEnvironment requires archive provider options.");
   }
   const runCount = options.runCount ?? MINIMUM_RUN_COUNT;
-  if (!Number.isInteger(runCount) || runCount < MINIMUM_RUN_COUNT) {
+  if (!Number.isInteger(runCount) || runCount < ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT) {
     invalidInput(
-      `This profile requires at least ${MINIMUM_RUN_COUNT} fresh materializations; received ${String(options.runCount)}.`,
+      `This profile requires at least ${ARCHIVE_OBSERVATION_MINIMUM_RUN_COUNT} fresh materializations; received ${String(options.runCount)}.`,
     );
   }
   validateProviders(record, options.providers);
