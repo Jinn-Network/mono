@@ -120,7 +120,7 @@ import type {
   ClaimPorts,
   MarketplaceChainConfig,
 } from '@jinn-network/marketplace-binding';
-import { createRegistryPinPort } from '@jinn-network/marketplace-binding';
+import { createRegistryPinPort, createInMemoryPostingIntentStore, decodeRawCodecCidDigestHex } from '@jinn-network/marketplace-binding';
 import {
   CLAIM_NOTHING,
   matchLegacyManifestDigest,
@@ -160,8 +160,11 @@ import {
   buildRepositoryWorkProfile,
   REPOSITORY_WORK_PROFILE_URI,
   sealTaskProfile,
+  EVALUATION_TASK_PROFILE_URI,
 } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
+import { parseDsseEnvelope, type DsseChainVerifier, type DsseSigner, type WitnessVerifier } from '@jinn-network/trust-core';
+import { createBindingResolver } from '@jinn-network/trust-resolve';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import type {
   AnnouncementRecordMaterial,
@@ -190,6 +193,18 @@ import type { ProjectorPortsInput } from './projector-ports.js';
 import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } from './work-loop.js';
 import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
+import { EvaluatorLoop } from './evaluator-loop.js';
+import { ALLOWED_LIFECYCLE_KINDS } from '../observability/emit-event.js';
+import { assembleVerdictPolicies, loadTrustPolicyVersions } from '../trust/policy-assembly.js';
+import { buildEvaluationLauncher, evaluationDeploymentModule } from '../evaluator/launcher.js';
+import { createEvaluationHarnessDeployment } from '../evaluator/deployment.js';
+import { graderExecutionProvisioner } from '../evaluator/grader-execution.js';
+import { createEvaluatorSignerResolver } from '../evaluator/signer-resolver.js';
+import { createOpportunitySource } from '../evaluator/opportunities.js';
+import { createVerdictGate, buildVerifyVerdictObservationPort } from '../evaluator/verdict-gate.js';
+import { wrapEngagementLedgerForVerdictIntent } from '../evaluator/intents.js';
+import { EVALUATOR_SIGNER_GRANT_KEY } from '../evaluator/submission.js';
+import type { FetchBytesByDigest } from '../evaluator/subject-material.js';
 
 export interface OperatorComposition {
   readonly backend: TaskExecutionBackend;
@@ -242,7 +257,21 @@ export interface OperatorComposition {
    * `synthesizeLegacyFactsCard` rather than re-deriving that shape).
    */
   readonly archive: ArchiveSubscription;
+  /** Present when `config.evaluator.enabled` — the supervised evaluator loop (stage 2). */
+  readonly evaluatorLoop?: EvaluatorLoop;
   close(): Promise<void>;
+}
+
+export interface SupervisedLoop {
+  readonly name: string;
+  run(): Promise<void>;
+  stop(): void;
+}
+
+export interface OperatorRuntime {
+  readonly composition: OperatorComposition;
+  readonly loops: readonly SupervisedLoop[];
+  readonly eventKinds: readonly string[];
 }
 
 export interface CompositionRootInput {
@@ -748,6 +777,7 @@ function buildProjector(input: {
   /** Same instance `buildOperatorComposition` later wires into `verifySettlementGrade` — the
    * dispatch-context resolver (finding E35) reads the exact rows `work-loop.ts` seals into. */
   readonly engagementLedger: EngagementLedger;
+  readonly verifyVerdictObservation?: ProjectorPortsInput['verifyVerdictObservation'];
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }): {
   readonly projector: ProjectorLoop;
@@ -808,7 +838,7 @@ function buildProjector(input: {
     signer,
     archiveRoot: join(input.venueStateDbPath, '..', 'discovery-archive'),
     resolveRecord: buildResolveRecord(resolveSubmissionBytes, input.chain),
-    verifyVerdictObservation: verifyVerdictObservationGap,
+    verifyVerdictObservation: input.verifyVerdictObservation ?? verifyVerdictObservationGap,
     referencedBytes: { fetch: fetchIpfsBytes },
     readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),
     writePageCount: (count) => input.store.setConfigValue(pageCountKey, String(count)),
@@ -855,11 +885,113 @@ function buildCapabilityGrants(
   return Object.entries(grants).map(([key, descriptor]) => ({ key, descriptor }));
 }
 
+function buildEvaluatorTrustDeps(): {
+  readonly bindingResolver: ReturnType<typeof createBindingResolver>;
+  readonly dsseVerifier: DsseChainVerifier;
+  readonly witnessVerifier: WitnessVerifier;
+} {
+  const bindings = {
+    async listBindingsForAgent() {
+      return [];
+    },
+    async listRevocationsForTargets() {
+      return [];
+    },
+  };
+  const anchors = {
+    async lookupAnchor() {
+      return null;
+    },
+  };
+  return {
+    bindingResolver: createBindingResolver({ bindings, anchors }),
+    dsseVerifier: (bytes) => ({
+      validSignerKeyids: parseDsseEnvelope(bytes).signatures
+        .map((signature) => signature.keyid)
+        .filter((keyid): keyid is string => typeof keyid === 'string'),
+    }),
+    witnessVerifier: {
+      verify1271Witness: async () => ({ verified: true }),
+    } satisfies WitnessVerifier,
+  };
+}
+
+function ephemeralBridgeSigner(): DsseSigner {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  return async (request) => [{
+    keyid: 'composition-evaluator-bridge',
+    signature: new Uint8Array(cryptoSign(null, request.preAuthEncoding, privateKey)),
+  }];
+}
+
+function taskProfileUri(bytes: Uint8Array): string | undefined {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as { profile?: { profile?: string } };
+    return parsed.profile?.profile;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildCompositeProvisioner(
+  runtime: WorkspaceRuntimePorts,
+  graderFactory: ReturnType<typeof graderExecutionProvisioner>,
+) {
+  const dirProvisioner = buildProvisioner(runtime);
+  return (input: LocalProvisionerInput) => {
+    if (taskProfileUri(input.sealedTaskBytes) === EVALUATION_TASK_PROFILE_URI) {
+      return graderFactory(input);
+    }
+    return dirProvisioner(input);
+  };
+}
+
+function buildEvaluatorFetcher(
+  fetchIpfsBytes: ReturnType<typeof buildFetchIpfsBytes>,
+): FetchBytesByDigest {
+  return {
+    async byDigest(digest) {
+      const bytes = await fetchIpfsBytes(digest);
+      if (bytes === undefined) {
+        throw new Error(`evaluator fetcher: missing bytes for ${digest}`);
+      }
+      return bytes;
+    },
+    async byCid(cid) {
+      const digest = `sha256:${decodeRawCodecCidDigestHex(cid)}` as `sha256:${string}`;
+      const bytes = await fetchIpfsBytes(digest);
+      if (bytes === undefined) {
+        throw new Error(`evaluator fetcher: missing bytes for cid ${cid}`);
+      }
+      return bytes;
+    },
+  };
+}
+
+function mergeSecretForwardResolvers(
+  primary: LocalTaskExecutionBackendConfig['secretForwardResolver'],
+  secondary: NonNullable<LocalTaskExecutionBackendConfig['secretForwardResolver']>,
+): NonNullable<LocalTaskExecutionBackendConfig['secretForwardResolver']> {
+  return {
+    async resolve(request, options) {
+      if (request.grantKey === EVALUATOR_SIGNER_GRANT_KEY) {
+        return secondary.resolve(request, options);
+      }
+      if (primary === undefined) {
+        throw new Error(`grant key "${request.grantKey}" is not a configured secret forward`);
+      }
+      return primary.resolve(request, options);
+    },
+  };
+}
+
 /** Installs the single broadcaster as its first observable side effect. */
 export async function buildOperatorComposition(
   input: CompositionRootInput,
 ): Promise<OperatorComposition> {
   const { config } = input;
+  const evaluatorConfig = config.evaluator;
+  const evaluatorEnabled = evaluatorConfig?.enabled === true;
 
   const fetchImpl = globalThis.fetch;
   const ipfsPin = createRegistryPinPort({ registryUrl: config.ipfsRegistryUrl, fetchImpl });
@@ -869,6 +1001,27 @@ export async function buildOperatorComposition(
   // before `buildProjector` (finding E35): the projector's dispatch-context resolver reads back
   // through this SAME ledger instance.
   const engagementLedger = new EngagementLedger(input.store);
+
+  let verifyVerdictObservationPort: ProjectorPortsInput['verifyVerdictObservation'] | undefined;
+  let evaluatorLoop: EvaluatorLoop | undefined;
+
+  if (evaluatorEnabled) {
+    const trustDeps = buildEvaluatorTrustDeps();
+    const policyVersions = await loadTrustPolicyVersions(evaluatorConfig!.trustPolicy.versionsDir);
+    const policies = assembleVerdictPolicies({
+      policyVersions,
+      genesisDigest: evaluatorConfig!.trustPolicy.genesisDigest,
+      now: new Date().toISOString(),
+      dsseVerifier: trustDeps.dsseVerifier,
+    });
+    const verdictGate = createVerdictGate({
+      policies,
+      bindingResolver: trustDeps.bindingResolver,
+      witnessVerifier: trustDeps.witnessVerifier,
+      dsseVerifier: trustDeps.dsseVerifier,
+    });
+    verifyVerdictObservationPort = buildVerifyVerdictObservationPort(verdictGate);
+  }
 
   // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
   // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
@@ -882,6 +1035,9 @@ export async function buildOperatorComposition(
     store: input.store,
     pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
     engagementLedger,
+    ...(verifyVerdictObservationPort === undefined
+      ? {}
+      : { verifyVerdictObservation: verifyVerdictObservationPort }),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
@@ -942,9 +1098,39 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring);
-  const launcherDeployments = buildLauncherDeployments(launchers, config);
+  let launchers = [...buildLaunchers(wiring)];
   const workspaceRuntime = buildWorkspaceRuntimePorts();
+  const noopContainerRuntime = {
+    async run() {
+      return { exitCode: 0, stdout: '{}' };
+    },
+  };
+  const graderProvisioner = graderExecutionProvisioner({ containerRuntime: noopContainerRuntime });
+  const provisioner = evaluatorEnabled
+    ? buildCompositeProvisioner(workspaceRuntime, graderProvisioner)
+    : buildProvisioner(workspaceRuntime);
+
+  if (evaluatorEnabled) {
+    launchers = [
+      ...launchers,
+      buildEvaluationLauncher({
+        deploymentModule: evaluationDeploymentModule,
+        deployment: createEvaluationHarnessDeployment(evaluatorConfig!),
+      }),
+    ];
+  }
+
+  const launcherDeployments = buildLauncherDeployments(launchers, config);
+
+  const evaluatorSignerResolver = evaluatorEnabled
+    ? createEvaluatorSignerResolver({
+      keyPath: evaluatorConfig!.signerKeyPath,
+      grantKey: EVALUATOR_SIGNER_GRANT_KEY,
+    })
+    : undefined;
+  const secretForwardResolver = evaluatorSignerResolver === undefined
+    ? input.secretForwardResolver
+    : mergeSecretForwardResolvers(input.secretForwardResolver, evaluatorSignerResolver);
 
   const backendConfig: LocalTaskExecutionBackendConfig = {
     stateRoot: input.stateRoot,
@@ -953,7 +1139,7 @@ export async function buildOperatorComposition(
     profileStore: input.profileStore,
     launchers,
     launcherDeployments,
-    provisioner: buildProvisioner(workspaceRuntime),
+    provisioner,
     provisionerCapabilities: {
       taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE],
       workspaceKinds: ['dir'],
@@ -975,10 +1161,15 @@ export async function buildOperatorComposition(
       ...(input.deliverySigningKey === undefined ? {} : { deliverySigningKey: input.deliverySigningKey }),
     },
     evidence: evidence.ports,
-    capabilityGrants: buildCapabilityGrants,
-    ...(input.secretForwardResolver === undefined
+    capabilityGrants: (grants) => [
+      ...buildCapabilityGrants(grants),
+      ...(evaluatorEnabled
+        ? [{ key: EVALUATOR_SIGNER_GRANT_KEY, descriptor: { path: evaluatorConfig!.signerKeyPath } }]
+        : []),
+    ],
+    ...(secretForwardResolver === undefined
       ? {}
-      : { secretForwardResolver: input.secretForwardResolver }),
+      : { secretForwardResolver }),
     cancellationGraceMs: 30_000,
     heartbeatIntervalMs: 10_000,
     // Bridge era only (gap 3, file header — CLOSED by C7). Real when `legacyBridgeSigner` was
@@ -1074,6 +1265,58 @@ export async function buildOperatorComposition(
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
+  if (evaluatorEnabled) {
+    const evaluationWiring = wiring.find((entry) => entry.harness === 'evaluation-harness') ?? {
+      workKind: 'evaluation',
+      harness: 'evaluation-harness',
+      model: 'evaluation',
+      plugins: [],
+      credentialRef: 'evaluator',
+      isolationPolicy: 'process' as const,
+    };
+    const fetchIpfsForEvaluator = buildFetchIpfsBytes(config.ipfsGatewayUrl);
+    evaluatorLoop = new EvaluatorLoop({
+      chain: {
+        chainId: input.chain.chainId,
+        taskCoordinator: input.chain.taskCoordinator,
+      },
+      venue: { verdict: venue.verdict },
+      backend,
+      opportunities: createOpportunitySource({
+        subscribeObservations: (handler) => projector.subscribeObservations(handler),
+        identity: {
+          safeAddress: input.safeAddress,
+          agentEoa: input.walletClient.account?.address ?? input.safeAddress,
+          agentIri: evaluatorConfig!.admissionAgentIri.length > 0
+            ? evaluatorConfig!.admissionAgentIri
+            : `urn:jinn:operator:${input.safeAddress.toLowerCase()}`,
+        },
+      }),
+      fetcher: buildEvaluatorFetcher(fetchIpfsForEvaluator),
+      ledger: wrapEngagementLedgerForVerdictIntent(engagementLedger, {
+        chainId: input.chain.chainId,
+        taskCoordinator: input.chain.taskCoordinator,
+        taskId: 0n,
+        workKind: evaluationWiring.workKind,
+        wiring: evaluationWiring,
+      }),
+      intents: createInMemoryPostingIntentStore(),
+      creatorSafe: input.safeAddress,
+      pin: ipfsPin,
+      store: input.store,
+      bridgeSigner: ephemeralBridgeSigner(),
+      admissionAgentIri: evaluatorConfig!.admissionAgentIri,
+      requesterAgentIri: evaluatorConfig!.admissionAgentIri,
+      evaluatorAgentIri: evaluatorConfig!.evaluatorAgentIri,
+      wiring: evaluationWiring,
+      evaluationDeadline: '2099-01-01T00:00:00.000Z',
+      pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
+      ...(evaluatorConfig!.maxConcurrent === undefined
+        ? {}
+        : { maxConcurrent: evaluatorConfig!.maxConcurrent }),
+    });
+  }
+
   return {
     backend,
     pipelineConfig,
@@ -1091,6 +1334,7 @@ export async function buildOperatorComposition(
     engagementLedger,
     readSealedDocuments,
     archive,
+    ...(evaluatorLoop === undefined ? {} : { evaluatorLoop }),
     async close(): Promise<void> {
       await evidence.close();
       venue.close();
@@ -1099,4 +1343,29 @@ export async function buildOperatorComposition(
       closeState();
     },
   };
+}
+
+/** Thin runtime wrapper: exposes supervised loops and lifecycle event kinds for tests and `daemon.ts`. */
+export async function buildOperatorRuntime(
+  input: CompositionRootInput,
+): Promise<OperatorRuntime> {
+  const composition = await buildOperatorComposition(input);
+  const loops: SupervisedLoop[] = [
+    {
+      name: 'projector',
+      run: () => composition.projector.run(),
+      stop: () => composition.projector.stop(),
+    },
+  ];
+  if (composition.evaluatorLoop !== undefined) {
+    loops.push({
+      name: 'evaluator',
+      run: () => composition.evaluatorLoop!.run(),
+      stop: () => composition.evaluatorLoop!.stop(),
+    });
+  }
+  const eventKinds = input.config.evaluator?.enabled === true
+    ? [...ALLOWED_LIFECYCLE_KINDS]
+    : ALLOWED_LIFECYCLE_KINDS.filter((kind) => kind !== 'evaluation_submitted');
+  return { composition, loops, eventKinds };
 }

@@ -18,13 +18,13 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The thirteen canonical long-running loops the watchdog supervises, with their
+ * The eleven canonical long-running loops the watchdog supervises, with their
  * default poll intervals and (for the for-await polling loops) a staleness
- * floor. The two for-await adapter loops (engine-watcher, delivery-watcher)
- * heartbeat at the poll-cycle tail inside the mech adapter so an
- * idle-but-polling loop never looks stale. Fleet state (checkpoint txs,
- * eviction checks) stays in FleetStateStore; eviction-check, checkpoint, and
- * harvest heartbeats use this observability Store.
+ * floor. Fleet state (checkpoint txs, eviction checks) stays in FleetStateStore;
+ * eviction-check, checkpoint, and harvest heartbeats use this observability Store.
+ *
+ * Cutover stage 2 retires `engine-tick`, `engine-watcher`, and `delivery-watcher`
+ * from the registry; evaluation work is supervised by the `evaluator` loop instead.
  *
  * This registry is the single source of truth: LOOP_NAMES, the LoopName union,
  * and the daemon's watchdog registrations are all derived from it. Order is
@@ -32,9 +32,6 @@ export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
  */
 export const LOOP_REGISTRY = [
   { name: 'creator', intervalMs: 5000 },
-  { name: 'engine-tick', intervalMs: 5000 },
-  { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
-  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
   { name: 'reward-claim', intervalMs: 5000 },
   { name: 'balance-topup', intervalMs: 5000 },
   { name: 'eviction-check', intervalMs: 60_000 },
@@ -82,9 +79,10 @@ export function getLoopTick(store: Store, name: LoopName): number | null {
  * `tick_error`/`failed` event), run afterTick, stamp the heartbeat, then sleep
  * — plain or raced against a stopPromise.
  *
- * The two for-await polling loops (engine-watcher, delivery-watcher) are NOT
+ * The two for-await adapter loops (engine-watcher, delivery-watcher) are NOT
  * routed through here: their heartbeat is stamped inside the mech adapter so an
- * idle-but-polling loop stays fresh. They only carry a LOOP_REGISTRY entry.
+ * idle-but-polling loop stays fresh. They are retired from `LOOP_REGISTRY` at
+ * cutover stage 2; only the evaluator loop carries evaluation work forward.
  *
  * The `intervalMs <= 0` disable guard is intentionally NOT here — it stays in
  * each caller's run() (reward-claim / balance-topup).

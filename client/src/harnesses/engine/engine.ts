@@ -872,7 +872,7 @@ export class TaskEngine {
       } catch (err) {
         console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
       }
-      recordLoopTick(this.store, 'engine-tick'); // #1043 loop watchdog
+      // Cutover stage 2: `engine-tick` retired from LOOP_REGISTRY — heartbeat removed.
       if (this.stopped) break;
       await Promise.race([
         new Promise((resolve) => setTimeout(resolve, intervalMs)),

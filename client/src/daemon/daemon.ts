@@ -636,7 +636,7 @@ export class Daemon {
       // Derive the watchdog registrations from LOOP_REGISTRY (the single source
       // of loop names + defaults) — filter to the loops actually started, then
       // override the intervals that are operator/config-driven.
-      const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
+      const started = new Set<LoopName>(['creator']);
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
@@ -647,7 +647,6 @@ export class Daemon {
       if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
-        'engine-tick': interval,
         'reward-claim': this.config.rewardClaim?.intervalMs,
         'balance-topup': this.config.balanceTopup?.intervalMs,
         'eviction-check': this.config.evictionCheck?.intervalMs,

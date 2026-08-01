@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { vi, type Mock } from 'vitest';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
+import {
+  buildPolicyFixture,
+  testAgentIri,
+  testDidKey,
+} from '@jinn-network/trust-testing';
 import {
   BASE_SEPOLIA_TODAY,
   computeRawCodecCid,
@@ -49,7 +56,9 @@ import {
 import type { SubjectMaterial } from '../../src/evaluator/subject-material.js';
 import { createOpportunitySource } from '../../src/evaluator/opportunities.js';
 import type { EvaluatorLoopConfig } from '../../src/daemon/evaluator-loop.js';
-import type { Store } from '../../src/store/store.js';
+import type { CompositionRootInput } from '../../src/daemon/composition-root.js';
+import type { EvaluatorConfig } from '../../src/config.js';
+import { Store } from '../../src/store/store.js';
 
 ed.hashes.sha512 = (m: Uint8Array) => sha512(m);
 
@@ -708,5 +717,92 @@ export async function evaluatorLoopHarness(
     idle() {
       return idlePromise;
     },
+  };
+}
+
+const DEFAULT_EVALUATOR_TRUST = await (async () => {
+  const versionsDir = mkdtempSync(join(tmpdir(), 'jinn-eval-trust-'));
+  const fixture = await buildPolicyFixture({
+    purposes: {
+      'admission-agent': { accepted: [testAgentIri('composition-admission')], requiredStrength: 'strong' },
+      'evaluator-eligibility': { accepted: [testAgentIri('composition-evaluator')], requiredStrength: 'weak' },
+    },
+    refreshBy: '2027-01-01T00:00:00.000Z',
+    signerKeyid: testDidKey('composition-policy'),
+  });
+  writeFileSync(join(versionsDir, 'policy.json'), fixture.envelopeBytes);
+  return { genesisDigest: fixture.digest, versionsDir };
+})();
+
+export function minimalRuntimeConfig(
+  overrides?: {
+    readonly evaluator?: Partial<EvaluatorConfig>;
+  },
+): CompositionRootInput {
+  const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-eval-composition-state-'));
+  const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-eval-composition-evidence-'));
+  const evaluatorOverrides = overrides?.evaluator ?? {};
+  const enabled = evaluatorOverrides.enabled ?? false;
+  const trustPolicy = evaluatorOverrides.trustPolicy
+    ?? (enabled ? DEFAULT_EVALUATOR_TRUST : {
+      genesisDigest: `sha256:${'0'.repeat(64)}` as const,
+      versionsDir: join(stateRoot, 'trust-policy'),
+    });
+
+  const config = {
+    ipfsRegistryUrl: 'https://registry.example',
+    ipfsGatewayUrl: 'https://gateway.example',
+    rpcUrl: 'http://127.0.0.1:8545',
+    claudePath: 'claude',
+    executionWiring: [{
+      workKind: 'QmSolver',
+      harness: 'claude-code',
+      model: 'm',
+      plugins: [],
+      credentialRef: 'c',
+      isolationPolicy: 'process',
+      legacyManifestDigest: 'QmSolver',
+    }],
+    claimPolicy: { mode: 'every-runnable', spendCapWei: '999', aiUnitCap: 3 },
+    evaluator: {
+      enabled,
+      signerKeyPath: join(stateRoot, 'evaluator', 'signer.key'),
+      admissionAgentIri: testAgentIri('composition-admission'),
+      evaluatorAgentIri: testAgentIri('composition-evaluator'),
+      trustPolicy,
+      publicSpecDir: join(stateRoot, 'evaluator', 'public-specs'),
+      maxConcurrent: 1,
+      maxClaimEvidenceBytes: 1_048_576,
+      ...evaluatorOverrides,
+      trustPolicy,
+    },
+  };
+
+  const safeAddress = '0x1111111111111111111111111111111111111111' as const;
+  const mechAddress = '0x2222222222222222222222222222222222222222' as const;
+  const chain = {
+    chainId: BASE_SEPOLIA_TODAY.chainId,
+    taskCoordinator: BASE_SEPOLIA_TODAY.taskCoordinator,
+    jinnRouter: '0x4444444444444444444444444444444444444444',
+    mechMarketplace: '0x5555555555555555555555555555555555555555',
+    activityChecker: '0x6666666666666666666666666666666666666666',
+    generation: 'today',
+  };
+  const publicClient = {
+    getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }),
+  };
+
+  return {
+    config: config as never,
+    publicClient: publicClient as never,
+    walletClient: { account: { address: safeAddress } } as never,
+    safeAddress,
+    mechAddress,
+    chain: chain as never,
+    stateRoot,
+    evidenceRoot,
+    venueStateDbPath: join(stateRoot, 'venue.db'),
+    profileStore: { get: () => undefined },
+    store: new Store(':memory:'),
   };
 }

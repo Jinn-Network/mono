@@ -1,3 +1,5 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   verifyPolicyChain,
   type DsseChainVerifier,
@@ -9,6 +11,21 @@ export class TrustPolicyUnavailableError extends Error {
     super(`operator trust policy is unusable: ${reason}`);
     this.name = 'TrustPolicyUnavailableError';
   }
+}
+
+/** Read every non-hidden file in the operator's local trust-policy versions directory. */
+export async function loadTrustPolicyVersions(versionsDir: string): Promise<readonly Uint8Array[]> {
+  let names: string[];
+  try {
+    names = await readdir(versionsDir);
+  } catch {
+    throw new TrustPolicyUnavailableError(`cannot read policy versions at ${versionsDir}`);
+  }
+  const files = names.filter((name) => !name.startsWith('.')).sort();
+  if (files.length === 0) {
+    throw new TrustPolicyUnavailableError(`no policy versions in ${versionsDir}`);
+  }
+  return Promise.all(files.map(async (name) => readFile(join(versionsDir, name))));
 }
 
 export interface AssembledVerdictPolicies {

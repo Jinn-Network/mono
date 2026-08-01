@@ -38,6 +38,8 @@ The *node* is the union of every component in this spec — daemon, identity, fu
 - **State messages**
   - misconfigured
   - restart required
+- **Collections**
+  - Activity — lifecycle events the daemon records. `evaluation_submitted` items originate from the `evaluator` supervised loop when `config.evaluator.enabled` is true (cutover stage 2); the retired `delivery-watcher` loop no longer emits them.
 
 ### 2.2 Identity
 

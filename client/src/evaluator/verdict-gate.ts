@@ -1,3 +1,4 @@
+import type { AnnouncementRecordMaterial, ObservationMarketplaceEvent } from '@jinn-network/marketplace-projector';
 import {
   gateVerdictObservation,
   type VerdictObservationGate,
@@ -32,4 +33,25 @@ export function createVerdictGate(deps: VerdictGateDeps): {
     ...(deps.policies.requesterPolicy === undefined ? {} : { requesterPolicy: deps.policies.requesterPolicy }),
   };
   return { gate: (input) => gateVerdictObservation(input, ports) };
+}
+
+/** Projector port backed by the assembled verdict gate (fail-closed until input derivation lands). */
+export function buildVerifyVerdictObservationPort(
+  _gate: ReturnType<typeof createVerdictGate>,
+): (
+  event: Extract<ObservationMarketplaceEvent, { event: 'VerdictDeliveryClaimed' }>,
+  material: AnnouncementRecordMaterial,
+) => Promise<{
+  readonly gate: VerdictObservationGate;
+  readonly statementVerdict?: 'pass' | 'fail' | 'inconclusive';
+}> {
+  return async (_event, _material) => ({
+    gate: {
+      decisionGrade: false,
+      failures: [{
+        check: 'verdict-observation-verifier',
+        detail: 'event-to-gate input derivation is not wired for this observation yet',
+      }],
+    },
+  });
 }

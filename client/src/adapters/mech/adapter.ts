@@ -1458,9 +1458,7 @@ export class MechAdapter implements ExecutionAdapter {
         }));
       }
 
-      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
-      // nothing was yielded) so an idle-but-polling loop never looks stale.
-      if (this.store) recordLoopTick(this.store, 'engine-watcher');
+      // Cutover stage 2: `engine-watcher` retired from LOOP_REGISTRY — heartbeat removed.
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }
@@ -1940,9 +1938,8 @@ export class MechAdapter implements ExecutionAdapter {
       // Cursor persistence is per-chunk inside the loop above (#552). A poll
       // that did no chunked work has no progress to persist.
 
-      // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
-      // nothing was yielded) so an idle-but-polling loop never looks stale.
-      if (this.store) recordLoopTick(this.store, 'delivery-watcher');
+      // Cutover stage 2: `delivery-watcher` retired — evaluation heartbeats move to `evaluator`.
+      if (this.store) recordLoopTick(this.store, 'evaluator');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
   }

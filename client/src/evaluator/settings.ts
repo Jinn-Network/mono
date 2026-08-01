@@ -1,18 +1,20 @@
 import type { EvidenceRepositoryWriter } from '@jinn-network/task-execution-evaluation-harness';
+import type { EvaluatorConfig } from '../config.js';
 
 export interface EvaluatorSettings {
   readonly maxClaimEvidenceBytes: number;
   readonly evaluatorAgentIri: string;
 }
 
-const DEFAULT_MAX_CLAIM_EVIDENCE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_MAX_CLAIM_EVIDENCE_BYTES = 1_048_576;
 const DEFAULT_EVALUATOR_AGENT_IRI = 'https://agents.example/jinn/operator-evaluator';
 
-/** Minimal Task-14 stand-in until the full evaluator config block lands. */
-export function evaluatorSettings(): EvaluatorSettings {
+export function evaluatorSettings(
+  config?: Pick<EvaluatorConfig, 'maxClaimEvidenceBytes' | 'evaluatorAgentIri'>,
+): EvaluatorSettings {
   return {
-    maxClaimEvidenceBytes: DEFAULT_MAX_CLAIM_EVIDENCE_BYTES,
-    evaluatorAgentIri: DEFAULT_EVALUATOR_AGENT_IRI,
+    maxClaimEvidenceBytes: config?.maxClaimEvidenceBytes ?? DEFAULT_MAX_CLAIM_EVIDENCE_BYTES,
+    evaluatorAgentIri: config?.evaluatorAgentIri ?? DEFAULT_EVALUATOR_AGENT_IRI,
   };
 }
 

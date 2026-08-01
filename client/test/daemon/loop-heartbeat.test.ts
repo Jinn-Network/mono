@@ -33,10 +33,10 @@ describe('#1043 loop-heartbeat helper', () => {
 
   it('round-trips a recorded tick as the wall-clock ms it wrote', () => {
     const before = Date.now();
-    recordLoopTick(store, 'engine-tick');
+    recordLoopTick(store, 'creator');
     const after = Date.now();
 
-    const tick = getLoopTick(store, 'engine-tick');
+    const tick = getLoopTick(store, 'creator');
     expect(tick).not.toBeNull();
     expect(tick).toBeGreaterThanOrEqual(before);
     expect(tick).toBeLessThanOrEqual(after);
@@ -51,15 +51,13 @@ describe('#1043 loop-heartbeat helper', () => {
     expect(getLoopTick(store, 'creator')).toBeNull();
   });
 
-  it('enumerates the thirteen canonical watchdog loops', () => {
+  it('enumerates the eleven canonical watchdog loops', () => {
     expect([...LOOP_NAMES].sort()).toEqual(
       [
         'balance-topup',
         'checkpoint',
         'creator',
-        'delivery-watcher',
-        'engine-tick',
-        'engine-watcher',
+        'evaluator',
         'evidence-driver',
         'eviction-check',
         'harvest',

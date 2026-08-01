@@ -87,8 +87,18 @@ export interface ProjectorLoopConfig {
 
 export class ProjectorLoop {
   private stopped = false;
+  private readonly observationHandlers = new Set<(event: ObservationMarketplaceEvent) => void>();
 
   constructor(private readonly config: ProjectorLoopConfig) {}
+
+  subscribeObservations(
+    handler: (event: ObservationMarketplaceEvent) => void,
+  ): () => void {
+    this.observationHandlers.add(handler);
+    return () => {
+      this.observationHandlers.delete(handler);
+    };
+  }
 
   /** One pass; exported so the boot catch-up gate can drive it synchronously. */
   async tick(): Promise<{ readonly announcements: number; readonly refusals: number; readonly caughtUp: boolean }> {
@@ -147,6 +157,11 @@ export class ProjectorLoop {
     // close-out plan §C5) -- previously `transition.observations` was computed and discarded, so
     // `BaseVenueConfig.observations` had nothing durable to read from.
     this.config.cursorStore.write(nextCursor, transition.observations);
+    for (const observation of transition.observations) {
+      for (const handler of this.observationHandlers) {
+        handler(observation as unknown as ObservationMarketplaceEvent);
+      }
+    }
 
     return {
       announcements: result.announcements.length,

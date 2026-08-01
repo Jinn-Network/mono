@@ -654,6 +654,32 @@ export const JinnConfigSchema = z.object({
   spendCaps: z.record(z.string(), z.number().positive()).optional(),
 
   /**
+   * Cutover stage 2 evaluator loop configuration. Restart-required; no hot reload.
+   * Env: `JINN_EVALUATOR_ENABLED`, `JINN_EVALUATOR_SIGNER_KEY_PATH`, `JINN_EVALUATOR_MAX_CONCURRENT`.
+   */
+  evaluator: z
+    .object({
+      enabled: z.boolean().default(false),
+      signerKeyPath: z.string().optional(),
+      admissionAgentIri: z.string().default(''),
+      evaluatorAgentIri: z.string().default(''),
+      trustPolicy: z
+        .object({
+          genesisDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+          versionsDir: z.string(),
+        })
+        .optional(),
+      publicSpecDir: z.string().optional(),
+      maxConcurrent: z.number().int().positive().optional(),
+      maxClaimEvidenceBytes: z.number().int().positive().optional(),
+    })
+    .default({
+      enabled: false,
+      admissionAgentIri: '',
+      evaluatorAgentIri: '',
+    }),
+
+  /**
    * Operator-local SolverPlugin trust state.
    *
    * `blockedCids` is the list of plug-in CIDs the operator has chosen to
@@ -734,12 +760,24 @@ const DEFAULT_ENGINE = {
  * which is what `buildFallbackTransport()` consumes. Same shape for the L1
  * (ethereum) and optional archive/proof variants.
  */
+export interface EvaluatorConfig {
+  readonly enabled: boolean;
+  readonly signerKeyPath: string;
+  readonly admissionAgentIri: string;
+  readonly evaluatorAgentIri: string;
+  readonly trustPolicy: { readonly genesisDigest: `sha256:${string}`; readonly versionsDir: string };
+  readonly publicSpecDir: string;
+  readonly maxConcurrent?: number;
+  readonly maxClaimEvidenceBytes?: number;
+}
+
 export type JinnConfig = Omit<
   z.infer<typeof JinnConfigSchema>,
   | 'rpcUrl'
   | 'archiveRpcUrl'
   | 'tasks'
   | 'engine'
+  | 'evaluator'
 > & {
   rpcUrl: string;
   rpcUrls: readonly string[];
@@ -747,6 +785,7 @@ export type JinnConfig = Omit<
   archiveRpcUrls?: readonly string[];
   tasks: Task[];
   engine: { workingDirRoot: string; implStateDirRoot: string; knowledgeAutoload: boolean };
+  evaluator: EvaluatorConfig;
 };
 
 // ── Defaults ────────────────────────────────────────────────────────────────
@@ -1138,6 +1177,26 @@ export function loadConfig(configPath?: string): JinnConfig {
       sources,
     };
   }
+  if (env['JINN_EVALUATOR_ENABLED'] !== undefined) {
+    const v = env['JINN_EVALUATOR_ENABLED'].trim().toLowerCase();
+    const enabled = v === '1' || v === 'true' || v === 'yes';
+    merged.evaluator = {
+      ...(typeof merged.evaluator === 'object' && merged.evaluator ? merged.evaluator : {}),
+      enabled,
+    };
+  }
+  if (env['JINN_EVALUATOR_SIGNER_KEY_PATH']) {
+    merged.evaluator = {
+      ...(typeof merged.evaluator === 'object' && merged.evaluator ? merged.evaluator : {}),
+      signerKeyPath: env['JINN_EVALUATOR_SIGNER_KEY_PATH'],
+    };
+  }
+  if (env['JINN_EVALUATOR_MAX_CONCURRENT']) {
+    merged.evaluator = {
+      ...(typeof merged.evaluator === 'object' && merged.evaluator ? merged.evaluator : {}),
+      maxConcurrent: parseInt(env['JINN_EVALUATOR_MAX_CONCURRENT'], 10),
+    };
+  }
   // Single sharing consent (mono#1714). JINN_SHARE_CONSENT is authoritative;
   // the legacy JINN_MINEABLE_PUBLISH_CONSENT still maps to `share` for one
   // release (only the old publish bit ever meant "a task may leave").
@@ -1473,6 +1532,32 @@ export function loadConfig(configPath?: string): JinnConfig {
       implStateDirRoot: parsed.engine?.implStateDirRoot ?? DEFAULT_ENGINE.implStateDirRoot,
       knowledgeAutoload: parsed.engine?.knowledgeAutoload ?? true,
     },
+    evaluator: resolveEvaluatorConfig(rest, rest.stateDir ?? DEFAULT_DIR),
+  };
+}
+
+function resolveEvaluatorConfig(
+  parsed: z.infer<typeof JinnConfigSchema>,
+  stateDir: string,
+): EvaluatorConfig {
+  const raw = parsed.evaluator;
+  const trustVersionsDir = raw.trustPolicy?.versionsDir ?? join(stateDir, 'evaluator', 'trust-policy');
+  return {
+    enabled: raw.enabled,
+    signerKeyPath: raw.signerKeyPath ?? join(stateDir, 'evaluator', 'signer.key'),
+    admissionAgentIri: raw.admissionAgentIri,
+    evaluatorAgentIri: raw.evaluatorAgentIri.length > 0
+      ? raw.evaluatorAgentIri
+      : 'https://agents.example/jinn/operator-evaluator',
+    trustPolicy: {
+      genesisDigest: (raw.trustPolicy?.genesisDigest ?? `sha256:${'0'.repeat(64)}`) as `sha256:${string}`,
+      versionsDir: trustVersionsDir,
+    },
+    publicSpecDir: raw.publicSpecDir ?? join(stateDir, 'evaluator', 'public-specs'),
+    ...(raw.maxConcurrent === undefined ? {} : { maxConcurrent: raw.maxConcurrent }),
+    ...(raw.maxClaimEvidenceBytes === undefined
+      ? {}
+      : { maxClaimEvidenceBytes: raw.maxClaimEvidenceBytes }),
   };
 }
 
