@@ -12,6 +12,7 @@ const DEPENDENCY_SECTIONS = [
 const ENVIRONMENT_PACKAGES = [
   ['record', '@jinn-network/environment-record'],
   ['verification', '@jinn-network/environment-verification'],
+  ['chain-record', '@jinn-network/chain-environment-record'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
@@ -48,6 +49,18 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // portal's own resolutions do not apply, so its Jinn dependency must be resolved here.
     // The source-boundary guard bans importing it from anywhere in this package.
     devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `chain-record` is tier 2 and depends on NO Jinn package at runtime (design §3: zod +
+  // noble-class primitives only). Two test-only devDependencies carry the cross-package
+  // seal-equivalence legs (program §4 contract 3): `environment-record` is the SWE sibling
+  // this package's primitives were materialized from, and `evidence-protocol` is the
+  // evidence tree's own digest spelling. The chain kind is a SIBLING of the SWE kind, never
+  // an extension of it, so a production import of either is a boundary failure.
+  ['chain-record', {
+    dependencies: [],
+    devDependencies: ['@jinn-network/environment-record', '@jinn-network/evidence-protocol'],
     optionalDependencies: [],
     peerDependencies: [],
   }],
@@ -130,6 +143,7 @@ test('every environments package declares Vitest as an exact optional peer where
   const expectedExports = new Map([
     ['record', ['.', './fixtures/*', './schemas/*', './testing']],
     ['verification', ['.', './fixtures/*', './testing']],
+    ['chain-record', ['.', './fixtures/*', './schemas/*', './testing']],
   ]);
   assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
   for (const [directory] of ENVIRONMENT_PACKAGES) {
