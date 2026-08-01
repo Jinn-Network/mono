@@ -1,0 +1,383 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jinn.network/architecture/platform-packages.schema.json",
+  "title": "Jinn platform package catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "catalogVersion",
+    "manifestRoots",
+    "ownerGroups",
+    "gateDefinitions",
+    "releaseGroups",
+    "tierRules",
+    "packages"
+  ],
+  "properties": {
+    "catalogVersion": {
+      "const": 1
+    },
+    "manifestRoots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "mode"],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/repositoryPath"
+          },
+          "mode": {
+            "enum": ["recursive", "package"]
+          },
+          "excludedDirectories": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "ownerGroups": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "pattern": "^@[^\\s]+$"
+        }
+      }
+    },
+    "gateDefinitions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path"],
+        "properties": {
+          "kind": {
+            "enum": ["workflow", "source-boundary"]
+          },
+          "path": {
+            "$ref": "#/$defs/repositoryPath"
+          }
+        }
+      }
+    },
+    "releaseGroups": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedPackageCount",
+          "publishPolicies",
+          "stackPublished",
+          "canary",
+          "stable"
+        ],
+        "properties": {
+          "expectedPackageCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "publishPolicies": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/publishPolicy"
+            }
+          },
+          "stackPublished": {
+            "type": "boolean"
+          },
+          "canary": {
+            "type": "boolean"
+          },
+          "stable": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "tierRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowedDependencies"],
+      "properties": {
+        "allowedDependencies": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["1", "2", "3", "4", "null"],
+          "properties": {
+            "1": {
+              "$ref": "#/$defs/tierList"
+            },
+            "2": {
+              "$ref": "#/$defs/tierList"
+            },
+            "3": {
+              "$ref": "#/$defs/tierList"
+            },
+            "4": {
+              "$ref": "#/$defs/tierList"
+            },
+            "null": {
+              "$ref": "#/$defs/tierList"
+            }
+          }
+        }
+      }
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/package"
+      }
+    }
+  },
+  "$defs": {
+    "repositoryPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+    },
+    "tier": {
+      "enum": [1, 2, 3, 4, null]
+    },
+    "tierList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tier"
+      }
+    },
+    "publishPolicy": {
+      "enum": [
+        "canary-and-stable",
+        "canary-only",
+        "disabled",
+        "independent",
+        "private",
+        "never"
+      ]
+    },
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "path",
+        "domain",
+        "role",
+        "tier",
+        "classification",
+        "stability",
+        "authority",
+        "releaseGroup",
+        "publishPolicy",
+        "ownerGroup",
+        "requiredGateIds",
+        "boundaryPolicy",
+        "publicSurface",
+        "supersedes",
+        "replacedBy"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^@jinn-network/[a-z0-9][a-z0-9-]*$"
+        },
+        "path": {
+          "$ref": "#/$defs/repositoryPath"
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tier": {
+          "$ref": "#/$defs/tier"
+        },
+        "tierReason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "classification": {
+          "enum": [
+            "platform",
+            "platform-support",
+            "product",
+            "product-support",
+            "legacy",
+            "transitional",
+            "repository-tooling"
+          ]
+        },
+        "stability": {
+          "enum": [
+            "stable-semantics",
+            "candidate",
+            "experimental",
+            "deprecated",
+            "transitional"
+          ]
+        },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["documents", "status", "decisionRecord"],
+          "properties": {
+            "documents": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/repositoryPath"
+              }
+            },
+            "status": {
+              "enum": ["ratified", "approved", "draft", "current"]
+            },
+            "decisionRecord": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/repositoryPath"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "releaseGroup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "publishPolicy": {
+          "$ref": "#/$defs/publishPolicy"
+        },
+        "ownerGroup": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requiredGateIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "boundaryPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": {
+              "enum": ["workflow", "source-boundary"]
+            },
+            "path": {
+              "$ref": "#/$defs/repositoryPath"
+            }
+          }
+        },
+        "publicSurface": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemas", "profiles", "fixtures", "conformance"],
+          "properties": {
+            "schemas": {
+              "$ref": "#/$defs/stringList"
+            },
+            "profiles": {
+              "$ref": "#/$defs/stringList"
+            },
+            "fixtures": {
+              "$ref": "#/$defs/stringList"
+            },
+            "conformance": {
+              "$ref": "#/$defs/stringList"
+            }
+          }
+        },
+        "supersedes": {
+          "$ref": "#/$defs/stringList"
+        },
+        "replacedBy": {
+          "$ref": "#/$defs/stringList"
+        },
+        "transition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason", "status", "sunsetCondition"],
+          "properties": {
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sunsetCondition": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "tier": {
+                "type": "null"
+              }
+            },
+            "required": ["tier"]
+          },
+          "then": {
+            "required": ["tierReason"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "stability": {
+                "enum": ["deprecated", "transitional"]
+              }
+            },
+            "required": ["stability"]
+          },
+          "then": {
+            "required": ["transition"]
+          }
+        }
+      ]
+    }
+  }
+}
