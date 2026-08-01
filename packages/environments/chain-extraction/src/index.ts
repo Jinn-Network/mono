@@ -168,3 +168,25 @@ export {
   type WidenOptions,
   type WideningRound,
 } from "./widen.js";
+
+export {
+  EXTRACTION_JOB_DISPOSITIONS,
+  MAX_INFRASTRUCTURE_ATTEMPTS,
+  advanceExtractionJob,
+  createExtractionStateFile,
+  dueExtractionJobs,
+  extractionJobKey,
+  parseExtractionStateFile,
+  recordExtractionConverged,
+  recordExtractionFailure,
+  recordExtractionSpend,
+  remainingBudget,
+  serializeExtractionStateFile,
+  upsertExtractionJobs,
+  type ExtractionJob,
+  type ExtractionJobDisposition,
+  type ExtractionStateFile,
+  type ExtractionStateStore,
+} from "./extraction-state.js";
+
+export { createFileExtractionStateStore } from "./extraction-state-store.js";

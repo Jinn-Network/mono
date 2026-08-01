@@ -3,13 +3,25 @@
 // The published conformance kit. `node:fs/promises` appears here (fixture loading only) and
 // is allowlisted for this file in the tree guard. Grows task by task.
 
+import type { ChainEnvironmentRecord } from "@jinn-network/chain-environment-record";
+import { BLACKHOLE_EGRESS_POLICY_ID } from "@jinn-network/chain-environment-record";
 import { keccak_256 } from "@noble/hashes/sha3.js";
+import { createRequire } from "node:module";
+
+import type { ExtractionRequest } from "./baseline.js";
 
 import type { StateArtifact } from "./artifact.js";
 import { STATE_ARTIFACT_SCHEMA_VERSION } from "./identifiers.js";
 import { normalizeAddress, normalizeHex32, normalizeQuantity, normalizeSlot, type Hex32, type HexAddress } from "./hex.js";
 import type { ArchiveAccountProof, ArchiveRpcPort } from "./ports.js";
 import type { RlpItem } from "./rlp.js";
+
+const require = createRequire(import.meta.url);
+const { buildConformanceChainRecord } = require(
+  "../../chain-verification/dist/conformance-records.js",
+) as {
+  buildConformanceChainRecord: (options?: { closureClass?: "archive-dependent" }) => ChainEnvironmentRecord;
+};
 
 export const FAKE_POOL = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 export const FAKE_ORACLE = "0xcccccccccccccccccccccccccccccccccccccccc";
@@ -418,6 +430,38 @@ export function buildFakeTrieWorld(options: FakeTrieWorldOptions = {}): FakeTrie
     proofFor,
     absenceProofFor,
     archive,
+  };
+}
+
+function fakeArchiveDependentDraft(): ChainEnvironmentRecord {
+  const draft = buildConformanceChainRecord({ closureClass: "archive-dependent" });
+  return {
+    ...draft,
+    capabilityEnvelope: {
+      ...draft.capabilityEnvelope,
+      egressPolicyId: BLACKHOLE_EGRESS_POLICY_ID,
+    },
+    determinismControls: {
+      ...draft.determinismControls,
+      resetMechanism: "fresh-process",
+    },
+    verificationContract: {
+      ...draft.verificationContract,
+      closureCheckRequired: true,
+    },
+  };
+}
+
+/** Stable extraction request for kit and state tests. */
+export function fakeExtractionRequest(): ExtractionRequest {
+  const draft = fakeArchiveDependentDraft();
+  return {
+    draft,
+    anchorBlockNumber: draft.sourceAnchor?.blockNumber ?? 1,
+    fidelityClass: "anchored-subset",
+    sourceAddresses: [FAKE_POOL],
+    fixtureDeclarations: [],
+    finalityPolicy: "finalized",
   };
 }
 
