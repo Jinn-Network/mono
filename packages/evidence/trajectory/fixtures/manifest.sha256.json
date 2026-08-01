@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/empty-with-spans/document.json",
+      "sha256": "138549e81065f6e36ce85e3b646c3a6414df9eb42f2fe76c8b97809da388ada5"
+    },
+    {
+      "id": "adversarial-v1/full-with-skipped/document.json",
+      "sha256": "85e540ce07fa4bfe3ad7bd86fd0b808e69ddb672fff106a207061e8d87e2e3ad"
+    },
+    {
+      "id": "adversarial-v1/grafted-parent/document.json",
+      "sha256": "0b998782587ec1d3b4262dd5db9e26bed7a611456243a4f838f9c721d5844a46"
+    },
+    {
+      "id": "adversarial-v1/manifest.json",
+      "sha256": "1c1c18ebb25c25876a5bed885e1bc28b50d42bd74a78f2ba18e3afb5fb1f3543"
+    },
+    {
+      "id": "adversarial-v1/message-content-attribute/document.json",
+      "sha256": "4bbd22aecfffe2581f94b06a76732f4776b7fb432d30ac27e9cab8c5fd81e369"
+    },
+    {
+      "id": "adversarial-v1/namespaced-extension-preserved/document.json",
+      "sha256": "fb0dce68d77916b4f15f75947638a47ee6226489d210f9ed574e6f97aaca6aa5"
+    },
+    {
+      "id": "adversarial-v1/nested-native-trace-key/document.json",
+      "sha256": "f2d870389318860f66521c37016fcbb8f3124d0d9a92e66fc731b4d70e8c9c7e"
+    },
+    {
+      "id": "adversarial-v1/partial-without-skipped/document.json",
+      "sha256": "fdccf88a0734b196ed024a066289f54d752ef54119e4dce989a3c8cbb9825750"
+    },
+    {
+      "id": "adversarial-v1/substituted-source-digest/document.json",
+      "sha256": "4cd705c3453c2623a8fa61ac2b568302e58e22226bb8d463123ce2ff5c77c506"
+    },
+    {
+      "id": "derivation/execution-golden-base.json",
+      "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf"
+    },
+    {
+      "id": "equivalence/expected-digest.json",
+      "sha256": "623138b1e68656f9f2d89228de21f81e5b774144aa9f07d64c562ef84e71abf2"
+    },
+    {
+      "id": "equivalence/input-a.json",
+      "sha256": "c1454efd3e5f40558a976cef5035f6ea93c8efd00b3c22749739cbfa66d0b754"
+    },
+    {
+      "id": "equivalence/input-b.json",
+      "sha256": "22ecf97252dd668f2f5a52158caf64b187a7d59601e0852e590e977816829f70"
+    },
+    {
+      "id": "trajectory/invalid-forged-span-id.json",
+      "sha256": "4333c6437e1e608290df0de147563ced810e30be4ca614fc580e401d90c48c0a"
+    },
+    {
+      "id": "trajectory/invalid-forged-trace-id.json",
+      "sha256": "4fded46aabe36b61cf581f2d5f754f663e484d998c15d2e21868526269dc3084"
+    },
+    {
+      "id": "trajectory/invalid-unknown-extension-key.json",
+      "sha256": "4932f4bf7cfc8188b869d7f1e63c773491687fab936447bb384e3c6df70b6390"
+    },
+    {
+      "id": "trajectory/invalid-unsorted-attributes.json",
+      "sha256": "4935e9cfb68ed2ce8f95065d954e2d54616fde7d07c9620aee42f47f0f558ac4"
+    },
+    {
+      "id": "trajectory/minimal.json",
+      "sha256": "da994c831ecb73c358567c1a175a3d604fb7220372efaa095c9e70b62c0dc6e5"
+    },
+    {
+      "id": "trajectory/minimal.sha256",
+      "sha256": "5883e81477dcb66b1e91aea7682f6f4fad0c5af15fb9861a8799db0314d98ca4"
+    },
+    {
+      "id": "trajectory/valid.json",
+      "sha256": "ef9b5acd6cbf9c852ef4ca8b844bf38c12494b6cfc31b4f4ad1460a42a7532c0"
+    },
+    {
+      "id": "trajectory/valid.sha256",
+      "sha256": "c16f1f88a234bfe9a9cfdf041f51e9ec3e2a0cdba6cf2306f5ced3b7d62be53c"
+    }
+  ],
+  "errata": []
+}
