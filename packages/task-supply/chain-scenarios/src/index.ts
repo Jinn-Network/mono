@@ -44,3 +44,38 @@ export type {
   ReferenceScript,
   SealedScriptDocument,
 } from "./solution-script.js";
+export {
+  addressForbidden,
+  approvalConstraint,
+  budget,
+  callResult,
+  erc20Balance,
+  eventEmitted,
+  eventForbidden,
+  eventSignatureTopic0,
+  nativeBalance,
+  predicateId,
+  reportedValue,
+  timeBound,
+  txOutcome,
+} from "./predicates.js";
+export type { ScenarioPredicate } from "./predicates.js";
+export {
+  assertCandidateHardened,
+  assertTemplateHardened,
+} from "./hardening.js";
+export {
+  buildProbeRoleAddresses,
+  resolveRoleAddress,
+  syntheticProbeAddress,
+} from "./template.js";
+export type {
+  ChainDerivationEnvironment,
+  ChainScenarioCandidate,
+  EnvironmentCompatibility,
+  HardeningChecklist,
+  ScenarioEnvelopeTightenings,
+  ScenarioLineage,
+  ScenarioTemplate,
+  StatePredicateDraft,
+} from "./template.js";
