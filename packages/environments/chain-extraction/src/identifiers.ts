@@ -32,3 +32,7 @@ export const DEFAULT_ARCHIVE_BUDGET: ArchiveBudgetLimits = Object.freeze({
   maxCalls: 20_000,
   maxBytes: 256 * 1024 * 1024,
 });
+
+export const STATE_ARTIFACT_SCHEMA_VERSION = "chain-state-artifact.v1" as const;
+export const COVERAGE_MANIFEST_SCHEMA_VERSION = "chain-source-coverage.v1" as const;
+export const EXTRACTION_STATE_SCHEMA_VERSION = "chain-extraction-staged-state.v1" as const;
