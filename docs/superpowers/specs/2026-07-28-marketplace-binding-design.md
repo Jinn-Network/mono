@@ -369,6 +369,20 @@ digests, and refuses to treat a verdict as decision-grade if they disagree (cont
 known on-chain default-Pass quirk); the revision makes the on-chain code and the Statement
 authoritative-equal.
 
+**§6.4 addendum (2026-07-30, Finding 1 / program §7.40):** Under the evaluator-seals
+carve-out, the binding admits **exactly one** `capabilityGrants` entry when two conditions
+hold: (1) `publicSpec` is `true`, and (2) the evaluator declares `selfSignerGrantKey` equal
+to that sole grant key. The grant is the evaluator's own signing-key forward — an
+operator-local handle for dispatching the evaluation Submission, not requester-conveyed
+private grader or test material. Any other grant key, any missing `selfSignerGrantKey`, or
+any private specification still rejects evaluator-side sealing.
+
+The named checks in this section are unaffected: the gate byte-checks the **evaluation Task**
+(derivation equality against the settlement `(Task, Delivery)` pair), never the evaluation
+Submission's `capabilityGrants`. Admission-receipt validity, verdict-consistency, evaluator ≠
+solver, and the §7.5a settlement join continue to bind the off-chain verdict observation;
+they do not inspect grant keys on the evaluation dispatch document.
+
 ## 7. Operator sovereignty
 
 **At the protocol level there is no membership, no filter concept, and nothing prescribed.**

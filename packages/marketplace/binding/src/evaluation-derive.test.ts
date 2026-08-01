@@ -47,6 +47,14 @@ const subjectSubmission = SubmissionRecordSchema.parse({
   annotations: { [ADMISSION_RECEIPT_ANNOTATION_URI]: receipt },
 });
 
+function evaluatorSealedInput(): DeriveAndSealEvaluationSubmissionInput {
+  return input({
+    publicSpec: true,
+    sealerRole: "evaluator",
+    capabilityGrants: {},
+  });
+}
+
 function input(
   overrides: Partial<DeriveAndSealEvaluationSubmissionInput> = {},
 ): DeriveAndSealEvaluationSubmissionInput {
@@ -166,5 +174,45 @@ describe("deriveAndSealEvaluationSubmission (§6.4, program §7.39–§7.40)", (
     fields.protocol = "https://attacker.invalid/protocol";
     fields.task = { digest: { sha256: "0".repeat(64) } };
     expect(() => deriveAndSealEvaluationSubmission(widened)).toThrow(/unsupported submissionFields/);
+  });
+
+  test("evaluator sealing admits exactly one declared self-signer grant (§7.40 addendum)", () => {
+    const result = deriveAndSealEvaluationSubmission({
+      ...evaluatorSealedInput(),
+      publicSpec: true,
+      sealerRole: "evaluator",
+      selfSignerGrantKey: "evaluator-signer",
+      capabilityGrants: { "evaluator-signer": { name: "evaluator-signer" } },
+    });
+    expect(result.submission.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  test("evaluator sealing still refuses a grant that is not the declared self-signer", () => {
+    expect(() => deriveAndSealEvaluationSubmission({
+      ...evaluatorSealedInput(),
+      publicSpec: true,
+      sealerRole: "evaluator",
+      selfSignerGrantKey: "evaluator-signer",
+      capabilityGrants: { "evaluator-signer": {}, "private-grader": {} },
+    })).toThrow(/fully public/);
+  });
+
+  test("evaluator sealing still refuses a private specification even with a self-signer grant", () => {
+    expect(() => deriveAndSealEvaluationSubmission({
+      ...evaluatorSealedInput(),
+      publicSpec: false,
+      sealerRole: "evaluator",
+      selfSignerGrantKey: "evaluator-signer",
+      capabilityGrants: { "evaluator-signer": {} },
+    })).toThrow(/requester-side sealing/);
+  });
+
+  test("evaluator sealing refuses a grant when no self-signer key is declared", () => {
+    expect(() => deriveAndSealEvaluationSubmission({
+      ...evaluatorSealedInput(),
+      publicSpec: true,
+      sealerRole: "evaluator",
+      capabilityGrants: { "evaluator-signer": {} },
+    })).toThrow(/fully public/);
   });
 });

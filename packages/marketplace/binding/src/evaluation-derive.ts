@@ -35,6 +35,7 @@ export interface DeriveAndSealEvaluationSubmissionInput
   readonly capabilityGrants: Record<string, unknown>;
   readonly publicSpec: boolean;
   readonly sealerRole: "requester" | "evaluator";
+  readonly selfSignerGrantKey?: string;
 }
 
 export interface SealedDocumentTriple {
@@ -86,13 +87,17 @@ function parseSubjectSubmission(subjectSubmission: SubmissionRecord) {
 
 function assertSealerRule(input: DeriveAndSealEvaluationSubmissionInput): void {
   const grantKeys = Object.keys(input.capabilityGrants);
-  if (input.sealerRole === "evaluator") {
-    if (!input.publicSpec) {
-      throw new Error("private evaluation specifications require requester-side sealing (§7.40)");
-    }
-    if (grantKeys.length > 0) {
-      throw new Error("evaluator sealing is allowed only for a fully public, grant-free evaluation (§7.40)");
-    }
+  if (input.sealerRole !== "evaluator") return;
+  if (!input.publicSpec) {
+    throw new Error("private evaluation specifications require requester-side sealing (§7.40)");
+  }
+  if (grantKeys.length === 0) return;
+  // §7.40 addendum (2026-07-30): the evaluator's OWN signing-key forward is an
+  // operator-local handle, not requester-conveyed private material. Exactly one such key
+  // is admitted, and only when the evaluator declares it.
+  const selfSigner = input.selfSignerGrantKey;
+  if (selfSigner === undefined || grantKeys.length !== 1 || grantKeys[0] !== selfSigner) {
+    throw new Error("evaluator sealing is allowed only for a fully public, grant-free evaluation (§7.40)");
   }
 }
 
