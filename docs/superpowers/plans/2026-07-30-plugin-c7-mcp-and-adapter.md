@@ -7013,3 +7013,7 @@ Reviewed defect head: `08dc460219081f01743c3b86c498d0bb535c42c6`. This is the on
 ### Acceptance
 
 **acceptance-complete** (2026-08-01) at exact head `90c9983d8ce075feeaaaa4b53de6294607c3d7f5`. Scoped wave-2 rereview of C7-W1-1..4: **CLEAN**. PR comment: https://github.com/Jinn-Network/mono/pull/2347#issuecomment-5148500794. Named residuals (F-C7-T20-1 local captureSigner custody ≠ HSM; published-registry = C8) deferred; do not block dependents.
+
+## Program Phase 4
+
+**C8 Gate 1 (local acceptance)** is satisfied by C7 Gate C7 at acceptance pin `90c9983d8ce075feeaaaa4b53de6294607c3d7f5` (docs tip `9059982e9…`). Per the 2026-07-31 Gate 1/2 split, Gate 1 is the product proof on the C7 stack (`file://` / local tarball, Hermes, capture, pickup, `◇`, doctor, disable/remove) — already **GATE C7 PASSED** via Task 20 / `plugin/scripts/c7-rehearsal.sh`. No separate C8 implementer workstream for Gate 1. Program C8 Gate 2 (publish cutover / #2293 / npm acquisition / operator ratification) and C9 remain operator-gated and not started; C8 plan Tasks 1–13 stay channel/cutover-shaped.
