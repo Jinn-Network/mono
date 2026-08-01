@@ -34,7 +34,7 @@ const PUBLISH_POLICIES = new Set([
   'private',
   'never',
 ]);
-const AUTHORITY_STATUSES = new Set(['ratified', 'approved', 'draft', 'current']);
+const AUTHORITY_STATUSES = new Set(['ratified', 'approved', 'proposed', 'draft', 'current', 'superseded']);
 const FORBIDDEN_CATALOG_PACKAGE_FIELDS = [
   'version',
   'dependencies',
@@ -80,6 +80,61 @@ const INITIAL_ADJACENT_PATHS = [
   'client/src/dashboard/spa',
   'plugin/runtime',
 ];
+const INITIAL_RELEASE_GROUPS = {
+  'platform-v1': {
+    expectedPackageCount: 50,
+    publishPolicies: ['canary-only'],
+    stackPublished: true,
+    canary: true,
+    stable: false,
+  },
+  'experimental-environment-supply': {
+    expectedPackageCount: 7,
+    publishPolicies: ['disabled'],
+    stackPublished: false,
+    canary: false,
+    stable: false,
+  },
+  'legacy-product-lines': {
+    expectedPackageCount: 5,
+    publishPolicies: ['independent'],
+    stackPublished: false,
+    canary: false,
+    stable: false,
+  },
+  'transitional-or-private': {
+    expectedPackageCount: 7,
+    publishPolicies: ['private', 'never'],
+    stackPublished: false,
+    canary: false,
+    stable: false,
+  },
+};
+const ALLOWED_RELEASE_GROUP_DEPENDENCIES = {
+  'platform-v1': new Set(['platform-v1']),
+  'experimental-environment-supply': new Set([
+    'experimental-environment-supply',
+    'platform-v1',
+  ]),
+  'legacy-product-lines': new Set(['legacy-product-lines', 'platform-v1']),
+  'transitional-or-private': new Set([
+    'experimental-environment-supply',
+    'legacy-product-lines',
+    'platform-v1',
+    'transitional-or-private',
+  ]),
+};
+const INITIAL_RELEASE_GROUP_CLASSIFICATIONS = {
+  'platform-v1': new Set(['platform', 'platform-support']),
+  'experimental-environment-supply': new Set(['platform']),
+  'legacy-product-lines': new Set(['legacy', 'product']),
+  'transitional-or-private': new Set([
+    'product',
+    'product-support',
+    'repository-tooling',
+    'transitional',
+  ]),
+};
 
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -115,10 +170,178 @@ function requireRepoRelativePath(value, label) {
   return value;
 }
 
-function assertExistingPath(repoRoot, relativePath, label) {
-  if (!existsSync(resolve(repoRoot, ...relativePath.split('/')))) {
+function assertExistingFile(repoRoot, relativePath, label) {
+  const absolutePath = resolve(repoRoot, ...relativePath.split('/'));
+  if (!existsSync(absolutePath) || !statSync(absolutePath).isFile()) {
     throw new Error(`${label} path does not exist: ${relativePath}`);
   }
+}
+
+function schemaFailure(path, message) {
+  throw new Error(`schema validation failed at ${path}: ${message}`);
+}
+
+function schemaValueEquals(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function schemaTypeMatches(value, type) {
+  if (type === 'null') return value === null;
+  if (type === 'array') return Array.isArray(value);
+  if (type === 'object') return isObject(value);
+  if (type === 'integer') return Number.isInteger(value);
+  return typeof value === type;
+}
+
+function resolveSchemaReference(rootSchema, reference) {
+  if (!reference.startsWith('#/')) throw new Error(`unsupported catalog schema reference ${reference}`);
+  return reference.slice(2).split('/').reduce((value, component) => {
+    const key = component.replace(/~1/gu, '/').replace(/~0/gu, '~');
+    if (!isObject(value) || !(key in value)) throw new Error(`unresolved catalog schema reference ${reference}`);
+    return value[key];
+  }, rootSchema);
+}
+
+const SUPPORTED_SCHEMA_KEYWORDS = new Set([
+  '$defs',
+  '$id',
+  '$ref',
+  '$schema',
+  'additionalProperties',
+  'allOf',
+  'const',
+  'enum',
+  'if',
+  'items',
+  'minItems',
+  'minLength',
+  'minProperties',
+  'minimum',
+  'oneOf',
+  'pattern',
+  'properties',
+  'required',
+  'then',
+  'title',
+  'type',
+  'uniqueItems',
+]);
+
+function assertSupportedSchema(schema, path = 'schema') {
+  if (!isObject(schema)) throw new Error(`catalog schema node at ${path} must be an object`);
+  for (const keyword of Object.keys(schema)) {
+    if (!SUPPORTED_SCHEMA_KEYWORDS.has(keyword)) {
+      throw new Error(`unsupported catalog schema keyword ${keyword} at ${path}`);
+    }
+  }
+  for (const mapKeyword of ['$defs', 'properties']) {
+    for (const [key, childSchema] of Object.entries(schema[mapKeyword] ?? {})) {
+      assertSupportedSchema(childSchema, `${path}.${mapKeyword}.${key}`);
+    }
+  }
+  for (const keyword of ['additionalProperties', 'if', 'items', 'then']) {
+    if (isObject(schema[keyword])) assertSupportedSchema(schema[keyword], `${path}.${keyword}`);
+  }
+  for (const arrayKeyword of ['allOf', 'oneOf']) {
+    (schema[arrayKeyword] ?? []).forEach((childSchema, index) => {
+      assertSupportedSchema(childSchema, `${path}.${arrayKeyword}[${index}]`);
+    });
+  }
+}
+
+function schemaMatches(value, schema, rootSchema, path) {
+  try {
+    validateSchemaValue(value, schema, rootSchema, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateSchemaValue(value, schema, rootSchema, path) {
+  if (!isObject(schema)) throw new Error(`invalid catalog schema node at ${path}`);
+  if (schema.$ref) {
+    validateSchemaValue(value, resolveSchemaReference(rootSchema, schema.$ref), rootSchema, path);
+  }
+  if ('const' in schema && !schemaValueEquals(value, schema.const)) {
+    schemaFailure(path, `expected constant ${JSON.stringify(schema.const)}`);
+  }
+  if (Array.isArray(schema.enum) && !schema.enum.some((candidate) => schemaValueEquals(value, candidate))) {
+    schemaFailure(path, `value ${JSON.stringify(value)} is not in the allowed enum`);
+  }
+  if (schema.type && !schemaTypeMatches(value, schema.type)) {
+    schemaFailure(path, `expected ${schema.type}`);
+  }
+  if (Array.isArray(schema.oneOf)) {
+    const matches = schema.oneOf.filter((candidate) => schemaMatches(value, candidate, rootSchema, path));
+    if (matches.length !== 1) schemaFailure(path, `expected exactly one of ${schema.oneOf.length} schema branches`);
+  }
+  if (isObject(value)) {
+    for (const required of schema.required ?? []) {
+      if (!(required in value)) schemaFailure(path, `missing required field ${required}`);
+    }
+    if (Number.isInteger(schema.minProperties) && Object.keys(value).length < schema.minProperties) {
+      schemaFailure(path, `expected at least ${schema.minProperties} properties`);
+    }
+    const properties = schema.properties ?? {};
+    for (const [key, child] of Object.entries(value)) {
+      if (key in properties) {
+        validateSchemaValue(child, properties[key], rootSchema, `${path}.${key}`);
+      } else if (schema.additionalProperties === false) {
+        schemaFailure(path, `unknown field ${key}`);
+      } else if (isObject(schema.additionalProperties)) {
+        validateSchemaValue(child, schema.additionalProperties, rootSchema, `${path}.${key}`);
+      }
+    }
+  }
+  if (Array.isArray(value)) {
+    if (Number.isInteger(schema.minItems) && value.length < schema.minItems) {
+      schemaFailure(path, `expected at least ${schema.minItems} items`);
+    }
+    if (schema.uniqueItems) {
+      const serialized = value.map((entry) => JSON.stringify(entry));
+      if (new Set(serialized).size !== serialized.length) schemaFailure(path, 'items must be unique');
+    }
+    if (isObject(schema.items)) {
+      value.forEach((entry, index) => validateSchemaValue(entry, schema.items, rootSchema, `${path}[${index}]`));
+    }
+  }
+  if (typeof value === 'string') {
+    if (Number.isInteger(schema.minLength) && value.length < schema.minLength) {
+      schemaFailure(path, `expected length at least ${schema.minLength}`);
+    }
+    if (schema.pattern && !(new RegExp(schema.pattern, 'u')).test(value)) {
+      schemaFailure(path, `value does not match ${schema.pattern}`);
+    }
+  }
+  if (typeof value === 'number' && typeof schema.minimum === 'number' && value < schema.minimum) {
+    schemaFailure(path, `expected value at least ${schema.minimum}`);
+  }
+  for (const condition of schema.allOf ?? []) {
+    validateSchemaValue(value, condition, rootSchema, path);
+  }
+  if (schema.if && schemaMatches(value, schema.if, rootSchema, path) && schema.then) {
+    validateSchemaValue(value, schema.then, rootSchema, path);
+  }
+}
+
+function loadCatalogSchema(repoRoot, schemaPath) {
+  const absoluteSchemaPath = resolve(repoRoot, ...schemaPath.split('/'));
+  try {
+    const schema = JSON.parse(readFileSync(absoluteSchemaPath, 'utf8'));
+    if (schema.$schema !== 'https://json-schema.org/draft/2020-12/schema') {
+      throw new Error(`expected JSON Schema Draft 2020-12, got ${schema.$schema ?? '<missing>'}`);
+    }
+    assertSupportedSchema(schema);
+    return schema;
+  } catch (error) {
+    throw new Error(`cannot read platform catalog schema ${schemaPath}: ${error?.message ?? String(error)}`);
+  }
+}
+
+function validateCatalogSchema(catalog, repoRoot, schemaPath) {
+  const schema = loadCatalogSchema(repoRoot, schemaPath);
+  validateSchemaValue(catalog, schema, schema, 'catalog');
 }
 
 function discoverRecursiveManifests(absoluteRoot, relativeRoot, excluded, found) {
@@ -194,7 +417,7 @@ function validateDefinitions(catalog, repoRoot) {
     requireObject(gate, `gateDefinitions.${gateId}`);
     requireString(gate.kind, `gateDefinitions.${gateId}.kind`);
     requireRepoRelativePath(gate.path, `gateDefinitions.${gateId}.path`);
-    assertExistingPath(repoRoot, gate.path, `gate ${gateId}`);
+    assertExistingFile(repoRoot, gate.path, `gate ${gateId}`);
   }
   for (const [groupId, group] of Object.entries(catalog.releaseGroups)) {
     requireObject(group, `releaseGroups.${groupId}`);
@@ -248,15 +471,24 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
     throw new Error(`${pkg.name}: repository-tooling packages must use tier null`);
   }
   requireObject(pkg.authority, `${pkg.name}.authority`);
-  requireStringArray(pkg.authority.documents, `${pkg.name}.authority.documents`, { nonEmpty: true });
-  if (!AUTHORITY_STATUSES.has(pkg.authority.status)) throw new Error(`${pkg.name}: unknown authority status ${pkg.authority.status}`);
-  for (const document of pkg.authority.documents) {
-    requireRepoRelativePath(document, `${pkg.name}.authority.documents`);
-    assertExistingPath(repoRoot, document, `${pkg.name}: authority`);
+  if (!Array.isArray(pkg.authority.documents) || pkg.authority.documents.length === 0) {
+    throw new Error(`${pkg.name}.authority.documents must be a non-empty array`);
+  }
+  for (const [documentIndex, document] of pkg.authority.documents.entries()) {
+    requireObject(document, `${pkg.name}.authority.documents[${documentIndex}]`);
+    requireRepoRelativePath(document.path, `${pkg.name}.authority.documents[${documentIndex}].path`);
+    if (!AUTHORITY_STATUSES.has(document.status)) {
+      throw new Error(`${pkg.name}: unknown authority status ${document.status}`);
+    }
+    assertExistingFile(repoRoot, document.path, `${pkg.name}: authority`);
   }
   if (pkg.authority.decisionRecord !== null) {
-    requireRepoRelativePath(pkg.authority.decisionRecord, `${pkg.name}.authority.decisionRecord`);
-    assertExistingPath(repoRoot, pkg.authority.decisionRecord, `${pkg.name}: decision record`);
+    requireObject(pkg.authority.decisionRecord, `${pkg.name}.authority.decisionRecord`);
+    requireRepoRelativePath(pkg.authority.decisionRecord.path, `${pkg.name}.authority.decisionRecord.path`);
+    if (!AUTHORITY_STATUSES.has(pkg.authority.decisionRecord.status)) {
+      throw new Error(`${pkg.name}: unknown authority status ${pkg.authority.decisionRecord.status}`);
+    }
+    assertExistingFile(repoRoot, pkg.authority.decisionRecord.path, `${pkg.name}: decision record`);
   }
   if (!(pkg.ownerGroup in catalog.ownerGroups)) throw new Error(`${pkg.name}: unknown owner group ${pkg.ownerGroup}`);
   requireStringArray(pkg.requiredGateIds, `${pkg.name}.requiredGateIds`, { nonEmpty: true });
@@ -266,7 +498,7 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
   requireObject(pkg.boundaryPolicy, `${pkg.name}.boundaryPolicy`);
   requireString(pkg.boundaryPolicy.kind, `${pkg.name}.boundaryPolicy.kind`);
   requireRepoRelativePath(pkg.boundaryPolicy.path, `${pkg.name}.boundaryPolicy.path`);
-  assertExistingPath(repoRoot, pkg.boundaryPolicy.path, `${pkg.name}: boundary policy`);
+  assertExistingFile(repoRoot, pkg.boundaryPolicy.path, `${pkg.name}: boundary policy`);
   requireObject(pkg.publicSurface, `${pkg.name}.publicSurface`);
   for (const field of PUBLIC_SURFACE_FIELDS) {
     requireStringArray(pkg.publicSurface[field], `${pkg.name}.publicSurface.${field}`);
@@ -287,8 +519,29 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
 }
 
 function validateReleaseGroups(catalog) {
+  const actualGroupIds = Object.keys(catalog.releaseGroups).sort();
+  const requiredGroupIds = Object.keys(INITIAL_RELEASE_GROUPS).sort();
+  if (!schemaValueEquals(actualGroupIds, requiredGroupIds)) {
+    throw new Error(`required release groups must be exactly: ${requiredGroupIds.join(', ')}`);
+  }
+  for (const [groupId, expected] of Object.entries(INITIAL_RELEASE_GROUPS)) {
+    const actual = catalog.releaseGroups[groupId];
+    for (const field of ['expectedPackageCount', 'stackPublished', 'canary', 'stable']) {
+      if (actual[field] !== expected[field]) {
+        throw new Error(`${groupId}.${field} must be ${expected[field]}`);
+      }
+    }
+    if (!schemaValueEquals(actual.publishPolicies, expected.publishPolicies)) {
+      throw new Error(`${groupId}.publishPolicies must be exactly ${expected.publishPolicies.join(', ')}`);
+    }
+  }
   const grouped = new Map();
   for (const pkg of catalog.packages) {
+    if (!INITIAL_RELEASE_GROUP_CLASSIFICATIONS[pkg.releaseGroup].has(pkg.classification)) {
+      throw new Error(
+        `${pkg.releaseGroup} package ${pkg.name} cannot have classification ${pkg.classification}`,
+      );
+    }
     const entries = grouped.get(pkg.releaseGroup) ?? [];
     entries.push(pkg);
     grouped.set(pkg.releaseGroup, entries);
@@ -299,7 +552,6 @@ function validateReleaseGroups(catalog) {
       throw new Error(`release group ${groupId} expects ${definition.expectedPackageCount} packages, found ${actual}`);
     }
   }
-  if (!catalog.releaseGroups['platform-v1']) return;
   const core = grouped.get('platform-v1') ?? [];
   if (core.length !== 50) throw new Error(`platform-v1 must contain exactly 50 packages, found ${core.length}`);
   if (catalog.releaseGroups['platform-v1'].stable !== false) throw new Error('platform-v1 stable publication must be false');
@@ -353,19 +605,33 @@ function validateManifestAgreement(catalog, repoRoot) {
   return manifests;
 }
 
-function validateDependencies(catalog, manifests) {
+function isCompatibleInternalSpecifier(specifier, source, target, repoRoot) {
+  if (specifier === target.manifest.version) return true;
+  if (typeof specifier !== 'string' || !specifier.startsWith('portal:')) return false;
+  const portalPath = specifier.slice('portal:'.length);
+  if (portalPath === '' || portalPath.startsWith('/') || portalPath.includes('::')) return false;
+  const resolvedPortalPath = resolve(repoRoot, ...source.directory.split('/'), portalPath);
+  const resolvedTargetPath = resolve(repoRoot, ...target.directory.split('/'));
+  return resolvedPortalPath === resolvedTargetPath;
+}
+
+function validateDependencies(catalog, manifests, repoRoot) {
   const allowedDependencies = catalog.tierRules.allowedDependencies;
   for (const source of manifests.values()) {
-    const sourceGroup = catalog.releaseGroups[source.catalog.releaseGroup];
+    const sourceGroupId = source.catalog.releaseGroup;
+    const allowedReleaseGroups = ALLOWED_RELEASE_GROUP_DEPENDENCIES[sourceGroupId];
     for (const section of RUNTIME_DEPENDENCY_SECTIONS) {
       for (const [dependency, specifier] of Object.entries(source.manifest[section] ?? {})) {
         if (!dependency.startsWith('@jinn-network/') || dependency === source.catalog.name) continue;
         const target = manifests.get(dependency);
         if (!target) {
-          if (sourceGroup.stackPublished) {
-            throw new Error(`${source.catalog.releaseGroup} package ${source.catalog.name} depends on missing catalog package ${dependency}`);
-          }
-          continue;
+          throw new Error(`${sourceGroupId} package ${source.catalog.name} depends on missing catalog package ${dependency}`);
+        }
+        const targetGroupId = target.catalog.releaseGroup;
+        if (!allowedReleaseGroups.has(targetGroupId)) {
+          throw new Error(
+            `${sourceGroupId} package ${source.catalog.name} cannot depend on ${dependency} in ${targetGroupId}`,
+          );
         }
         const permittedTiers = allowedDependencies[String(source.catalog.tier)];
         if (!permittedTiers.includes(target.catalog.tier)) {
@@ -373,32 +639,25 @@ function validateDependencies(catalog, manifests) {
             `tier ${source.catalog.tier} package ${source.catalog.name} cannot depend on tier ${target.catalog.tier} package ${target.catalog.name}`,
           );
         }
-        if (sourceGroup.stackPublished && target.catalog.releaseGroup !== source.catalog.releaseGroup) {
+        if (!isCompatibleInternalSpecifier(specifier, source, target, repoRoot)) {
           throw new Error(
-            `${source.catalog.releaseGroup} package ${source.catalog.name} depends on ${dependency} in ${target.catalog.releaseGroup}`,
+            `${source.catalog.name} depends on incompatible ${dependency} specifier ${specifier}; expected ${target.manifest.version}`,
           );
-        }
-        if (sourceGroup.stackPublished && target.catalog.releaseGroup === source.catalog.releaseGroup) {
-          const isLocal = typeof specifier === 'string' && /^(portal|link|file|workspace):/u.test(specifier);
-          if (!isLocal && specifier !== target.manifest.version) {
-            throw new Error(
-              `${source.catalog.name} depends on incompatible ${dependency} specifier ${specifier}; expected ${target.manifest.version}`,
-            );
-          }
         }
       }
     }
   }
 }
 
-export function validatePlatformCatalog(catalog, { repoRoot }) {
+export function validatePlatformCatalog(catalog, { repoRoot, schemaPath = PLATFORM_CATALOG_SCHEMA_PATH }) {
   const root = resolve(repoRoot);
+  validateCatalogSchema(catalog, root, schemaPath);
   validateTopLevel(catalog);
   validateDefinitions(catalog, root);
   catalog.packages.forEach((pkg, index) => validatePackageShape(pkg, index, catalog, root));
   validateReleaseGroups(catalog);
   const manifests = validateManifestAgreement(catalog, root);
-  validateDependencies(catalog, manifests);
+  validateDependencies(catalog, manifests, root);
   return catalog;
 }
 

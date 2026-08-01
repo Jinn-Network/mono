@@ -180,6 +180,19 @@
         "minLength": 1
       }
     },
+    "authoritySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repositoryPath"
+        },
+        "status": {
+          "enum": ["ratified", "approved", "proposed", "draft", "current", "superseded"]
+        }
+      }
+    },
     "package": {
       "type": "object",
       "additionalProperties": false,
@@ -247,23 +260,20 @@
         "authority": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["documents", "status", "decisionRecord"],
+          "required": ["documents", "decisionRecord"],
           "properties": {
             "documents": {
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
               "items": {
-                "$ref": "#/$defs/repositoryPath"
+                "$ref": "#/$defs/authoritySource"
               }
-            },
-            "status": {
-              "enum": ["ratified", "approved", "draft", "current"]
             },
             "decisionRecord": {
               "oneOf": [
                 {
-                  "$ref": "#/$defs/repositoryPath"
+                  "$ref": "#/$defs/authoritySource"
                 },
                 {
                   "type": "null"
