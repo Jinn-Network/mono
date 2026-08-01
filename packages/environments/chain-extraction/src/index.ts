@@ -85,10 +85,22 @@ export {
   serializeStateArtifact,
   stateArtifactDigest,
   stateArtifactEntryCount,
+  stateArtifactEntryCounts,
   stateArtifactKeySet,
   type StateArtifact,
   type StateArtifactAccount,
 } from "./artifact.js";
+
+export {
+  FIXTURE_COVERAGE_FORMAT,
+  PROOF_BUNDLE_FORMAT,
+  buildCoverageArtifacts,
+  collectSourceProofs,
+  type CoverageArtifacts,
+  type CoverageInput,
+  type FixtureCoverageDocument,
+  type ProofBundle,
+} from "./coverage.js";
 
 export { decodeRlp, type RlpItem } from "./rlp.js";
 

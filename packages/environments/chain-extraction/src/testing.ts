@@ -5,6 +5,8 @@
 
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
+import type { StateArtifact } from "./artifact.js";
+import { STATE_ARTIFACT_SCHEMA_VERSION } from "./identifiers.js";
 import { normalizeAddress, normalizeHex32, normalizeQuantity, normalizeSlot, type Hex32, type HexAddress } from "./hex.js";
 import type { ArchiveAccountProof, ArchiveRpcPort } from "./ports.js";
 import type { RlpItem } from "./rlp.js";
@@ -416,5 +418,36 @@ export function buildFakeTrieWorld(options: FakeTrieWorldOptions = {}): FakeTrie
     proofFor,
     absenceProofFor,
     archive,
+  };
+}
+
+/** The fake world's state artifact for coverage tests: pool (proven) and actor (fixture). */
+export function fakeStateArtifact(stateRoot?: Hex32): StateArtifact {
+  return {
+    schemaVersion: STATE_ARTIFACT_SCHEMA_VERSION,
+    anchor: {
+      blockNumber: 1,
+      blockHash: normalizeHex32(`0x${"1".repeat(64)}`),
+      stateRoot: stateRoot ?? normalizeHex32(`0x${"0".repeat(64)}`),
+      timestamp: 1,
+    },
+    accounts: [
+      {
+        address: FAKE_ACTOR,
+        balance: "0xde0b6b3a7640000",
+        nonce: "0x0",
+        storage: [],
+      },
+      {
+        address: FAKE_POOL,
+        balance: "0x0",
+        nonce: "0x1",
+        code: "0x60016002",
+        storage: [
+          { slot: FAKE_SLOT_1, value: `0x${"0".repeat(63)}7` },
+          { slot: FAKE_SLOT_2, value: `0x${"0".repeat(63)}3` },
+        ],
+      },
+    ],
   };
 }

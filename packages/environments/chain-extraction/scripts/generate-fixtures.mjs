@@ -14,6 +14,17 @@ const {
   serializeStateArtifact,
   stateArtifactDigest,
 } = await import(join(root, "dist", "artifact.js"));
+const {
+  buildCoverageArtifacts,
+  collectSourceProofs,
+} = await import(join(root, "dist", "coverage.js"));
+const { createBudgetedArchivePort } = await import(join(root, "dist", "budget.js"));
+const {
+  buildFakeTrieWorld,
+  fakeStateArtifact,
+  FAKE_ACTOR,
+  FAKE_POOL,
+} = await import(join(root, "dist", "testing.js"));
 
 const ANCHOR = {
   blockNumber: 21_000_000,
@@ -68,6 +79,49 @@ unsorted.accounts[0].storage = [
   { slot: SLOT_1, value: `0x${"0".repeat(63)}7` },
 ];
 await emit("adversarial-v1/unsorted-slots.json", `${JSON.stringify(unsorted)}\n`);
+
+const world = buildFakeTrieWorld();
+const archive = createBudgetedArchivePort(world.archive(), { maxCalls: 100, maxBytes: 5_000_000 });
+const artifact = fakeStateArtifact(world.stateRoot);
+const proofs = await collectSourceProofs(archive, artifact, {
+  addresses: [FAKE_POOL],
+  stateRoot: world.stateRoot,
+});
+if (!proofs.ok) {
+  throw new Error(`coverage fixture generation failed to collect proofs: ${proofs.detail}`);
+}
+const built = buildCoverageArtifacts({
+  artifact,
+  fidelityClass: "anchored-subset",
+  bundle: proofs.value,
+  declarations: [{ address: FAKE_ACTOR, kind: "account" }],
+});
+if (!built.ok) {
+  throw new Error(`coverage fixture generation failed to build artifacts: ${built.detail}`);
+}
+
+await emit("coverage-v1/proof-bundle.json", built.value.bundleBytes);
+await emit("coverage-v1/proof-bundle.sha256", `${built.value.bundleDigest}\n`);
+await emit("coverage-v1/fixture-coverage.json", built.value.fixtureBytes);
+await emit("coverage-v1/fixture-coverage.sha256", `${built.value.fixtureDigest}\n`);
+
+const uncoveredBuilt = buildCoverageArtifacts({
+  artifact,
+  fidelityClass: "anchored-subset",
+  bundle: proofs.value,
+  declarations: [],
+});
+if (uncoveredBuilt.ok) {
+  throw new Error("uncovered-entry fixture expected coverage-incomplete failure");
+}
+const uncoveredEntry = {
+  artifact,
+  sourceAddresses: [FAKE_POOL],
+  declarations: [],
+  expectedReason: uncoveredBuilt.reason,
+  uncoveredAddress: FAKE_ACTOR,
+};
+await emit("adversarial-v1/uncovered-entry.json", `${JSON.stringify(uncoveredEntry)}\n`);
 
 if (check && failures.length > 0) {
   console.error(`fixture drift in:\n${failures.map((path) => `  ${path}`).join("\n")}`);

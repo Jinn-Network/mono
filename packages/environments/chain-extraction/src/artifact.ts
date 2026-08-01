@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { StateEntryCounts } from "@jinn-network/chain-environment-record";
 import {
   canonicalJsonBytes,
   compareCodeUnitStrings,
@@ -134,6 +135,16 @@ export function stateArtifactEntryCount(artifact: StateArtifact): number {
     (total, account) => total + 1 + (account.code === undefined ? 0 : 1) + account.storage.length,
     0,
   );
+}
+
+/** CE1's census type. One entry per account, per code blob, per slot -- the denominator
+ * the record's E13 arithmetic balances against. */
+export function stateArtifactEntryCounts(artifact: StateArtifact): StateEntryCounts {
+  return {
+    accounts: artifact.accounts.length,
+    codeEntries: artifact.accounts.filter((account) => account.code !== undefined).length,
+    storageSlots: artifact.accounts.reduce((total, account) => total + account.storage.length, 0),
+  };
 }
 
 /**
