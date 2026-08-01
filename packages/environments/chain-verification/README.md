@@ -52,7 +52,9 @@ Everything that touches the world is injected: `runtime` (materializer + probe e
 `artifactStore` (`getArtifact` / `putArtifact`), `signer` (a `DsseSigner` function — this
 package never sees key bytes), `clock`, and the host-declared `verifier` toolchain identity.
 `createAnvilMaterializer` takes an injected process host, RPC transport, workspace, and
-artifact source; this package spawns no process and opens no socket.
+artifact source; this package spawns no process and opens no socket. Pass
+`supportedControls` from [`ANVIL-CAVEATS.md`](./ANVIL-CAVEATS.md) — the list is measured,
+not assumed — so step 3 never attests to a determinism control the launch line did not apply.
 
 ## Digest forms
 

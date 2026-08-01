@@ -659,14 +659,29 @@ test('chain-environment-verification takes exactly its two approved package edge
   const fsUsers = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
     .filter((finding) => !CHAIN_VERIFICATION_FILESYSTEM_SOURCES.some(
       (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
     ));
   assert.deepEqual(fsUsers, [],
     `only ${CHAIN_VERIFICATION_FILESYSTEM_SOURCES.join(' and ')} may touch the filesystem, and only `
     + 'through a directory supplied as an argument');
   const fsCarveOutUses = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
-    .filter((finding) => !finding.includes('node:fs/promises'));
+    .filter((finding) => !finding.includes('node:fs/promises'))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
+    ));
   assert.deepEqual(fsCarveOutUses, [],
     'the filesystem carve-out covers node:fs/promises only; no other I/O module is admitted');
+
+  const processUsers = forbiddenImportsInFiles(allFiles, ['node:child_process', 'node:http'])
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ));
+  assert.deepEqual(processUsers, [],
+    `only ${CHAIN_VERIFICATION_PROCESS_SOURCES.join(' and ')} may spawn a process or dial HTTP`);
 
   assert.deepEqual(
     forbiddenImportsInFiles([join(verificationSource, 'index.ts')], [], [testingEntry]),
