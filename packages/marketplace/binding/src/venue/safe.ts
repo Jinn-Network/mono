@@ -4,8 +4,12 @@
 // `client/src/adapters/mech/safe.ts` (design §14 "declared impact"; design §3 "all
 // state-changing calls Safe-routed"). Deliberately simpler than the client's production
 // version: no shared nonce-ledger, no cross-process lock, no eviction-recovery retry loop --
-// those are daemon-concurrency concerns that belong to the pipeline (Milestone M6) wiring this
-// into a running daemon with multiple concurrent loops sharing one Safe. For a single-shot
+// those are venue-concurrency concerns and they are re-homed to
+// `@jinn-network/marketplace-venue-base` (operator-daemon composition design §6.1 "Supersession note" -- venue
+// mechanics, not application policy; nothing frozen pinned the earlier Milestone-M6 placement). From cutover stage 1
+// that package's Safe broadcaster is the only transaction path in the operator process (the single-broadcaster
+// rule); this helper remains the minimum single-shot read-sign-broadcast-wait sequence for one-off binding calls and
+// tests. For a single-shot
 // binding call (posting one Task, per M2 scope) a straight read-sign-broadcast-wait sequence is
 // the minimum code that solves the problem (Rule 2); it still classifies inner reverts via
 // `safe-revert.ts` so a caller gets a decoded reason, not just "reverted".

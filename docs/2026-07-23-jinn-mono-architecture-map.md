@@ -2,7 +2,13 @@
 
 **Date:** 2026-07-23
 
-**Status:** Repository audit and boundary proposal
+**Status:** **Superseded as a boundary proposal (2026-07-30, DR-2026-07-30).** Its inventory
+and system map remain useful history — written before the stack implementation landed, so its
+figures predate the current tree. Its proposed boundaries and dispositions are replaced by
+[`docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md`](superpowers/specs/2026-07-30-jinn-platform-architecture.md)
+§7. The three decisions this map deferred (publication authority, task/evaluation ownership,
+package names) are dispositioned there or assigned to the queued product design sessions.
+Originally: repository audit and boundary proposal
 
 **Scope:** `jinn-mono` only
 

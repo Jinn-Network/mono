@@ -92,7 +92,7 @@ ETH actually lives across three roles — the **agent address** (gas float for t
 
 ### 2.4 Network Memberships
 
-The SolverNets this operator has joined. One entry per joined SolverNet, keyed by manifest CID.
+The SolverNets this operator has joined. One entry per joined SolverNet, keyed by manifest CID. As of the stage-1 cutover, membership no longer gates claiming — claim eligibility is governed by §2.15 Claim policy & wiring, derived from these memberships by the one-time boot migration; this page remains the legacy view of who the operator has joined until stage 5.
 
 **Onboarding-essential.** Joining at least one SolverNet — with a ready harness (§2.9) and a selected model for its solver role — is part of the Bootstrap completion criterion (§2.8), not a post-onboarding optional step. A node with zero memberships is not eligible to claim any tasks, so onboarding does not report complete until the first membership exists. Evaluator-only joins follow §2.9's evaluator rule (no solver-harness selection required).
 
@@ -304,6 +304,9 @@ Components raise state messages locally. The Notifications component is the unio
 - `no_solvernets_joined` — fires **only** for a running node that has left all its SolverNets *after* onboarding. It is **never** shown to a freshly-onboarded node: onboarding's completion criterion (§2.8) guarantees ≥1 joined SolverNet, so a node that has just finished onboarding always has a membership. The onboarding-local "join a SolverNet to finish" prompt (§2.8 state messages) is the takeover-phase counterpart and is a distinct, non-taxonomy message.
 - `safe_binding_pending`
 - `claim_failed`
+- `config_migrated` — the operator's config was migrated to shape v2 on this boot: a claim policy and execution wiring were derived from the existing SolverNet memberships, beside the legacy keys. Severity: info. Names how many wiring and posting entries were created, and whether per-claim caps are unset (in which case the USD spend gates remain the operative bound). Jumps to §2.15 Claim policy & wiring. Fires once per migrating boot; a re-run is a no-op.
+- `unreleased_attempt` — an attempt was claimed on chain but not settled by this daemon; it occupies its `maxClaims` slot until the venue reaps it. Severity: info. Jumps to §2.15 Claim policy & wiring.
+- `evidence_indexing_failed` — one or more evidence records failed to index. Severity: info. No action yet; the driver retries automatically.
 
 ### 2.11 Settings
 
@@ -394,6 +397,46 @@ Rendered inside a launched-SolverNet detail view, this panel surfaces the live s
   - `vetted_pool_publication_failed` — **warning** severity. Raised when `generatorState.lastError.message` starts with `"vetted pool publication failed"`. Rendered as the existing `GeneratorError` block; the daemon retries on the next tick. (swe-rebench-v2 only.)
 - **Collections** — none. The pool is a derived view rendered inline; the panel does not own a paginated collection.
 - **Actions** — none in v1. Hot-applyable config edits are owned by the sibling generator-config form on the same panel.
+
+### 2.15 Claim policy & wiring
+
+How this operator decides what to claim and what runs it. Replaces `joinedSolverNets` as the
+claim authority at cutover stage 1; memberships (§2.4) remain the legacy view until stage 5.
+
+- **Static**
+  - claim predicate mode — `claim-nothing` | `every-runnable` | `match-legacy-manifest-digest`
+  - spend cap (wei) — optional per-task ceiling enforced before every claim. Absent means the
+    host's USD rolling-window gates (§6.5) remain the operative spend bound — the same behavior
+    as before this cutover.
+  - AI-unit cap — optional per-task ceiling enforced before every claim. Same absent-is-permissive
+    rule as the spend cap.
+  - shape version — `2` once the boot migration has run
+  - **Actions**
+    - edit claim predicate mode *(restart-required)*
+    - edit spend cap *(restart-required)*
+    - edit AI-unit cap *(restart-required)*
+- **Collections**
+  - execution wiring entries — one per work kind. Item shape: work kind, harness, model,
+    plugins, credential reference, isolation policy, legacy manifest digest (bridge era only).
+    Ordered by work kind. No pagination.
+    - **Actions**
+      - edit wiring entry *(restart-required)*
+      - remove wiring entry *(restart-required)*
+- **State messages**
+  - claim policy migrated from SolverNet memberships — one-time, **informational**, never
+    action-required (coordinator amendment 1: an operator with no per-claim caps set is a normal,
+    safe posture — the host's USD spend gates remain the operative bound). Names how many wiring
+    entries were created and whether per-claim caps are unset; no action maps to this message.
+    See §2.10 `config_migrated`.
+  - caps at zero — the spend cap or AI-unit cap is **explicitly** set to zero (distinct from a cap
+    being merely absent/unset, which is the informational case above): no tasks will be claimed
+    until both are raised above zero. Action: raise both caps above zero.
+  - unreleased attempt — an attempt was claimed on chain but not settled by this daemon; it
+    occupies its `maxClaims` slot until the venue reaps it. Informational in the today
+    generation (there is no on-venue release); gains a release action with the revised
+    generation. See §2.10 `unreleased_attempt`.
+  - evidence indexing failed — one or more evidence records failed to index. Action: none yet;
+    the driver retries. Informational. See §2.10 `evidence_indexing_failed`.
 
 ## 3. Cross-cutting concerns
 

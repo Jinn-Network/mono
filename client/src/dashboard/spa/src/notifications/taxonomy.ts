@@ -12,6 +12,9 @@ export const CANONICAL_KINDS = [
   'no_solvernets_joined',
   'safe_binding_pending',
   'claim_failed',
+  'config_migrated',
+  'unreleased_attempt',
+  'evidence_indexing_failed',
 ] as const;
 
 export type CanonicalKind = (typeof CANONICAL_KINDS)[number];

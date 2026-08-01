@@ -28,6 +28,7 @@ import {
 } from '../../config.js';
 import { FleetBootstrapper } from '../../earning/bootstrap.js';
 import { PluginRegistryPublisher } from '../../erc8004/plugin-registry.js';
+import { createDirectSafeBroadcaster } from '../../adapters/mech/direct-safe-broadcaster.js';
 import { pinFileToIpfs as defaultPinFileToIpfs } from '../../adapters/mech/ipfs-pinfile.js';
 import { fetchFromIpfs as defaultFetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { resolveCliPassword as defaultResolveCliPassword } from '../password.js';
@@ -176,6 +177,11 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
             safeAddress: args.safeAddress,
             publicClient: pubClient,
             walletClient: walClient,
+            // Finding E16 / the C2 ruling: `jinn solver-plugins publish|revoke` is a standalone
+            // one-shot process with no composition root to borrow a broadcaster from, so it
+            // constructs its own — bound to the fleet identity Safe, signed by the same agent key
+            // `walClient` already resolved above.
+            broadcaster: createDirectSafeBroadcaster(pubClient, walClient, args.safeAddress),
           }),
         );
       }
@@ -226,11 +232,18 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);
           const walClient = createJinnWalletClient(args.rpcUrl, args.network, account);
+          // Finding E16 / the C2 ruling: this write client is a standalone one-shot process's
+          // own client, with no composition root to borrow a broadcaster from — construct one
+          // bound to the target Safe (when routing through one) rather than hard-failing.
+          const broadcaster = args.safeAddress
+            ? createDirectSafeBroadcaster(pubClient, walClient, args.safeAddress)
+            : undefined;
           return new ReputationRegistryClient({
             reputationRegistryAddress: args.reputationRegistryAddress,
             publicClient: pubClient,
             walletClient: walClient,
             ...(args.safeAddress ? { safeAddress: args.safeAddress } : {}),
+            ...(broadcaster ? { broadcaster } : {}),
           });
         })();
       }

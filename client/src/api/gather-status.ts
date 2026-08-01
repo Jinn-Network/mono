@@ -11,6 +11,7 @@ type StatusBalanceRpc = Pick<PublicClient, 'getBalance' | 'readContract'>;
 import { base, baseSepolia, sepolia } from 'viem/chains';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
+import { getLastConfigMigrationReport } from '../config.js';
 import type { CredentialId } from '../spend/credential.js';
 import { isOverSpendCap } from '../spend/spend-cap.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
@@ -49,6 +50,7 @@ import {
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
 import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
+import type { EvidenceIndexingSource } from '../types/evidence-indexing.js';
 import { buildInfo } from '../build-info.js';
 import type { BalanceCacheEntry } from '../store/store.js';
 import {
@@ -210,6 +212,14 @@ export interface StatusGatherConfig {
    * any discovery failure degrades silently to `null`, never a wrong `'fail'`.
    */
   discovery?: DiscoveryAPI;
+  /**
+   * Optional getter for the live `EvidenceDriverLoop` instance (Task 12's
+   * composition root threads this through server.ts). When present,
+   * `/v1/status` carries an `evidenceIndexing` block: the driver's cached
+   * indexing-failure list and its cached count of announcements pending
+   * indexing. Returning `null`/absent ⇒ no `evidenceIndexing` block.
+   */
+  evidenceDriver?: () => EvidenceIndexingSource | null;
 }
 
 function chainKey(network: 'mainnet' | 'testnet'): 'base' | 'base-sepolia' {
@@ -632,6 +642,32 @@ export async function gatherGatheredStatusRaw(
     }
   }
 
+  // One-time shape-v2 config migration report (Task 3's `migrateConfigShapeV2`,
+  // read via `getLastConfigMigrationReport`). Present only on the boot where
+  // this operator's legacy config was auto-migrated this process start.
+  //
+  // Coordinator amendment 1 (F7 reversed — no claim-nothing migration):
+  // `capsUnset` is computed from the migrated `claimPolicy`'s cap fields
+  // being ABSENT (the schema makes them optional), not from a synthesized
+  // zero. It drives message copy only — the host's USD spend gates (spec
+  // §6.5) remain the operative bound either way.
+  const migrationReport = getLastConfigMigrationReport();
+  const configMigration =
+    migrationReport === undefined || !migrationReport.migrated
+      ? undefined
+      : {
+          shapeVersion: 2 as const,
+          wiringEntries: migrationReport.wiringEntries,
+          postingEntries: migrationReport.postingEntries,
+          ...(migrationReport.backupPath === undefined
+            ? {}
+            : { backupPath: migrationReport.backupPath }),
+          capsUnset:
+            status?.config?.claimPolicy === undefined ||
+            status.config.claimPolicy.spendCapWei === undefined ||
+            status.config.claimPolicy.aiUnitCap === undefined,
+        };
+
   let harnessRollup: ReturnType<typeof buildHarnessRollup> | undefined;
   try {
     const hr = status?.harnessReadiness?.();
@@ -711,6 +747,7 @@ export async function gatherGatheredStatusRaw(
     claimedByService: store.getClaimedRewardsByService(),
     claimedStakingRewardsLast24hWei: store.getClaimedRewardsLast24hWei(),
     harnessRollup,
+    configMigration,
   };
 
   if (!status) {
@@ -879,6 +916,15 @@ export async function gatherStatusForApi(
   });
   if (status?.engine?.implStateDirRoot) {
     body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
+  }
+  // Evidence indexing-failure rollup (Task 11). Best-effort: absent driver ⇒
+  // no evidenceIndexing block; never blocks the status endpoint.
+  const evidenceDriver = status?.evidenceDriver?.();
+  if (evidenceDriver) {
+    body.evidenceIndexing = {
+      failures: await evidenceDriver.failures(),
+      pending: evidenceDriver.pending(),
+    };
   }
   const caps = status?.spendCaps;
   if (caps && Object.keys(caps).length > 0) {

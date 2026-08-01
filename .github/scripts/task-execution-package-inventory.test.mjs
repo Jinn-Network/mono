@@ -19,6 +19,7 @@ const TASK_EXECUTION_PACKAGES = [
   ['backend-local/launchers', '@jinn-network/task-execution-launchers'],
   ['backend-local/assembly', '@jinn-network/task-execution-backend-local'],
   ['evaluation-harness', '@jinn-network/task-execution-evaluation-harness'],
+  ['evaluator-adapters', '@jinn-network/task-execution-evaluator-adapters'],
 ];
 
 // Packages OUTSIDE the task-execution tree that a task-execution package may legitimately
@@ -115,6 +116,24 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     ],
     optionalDependencies: [], peerDependencies: [],
   }],
+  // evaluator-adapters (composition design §6.3): concrete result parsers plugged into
+  // the evaluation harness's deployment allowlist. Production surface is the adapter
+  // contract (evaluation-harness), the EvaluationSpec vocabulary (profiles), and the
+  // Attempt identity (supervisor). Nothing else — no evidence package, no backend.
+  ['evaluator-adapters', {
+    dependencies: [
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-supervisor',
+    ],
+    devDependencies: [
+      '@jinn-network/attestation-issuer', '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository', '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-workspace',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
 ]);
 
 function readPackage(directory) {
@@ -155,7 +174,7 @@ test('the task-execution package inventory is explicit and has one manifest', ()
   // total, never a hardcoded guessed number) — TASK_EXECUTION_PACKAGES.length IS that live
   // total; this assertion documents the count this revision expects (4 pre-existing + the four
   // backend-local components, backend plan Task A1).
-  assert.equal(TASK_EXECUTION_PACKAGES.length, 9);
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 10);
   for (const [directory, expectedName] of TASK_EXECUTION_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

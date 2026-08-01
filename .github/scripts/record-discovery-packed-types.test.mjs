@@ -21,6 +21,7 @@ const packages = [
   ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
+  ['transport-http', '@jinn-network/record-discovery-transport-http'],
 ];
 
 const codeEntrypoints = [
@@ -34,6 +35,7 @@ const codeEntrypoints = [
   '@jinn-network/record-discovery-facts-benchmarking',
   '@jinn-network/record-discovery-facts-environments',
   '@jinn-network/record-discovery-source-evidence-journal',
+  '@jinn-network/record-discovery-transport-http',
 ];
 
 // Cross-tree Jinn dependencies each *then-present* discovery package

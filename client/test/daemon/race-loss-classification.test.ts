@@ -16,6 +16,13 @@ import { join } from 'node:path';
  * `kind: 'race_lost'` / `outcome: 'ok'` / `level: 'info'`. Genuine errors
  * (RPC failures, unknown reverts) must continue to emit
  * `kind: 'tick_error'` / `outcome: 'failed'` / `level: 'error'`.
+ *
+ * Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+ * Task 16): the solution path retired — `_runEngineWatcherLoop` now skips any
+ * announcement whose task.role isn't 'evaluation' before it ever reaches
+ * `adapter.claimTask()`. Every posted task below now carries role: 'evaluation'
+ * so the announcement still reaches the claim path this suite classifies
+ * reverts on; the revert-classification logic itself is role-agnostic.
  */
 
 function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
@@ -162,7 +169,7 @@ describe('daemon race-loss revert classification', () => {
     const adapter = new FailingClaimAdapter(() => raceLossRevert('TCMaxVerdictsReached', [232n, 0]));
 
     harness = await startHarness(adapter);
-    await adapter.postTask({ id: 'race-1', description: 'lost-race task' });
+    await adapter.postTask({ id: 'race-1', description: 'lost-race task', role: 'evaluation' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'race_lost');
     expect(event.kind).toBe('race_lost');
@@ -181,7 +188,7 @@ describe('daemon race-loss revert classification', () => {
     const adapter = new FailingClaimAdapter(() => raceLossRevert('TCAttemptAlreadyFinalized', [99n, 1]));
 
     harness = await startHarness(adapter);
-    await adapter.postTask({ id: 'race-2', description: 'finalized-attempt task' });
+    await adapter.postTask({ id: 'race-2', description: 'finalized-attempt task', role: 'evaluation' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'race_lost');
     expect(event.kind).toBe('race_lost');
@@ -194,7 +201,7 @@ describe('daemon race-loss revert classification', () => {
     const adapter = new FailingClaimAdapter(() => raceLossRevert('TCEvaluationDeadlinePassed', [7n]));
 
     harness = await startHarness(adapter);
-    await adapter.postTask({ id: 'race-3', description: 'past-deadline task' });
+    await adapter.postTask({ id: 'race-3', description: 'past-deadline task', role: 'evaluation' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'race_lost');
     expect(event.kind).toBe('race_lost');
@@ -206,7 +213,7 @@ describe('daemon race-loss revert classification', () => {
   it('still emits tick_error (level=error, outcome=failed) for an unexpected RPC failure', async () => {
     const adapter = new FailingClaimAdapter(() => new Error('ECONNREFUSED'));
     harness = await startHarness(adapter);
-    await adapter.postTask({ id: 'rpc-fail', description: 'genuine error task' });
+    await adapter.postTask({ id: 'rpc-fail', description: 'genuine error task', role: 'evaluation' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'tick_error');
     expect(event.kind).toBe('tick_error');
@@ -232,7 +239,7 @@ describe('daemon race-loss revert classification', () => {
       ),
     );
     harness = await startHarness(adapterUnknown);
-    await adapterUnknown.postTask({ id: 'unknown-revert', description: 'unknown revert task' });
+    await adapterUnknown.postTask({ id: 'unknown-revert', description: 'unknown revert task', role: 'evaluation' });
 
     const event = await waitForActivityEvent(harness.store, (r) => r.kind === 'tick_error');
     expect(event.kind).toBe('tick_error');
@@ -253,7 +260,7 @@ describe('daemon race-loss revert classification', () => {
       ),
     );
     harness = await startHarness(adapterOther);
-    await adapterOther.postTask({ id: 'other-revert', description: 'unknown-name revert task' });
+    await adapterOther.postTask({ id: 'other-revert', description: 'unknown-name revert task', role: 'evaluation' });
 
     const event2 = await waitForActivityEvent(harness.store, (r) => r.kind === 'tick_error');
     expect(event2.kind).toBe('tick_error');

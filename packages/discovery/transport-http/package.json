@@ -1,0 +1,58 @@
+{
+  "name": "@jinn-network/record-discovery-transport-http",
+  "version": "0.1.0",
+  "description": "Production HTTP transports for the Jinn Record Discovery Protocol v1: filesystem blob store, static-layout archive handler with an SSE tail, and client-side fetch/SSE/ping transports.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/discovery/transport-http"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/record-discovery-client": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/record-discovery-testing": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@types/node": "^22.0.0",
+    "hono": "^4.12.10",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/record-discovery-client": "portal:../client",
+    "@jinn-network/record-discovery-protocol": "portal:../protocol",
+    "@jinn-network/record-discovery-serve": "portal:../serve",
+    "@jinn-network/record-discovery-testing": "portal:../testing",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  }
+}

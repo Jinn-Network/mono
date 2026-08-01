@@ -1,5 +1,6 @@
 // client/test/e2e/_daemon-harness-helpers.ts
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { mkdtemp, readFile } from 'node:fs/promises';
@@ -70,6 +71,16 @@ import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { startApiServer } from '../../src/api/server.js';
 import type { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import type { Harness } from '../../src/harnesses/types.js';
+import { buildOperatorComposition, type OperatorComposition } from '../../src/daemon/composition-root.js';
+import type { JinnConfig } from '../../src/config.js';
+import { CONFIG_SHAPE_VERSION, type ExecutionWiringConfigEntry } from '../../src/config/shape-v2.js';
+import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
+import {
+  buildRepositoryWorkProfile,
+  buildEvaluationTaskProfile,
+  sealTaskProfile,
+} from '@jinn-network/task-execution-profiles';
+import type { ProfileStore } from '@jinn-network/task-execution-profiles';
 export { compileContracts, ANVIL_PRIVATE_KEYS };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -140,6 +151,13 @@ export interface TaskV3Env {
    * and assert that the daemon's settle tx incremented the counter.
    */
   activityCheckerAddress: `0x${string}`;
+  /**
+   * Locally-deployed TaskCoordinator address (Task 18). `MarketplaceChainConfig.taskCoordinator`
+   * must point at THIS locally-deployed contract, not the real Base Sepolia
+   * `BASE_SEPOLIA_TODAY.taskCoordinator` — this fixture runs on an Anvil fork of Base MAINNET, so
+   * the Sepolia address would resolve to unrelated (or empty) bytecode there.
+   */
+  coordinatorAddress: `0x${string}`;
 }
 
 export interface DaemonHarnessFixture {
@@ -356,6 +374,7 @@ export async function deployMinimalV3Stack(
     mockMechAddress: mockMech,
     mockMarketplaceAddress: marketplace,
     activityCheckerAddress: activityChecker,
+    coordinatorAddress: coordinator,
   };
 }
 
@@ -434,6 +453,90 @@ export async function setupAnvilFixtureFromState(statePath: string): Promise<Dae
   };
 }
 
+// ── FORK-ONLY REMEDIATION (issue #2341 — NOT shipped, NOT a production fix) ────
+//
+// Live Base mainnet's ServiceRegistryL2 (0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE)
+// has never whitelisted the stOLAS `gnosisSafeSameAddressMultisig` implementation
+// (0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB) that ExternalStakingDistributor's
+// stake() path deploys services against:
+//
+//   cast call 0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE \
+//     "mapMultisigs(address)(bool)" 0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB \
+//     --rpc-url https://mainnet.base.org
+//   → false
+//
+// stake() reverts with UnauthorizedMultisig(0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB)
+// (selector 0x14460f20). This is a LIVE-CHAIN breakage tracked at
+// https://github.com/Jinn-Network/mono/issues/2341 — Jinn does not own
+// ServiceRegistryL2 and cannot fix it there. Per Ruling 3 on that issue, the
+// harness MAY impersonate the registry owner on this Anvil FORK ONLY and apply
+// the missing whitelist entry so the e2e loop can exercise everything
+// downstream of bootstrap. This function must never run against a live chain —
+// it only ever touches an in-process Anvil fork's state.
+const SERVICE_REGISTRY_OWNER_ABI = parseAbi([
+  'function owner() view returns (address)',
+  'function mapMultisigs(address multisig) view returns (bool)',
+  'function changeMultisigPermission(address multisig, bool permission) external',
+]);
+
+async function remediateStOlasMultisigAuthorizationOnFork(rpcUrl: string): Promise<void> {
+  const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
+  const registry = CHAIN_CONFIG.serviceRegistry as Address;
+  const multisig = CHAIN_CONFIG.gnosisSafeSameAddressMultisig as Address;
+
+  const alreadyAuthorized = await publicClient.readContract({
+    address: registry,
+    abi: SERVICE_REGISTRY_OWNER_ABI,
+    functionName: 'mapMultisigs',
+    args: [multisig],
+  });
+  if (alreadyAuthorized) return;
+
+  const owner = getAddress(
+    await publicClient.readContract({
+      address: registry,
+      abi: SERVICE_REGISTRY_OWNER_ABI,
+      functionName: 'owner',
+    }),
+  ) as Address;
+
+  process.stdout.write(
+    `[fork-remediation #2341] ServiceRegistryL2.mapMultisigs(${multisig}) is false on the ` +
+    `forked chain (mirrors live Base mainnet). Impersonating registry owner ${owner} ` +
+    `INSIDE THIS ANVIL FORK ONLY to call changeMultisigPermission(${multisig}, true) — ` +
+    `this is test-setup remediation for a live-chain breakage, not something Jinn ships.\n`,
+  );
+
+  await anvilJsonRpc(rpcUrl, 'anvil_setBalance', [owner, '0x56BC75E2D63100000']); // 100 ETH for gas
+  await anvilJsonRpc(rpcUrl, 'anvil_impersonateAccount', [owner]);
+  try {
+    const ownerWallet = createWalletClient({ account: owner, chain: base, transport: http(rpcUrl) });
+    const hash = await ownerWallet.writeContract({
+      address: registry,
+      abi: SERVICE_REGISTRY_OWNER_ABI,
+      functionName: 'changeMultisigPermission',
+      args: [multisig, true],
+      account: owner,
+      chain: base,
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+  } finally {
+    await anvilJsonRpc(rpcUrl, 'anvil_stopImpersonatingAccount', [owner]);
+  }
+
+  const nowAuthorized = await publicClient.readContract({
+    address: registry,
+    abi: SERVICE_REGISTRY_OWNER_ABI,
+    functionName: 'mapMultisigs',
+    args: [multisig],
+  });
+  if (!nowAuthorized) {
+    throw new Error(
+      `[fork-remediation #2341] mapMultisigs(${multisig}) still false after changeMultisigPermission`,
+    );
+  }
+}
+
 /**
  * Run the FleetBootstrapper 11-step lifecycle to `complete` on the Anvil fork.
  * Funds the EOA via Anvil's anvil_setBalance (stOLAS mode — the distributor
@@ -448,6 +551,9 @@ export async function bootstrapStakedOperator(
   fixture: DaemonHarnessFixture,
 ): Promise<BootstrappedOperator> {
   const rpcUrl = fixture.anvil.rpcUrl;
+
+  // FORK-ONLY: see `remediateStOlasMultisigAuthorizationOnFork` above — issue #2341.
+  await remediateStOlasMultisigAuthorizationOnFork(rpcUrl);
 
   // Step 1: Create a temp earning dir under implStateRoot.
   const earningDir = await mkdtemp(join(fixture.implStateRoot, 'earning-'));
@@ -866,8 +972,25 @@ export async function startDaemon(
    *   `getResolution` call then hits the mock server instead of
    *   `gamma-api.polymarket.com`. Point it at a `MockPolymarketGammaServer`
    *   so the evaluator/verdict leg is deterministic and needs no network.
+   * - `enableComposition` (Task 18) — build a real `OperatorComposition` via
+   *   `buildOperatorComposition` and pass it on `DaemonConfig.composition`, exactly like
+   *   `main.ts`'s testnet branch. Requires `v3Env` (the composition's `MarketplaceChainConfig`
+   *   is built entirely from the locally-deployed V3 addresses — there is no equivalent
+   *   deployment to target on production Base mainnet, which is what `v3Env`-absent callers run
+   *   against). Defaults to `false` because it needs `v3Env`, not because of any process-wide
+   *   collision risk: as of finding E16 / the C2 ruling, `buildOperatorComposition` returns its
+   *   broadcaster on `OperatorComposition.broadcaster` instead of installing a process-global
+   *   singleton, and `startDaemon` threads that instance to `mechAdapter` / `deliveryDeps` itself
+   *   (see step 6.5/7 below) — two `startDaemon` calls in one process (T2.2's op-a + op-b) each
+   *   get their own broadcaster bound to their own Safe and no longer race. `jinn-repo-loop.ts` /
+   *   `jinn-repo-live-loop.ts` still don't pass this flag today (unrelated to this fix — see their
+   *   own callers), but nothing about the broadcaster design blocks them from doing so.
    */
-  opts?: { polymarketGammaBaseUrl?: string; instanceLabel?: string },
+  opts?: {
+    polymarketGammaBaseUrl?: string;
+    instanceLabel?: string;
+    enableComposition?: boolean;
+  },
   /**
    * Extra SolverType→harness-name dispatch entries merged into
    * `solverTypeHarnesses` on top of the prediction.v1 mapping derived from
@@ -1076,6 +1199,153 @@ export async function startDaemon(
   const { createClients } = await import('../../src/adapters/mech/safe.js');
   const agentClients = createClients(rpcUrl, operator.agentPrivateKey, base);
 
+  // 6.5 (Task 18). Build the stage-1 cutover composition root, mirroring main.ts's
+  //     testnet-only branch (main.ts §2164 "Stage-1 cutover composition root"). Gated on
+  //     `opts.enableComposition` — see that field's doc comment above for why this is opt-in
+  //     rather than automatic whenever `v3Env` is present.
+  //
+  //     `config` is a minimal `JinnConfig`-shaped fixture, not a fully-defaulted config
+  //     (`JinnConfigSchema.parse(...)` plus `loadConfig()`'s rpcUrl/engine post-processing would
+  //     be needed for that, and this rig never boots through the file-based config loader —
+  //     `startDaemon` builds every dependency explicitly, matching the rest of this file's
+  //     pattern). It is cast to `JinnConfig` because `buildOperatorComposition` only ever reads
+  //     `config.ipfsRegistryUrl` / `config.claudePath` / `config.codexPath` / `config.hermesPath`
+  //     / `config.executionWiring` / `config.claimPolicy` (verified against composition-root.ts)
+  //     — every field this fixture sets is real and exercises the real code path; the cast is
+  //     only standing in for the ~60 unrelated `JinnConfig` fields buildOperatorComposition never
+  //     touches.
+  //
+  //     `configShapeVersion: 2` / `executionWiring` / `claimPolicy` are the shape-v2 keys (Task
+  //     1, `src/config/shape-v2.ts`) the plan calls for. `executionWiring`'s single entry's
+  //     `legacyManifestDigest` is set to the SAME digest `postPredictionV1Task` computes
+  //     (`keccak256(toBytes('prediction.v1'))`) so `matchLegacyManifestDigest` (the bridge
+  //     predicate composition-root.ts's `buildClaimPredicate` builds for
+  //     `mode: 'match-legacy-manifest-digest'`) recognizes a legacy-bridged prediction.v1 card.
+  let composition: OperatorComposition | undefined;
+  if (opts?.enableComposition === true) {
+    if (!v3Env) {
+      throw new Error('startDaemon: opts.enableComposition requires v3Env (no local V3 stack to target)');
+    }
+    const PREDICTION_V1_LEGACY_MANIFEST_CID = 'prediction.v1';
+    const legacyManifestDigest = keccak256(toBytes(PREDICTION_V1_LEGACY_MANIFEST_CID));
+
+    const executionWiring: ExecutionWiringConfigEntry[] = [
+      {
+        workKind: 'prediction.v1',
+        harness: selectedHarnessName,
+        model: claudeModel,
+        plugins: [],
+        credentialRef: 'e2e-daemon-harness',
+        isolationPolicy: 'process',
+        legacyManifestDigest,
+      },
+    ];
+    const compositionConfig = {
+      configShapeVersion: CONFIG_SHAPE_VERSION,
+      claimPolicy: {
+        mode: 'match-legacy-manifest-digest' as const,
+        spendCapWei: '1000000000000000000',
+        aiUnitCap: 1000,
+      },
+      executionWiring,
+      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
+      // Last-mile fix: `buildOperatorComposition`'s projector (`resolveSubmissionBytes`'s IPFS
+      // fetch, `readSealedDocuments`) reads `config.ipfsGatewayUrl` via the SAME
+      // `buildFetchIpfsBytes` helper the MechAdapter above already uses `resolvedIpfsGatewayUrl`
+      // for -- this was an accidental omission (composition-root.ts's `fetchIpfsBytes` port always
+      // failed closed with no gateway URL, which was invisible while `resolveSubmissionBytes`
+      // never called it at all). Must be the SAME mock IPFS gateway the MechAdapter/creator write
+      // task documents to, or the composition reads from a different (real) gateway than the one
+      // this fixture's tasks are actually pinned to.
+      ipfsGatewayUrl: resolvedIpfsGatewayUrl,
+      claudePath,
+      codexPath: process.env['JINN_CODEX_PATH'] ?? 'codex',
+      hermesPath: process.env['JINN_HERMES_PATH'] ?? 'hermes',
+    } as unknown as JinnConfig;
+
+    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
+    const profilesByDigest = new Map(profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]));
+    const profileStore: ProfileStore = { get: (digest) => profilesByDigest.get(digest) };
+
+    // `taskCoordinator`/`activityChecker` MUST be the locally-deployed V3 addresses, not
+    // `BASE_SEPOLIA_TODAY`'s real Base Sepolia addresses — this fixture runs on an Anvil fork of
+    // Base MAINNET (chainId 8453; `spawnAnvilFork` forks with no `--chain-id` override), so a
+    // Sepolia address would resolve to unrelated bytecode there.
+    const chain: MarketplaceChainConfig = {
+      chainId: 8453,
+      taskCoordinator: v3Env.coordinatorAddress,
+      jinnRouter: v3Env.routerAddress,
+      mechMarketplace: v3Env.mockMarketplaceAddress,
+      activityChecker: v3Env.activityCheckerAddress,
+      generation: 'today',
+    };
+
+    // Neither key has production key material yet (both left as explicit follow-ups by design
+    // — see `composition-root.ts`'s `CompositionRootInput.deliverySigningKey` /
+    // `.legacyBridgeSigner` doc comments). Without them the loop cannot close: no
+    // `deliverySigningKey` → `executorBinding` reports "missing" → `verificationFailure` REJECTS
+    // every settlement; no `legacyBridgeSigner` → `deliveryExtensions` stays `() => ({})` and the
+    // legacy evaluator gets no envelope. The e2e harness supplies real (test-only) key material
+    // for both so the full settlement path is genuinely exercised.
+
+    // 1. `deliverySigningKey` — real Ed25519 key, wired exactly as
+    //    `client/test/daemon/settlement-grade.test.ts`'s "REAL LocalTaskExecutionBackend delivery
+    //    (finding E31)" fixture drives `trustKeys.deliverySigningKey`.
+    const deliveryKeyPair = generateKeyPairSync('ed25519');
+    const deliverySigningKey = {
+      keyId: `e2e-daemon-harness-${label}`,
+      publicKey: deliveryKeyPair.publicKey,
+      sign: (payload: Uint8Array): Uint8Array =>
+        new Uint8Array(cryptoSign(null, payload, deliveryKeyPair.privateKey)),
+    };
+
+    // 2. `legacyBridgeSigner` — real synchronous secp256k1 signer, ported from
+    //    `client/test/bridge/converged-delivery-legacy-evaluator.test.ts`'s `syncSign`. Recovery
+    //    format is reordered to r||s||recovery (the convention `harnesses/engine/signing.ts`
+    //    uses); noble's own `'recovered'` format puts the recovery byte first.
+    const legacyBridgePrivateKey = secp256k1.utils.randomSecretKey();
+    const legacyBridgeSigner = (hash: `0x${string}`): `0x${string}` => {
+      const message = Buffer.from(hash.slice(2), 'hex');
+      const recovered = secp256k1.sign(message, legacyBridgePrivateKey, {
+        prehash: false,
+        format: 'recovered',
+      });
+      const recovery = recovered[0]!;
+      const rs = Buffer.from(recovered.slice(1));
+      return `0x${rs.toString('hex')}${recovery.toString(16).padStart(2, '0')}` as `0x${string}`;
+    };
+
+    composition = await buildOperatorComposition({
+      config: compositionConfig,
+      publicClient: agentClients.publicClient,
+      walletClient: agentClients.walletClient as unknown as WalletClient,
+      safeAddress: operator.safeAddress,
+      mechAddress: v3Env.mockMechAddress,
+      chain,
+      stateRoot: join(fixture.implStateRoot, `${label}-backend`),
+      evidenceRoot: join(fixture.implStateRoot, `${label}-evidence`),
+      venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
+      profileStore,
+      deliverySigningKey,
+      legacyBridgeSigner,
+      // C8: required — backs the projector's durable cursor/observations and the engagement
+      // ledger. Its absence here (an accidental omission, not intentional) is exactly what made
+      // `ProjectorLoop` crash on its first tick with `store.setConfigValue` on `undefined` —
+      // `store` is this same daemon's own SQLite `Store` (built above, step 3), not a separate
+      // instance.
+      store,
+      // Diagnostic only: surfaces composition-root.ts's own file-header gap (a) warnings
+      // ("no production Submission/dispatch-context resolver exists for today-generation tasks
+      // yet") on stdout so a stalled projector is diagnosable instead of silently ticking.
+      logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
+    });
+    // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
+    // broadcaster (built above, bound to `operator.safeAddress`) is threaded explicitly to the
+    // legacy `mechAdapter` too, before `daemon.start()`. `deliveryDeps` below is constructed
+    // AFTER this point so it picks the same instance up directly in its object literal.
+    mechAdapter.setBroadcaster(composition.broadcaster);
+  }
+
   // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
   //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
   //      No artifact donation in tests; donation.enabled = false.
@@ -1107,6 +1377,10 @@ export async function startDaemon(
     routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
     claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
     // evictionRecovery: omitted — no master wallet in test
+    // Finding E16 / the C2 ruling: the SAME broadcaster instance `mechAdapter` above just picked
+    // up — undefined when `opts.enableComposition` was not set (no composition, no broadcaster,
+    // same as production on a network with no composition).
+    broadcaster: composition?.broadcaster,
   };
 
   // 8. Construct Daemon. Translation of main.ts §2046.
@@ -1129,6 +1403,32 @@ export async function startDaemon(
     // apiToken: not passed because we injected apiServer with its own token above
     peers: [],
     creatorSafeAddress: operator.safeAddress,
+    // Step 6.5's composition (Task 18, opt-in via opts.enableComposition). Finding E36 (ruled
+    // "build it"): `DaemonConfig.work` is now set alongside `composition` — `composition.archive`
+    // is the real `ArchiveSubscription` over the projector's durable observation stream
+    // (`archive-subscription.js`), and `composition.readSealedDocuments` mirrors main.ts's own
+    // `workLoopConfig` exactly (same `estimateAiUnits`/`acceptLegacyCards` values). Without this,
+    // `composition` only builds a broadcaster for `mechAdapter`/`deliveryDeps` and no loop ever
+    // claims — that was true before this ruling landed a real archive feed and is no longer the
+    // intended shape for a rig exercising the full claim-to-settle loop.
+    ...(composition
+      ? {
+          composition,
+          work: {
+            archive: composition.archive,
+            ledger: composition.engagementLedger,
+            claimGate: composition.claimGate,
+            estimateAiUnits: () => 0,
+            readSealedDocuments: composition.readSealedDocuments,
+            pollIntervalMs: 300,
+            acceptLegacyCards: true,
+            // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent
+            // no-op and the per-tick outcome line (E39's fix) never reaches this rig's stdout —
+            // mirrors the composition logger a few lines above and main.ts's own workLoopConfig.
+            logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
+          },
+        }
+      : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start
     restorationEngine: {
@@ -1197,6 +1497,12 @@ export async function startDaemon(
     // (ownsApiServer=false when config.apiServer is injected), so we
     // are responsible for closing it here.
     await preStartedApiServer.close().catch(() => {});
+    // composition.close() clears the venue broadcaster singleton (Finding E16) and closes the
+    // evidence runtime + venue sqlite handle — must run so a sibling daemon (or the next e2e
+    // process tick) doesn't inherit a broadcaster bound to this Safe.
+    if (composition) {
+      await composition.close().catch(() => {});
+    }
   };
 
   return { daemon, store, stop };
@@ -1305,11 +1611,20 @@ async function postSignedTaskOnChain(
     },
   };
 
-  // `taskCidDigest` = keccak256(JSON.stringify(signedTaskDoc)). The daemon
-  // derives the IPFS CID as `f01551220${digest.slice(2)}` from the on-chain
-  // event and fetches from the mock gateway at that path.
+  // `taskCidDigest` MUST be a real sha256 digest of the exact posted bytes, not an arbitrary
+  // lookup key: `composition-root.ts`'s `buildResolveSubmissionBytes` (the projector's TEP
+  // admission path) re-derives `sha256(fetchedBytes)` and cross-checks it against this on-chain
+  // value (`resolveTaskProjection`'s digest join) before admitting the event — a mismatch is a
+  // correct fail-closed drop, not a bug in that path. This was previously
+  // `keccak256(JSON.stringify(signedTaskDoc))` (an opaque mock-gateway lookup key, harmless while
+  // nothing ever verified it, but wrong now that something does). Real production posting
+  // (`adapter.ts`'s `uploadToIpfs` + `cidToDigestHex`) computes a genuine sha256-based CID digest
+  // over the uploaded bytes; this mirrors that, over the same JSON bytes the mock gateway serves
+  // back byte-identical (see `startMockIpfsServer`'s doc comment). The daemon still derives the
+  // IPFS CID as `f01551220${digest.slice(2)}` from the on-chain event and fetches from the mock
+  // gateway at that path — unchanged.
   const taskJson = JSON.stringify(signedTaskDoc);
-  const taskCidDigest = keccak256(toBytes(taskJson)) as `0x${string}`;
+  const taskCidDigest = `0x${createHash('sha256').update(taskJson).digest('hex')}` as `0x${string}`;
   mockIpfs.register(taskCidDigest, signedTaskDoc);
 
   const manifestDigest = keccak256(toBytes(manifestCid)) as `0x${string}`;

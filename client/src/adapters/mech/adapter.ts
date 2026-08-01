@@ -13,7 +13,7 @@ import type {
   DeliveredResult,
 } from '../../types/index.js';
 import { TransientError, PermanentError, parseTask } from '../../types/index.js';
-import { createClients } from './safe.js';
+import { createClients, type VenueBroadcaster } from './safe.js';
 
 /**
  * Coalesce a string-or-array RPC input down to the head URL for display in
@@ -35,6 +35,7 @@ import {
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
+import { legacyRestorationResultFromDelivery } from '../../daemon/bridge-legacy-delivery.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -321,6 +322,15 @@ export class MechAdapter implements ExecutionAdapter {
    */
   public setEvaluatorEnabled(enabled: boolean): void {
     this.config.evaluatorEnabled = enabled;
+  }
+
+  /**
+   * Late-bind the Safe broadcaster this adapter's writes route through (finding E16 / the C2
+   * ruling). Needed because `main.ts` constructs this adapter before the composition root that
+   * owns the broadcaster; the daemon calls this once, before starting any loop that can write.
+   */
+  public setBroadcaster(broadcaster: VenueBroadcaster): void {
+    this.config.broadcaster = broadcaster;
   }
 
   async initialize(): Promise<void> {
@@ -702,6 +712,7 @@ export class MechAdapter implements ExecutionAdapter {
     const taskSubmission = await submitTask(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       restorationDataHex,
@@ -1246,7 +1257,14 @@ export class MechAdapter implements ExecutionAdapter {
         + `does not match canonical TaskCreated provenance for task ${solution.taskId}`,
       );
     }
-    const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
+    // Bridge read path (cutover stage 1, Task 15, coordinator amendment 4 / D3): prefer the
+    // `deliveryExtensions` bridge annotation when the converged Delivery carries one. Read-path
+    // preference only — no state-machine change, no schema change, no new transaction.
+    const bridgedResultData = legacyRestorationResultFromDelivery(
+      new TextEncoder().encode(JSON.stringify(resultPayload)),
+    );
+    const resultData =
+      bridgedResultData ?? (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     let autopilotEvaluationContext: Record<string, unknown> | undefined;
     if (
       restoration.task.spec?.['source'] === 'autopilot-session'
@@ -1396,9 +1414,11 @@ export class MechAdapter implements ExecutionAdapter {
           yield announcement;
         }
 
-        for await (const announcement of this.discoverSubgraphRestorationTasks()) {
-          yield announcement;
-        }
+        // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+        // Task 16): the solution path retires — watchForTasks yields only evaluation
+        // announcements now. discoverSubgraphRestorationTasks() and the joined-manifest-digest
+        // filter below (the joinedSolverNets claim gate the retirement table names) are no
+        // longer called from here.
 
         const currentBlock = await this.publicClient.getBlockNumber();
         if (currentBlock > this.requestBlockCursor) {
@@ -1406,7 +1426,7 @@ export class MechAdapter implements ExecutionAdapter {
           const logs = await this.getRouterLogsInChunks(fromBlock, currentBlock);
 
           // #547: only evaluators ingest delivery-claimed logs into the
-          // pending-evaluation set. Restoration discovery below is unaffected.
+          // pending-evaluation set.
           if (this.evaluatorEnabled) {
             const submittedSolutions = decodeSolutionDeliveryClaimedLogs(logs);
             for (const solution of submittedSolutions) {
@@ -1414,35 +1434,11 @@ export class MechAdapter implements ExecutionAdapter {
             }
           }
 
-          const joinedManifestDigests = this.joinedManifestDigestSet();
+          // Retained: the evaluation provenance cross-check
+          // (canonicalTaskCreationForEvaluation) reads canonicalTaskCreationProvenance.
           const createdTasks = decodeTaskCreatedLogs(logs);
           for (const event of createdTasks) {
             this.rememberCanonicalTaskCreated(event);
-          }
-          for (const { taskId, taskCidDigest, manifestDigest, transactionHash, blockNumber } of createdTasks) {
-            if (!this.isDiscoveryTaskAllowed(taskId)) continue;
-            if (this.observedTasks.has(taskId)) continue;
-            if (joinedManifestDigests.size > 0 && !joinedManifestDigests.has(manifestDigest.toLowerCase())) continue;
-            try {
-              const claimable = await canClaimTask(
-                this.publicClient,
-                this.config.safeAddress,
-                this.config.routerAddress,
-                taskId,
-                this.config.mechContractAddress,
-              );
-              if (!claimable.ok) continue;
-              const announcement = await this.restorationAnnouncementFromDigest({
-                taskId,
-                taskCidDigest,
-                transactionHash,
-                blockNumber,
-              });
-              if (this.hasExpiredExecutionWindow(announcement)) continue;
-              yield announcement;
-            } catch (err) {
-              console.error(`[mech] Failed to parse task ${taskId}:`, err);
-            }
           }
           for await (const announcement of this.retryPendingEvaluationSolutions()) {
             yield announcement;
@@ -1510,6 +1506,7 @@ export class MechAdapter implements ExecutionAdapter {
     const claimed = await claimTaskOnchain(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       taskId,
@@ -1544,6 +1541,7 @@ export class MechAdapter implements ExecutionAdapter {
     await callDeliverToMarketplace(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.mechContractAddress,
       [requestId as Hex],
@@ -1563,6 +1561,7 @@ export class MechAdapter implements ExecutionAdapter {
     const claimed = await claimEvaluationOnchain(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       taskId,
@@ -1579,6 +1578,7 @@ export class MechAdapter implements ExecutionAdapter {
     await claimDelivery(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       requestId as Hex,
@@ -1591,6 +1591,7 @@ export class MechAdapter implements ExecutionAdapter {
     await claimDelivery(
       this.publicClient,
       this.walletClient,
+      this.config.broadcaster,
       this.config.safeAddress,
       this.config.routerAddress,
       requestId as Hex,
@@ -1695,6 +1696,7 @@ export class MechAdapter implements ExecutionAdapter {
       await claimDelivery(
         this.publicClient,
         this.walletClient,
+        this.config.broadcaster,
         this.config.safeAddress,
         this.config.routerAddress,
         requestId as Hex,

@@ -16,8 +16,9 @@ describe('OperatorSubNav', () => {
     render(withRouter('/operator/memberships', <OperatorSubNav />));
     const nav = screen.getByRole('navigation', { name: /operator sections/i });
     const links = nav.querySelectorAll('a');
-    expect(links).toHaveLength(5);
+    expect(links).toHaveLength(6);
     const labels = Array.from(links).map((l) => l.textContent);
+    expect(labels).toContain('Claim policy & wiring');
     expect(labels).toContain('Memberships');
     expect(labels).toContain('Registry');
     expect(labels).toContain('Execution data');
@@ -55,6 +56,7 @@ describe('OperatorSubNav', () => {
 
   it('each link points to its canonical href', () => {
     render(withRouter('/operator/memberships', <OperatorSubNav />));
+    expect(screen.getByRole('link', { name: 'Claim policy & wiring' }).getAttribute('href')).toBe('/operator/claim-policy');
     expect(screen.getByRole('link', { name: 'Memberships' }).getAttribute('href')).toBe('/operator/memberships');
     expect(screen.getByRole('link', { name: 'Registry' }).getAttribute('href')).toBe('/operator/registry');
     expect(screen.getByRole('link', { name: 'Network' }).getAttribute('href')).toBe('/operator/network');

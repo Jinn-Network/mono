@@ -131,11 +131,30 @@ describe("assembleCapabilities", () => {
       recorderAvailability: "none",
       trustKeys: {
         observationSigningKeyConfigured: true,
-        deliverySigningKeyConfigured: false,
       },
     });
     expect(capabilities.signedObservations).toBe(true);
+    // No `deliverySigningKey` supplied -- finding E31: absence, not a hardcoded flag, is what
+    // reports `false` here.
     expect(capabilities.signedDeliveries).toBe(false);
+  });
+
+  test("advertises signedDeliveries only when a real delivery-signing key is present (finding E31)", () => {
+    const capabilities = assembleCapabilities({
+      launchers: [launcher("fixture", ["profile:one"])],
+      provisioner: {
+        taskProfiles: ["profile:one"],
+        workspaceKinds: ["dir"],
+        inputMediaTypes: [],
+        outputMediaTypes: [],
+        isolation: ["process"],
+      },
+      recorderAvailability: "none",
+      trustKeys: {
+        deliverySigningKey: { keyId: "test-key", sign: (payload) => payload },
+      },
+    });
+    expect(capabilities.signedDeliveries).toBe(true);
   });
 
   test("withdraws cancellation and active deadlines when Linux custody is unavailable", () => {

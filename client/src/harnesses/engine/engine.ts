@@ -734,6 +734,12 @@ export class TaskEngine {
     taskRole?: 'restoration' | 'evaluation';
     task?: Task;
   }): Promise<{ ok: true } | { ok: false; reason: string }> {
+    // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+    // Task 16): the solution path moved to the work loop on the merged stack. The
+    // evaluation path below is untouched and retires at stage 2.
+    if (input.taskRole === 'restoration') {
+      return { ok: false, reason: 'solution path retired at cutover stage 1' };
+    }
     const reason = await this.runnableFailureReason(
       input.solverType,
       input.taskRole ?? 'restoration',

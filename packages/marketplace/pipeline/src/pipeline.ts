@@ -187,9 +187,16 @@ export async function runPipeline(
     return { kind: "finality-failed", finalityKind: finality.kind, released };
   }
 
+  const executionTaskDigest = documentDigest(input.taskBytes);
   const engagement = buildEngagement({
     attemptUri: claim.attemptUri,
-    dispatchContext: claim.dispatchContext,
+    // Backend submit binds dispatch context to the exact sealed Task bytes provided (§8). For
+    // bridge-era legacy cards those bytes are synthesized (E41) and diverge from facts.taskDigest
+    // used at claim time; settlement still correlates via the claim-time dispatch context digest.
+    dispatchContext: {
+      ...claim.dispatchContext,
+      taskDigest: executionTaskDigest,
+    },
   });
   const submitAck = await backend.submit(input.taskBytes, input.submissionBytes, engagement);
   if (!submitAck.accepted) {

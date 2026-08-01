@@ -68,6 +68,11 @@ export default defineConfig({
     // test regression and block canary publishes.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Point `~` at a temp directory before any test module loads. `loadConfig()` with no
+    // argument reads AND (since the shape-v2 migration) writes `~/.jinn-client/config.json`,
+    // so without this the suite mutates the operator's real config. See
+    // test/_support/isolate-home.ts.
+    setupFiles: [fileURLToPath(new URL('./test/_support/isolate-home.ts', import.meta.url))],
     exclude,
     alias,
     projects: [

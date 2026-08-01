@@ -1,0 +1,15 @@
+// Public surface of @jinn-network/record-discovery-transport-http. The
+// package's `exports` map exposes only "." -- every downstream consumer
+// (the operator runtime's composition root at cutover stages 1 and 4)
+// can only reach these names through this file.
+
+export * from "./ports.js";
+export * from "./fs-blob-store.js";
+export * from "./paths.js";
+export * from "./tail.js";
+export * from "./handler.js";
+export * from "./sse.js";
+export * from "./advertise.js";
+export * from "./fetch-transport.js";
+export * from "./sse-transport.js";
+export * from "./ping-transport.js";

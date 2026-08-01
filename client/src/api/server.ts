@@ -40,6 +40,7 @@ import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-bi
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
+import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
 import { addHarnessReadinessRoutes } from './harness-readiness-endpoint.js';
 import { addHarnessAuthStatusRoutes } from './harness-auth-status-endpoint.js';
@@ -96,6 +97,8 @@ export interface ApiServerConfig {
   bootstrap?: BootstrapEndpointConfig;
   /** Optional panel-driven setup actions such as testnet faucet funding. */
   setup?: SetupRoutesConfig;
+  /** When set, mounts the §2.15 Claim policy & wiring endpoints (GET/PUT). */
+  claimPolicy?: ClaimPolicyRoutesConfig;
   /**
    * Launcher mode routes (`/v1/launcher/*`). Mounted only when supplied so
    * tests and bootstrap-only API instances don't pay the deps wiring cost.
@@ -627,6 +630,9 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     // gated behind the UI token so external callers can't fingerprint the host
     // or rotate keys.
     addSetupRoutes(app, config.setup);
+    if (config.claimPolicy) {
+      addClaimPolicyRoutes(app, config.claimPolicy);
+    }
   }
 
   // Launcher mode routes — gated by the UI token via the `app.use` block

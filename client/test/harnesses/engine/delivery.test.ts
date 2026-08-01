@@ -63,9 +63,9 @@ describe('deliverAndClaim', () => {
 
     expect(callDeliverToMarketplace).toHaveBeenCalledOnce();
     const call = vi.mocked(callDeliverToMarketplace).mock.calls[0]!;
-    expect(call[4]).toEqual(['0xreq001']); // requestIds
+    expect(call[5]).toEqual(['0xreq001']); // requestIds
     // deliveryDigest comes from cidToDigestHex mock
-    expect(call[5]).toEqual(['0xdeadbeef00000000000000000000000000000000000000000000000000000000']);
+    expect(call[6]).toEqual(['0xdeadbeef00000000000000000000000000000000000000000000000000000000']);
   });
 
   it('calls claimDelivery with variant v2 and evidenceHash', async () => {
@@ -81,7 +81,7 @@ describe('deliverAndClaim', () => {
 
     expect(claimDelivery).toHaveBeenCalledOnce();
     const call = vi.mocked(claimDelivery).mock.calls[0]!;
-    expect(call[5]).toMatchObject({ variant: 'v2', evidenceHash: '0xevidence' });
+    expect(call[6]).toMatchObject({ variant: 'v2', evidenceHash: '0xevidence' });
   });
 
   it('passes verdict settlement options for V3 evaluation deliveries', async () => {
@@ -100,7 +100,7 @@ describe('deliverAndClaim', () => {
 
     expect(claimDelivery).toHaveBeenCalledOnce();
     const call = vi.mocked(claimDelivery).mock.calls[0]!;
-    expect(call[5]).toMatchObject({
+    expect(call[6]).toMatchObject({
       variant: 'v3',
       kind: 'verdict',
       evidenceHash: '0xevidence',
@@ -121,7 +121,7 @@ describe('deliverAndClaim', () => {
 
     expect(claimDelivery).toHaveBeenCalledOnce();
     const call = vi.mocked(claimDelivery).mock.calls[0]!;
-    expect(call[5]).toMatchObject({ variant: 'v1' });
+    expect(call[6]).toMatchObject({ variant: 'v1' });
     expect(call[5].evidenceHash).toBeUndefined();
   });
 

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'discovery');
-const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/benchmarking', 'facts/environments', 'sources/evidence-journal'];   // grows per package task
+const discoveryDirectories = ['protocol', 'testing', 'serve', 'client', 'facts/evidence', 'facts/trust', 'facts/task-execution', 'facts/benchmarking', 'facts/environments', 'sources/evidence-journal', 'transport-http'];   // grows per package task
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'), join(root, 'client'),
   ...['autopilot', 'core', 'indexer', 'indexer-enrichment', 'layer', 'plugin', 'sdk']
@@ -141,6 +141,39 @@ const SOURCE_EVIDENCE_JOURNAL_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-facts-environments',
 ];
 
+// transport-http is the tier-3 HTTP adapter: it implements serve's
+// BlobStore/PingTransport ports and client's Transport/StreamTransport
+// ports, so it is the one discovery package allowed to reference BOTH
+// sides of the serve/client boundary -- by `import type` only, which is
+// why neither name appears below. Everything else stays forbidden: no
+// facts/* leaf, no sources/* leaf, no record-kind tree, no trust
+// package (trust-core is a shadow devDependency for yarn's per-project
+// resolution only; this package's source never imports it).
+const TRANSPORT_HTTP_FORBIDDEN_PACKAGES = [
+  '@jinn-network/record-discovery-facts-evidence', '@jinn-network/record-discovery-facts-trust',
+  '@jinn-network/record-discovery-facts-task-execution',
+  '@jinn-network/record-discovery-facts-benchmarking',
+  '@jinn-network/record-discovery-source-evidence-journal',
+  '@jinn-network/task-execution-protocol', '@jinn-network/task-execution-profiles',
+  '@jinn-network/trust-core', '@jinn-network/trust-resolve', '@jinn-network/trust-testing',
+  '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository', '@jinn-network/evidence-discovery',
+  '@jinn-network/marketplace-binding', '@jinn-network/marketplace-projector',
+  '@jinn-network/marketplace-pipeline', '@jinn-network/marketplace-testing',
+];
+
+// Finding F1 (plan docs/superpowers/plans/2026-07-30-discovery-transport-http.md):
+// the ambient-network ban below is what keeps every OTHER discovery
+// package injectable and testable without a network. transport-http is
+// the package that supplies those very ports, so the ban is replaced
+// there with a tighter allowlist: only these three modules may name an
+// ambient network API, and every other file in the tree (including every
+// other file in transport-http) stays under the original ban.
+const AMBIENT_NETWORK_ALLOWED_FILES = new Set([
+  'packages/discovery/transport-http/src/fetch-transport.ts',
+  'packages/discovery/transport-http/src/sse-transport.ts',
+  'packages/discovery/transport-http/src/ping-transport.ts',
+]);
+
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
 const ambientNetworkIdentifier = new RegExp(
   String.raw`(?<![\w$."'\x60])(?:${AMBIENT_NETWORK_APIS.join('|')})\b`,
@@ -183,9 +216,25 @@ function localeSensitiveUsesInFiles(sourceFiles) {
   }).sort();
 }
 
+// A module specifier is a file PATH, not a use of an ambient API: the
+// package barrel's `export * from "./fetch-transport.js"` names a file,
+// and no string in a `from` / `import()` / `require()` clause can ever be
+// a call. Blank those specifiers before the identifier scan so the ban
+// stays about code rather than about what a module is named. Everything
+// else stays in scope, comments deliberately included -- the scan is raw
+// text, and that conservatism is the point.
+const MODULE_SPECIFIER = new RegExp(
+  String.raw`(\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)(["'\x60])(?:[^"'\x60\\\n]|\\.)*?\2`,
+  'g',
+);
+
+function withoutModuleSpecifiers(source) {
+  return source.replace(MODULE_SPECIFIER, (_match, clause, quote) => `${clause}${quote}${quote}`);
+}
+
 function ambientNetworkUsesInFiles(sourceFiles) {
   return sourceFiles.flatMap((file) => {
-    const source = readFileSync(file, 'utf8');
+    const source = withoutModuleSpecifiers(readFileSync(file, 'utf8'));
     const identifiers = [...source.matchAll(ambientNetworkIdentifier)]
       .map((match) => `${relative(root, file)} -> ${match[0]}`);
     const globals = [...source.matchAll(ambientNetworkGlobal)]
@@ -341,16 +390,31 @@ test('record-discovery-source-evidence-journal production source stays within it
   assertBoundary(join(packages, 'sources', 'evidence-journal', 'src'), SOURCE_EVIDENCE_JOURNAL_FORBIDDEN_PACKAGES);
 });
 
-test('record discovery production source never uses ambient network APIs', () => {
+test('record-discovery-transport-http production source stays within its architecture boundary', () => {
+  assertBoundary(join(packages, 'transport-http', 'src'), TRANSPORT_HTTP_FORBIDDEN_PACKAGES);
+});
+
+test('record discovery ambient network APIs appear only in transport-http allowlisted transport modules', () => {
+  const offenders = [];
   for (const directory of discoveryDirectories) {
     const source = join(packages, directory, 'src');
     if (!existsSync(source)) continue;
     const production = files(source).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
-    assert.deepEqual(
-      ambientNetworkUsesInFiles(production),
-      [],
-      `${directory} production source may not use ambient network APIs (fetch/WebSocket/EventSource/XMLHttpRequest)`,
-    );
+    for (const finding of ambientNetworkUsesInFiles(production)) {
+      const [file] = finding.split(' -> ');
+      if (AMBIENT_NETWORK_ALLOWED_FILES.has(file)) continue;
+      offenders.push(finding);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'only transport-http\'s allowlisted transport modules may use ambient network APIs '
+      + '(fetch/WebSocket/EventSource/XMLHttpRequest); every other discovery module takes them as injected ports');
+});
+
+test('every ambient-network allowlist entry names a real transport-http module', () => {
+  for (const allowed of AMBIENT_NETWORK_ALLOWED_FILES) {
+    assert.ok(existsSync(join(root, allowed)),
+      `stale ambient-network allowlist entry: ${allowed}`);
   }
 });
 

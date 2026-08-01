@@ -644,6 +644,27 @@ convenience with no completeness promise; anything missed is recoverable by curs
 cold sync. Consumers apply backpressure or drop to cold sync; producers may coalesce —
 aligned with TEP's `watch` semantics.
 
+**Addendum 2026-07-30 — the pull-tail's one normative HTTP profile is fixed.** This
+section left the pull-tail transport open ("long-poll / WebSocket / SSE — one normative
+HTTP profile fixed at implementation"). The operator-daemon composition design
+([`2026-07-30-operator-daemon-composition-design.md`](./2026-07-30-operator-daemon-composition-design.md))
+§7.3 ruling 3 closes it: the pull-tail is **Server-Sent Events with `Last-Event-ID`
+carrying the relay cursor** — the boring standard for a server-to-client append-only
+feed (auto-reconnect, plain HTTP, stateless horizontal scale); WebSocket is justified
+only by mid-stream client-to-server messages, and this protocol's filters are set at
+subscribe time. The §9.3 five-case cursor contract maps onto SSE as typed terminal
+events (`unknown-cursor` and `cursor-too-old`, the latter naming the cold-sync path)
+followed by stream close, and each source advertises its bounded replay window in the
+well-known discovery document (§7 item 3). The same ruling fixes the rest of the
+archive wire profile — `ETag`/`If-None-Match` conditional GET on the head,
+`Cache-Control: immutable` on digest paths and archive pages, declared
+`Accept-Ranges: bytes` on blobs — and explicitly rejects TUF's role machinery and OCI's
+registry API for this layer. Implemented by
+`packages/discovery/transport-http/` per
+[`../plans/2026-07-30-discovery-transport-http.md`](../plans/2026-07-30-discovery-transport-http.md).
+Nothing else in this design changes; §9.4's optional push mode and its WebSub-style
+challenge-echo handshake are untouched.
+
 ### 9.5 Trust posture and the relay cross-check
 
 A subscription is an availability optimization, nothing more. A malicious relay can delay,

@@ -13,6 +13,7 @@ import type { PortfolioV0Status } from './portfolio-v0-build.js';
 import type { PredictionV1Status } from './prediction-v1-build.js';
 import type { TaskRunsStatus } from './task-runs-build.js';
 import type { LoopCompletionStatus, ImplStateCadenceStatus } from './loop-completion-build.js';
+import type { EvidenceIndexingStatus } from '../types/evidence-indexing.js';
 import { DEFAULT_HARNESS_ROLLUP, type HarnessRollup } from './status-harness-rollup.js';
 import {
   buildCostSurfaceStatus,
@@ -110,6 +111,25 @@ export interface AiUnitsCredentialRow {
 /** Per-credential AI-units block; present on /v1/status when AI-units gating is on. */
 export interface AiUnitsStatus {
   credentials: AiUnitsCredentialRow[];
+}
+
+/**
+ * One-time shape-v2 config migration report, present only on the boot where
+ * `migrateConfigShapeV2` produced a report with `migrated === true` (see
+ * `client/src/config/migrate-shape-v2.ts`, `getLastConfigMigrationReport`).
+ *
+ * `capsUnset` is true when the migrated `claimPolicy` is missing or its
+ * `spendCapWei`/`aiUnitCap` are unset. Per coordinator amendment 1 (F7
+ * reversed), this is informational, not action-required: the host's USD
+ * spend gates (spec §6.5) remain the operative bound whether or not
+ * per-claim caps are set — exactly today's behavior (spec §9).
+ */
+export interface ConfigMigrationStatus {
+  readonly shapeVersion: 2;
+  readonly wiringEntries: number;
+  readonly postingEntries: number;
+  readonly backupPath?: string;
+  readonly capsUnset: boolean;
 }
 
 export interface GatheredStatusRaw {
@@ -227,6 +247,8 @@ export interface GatheredStatusRaw {
   autoRestakeEnabled?: boolean;
   /** Configured EvictionLoop poll interval in milliseconds (0 when the loop is disabled). */
   evictionCheckIntervalMs?: number;
+  /** One-time shape-v2 config migration report (see `ConfigMigrationStatus`). */
+  configMigration?: ConfigMigrationStatus;
 }
 
 export interface StatusV1Response {
@@ -337,6 +359,12 @@ export interface StatusV1Response {
    * config; `repos` is empty when the root is absent / has no git repos.
    */
   implStateCadence?: ImplStateCadenceStatus;
+  /**
+   * Evidence indexing-failure rollup, fed by the `EvidenceDriverLoop` (Task
+   * 11). Present only when the composition root threads a live driver
+   * through `StatusGatherConfig.evidenceDriver`.
+   */
+  evidenceIndexing?: EvidenceIndexingStatus;
   /** Per-credential daily spend block — present when caps are configured. */
   spend?: SpendStatus;
   /** Per-credential AI-units 6h-block + 7d-window block — issue #815. */
@@ -359,6 +387,8 @@ export interface StatusV1Response {
    * notification (issue #441).
    */
   security: { lastPasswordRotationAt: string | null };
+  /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
+  configMigration?: ConfigMigrationStatus;
 }
 
 /**
@@ -641,5 +671,6 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
+    ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
   };
 }

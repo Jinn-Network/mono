@@ -64,7 +64,7 @@ describe('submitTask TaskCreated recovery', () => {
     const beforeBroadcast = vi.fn();
     const onTransactionHash = vi.fn();
     vi.mocked(executeSafeTransaction).mockImplementationOnce(
-      async (_publicClient, _walletClient, _params, options) => {
+      async (_publicClient, _walletClient, _params, _broadcaster, options) => {
         await options?.beforeBroadcast?.();
         await options?.onBroadcast?.(FIRST_TX);
         return FIRST_TX;
@@ -83,6 +83,7 @@ describe('submitTask TaskCreated recovery', () => {
     const result = await submitTask(
       publicClient as never,
       {} as never,
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       TASK_CID_DIGEST,
@@ -125,6 +126,7 @@ describe('submitTask TaskCreated recovery', () => {
     const result = await submitTask(
       publicClient as never,
       {} as never,
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       TASK_CID_DIGEST,
@@ -157,6 +159,7 @@ describe('submitTask TaskCreated recovery', () => {
     await expect(submitTask(
       publicClient as never,
       {} as never,
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       TASK_CID_DIGEST,

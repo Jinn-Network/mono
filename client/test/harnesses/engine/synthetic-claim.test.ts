@@ -26,11 +26,18 @@ describe('TaskEngine synthetic claim filter', () => {
         },
       });
 
+      // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+      // Task 16): canAcceptTask({ taskRole: 'restoration', ... }) is now always refused
+      // before the synthetic-claim filter runs (see
+      // test/daemon/solution-path-retired.test.ts). syntheticClaimBlocked() is
+      // role-agnostic (it runs whenever a task + operatorSafeAddress are present,
+      // irrespective of role), so this probe now uses taskRole: 'evaluation' — the
+      // identical code path, still reachable.
       const task: Task = {
         id: 't1',
         description: 'synthetic',
         solverType: 'swe-rebench-v2.v1',
-        role: 'restoration',
+        role: 'evaluation',
         eligibility: {
           syntheticProvenance: {
             synthetic: true,
@@ -43,7 +50,7 @@ describe('TaskEngine synthetic claim filter', () => {
 
       const accept = await engine.canAcceptTask({
         solverType: 'swe-rebench-v2.v1',
-        taskRole: 'restoration',
+        taskRole: 'evaluation',
         task,
       });
       expect(accept.ok).toBe(false);

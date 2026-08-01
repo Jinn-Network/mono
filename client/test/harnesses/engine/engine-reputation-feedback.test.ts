@@ -590,7 +590,9 @@ describe('Engine reputation feedback wiring (jinn-mono-yg4)', () => {
     const calls = vi.mocked(mockedClaimDelivery).mock.calls;
     if (calls.length === 0) return undefined;
     const lastCall = calls[calls.length - 1]!;
-    const options = lastCall[5] as { verdictCode?: number };
+    // `claimDelivery`'s options argument sits at index 6: the venue broadcaster was
+    // threaded in at index 2 when it stopped being process-global state.
+    const options = lastCall[6] as { verdictCode?: number };
     return options.verdictCode;
   }
 

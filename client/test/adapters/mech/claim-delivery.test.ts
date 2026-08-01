@@ -45,6 +45,7 @@ describe('claimDelivery', () => {
     const txHash = await claimDelivery(
       publicClient,
       makeWalletClient(),
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       REQUEST_ID,
@@ -63,6 +64,7 @@ describe('claimDelivery', () => {
     const txHash = await claimDelivery(
       publicClient,
       makeWalletClient(),
+      undefined,
       SAFE_ADDRESS,
       ROUTER_ADDRESS,
       REQUEST_ID,
@@ -81,6 +83,7 @@ describe('claimDelivery', () => {
       claimDelivery(
         publicClient,
         makeWalletClient(),
+        undefined,
         SAFE_ADDRESS,
         ROUTER_ADDRESS,
         REQUEST_ID,

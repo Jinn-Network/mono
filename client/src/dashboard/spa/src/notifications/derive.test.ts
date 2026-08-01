@@ -329,3 +329,47 @@ describe('deriveNotifications — eviction (#773)', () => {
     expect(out.map(n => n.kind)).not.toContain('service_evicted');
   });
 });
+
+// Coordinator amendment 1 (F7 reversed — no claim-nothing migration): the
+// one-time shape-v2 migration message is always informational, never
+// action-required — the host's USD spend gates remain the operative bound
+// whether or not per-claim caps are set. `capsUnset` only changes the
+// message copy, never the severity.
+describe('deriveNotifications — config_migrated (one-time shape-v2 migration)', () => {
+  it('raises config_migrated as informational when per-claim caps are unset', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: {
+        ...baseState.status,
+        configMigration: { shapeVersion: 2, wiringEntries: 1, postingEntries: 0, capsUnset: true },
+      },
+    });
+    const migrated = out.find((n) => n.kind === 'config_migrated');
+    expect(migrated).toEqual({
+      kind: 'config_migrated',
+      severity: 'info',
+      message:
+        'Claim policy and execution wiring were created from your SolverNet memberships. Per-claim caps are not set; the USD spend gates remain active.',
+      jumpTo: '/operator/claim-policy',
+      details: { wiringEntries: 1, postingEntries: 0 },
+    });
+  });
+
+  it('raises config_migrated as info once caps are set', () => {
+    const out = deriveNotifications({
+      ...baseState,
+      status: {
+        ...baseState.status,
+        configMigration: { shapeVersion: 2, wiringEntries: 1, postingEntries: 1, capsUnset: false },
+      },
+    });
+    const migrated = out.find((n) => n.kind === 'config_migrated');
+    expect(migrated).toEqual({
+      kind: 'config_migrated',
+      severity: 'info',
+      message: 'Claim policy and execution wiring were created from your SolverNet memberships.',
+      jumpTo: '/operator/claim-policy',
+      details: { wiringEntries: 1, postingEntries: 1 },
+    });
+  });
+});

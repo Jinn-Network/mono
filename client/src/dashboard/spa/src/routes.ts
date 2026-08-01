@@ -25,6 +25,7 @@ export const ROUTES: RouteSpec[] = [
     params: { cid: 'bafkrei-mock-manifest-cid' },
   },
   { path: '/operator/execution-data', label: 'operator-execution-data' },
+  { path: '/operator/claim-policy', label: 'operator-claim-policy' },
   { path: '/operator/memberships', label: 'operator-memberships' },
   { path: '/operator/registry', label: 'operator-registry' },
   { path: '/operator/network', label: 'operator-network' },

@@ -16,8 +16,6 @@ import {
   executeSafeTransaction,
   SafePostBroadcastHookError,
 } from '@/adapters/mech/safe.js';
-import { createMemoryTxSubmissionLedger } from '@/tx-retry.js';
-import { baseSepolia } from 'viem/chains';
 import Database from 'better-sqlite3';
 import {
   TaskSubmitRequestV1Schema,
@@ -66,6 +64,15 @@ vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
 const V2_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 const SAFE_WRAPPER_TX_HASH = `0x${'9a'.repeat(32)}` as const;
 
+/**
+ * Drives the real `executeSafeTransaction` chokepoint (single-broadcaster cutover — plan Task
+ * 7; per-daemon state — finding E16 / the C2 ruling). It requires a `VenueBroadcaster` bound to
+ * the Safe under test, so this helper builds a stub one and passes it explicitly on each call —
+ * no process-global to install or clear. `writeContract` stands in for the broadcaster's
+ * underlying wallet write; both existing usages exercise the `beforeBroadcast` fence rejecting
+ * BEFORE the broadcaster is ever reached, so `writeContract` staying uncalled is still the
+ * meaningful assertion.
+ */
 async function postThroughSafeWalletBoundary(
   options: {
     beforeBroadcast?: () => void | Promise<void>;
@@ -73,38 +80,24 @@ async function postThroughSafeWalletBoundary(
   } | undefined,
   writeContract: ReturnType<typeof vi.fn>,
 ) {
-  const safeTxHash = `0x${'77'.repeat(32)}` as const;
-  const signature = `0x${'ab'.repeat(32)}${'cd'.repeat(32)}1b` as const;
+  const safeAddress = '0x00112233445566778899aabbccddeeff00112233' as const;
+  const broadcaster = {
+    safeAddress,
+    execute: async (request: unknown) => ({
+      txHash: (await writeContract(request)) as typeof SAFE_WRAPPER_TX_HASH,
+    }),
+  };
   const txHash = await executeSafeTransaction(
+    {} as never,
+    {} as never,
     {
-      getChainId: vi.fn().mockResolvedValue(baseSepolia.id),
-      getTransactionCount: vi.fn().mockResolvedValue(7),
-      readContract: vi.fn(async (args: { functionName: string }) => {
-        if (args.functionName === 'nonce') return 0n;
-        if (args.functionName === 'getTransactionHash') return safeTxHash;
-        throw new Error(`unexpected readContract call: ${args.functionName}`);
-      }),
-      estimateFeesPerGas: vi.fn().mockResolvedValue({
-        maxFeePerGas: 100n,
-        maxPriorityFeePerGas: 10n,
-      }),
-      getGasPrice: vi.fn(),
-      waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
-    } as never,
-    {
-      account: { address: '0x000000000000000000000000000000000000beef' },
-      chain: baseSepolia,
-      signMessage: vi.fn().mockResolvedValue(signature),
-      writeContract,
-    } as never,
-    {
-      safeAddress: '0x00112233445566778899aabbccddeeff00112233',
+      safeAddress,
       to: '0x2222222222222222222222222222222222222222',
       value: 0n,
       data: '0xdeadbeef',
     },
+    broadcaster,
     {
-      ledger: createMemoryTxSubmissionLedger(),
       beforeBroadcast: options?.beforeBroadcast,
       onBroadcast: options?.onTransactionHash,
     },

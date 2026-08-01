@@ -102,12 +102,18 @@ describe('TaskEngine official Autopilot profile policy', () => {
     rmSync(directory, { recursive: true, force: true });
   });
 
+  // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+  // Task 16): canAcceptTask({ taskRole: 'restoration', ... }) is now always refused
+  // before the official-profile guard runs (see
+  // test/daemon/solution-path-retired.test.ts). officialAutopilotTaskProfileFailure()
+  // is role-agnostic (no role parameter), so the 'restoration'-labeled case below now
+  // uses taskRole: 'evaluation' — the identical code path, still reachable.
   it.each([
     {
       name: 'unsupported profile before the restoration solver',
       repository: 'Jinn-Network/mono',
       verificationProfile: 'other-repository.v1',
-      role: 'restoration' as const,
+      role: 'evaluation' as const,
       reason: "unsupported Autopilot verification profile 'other-repository.v1'",
     },
     {
@@ -165,7 +171,7 @@ describe('TaskEngine official Autopilot profile policy', () => {
       name: 'without a manifest CID before the restoration solver',
       repository: 'Jinn-Network/mono',
       verificationProfile: 'unsupported.v1',
-      role: 'restoration' as const,
+      role: 'evaluation' as const,
       solverNetManifestCid: null,
       includeResolver: true,
       reason: "unsupported Autopilot verification profile 'unsupported.v1'",

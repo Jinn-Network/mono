@@ -91,6 +91,11 @@ async function main(): Promise<void> {
       mockIpfs.baseUrl,  // ipfsGatewayUrl — for GET /ipfs/{cid} (task fetch)
       v3Env,
       mockIpfs.baseUrl,  // ipfsRegistryUrl — for POST /api/v0/add (envelope upload)
+      // Task 18: build the stage-1 cutover composition root (main.ts's testnet branch) so a
+      // broadcaster is built and threaded to the daemon's legacy Safe-write call sites before
+      // daemon.start() — every Safe-executed transaction now requires one (Finding E16 / the C2
+      // ruling: per-daemon state, not a process-global — see startDaemon's opts doc comment).
+      { enableComposition: true },
     );
     try {
       console.log('daemon started — loops running');
@@ -112,6 +117,13 @@ async function main(): Promise<void> {
       // Wait for the daemon to discover and claim the task.
       const claim = await waitForDaemonClaim(fixture, posted, operator, v3Env);
       console.log(`daemon claimed task: requestId=${claim.requestId} tx=${claim.txHash}`);
+
+      // Anvil forks leave the `finalized` tag stuck at the fork point. Venue-base's chain log
+      // source falls back to `latest - 120` in that shape (see chain-log-source.ts), so the
+      // claim is only finalizable once ≥120 blocks have been mined past it. Without this the
+      // work loop hangs in `awaitFinalized` for the e2e's entire delivery wait.
+      await anvilJsonRpc(fixture.anvil.rpcUrl, 'anvil_mine', ['0x79']); // 121 blocks
+      console.log('mined 121 blocks so anvil-fork finality depth can cover the claim');
 
       // Wait for the daemon to complete the full settlement loop:
       // harness runs → envelope assembled + uploaded → deliverToMarketplace on-chain.

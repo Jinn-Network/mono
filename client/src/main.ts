@@ -59,6 +59,7 @@ import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner } from './earning/wallet.js';
+import { deriveDeliverySigningKey, deriveLegacyBridgeSigner } from './daemon/trust-keys.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
@@ -92,7 +93,7 @@ import { resolveContractFromSolverNetId } from './solvernets/launched-record-dis
 import type { Harness } from './harnesses/types.js';
 import { HarnessReadinessRegistry } from './harnesses/readiness-registry.js';
 import type { JinnConfig } from './config.js';
-import { createClients } from './adapters/mech/safe.js';
+import { createClients, type VenueBroadcaster } from './adapters/mech/safe.js';
 import {
   findJoinedByName,
   loadSolverNets,
@@ -1658,8 +1659,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     safeAddress,
   };
 
-  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter
-  const deliveryDeps = {
+  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter.
+  // `broadcaster` starts unset and is late-bound below, once the Stage-1 cutover composition
+  // root (if any — testnet only) has built one (finding E16 / the C2 ruling: no process-global —
+  // this daemon's one broadcaster is threaded explicitly to every legacy call site that needs it).
+  const deliveryDeps: import('./harnesses/engine/delivery.js').DeliveryDeps = {
     publicClient: agentClients.publicClient,
     walletClient: agentClients.walletClient,
     safeAddress,
@@ -2161,12 +2165,91 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     }
   }
 
+  // ── Stage-1 cutover composition root (Task 12; loops started at close-out C8) ──────────────
+  //
+  // Testnet-only: `MarketplaceChainConfig` (TaskCoordinator/JinnRouterV3 addresses) is only
+  // defined for Base Sepolia (`@jinn-network/marketplace-binding`'s `BASE_SEPOLIA_TODAY`) — no
+  // equivalent contracts are deployed on Base mainnet yet (see CLAUDE.md's Phase 2 rollout).
+  // `composition` stays `undefined` on mainnet; `DaemonConfig.composition` is optional and the
+  // `work`/projector/evidence-driver config below is gated on it being defined.
+  let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
+  let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
+  if (config.network === 'testnet') {
+    const { buildOperatorComposition } = await import('./daemon/composition-root.js');
+    const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
+    const { buildRepositoryWorkProfile, buildEvaluationTaskProfile, sealTaskProfile } =
+      await import('@jinn-network/task-execution-profiles');
+    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
+    const profilesByDigest = new Map(
+      profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
+    );
+    composition = await buildOperatorComposition({
+      config,
+      publicClient,
+      walletClient: masterWallet,
+      safeAddress,
+      mechAddress,
+      chain: BASE_SEPOLIA_TODAY,
+      stateRoot: join(config.earningDir, '..', 'engine', 'backend'),
+      evidenceRoot: join(config.earningDir, '..', 'evidence'),
+      venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
+      profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      store: sharedStore,
+      // Ruling 3 (E36 appendix): keystore-derived, host-side, no new custody surface — both
+      // signers are pure functions of the same `agentPrivateKey` this daemon already decrypted
+      // from the operator keystore for every other trust surface (envelopeDeps, deliveryDeps,
+      // identityPublisher). See `./daemon/trust-keys.js` for the derivations.
+      deliverySigningKey: deriveDeliverySigningKey(agentPrivateKey),
+      legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
+      ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
+    });
+
+    // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
+    // broadcaster (built above, bound to `safeAddress`) is threaded explicitly to every legacy
+    // `executeSafeTransaction` call site this daemon owns, before any loop can write. Must run
+    // before `daemon.start()`; `adapter` / `deliveryDeps` / `reputationFeedback.client` are all
+    // constructed earlier in this function (composition is built last because it needs
+    // `identityRegistryAddress` etc. resolved first), so late-binding via setter/mutation is how
+    // they pick up the one broadcaster rather than each racing to build their own against the
+    // same Safe.
+    adapter.setBroadcaster(composition.broadcaster);
+    deliveryDeps.broadcaster = composition.broadcaster;
+    reputationFeedback?.client.setBroadcaster(composition.broadcaster);
+
+    // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
+    // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
+    // `ArchiveSubscription` over the projector's durable observation stream
+    // (`archive-subscription.js`). It stays empty in practice until the projector's own
+    // `resolveSubmissionBytes` (composition-root.ts file header, gap a) actually admits/announces
+    // a today-generation TaskCreated — a real, documented gap, not a stub this loop introduces.
+    // `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade` already reads
+    // (contract 2's dispatch-binding correlation).
+    workLoopConfig = {
+      archive: composition.archive,
+      ledger: composition.engagementLedger,
+      claimGate: composition.claimGate,
+      estimateAiUnits: () => 0,
+      readSealedDocuments: composition.readSealedDocuments,
+      pollIntervalMs: config.pollIntervalMs,
+      acceptLegacyCards: true,
+      // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent no-op
+      // (`work-loop.ts`'s `noopLogger`) and the per-tick outcome line (E39's fix) never reaches
+      // an operator. Same console-based shape every other loop in this file wires up.
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+      },
+    };
+  }
+
   const daemon = new Daemon({
     adapter,
     runner,
     taskSources,
     dbPath: config.dbPath,
     store: sharedStore,
+    composition,
+    work: workLoopConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,

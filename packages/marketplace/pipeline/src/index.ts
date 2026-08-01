@@ -51,3 +51,12 @@ export type {
   SubmissionFacts,
   TaskEngineFailedCause,
 } from "./types.js";
+
+export { mapAnnouncedSubmissionToFacts } from "./facts-mapper.js";
+export { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
+export type {
+  AnnouncedSubmissionCard,
+  FactsMapperOptions,
+  FactsMappingRefusal,
+  FactsMappingResult,
+} from "./facts-mapper.js";

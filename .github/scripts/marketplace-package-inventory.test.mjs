@@ -13,6 +13,7 @@ const MARKETPLACE_PACKAGES = [
   ['binding', '@jinn-network/marketplace-binding'],
   ['projector', '@jinn-network/marketplace-projector'],
   ['pipeline', '@jinn-network/marketplace-pipeline'],
+  ['venue-base', '@jinn-network/marketplace-venue-base'],
   ['testing', '@jinn-network/marketplace-testing'],
 ];
 
@@ -112,11 +113,35 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
+  // venue-base is the tier-3 chain-adapter tree (composition design §6.1). It consumes the
+  // binding's port surface and the projector's decode/finality/observe machinery; it may NEVER
+  // consume marketplace-pipeline (program §6 contract 8 -- tier-3 adapters stay off the
+  // application-shaped package; the three pipeline-declared ports re-export from binding).
+  // Shadow devDependencies mirror the transitive portal closure standalone yarn install needs.
+  ['venue-base', {
+    dependencies: [
+      '@jinn-network/marketplace-binding',
+      '@jinn-network/marketplace-projector',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: [
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+      '@jinn-network/record-discovery-testing',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/trust-core',
+      '@jinn-network/trust-resolve',
+    ],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
   ['testing', {
     dependencies: [
       '@jinn-network/evidence-protocol',
       '@jinn-network/marketplace-binding',
       '@jinn-network/marketplace-projector',
+      '@jinn-network/marketplace-venue-base',
       '@jinn-network/record-discovery-testing',
       '@jinn-network/task-execution-testing',
       '@jinn-network/trust-testing',
@@ -176,8 +201,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), targetDir) || '.'}`;
 }
 
-test('the marketplace package inventory is explicit and has four manifests', () => {
-  assert.equal(MARKETPLACE_PACKAGES.length, 4);
+test('the marketplace package inventory is explicit and has five manifests', () => {
+  assert.equal(MARKETPLACE_PACKAGES.length, 5);
   for (const [directory, expectedName] of MARKETPLACE_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

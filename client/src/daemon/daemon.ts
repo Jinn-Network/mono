@@ -35,6 +35,10 @@ import { gateClaimByAiUnits } from './ai-units-gate.js';
 import type { AiUnitsDaemonConfig } from '../spend/ai-units-config.js';
 import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
+import type { OperatorComposition } from './composition-root.js';
+import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
+import { EvidenceDriverLoop } from './evidence-driver.js';
+import type { ProjectorLoop } from './projector-loop.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -251,6 +255,30 @@ export interface DaemonConfig {
     stalenessFactor?: number;
     checkIntervalMs?: number;
   };
+
+  /**
+   * The stage-1 cutover composition root (Task 12, `client/src/daemon/composition-root.ts`):
+   * the assembled `LocalTaskExecutionBackend` + marketplace pipeline config/ports + venue +
+   * (C8) real projector loop + claim gate + engagement ledger. Optional so the many existing
+   * `new Daemon(...)` call sites (unit tests, non-cutover daemons) keep compiling. When present,
+   * `start()` also starts `composition.projector` and an `EvidenceDriverLoop` over
+   * `composition.evidence` (close-out C8) — see `work` below for the third loop.
+   */
+  composition?: OperatorComposition;
+
+  /**
+   * The work loop (Task 13, `client/src/daemon/work-loop.ts`): closes the claim-to-settle loop
+   * against `composition`. Everything except `composition`/`store`, both of which the daemon
+   * supplies itself. Omitted, or `composition` absent -> the loop is not started.
+   */
+  work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
+
+  /**
+   * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
+   * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
+   * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
+   */
+  evidenceDriverIntervalMs?: number;
 }
 
 export class Daemon {
@@ -273,6 +301,9 @@ export class Daemon {
   private evictionLoop?: EvictionLoop;
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
+  private workLoop?: WorkLoop;
+  private projectorLoop?: ProjectorLoop;
+  private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
   private skipLogDeduper = new SkipLogDeduper();
   private corpus?: Corpus;
@@ -348,6 +379,19 @@ export class Daemon {
     }
     if (config.checkpoint && config.checkpoint.intervalMs > 0) {
       this.checkpointLoop = new CheckpointLoop({ ...config.checkpoint, jinnStore: this.store });
+    }
+    if (config.composition && config.work) {
+      this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
+    }
+    if (config.composition) {
+      // C8: the projector and evidence-driver loops are independent of `work` — both are started
+      // whenever a composition exists, regardless of whether the work loop is configured.
+      this.projectorLoop = config.composition.projector;
+      this.evidenceDriverLoop = new EvidenceDriverLoop({
+        evidence: config.composition.evidence,
+        intervalMs: config.evidenceDriverIntervalMs ?? 30_000,
+        store: this.store,
+      });
     }
   }
 
@@ -538,6 +582,45 @@ export class Daemon {
         }),
       );
     }
+    if (this.workLoop) {
+      this.loopPromises.push(
+        this.workLoop.run().catch(err => {
+          console.error('[daemon] work loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'work loop crashed',
+            errorCode: 'work_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.projectorLoop) {
+      this.loopPromises.push(
+        this.projectorLoop.run().catch(err => {
+          console.error('[daemon] projector loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'projector loop crashed',
+            errorCode: 'projector_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
+    if (this.evidenceDriverLoop) {
+      this.loopPromises.push(
+        this.evidenceDriverLoop.run().catch(err => {
+          console.error('[daemon] evidence-driver loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evidence-driver loop crashed',
+            errorCode: 'evidence_driver_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     // #1043 loop watchdog. Inert unless config.watchdog is supplied.
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
@@ -559,6 +642,9 @@ export class Daemon {
       if (this.evictionLoop) started.add('eviction-check');
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
+      if (this.workLoop) started.add('work');
+      if (this.projectorLoop) started.add('projector');
+      if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
       const overrides: Partial<Record<LoopName, number>> = {
         'engine-tick': interval,
@@ -567,6 +653,8 @@ export class Daemon {
         'eviction-check': this.config.evictionCheck?.intervalMs,
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
+        work: this.config.work?.pollIntervalMs,
+        'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
         .filter(r => started.has(r.name))
@@ -622,6 +710,9 @@ export class Daemon {
     this.evictionLoop?.stop();
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
+    this.workLoop?.stop();
+    this.projectorLoop?.stop();
+    this.evidenceDriverLoop?.stop();
     this.peerSync?.stop();
     this.watchdogLoop?.stop();
 
@@ -676,6 +767,18 @@ export class Daemon {
     for await (const taskAnnouncement of this.adapter.watchForTasks()) {
       if (this.engineStopped) break;
       if (!taskAnnouncement.taskId) continue;
+
+      // Cutover stage 1 (docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md
+      // Task 16): the solution path retired — watchForTasks() is only supposed to yield
+      // evaluation announcements now. Loud-log and skip rather than silently drop, so a
+      // regression here (e.g. an adapter change that starts yielding restoration again) is
+      // visible instead of quietly starving the solution path further.
+      if (taskAnnouncement.task.role !== 'evaluation') {
+        console.warn(
+          `[engine-watcher] ignoring non-evaluation announcement ${taskAnnouncement.taskId} — the solution path retired at stage 1`,
+        );
+        continue;
+      }
 
       if (++scanned % YIELD_EVERY === 0) {
         // setImmediate schedules a macrotask: the event loop drains pending I/O
