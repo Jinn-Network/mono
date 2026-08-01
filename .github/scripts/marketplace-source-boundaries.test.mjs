@@ -282,14 +282,18 @@ test('no marketplace package imports the backend-local component internals (ruli
 
 test('marketplace exports stay root-only except for the native testing conformance subpaths', () => {
   for (const [directory, name, entries] of [
-    ['binding', '@jinn-network/marketplace-binding', ['.']],
+    // stack-publish-path plan Task 13 / design §5 ("retrievable without cloning"): a packed
+    // fixtures/ directory must be reachable through an exports subpath, so binding and testing
+    // (the two marketplace trees that ship a fixtures/ directory) each get './fixtures/*'.
+    // projector and pipeline have no fixtures/ directory, so their surface stays root-only.
+    ['binding', '@jinn-network/marketplace-binding', ['.', './fixtures/*']],
     ['projector', '@jinn-network/marketplace-projector', ['.']],
     ['pipeline', '@jinn-network/marketplace-pipeline', ['.']],
     // The native §16.2 suite is intentionally a public testing subpath; it does not turn the
     // profile checks into a parameter of the unmodified TEP core kit (ruling §7.19).
     ['testing', '@jinn-network/marketplace-testing', [
       '.', './backend-conformance', './named-check-fixtures', './projector-conformance',
-      './revised-contract-conformance',
+      './revised-contract-conformance', './fixtures/*',
     ]],
   ]) {
     const manifest = JSON.parse(readFileSync(join(packages, directory, 'package.json'), 'utf8'));
