@@ -15,6 +15,7 @@ import { createChainLogSource, type ChainLogSource } from "./log-source/chain-lo
 import { createFinalityWaiter } from "./waiters/finality.js";
 import { createDeliveryWaiter } from "./waiters/delivery.js";
 import { createClaimWriter } from "./writers/claim.js";
+import { createVerdictPorts, type VerdictPorts } from "./verdict.js";
 import { createSettlementPorts } from "./writers/settlement.js";
 import { createLifecyclePorts, createReleasePort } from "./writers/lifecycle.js";
 import { createSqlitePostingIntentStore } from "./intents/intent-store.js";
@@ -32,6 +33,7 @@ export interface BaseVenue {
   readonly safe: BaseVenueSafeBroadcaster;
   readonly logSource: ChainLogSource;
   readonly intents: PostingIntentStore;
+  readonly verdict: VerdictPorts;
   close(): void;
 }
 
@@ -109,6 +111,13 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     safe,
     logSource,
     intents: createSqlitePostingIntentStore(state),
+    verdict: createVerdictPorts({
+      publicClient: config.publicClient,
+      broadcaster: safe,
+      safeAddress: config.safeAddress,
+      routerAddress: config.chain.jinnRouter,
+      mechAddress: config.priorityMech,
+    }),
     close() {
       logSource.close();
       state.close();
