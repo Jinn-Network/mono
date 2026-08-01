@@ -57,3 +57,29 @@ export {
   unionKeySets,
   type StateKeySet,
 } from "./key-set.js";
+
+export {
+  createBudgetedArchivePort,
+  type BudgetedArchivePort,
+} from "./budget.js";
+
+export {
+  asChainStateBackend,
+  type ArchiveAccountProof,
+  type ArchiveAccountState,
+  type ArchiveBlockHeader,
+  type ArchiveRpcPort,
+  type ArchiveUsage,
+  type ArtifactStore,
+  type BlockSelector,
+  type ChainRuntime,
+  type ChainStateBackend,
+  type ChainStateDump,
+  type Clock,
+  type ExtractionDeps,
+  type ForkBackendBinding,
+  type ScriptReplayer,
+  type StateDumpPort,
+  type VerifiedChainMaterializer,
+  type VerifierIdentity,
+} from "./ports.js";
