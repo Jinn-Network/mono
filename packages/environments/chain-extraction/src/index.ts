@@ -22,11 +22,24 @@ export {
   EXTRACTION_STAGES,
   classifyExtractionFailure,
   isRetryableExtractionFailure,
+  stageFail,
   stageForExtractionFailure,
+  stageOk,
   type ExtractionFailureDisposition,
   type ExtractionFailureReason,
   type ExtractionStage,
+  type StageOutcome,
 } from "./failures.js";
+
+export {
+  captureAnchor,
+  confirmAnchorUnchanged,
+  type AnchorCapture,
+  type AnchorFinalityObservation,
+  type AnchorRequest,
+  type HeaderProofCarrier,
+  type HeaderProofDescriptor,
+} from "./anchor.js";
 
 export {
   HexAddressSchema,

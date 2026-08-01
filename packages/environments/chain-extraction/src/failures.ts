@@ -117,3 +117,27 @@ export function stageForExtractionFailure(
 export function isRetryableExtractionFailure(reason: ExtractionFailureReason): boolean {
   return classifyExtractionFailure(reason) === "infrastructure";
 }
+
+/**
+ * Every pipeline stage returns one of these. Extraction *facts* -- the archive could not
+ * serve the anchor, the world would not close -- are values, not exceptions; exceptions
+ * are reserved for caller error and port contract violations (see errors.ts).
+ */
+export type StageOutcome<T> =
+  | { readonly ok: true; readonly value: T }
+  | {
+    readonly ok: false;
+    readonly reason: ExtractionFailureReason;
+    readonly detail: string;
+  };
+
+export function stageOk<T>(value: T): StageOutcome<T> {
+  return { ok: true, value };
+}
+
+export function stageFail<T>(
+  reason: ExtractionFailureReason,
+  detail: string,
+): StageOutcome<T> {
+  return { ok: false, reason, detail };
+}
