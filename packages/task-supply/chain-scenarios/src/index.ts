@@ -103,3 +103,19 @@ export type {
   ScenarioTemplate,
   StatePredicateDraft,
 } from "./template.js";
+export {
+  CHAIN_SCENARIO_STRATEGY_ID,
+  chainScenarioStrategy,
+  loadChainDerivationEnvironment,
+} from "./strategy.js";
+export type { ChainScenarioInputs } from "./strategy.js";
+export { runChainScenarioDerivation } from "./run.js";
+export type {
+  ChainAdmissionPort,
+  ChainAdmissionRequest,
+  ChainDerivationDeps,
+  ChainPoolWriteSummary,
+  FailedCandidate,
+  RefusedCandidate,
+  WrittenPair,
+} from "./run.js";
