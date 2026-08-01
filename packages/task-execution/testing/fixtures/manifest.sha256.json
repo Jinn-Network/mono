@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "backend-local/cancellation-races.json",
+      "sha256": "a2b925002f8349639a506ef4801a62e0a8e8ba8c1f1116634f3f9e96176e3ecb"
+    },
+    {
+      "id": "backend-local/evidence-join.json",
+      "sha256": "31f3ad6cff21e1dde2d10400952037e75019325aaec66a387147aa68813bed40"
+    },
+    {
+      "id": "backend-local/expected-digests.json",
+      "sha256": "0c39d26f9949c96eccd10fc658e15ff0378f4230c107cdab472820bc3364265a"
+    },
+    {
+      "id": "backend-local/journals/contradictory-terminals.json",
+      "sha256": "be0d9ad956e113fa3896f759052ce94e91920b3776f5a1e54da8d8e9699de4c6"
+    },
+    {
+      "id": "backend-local/journals/dangling-intents.json",
+      "sha256": "410127d1e10813b07228c447ecacc7ee4627878fb8ebc27aede03450e6110508"
+    },
+    {
+      "id": "backend-local/journals/duplicate-nonces.json",
+      "sha256": "043318444ce5b4151878c4f8a8110f29d69f75e4e929815255c41f3ead0d42a2"
+    },
+    {
+      "id": "backend-local/journals/rebuild-identity.json",
+      "sha256": "c67e0054ee1239c991b6eaffd26b9d030eca593b06c153d349b6ce5f82074711"
+    },
+    {
+      "id": "backend-local/journals/seq-resumption.json",
+      "sha256": "640cf663da440c340ecfca5881df4f3a1e98fb1cceb050bfd2a03c85d670b009"
+    },
+    {
+      "id": "backend-local/journals/submission-segment-survival.json",
+      "sha256": "1d81550748c6feeacb9537536bca024c2dd55993f4330a04b35ce584a2cd8d02"
+    },
+    {
+      "id": "backend-local/journals/torn-tail.json",
+      "sha256": "f0fa00b73d47e744f8c2278537109a6235a889b9277309dbc2f78f7f8cec2a37"
+    },
+    {
+      "id": "backend-local/journals/valid.json",
+      "sha256": "1882143be85b81a573c96df27adc34d542c0d54e20d27e8f53f1c6c3395b9ed5"
+    },
+    {
+      "id": "backend-local/reconciliation-table.json",
+      "sha256": "23272ef0b54e7f58b9423dd109d4adf9c135d666e44fb8f490005534815f6234"
+    },
+    {
+      "id": "backend-local/result-interpretation.json",
+      "sha256": "64f222524ab96a126207cacf492c8e21f45a98f28f2b281a1c1dbca8070ee1ea"
+    },
+    {
+      "id": "backend-local/shim-contract.json",
+      "sha256": "b41b1126d1aaea3b61fbba7376b8afeb661263738ac0768479fa2df6fd1cf600"
+    },
+    {
+      "id": "backend-local/workspace.json",
+      "sha256": "e59d182c14a96fd703137a56ddf2280de03f1a4e1ed529e2b237d1fdc0b2a38a"
+    }
+  ],
+  "errata": []
+}

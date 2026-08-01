@@ -1,0 +1,320 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+
+import { packWave, publishWave, registryDistTag, runPublish, verifyCoherentSet } from './publish-stack-run.mjs';
+
+const SHA = 'c'.repeat(40);
+
+function scratch() {
+  const root = mkdtempSync(join(tmpdir(), 'jinn-publish-run-'));
+  const packageDir = join(root, 'packages/trust/core');
+  mkdirSync(packageDir, { recursive: true });
+  writeFileSync(
+    join(packageDir, 'package.json'),
+    `${JSON.stringify({
+      name: '@jinn-network/trust-core',
+      version: '0.1.0',
+      publishConfig: { access: 'public' },
+      resolutions: { '@jinn-network/trust-testing': 'portal:../testing' },
+    }, null, 2)}\n`,
+    'utf8',
+  );
+  return { root, packageDir };
+}
+
+function fakeExec(root, calls, tarballBytes) {
+  return (command, args, cwd) => {
+    calls.push({ command, args, cwd });
+    if (command === 'npm' && args[0] === 'pack') {
+      const destination = args[args.indexOf('--pack-destination') + 1];
+      const manifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
+      const filename = 'jinn-network-trust-core.tgz';
+      writeFileSync(join(destination, filename), tarballBytes);
+      calls.push({ packedManifest: manifest });
+      return { status: 0, stdout: JSON.stringify([{ name: manifest.name, version: manifest.version, filename }]), stderr: '' };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  };
+}
+
+test('packWave builds unmutated, packs mutated, and restores the manifest', async () => {
+  const { root, packageDir } = scratch();
+  const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));
+  const original = readFileSync(join(packageDir, 'package.json'), 'utf8');
+  const bytes = Buffer.from('tarball-bytes');
+  const calls = [];
+  try {
+    const artifacts = await packWave(
+      [{ name: '@jinn-network/trust-core', directory: 'packages/trust/core', manifestPath: join(packageDir, 'package.json'), spec: `@jinn-network/trust-core@0.1.0-canary.sha.${SHA}` }],
+      {
+        repoRoot: root,
+        version: `0.1.0-canary.sha.${SHA}`,
+        gitHead: SHA,
+        inSetNames: new Set(['@jinn-network/trust-core']),
+        tarballsDir,
+        exec: fakeExec(root, calls, bytes),
+      },
+    );
+    const commands = calls.filter((call) => call.command).map((call) => `${call.command} ${call.args.join(' ')}`);
+    assert.deepEqual(commands, [
+      'yarn install --immutable',
+      'yarn build',
+      `npm pack --json --ignore-scripts --pack-destination ${tarballsDir}`,
+    ]);
+    const packed = calls.find((call) => call.packedManifest).packedManifest;
+    assert.equal(packed.version, `0.1.0-canary.sha.${SHA}`);
+    assert.equal(packed.gitHead, SHA);
+    assert.equal('resolutions' in packed, false);
+    assert.equal(readFileSync(join(packageDir, 'package.json'), 'utf8'), original);
+    assert.equal(artifacts[0].integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(tarballsDir, { recursive: true, force: true });
+  }
+});
+
+test('packWave restores the manifest even when the build fails', async () => {
+  const { root, packageDir } = scratch();
+  const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));
+  const original = readFileSync(join(packageDir, 'package.json'), 'utf8');
+  try {
+    await assert.rejects(
+      packWave(
+        [{ name: '@jinn-network/trust-core', directory: 'packages/trust/core', manifestPath: join(packageDir, 'package.json'), spec: 'x' }],
+        {
+          repoRoot: root,
+          version: '0.1.0',
+          gitHead: SHA,
+          inSetNames: new Set(['@jinn-network/trust-core']),
+          tarballsDir,
+          exec: (command, args) => (args[0] === 'build'
+            ? { status: 2, stdout: '', stderr: 'tsc exploded' }
+            : { status: 0, stdout: '', stderr: '' }),
+        },
+      ),
+      /packages\/trust\/core: yarn build failed: tsc exploded/,
+    );
+    assert.equal(readFileSync(join(packageDir, 'package.json'), 'utf8'), original);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(tarballsDir, { recursive: true, force: true });
+  }
+});
+
+test('packWave refuses to pack a manifest that still carries an out-of-set local specifier', async () => {
+  // Regression: transformManifestForPublish only rewrites in-set dependency
+  // specifiers and strips portal: resolutions -- an out-of-set devDependency
+  // carrying portal:/link:/file:/workspace: would otherwise pack and publish
+  // untouched, and every consumer's install would resolve a path that does not
+  // exist on their disk.
+  const { root, packageDir } = scratch();
+  const manifest = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
+  manifest.devDependencies = { '@some/local': 'portal:../thing' };
+  writeFileSync(join(packageDir, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));
+  const original = readFileSync(join(packageDir, 'package.json'), 'utf8');
+  const calls = [];
+  try {
+    await assert.rejects(
+      packWave(
+        [{ name: '@jinn-network/trust-core', directory: 'packages/trust/core', manifestPath: join(packageDir, 'package.json'), spec: 'x' }],
+        {
+          repoRoot: root,
+          version: '0.1.0',
+          gitHead: SHA,
+          inSetNames: new Set(['@jinn-network/trust-core']),
+          tarballsDir,
+          exec: fakeExec(root, calls, Buffer.from('tarball-bytes')),
+        },
+      ),
+      /packages\/trust\/core: packed manifest devDependencies\.@some\/local still carries local specifier portal:\.\.\/thing/,
+    );
+    assert.equal(readFileSync(join(packageDir, 'package.json'), 'utf8'), original, 'the manifest must still be restored');
+    assert.ok(!calls.some((call) => call.command === 'npm'), 'npm pack must never run once a local specifier is caught');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(tarballsDir, { recursive: true, force: true });
+  }
+});
+
+test('packWave rejects a tarball whose packed identity disagrees with the plan', async () => {
+  const { root, packageDir } = scratch();
+  const tarballsDir = mkdtempSync(join(tmpdir(), 'jinn-publish-tarballs-'));
+  try {
+    await assert.rejects(
+      packWave(
+        [{ name: '@jinn-network/trust-core', directory: 'packages/trust/core', manifestPath: join(packageDir, 'package.json'), spec: 'x' }],
+        {
+          repoRoot: root,
+          version: '0.1.0',
+          gitHead: SHA,
+          inSetNames: new Set(['@jinn-network/trust-core']),
+          tarballsDir,
+          exec: (command, args, cwd) => (command === 'npm'
+            ? { status: 0, stdout: JSON.stringify([{ name: '@jinn-network/impostor', version: '0.1.0', filename: 'x.tgz' }]), stderr: '' }
+            : { status: 0, stdout: '', stderr: '' }),
+        },
+      ),
+      /npm pack produced @jinn-network\/impostor@0\.1\.0, expected @jinn-network\/trust-core@0\.1\.0/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(tarballsDir, { recursive: true, force: true });
+  }
+});
+
+test('runPublish refuses to run without a real commit sha, never substituting the version', async () => {
+  // Regression: the stable publish step invoked the driver with no --sha, and
+  // gitHead: args.sha ?? plan.version silently wrote the semver version string
+  // into every published manifest's gitHead field -- a field whose entire
+  // purpose is to record the source commit.
+  const plan = { waves: [], distTag: 'latest', version: '0.1.0', inSetNames: new Set() };
+  await assert.rejects(
+    runPublish(plan, { repoRoot: '/tmp', npmCommand: 'npm' }),
+    /runPublish requires a 40-character commit sha via --sha, got <missing>/,
+  );
+  await assert.rejects(
+    runPublish(plan, { repoRoot: '/tmp', npmCommand: 'npm', sha: '0.1.0' }),
+    /runPublish requires a 40-character commit sha via --sha, got 0\.1\.0/,
+  );
+});
+
+test('registryDistTag treats empty stdout on a zero exit as "tag not set", not invalid JSON', () => {
+  // `npm view <published-package> dist-tags.<unset-tag> --json` exits 0 with empty stdout
+  // when the package exists but that dist-tag was never applied — a real, verified
+  // registry behavior distinct from E404 (package/version not found).
+  const actual = registryDistTag('@jinn-network/trust-core', 'canary', {
+    exec: () => ({ status: 0, stdout: '', stderr: '' }),
+    repoRoot: '/tmp',
+  });
+  assert.equal(actual, null);
+});
+
+test('publishWave skips an artifact already published with matching integrity', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  const published = [];
+  await publishWave(artifacts, {
+    distTag: 'canary',
+    repoRoot: '/tmp',
+    exec: (command, args) => {
+      if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+      if (args[0] === 'view') return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      published.push(args);
+      return { status: 0, stdout: '', stderr: '' };
+    },
+  });
+  assert.deepEqual(published, []);
+});
+
+test('publishWave publishes a missing artifact and reverifies it', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  let exists = false;
+  const published = [];
+  await publishWave(artifacts, {
+    distTag: 'canary',
+    repoRoot: '/tmp',
+    exec: (command, args) => {
+      if (args[0] === 'view' && !exists) return { status: 1, stdout: '', stderr: 'npm error code E404' };
+      if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+      if (args[0] === 'view') return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      published.push(args);
+      exists = true;
+      return { status: 0, stdout: '', stderr: '' };
+    },
+  });
+  assert.deepEqual(published, [['publish', '/tmp/a.tgz', '--access', 'public', '--provenance', '--tag', 'canary']]);
+});
+
+test('publishWave aborts the whole wave when a preflight integrity disagrees', async () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', tarball: '/tmp/b.tgz', integrity: 'sha512-BBB' },
+  ];
+  const published = [];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'canary',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-DIFFERENT"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '"canary"', stderr: '' };
+        published.push(args);
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight integrity mismatch for @jinn-network\/trust-core@0\.1\.0: local sha512-AAA, registry sha512-DIFFERENT/,
+  );
+  assert.deepEqual(published, [], 'a preflight mismatch must abort before the first publish');
+});
+
+test('publishWave rejects an unset dist-tag with a clear message, not a JSON parse crash', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'canary',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight canary mismatch for @jinn-network\/trust-core: expected 0\.1\.0, got <missing>/,
+  );
+});
+
+test('publishWave rejects a dist-tag that did not move to this version', async () => {
+  const artifacts = [{ name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', tarball: '/tmp/a.tgz', integrity: 'sha512-AAA' }];
+  await assert.rejects(
+    publishWave(artifacts, {
+      distTag: 'latest',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[0] === 'view' && args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        if (args[0] === 'view') return { status: 0, stdout: '"0.0.9"', stderr: '' };
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }),
+    /preflight latest mismatch for @jinn-network\/trust-core: expected 0\.1\.0, got 0\.0\.9/,
+  );
+});
+
+test('verifyCoherentSet passes when every package resolves at the published version', () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', integrity: 'sha512-BBB' },
+  ];
+  const integrities = { '@jinn-network/trust-core@0.1.0': 'sha512-AAA', '@jinn-network/trust-resolve@0.1.0': 'sha512-BBB' };
+  verifyCoherentSet(artifacts, {
+    distTag: 'latest',
+    version: '0.1.0',
+    repoRoot: '/tmp',
+    exec: (command, args) => (args[2] === 'dist.integrity'
+      ? { status: 0, stdout: JSON.stringify(integrities[args[1]]), stderr: '' }
+      : { status: 0, stdout: '"0.1.0"', stderr: '' }),
+  });
+});
+
+test('verifyCoherentSet names the partially-published graph', () => {
+  const artifacts = [
+    { name: '@jinn-network/trust-core', spec: '@jinn-network/trust-core@0.1.0', integrity: 'sha512-AAA' },
+    { name: '@jinn-network/trust-resolve', spec: '@jinn-network/trust-resolve@0.1.0', integrity: 'sha512-BBB' },
+  ];
+  assert.throws(
+    () => verifyCoherentSet(artifacts, {
+      distTag: 'latest',
+      version: '0.1.0',
+      repoRoot: '/tmp',
+      exec: (command, args) => {
+        if (args[1] === '@jinn-network/trust-resolve@0.1.0') return { status: 1, stdout: '', stderr: 'npm error code E404' };
+        if (args[2] === 'dist.integrity') return { status: 0, stdout: '"sha512-AAA"', stderr: '' };
+        return { status: 0, stdout: '"0.1.0"', stderr: '' };
+      },
+    }),
+    /partially-published platform set at 0\.1\.0: @jinn-network\/trust-resolve is missing from the registry/,
+  );
+});
