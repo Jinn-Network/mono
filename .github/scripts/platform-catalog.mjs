@@ -181,8 +181,20 @@ function schemaFailure(path, message) {
   throw new Error(`schema validation failed at ${path}: ${message}`);
 }
 
+function canonicalJsonValue(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => canonicalJsonValue(entry)).join(',')}]`;
+  }
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => (
+      `${JSON.stringify(key)}:${canonicalJsonValue(value[key])}`
+    )).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function schemaValueEquals(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
+  return canonicalJsonValue(left) === canonicalJsonValue(right);
 }
 
 function schemaTypeMatches(value, type) {
@@ -299,7 +311,7 @@ function validateSchemaValue(value, schema, rootSchema, path) {
       schemaFailure(path, `expected at least ${schema.minItems} items`);
     }
     if (schema.uniqueItems) {
-      const serialized = value.map((entry) => JSON.stringify(entry));
+      const serialized = value.map((entry) => canonicalJsonValue(entry));
       if (new Set(serialized).size !== serialized.length) schemaFailure(path, 'items must be unique');
     }
     if (isObject(schema.items)) {

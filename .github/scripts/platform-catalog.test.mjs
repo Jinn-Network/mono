@@ -302,6 +302,23 @@ test('fails closed when the catalog schema uses an unsupported keyword', () => {
   }
 });
 
+test('rejects structurally equal unique items with different object key order', () => {
+  const catalog = fixtureCatalog();
+  catalog.packages[0].authority.documents = [
+    { path: 'docs/fixture-authority.md', status: 'current' },
+    { status: 'current', path: 'docs/fixture-authority.md' },
+  ];
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /schema validation failed at catalog\.packages\[0\]\.authority\.documents: items must be unique/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('rejects missing ownership, gate, authority, boundary, and transition references', async (t) => {
   const cases = [
     {
