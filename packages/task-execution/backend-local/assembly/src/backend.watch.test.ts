@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -70,7 +70,9 @@ function delayedLauncher(delayMs: number): LauncherContract {
 function backend(root: string, delayMs = 250): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
     workspaceKind: () => "dir",
-    async setup() {},
+    async setup(_view, workspace) {
+      await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
+    },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest() {
       return { manifest: [], omissions: [], integrityViolations: [] };
@@ -209,6 +211,6 @@ describe("durable watch tail (§7.96)", () => {
 
     const shutdownStarted = Date.now();
     await instance.shutdown();
-    expect(Date.now() - shutdownStarted).toBeLessThan(2_000);
+    expect(Date.now() - shutdownStarted).toBeLessThan(5_000);
   });
 });

@@ -1,7 +1,7 @@
 # Split jinn plugin to the slim release repo (Jinn-Network/jinn-plugin).
 #
 # WHAT: On each Monday `main` promote (and on plugin hotfixes that land on
-# `main`), mirror `apps/jinn-agent/plugins/jinn/` to the ROOT of the slim
+# `main`), mirror `plugin/frozen/` to the ROOT of the slim
 # standalone repo `Jinn-Network/jinn-plugin`, so
 # `hermes plugins install Jinn-Network/jinn-plugin` (a git clone) yields a
 # working plugin. This is a deterministic CONTENT-MIRROR
@@ -12,9 +12,11 @@
 # The mirror decision logic lives in the tested helper
 # `.github/scripts/jinn-plugin-split.mjs`; this YAML owns only auth + the push.
 #
-# EDIT IN MONO, NOT HERE: the slim repo is generated. The source of truth is the
-# plugin dir in Jinn-Network/mono. Never hand-edit the slim repo — it is
-# overwritten on the next promote.
+# EDIT IN MONO, NOT HERE: the slim repo is generated. The source of truth is
+# `plugin/frozen/` in Jinn-Network/mono. Never hand-edit the slim repo — it is
+# overwritten on the next promote. That directory is FROZEN (spec §4.1): critical
+# fixes only, and nothing may be added to it, because every file in it is
+# published to the root of Jinn-Network/jinn-plugin.
 #
 # CHARTER DECISION 3 (BINDING): NO layer artifact rides the split. The plugin
 # dir is published verbatim; the published plugin references the independently
@@ -91,7 +93,7 @@ jobs:
       - name: Mirror the plugin dir into the slim checkout (validate + provenance + local commit)
         id: mirror
         env:
-          PLUGIN_DIR: mono/apps/jinn-agent/plugins/jinn
+          PLUGIN_DIR: mono/plugin/frozen
           SLIM_DIR: slim
           MONO_SHA: ${{ steps.prep.outputs.mono_sha }}
         run: |

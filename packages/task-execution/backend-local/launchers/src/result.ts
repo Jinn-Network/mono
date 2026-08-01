@@ -22,10 +22,19 @@ export interface InterpretedResult {
     readonly sessionId?: string;
   };
 }
+function blameRuleMatches(
+  rule: { readonly match: { readonly exitCode?: number; readonly signal?: string } },
+  exit: { readonly exitCode?: number; readonly signal?: string },
+): boolean {
+  if (rule.match.exitCode !== undefined && rule.match.exitCode === exit.exitCode) return true;
+  if (rule.match.signal !== undefined && rule.match.signal === exit.signal) return true;
+  return false;
+}
+
 export function interpretResult(plan: LaunchPlan, exit: { exitCode?: number; signal?: string }, envelope?: ResultEnvelope): InterpretedResult {
   const valid = exit.signal === undefined && exit.exitCode !== undefined && plan.validExitCodes.includes(exit.exitCode);
   if (!valid) {
-    const match = plan.blameExitCodes?.find((rule) => rule.match.exitCode === exit.exitCode || rule.match.signal === exit.signal);
+    const match = plan.blameExitCodes?.find((rule) => blameRuleMatches(rule, exit));
     return { state: "failed", blame: match?.blame ?? "task", reasonCode: match?.reasonCode ?? (exit.signal ? "death-by-signal" : "invalid-exit") };
   }
   const correlation = envelope && (envelope.sessionId || envelope.harnessVersion || envelope.capabilities)

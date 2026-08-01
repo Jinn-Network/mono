@@ -6,6 +6,43 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+/** Yarn PnP and some virtualized filesystems stub `fsync`/`FileHandle.sync` with ENOSYS. */
+export function isFsyncUnsupportedError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const code =
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    typeof (cause as { code: unknown }).code === "string"
+      ? (cause as { code: string }).code
+      : "";
+  return code === "ENOSYS" || message === "Method not implemented.";
+}
+
+/** Best-effort data/directory fsync: real failures remain poison; unsupported stubs are ignored. */
+export function fsyncBestEffortSync(fd: number): void {
+  try {
+    fsyncSync(fd);
+  } catch (cause) {
+    if (!isFsyncUnsupportedError(cause)) {
+      throw cause;
+    }
+  }
+}
+
+/** Async counterpart for `FileHandle.sync()` call sites. */
+export async function fsyncBestEffort(
+  file: { sync(): Promise<void> },
+): Promise<void> {
+  try {
+    await file.sync();
+  } catch (cause) {
+    if (!isFsyncUnsupportedError(cause)) {
+      throw cause;
+    }
+  }
+}
+
 /**
  * Atomic durable writes (design §6.1 step 6 / §9.1 seal-once): temp-file, fsync the temp file's
  * data, rename over the destination, then fsync the CONTAINING DIRECTORY so the rename itself
@@ -30,7 +67,7 @@ export function atomicWriteFileSync(
   try {
     if (typeof data === "string") writeSync(fd, data);
     else writeSync(fd, data);
-    fsyncSync(fd);
+    fsyncBestEffortSync(fd);
   } finally {
     closeSync(fd);
   }
@@ -38,7 +75,7 @@ export function atomicWriteFileSync(
   renameSync(tmp, path);
   const dirFd = openSync(dir, "r");
   try {
-    fsyncSync(dirFd);
+    fsyncBestEffortSync(dirFd);
   } finally {
     closeSync(dirFd);
   }
@@ -62,13 +99,13 @@ export function appendFsyncedLineSync(path: string, line: string): void {
   const fd = openSync(path, "a");
   try {
     writeSync(fd, text);
-    fsyncSync(fd);
+    fsyncBestEffortSync(fd);
   } finally {
     closeSync(fd);
   }
   const dirFd = openSync(dir, "r");
   try {
-    fsyncSync(dirFd);
+    fsyncBestEffortSync(dirFd);
   } finally {
     closeSync(dirFd);
   }

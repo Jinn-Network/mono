@@ -227,9 +227,10 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
     });
     const provisioner: ProvisionerContract = {
       workspaceKind: () => "dir",
-      async setup() {
+      async setup(_view, workspace) {
         enterSetup();
         await setupBlocked;
+        await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
       },
       executionEnv: ({ env }) => ({ ...env }),
       async harvest() {

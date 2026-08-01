@@ -1,0 +1,49 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "environment",
+      "digest": {
+        "sha256": "f7f57e020f997df4a8f68a95df0ff8d23c3b5d165ff968b4549854dd3ce9ec30"
+      }
+    },
+    {
+      "name": "image",
+      "digest": {
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    }
+  ],
+  "predicateType": "https://jinn.network/attestations/environment-verification/v1",
+  "predicate": {
+    "protocol": "https://jinn.network/environment-verification/protocol/1.0",
+    "result": "error",
+    "window": {
+      "startedAt": "2026-07-31T09:00:00.000Z",
+      "endedAt": "2026-07-31T09:25:00.000Z"
+    },
+    "controls": {
+      "network": "none",
+      "seeds": {
+        "PYTHONHASHSEED": "0"
+      },
+      "order": "default",
+      "parallelism": 1,
+      "locale": "C.UTF-8",
+      "tz": "UTC"
+    },
+    "runtime": {
+      "timeoutSeconds": 1800
+    },
+    "verifier": {
+      "id": "https://jinn.network/environment-verification/conformance-verifier",
+      "version": "0.1.0",
+      "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+    },
+    "failure": {
+      "stage": "acquire",
+      "reason": "image-unresolvable",
+      "detail": "manifest unknown: manifest tagged by digest not found"
+    }
+  }
+}

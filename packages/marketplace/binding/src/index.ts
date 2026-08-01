@@ -44,6 +44,18 @@ export {
 } from "./venue/safe-revert.js";
 export { SAFE_ABI, buildSafeSignature, executeSafeTransaction } from "./venue/safe.js";
 export type { SafeTransactionParams } from "./venue/safe.js";
+export { createEoaBroadcastPort } from "./venue/eoa-broadcast.js";
+export type { EoaBroadcastOptions } from "./venue/eoa-broadcast.js";
+export {
+  DEFAULT_CLAIM_SKEW_SECONDS,
+  DEFAULT_SCAN_BLOCK_RANGE,
+  scanForOnChainMatch,
+} from "./venue/task-created-scan.js";
+export type {
+  AmbiguousMatchReport,
+  OnChainMatchScanConfig,
+  StaleMatchReport,
+} from "./venue/task-created-scan.js";
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 export { JINN_ROUTER_V4_ABI } from "./abis/revised-contracts.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
@@ -74,7 +86,13 @@ export {
   createInMemoryPostingIntentStore,
   recoverPostingIntents,
 } from "./broadcast-intent.js";
+export { createFilePostingIntentStore } from "./posting-intent-file-store.js";
 export type {
+  FilePostingIntentStoreOptions,
+  MalformedIntentRecordReport,
+} from "./posting-intent-file-store.js";
+export type {
+  OwnedPostingIntentRecord,
   PostingIntent,
   PostingIntentClaim,
   PostingIntentKey,
@@ -88,6 +106,14 @@ export type {
 // --- today-mode posting + digest-join (§6.1; M2.3) ---
 export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
 export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
+
+// --- requester on-ramp defaults (supply design §8 D7; finding F2) ---
+export {
+  DEFAULT_POSTING_TERMS,
+  assertMaxClaimsAgreement,
+  postingEscrowValueWei,
+} from "./posting-defaults.js";
+export type { DefaultPostingTerms } from "./posting-defaults.js";
 
 // --- capabilities() with the attested run-pinning posture (§7, profiles §5.2; M2.4) ---
 export { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";

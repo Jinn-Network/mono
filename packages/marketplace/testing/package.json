@@ -39,7 +39,8 @@
     "./venue-conformance": {
       "import": "./dist/venue-conformance.js",
       "types": "./dist/venue-conformance.d.ts"
-    }
+    },
+    "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",

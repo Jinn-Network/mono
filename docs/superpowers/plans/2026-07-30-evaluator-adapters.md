@@ -1,3971 +1,2936 @@
-# Evaluator Adapters — `packages/task-execution/evaluator-adapters/`
+# Evaluator Adapters Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
-> (recommended) or superpowers:executing-plans. Do not improvise an execution order — the
-> tasks below are dependency-ordered and each ends in a verified commit.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** implement §1 row 3 of
-[`2026-07-30-operator-daemon-composition-program.md`](./2026-07-30-operator-daemon-composition-program.md)
-— the tier-3 package that re-homes the swe-rebench and prediction result parsers into the
-evaluation harness's deployment allowlist, per
-[`../specs/2026-07-30-operator-daemon-composition-design.md`](../specs/2026-07-30-operator-daemon-composition-design.md)
-§6.3 and standards ruling §7.5.
+**Goal:** Build `packages/task-execution/evaluator-adapters/` — a fresh, parse-only tier-3 package supplying the swe-rebench and prediction `EvaluatorAdapter` implementations, their parser identities, and the deployment facade the evaluation harness loads through its parser allowlist.
 
-**Architecture:** the package ships two `EvaluatorAdapter` implementations plus the
-deployment-allowlist entries that let `runEvaluationHarness` resolve them. Each adapter is a
-thin composition of one **pure ingestion parser** (raw grader report or raw solver Result →
-a normalized outcome, or a typed ungradeable classification) with one **injected execution
-provider** (evaluation-runner design §5.4/§11: "the adapter receives method-specific
-execution providers when the host constructs it"). No adapter reinterprets scores, invents
-thresholds, or emits a record format: the verdict leaves as a `CompletedEvaluation` in Jinn's
-sealed-record grammar, which the harness runtime turns into the signed Result Evaluation.
+**Architecture:** Three ingestion parsers (benchmark-local JSON, JUnit XML, TAP14) reduce untrusted grader output into one internal `TestOutcomeReport`; a shared transitions reducer turns that into declared measurements; two `EvaluatorAdapter`s derive their verdict by evaluating the EvaluationSpec's *own* `verdictRule` over those measurements, so the harness's `checkVerdictConsistency` gate can never disagree with the adapter. Infrastructure aborts raise the harness's typed no-verdict path (`EvaluationOperationalError`) instead of producing a false `fail`. The package touches no network, no chain, no signer, and never defines verdict semantics — the sealed Result Evaluation stays harness-owned (design §7 ruling 5).
 
-**Tech stack:** TypeScript 5.9 / Node 22 / Yarn 4.13.0 with `portal:` resolution; vitest 4;
-`node --test` for the repository guard scripts; the existing task-execution CI workflow.
+**Tech Stack:** TypeScript 5.9 / Node 22 / Yarn 4.13.0 with `portal:` resolution; vitest 4; `node --test` for the repo guards; zero third-party runtime dependencies.
 
-## Global constraints
+## Global Constraints
 
-Copied verbatim from the program plan's §Global constraints, then extended:
-
-- Branch target: `integration/evidence-v1` (stacked PR trains; the integration branch is
-  not yet in `next`). Nothing here publishes to npm — #2293 runs in parallel.
-- Kits and fixtures **before** implementations; a layer's kit green before dependents build.
-- Guard trio (package inventory, source-boundary, packed-types + CI workflow) ships **with**
-  each new tree, not after.
-- Every task ends with typecheck + tests + relevant kit + guards run locally, outputs shown.
-- Independent per-component review when a component completes, findings resolved before
-  dependents build on it (program discipline, principles §13.2).
-- American English throughout; no product names in tier-3 code.
-- The spec's §6.1 placement notes and §10 bridge-era/drain/standing rules are binding
-  cross-plan contracts (§6 below).
-
-Plan-specific additions:
-
-- **Package name is settled** (program §5): npm `@jinn-network/task-execution-evaluator-adapters`,
-  directory `packages/task-execution/evaluator-adapters/`. Do not rename.
-- **Fresh rewrite, legacy as fixtures** (program §6 contract 12): every behavior in
-  `client/src/harnesses/impls/swe-rebench-v2-evaluator/` and
-  `client/src/harnesses/impls/prediction-v*-evaluator/` enters this package **as test
-  fixtures and assertions only**. No file is ported, copied, or adapted as code. Fixture
-  tasks precede implementation tasks.
-- **No new interchange format** (spec §7 ruling 5). SARIF / JUnit XML / TAP / benchmark-local
-  JSON are ingestion formats parsed at the adapter edge. The only outward shape is
-  `CompletedEvaluation` (already defined by
-  `packages/task-execution/evaluation-harness/src/adapter.ts`).
-- **Unscorable is never a silent zero.** An evaluation that could not grade the solution
-  raises `EvaluationOperationalError` — the harness runtime returns exit
-  `EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE` (70), which the evaluation launcher maps to
-  `blame: "infrastructure"`, and **no verdict is written**. A `fail` verdict is reserved for
-  a graded solution that did not satisfy the spec's `verdictRule`.
-- **Never patch the harness runtime.** If a task discovers that
-  `packages/task-execution/evaluation-harness/src/{runtime,adapter,registration,launcher}.ts`
-  is wrong or insufficient, stop and record a finding with a proposed disposition in the PR
-  description. Do not edit those files in this train.
-- **American English**; tier-3 code names no product (no "operator app", no "Autopilot", no
-  "daemon"). "swe-rebench" and "prediction" are benchmark/work-kind names, not products.
-
-## What this plan does NOT do
-
-- **No evaluator loop.** Observing deliveries, deriving the evaluation Submission, claiming
-  the verdict attempt, and dispatching the evaluation-profile Attempt are stage 2
-  (`2026-07-30-cutover-stage-2-evaluator-flow.md`). This package is called by that loop's
-  deployment module; it never runs one.
-- **No new record formats and no protocol semantics.** No new `EvaluationSpec` family, no new
-  grader family, no verdict document. `CompletedEvaluation`, `EvaluationSpec`, and the
-  Result Evaluation envelope are all owned elsewhere.
-- **No changes to the harness runtime**, the registration contract, the launcher, or
-  `profiles`. Findings there are surfaced with proposed dispositions, never patched silently.
-- **No container/Docker driver and no live venue client.** Both are execution providers under
-  the runner design's §5.4 ownership line; this package defines the injected ports and ships
-  only hermetic, in-package providers. See Findings A and B below.
-- **No `client/` changes.** The legacy evaluators keep running until stage 2 retires them.
-
-## Findings carried into this plan (surface, do not paper over)
-
-Record these verbatim in the component PR description. Each has a proposed disposition; the
-plan executes under the proposed disposition and does not wait on a ruling.
-
-**Finding A — nothing in the merged stack executes a `deterministic-process` grader.**
-`runEvaluationHarness` (`runtime.ts:683`) resolves exact material, validates the spec,
-enforces the parser allowlist, and calls `registration.adapter.evaluate(...)`. It never runs
-a container. The evaluation-runner design assigns "the environment in which method-specific
-work occurs … process, container, remote-worker" to the **execution provider** (§5.4) and
-says the adapter "receives method-specific execution providers when the host constructs it"
-(§11) — but the local-execution-backend design §10.4 lists "the execution-provider
-abstraction (§5.4, §13)" among the *superseded* halves, on the ground that the backend
-already performs that generic job once. Between those two, no package owns "run the pinned
-swe-rebench image inside the evaluation Attempt". Composition design §6.3 scopes *this*
-package to "the concrete result parsers", so a container driver is out of scope here.
-*Proposed disposition:* this package defines the injected port
-`GraderReportSource` and ships one in-package implementation — `contextGraderReportSource`,
-which reads an already-produced grader report from the harness-supplied evaluation context
-(the runner design's §8.3 "supporting context", surfaced by `runtime.ts:757`
-`optionalContext`). A container-executing `GraderReportSource` is stage-2 host work or a
-separately chartered tree; the coordinator picks. This plan neither writes nor assumes one.
-
-**Finding B — the prediction evaluator's ground truth is a live venue read, and the four
-grader families are frozen.** `client/src/harnesses/impls/prediction-v1-evaluator/index.ts:133`
-resolves the market through `venues/polymarket/client.ts` at evaluation time. None of
-`deterministic-process` / `model-graded` / `human-review` / `composite`
-(`profiles/src/evaluation-spec/schema.ts:9`) describes "deterministic scorer over an external
-observation". *Proposed disposition:* model prediction evaluation as `deterministic-process`
-whose `parser` identity is the scorer's semantic commitment, with the resolution snapshot
-arriving as **supporting context** through the same §8.3 channel (injected port
-`ResolutionSnapshotSource`, in-package implementation `contextResolutionSnapshotSource`). The
-live venue read is stage-2 host work. If the coordinator prefers a fifth family, that is a
-`profiles` protocol change and this package's parser is unaffected — only the fixture spec
-moves.
-
-**Finding C — `runtime.ts` never forwards a declared unscorable class to the
-verdict-consistency check.** `validateCompletedDetails` calls `checkVerdictConsistency({spec,
-delivered, measurements})` (`runtime.ts:505`) with `declaredUnscorableClass` left `undefined`,
-so the `recorded-inconclusive` branch of
-`profiles/src/evaluation-spec/verdict-consistency.ts:27` is unreachable from the harness. An
-adapter can therefore deliver `inconclusive` **only** when the spec's `verdictRule` recomputes
-to `inconclusive` — i.e. only under a declared `inconclusiveWhen` predicate over delivered
-measurements. *Proposed disposition:* this plan lives within the constraint — the prediction
-fixture spec carries an explicit `inconclusiveWhen`, and swe-rebench (whose canonical spec
-from `profiles/src/documents/swe-rebench.ts:70` declares only a `retryable-infrastructure`
-class) never returns `inconclusive`. The harness gap is reported, not patched.
-
-**Finding D — the canonical swe-rebench spec declares exactly one measurement.**
-`sweRebenchRowToTaskAndSpec` (`profiles/src/documents/swe-rebench.ts:68`) emits
-`measurements: [{ name: "passed", type: "boolean", required: true }]` and
-`verdictRule: { threshold: { measurement: "passed", op: "eq", value: true } }`. The runtime
-rejects any *undeclared* delivered measurement (`runtime.ts:465`). So the legacy verdict
-payload's `score` / `passedCount` / `totalCount` / `evaluator_cost_usd`
-(`client/src/harnesses/impls/swe-rebench-v2-evaluator/harness.ts:1426`) **cannot** ride as
-measurements. *Proposed disposition:* they ride in `detailedOutcome` (unconstrained, and the
-runner design §16.2's home for rich findings). If the coordinator wants them measurable
-(comparable across cells), that is a change to `profiles/src/documents/swe-rebench.ts` owned
-by the profiles design, filed as a follow-up — not made here.
+- **Branch target:** `integration/evidence-v1`. Baseline head `8c7179f2c`; PRs #2306 / #2307 / #2308 are assumed merged. Stacked PR train, one train for this component. No agent self-merge.
+- **Custody:** this tree consumes **no signers** and no key material. Signing stays in the harness (`makeSecretsSigner`). Custody law is trivially clean here and must stay that way — no `secrets/` access, no key loading, ever.
+- **npm name:** `@jinn-network/task-execution-evaluator-adapters` (program §5). Nothing publishes in this program; #2293 runs in parallel.
+- **Fresh rewrite, legacy as fixtures** (program §6 contract 12): no line of `client/src/harnesses/impls/**` is ported. Legacy behavior enters only as kit test cases.
+- **Kits and fixtures before implementations** (program Global constraints): Task 2 lands the conformance kit and the whole fixture corpus before any parser exists.
+- **Guard trio ships with the tree, not after** (program Global constraints): Task 1 extends the package-inventory, source-boundary, and packed-types guards and adds the CI job, against an empty `src/`.
+- **Adapters parse ingestion formats; they never define verdict semantics** (design §7 ruling 5). The verdict record grammar is `@jinn-network/attestation-issuer`'s, invoked by the harness.
+- **No network at the adapter edge.** Production source uses no `fetch` / `WebSocket` / `EventSource` / `XMLHttpRequest`, no `node:http(s)`, no `node:net`, no `node:child_process`. Enforced by a guard assertion in Task 1.
+- **No product names in tier-3 code** (program Global constraints). "swe-rebench" and "prediction" are benchmark/work-kind names, not Jinn product names, and are permitted; "operator", "Autopilot", "Jinn client" are not.
+- **American English** in identifiers, file names, and copy (CLAUDE.md Rule 5).
+- **No locale-sensitive APIs** in production source (`localeCompare`, `toLocale*`, `Intl`) — the task-execution guard already asserts this tree-wide; use code-unit comparison.
+- **Fractional quantities are decimal strings, never JSON numbers** (profiles Global Constraints / §7.14). Brier scores are computed with `BigInt` scaled-integer arithmetic, never `Number`/`toFixed`.
+- **Every task ends with** `yarn typecheck && yarn test && yarn build` in the package plus `node --test .github/scripts/task-execution-package-inventory.test.mjs` and `node --test .github/scripts/task-execution-source-boundaries.test.mjs` from the repo root, outputs shown.
+- **Repo path contains an apostrophe** (`life's-work`) — quote every shell path.
 
 ---
 
-## Task 1 — Package scaffold, guard trio extension, CI wiring
+## File Structure
 
-**Files**
+All paths are relative to the repo root.
 
-- `packages/task-execution/evaluator-adapters/package.json` (new)
-- `packages/task-execution/evaluator-adapters/tsconfig.json` (new)
-- `packages/task-execution/evaluator-adapters/tsconfig.build.json` (new)
-- `packages/task-execution/evaluator-adapters/README.md` (new)
-- `packages/task-execution/evaluator-adapters/src/index.ts` (new)
-- `packages/task-execution/evaluator-adapters/scripts/pack-smoke.mjs` (new)
-- `.github/scripts/task-execution-package-inventory.test.mjs` (edit)
-- `.github/scripts/task-execution-source-boundaries.test.mjs` (edit)
-- `.github/scripts/task-execution-packed-types.test.mjs` (edit)
-- `.github/workflows/task-execution-ci.yml` (edit)
-
-**Interfaces**
-
-- Consumes: `@jinn-network/task-execution-evaluation-harness` (`EvaluatorAdapter`,
-  `EvaluatorRegistration`, `EvaluationOperationalError`, `CompletedEvaluation`,
-  `ExactEvaluationMaterial`, `EvaluationContext`, `ResourceDescriptor`,
-  `defineEvaluatorRegistration`); `@jinn-network/task-execution-profiles`
-  (`EvaluationSpec`, `DeterministicProcessBlock`, `ParserIdentity`, `parserAllowlistKey`);
-  `@jinn-network/task-execution-supervisor` (`AttemptIdentity`).
-- Produces: the package identity `@jinn-network/task-execution-evaluator-adapters` with a
-  single `"."` export entry resolving to `./dist/index.js`.
-
-### Steps
-
-- [ ] **Failing test first — extend the package-inventory guard.** In
-      `.github/scripts/task-execution-package-inventory.test.mjs`, add the row to
-      `TASK_EXECUTION_PACKAGES` (after the `evaluation-harness` entry):
-
-      ```js
-        ['evaluator-adapters', '@jinn-network/task-execution-evaluator-adapters'],
-      ```
-
-      bump the documented live count from `9` to `10`:
-
-      ```js
-        assert.equal(TASK_EXECUTION_PACKAGES.length, 10);
-      ```
-
-      and add the approved dependency graph entry to `JINN_DEPENDENCY_GRAPH`:
-
-      ```js
-        // evaluator-adapters (composition design §6.3): concrete result parsers plugged into
-        // the evaluation harness's deployment allowlist. Production surface is the adapter
-        // contract (evaluation-harness), the EvaluationSpec vocabulary (profiles), and the
-        // Attempt identity (supervisor). Nothing else — no evidence package, no backend.
-        ['evaluator-adapters', {
-          dependencies: [
-            '@jinn-network/task-execution-evaluation-harness',
-            '@jinn-network/task-execution-profiles',
-            '@jinn-network/task-execution-supervisor',
-          ],
-          devDependencies: [
-            '@jinn-network/attestation-issuer', '@jinn-network/evidence-protocol',
-            '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
-            '@jinn-network/task-execution-workspace',
-          ],
-          optionalDependencies: [], peerDependencies: [],
-        }],
-      ```
-
-      (The devDependencies are transitive gap-fills so the standalone project's local install
-      resolves the harness's own production chain from portals instead of the unpublished
-      registry, plus `task-execution-protocol` for the Task 10 integration fixture's
-      `sealTask` / `sealDelivery` / `documentDigest`.)
-
-- [ ] **Run to verify fail.**
-      `node --test .github/scripts/task-execution-package-inventory.test.mjs`
-      Expected failure: `missing package manifest: …/packages/task-execution/evaluator-adapters/package.json`.
-
-- [ ] **Minimal implementation — the manifest.** Create
-      `packages/task-execution/evaluator-adapters/package.json`:
-
-      ```json
-      {
-        "name": "@jinn-network/task-execution-evaluator-adapters",
-        "version": "0.1.0",
-        "description": "Concrete evaluator adapters for the Jinn evaluation harness: the swe-rebench grader-report parser and the prediction scorer, plugged into a deployment parser allowlist.",
-        "type": "module",
-        "packageManager": "yarn@4.13.0",
-        "engines": { "node": ">=22" },
-        "license": "Apache-2.0",
-        "repository": {
-          "type": "git",
-          "url": "https://github.com/Jinn-Network/mono.git",
-          "directory": "packages/task-execution/evaluator-adapters"
-        },
-        "main": "./dist/index.js",
-        "types": "./dist/index.d.ts",
-        "exports": {
-          ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" }
-        },
-        "files": ["dist/", "fixtures/", "README.md"],
-        "publishConfig": { "access": "public" },
-        "scripts": {
-          "build": "tsc -p tsconfig.build.json",
-          "typecheck": "tsc --noEmit -p tsconfig.json",
-          "test": "vitest run",
-          "pack:smoke": "node scripts/pack-smoke.mjs",
-          "prepack": "yarn build"
-        },
-        "dependencies": {
-          "@jinn-network/task-execution-evaluation-harness": "0.1.0",
-          "@jinn-network/task-execution-profiles": "0.1.0",
-          "@jinn-network/task-execution-supervisor": "0.1.0"
-        },
-        "devDependencies": {
-          "@jinn-network/attestation-issuer": "0.1.0",
-          "@jinn-network/evidence-protocol": "0.1.0",
-          "@jinn-network/task-execution-launchers": "0.1.0",
-          "@jinn-network/task-execution-protocol": "0.1.0",
-          "@jinn-network/task-execution-workspace": "0.1.0",
-          "@types/node": "^22.0.0",
-          "typescript": "^5.9.3",
-          "vitest": "^4.1.8"
-        },
-        "resolutions": {
-          "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
-          "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
-          "@jinn-network/task-execution-evaluation-harness": "portal:../evaluation-harness",
-          "@jinn-network/task-execution-launchers": "portal:../backend-local/launchers",
-          "@jinn-network/task-execution-profiles": "portal:../profiles",
-          "@jinn-network/task-execution-protocol": "portal:../protocol",
-          "@jinn-network/task-execution-supervisor": "portal:../backend-local/supervisor",
-          "@jinn-network/task-execution-workspace": "portal:../backend-local/workspace"
-        }
-      }
-      ```
-
-      Create `tsconfig.json` byte-identical to
-      `packages/task-execution/evaluation-harness/tsconfig.json`, and `tsconfig.build.json`:
-
-      ```json
-      { "extends": "./tsconfig.json", "exclude": ["src/**/*.test.ts"] }
-      ```
-
-      Create `src/index.ts` as a placeholder that the later tasks extend:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      export {};
-      ```
-
-      Create `scripts/pack-smoke.mjs` by copying
-      `packages/task-execution/evaluation-harness/scripts/pack-smoke.mjs` and changing only
-      the two package-list constants: append
-      `[join(taskExecutionRoot, "evaluation-harness"), "@jinn-network/task-execution-evaluation-harness"]`
-      to `packageInputs`, replace the final entry with
-      `[packageRoot, "@jinn-network/task-execution-evaluator-adapters"]`, and rename the
-      `mkdtemp` prefix to `"jinn-evaluator-adapters-"`. Write `README.md` naming the package,
-      its two adapters, the two injected provider ports, and Findings A–D.
-
-- [ ] **Run to verify pass.**
-      `node --test .github/scripts/task-execution-package-inventory.test.mjs`
-      Expected: 3 passing tests, 0 failing.
-
-- [ ] **Failing test — extend the source-boundary guard.** In
-      `.github/scripts/task-execution-source-boundaries.test.mjs`:
-
-      add `'evaluator-adapters'` to `taskExecutionDirectories`; add the forbidden list next to
-      the harness lists:
-
-      ```js
-      // evaluator-adapters (composition design §6.3) is a leaf: it consumes the adapter
-      // contract, the EvaluationSpec vocabulary, and the Attempt identity, and imports no
-      // evidence/trust/discovery package and no chain or network client in production.
-      const EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN = [
-        ...TASK_EXECUTION_FOREIGN_PACKAGES,
-        '@jinn-network/task-execution-backend',
-        '@jinn-network/task-execution-backend-local',
-        '@jinn-network/task-execution-launchers',
-        '@jinn-network/task-execution-protocol',
-        '@jinn-network/task-execution-testing',
-        '@jinn-network/task-execution-workspace',
-      ];
-      // Its tests drive the real harness runtime end-to-end, so they may seal Task/Delivery
-      // documents and place workspace paths — but still touch no evidence runtime.
-      const EVALUATOR_ADAPTERS_TEST_FORBIDDEN = [
-        ...TASK_EXECUTION_FOREIGN_PACKAGES
-          .filter((name) => name !== '@jinn-network/evidence-protocol'),
-        '@jinn-network/task-execution-backend-local',
-        '@jinn-network/task-execution-testing',
-      ];
-      ```
-
-      and inside `test('task-execution source boundaries remain one-way across the approved graph', …)`,
-      after the evaluation-harness block, append:
-
-      ```js
-        const adaptersSrc = join(packages, 'evaluator-adapters', 'src');
-        const adaptersTests = files(adaptersSrc)
-          .filter((file) => /\.test\.[cm]?[jt]sx?$/u.test(file));
-        const adaptersProduction = files(adaptersSrc)
-          .filter((file) => !adaptersTests.includes(file));
-        assert.deepEqual(
-          forbiddenImportsInFiles(adaptersProduction, EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN),
-          [],
-          'evaluator-adapters production source crosses its approved contract boundary',
-        );
-        assert.deepEqual(
-          forbiddenImportsInFiles(adaptersTests, EVALUATOR_ADAPTERS_TEST_FORBIDDEN),
-          [],
-          'evaluator-adapters tests may import only the approved harness-driving surface',
-        );
-      ```
-
-      In the same file, add `'evaluator-adapters'` to the array iterated by
-      `test('Task-execution production source never orders or formats with the host locale', …)`
-      if that test enumerates directories explicitly; otherwise it already reads
-      `taskExecutionDirectories` and the first edit suffices — verify by reading the test body
-      before editing.
-
-- [ ] **Run to verify fail.**
-      `node --test .github/scripts/task-execution-source-boundaries.test.mjs`
-      Expected failure: the boundary test errors reading `…/evaluator-adapters/src` before the
-      import scanner finds any file, or reports an empty-directory assertion. Once `src/index.ts`
-      exists from the previous step it passes — so run this guard **before** creating `src/`
-      if you want to observe the red; otherwise accept the inventory guard's red as the
-      scaffold's failing gate and note it in the commit body.
-
-- [ ] **Run to verify pass.**
-      `node --test .github/scripts/task-execution-source-boundaries.test.mjs`
-      Expected: 7 passing tests, 0 failing.
-
-- [ ] **Extend the packed-types guard.** In `.github/scripts/task-execution-packed-types.test.mjs`
-      append to `packages`:
-
-      ```js
-        [join(taskExecutionRoot, 'evaluator-adapters'), '@jinn-network/task-execution-evaluator-adapters'],
-      ```
-
-      and to `codeEntrypoints`:
-
-      ```js
-        '@jinn-network/task-execution-evaluator-adapters',
-      ```
-
-- [ ] **Wire CI.** In `.github/workflows/task-execution-ci.yml` add a job after
-      `evaluation-harness`:
-
-      ```yaml
-        evaluator-adapters:
-          needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness]
-          runs-on: ubuntu-latest
-          steps:
-            - uses: actions/checkout@v4
-            - uses: actions/setup-node@v4
-              with:
-                node-version: 22
-            - name: Enable Yarn 4.13.0
-              run: |
-                corepack enable
-                corepack prepare yarn@4.13.0 --activate
-            - name: Restore all Task Execution distributions
-              uses: actions/download-artifact@v4
-              with:
-                pattern: task-execution-*-dist
-                path: .task-execution-dist
-            - name: Place Task Execution distributions
-              run: |
-                for package in protocol backend profiles evaluation-harness; do
-                  mkdir -p "packages/task-execution/${package}/dist"
-                  cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
-                done
-                for package in supervisor workspace launchers; do
-                  mkdir -p "packages/task-execution/backend-local/${package}/dist"
-                  cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/backend-local/${package}/dist/"
-                done
-                mkdir -p packages/task-execution/backend-local/assembly/dist
-                cp -R ".task-execution-dist/task-execution-backend-local-dist/." packages/task-execution/backend-local/assembly/dist/
-            - name: Restore executable bit on native custody binaries
-              run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
-            - name: Install packed-smoke dependency toolchains
-              run: |
-                (cd packages/task-execution/protocol && yarn install --immutable)
-                (cd packages/task-execution/backend && yarn install --immutable)
-                (cd packages/task-execution/profiles && yarn install --immutable)
-                (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
-                (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
-                (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
-                (cd packages/task-execution/evaluation-harness && yarn install --immutable)
-            - name: Build evidence contract packages from source
-              run: |
-                (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-                (cd packages/evidence/repository && yarn install --immutable && yarn build)
-                (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-                (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-                (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
-            - name: Verify Task Execution Evaluator Adapters
-              working-directory: packages/task-execution/evaluator-adapters
-              run: |
-                yarn install --immutable
-                yarn typecheck
-                yarn test
-                yarn build
-                yarn pack:smoke
-            - name: Upload Task Execution Evaluator Adapters distribution
-              uses: actions/upload-artifact@v4
-              with:
-                name: task-execution-evaluator-adapters-dist
-                path: packages/task-execution/evaluator-adapters/dist
-                if-no-files-found: error
-                retention-days: 1
-      ```
-
-      In the existing `verify` job: add `evaluator-adapters` to `needs`, add
-      `EVALUATOR_ADAPTERS_RESULT: ${{ needs.evaluator-adapters.result }}` to `env`, add
-      `"$EVALUATOR_ADAPTERS_RESULT" \` to the `for result in` list, and add
-      `evaluation-harness evaluator-adapters` to the `for package in protocol backend testing profiles`
-      loop in "Place package distributions".
-
-- [ ] **Verify locally.**
-      ```
-      cd packages/task-execution/evaluator-adapters && yarn install && yarn typecheck && yarn build
-      ```
-      Expected: install resolves every portal, `tsc --noEmit` prints nothing, `dist/index.js`
-      and `dist/index.d.ts` exist.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters .github/scripts .github/workflows/task-execution-ci.yml && \
-      git commit -m "feat(task-execution): scaffold evaluator-adapters with the guard trio and CI job"
-      ```
+| File | Responsibility |
+| --- | --- |
+| `packages/task-execution/evaluator-adapters/package.json` | Manifest: name, exports `.` + `./testing`, portal resolutions, scripts |
+| `packages/task-execution/evaluator-adapters/tsconfig.json`, `tsconfig.build.json` | Compiler config (copied from the evaluation harness) |
+| `packages/task-execution/evaluator-adapters/README.md` | What the package is and the one rule it obeys |
+| `packages/task-execution/evaluator-adapters/scripts/pack-smoke.mjs` | Packed-consumer smoke |
+| `packages/task-execution/evaluator-adapters/scripts/seal-parser-declarations.mjs` | Generates/checks the pinned parser-declaration digests |
+| `src/report.ts` | `TestOutcomeReport`, `TransitionOutcome`, `reduceTransitions`, log capping |
+| `src/material.ts` | `resolveReportMaterial` — locates report bytes in Results, then context |
+| `src/parsers/pytest-json-report.ts` | Benchmark-local JSON (`report.json`) ingestion |
+| `src/parsers/junit-xml.ts` | JUnit XML ingestion (bounded, non-validating, XXE-refusing) |
+| `src/parsers/tap14.ts` | TAP14 ingestion |
+| `src/declarations.ts` | Parser declaration documents + sealed identities + allowlist keys |
+| `src/infrastructure.ts` | Infrastructure-abort signature table → `EvaluationOperationalError` |
+| `src/swe-rebench.ts` | `createSweRebenchRegistration` |
+| `src/prediction.ts` | `createPredictionRegistration` |
+| `src/deployment.ts` | `createEvaluatorDeployment` — the host-facing facade |
+| `src/index.ts` | Public surface |
+| `src/testing.ts` | `./testing` conformance kit + fixture loader + spec builders |
+| `fixtures/**` | Six fixture families (golden + adversarial) |
+| `.github/scripts/task-execution-package-inventory.test.mjs` | Extended: 10th package + dependency graph |
+| `.github/scripts/task-execution-source-boundaries.test.mjs` | Extended: import allowlist + no-network + locale coverage |
+| `.github/scripts/task-execution-packed-types.test.mjs` | Extended: package + entrypoints |
+| `.github/workflows/task-execution-ci.yml` | Extended: `evaluator-adapters` job + `verify` wiring |
 
 ---
 
-## Task 2 — Parser semantics documents and pinned parser identities
+## Design findings (raised, not silently patched)
 
-The `EvaluationSpec`'s `parser` is `{id, version, digest}` and "the digest is the semantic
-commitment" (profiles design §7.2). Fabricating a digest would be a lie about what the parser
-promises. Instead each parser ships a **semantics document** in `fixtures/parsers/`, and the
-exported `ParserIdentity.digest` is the SHA-256 of that file's exact bytes — pinned by a test,
-so any edit to the semantics without a version bump breaks CI.
+These surfaced from reading the code against design §6.3 / §7 ruling 5. Each carries a proposed disposition that this plan implements. Report them with the component; do not treat them as licence to widen scope.
 
-**Files**
+1. **Nobody executes the `deterministic-process` container.** The family block carries `image`, `testMaterial`, `transitions`, `timeout`, but the evaluation harness runtime (`runtime.ts`) spawns no process and design §2's evaluate row assigns no owner. §6.3 scopes this tree to *parsing*. **Proposed disposition (implemented here):** adapters are parse-only and resolve already-produced grader output from the subject Results, falling back to host-provisioned `evaluation-context.json`; when it is absent they raise `EvaluationOperationalError{reason:"subject-not-found", recoveryAdvice:"operator-action-required"}` rather than inventing a verdict. The execution owner is a stage-2 (evaluator loop) hand-off.
+2. **`recorded-inconclusive` is unreachable through the runtime's declared-class path.** `runtime.ts` calls `checkVerdictConsistency` without `declaredUnscorableClass`, so an adapter may return `inconclusive` only when the spec's own `verdictRule` recomputes to `inconclusive`. **Proposed disposition (implemented here):** both adapters derive their verdict by calling `evaluateVerdictRule` on the spec's rule over their own measurements, and the prediction fixture spec expresses market-unresolved as an `inconclusiveWhen` node. No runtime change requested.
+3. **The frozen grader-family taxonomy has no pure-parse family**, so a prediction EvaluationSpec must be authored as `deterministic-process` and fill a nominal `image` descriptor. **Proposed disposition (implemented here):** the prediction *spec builder* lives in `./testing` (fixture surface only, so production ships no nominal image), and it sets `image` to the scorer's own sealed declaration descriptor — an honest content commitment to the code that scores. A profiles-side family/optionality amendment is a follow-up for the owning design, not this plan.
+4. **Undeclared measurements are rejected by the runtime** (`measurementMap` → `operational(...undeclared measurement...)`). **Proposed disposition (implemented here):** every adapter emits the intersection of what it computed with `specification.measurements`, tested directly.
+5. **Legacy log capping mislabels characters as bytes** (`capLogTail`: `${log.length - MAX} bytes truncated`). **Proposed disposition (implemented here):** the fresh implementation says `characters`, and the fixture pins the corrected text as a deliberate divergence from legacy.
 
-- `packages/task-execution/evaluator-adapters/fixtures/parsers/swe-rebench-v2.parser.json` (new)
-- `packages/task-execution/evaluator-adapters/fixtures/parsers/prediction-market.parser.json` (new)
-- `packages/task-execution/evaluator-adapters/src/parser-identity.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/parser-identity.test.ts` (new)
+---
 
-**Interfaces**
+### Task 1: Package scaffold, guard trio, CI job
 
-- Consumes: `ParserIdentity`, `parserAllowlistKey` from `@jinn-network/task-execution-profiles`.
+Creates a guarded, CI-gated, empty package. A reviewer can accept or reject this independently of any parser.
+
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/package.json`
+- Create: `packages/task-execution/evaluator-adapters/tsconfig.json`
+- Create: `packages/task-execution/evaluator-adapters/tsconfig.build.json`
+- Create: `packages/task-execution/evaluator-adapters/README.md`
+- Create: `packages/task-execution/evaluator-adapters/src/index.ts`
+- Modify: `.github/scripts/task-execution-package-inventory.test.mjs`
+- Modify: `.github/scripts/task-execution-source-boundaries.test.mjs`
+- Modify: `.github/scripts/task-execution-packed-types.test.mjs`
+- Modify: `.github/workflows/task-execution-ci.yml`
+
+**Interfaces:**
+- Consumes: nothing (first task).
+- Produces: the package directory and manifest name `@jinn-network/task-execution-evaluator-adapters`; production imports restricted to `@jinn-network/task-execution-evaluation-harness` and `@jinn-network/task-execution-profiles`.
+
+- [ ] **Step 1: Write the failing guard assertions**
+
+In `.github/scripts/task-execution-package-inventory.test.mjs`, add the tenth entry to `TASK_EXECUTION_PACKAGES` (after the `evaluation-harness` row):
+
+```js
+  ['evaluation-harness', '@jinn-network/task-execution-evaluation-harness'],
+  ['evaluator-adapters', '@jinn-network/task-execution-evaluator-adapters'],
+];
+```
+
+Change the count assertion in `test('the task-execution package inventory is explicit and has one manifest', ...)`:
+
+```js
+  assert.equal(TASK_EXECUTION_PACKAGES.length, 10);
+```
+
+Add the dependency-graph entry at the end of `JINN_DEPENDENCY_GRAPH` (alphabetical order inside each section — `jinnDependencyNames` sorts, so the expectation must be sorted):
+
+```js
+  // evaluator-adapters (composition design §6.3): parse-only adapters. PRODUCTION imports are
+  // the evaluation-harness contract surface plus profiles (EvaluationSpec + verdict rule
+  // evaluation) and nothing else. The devDependencies are type-resolution gap-fills for the
+  // harness's own public .d.ts surface (attestation-issuer, evidence-protocol, launchers,
+  // supervisor, workspace) plus task-execution-protocol, which the integration test uses to
+  // seal subject Task/Delivery bytes.
+  ['evaluator-adapters', {
+    dependencies: [
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-profiles',
+    ],
+    devDependencies: [
+      '@jinn-network/attestation-issuer', '@jinn-network/evidence-protocol',
+      '@jinn-network/task-execution-launchers', '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+```
+
+- [ ] **Step 2: Run the inventory guard to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071" && node --test .github/scripts/task-execution-package-inventory.test.mjs`
+Expected: FAIL with `missing package manifest: .../packages/task-execution/evaluator-adapters/package.json`
+
+- [ ] **Step 3: Create the manifest**
+
+`packages/task-execution/evaluator-adapters/package.json`:
+
+```json
+{
+  "name": "@jinn-network/task-execution-evaluator-adapters",
+  "version": "0.1.0",
+  "description": "Concrete evaluator adapters and ingestion-format parsers for the Jinn Task Execution Protocol evaluation harness.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-execution/evaluator-adapters"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs"
+  },
+  "dependencies": {
+    "@jinn-network/task-execution-evaluation-harness": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0"
+  },
+  "devDependencies": {
+    "@jinn-network/attestation-issuer": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/task-execution-launchers": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/task-execution-supervisor": "0.1.0",
+    "@jinn-network/task-execution-workspace": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/task-execution-evaluation-harness": "portal:../evaluation-harness",
+    "@jinn-network/task-execution-launchers": "portal:../backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../profiles",
+    "@jinn-network/task-execution-protocol": "portal:../protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../backend-local/supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../backend-local/workspace"
+  }
+}
+```
+
+Note: `prepack` is deliberately absent — `pack-smoke.mjs` builds explicitly, and the packed-types guard packs with `--ignore-scripts`. `./testing` is added to `exports` and `files` in Task 2.
+
+- [ ] **Step 4: Create the compiler config, README, and an empty entrypoint**
+
+`packages/task-execution/evaluator-adapters/tsconfig.json` (identical to the evaluation harness's):
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"]
+}
+```
+
+`packages/task-execution/evaluator-adapters/tsconfig.build.json`:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts"]
+}
+```
+
+`packages/task-execution/evaluator-adapters/README.md`:
+
+```markdown
+# `@jinn-network/task-execution-evaluator-adapters`
+
+Concrete evaluator adapters for the Jinn Task Execution Protocol evaluation harness: the
+swe-rebench deterministic-process adapter and the binary-prediction-market adapter, plus the
+ingestion-format parsers they share.
+
+Parsers ingest at the adapter edge only. JUnit XML, TAP14, and benchmark-local JSON are read as
+untrusted input and reduced to declared measurements; the verdict record itself stays in the
+sealed-record grammar owned by the harness and Attestation Issuer. This package defines no
+verdict semantics.
+
+Each adapter derives its verdict by evaluating the EvaluationSpec's own `verdictRule` over the
+measurements it computed, so the harness's verdict-consistency gate and the adapter can never
+disagree. Measurements the spec does not declare are dropped before delivery.
+
+The package performs no network access, holds no key material, and never reads the Attempt's
+`secrets/` directory. An infrastructure abort raises `EvaluationOperationalError` — the typed
+no-verdict path — instead of delivering a false `fail`.
+```
+
+`packages/task-execution/evaluator-adapters/src/index.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+export {};
+```
+
+- [ ] **Step 5: Install and verify the inventory guard passes**
+
+Run:
+```bash
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn install && yarn typecheck && yarn build
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071" && node --test .github/scripts/task-execution-package-inventory.test.mjs
+```
+Expected: install writes `yarn.lock`; typecheck and build clean; the inventory guard PASSES.
+
+- [ ] **Step 6: Extend the source-boundary guard**
+
+In `.github/scripts/task-execution-source-boundaries.test.mjs`:
+
+Add the directory to the locale sweep list:
+
+```js
+const taskExecutionDirectories = [
+  'protocol', 'backend', 'testing', 'profiles',
+  'backend-local/supervisor', 'backend-local/workspace', 'backend-local/launchers', 'backend-local/assembly',
+  'evaluation-harness', 'evaluator-adapters',
+];
+```
+
+Append `'@jinn-network/task-execution-evaluator-adapters'` to each of these existing arrays: `TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_BACKEND`, `TASK_EXECUTION_SIBLINGS_FORBIDDEN_FROM_PROFILES`, `SUPERVISOR_FORBIDDEN`, `WORKSPACE_FORBIDDEN`, `LAUNCHERS_FORBIDDEN`, `ASSEMBLY_FORBIDDEN`, and `EVALUATION_HARNESS_PRODUCTION_FORBIDDEN`. Also append it to `EVALUATION_HARNESS_TEST_FORBIDDEN` by changing its definition to:
+
+```js
+const EVALUATION_HARNESS_TEST_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES
+    .filter((name) => !EVALUATION_HARNESS_TEST_ALLOWED_EVIDENCE.includes(name)),
+  '@jinn-network/task-execution-evaluator-adapters',
+];
+```
+
+Add the new tree's own lists after `EVALUATION_HARNESS_TEST_FORBIDDEN`:
+
+```js
+// evaluator-adapters (composition design §6.3): parse-only. PRODUCTION imports the evaluation
+// harness contract surface and profiles only — never the backend, never the backend-local
+// components, never evidence/trust/discovery, never a process spawn, never a socket. Its tests
+// may additionally reach the Evidence Protocol validators and the protocol's sealing helpers to
+// drive one real end-to-end harness run.
+const EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES,
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-workspace',
+  'node:child_process',
+  'node:http',
+  'node:https',
+  'node:net',
+  'node:tls',
+];
+const EVALUATOR_ADAPTERS_TEST_ALLOWED = [
+  '@jinn-network/attestation-issuer',
+  '@jinn-network/evidence-protocol',
+];
+const EVALUATOR_ADAPTERS_TEST_FORBIDDEN = [
+  ...TASK_EXECUTION_FOREIGN_PACKAGES.filter((name) => !EVALUATOR_ADAPTERS_TEST_ALLOWED.includes(name)),
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-testing',
+];
+```
+
+Inside `test('task-execution source boundaries remain one-way across the approved graph', ...)`, after the evaluation-harness assertions, add:
+
+```js
+  // evaluator-adapters: parse-only at the adapter edge. Production source additionally must not
+  // reach the network — "parsers ingest, never fetch" (composition design §6.3/§7 ruling 5).
+  const adaptersSrc = join(packages, 'evaluator-adapters', 'src');
+  const adaptersTests = files(adaptersSrc)
+    .filter((file) => /\.test\.[cm]?[jt]sx?$/u.test(file));
+  const adaptersProduction = files(adaptersSrc)
+    .filter((file) => !adaptersTests.includes(file));
+  assert.deepEqual(
+    forbiddenImportsInFiles(adaptersProduction, EVALUATOR_ADAPTERS_PRODUCTION_FORBIDDEN),
+    [],
+    'evaluator-adapters production source crosses its approved contract boundary',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(adaptersTests, EVALUATOR_ADAPTERS_TEST_FORBIDDEN),
+    [],
+    'evaluator-adapters tests may import only the approved evidence validators',
+  );
+  assert.deepEqual(
+    ambientNetworkUsesInFiles(adaptersProduction),
+    [],
+    'evaluator-adapters production source must never reach the network; grader output is '
+      + 'ingested from provisioned material, never fetched',
+  );
+```
+
+Add the new tree to the cross-tree consumption test's loop so nothing there imports backend-local components. In `test('cross-tree consumption: only assembly, the testing kit slice, and the evaluation harness may import backend-local components (program §7.18)', ...)` change the first loop:
+
+```js
+  for (const directory of ['protocol', 'backend', 'profiles', 'evaluator-adapters']) {
+    assertBoundary(join(packages, directory, 'src'), BACKEND_LOCAL_COMPONENT_PACKAGES);
+  }
+```
+
+- [ ] **Step 7: Run the source-boundary guard**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071" && node --test .github/scripts/task-execution-source-boundaries.test.mjs`
+Expected: PASS (the empty `src/index.ts` imports nothing).
+
+- [ ] **Step 8: Extend the packed-types guard**
+
+In `.github/scripts/task-execution-packed-types.test.mjs`, add to `packages`:
+
+```js
+  [join(taskExecutionRoot, 'evaluator-adapters'), '@jinn-network/task-execution-evaluator-adapters'],
+```
+
+and to `codeEntrypoints`:
+
+```js
+  '@jinn-network/task-execution-evaluator-adapters',
+```
+
+- [ ] **Step 9: Add the CI job**
+
+In `.github/workflows/task-execution-ci.yml`:
+
+Add `evaluator-adapters` to the `workflow_dispatch` scope options list (between `evaluation-harness` and `full`).
+
+Add a new job after `evaluation-harness`:
+
+```yaml
+  evaluator-adapters:
+    needs: [foundation, backend, profiles, supervisor, workspace, launchers, backend-local, evaluation-harness]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore all Task Execution distributions
+        uses: actions/download-artifact@v4
+        with:
+          pattern: task-execution-*-dist
+          path: .task-execution-dist
+      - name: Place Task Execution distributions
+        run: |
+          for package in protocol backend profiles; do
+            mkdir -p "packages/task-execution/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/${package}/dist/"
+          done
+          for package in supervisor workspace launchers; do
+            mkdir -p "packages/task-execution/backend-local/${package}/dist"
+            cp -R ".task-execution-dist/task-execution-${package}-dist/." "packages/task-execution/backend-local/${package}/dist/"
+          done
+          mkdir -p packages/task-execution/backend-local/assembly/dist
+          cp -R ".task-execution-dist/task-execution-backend-local-dist/." packages/task-execution/backend-local/assembly/dist/
+          mkdir -p packages/task-execution/evaluation-harness/dist
+          cp -R ".task-execution-dist/task-execution-evaluation-harness-dist/." packages/task-execution/evaluation-harness/dist/
+      - name: Install packed-smoke dependency toolchains
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable)
+          (cd packages/task-execution/profiles && yarn install --immutable)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable)
+      - name: Build evidence contract packages from source
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+      - name: Verify Task Execution Evaluator Adapters
+        working-directory: packages/task-execution/evaluator-adapters
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Task Execution Evaluator Adapters distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-execution-evaluator-adapters-dist
+          path: packages/task-execution/evaluator-adapters/dist
+          if-no-files-found: error
+          retention-days: 1
+```
+
+In the `verify` job: add `evaluator-adapters` to `needs`, add `EVALUATOR_ADAPTERS_RESULT: ${{ needs.evaluator-adapters.result }}` to `env`, add `"$EVALUATOR_ADAPTERS_RESULT" \` to the `for result in` list, and append to the "Place package distributions" step:
+
+```bash
+          mkdir -p packages/task-execution/evaluator-adapters/dist
+          cp -R ".task-execution-dist/task-execution-evaluator-adapters-dist/." packages/task-execution/evaluator-adapters/dist/
+```
+
+- [ ] **Step 10: Create the pack-smoke script**
+
+`packages/task-execution/evaluator-adapters/scripts/pack-smoke.mjs`:
+
+```js
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const taskExecutionRoot = resolve(packageRoot, "..");
+const evidenceRoot = resolve(taskExecutionRoot, "..", "evidence");
+
+const packageInputs = [
+  [join(evidenceRoot, "protocol"), "@jinn-network/evidence-protocol"],
+  [join(evidenceRoot, "repository"), "@jinn-network/evidence-repository"],
+  [join(evidenceRoot, "attestation-issuer"), "@jinn-network/attestation-issuer"],
+  [join(taskExecutionRoot, "protocol"), "@jinn-network/task-execution-protocol"],
+  [join(taskExecutionRoot, "backend"), "@jinn-network/task-execution-backend"],
+  [join(taskExecutionRoot, "profiles"), "@jinn-network/task-execution-profiles"],
+  [join(taskExecutionRoot, "backend-local", "supervisor"), "@jinn-network/task-execution-supervisor"],
+  [join(taskExecutionRoot, "backend-local", "workspace"), "@jinn-network/task-execution-workspace"],
+  [join(taskExecutionRoot, "backend-local", "launchers"), "@jinn-network/task-execution-launchers"],
+  [join(taskExecutionRoot, "evaluation-harness"), "@jinn-network/task-execution-evaluation-harness"],
+  [packageRoot, "@jinn-network/task-execution-evaluator-adapters"],
+];
+
+const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-evaluator-adapters-"));
+const archivesRoot = join(temporaryRoot, "archives");
+const consumerRoot = join(temporaryRoot, "consumer");
+
+function run(command, args, options = {}) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", ...options });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`${command} exited with ${code}`));
+    });
+  });
+}
+
+try {
+  await run("yarn", ["build"], { cwd: packageRoot });
+  await mkdir(archivesRoot, { recursive: true });
+  const archives = new Map();
+  for (const [root, name] of packageInputs) {
+    const archive = join(archivesRoot, `${name.slice("@jinn-network/".length)}.tgz`);
+    await run("yarn", ["pack", "--out", archive], { cwd: root });
+    archives.set(name, archive);
+  }
+
+  await mkdir(consumerRoot);
+  await writeFile(
+    join(consumerRoot, "package.json"),
+    JSON.stringify({
+      private: true,
+      type: "module",
+      dependencies: {
+        ...Object.fromEntries([...archives].map(([name, archive]) => [name, `file:${archive}`])),
+        "@types/node": "^22.0.0",
+        typescript: "5.9.3",
+      },
+    }),
+  );
+  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumerRoot });
+
+  const installedRoot = join(
+    consumerRoot, "node_modules", "@jinn-network", "task-execution-evaluator-adapters",
+  );
+  const smokeScript = join(consumerRoot, "smoke.mjs");
+  await writeFile(
+    smokeScript,
+    `
+import { readFile, readdir } from "node:fs/promises";
+const adapters = await import("@jinn-network/task-execution-evaluator-adapters");
+for (const name of [
+  "createEvaluatorDeployment",
+  "createSweRebenchRegistration",
+  "createPredictionRegistration",
+  "parserAllowlistEntries",
+]) {
+  if (typeof adapters[name] !== "function") {
+    throw new Error("missing public export: " + name);
+  }
+}
+const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+const actual = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
+const expected = ${JSON.stringify([
+      "@jinn-network/task-execution-evaluation-harness",
+      "@jinn-network/task-execution-profiles",
+    ])};
+if (actual.join(",") !== expected.join(",")) {
+  throw new Error("unexpected Jinn dependency boundary: " + actual.join(", "));
+}
+const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
+if (distFiles.some((name) => name.includes(".test."))) {
+  throw new Error("test output leaked into dist");
+}
+await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
+console.log("Installed evaluator-adapters surface and dependency boundary verified.");
+`,
+  );
+  await run(process.execPath, [smokeScript], { cwd: consumerRoot });
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
+```
+
+The smoke script asserts exports that do not exist yet — it becomes green at Task 9. That is intentional: `pack:smoke` runs in CI only, and CI first runs it in the PR that lands Task 9's train head. If the PR train is split so that Task 1 lands alone, temporarily reduce the export list in the smoke script to `[]` and restore it in Task 9; note the restoration in Task 9's commit.
+
+- [ ] **Step 11: Run all three guards**
+
+Run:
+```bash
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071"
+node --test .github/scripts/task-execution-package-inventory.test.mjs
+node --test .github/scripts/task-execution-source-boundaries.test.mjs
+node .github/scripts/task-execution-packed-types.test.mjs
+```
+Expected: all three PASS. The packed-types run ends with `Compiled a packed TypeScript consumer against 13 public code entrypoints across all task-execution packages.`
+
+- [ ] **Step 12: Commit**
+
+```bash
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071"
+git add packages/task-execution/evaluator-adapters .github/scripts .github/workflows/task-execution-ci.yml
+git commit -m "feat(task-execution): scaffold evaluator-adapters with the guard trio and CI job"
+```
+
+---
+
+### Task 2: Conformance kit and the full fixture corpus
+
+Kit-first, per the program's Global constraints. Everything after this task is driven by fixtures that already exist.
+
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/testing.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/testing.test.ts`
+- Create: `packages/task-execution/evaluator-adapters/fixtures/README.md`
+- Create: `packages/task-execution/evaluator-adapters/fixtures/{pytest-json-report,junit-xml,tap14,swe-rebench-adapter,prediction-adapter,parser-declarations}/{golden,adversarial}/*.json`
+- Modify: `packages/task-execution/evaluator-adapters/package.json` (add `./testing` export + `fixtures/` to `files`)
+- Modify: `.github/scripts/task-execution-packed-types.test.mjs` (add the `./testing` entrypoint)
+
+**Interfaces:**
+- Consumes: the package scaffold from Task 1.
 - Produces:
-  ```ts
-  export const SWE_REBENCH_PARSER: ParserIdentity;
-  export const PREDICTION_PARSER: ParserIdentity;
-  export function evaluatorAdaptersParserAllowlist(): ReadonlySet<string>;
-  ```
+  - `FIXTURE_FAMILIES: string[]`
+  - `interface FixtureCase { name: string; kind: "golden" | "adversarial"; input: unknown; expect: unknown }`
+  - `loadFixtureFamily(family: string): Promise<FixtureCase[]>`
+  - `buildSweRebenchEvaluationSpec(overrides?: { parserId?: string }): EvaluationSpec`
+  - `buildPredictionEvaluationSpec(): EvaluationSpec`
 
-### Steps
+- [ ] **Step 1: Write the failing kit test**
 
-- [ ] **Failing test.** Create `src/parser-identity.test.ts`:
+`packages/task-execution/evaluator-adapters/src/testing.test.ts`:
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+```ts
+// SPDX-License-Identifier: Apache-2.0
 
-      import { createHash } from "node:crypto";
-      import { readFileSync } from "node:fs";
-      import { join } from "node:path";
-      import { fileURLToPath } from "node:url";
-      import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
-      import { describe, expect, test } from "vitest";
-      import {
-        evaluatorAdaptersParserAllowlist,
-        PREDICTION_PARSER,
-        SWE_REBENCH_PARSER,
-      } from "./parser-identity.js";
+import { describe, expect, it } from "vitest";
+import { parseEvaluationSpec, sealEvaluationSpec } from "@jinn-network/task-execution-profiles";
+import {
+  buildPredictionEvaluationSpec,
+  buildSweRebenchEvaluationSpec,
+  FIXTURE_FAMILIES,
+  loadFixtureFamily,
+} from "./testing.js";
 
-      const fixtures = fileURLToPath(new URL("../fixtures/parsers/", import.meta.url));
-
-      function fileDigest(name: string): string {
-        return `sha256:${createHash("sha256").update(readFileSync(join(fixtures, name))).digest("hex")}`;
+describe("evaluator-adapters conformance kit", () => {
+  it("loads every declared fixture family with at least one golden case", async () => {
+    expect(FIXTURE_FAMILIES.length).toBeGreaterThan(0);
+    for (const family of FIXTURE_FAMILIES) {
+      const cases = await loadFixtureFamily(family);
+      expect(cases.length, `${family} has no cases`).toBeGreaterThan(0);
+      expect(
+        cases.some((fixtureCase) => fixtureCase.kind === "golden"),
+        `${family} has no golden case`,
+      ).toBe(true);
+      for (const fixtureCase of cases) {
+        expect(typeof fixtureCase.name).toBe("string");
+        expect(Object.hasOwn(fixtureCase, "input")).toBe(true);
+        expect(Object.hasOwn(fixtureCase, "expect")).toBe(true);
       }
+    }
+  });
 
-      describe("parser identities", () => {
-        test("the swe-rebench digest is its semantics document, byte for byte", () => {
-          expect(SWE_REBENCH_PARSER.id).toBe("network.jinn.parser.swe-rebench-v2");
-          expect(SWE_REBENCH_PARSER.version).toBe("1.0.0");
-          expect(SWE_REBENCH_PARSER.digest).toBe(fileDigest("swe-rebench-v2.parser.json"));
-        });
+  it("builds spec fixtures that survive the profiles parser and seal deterministically", () => {
+    for (const spec of [buildSweRebenchEvaluationSpec(), buildPredictionEvaluationSpec()]) {
+      const sealed = sealEvaluationSpec(spec);
+      expect(parseEvaluationSpec(sealed.bytes)).toBeDefined();
+      expect(sealEvaluationSpec(spec).digest).toBe(sealed.digest);
+    }
+  });
+});
+```
 
-        test("the prediction digest is its semantics document, byte for byte", () => {
-          expect(PREDICTION_PARSER.id).toBe("network.jinn.parser.prediction-market");
-          expect(PREDICTION_PARSER.version).toBe("1.0.0");
-          expect(PREDICTION_PARSER.digest).toBe(fileDigest("prediction-market.parser.json"));
-        });
+- [ ] **Step 2: Run it to verify it fails**
 
-        test("the deployment allowlist carries exactly both parser keys", () => {
-          expect([...evaluatorAdaptersParserAllowlist()].sort()).toEqual(
-            [
-              parserAllowlistKey(PREDICTION_PARSER),
-              parserAllowlistKey(SWE_REBENCH_PARSER),
-            ].sort(),
-          );
-        });
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test`
+Expected: FAIL — `Cannot find module './testing.js'`
 
-        test("an unrelated parser identity is not allowlisted", () => {
-          expect(
-            evaluatorAdaptersParserAllowlist().has(
-              parserAllowlistKey({
-                id: "network.jinn.parser.swe-rebench-v2",
-                version: "1.0.0",
-                digest: `sha256:${"0".repeat(64)}`,
-              }),
-            ),
-          ).toBe(false);
-        });
+- [ ] **Step 3: Write the kit**
+
+`packages/task-execution/evaluator-adapters/src/testing.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+//
+// Conformance-kit backbone. Mirrors the profiles kit (`@jinn-network/task-execution-profiles/testing`):
+// a pure fixture loader plus the spec builders the fixtures are written against. No vitest import —
+// these are plain functions a consumer calls from any test framework.
+
+import { readdir, readFile } from "node:fs/promises";
+import { basename } from "node:path";
+import {
+  EVALUATION_SPEC_FORMAT_URI,
+  EVAL_SEMANTICS_VERSION,
+  type EvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
+
+/** Every fixture family this package ships under `fixtures/*`, sorted by UTF-16 code unit. */
+export const FIXTURE_FAMILIES: string[] = [
+  "junit-xml",
+  "parser-declarations",
+  "prediction-adapter",
+  "pytest-json-report",
+  "swe-rebench-adapter",
+  "tap14",
+];
+
+export type FixtureKind = "golden" | "adversarial";
+
+export interface FixtureCase {
+  name: string;
+  kind: FixtureKind;
+  input: unknown;
+  expect: unknown;
+}
+
+const FIXTURE_KINDS: readonly FixtureKind[] = ["golden", "adversarial"];
+
+function fixtureUrl(family: string, kind: FixtureKind): URL {
+  return new URL(`../fixtures/${family}/${kind}/`, import.meta.url);
+}
+
+/**
+ * Loads one fixture family. Each `*.json` file is `{ input, expect }`; the case name is the file
+ * stem and the kind is its directory. Ordering is by code unit so a run is reproducible.
+ */
+export async function loadFixtureFamily(family: string): Promise<FixtureCase[]> {
+  if (!FIXTURE_FAMILIES.includes(family)) {
+    throw new TypeError(`unknown fixture family: ${family}`);
+  }
+  const cases: FixtureCase[] = [];
+  for (const kind of FIXTURE_KINDS) {
+    const directory = fixtureUrl(family, kind);
+    let entries: string[];
+    try {
+      entries = await readdir(directory);
+    } catch {
+      continue;
+    }
+    for (const entry of entries.filter((name) => name.endsWith(".json"))) {
+      const document = JSON.parse(
+        await readFile(new URL(entry, directory), "utf8"),
+      ) as { input: unknown; expect: unknown };
+      cases.push({
+        name: basename(entry, ".json"),
+        kind,
+        input: document.input,
+        expect: document.expect,
       });
-      ```
+    }
+  }
+  return cases.sort((left, right) =>
+    left.kind < right.kind ? -1
+      : left.kind > right.kind ? 1
+      : left.name < right.name ? -1
+      : left.name > right.name ? 1
+      : 0
+  );
+}
 
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/parser-identity.test.ts`
-      Expected failure: `Failed to resolve import "./parser-identity.js"`.
+const SCORER_DIGEST_PLACEHOLDER = "a".repeat(64);
 
-- [ ] **Write the semantics documents.** `fixtures/parsers/swe-rebench-v2.parser.json` states
-      exactly what the parser commits to, transcribed from the legacy oracles
-      (`client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:1-27`, `:216-249`,
-      `:546-569`). It is data, never code:
+/**
+ * The swe-rebench EvaluationSpec shape — byte-identical in structure to what
+ * `sweRebenchRowToTaskAndSpec` produces in profiles, so an adapter that satisfies this fixture
+ * satisfies a real mined row. `parserId` selects which ingestion format the row commits to.
+ */
+export function buildSweRebenchEvaluationSpec(
+  overrides: { parserId?: string; parserDigest?: `sha256:${string}` } = {},
+): EvaluationSpec {
+  const parserId = overrides.parserId ?? "jinn.parser.pytest-json-report";
+  const parserDigest = overrides.parserDigest ?? `sha256:${"b".repeat(64)}`;
+  return {
+    protocol: EVALUATION_SPEC_FORMAT_URI,
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    family: "deterministic-process",
+    grader: {
+      name: parserId,
+      digest: { sha256: parserDigest.slice("sha256:".length) },
+      accessClass: "public",
+    },
+    familyBlock: {
+      image: { name: "grader-image", digest: { sha256: SCORER_DIGEST_PLACEHOLDER } },
+      platform: "linux/amd64",
+      workspace: {},
+      testMaterial: [],
+      parser: { id: parserId, version: "1.0.0", digest: parserDigest },
+      transitions: {
+        failToPass: ["test_pool.py::test_retry_releases_connection"],
+        passToPass: ["test_pool.py::test_basic_get"],
+      },
+      timeout: 1800,
+    },
+    measurements: [{ name: "passed", type: "boolean", required: true }],
+    verdictRule: { threshold: { measurement: "passed", op: "eq", value: true } },
+    unscorable: [{ name: "environment-setup-failure", disposition: "retryable-infrastructure" }],
+    evidenceConventions: { requiredRefs: [] },
+  };
+}
 
-      ```json
-      {
-        "parser": "network.jinn.parser.swe-rebench-v2",
-        "version": "1.0.0",
-        "input": {
-          "report": "one item of the upstream SWE-rebench-V2 scripts/eval report.json items[] array",
-          "graded": ["instance_id", "from_fail_to_pass", "failed_from_pass_to_pass", "passed_actual", "failed_actual", "exit_code", "log_path"],
-          "setupError": ["instance_id", "error"],
-          "log": "the concatenated container log, UTF-8, tail-capped by the caller"
+/**
+ * The binary-prediction-market EvaluationSpec. Design finding 3: the frozen grader-family
+ * taxonomy has no pure-parse family, so this fixture authors the scorer as a
+ * `deterministic-process` whose `image` carries the scorer's own declaration digest — an honest
+ * content commitment rather than a fabricated container reference. The builder lives in the kit,
+ * not production, so nothing shipped depends on that nominal field.
+ */
+export function buildPredictionEvaluationSpec(): EvaluationSpec {
+  const parserDigest = `sha256:${"c".repeat(64)}` as const;
+  return {
+    protocol: EVALUATION_SPEC_FORMAT_URI,
+    semanticsVersion: EVAL_SEMANTICS_VERSION,
+    family: "deterministic-process",
+    grader: {
+      name: "jinn.parser.prediction-market-v1",
+      digest: { sha256: parserDigest.slice("sha256:".length) },
+      accessClass: "public",
+    },
+    familyBlock: {
+      image: { name: "jinn.parser.prediction-market-v1", digest: { sha256: parserDigest.slice("sha256:".length) } },
+      platform: "any",
+      workspace: {},
+      testMaterial: [],
+      parser: { id: "jinn.parser.prediction-market-v1", version: "1.0.0", digest: parserDigest },
+      transitions: { failToPass: [], passToPass: [] },
+      timeout: 60,
+    },
+    measurements: [
+      { name: "identityMatched", type: "boolean", required: true },
+      { name: "withinWindow", type: "boolean", required: true },
+      { name: "resolved", type: "boolean", required: true },
+      { name: "solverBrier", type: "string", required: false },
+      { name: "consensusBrier", type: "string", required: false },
+      { name: "brierSpread", type: "string", direction: "lower-better", required: false },
+    ],
+    verdictRule: {
+      all: [
+        { threshold: { measurement: "identityMatched", op: "eq", value: true } },
+        { threshold: { measurement: "withinWindow", op: "eq", value: true } },
+        {
+          inconclusiveWhen: { threshold: { measurement: "resolved", op: "eq", value: false } },
+          class: "market-unresolved",
         },
-        "resolution": {
-          "rule": "resolved iff every declared failToPass transition now passes AND no declared passToPass transition broke",
-          "note": "the upstream passed_match field is NOT trusted: it compares the observed passing set to the union of declared transitions, which makes any instance whose test command runs extra tests structurally unscorable and penalises an added passing test"
-        },
-        "ungradeable": {
-          "rule": "a report is ungradeable when the upstream item carries a non-empty error, or lacks a numeric exit_code, or (container exit non-zero AND no declared failToPass passed AND every declared passToPass is reported broken AND the log matches a classified infrastructure signature)",
-          "classes": [
-            "docker_unavailable", "docker_storage_io_error", "image_pull_failed",
-            "docker_credentials_error", "docker_run_failed", "patch_corrupt",
-            "patch_does_not_apply", "patch_merge_conflict", "workdir_not_git_repo",
-            "test_command_not_found", "install_build_failed", "venv_missing",
-            "image_arch_mismatch", "venv_collision", "pytest_missing",
-            "requests_dep_mismatch", "conftest_import_error",
-            "eval_setup_error", "eval_report_malformed"
-          ],
-          "note": "an ungradeable report yields no verdict; it is never reported as a failing verdict"
-        },
-        "measurements": { "passed": "boolean — the resolution rule's outcome" }
-      }
-      ```
+        { threshold: { measurement: "brierSpread", op: "lt", value: "0" } },
+      ],
+    },
+    unscorable: [{ name: "market-unresolved", disposition: "recorded-inconclusive" }],
+    evidenceConventions: { requiredRefs: [] },
+  };
+}
+```
 
-      `fixtures/parsers/prediction-market.parser.json`, transcribed from
-      `client/src/harnesses/impls/prediction-v1-evaluator/index.ts:92-146` and
-      `client/src/harnesses/impls/prediction-v0-evaluator/score.ts`:
+- [ ] **Step 4: Write the fixture corpus**
 
-      ```json
-      {
-        "parser": "network.jinn.parser.prediction-market",
-        "version": "1.0.0",
-        "input": {
-          "result": "the solver Result document: probabilityYes (decimal string in [0,1]), submittedAt (RFC 3339), modelId",
-          "context": "the resolution snapshot: status (resolved|unresolved|unavailable), outcome (YES|NO), resolvedAt, marketId, conditionId, sourceUrl, and the consensus snapshot probabilityYes plus the submission window"
-        },
-        "checks": ["result.schema", "result.window", "market.identity", "market.resolution"],
-        "verdict": {
-          "fail": "any check other than market.resolution reports FAIL",
-          "inconclusive": "the market is not resolved (the spec must declare an inconclusiveWhen predicate over the resolved measurement)",
-          "pass": "every check passes and the market resolved"
-        },
-        "scoring": {
-          "basis": "brier-loss.v1",
-          "rule": "brier = (probability - target)^2 with target 1 for YES and 0 for NO; spread = solverBrier - consensusBrier",
-          "encoding": "fixed six-fraction-digit decimal strings — never JSON numbers, per the I-JSON sealed-numbers rule"
-        },
-        "measurements": {
-          "integrity": "boolean", "resolved": "boolean", "outcomeYes": "boolean",
-          "solverBrier": "string", "consensusBrier": "string", "brierSpread": "string"
-        }
-      }
-      ```
+`fixtures/README.md`:
 
-- [ ] **Minimal implementation.** Create `src/parser-identity.ts`:
+```markdown
+# Evaluator-adapter fixtures
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+Each `*.json` is one conformance case: `{ "input": …, "expect": … }`. The file stem is the case
+name; the directory (`golden` / `adversarial`) is the case kind.
 
-      import { createHash } from "node:crypto";
-      import { readFileSync } from "node:fs";
-      import { fileURLToPath } from "node:url";
-      import {
-        parserAllowlistKey,
-        type ParserIdentity,
-      } from "@jinn-network/task-execution-profiles";
+The `pytest-json-report`, `swe-rebench-adapter`, and `prediction-adapter` families carry the
+behavior of the retired `client/src/harnesses/impls/**` evaluators as *test cases*, never as
+ported code (composition program §6 contract 12). Where the fresh implementation deliberately
+diverges from legacy, the case name says so and the file carries a `note` field.
+```
 
-      /**
-       * A parser's semantic commitment is its digest (profiles design §7.2). The digest here is
-       * the SHA-256 of the parser's own semantics document, shipped in `fixtures/parsers/` and
-       * pinned by `parser-identity.test.ts` — editing the semantics without bumping `version`
-       * breaks the build rather than silently changing what the allowlist key means.
-       */
-      function semanticsDigest(fileName: string): `sha256:${string}` {
-        const path = fileURLToPath(
-          new URL(`../fixtures/parsers/${fileName}`, import.meta.url),
-        );
-        return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
-      }
+**Family `pytest-json-report`** — `input` is `{ report, transitions, stdout }` where `report` is the upstream `report.json` document, `transitions` is `{ failToPass, passToPass }`, and `stdout` is the captured container output; `expect` is either `{ "outcome": { passed, failToPassPassed, passToPassBroken, noTestPassed } }` or `{ "operational": { reason } }`.
 
-      export const SWE_REBENCH_PARSER: ParserIdentity = Object.freeze({
-        id: "network.jinn.parser.swe-rebench-v2",
-        version: "1.0.0",
-        digest: semanticsDigest("swe-rebench-v2.parser.json"),
-      });
+Write these eleven files (`golden/`):
 
-      export const PREDICTION_PARSER: ParserIdentity = Object.freeze({
-        id: "network.jinn.parser.prediction-market",
-        version: "1.0.0",
-        digest: semanticsDigest("prediction-market.parser.json"),
-      });
+- `resolved.json` — items `[{ instance_id: "i", from_fail_to_pass: ["test_pool.py::test_retry_releases_connection"], failed_from_pass_to_pass: [], passed_match: true, exit_code: 0 }]`; expect `outcome.passed === true`, `noTestPassed === false`.
+- `rederived-pass-despite-upstream-mismatch.json` — `from_fail_to_pass: ["test_pool.py::test_retry_releases_connection"]`, `failed_from_pass_to_pass: []`, `passed_match: false`, `exit_code: 1`; expect `outcome.passed === true`. `note`: "upstream `passed_match` is an exact-set comparison and is deliberately ignored; SWE-bench `resolved` semantics are re-derived."
+- `genuine-wrong-answer.json` — `from_fail_to_pass: []`, `failed_from_pass_to_pass: []`, `exit_code: 1`, stdout a plain pytest summary; expect `outcome.passed === false`, no operational failure.
+- `partial-fail-to-pass.json` — two `failToPass` ids, one in `from_fail_to_pass`; expect `passed === false`.
+- `broken-pass-to-pass.json` — all `failToPass` passing but `failed_from_pass_to_pass: ["test_pool.py::test_basic_get"]`; expect `passed === false`.
+- `infrastructure-signature-with-a-real-pass.json` — stdout contains `Cannot connect to the Docker daemon`, but `from_fail_to_pass` is non-empty; expect `outcome.passed === true`. `note`: "the infrastructure gate requires that nothing expected passed; a partially-passing run is a real result."
+- `missing-pass-to-pass-id-is-not-broken.json` — a `passToPass` id absent from both report lists; expect `passToPassBroken` empty. `note`: "only explicitly failed PASS_TO_PASS ids count as broken, matching legacy `failed_from_pass_to_pass` semantics."
+- `empirical-mode.json` — `transitions` both empty; report carries `passed_actual: ["a","b"]`, `failed_actual: []`, `exit_code: 0`; expect `passed === true` and the passed set equal to `passed_actual`.
+- `log-tail-capped.json` — `stdout` is a 1 100 000-character string of `"x"`; expect `{ "log": { "startsWith": "[... 51648 characters truncated ...]\n", "length": 1048576 } }`. Compute the exact numbers when writing the file by running the implementation once, then pin them.
 
-      /**
-       * The deployment-side execution allowlist this package contributes. A host merges it into
-       * `EvaluationHarnessDeployment.parserAllowlist`; a spec naming any other parser identity is
-       * refused by the harness runtime before an adapter is selected.
-       */
-      export function evaluatorAdaptersParserAllowlist(): ReadonlySet<string> {
-        return new Set([
-          parserAllowlistKey(SWE_REBENCH_PARSER),
-          parserAllowlistKey(PREDICTION_PARSER),
-        ]);
-      }
-      ```
+And these six (`adversarial/`):
 
-      Export it from `src/index.ts`:
+- `setup-error.json` — item `{ instance_id: "i", from_fail_to_pass: [], failed_from_pass_to_pass: ["test_pool.py::test_basic_get"], error: "Task i missing top-level image_name." }`; expect `{ operational: { reason: "eval_setup_error" } }`.
+- `missing-exit-code.json` — item without `exit_code` and without `error`; expect `{ operational: { reason: "eval_report_malformed" } }`.
+- `no-items.json` — `{ items: [] }`; expect `{ operational: { reason: "eval_report_malformed" } }`.
+- `docker-unavailable.json` — `exit_code: 125`, every `passToPass` id in `failed_from_pass_to_pass`, stdout `Cannot connect to the Docker daemon at unix:///var/run/docker.sock.`; expect `{ operational: { reason: "docker_unavailable" } }`.
+- `docker-credentials-error.json` — `exit_code: 1`, all PASS_TO_PASS broken, stdout `error getting credentials - err: exit status 1`; expect `{ operational: { reason: "docker_credentials_error" } }`. `note`: "the 2026-07-07 evaluator outage: this shape previously delivered a false `fail`."
+- `patch-corrupt.json` — `exit_code: 1`, all PASS_TO_PASS broken, stdout `Checking patch src/foo.py...\nerror: corrupt patch at line 30`; expect `{ operational: { reason: "patch_corrupt" } }`.
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+**Family `junit-xml`** — `input` is `{ xml }`; `expect` is `{ report: { passed, failed, skipped } }` or `{ error: "invalid-report" }`.
+- `golden/single-suite.json` — one `<testsuite>` with three `<testcase classname="test_pool" name="test_basic_get"/>`, one carrying `<failure/>`, one `<skipped/>`; expect ids `test_pool.py::test_basic_get`-style composition `classname::name`.
+- `golden/nested-suites.json` — `<testsuites>` wrapping two `<testsuite>`; both contribute.
+- `golden/error-counts-as-failed.json` — a `<testcase>` with `<error/>`.
+- `golden/self-closing-and-empty-suite.json` — a suite with no cases; expect all three arrays empty.
+- `adversarial/doctype-entity.json` — XML containing `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`; expect `{ error: "invalid-report" }`.
+- `adversarial/unterminated-tag.json` — truncated XML; expect `{ error: "invalid-report" }`.
 
-      export * from "./parser-identity.js";
-      ```
+**Family `tap14`** — `input` is `{ text }`; same `expect` shape.
+- `golden/plan-and-results.json` — `TAP version 14\n1..3\nok 1 - alpha\nnot ok 2 - beta\nok 3 - gamma # SKIP not applicable\n`; expect `passed: ["alpha","gamma"]`? No — SKIP goes to `skipped`, so `passed: ["alpha"]`, `failed: ["beta"]`, `skipped: ["gamma"]`.
+- `golden/todo-directive.json` — `not ok 1 - delta # TODO known bug`; expect `skipped: ["delta"]`, nothing failed. `note`: "a TODO-directive failure is not a real failure per TAP14."
+- `golden/no-description.json` — `ok 1` with no description; expect the id `1`.
+- `adversarial/plan-count-mismatch.json` — `1..3` with two results; expect `{ error: "invalid-report" }`.
+- `adversarial/missing-version.json` — no `TAP version 14` line; expect `{ error: "invalid-report" }`.
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/parser-identity.test.ts`
-      Expected: 4 passing tests.
+**Family `swe-rebench-adapter`** — `input` is `{ report, stdout }`, `expect` is `{ verdict, measurements }` or `{ operational: { reason, canonicalCode, recoveryAdvice } }`. Four cases: `golden/pass.json`, `golden/fail.json`, `adversarial/setup-error.json`, `adversarial/undeclared-measurements-dropped.json` (report also produces counts the spec does not declare; `expect.measurements` contains only `passed`).
 
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): pin evaluator parser identities to their semantics documents"
-      ```
+**Family `prediction-adapter`** — `input` is `{ taskPayload, solution, outcome }`, `expect` is `{ verdict, measurements, limitations? }`. Six cases:
+- `golden/beats-consensus.json` — solver `probabilityYes: "0.9"`, consensus `"0.6"`, outcome `YES`; expect `verdict: "pass"`, `solverBrier: "0.010000"`, `consensusBrier: "0.160000"`, `brierSpread: "-0.150000"`.
+- `golden/loses-to-consensus.json` — solver `"0.2"`, consensus `"0.6"`, outcome `YES`; expect `verdict: "fail"`, `brierSpread: "0.480000"`.
+- `golden/unresolved-market.json` — outcome `{ status: "unresolved" }`; expect `verdict: "inconclusive"`, `limitations: ["market-unresolved"]`, no Brier measurements.
+- `adversarial/condition-id-case-differs.json` — outcome `conditionId` differs only in hexadecimal letter case; expect `identityMatched: true`. `note`: "conditionId matches case-insensitively; marketId matches exactly."
+- `adversarial/market-id-differs.json` — expect `verdict: "fail"`, `identityMatched: false`.
+- `adversarial/submitted-outside-window.json` — `submittedAt` one second after `window.endTs`; expect `verdict: "fail"`, `withinWindow: false`.
+
+**Family `parser-declarations`** — one golden per parser: `input` is `{ id }`, `expect` is `{ allowlistKey }`. The four keys are generated by Task 3's script, not hand-written; create the four files with `expect: { "allowlistKey": "" }` now and let Task 3's `yarn generate:parsers` fill them.
+
+- [ ] **Step 5: Add the `./testing` export and fixture packaging**
+
+In `packages/task-execution/evaluator-adapters/package.json`, add to `exports`:
+
+```json
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+```
+
+and add `"fixtures/"` to `files` (after `"dist/"`).
+
+In `.github/scripts/task-execution-packed-types.test.mjs`, add to `codeEntrypoints`:
+
+```js
+  '@jinn-network/task-execution-evaluator-adapters/testing',
+```
+
+- [ ] **Step 6: Run the kit test**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test && yarn typecheck && yarn build`
+Expected: PASS. Then from the repo root: `node .github/scripts/task-execution-packed-types.test.mjs` — PASS with 14 entrypoints.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters .github/scripts/task-execution-packed-types.test.mjs
+git commit -m "test(task-execution): add the evaluator-adapters conformance kit and fixture corpus"
+```
 
 ---
 
-## Task 3 — swe-rebench golden and adversarial fixtures
+### Task 3: Parser declarations and allowlist keys
 
-Fixtures precede the parser. Every case below is transcribed from a named legacy oracle;
-record the provenance comment in the fixture module exactly as written.
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/declarations.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/declarations.test.ts`
+- Create: `packages/task-execution/evaluator-adapters/scripts/seal-parser-declarations.mjs`
+- Modify: `packages/task-execution/evaluator-adapters/package.json` (add `generate:parsers` / `check:parsers` scripts)
+- Modify: `packages/task-execution/evaluator-adapters/fixtures/parser-declarations/golden/*.json`
 
-**Files**
-
-- `packages/task-execution/evaluator-adapters/fixtures/swe-rebench/README.md` (new)
-- `packages/task-execution/evaluator-adapters/fixtures/swe-rebench/*.json` / `*.log` (new)
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/fixtures.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/fixtures.test.ts` (new)
-
-**Interfaces**
-
+**Interfaces:**
+- Consumes: `loadFixtureFamily` from Task 2.
 - Produces:
-  ```ts
-  export interface SweRebenchFixture {
-    readonly name: string;
-    readonly provenance: string;
-    readonly transitions: { readonly failToPass: readonly string[]; readonly passToPass: readonly string[] };
-    readonly report: unknown;            // one upstream report.json items[] entry, or a non-object
-    readonly log: string;
-    readonly expect:
-      | { readonly kind: "graded"; readonly passed: boolean }
-      | { readonly kind: "ungradeable"; readonly ungradeableClass: string };
+  - `type ParserFormat = "benchmark-json" | "junit-xml" | "tap14"`
+  - `interface ParserDeclaration { readonly id: string; readonly version: string; readonly format: ParserFormat; readonly materialName: string }`
+  - `PARSER_DECLARATIONS: readonly ParserDeclaration[]` — ids `jinn.parser.pytest-json-report`, `jinn.parser.junit-xml`, `jinn.parser.tap14`, `jinn.parser.prediction-market-v1`
+  - `parserIdentity(id: string): ParserIdentity` (throws `TypeError` for an unknown id)
+  - `parserDeclaration(id: string): ParserDeclaration`
+  - `parserAllowlistEntries(): ReadonlySet<string>`
+
+- [ ] **Step 1: Write the failing test**
+
+`packages/task-execution/evaluator-adapters/src/declarations.test.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
+import { loadFixtureFamily } from "./testing.js";
+import {
+  PARSER_DECLARATIONS,
+  parserAllowlistEntries,
+  parserIdentity,
+} from "./declarations.js";
+
+describe("parser declarations", () => {
+  it("commits every parser to a sealed identity digest", () => {
+    for (const declaration of PARSER_DECLARATIONS) {
+      const identity = parserIdentity(declaration.id);
+      expect(identity.id).toBe(declaration.id);
+      expect(identity.version).toBe(declaration.version);
+      expect(identity.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    }
+  });
+
+  it("produces an allowlist that is exactly the declared parser keys", () => {
+    const entries = parserAllowlistEntries();
+    expect(entries.size).toBe(PARSER_DECLARATIONS.length);
+    for (const declaration of PARSER_DECLARATIONS) {
+      expect(entries.has(parserAllowlistKey(parserIdentity(declaration.id)))).toBe(true);
+    }
+  });
+
+  it("matches the pinned fixture keys", async () => {
+    for (const fixtureCase of await loadFixtureFamily("parser-declarations")) {
+      const { id } = fixtureCase.input as { id: string };
+      const { allowlistKey } = fixtureCase.expect as { allowlistKey: string };
+      expect(parserAllowlistKey(parserIdentity(id))).toBe(allowlistKey);
+    }
+  });
+
+  it("rejects an unknown parser id rather than inventing an identity", () => {
+    expect(() => parserIdentity("jinn.parser.unknown")).toThrow(TypeError);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/declarations.test.ts`
+Expected: FAIL — `Cannot find module './declarations.js'`
+
+- [ ] **Step 3: Write the declarations module**
+
+`packages/task-execution/evaluator-adapters/src/declarations.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  parserAllowlistKey,
+  sealDocument,
+  type ParserIdentity,
+} from "@jinn-network/task-execution-profiles";
+
+/** Ingestion formats parsed at the adapter edge (composition design §7 ruling 5). */
+export type ParserFormat = "benchmark-json" | "junit-xml" | "tap14";
+
+export interface ParserDeclaration {
+  /** Reverse-DNS parser id, exactly as it appears in a sealed EvaluationSpec's family block. */
+  readonly id: string;
+  readonly version: string;
+  readonly format: ParserFormat;
+  /** The material filename this parser reads from the provisioned Attempt input. */
+  readonly materialName: string;
+  /** Measurement names this parser can contribute; the adapter drops undeclared ones. */
+  readonly measurements: readonly string[];
+}
+
+/**
+ * The deployment's parser inventory, sorted by id (code unit). A parser's semantic commitment is
+ * its digest, never inline source (profiles family-blocks.ts): the digest below is the sealed
+ * digest of the declaration document itself, so changing a parser's format, material name, or
+ * measurement contract changes its identity and takes it out of every existing allowlist.
+ */
+export const PARSER_DECLARATIONS: readonly ParserDeclaration[] = Object.freeze([
+  Object.freeze({
+    id: "jinn.parser.junit-xml",
+    version: "1.0.0",
+    format: "junit-xml",
+    materialName: "junit.xml",
+    measurements: Object.freeze(["passed"]),
+  }),
+  Object.freeze({
+    id: "jinn.parser.prediction-market-v1",
+    version: "1.0.0",
+    format: "benchmark-json",
+    materialName: "prediction-outcome.json",
+    measurements: Object.freeze([
+      "identityMatched",
+      "withinWindow",
+      "resolved",
+      "solverBrier",
+      "consensusBrier",
+      "brierSpread",
+    ]),
+  }),
+  Object.freeze({
+    id: "jinn.parser.pytest-json-report",
+    version: "1.0.0",
+    format: "benchmark-json",
+    materialName: "evaluation-report.json",
+    measurements: Object.freeze(["passed"]),
+  }),
+  Object.freeze({
+    id: "jinn.parser.tap14",
+    version: "1.0.0",
+    format: "tap14",
+    materialName: "results.tap",
+    measurements: Object.freeze(["passed"]),
+  }),
+] as const);
+
+export const PARSER_DECLARATION_FORMAT_URI =
+  "https://jinn.network/profiles/evaluator-parser-declaration/1.0" as const;
+
+const byId = new Map(PARSER_DECLARATIONS.map((declaration) => [declaration.id, declaration]));
+
+export function parserDeclaration(id: string): ParserDeclaration {
+  const declaration = byId.get(id);
+  if (declaration === undefined) {
+    throw new TypeError(`unknown parser declaration: ${id}`);
   }
-  export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[];
-  ```
+  return declaration;
+}
 
-### Steps
+/** The canonical declaration document whose sealed digest is the parser's identity digest. */
+export function parserDeclarationDocument(id: string): Record<string, unknown> {
+  const declaration = parserDeclaration(id);
+  return {
+    protocol: PARSER_DECLARATION_FORMAT_URI,
+    id: declaration.id,
+    version: declaration.version,
+    format: declaration.format,
+    materialName: declaration.materialName,
+    measurements: [...declaration.measurements],
+  };
+}
 
-- [ ] **Failing test.** Create `src/swe-rebench/fixtures.test.ts`:
+export function parserIdentity(id: string): ParserIdentity {
+  const declaration = parserDeclaration(id);
+  return {
+    id: declaration.id,
+    version: declaration.version,
+    digest: sealDocument(parserDeclarationDocument(id)).digest,
+  };
+}
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+/** The deployment allowlist the evaluation harness enforces for deterministic-process specs. */
+export function parserAllowlistEntries(): ReadonlySet<string> {
+  return new Set(
+    PARSER_DECLARATIONS.map((declaration) => parserAllowlistKey(parserIdentity(declaration.id))),
+  );
+}
+```
 
-      import { describe, expect, test } from "vitest";
-      import { SWE_REBENCH_FIXTURES } from "./fixtures.js";
+- [ ] **Step 4: Write the pin script and fill the fixtures**
 
-      describe("swe-rebench fixtures", () => {
-        test("every fixture names its legacy provenance", () => {
-          expect(SWE_REBENCH_FIXTURES.length).toBeGreaterThanOrEqual(12);
-          for (const fixture of SWE_REBENCH_FIXTURES) {
-            expect(fixture.provenance).toMatch(/^client\/(src|test)\/.+:\d+/u);
-          }
-        });
+`packages/task-execution/evaluator-adapters/scripts/seal-parser-declarations.mjs`:
 
-        test("fixture names are unique", () => {
-          const names = SWE_REBENCH_FIXTURES.map((fixture) => fixture.name);
-          expect(new Set(names).size).toBe(names.length);
-        });
+```js
+// Writes (or checks) the pinned parser allowlist keys in fixtures/parser-declarations/golden/.
+// Run `yarn generate:parsers` after any declaration change; `yarn check:parsers` fails CI when
+// the pinned keys drift from the code.
 
-        test("both graded outcomes and every ungradeable class appear at least once", () => {
-          const graded = SWE_REBENCH_FIXTURES.filter((f) => f.expect.kind === "graded");
-          expect(graded.some((f) => f.expect.kind === "graded" && f.expect.passed)).toBe(true);
-          expect(graded.some((f) => f.expect.kind === "graded" && !f.expect.passed)).toBe(true);
-          const classes = new Set(
-            SWE_REBENCH_FIXTURES.flatMap((f) =>
-              f.expect.kind === "ungradeable" ? [f.expect.ungradeableClass] : []
-            ),
-          );
-          for (const required of [
-            "docker_unavailable",
-            "patch_does_not_apply",
-            "patch_corrupt",
-            "workdir_not_git_repo",
-            "venv_collision",
-            "pytest_missing",
-            "requests_dep_mismatch",
-            "conftest_import_error",
-            "eval_setup_error",
-            "eval_report_malformed",
-          ]) {
-            expect(classes).toContain(required);
-          }
-        });
-      });
-      ```
+import { readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench/fixtures.test.ts`
-      Expected failure: `Failed to resolve import "./fixtures.js"`.
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const goldenRoot = join(packageRoot, "fixtures", "parser-declarations", "golden");
+const { PARSER_DECLARATIONS, parserIdentity } = await import(
+  join(packageRoot, "dist", "declarations.js")
+);
+const { parserAllowlistKey } = await import("@jinn-network/task-execution-profiles");
 
-- [ ] **Minimal implementation.** Create `src/swe-rebench/fixtures.ts`. Provenance for every
-      case, from the legacy oracles:
+const check = process.argv.includes("--check");
+let drift = 0;
 
-      - report shapes — `client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:6-13`
-        and the upstream stub `client/test/harnesses/impls/swe-rebench-v2-evaluator/fixtures/eval.py:88-101`;
-      - graded / ungradeable cases —
-        `client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:257-405`;
-      - infrastructure fingerprints —
-        `client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242` and the
-        2026-05-14 triage constants at
-        `client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:576-592`.
+for (const declaration of PARSER_DECLARATIONS) {
+  const file = join(goldenRoot, `${declaration.id.replaceAll(".", "-")}.json`);
+  const allowlistKey = parserAllowlistKey(parserIdentity(declaration.id));
+  const document = { input: { id: declaration.id }, expect: { allowlistKey } };
+  const serialized = `${JSON.stringify(document, null, 2)}\n`;
+  if (check) {
+    const current = await readFile(file, "utf8");
+    if (current !== serialized) {
+      drift += 1;
+      console.error(`pinned parser key drifted: ${declaration.id}`);
+    }
+  } else {
+    await writeFile(file, serialized);
+    console.log(`pinned ${declaration.id} -> ${allowlistKey}`);
+  }
+}
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+if (check && drift > 0) process.exit(1);
+```
 
-      /**
-       * Behavioral oracles for the swe-rebench parser. Composition design §6.6: legacy behavior
-       * enters as fixtures, never as ported code. Each entry cites the exact legacy file and line
-       * range it was transcribed from.
-       */
+Add to `package.json` scripts:
 
-      export interface SweRebenchFixture {
-        readonly name: string;
-        readonly provenance: string;
-        readonly transitions: {
-          readonly failToPass: readonly string[];
-          readonly passToPass: readonly string[];
-        };
-        readonly report: unknown;
-        readonly log: string;
-        readonly expect:
-          | { readonly kind: "graded"; readonly passed: boolean }
-          | { readonly kind: "ungradeable"; readonly ungradeableClass: string };
-      }
+```json
+    "generate:parsers": "yarn build && node scripts/seal-parser-declarations.mjs",
+    "check:parsers": "yarn build && node scripts/seal-parser-declarations.mjs --check",
+```
 
-      const TRANSITIONS = {
-        failToPass: ["tests/test_a.py::test_a"],
-        passToPass: ["tests/test_b.py::test_b"],
-      } as const;
+Run `yarn generate:parsers` to fill the four fixture files (this replaces the empty `allowlistKey` stubs from Task 2).
 
-      const PYTEST_TAIL = [
-        "==================================== PASSES ====================================",
-        "PASSED tests/test_a.py::test_a",
-        "PASSED tests/test_b.py::test_b",
-        "======================== 2 passed, 0 failed in 1.20s ==========================",
-      ].join("\n");
+- [ ] **Step 5: Run the tests**
 
-      export const SWE_REBENCH_FIXTURES: readonly SweRebenchFixture[] = Object.freeze([
-        {
-          name: "resolved-all-transitions",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: ["tests/test_a.py::test_a"],
-            failed_from_pass_to_pass: [],
-            passed_match: true,
-            exit_code: 0,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: PYTEST_TAIL,
-          expect: { kind: "graded", passed: true },
-        },
-        {
-          name: "resolved-despite-extra-unlisted-test-failing",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:270-283",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: ["tests/test_a.py::test_a"],
-            failed_from_pass_to_pass: [],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: [
-            "FAILED tests/test_unlisted.py::test_unlisted",
-            "PASSED tests/test_a.py::test_a",
-            "PASSED tests/test_b.py::test_b",
-            "=================== 2 passed, 1 failed in 2.10s ===============================",
-          ].join("\n"),
-          expect: { kind: "graded", passed: true },
-        },
-        {
-          name: "unresolved-fail-to-pass-still-failing",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:284-295",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: [],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: [
-            "FAILED tests/test_a.py::test_a - AssertionError",
-            "PASSED tests/test_b.py::test_b",
-            "=================== 1 passed, 1 failed in 1.80s ===============================",
-          ].join("\n"),
-          expect: { kind: "graded", passed: false },
-        },
-        {
-          name: "unresolved-pass-to-pass-broken",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:555-559",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: ["tests/test_a.py::test_a"],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: [
-            "PASSED tests/test_a.py::test_a",
-            "FAILED tests/test_b.py::test_b - RegressionError",
-            "=================== 1 passed, 1 failed in 1.90s ===============================",
-          ].join("\n"),
-          expect: { kind: "graded", passed: false },
-        },
-        {
-          name: "ungradeable-docker-unavailable",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:318-331",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 125,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.",
-          expect: { kind: "ungradeable", ungradeableClass: "docker_unavailable" },
-        },
-        {
-          name: "ungradeable-patch-corrupt",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:333-346",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "error: corrupt patch at line 7",
-          expect: { kind: "ungradeable", ungradeableClass: "patch_corrupt" },
-        },
-        {
-          name: "ungradeable-patch-does-not-apply",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:229",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "error: patch failed: src/widget.py:14\nerror: patch does not apply",
-          expect: { kind: "ungradeable", ungradeableClass: "patch_does_not_apply" },
-        },
-        {
-          name: "ungradeable-workdir-not-git-repo",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:348-361",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 128,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "fatal: not a git repository (or any of the parent directories): .git",
-          expect: { kind: "ungradeable", ungradeableClass: "workdir_not_git_repo" },
-        },
-        {
-          name: "ungradeable-venv-collision",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:576-580",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 2,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: [
-            "error: Failed to create virtual environment.",
-            "  Caused by: A virtual environment already exists at /testbed/.venv",
-            "  Use --clear to replace it",
-          ].join("\n"),
-          expect: { kind: "ungradeable", ungradeableClass: "venv_collision" },
-        },
-        {
-          name: "ungradeable-pytest-missing",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:582-583",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "/opt/conda/bin/python: No module named pytest",
-          expect: { kind: "ungradeable", ungradeableClass: "pytest_missing" },
-        },
-        {
-          name: "ungradeable-requests-dep-mismatch",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:585-586",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log:
-            "requests.exceptions.RequestsDependencyWarning: urllib3 (2.2.2) or "
-            + "chardet (7.4.3)/charset_normalizer (3.3.2) doesn't match a supported version!",
-          expect: { kind: "ungradeable", ungradeableClass: "requests_dep_mismatch" },
-        },
-        {
-          name: "ungradeable-conftest-import-error",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:588-589",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "ImportError while loading conftest '/testbed/tests/conftest.py'.",
-          expect: { kind: "ungradeable", ungradeableClass: "conftest_import_error" },
-        },
-        {
-          name: "ungradeable-upstream-setup-error",
-          provenance: "client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts:363-370",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            error: "missing image_name",
-          },
-          log: "",
-          expect: { kind: "ungradeable", ungradeableClass: "eval_setup_error" },
-        },
-        {
-          name: "adversarial-report-lacks-exit-code",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:501-507",
-          transitions: TRANSITIONS,
-          report: { instance_id: "acme__widget-1", from_fail_to_pass: [], failed_from_pass_to_pass: [] },
-          log: "",
-          expect: { kind: "ungradeable", ungradeableClass: "eval_report_malformed" },
-        },
-        {
-          name: "adversarial-report-is-not-an-object",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:478-489",
-          transitions: TRANSITIONS,
-          report: "the upstream harness crashed before writing a report",
-          log: "",
-          expect: { kind: "ungradeable", ungradeableClass: "eval_report_malformed" },
-        },
-        {
-          name: "adversarial-transition-arrays-carry-non-strings",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:251-253",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [null, 7, "tests/test_a.py::test_a"],
-            failed_from_pass_to_pass: [{ nested: true }],
-            passed_match: false,
-            exit_code: 0,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: PYTEST_TAIL,
-          expect: { kind: "graded", passed: true },
-        },
-        {
-          name: "adversarial-truncated-log-with-no-marker",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:256-261",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: [],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "[… 4194304 bytes truncated …]\ncollecting ... ",
-          expect: { kind: "graded", passed: false },
-        },
-        {
-          name: "adversarial-empty-log-non-zero-exit-no-signature",
-          provenance: "client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:539-553",
-          transitions: TRANSITIONS,
-          report: {
-            instance_id: "acme__widget-1",
-            from_fail_to_pass: [],
-            failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-            passed_match: false,
-            exit_code: 1,
-            log_path: "logs/acme__widget-1_log.txt",
-            error: "",
-          },
-          log: "",
-          expect: { kind: "graded", passed: false },
-        },
-      ]);
-      ```
+Run:
+```bash
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters"
+yarn test src/declarations.test.ts && yarn check:parsers && yarn typecheck
+```
+Expected: PASS on all three.
 
-      Also write `fixtures/swe-rebench/README.md` naming the two upstream report shapes, the
-      resolution rule, and the ungradeable rule, with the same provenance citations.
+- [ ] **Step 6: Add `check:parsers` to CI**
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench/fixtures.test.ts`
-      Expected: 3 passing tests; the fixture count assertion reports 18 entries.
+In `.github/workflows/task-execution-ci.yml`, in the `evaluator-adapters` job's "Verify Task Execution Evaluator Adapters" step, insert `yarn check:parsers` between `yarn test` and `yarn build`.
 
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "test(task-execution): land swe-rebench evaluator fixtures from the legacy oracles"
-      ```
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters .github/workflows/task-execution-ci.yml
+git commit -m "feat(task-execution): pin evaluator parser declarations and the deployment allowlist"
+```
 
 ---
 
-## Task 4 — the swe-rebench ingestion parser (pure)
+### Task 4: The report model and the benchmark-local JSON parser
 
-**Files**
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/report.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/pytest-json-report.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/pytest-json-report.test.ts`
 
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/parse.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/parse.test.ts` (new)
-
-**Interfaces**
-
-- Consumes: `SWE_REBENCH_FIXTURES` from `./fixtures.js`.
+**Interfaces:**
+- Consumes: `loadFixtureFamily` (Task 2).
 - Produces:
-  ```ts
-  export interface SweRebenchCheck {
-    readonly name: string;
-    readonly status: "pass" | "fail";
-    readonly detail?: string;
-  }
-  export interface SweRebenchGraded {
-    readonly kind: "graded";
-    readonly instanceId: string;
-    readonly passed: boolean;
-    readonly failToPassExpected: number;
-    readonly failToPassSatisfied: number;
-    readonly passToPassExpected: number;
-    readonly passToPassBroken: number;
-    readonly containerExitCode: number;
-    readonly checks: readonly SweRebenchCheck[];
-  }
-  export interface SweRebenchUngradeable {
-    readonly kind: "ungradeable";
-    readonly ungradeableClass: string;
-    readonly detail: string;
-  }
-  export type SweRebenchOutcome = SweRebenchGraded | SweRebenchUngradeable;
+  - `interface TestOutcomeReport { readonly passed: readonly string[]; readonly failed: readonly string[]; readonly skipped: readonly string[]; readonly exitCode?: number; readonly log: string; readonly setupError?: string }`
+  - `interface Transitions { readonly failToPass: readonly string[]; readonly passToPass: readonly string[] }`
+  - `interface TransitionOutcome { readonly passed: boolean; readonly failToPassPassed: readonly string[]; readonly passToPassBroken: readonly string[]; readonly noTestPassed: boolean }`
+  - `reduceTransitions(report: TestOutcomeReport, transitions: Transitions): TransitionOutcome`
+  - `capLogTail(log: string): string`, `MAX_LOG_CHARACTERS: number`
+  - `class ReportParseError extends Error` with `readonly detail: string`
+  - `parsePytestJsonReport(text: string, log: string): TestOutcomeReport`
 
-  export interface SweRebenchTransitions {
-    readonly failToPass: readonly string[];
-    readonly passToPass: readonly string[];
-  }
+- [ ] **Step 1: Write the failing test**
 
-  export function classifyInfrastructureSignature(log: string): string | undefined;
-  export function parseSweRebenchReport(input: {
-    readonly report: unknown;
-    readonly log: string;
-    readonly transitions: SweRebenchTransitions;
-  }): SweRebenchOutcome;
-  ```
+`packages/task-execution/evaluator-adapters/src/parsers/pytest-json-report.test.ts`:
 
-### Steps
+```ts
+// SPDX-License-Identifier: Apache-2.0
 
-- [ ] **Failing test.** Create `src/swe-rebench/parse.test.ts`:
+import { describe, expect, it } from "vitest";
+import { loadFixtureFamily } from "../testing.js";
+import { reduceTransitions, type Transitions } from "../report.js";
+import { parsePytestJsonReport } from "./pytest-json-report.js";
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+interface Input {
+  readonly report: unknown;
+  readonly transitions: Transitions;
+  readonly stdout: string;
+}
 
-      import { describe, expect, test } from "vitest";
-      import { SWE_REBENCH_FIXTURES } from "./fixtures.js";
-      import {
-        classifyInfrastructureSignature,
-        parseSweRebenchReport,
-      } from "./parse.js";
-
-      describe("parseSweRebenchReport", () => {
-        test.each(SWE_REBENCH_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
-          "%s reproduces the legacy outcome",
-          (_name, fixture) => {
-            const outcome = parseSweRebenchReport({
-              report: fixture.report,
-              log: fixture.log,
-              transitions: fixture.transitions,
-            });
-            if (fixture.expect.kind === "graded") {
-              expect(outcome.kind).toBe("graded");
-              if (outcome.kind !== "graded") return;
-              expect(outcome.passed).toBe(fixture.expect.passed);
-            } else {
-              expect(outcome.kind).toBe("ungradeable");
-              if (outcome.kind !== "ungradeable") return;
-              expect(outcome.ungradeableClass).toBe(fixture.expect.ungradeableClass);
-            }
-          },
-        );
-
-        test("a graded outcome carries per-check results, never a bare boolean", () => {
-          const outcome = parseSweRebenchReport({
-            report: SWE_REBENCH_FIXTURES[3]!.report,
-            log: SWE_REBENCH_FIXTURES[3]!.log,
-            transitions: SWE_REBENCH_FIXTURES[3]!.transitions,
-          });
-          expect(outcome.kind).toBe("graded");
-          if (outcome.kind !== "graded") return;
-          expect(outcome.checks.map((check) => check.name)).toEqual([
-            "transitions.fail-to-pass",
-            "transitions.pass-to-pass",
-          ]);
-          expect(outcome.checks[0]!.status).toBe("pass");
-          expect(outcome.checks[1]!.status).toBe("fail");
-          expect(outcome.passToPassBroken).toBe(1);
-        });
-
-        test("the upstream passed_match field is never trusted", () => {
-          const outcome = parseSweRebenchReport({
-            report: {
-              instance_id: "acme__widget-1",
-              from_fail_to_pass: ["tests/test_a.py::test_a"],
-              failed_from_pass_to_pass: [],
-              passed_match: false,
-              exit_code: 1,
-              error: "",
-            },
-            log: "PASSED tests/test_a.py::test_a",
-            transitions: { failToPass: ["tests/test_a.py::test_a"], passToPass: [] },
-          });
-          expect(outcome.kind === "graded" && outcome.passed).toBe(true);
-        });
-
-        test("a non-UTF-8-decodable log is classified, never crashed on", () => {
-          const outcome = parseSweRebenchReport({
-            report: {
-              instance_id: "acme__widget-1",
-              from_fail_to_pass: [],
-              failed_from_pass_to_pass: ["tests/test_b.py::test_b"],
-              exit_code: 1,
-              error: "",
-            },
-            log: "�� Cannot connect to the Docker daemon �",
-            transitions: { failToPass: ["a"], passToPass: ["tests/test_b.py::test_b"] },
-          });
-          expect(outcome.kind === "ungradeable" && outcome.ungradeableClass)
-            .toBe("docker_unavailable");
-        });
-      });
-
-      describe("classifyInfrastructureSignature", () => {
-        test("returns undefined for an ordinary pytest failure report", () => {
-          expect(classifyInfrastructureSignature(
-            "FAILED tests/test_a.py::test_a - AssertionError\n1 failed in 0.40s",
-          )).toBeUndefined();
-        });
-
-        test("classifies a docker-CLI abort", () => {
-          expect(classifyInfrastructureSignature(
-            "docker: Error response from daemon: no such image",
-          )).toBe("docker_run_failed");
-        });
-      });
-      ```
-
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench/parse.test.ts`
-      Expected failure: `Failed to resolve import "./parse.js"`.
-
-- [ ] **Minimal implementation.** Create `src/swe-rebench/parse.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      /**
-       * Ingestion parser for the upstream SWE-rebench-V2 evaluation report. Pure: no process, no
-       * filesystem, no clock. The commitment it implements is `fixtures/parsers/swe-rebench-v2.parser.json`,
-       * whose digest is this parser's identity.
-       */
-
-      export interface SweRebenchCheck {
-        readonly name: string;
-        readonly status: "pass" | "fail";
-        readonly detail?: string;
-      }
-
-      export interface SweRebenchGraded {
-        readonly kind: "graded";
-        readonly instanceId: string;
-        readonly passed: boolean;
-        readonly failToPassExpected: number;
-        readonly failToPassSatisfied: number;
-        readonly passToPassExpected: number;
-        readonly passToPassBroken: number;
-        readonly containerExitCode: number;
-        readonly checks: readonly SweRebenchCheck[];
-      }
-
-      export interface SweRebenchUngradeable {
-        readonly kind: "ungradeable";
-        readonly ungradeableClass: string;
-        readonly detail: string;
-      }
-
-      export type SweRebenchOutcome = SweRebenchGraded | SweRebenchUngradeable;
-
-      export interface SweRebenchTransitions {
-        readonly failToPass: readonly string[];
-        readonly passToPass: readonly string[];
-      }
-
-      /**
-       * Container-output signatures meaning the evaluation aborted before grading anything — the
-       * environment is the problem, not the solution. Transcribed as data from the legacy
-       * classification table (`client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242`);
-       * the fixtures in `./fixtures.ts` are its regression suite.
-       */
-      const INFRASTRUCTURE_SIGNATURES: readonly {
-        readonly pattern: RegExp;
-        readonly ungradeableClass: string;
-      }[] = Object.freeze([
-        { pattern: /Cannot connect to the Docker daemon/iu, ungradeableClass: "docker_unavailable" },
-        { pattern: /input\/output error/iu, ungradeableClass: "docker_storage_io_error" },
-        { pattern: /No such image|manifest unknown|pull access denied/iu, ungradeableClass: "image_pull_failed" },
-        { pattern: /error getting credentials/iu, ungradeableClass: "docker_credentials_error" },
-        { pattern: /^docker: (?:error|Error response from daemon)/imu, ungradeableClass: "docker_run_failed" },
-        { pattern: /error: corrupt patch at line|patch fragment without header/iu, ungradeableClass: "patch_corrupt" },
-        { pattern: /patch does not apply|error: patch failed:/iu, ungradeableClass: "patch_does_not_apply" },
-        { pattern: /Applied patch to .+ with conflicts|^U \S/mu, ungradeableClass: "patch_merge_conflict" },
-        { pattern: /fatal: not a git repository \(or any of the parent directories\): \.git/iu, ungradeableClass: "workdir_not_git_repo" },
-        { pattern: /: command not found/iu, ungradeableClass: "test_command_not_found" },
-        { pattern: /Failed building editable|Failed to build installable wheels/iu, ungradeableClass: "install_build_failed" },
-        { pattern: /No virtual environment found/iu, ungradeableClass: "venv_missing" },
-        { pattern: /exec format error|the requested image's platform .* does not match/iu, ungradeableClass: "image_arch_mismatch" },
-        { pattern: /Fatal Python error:\s*Illegal instruction|Illegal instruction(?:\s+\(core dumped\))?/iu, ungradeableClass: "image_arch_mismatch" },
-        { pattern: /A virtual environment already exists at \S+\.venv\b/iu, ungradeableClass: "venv_collision" },
-        { pattern: /No module named pytest\b/iu, ungradeableClass: "pytest_missing" },
-        { pattern: /RequestsDependencyWarning/iu, ungradeableClass: "requests_dep_mismatch" },
-        { pattern: /ImportError while loading conftest/iu, ungradeableClass: "conftest_import_error" },
-      ]);
-
-      export function classifyInfrastructureSignature(log: string): string | undefined {
-        for (const { pattern, ungradeableClass } of INFRASTRUCTURE_SIGNATURES) {
-          if (pattern.test(log)) return ungradeableClass;
-        }
-        return undefined;
-      }
-
-      function isObject(value: unknown): value is Record<string, unknown> {
-        return typeof value === "object" && value !== null && !Array.isArray(value);
-      }
-
-      function stringArray(value: unknown): readonly string[] {
-        return Array.isArray(value)
-          ? value.filter((entry): entry is string => typeof entry === "string")
-          : [];
-      }
-
-      function excerpt(text: string): string {
-        return text.length <= 800 ? text : text.slice(-800);
-      }
-
-      export function parseSweRebenchReport(input: {
-        readonly report: unknown;
-        readonly log: string;
-        readonly transitions: SweRebenchTransitions;
-      }): SweRebenchOutcome {
-        const { report, log, transitions } = input;
-        if (!isObject(report)) {
-          return {
-            kind: "ungradeable",
-            ungradeableClass: classifyInfrastructureSignature(log) ?? "eval_report_malformed",
-            detail: "the evaluation report is not a report item object",
-          };
-        }
-        const declaredError = typeof report["error"] === "string"
-          ? report["error"].trim()
-          : "";
-        if (declaredError.length > 0) {
-          return {
-            kind: "ungradeable",
-            ungradeableClass: "eval_setup_error",
-            detail: excerpt(declaredError),
-          };
-        }
-        if (typeof report["exit_code"] !== "number") {
-          return {
-            kind: "ungradeable",
-            ungradeableClass: "eval_report_malformed",
-            detail: "the evaluation report item carries no numeric exit_code",
-          };
-        }
-
-        const containerExitCode = report["exit_code"];
-        const satisfied = stringArray(report["from_fail_to_pass"]);
-        const broken = stringArray(report["failed_from_pass_to_pass"]);
-        const failToPassExpected = transitions.failToPass.length;
-        const passToPassExpected = transitions.passToPass.length;
-
-        // Ungradeable iff the container aborted, nothing declared was observed to pass, AND the
-        // output matches a classified signature. A wrong-answer run shows an ordinary failing
-        // report with no signature; a partially passing run is a real result. Both are verdicts.
-        const nothingPassed = satisfied.length === 0 && broken.length >= passToPassExpected;
-        if (containerExitCode !== 0 && nothingPassed) {
-          const ungradeableClass = classifyInfrastructureSignature(log);
-          if (ungradeableClass !== undefined) {
-            return { kind: "ungradeable", ungradeableClass, detail: excerpt(log) };
-          }
-        }
-
-        const failToPassSatisfied = satisfied.length;
-        const passToPassBroken = broken.length;
-        const failToPassOk = failToPassSatisfied === failToPassExpected;
-        const passToPassOk = passToPassBroken === 0;
-
-        return {
-          kind: "graded",
-          instanceId: typeof report["instance_id"] === "string" ? report["instance_id"] : "",
-          passed: failToPassOk && passToPassOk,
-          failToPassExpected,
-          failToPassSatisfied,
-          passToPassExpected,
-          passToPassBroken,
-          containerExitCode,
-          checks: [
-            {
-              name: "transitions.fail-to-pass",
-              status: failToPassOk ? "pass" : "fail",
-              detail: `${failToPassSatisfied}/${failToPassExpected} declared fail-to-pass transitions now pass`,
-            },
-            {
-              name: "transitions.pass-to-pass",
-              status: passToPassOk ? "pass" : "fail",
-              detail: `${passToPassBroken}/${passToPassExpected} declared pass-to-pass transitions broke`,
-            },
-          ],
-        };
-      }
-      ```
-
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench/parse.test.ts`
-      Expected: 18 parametrized cases plus 5 named tests passing, 0 failing.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): parse swe-rebench evaluation reports at the adapter edge"
-      ```
-
----
-
-## Task 5 — the swe-rebench `EvaluatorAdapter`
-
-**Files**
-
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/adapter.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/swe-rebench/adapter.test.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/index.ts` (edit)
-
-**Interfaces**
-
-- Consumes: `EvaluatorAdapter`, `CompletedEvaluation`, `ExactEvaluationMaterial`,
-  `EvaluationContext`, `EvaluationOperationalError` from
-  `@jinn-network/task-execution-evaluation-harness`; `EvaluationSpec`,
-  `DeterministicProcessBlock` from `@jinn-network/task-execution-profiles`;
-  `AttemptIdentity` from `@jinn-network/task-execution-supervisor`;
-  `parseSweRebenchReport`, `SweRebenchOutcome` from `./parse.js`.
-- Produces:
-  ```ts
-  export interface GraderReportRequest {
-    readonly specification: EvaluationSpec;
-    readonly task: ExactEvaluationMaterial;
-    readonly results: readonly ExactEvaluationMaterial[];
-    readonly context: EvaluationContext;
-    readonly attempt: AttemptIdentity;
-    readonly deadlineSignal: AbortSignal;
-  }
-  export interface RawGraderReport {
-    readonly report: unknown;
-    readonly log: string;
-  }
-  export interface GraderReportSource {
-    read(request: GraderReportRequest): Promise<RawGraderReport>;
-  }
-  export function contextGraderReportSource(): GraderReportSource;
-  export interface SweRebenchAdapterOptions {
-    readonly graderReportSource: GraderReportSource;
-    readonly now?: () => Date;
-    readonly maxTestLogBytes?: number;
-  }
-  export function createSweRebenchEvaluatorAdapter(
-    options: SweRebenchAdapterOptions,
-  ): EvaluatorAdapter;
-  export const SWE_REBENCH_MEASUREMENT_PASSED = "passed";
-  ```
-
-### Steps
-
-- [ ] **Failing test.** Create `src/swe-rebench/adapter.test.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        EvaluationOperationalError,
-        type ExactEvaluationMaterial,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import {
-        EVALUATION_SPEC_FORMAT_URI,
-        EVAL_SEMANTICS_VERSION,
-        type EvaluationSpec,
-      } from "@jinn-network/task-execution-profiles";
-      import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-      import { describe, expect, test } from "vitest";
-      import { SWE_REBENCH_FIXTURES } from "./fixtures.js";
-      import { SWE_REBENCH_PARSER } from "../parser-identity.js";
-      import {
-        contextGraderReportSource,
-        createSweRebenchEvaluatorAdapter,
-        type GraderReportSource,
-        type RawGraderReport,
-      } from "./adapter.js";
-
-      const encoder = new TextEncoder();
-
-      const ATTEMPT: AttemptIdentity = {
-        attemptUri: "urn:uuid:22222222-2222-4222-8222-222222222222" as AttemptIdentity["attemptUri"],
-        nonce: "evaluation-nonce",
-        attemptNumber: 1,
+describe("pytest-json-report ingestion", () => {
+  it("reduces every fixture case to its pinned transition outcome", async () => {
+    for (const fixtureCase of await loadFixtureFamily("pytest-json-report")) {
+      const input = fixtureCase.input as Input;
+      const expected = fixtureCase.expect as {
+        outcome?: { passed: boolean; noTestPassed: boolean; passToPassBroken?: string[] };
+        operational?: { reason: string };
+        log?: { startsWith: string; length: number };
       };
-
-      function material(name: string, text: string): ExactEvaluationMaterial {
-        return {
-          descriptor: { name, digest: { sha256: "1".repeat(64) } },
-          bytes: encoder.encode(text),
-        };
+      if (expected.operational !== undefined) {
+        expect(
+          () => parsePytestJsonReport(JSON.stringify(input.report), input.stdout),
+          fixtureCase.name,
+        ).toThrowError(expected.operational.reason);
+        continue;
       }
-
-      function specification(transitions: {
-        failToPass: readonly string[];
-        passToPass: readonly string[];
-      }): EvaluationSpec {
-        return {
-          protocol: EVALUATION_SPEC_FORMAT_URI,
-          semanticsVersion: EVAL_SEMANTICS_VERSION,
-          family: "deterministic-process",
-          grader: {
-            name: SWE_REBENCH_PARSER.id,
-            digest: { sha256: SWE_REBENCH_PARSER.digest.slice("sha256:".length) },
-            accessClass: "public",
-          },
-          familyBlock: {
-            image: { name: "grader-image", digest: { sha256: "2".repeat(64) } },
-            platform: "linux/amd64",
-            workspace: {},
-            testMaterial: [],
-            parser: SWE_REBENCH_PARSER,
-            transitions: {
-              failToPass: [...transitions.failToPass],
-              passToPass: [...transitions.passToPass],
-            },
-            timeout: 1800,
-          },
-          measurements: [{ name: "passed", type: "boolean", required: true }],
-          verdictRule: { threshold: { measurement: "passed", op: "eq", value: true } },
-          unscorable: [{
-            name: "environment-setup-failure",
-            disposition: "retryable-infrastructure",
-          }],
-          evidenceConventions: { requiredRefs: [] },
-        } as EvaluationSpec;
+      const report = parsePytestJsonReport(JSON.stringify(input.report), input.stdout);
+      if (expected.log !== undefined) {
+        expect(report.log.startsWith(expected.log.startsWith), fixtureCase.name).toBe(true);
+        expect(report.log.length, fixtureCase.name).toBe(expected.log.length);
+        continue;
       }
-
-      function source(raw: RawGraderReport): GraderReportSource {
-        return { async read() { return raw; } };
+      const outcome = reduceTransitions(report, input.transitions);
+      expect(outcome.passed, fixtureCase.name).toBe(expected.outcome!.passed);
+      expect(outcome.noTestPassed, fixtureCase.name).toBe(expected.outcome!.noTestPassed);
+      if (expected.outcome!.passToPassBroken !== undefined) {
+        expect([...outcome.passToPassBroken], fixtureCase.name)
+          .toEqual(expected.outcome!.passToPassBroken);
       }
+    }
+  });
 
-      describe("createSweRebenchEvaluatorAdapter", () => {
-        test.each(SWE_REBENCH_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
-          "%s maps to the harness verdict shape",
-          async (_name, fixture) => {
-            const adapter = createSweRebenchEvaluatorAdapter({
-              graderReportSource: source({ report: fixture.report, log: fixture.log }),
-              now: () => new Date("2026-07-30T09:00:00.000Z"),
-            });
-            const evaluate = adapter.evaluate(
-              material("subject-task.json", "{}"),
-              [material("result.patch", "diff --git a/a b/a\n")],
-              specification(fixture.transitions),
-              {},
-              ATTEMPT,
-              new AbortController().signal,
-            );
+  it("refuses input that is not UTF-8 JSON", () => {
+    expect(() => parsePytestJsonReport("{not json", "")).toThrowError("eval_report_malformed");
+  });
+});
+```
 
-            if (fixture.expect.kind === "ungradeable") {
-              const error = await evaluate.catch((cause: unknown) => cause);
-              expect(error).toBeInstanceOf(EvaluationOperationalError);
-              const operational = error as EvaluationOperationalError;
-              expect(operational.reason).toBe("provider-unavailable");
-              expect(operational.recoveryAdvice).toBe("new-attempt-required");
-              expect(operational.safeDetail).toContain(fixture.expect.ungradeableClass);
-              return;
-            }
+- [ ] **Step 2: Run it to verify it fails**
 
-            const completed = await evaluate;
-            expect(completed.verdict).toBe(fixture.expect.passed ? "pass" : "fail");
-            expect(completed.evaluatedAt).toBe("2026-07-30T09:00:00.000Z");
-            expect(completed.measurements).toEqual([
-              { name: "passed", value: fixture.expect.passed },
-            ]);
-          },
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/parsers/pytest-json-report.test.ts`
+Expected: FAIL — `Cannot find module '../report.js'`
+
+- [ ] **Step 3: Write the report model**
+
+`packages/task-execution/evaluator-adapters/src/report.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+/** One grader run, reduced from whatever ingestion format produced it. */
+export interface TestOutcomeReport {
+  readonly passed: readonly string[];
+  readonly failed: readonly string[];
+  readonly skipped: readonly string[];
+  /** The grader process's exit code when the format carries one. */
+  readonly exitCode?: number;
+  /** Captured grader output, already capped. Never authoritative; used for classification. */
+  readonly log: string;
+  /** Set when the grader itself failed to start or configure — never a solver failure. */
+  readonly setupError?: string;
+}
+
+export interface Transitions {
+  readonly failToPass: readonly string[];
+  readonly passToPass: readonly string[];
+}
+
+export interface TransitionOutcome {
+  /** SWE-bench `resolved`: every FAIL_TO_PASS now passes and no PASS_TO_PASS broke. */
+  readonly passed: boolean;
+  readonly failToPassPassed: readonly string[];
+  readonly passToPassBroken: readonly string[];
+  /**
+   * Nothing the spec expected was observed to pass. This is the gate on treating a non-zero
+   * exit plus an infrastructure signature as an abort rather than a verdict: a partially
+   * passing run is a real result no matter what the log says.
+   */
+  readonly noTestPassed: boolean;
+}
+
+/**
+ * The transition reduction. A PASS_TO_PASS id is broken only when the report explicitly reports
+ * it as failed — an id missing from the report entirely is not evidence of breakage, which is the
+ * semantics the retired evaluator's `failed_from_pass_to_pass` list carried.
+ */
+export function reduceTransitions(
+  report: TestOutcomeReport,
+  transitions: Transitions,
+): TransitionOutcome {
+  const passedIds = new Set(report.passed);
+  const failedIds = new Set(report.failed);
+  const empirical = transitions.failToPass.length === 0 && transitions.passToPass.length === 0;
+  const failToPassPassed = transitions.failToPass.filter((id) => passedIds.has(id));
+  const passToPassBroken = transitions.passToPass.filter((id) => failedIds.has(id));
+  const passed = empirical
+    ? report.passed.length > 0 && report.failed.length === 0
+    : failToPassPassed.length === transitions.failToPass.length && passToPassBroken.length === 0;
+  const noTestPassed = empirical
+    ? report.passed.length === 0
+    : failToPassPassed.length === 0 && passToPassBroken.length >= transitions.passToPass.length;
+  return { passed, failToPassPassed, passToPassBroken, noTestPassed };
+}
+
+/**
+ * The retained grader-output tail. The tail is what matters — a test summary and the last
+ * failures live there — and an unbounded log would be pinned verbatim as claim evidence.
+ * The retired implementation labelled the discarded amount "bytes" while measuring UTF-16 code
+ * units; this says characters, which is what it measures.
+ */
+export const MAX_LOG_CHARACTERS = 1024 * 1024;
+
+export function capLogTail(log: string): string {
+  if (log.length <= MAX_LOG_CHARACTERS) return log;
+  const truncated = log.length - MAX_LOG_CHARACTERS;
+  const notice = `[... ${truncated} characters truncated ...]\n`;
+  return notice + log.slice(log.length - MAX_LOG_CHARACTERS + notice.length);
+}
+
+export class ReportParseError extends Error {
+  readonly reason: string;
+  readonly detail: string;
+
+  constructor(reason: string, detail: string, options?: ErrorOptions) {
+    super(`${reason}: ${detail}`, options);
+    this.name = "ReportParseError";
+    this.reason = reason;
+    this.detail = detail;
+  }
+}
+```
+
+Note that `capLogTail` returns exactly `MAX_LOG_CHARACTERS` characters (notice included), which is what the `log-tail-capped` fixture pins.
+
+- [ ] **Step 4: Write the benchmark-local JSON parser**
+
+`packages/task-execution/evaluator-adapters/src/parsers/pytest-json-report.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { capLogTail, ReportParseError, type TestOutcomeReport } from "../report.js";
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+/**
+ * Ingests the benchmark-local JSON report a deterministic-process grader writes: a `{ items: [] }`
+ * document whose item carries either a setup `error`, or an `exit_code` plus the transition
+ * outcome lists. Untrusted input — every field is checked, nothing is executed.
+ */
+export function parsePytestJsonReport(text: string, log: string): TestOutcomeReport {
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch (cause) {
+    throw new ReportParseError("eval_report_malformed", "report is not valid UTF-8 JSON", { cause });
+  }
+  if (typeof document !== "object" || document === null || Array.isArray(document)) {
+    throw new ReportParseError("eval_report_malformed", "report must be an object");
+  }
+  const items = (document as { items?: unknown }).items;
+  const item = Array.isArray(items) && items.length > 0 ? items[0] : undefined;
+  if (typeof item !== "object" || item === null || Array.isArray(item)) {
+    throw new ReportParseError("eval_report_malformed", "report contains no item");
+  }
+  const record = item as Record<string, unknown>;
+
+  const setupError = typeof record["error"] === "string" ? record["error"].trim() : "";
+  if (setupError.length > 0) {
+    throw new ReportParseError("eval_setup_error", setupError);
+  }
+  if (typeof record["exit_code"] !== "number") {
+    throw new ReportParseError(
+      "eval_report_malformed",
+      "report item lacks a numeric exit_code",
+    );
+  }
+
+  // `from_fail_to_pass` is the intersection of the run with the expected FAIL_TO_PASS set;
+  // `passed_actual`/`failed_actual` are the full observed sets a transition-free (empirical) row
+  // produces. Both feed the same passed/failed sets; the transition reducer decides what counts.
+  const passed = [...stringArray(record["from_fail_to_pass"]), ...stringArray(record["passed_actual"])];
+  const failed = [
+    ...stringArray(record["failed_from_pass_to_pass"]),
+    ...stringArray(record["failed_actual"]),
+  ];
+
+  return {
+    passed: [...new Set(passed)],
+    failed: [...new Set(failed)],
+    skipped: [],
+    exitCode: record["exit_code"],
+    log: capLogTail(log),
+  };
+}
+```
+
+- [ ] **Step 5: Run the tests**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/parsers/pytest-json-report.test.ts`
+Expected: PASS. If `log-tail-capped.json`'s pinned numbers were guessed, correct the fixture from the observed values now and re-run.
+
+Note: the `docker-unavailable`, `docker-credentials-error`, and `patch-corrupt` adversarial cases expect infrastructure reasons that this parser does not yet produce — they are satisfied by Task 5. Until then, mark them with `it.todo`-equivalent skipping by filtering on the reasons this parser owns (`eval_setup_error`, `eval_report_malformed`) inside the test's `operational` branch, and remove that filter in Task 5 Step 5.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters/src packages/task-execution/evaluator-adapters/fixtures
+git commit -m "feat(task-execution): add the evaluator report model and benchmark-local JSON parser"
+```
+
+---
+
+### Task 5: Infrastructure-abort classification
+
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/infrastructure.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/infrastructure.test.ts`
+- Modify: `packages/task-execution/evaluator-adapters/src/parsers/pytest-json-report.test.ts` (drop the Task 4 filter)
+
+**Interfaces:**
+- Consumes: `TestOutcomeReport`, `TransitionOutcome`, `ReportParseError` (Task 4).
+- Produces:
+  - `INFRASTRUCTURE_SIGNATURES: readonly { readonly pattern: RegExp; readonly reason: string }[]`
+  - `classifyInfrastructureFailure(log: string): string | undefined`
+  - `toOperationalError(reason: string, detail: string, cause?: unknown): EvaluationOperationalError`
+  - `toOperationalErrorFromParse(failure: ReportParseError): EvaluationOperationalError` — re-homes a parse failure onto the same no-verdict path (consumed by Tasks 7 and 8)
+  - `assertGradeable(report: TestOutcomeReport, outcome: TransitionOutcome): void` — throws when the run aborted rather than graded
+
+- [ ] **Step 1: Write the failing test**
+
+`packages/task-execution/evaluator-adapters/src/infrastructure.test.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { EvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
+import { classifyInfrastructureFailure, assertGradeable, toOperationalError } from "./infrastructure.js";
+import type { TestOutcomeReport, TransitionOutcome } from "./report.js";
+
+const graded: TransitionOutcome = {
+  passed: false,
+  failToPassPassed: [],
+  passToPassBroken: ["b"],
+  noTestPassed: true,
+};
+
+function report(log: string, exitCode: number): TestOutcomeReport {
+  return { passed: [], failed: ["b"], skipped: [], exitCode, log };
+}
+
+describe("infrastructure classification", () => {
+  it("names each known abort signature", () => {
+    expect(classifyInfrastructureFailure("Cannot connect to the Docker daemon at unix:///x"))
+      .toBe("docker_unavailable");
+    expect(classifyInfrastructureFailure("error getting credentials - err: exit status 1"))
+      .toBe("docker_credentials_error");
+    expect(classifyInfrastructureFailure("error: corrupt patch at line 30")).toBe("patch_corrupt");
+    expect(classifyInfrastructureFailure("Fatal Python error: Illegal instruction"))
+      .toBe("image_arch_mismatch");
+    expect(classifyInfrastructureFailure("2 failed, 3 passed in 4.2s")).toBeUndefined();
+  });
+
+  it("aborts a zero-passed non-zero-exit run that carries an abort signature", () => {
+    expect(() => assertGradeable(report("Cannot connect to the Docker daemon", 125), graded))
+      .toThrowError(EvaluationOperationalError);
+  });
+
+  it("does not abort when the run produced a real result", () => {
+    const passing: TransitionOutcome = {
+      passed: true,
+      failToPassPassed: ["a"],
+      passToPassBroken: [],
+      noTestPassed: false,
+    };
+    expect(() => assertGradeable(report("Cannot connect to the Docker daemon", 1), passing))
+      .not.toThrow();
+    expect(() => assertGradeable(report("2 failed, 3 passed in 4.2s", 1), graded)).not.toThrow();
+    expect(() => assertGradeable(report("Cannot connect to the Docker daemon", 0), graded))
+      .not.toThrow();
+  });
+
+  it("maps a reason to the harness's typed no-verdict path", () => {
+    const failure = toOperationalError("eval_setup_error", "missing image_name");
+    expect(failure).toBeInstanceOf(EvaluationOperationalError);
+    expect(failure.reason).toBe("provider-unavailable");
+    expect(failure.recoveryAdvice).toBe("new-attempt-required");
+    expect(failure.safeDetail).toContain("eval_setup_error");
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/infrastructure.test.ts`
+Expected: FAIL — `Cannot find module './infrastructure.js'`
+
+- [ ] **Step 3: Write the classifier**
+
+`packages/task-execution/evaluator-adapters/src/infrastructure.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { EvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
+import { ReportParseError, type TestOutcomeReport, type TransitionOutcome } from "./report.js";
+
+/**
+ * Grader-output signatures that mean the run aborted before it could grade anything — the
+ * operator's environment is the problem, not the solver's work. Every entry is a scenario the
+ * retired evaluator learned in production; they enter here as a classification table, never as
+ * ported code (composition program §6 contract 12).
+ */
+export const INFRASTRUCTURE_SIGNATURES: readonly {
+  readonly pattern: RegExp;
+  readonly reason: string;
+}[] = Object.freeze([
+  { pattern: /Cannot connect to the Docker daemon/iu, reason: "docker_unavailable" },
+  { pattern: /input\/output error/iu, reason: "docker_storage_io_error" },
+  { pattern: /No such image|manifest unknown|pull access denied/iu, reason: "image_pull_failed" },
+  // A hung or killed credential helper aborts the run before the container starts, while the
+  // grader still writes a zero-passed report. Without this entry that shape delivers a false
+  // `fail` — the 2026-07-07 evaluator outage.
+  { pattern: /error getting credentials/iu, reason: "docker_credentials_error" },
+  { pattern: /^docker: (?:error|Error response from daemon)/imu, reason: "container_run_failed" },
+  { pattern: /error: corrupt patch at line|patch fragment without header/iu, reason: "patch_corrupt" },
+  { pattern: /patch does not apply|error: patch failed:/iu, reason: "patch_does_not_apply" },
+  { pattern: /Applied patch to .+ with conflicts|^U \S/mu, reason: "patch_merge_conflict" },
+  { pattern: /fatal: not a git repository/iu, reason: "workdir_not_git_repo" },
+  { pattern: /: command not found/iu, reason: "test_command_not_found" },
+  { pattern: /Failed building editable|Failed to build installable wheels/iu, reason: "install_build_failed" },
+  { pattern: /No virtual environment found/iu, reason: "virtualenv_missing" },
+  { pattern: /A virtual environment already exists at \S+\.venv\b/iu, reason: "virtualenv_collision" },
+  { pattern: /exec format error|the requested image's platform .* does not match/iu, reason: "image_arch_mismatch" },
+  { pattern: /Fatal Python error:\s*Illegal instruction|Illegal instruction(?:\s+\(core dumped\))?/iu, reason: "image_arch_mismatch" },
+  { pattern: /No module named pytest\b/iu, reason: "test_runner_missing" },
+  { pattern: /RequestsDependencyWarning/iu, reason: "dependency_version_mismatch" },
+  { pattern: /ImportError while loading conftest/iu, reason: "test_config_import_error" },
+]);
+
+export function classifyInfrastructureFailure(log: string): string | undefined {
+  for (const { pattern, reason } of INFRASTRUCTURE_SIGNATURES) {
+    if (pattern.test(log)) return reason;
+  }
+  return undefined;
+}
+
+/**
+ * Every abort reason lands on the same typed no-verdict path. `provider-unavailable` is the
+ * harness's reason for "the evaluation machinery could not produce a conclusion"; the operator
+ * sees the specific reason in `safeDetail`. The Attempt terminates
+ * `failed {blame: infrastructure}` — never FAIL, never inconclusive (profiles unscorable.ts).
+ */
+export function toOperationalError(
+  reason: string,
+  detail: string,
+  cause?: unknown,
+): EvaluationOperationalError {
+  return new EvaluationOperationalError({
+    canonicalCode: "UNAVAILABLE",
+    reason: "provider-unavailable",
+    recoveryAdvice: "new-attempt-required",
+    safeDetail: `${reason}: ${detail}`,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+/** Re-homes a parse failure onto the same path. */
+export function toOperationalErrorFromParse(failure: ReportParseError): EvaluationOperationalError {
+  return toOperationalError(failure.reason, failure.detail, failure);
+}
+
+/**
+ * Aborts when the run never graded: a non-zero grader exit, nothing the spec expected observed to
+ * pass, and a known abort signature in the output. All three conditions are required — a
+ * partially passing run is a real result whatever the log says, and a clean exit is a real result
+ * even when the log mentions a transient warning.
+ */
+export function assertGradeable(
+  report: TestOutcomeReport,
+  outcome: TransitionOutcome,
+): void {
+  if (report.exitCode === undefined || report.exitCode === 0) return;
+  if (!outcome.noTestPassed) return;
+  const reason = classifyInfrastructureFailure(report.log);
+  if (reason === undefined) return;
+  throw toOperationalError(reason, report.log.slice(-800));
+}
+```
+
+- [ ] **Step 4: Run the classifier tests**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/infrastructure.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Remove the Task 4 fixture filter**
+
+In `src/parsers/pytest-json-report.test.ts`, replace the `operational` branch so that infrastructure reasons are routed through `assertGradeable`:
+
+```ts
+      if (expected.operational !== undefined) {
+        let thrown: unknown;
+        try {
+          const parsed = parsePytestJsonReport(JSON.stringify(input.report), input.stdout);
+          assertGradeable(parsed, reduceTransitions(parsed, input.transitions));
+        } catch (cause) {
+          thrown = cause;
+        }
+        expect(thrown, fixtureCase.name).toBeDefined();
+        expect(String((thrown as Error).message), fixtureCase.name)
+          .toContain(expected.operational.reason);
+        continue;
+      }
+```
+
+Add the imports `assertGradeable` from `../infrastructure.js` and `reduceTransitions` from `../report.js`.
+
+- [ ] **Step 6: Run the full suite**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test && yarn typecheck`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters/src
+git commit -m "feat(task-execution): classify grader infrastructure aborts onto the no-verdict path"
+```
+
+---
+
+### Task 6: JUnit XML and TAP14 parsers
+
+Both are declared ingestion formats (design §6.3 / §7 ruling 5) and are the non-pytest path for graders whose node-id semantics the JSON report does not carry.
+
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/junit-xml.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/junit-xml.test.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/tap14.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/tap14.test.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/parsers/index.ts`
+
+**Interfaces:**
+- Consumes: `TestOutcomeReport`, `ReportParseError`, `capLogTail` (Task 4); `ParserFormat` (Task 3).
+- Produces:
+  - `parseJunitXml(text: string, log: string): TestOutcomeReport`
+  - `parseTap14(text: string, log: string): TestOutcomeReport`
+  - `parseByFormat(format: ParserFormat, text: string, log: string): TestOutcomeReport` (from `src/parsers/index.ts`)
+
+- [ ] **Step 1: Write the failing tests**
+
+`packages/task-execution/evaluator-adapters/src/parsers/junit-xml.test.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { loadFixtureFamily } from "../testing.js";
+import { parseJunitXml } from "./junit-xml.js";
+
+describe("JUnit XML ingestion", () => {
+  it("reduces every fixture case to its pinned report", async () => {
+    for (const fixtureCase of await loadFixtureFamily("junit-xml")) {
+      const { xml } = fixtureCase.input as { xml: string };
+      const expected = fixtureCase.expect as {
+        report?: { passed: string[]; failed: string[]; skipped: string[] };
+        error?: string;
+      };
+      if (expected.error !== undefined) {
+        expect(() => parseJunitXml(xml, ""), fixtureCase.name).toThrowError("invalid-report");
+        continue;
+      }
+      const report = parseJunitXml(xml, "");
+      expect([...report.passed], fixtureCase.name).toEqual(expected.report!.passed);
+      expect([...report.failed], fixtureCase.name).toEqual(expected.report!.failed);
+      expect([...report.skipped], fixtureCase.name).toEqual(expected.report!.skipped);
+    }
+  });
+});
+```
+
+`packages/task-execution/evaluator-adapters/src/parsers/tap14.test.ts` — identical shape against family `tap14` and `parseTap14`.
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/parsers/junit-xml.test.ts src/parsers/tap14.test.ts`
+Expected: FAIL — both modules missing.
+
+- [ ] **Step 3: Write the JUnit XML parser**
+
+`packages/task-execution/evaluator-adapters/src/parsers/junit-xml.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { capLogTail, ReportParseError, type TestOutcomeReport } from "../report.js";
+
+const TESTCASE = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase\s*>)/giu;
+const ATTRIBUTE = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*"([^"]*)"/gu;
+const OUTCOME_CHILD = /<(failure|error|skipped)\b/iu;
+const UNSAFE_PROLOG = /<!(?:DOCTYPE|ENTITY)\b/iu;
+const PROCESSING_OR_COMMENT = /<\?[\s\S]*?\?>|<!--[\s\S]*?-->/gu;
+
+const ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'",
+});
+
+function decodeEntities(value: string): string {
+  return value.replace(/&(#x?[0-9A-Fa-f]+|[a-z]+);/gu, (match, body: string) => {
+    if (body.startsWith("#x") || body.startsWith("#X")) {
+      return String.fromCodePoint(Number.parseInt(body.slice(2), 16));
+    }
+    if (body.startsWith("#")) return String.fromCodePoint(Number.parseInt(body.slice(1), 10));
+    return ENTITIES[body] ?? match;
+  });
+}
+
+function attributes(source: string): Record<string, string> {
+  const found: Record<string, string> = {};
+  ATTRIBUTE.lastIndex = 0;
+  for (const match of source.matchAll(ATTRIBUTE)) {
+    found[match[1]!] = decodeEntities(match[2]!);
+  }
+  return found;
+}
+
+/**
+ * A bounded, non-validating scanner over `<testcase>` elements. It never resolves external
+ * entities — a document carrying a DOCTYPE or ENTITY declaration is refused outright rather than
+ * parsed, because a grader report is untrusted input and entity expansion is the standard XML
+ * attack surface. Anything beyond `testcase` and its direct outcome children is ignored.
+ */
+export function parseJunitXml(text: string, log: string): TestOutcomeReport {
+  if (UNSAFE_PROLOG.test(text)) {
+    throw new ReportParseError("invalid-report", "JUnit XML declares a DOCTYPE or ENTITY");
+  }
+  const stripped = text.replace(PROCESSING_OR_COMMENT, "");
+  if (!/<testsuites?\b/iu.test(stripped)) {
+    throw new ReportParseError("invalid-report", "JUnit XML has no testsuite element");
+  }
+  const openTags = (stripped.match(/<testsuite\b/giu) ?? []).length;
+  const closeTags = (stripped.match(/<\/testsuite\s*>/giu) ?? []).length
+    + (stripped.match(/<testsuite\b[^>]*\/>/giu) ?? []).length;
+  if (openTags !== closeTags) {
+    throw new ReportParseError("invalid-report", "JUnit XML testsuite elements are unbalanced");
+  }
+
+  const passed: string[] = [];
+  const failed: string[] = [];
+  const skipped: string[] = [];
+  TESTCASE.lastIndex = 0;
+  for (const match of stripped.matchAll(TESTCASE)) {
+    const found = attributes(match[1] ?? "");
+    const name = found["name"];
+    if (name === undefined || name.length === 0) {
+      throw new ReportParseError("invalid-report", "JUnit testcase has no name");
+    }
+    const className = found["classname"];
+    const id = className === undefined || className.length === 0 ? name : `${className}::${name}`;
+    const body = match[3] ?? "";
+    const outcome = OUTCOME_CHILD.exec(body)?.[1]?.toLowerCase();
+    if (outcome === "skipped") skipped.push(id);
+    else if (outcome === "failure" || outcome === "error") failed.push(id);
+    else passed.push(id);
+  }
+
+  return { passed, failed, skipped, log: capLogTail(log) };
+}
+```
+
+- [ ] **Step 4: Write the TAP14 parser**
+
+`packages/task-execution/evaluator-adapters/src/parsers/tap14.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { capLogTail, ReportParseError, type TestOutcomeReport } from "../report.js";
+
+const VERSION = /^TAP version 14\s*$/u;
+const PLAN = /^1\.\.(\d+)\s*(?:#.*)?$/u;
+const RESULT = /^(not ok|ok)\b\s*(\d+)?\s*(?:-\s*)?([^#]*?)\s*(?:#\s*(\S+)(?:\s+(.*))?)?\s*$/u;
+
+/**
+ * Ingests TAP version 14. Only top-level results are read: subtests, YAML diagnostic blocks, and
+ * bail-out lines are ignored for outcome purposes, and a declared plan must match the number of
+ * results seen. A `SKIP` or `TODO` directive is not a failure — TODO in particular marks a known
+ * incomplete test, so counting it as failed would penalize a correct solver.
+ */
+export function parseTap14(text: string, log: string): TestOutcomeReport {
+  const lines = text.split(/\r?\n/u);
+  if (!lines.some((line) => VERSION.test(line))) {
+    throw new ReportParseError("invalid-report", "TAP stream has no version 14 header");
+  }
+  let planned: number | undefined;
+  const passed: string[] = [];
+  const failed: string[] = [];
+  const skipped: string[] = [];
+  let seen = 0;
+
+  for (const line of lines) {
+    if (line.startsWith(" ") || line.startsWith("#")) continue;
+    const plan = PLAN.exec(line);
+    if (plan !== null) {
+      planned = Number.parseInt(plan[1]!, 10);
+      continue;
+    }
+    const result = RESULT.exec(line);
+    if (result === null) continue;
+    seen += 1;
+    const ok = result[1] === "ok";
+    const number = result[2] ?? String(seen);
+    const description = (result[3] ?? "").trim();
+    const directive = result[4]?.toUpperCase();
+    const id = description.length > 0 ? description : number;
+    if (directive === "SKIP" || directive === "TODO") skipped.push(id);
+    else if (ok) passed.push(id);
+    else failed.push(id);
+  }
+
+  if (planned !== undefined && planned !== seen) {
+    throw new ReportParseError(
+      "invalid-report",
+      `TAP plan declared ${planned} tests but ${seen} results were seen`,
+    );
+  }
+  return { passed, failed, skipped, log: capLogTail(log) };
+}
+```
+
+- [ ] **Step 5: Write the format dispatcher**
+
+`packages/task-execution/evaluator-adapters/src/parsers/index.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import type { ParserFormat } from "../declarations.js";
+import type { TestOutcomeReport } from "../report.js";
+import { parseJunitXml } from "./junit-xml.js";
+import { parsePytestJsonReport } from "./pytest-json-report.js";
+import { parseTap14 } from "./tap14.js";
+
+export { parseJunitXml, parsePytestJsonReport, parseTap14 };
+
+/** Dispatches on the format the parser declaration commits to — never on the material's content. */
+export function parseByFormat(
+  format: ParserFormat,
+  text: string,
+  log: string,
+): TestOutcomeReport {
+  switch (format) {
+    case "benchmark-json": return parsePytestJsonReport(text, log);
+    case "junit-xml": return parseJunitXml(text, log);
+    case "tap14": return parseTap14(text, log);
+  }
+}
+```
+
+- [ ] **Step 6: Run the tests**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test && yarn typecheck`
+Expected: PASS
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters/src
+git commit -m "feat(task-execution): add JUnit XML and TAP14 ingestion parsers"
+```
+
+---
+
+### Task 7: The swe-rebench evaluator adapter
+
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/material.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/swe-rebench.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/swe-rebench.test.ts`
+
+**Interfaces:**
+- Consumes: `parseByFormat` (Task 6), `assertGradeable` / `toOperationalErrorFromParse` (Task 5), `reduceTransitions` (Task 4), `parserDeclaration` (Task 3), `buildSweRebenchEvaluationSpec` / `loadFixtureFamily` (Task 2).
+- Produces:
+  - `resolveReportMaterial(input: { results: readonly ExactEvaluationMaterial[]; context: EvaluationContext; materialName: string }): { readonly text: string }` — throws `EvaluationOperationalError` with reason `subject-not-found` when absent
+  - `deliverMeasurements(spec: EvaluationSpec, computed: Record<string, EvaluationMeasurementValue>): EvaluationMeasurement[]` — the declared intersection
+  - `createSweRebenchRegistration(options: { readonly signerHandle?: string; readonly evaluatorId?: string }): EvaluatorRegistration`
+
+- [ ] **Step 1: Write the failing test**
+
+`packages/task-execution/evaluator-adapters/src/swe-rebench.test.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { EvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
+import { buildSweRebenchEvaluationSpec, loadFixtureFamily } from "./testing.js";
+import { parserIdentity } from "./declarations.js";
+import { createSweRebenchRegistration } from "./swe-rebench.js";
+
+const encoder = new TextEncoder();
+
+function material(name: string, text: string) {
+  const bytes = encoder.encode(text);
+  return { descriptor: { name, digest: { sha256: "0".repeat(64) } }, bytes };
+}
+
+const attempt = { attemptUri: "jinn:attempt:test", nonce: "n", attemptNumber: 1 } as const;
+
+describe("swe-rebench evaluator adapter", () => {
+  const registration = createSweRebenchRegistration({});
+  const identity = parserIdentity("jinn.parser.pytest-json-report");
+  const spec = buildSweRebenchEvaluationSpec({ parserDigest: identity.digest });
+
+  it("accepts only the deterministic-process specs whose parser it declares", () => {
+    expect(registration.specificationCompatibility(spec)).toBe(true);
+    const foreign = buildSweRebenchEvaluationSpec({
+      parserId: "jinn.parser.somebody-elses",
+      parserDigest: `sha256:${"f".repeat(64)}`,
+    });
+    expect(registration.specificationCompatibility(foreign)).toBe(false);
+  });
+
+  it("reproduces every pinned adapter fixture", async () => {
+    for (const fixtureCase of await loadFixtureFamily("swe-rebench-adapter")) {
+      const input = fixtureCase.input as { report: unknown; stdout: string };
+      const expected = fixtureCase.expect as {
+        verdict?: "pass" | "fail";
+        measurements?: Record<string, unknown>;
+        operational?: { reason: string };
+      };
+      const results = [
+        material("evaluation-report.json", JSON.stringify(input.report)),
+        material("solution.patch", "diff --git a/x b/x\n"),
+      ];
+      const context = { "jinn.evaluation.log": input.stdout };
+      const run = registration.adapter.evaluate(
+        material("task.sealed", "{}"),
+        results,
+        spec,
+        context,
+        attempt,
+        new AbortController().signal,
+      );
+      if (expected.operational !== undefined) {
+        await expect(run, fixtureCase.name).rejects.toBeInstanceOf(EvaluationOperationalError);
+        continue;
+      }
+      const completed = await run;
+      expect(completed.verdict, fixtureCase.name).toBe(expected.verdict);
+      const delivered = Object.fromEntries(
+        (completed.measurements ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(delivered, fixtureCase.name).toEqual(expected.measurements);
+    }
+  });
+
+  it("aborts rather than guessing when the grader report was never provisioned", async () => {
+    await expect(registration.adapter.evaluate(
+      material("task.sealed", "{}"),
+      [material("solution.patch", "diff --git a/x b/x\n")],
+      spec,
+      {},
+      attempt,
+      new AbortController().signal,
+    )).rejects.toBeInstanceOf(EvaluationOperationalError);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/swe-rebench.test.ts`
+Expected: FAIL — `Cannot find module './swe-rebench.js'`
+
+- [ ] **Step 3: Write the material resolver**
+
+`packages/task-execution/evaluator-adapters/src/material.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { EvaluationOperationalError } from "@jinn-network/task-execution-evaluation-harness";
+import type {
+  EvaluationMeasurement,
+  EvaluationMeasurementValue,
+  ExactEvaluationMaterial,
+} from "@jinn-network/task-execution-evaluation-harness";
+import type { EvaluationSpec } from "@jinn-network/task-execution-profiles";
+
+const decoder = new TextDecoder("utf-8", { fatal: true });
+
+export type EvaluationContext = Readonly<Record<string, unknown>>;
+
+/** Host-provisioned grader output, read from `evaluation-context.json` when it is not a Result. */
+const CONTEXT_MATERIAL_KEY = "jinn.evaluation.material" as const;
+export const CONTEXT_LOG_KEY = "jinn.evaluation.log" as const;
+
+function notFound(materialName: string): never {
+  throw new EvaluationOperationalError({
+    canonicalCode: "FAILED_PRECONDITION",
+    reason: "subject-not-found",
+    recoveryAdvice: "operator-action-required",
+    safeDetail:
+      `grader material ${materialName} was not provisioned; this adapter parses provisioned `
+      + "output and never produces it",
+  });
+}
+
+/**
+ * Locates the grader's output. Preference order is digest-verified Result material first, then
+ * the host-provisioned evaluation context — the operator-local channel for output produced
+ * outside the Attempt. Composition design finding 1: no owner in the composition design executes
+ * the deterministic-process container, so an adapter that cannot find its material aborts loudly
+ * rather than inventing a verdict.
+ */
+export function resolveReportMaterial(input: {
+  readonly results: readonly ExactEvaluationMaterial[];
+  readonly context: EvaluationContext;
+  readonly materialName: string;
+}): { readonly text: string } {
+  const result = input.results.find(
+    (candidate) => candidate.descriptor.name === input.materialName,
+  );
+  if (result !== undefined) {
+    try {
+      return { text: decoder.decode(result.bytes) };
+    } catch (cause) {
+      throw new EvaluationOperationalError({
+        canonicalCode: "FAILED_PRECONDITION",
+        reason: "invalid-evaluator-output",
+        recoveryAdvice: "do-not-retry",
+        safeDetail: `grader material ${input.materialName} is not valid UTF-8`,
+        cause,
+      });
+    }
+  }
+  const provisioned = input.context[CONTEXT_MATERIAL_KEY];
+  if (typeof provisioned === "object" && provisioned !== null && !Array.isArray(provisioned)) {
+    const entry = (provisioned as Record<string, unknown>)[input.materialName];
+    if (typeof entry === "string") return { text: entry };
+  }
+  return notFound(input.materialName);
+}
+
+export function contextLog(context: EvaluationContext): string {
+  const log = context[CONTEXT_LOG_KEY];
+  return typeof log === "string" ? log : "";
+}
+
+/**
+ * The declared intersection. The harness rejects any measurement the spec does not declare, so an
+ * adapter must never deliver its full computed set; it delivers exactly what the spec asked for,
+ * in the spec's declaration order.
+ */
+export function deliverMeasurements(
+  spec: EvaluationSpec,
+  computed: Readonly<Record<string, EvaluationMeasurementValue>>,
+): EvaluationMeasurement[] {
+  return spec.measurements
+    .filter((declaration) => Object.hasOwn(computed, declaration.name))
+    .map((declaration) => ({
+      name: declaration.name,
+      value: computed[declaration.name]!,
+      ...(declaration.unit === undefined ? {} : { unit: declaration.unit }),
+    }));
+}
+```
+
+- [ ] **Step 4: Write the adapter**
+
+`packages/task-execution/evaluator-adapters/src/swe-rebench.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  defineEvaluatorRegistration,
+  type CompletedEvaluation,
+  type EvaluatorRegistration,
+} from "@jinn-network/task-execution-evaluation-harness";
+import {
+  evaluateVerdictRule,
+  type DeterministicProcessBlock,
+  type EvaluationSpec,
+  type MeasurementMap,
+  type VerdictRule,
+} from "@jinn-network/task-execution-profiles";
+import { parserDeclaration, parserIdentity } from "./declarations.js";
+import {
+  assertGradeable,
+  toOperationalError,
+  toOperationalErrorFromParse,
+} from "./infrastructure.js";
+import { contextLog, deliverMeasurements, resolveReportMaterial } from "./material.js";
+import { parseByFormat } from "./parsers/index.js";
+import { reduceTransitions, ReportParseError } from "./report.js";
+
+/** The parser identities this registration can serve — the transition-scored ingestion formats. */
+const SUPPORTED_PARSER_IDS = Object.freeze([
+  "jinn.parser.pytest-json-report",
+  "jinn.parser.junit-xml",
+  "jinn.parser.tap14",
+] as const);
+
+export const SWE_REBENCH_REGISTRATION_ID = "jinn.evaluator.transition-scored.v1" as const;
+
+function deterministicBlock(spec: EvaluationSpec): DeterministicProcessBlock | undefined {
+  return spec.family === "deterministic-process"
+    ? spec.familyBlock as DeterministicProcessBlock
+    : undefined;
+}
+
+/**
+ * The transition-scored adapter: it reads the grader's provisioned output through the ingestion
+ * format its EvaluationSpec's parser identity commits to, reduces it against the spec's declared
+ * transitions, and lets the spec's own verdict rule decide. The rule is authoritative, so the
+ * harness's verdict-consistency gate and this adapter cannot disagree.
+ */
+export function createSweRebenchRegistration(options: {
+  readonly signerHandle?: string;
+  readonly evaluatorId?: string;
+} = {}): EvaluatorRegistration {
+  const methodIdentity = parserIdentity("jinn.parser.pytest-json-report");
+  return defineEvaluatorRegistration({
+    registrationId: SWE_REBENCH_REGISTRATION_ID,
+    evaluatorIdentity: { id: options.evaluatorId ?? SWE_REBENCH_REGISTRATION_ID },
+    signer: { handle: options.signerHandle ?? "evaluator-signing-key" },
+    interruptionBehavior: "repeatable",
+    evaluationMethod: {
+      name: SWE_REBENCH_REGISTRATION_ID,
+      digest: { sha256: methodIdentity.digest.slice("sha256:".length) },
+    },
+    specificationCompatibility(specification) {
+      const block = deterministicBlock(specification);
+      if (block === undefined) return false;
+      const declaredId = block.parser.id;
+      if (!SUPPORTED_PARSER_IDS.includes(declaredId as (typeof SUPPORTED_PARSER_IDS)[number])) {
+        return false;
+      }
+      // The spec must commit to the exact parser this deployment ships, not merely its name.
+      return block.parser.digest === parserIdentity(declaredId).digest
+        && block.parser.version === parserIdentity(declaredId).version;
+    },
+    outcomeValidator(evaluation) {
+      return evaluation;
+    },
+    adapter: {
+      async evaluate(_task, results, specification, context, _attempt, _deadlineSignal) {
+        const block = deterministicBlock(specification);
+        if (block === undefined) {
+          throw toOperationalError("unsupported_specification", "spec is not deterministic-process");
+        }
+        const declaration = parserDeclaration(block.parser.id);
+        const log = contextLog(context);
+        const { text } = resolveReportMaterial({
+          results,
+          context,
+          materialName: declaration.materialName,
+        });
+
+        let report;
+        try {
+          report = parseByFormat(declaration.format, text, log);
+        } catch (cause) {
+          if (cause instanceof ReportParseError) throw toOperationalErrorFromParse(cause);
+          throw cause;
+        }
+
+        const outcome = reduceTransitions(report, block.transitions);
+        assertGradeable(report, outcome);
+
+        const computed = { passed: outcome.passed };
+        const measurements = deliverMeasurements(specification, computed);
+        const map: MeasurementMap = Object.fromEntries(
+          measurements.map((entry) => [entry.name, entry.value as string | number | boolean]),
         );
+        const decided = evaluateVerdictRule(specification.verdictRule as VerdictRule, map);
 
-        test("the detailed outcome carries per-check results and the transition counts", async () => {
-          const fixture = SWE_REBENCH_FIXTURES.find(
-            (entry) => entry.name === "unresolved-pass-to-pass-broken",
-          )!;
-          const adapter = createSweRebenchEvaluatorAdapter({
-            graderReportSource: source({ report: fixture.report, log: fixture.log }),
-          });
-          const completed = await adapter.evaluate(
-            material("subject-task.json", "{}"),
-            [material("result.patch", "diff --git a/a b/a\n")],
-            specification(fixture.transitions),
-            {},
-            ATTEMPT,
-            new AbortController().signal,
-          );
-          expect(completed.detailedOutcome).toMatchObject({
-            checks: [
-              { name: "transitions.fail-to-pass", status: "pass" },
-              { name: "transitions.pass-to-pass", status: "fail" },
-            ],
-            passToPassBroken: 1,
-            containerExitCode: 1,
-          });
-        });
-
-        test("the capped test log rides as claim evidence", async () => {
-          const fixture = SWE_REBENCH_FIXTURES[0]!;
-          const adapter = createSweRebenchEvaluatorAdapter({
-            graderReportSource: source({ report: fixture.report, log: fixture.log }),
-          });
-          const completed = await adapter.evaluate(
-            material("subject-task.json", "{}"),
-            [material("result.patch", "diff --git a/a b/a\n")],
-            specification(fixture.transitions),
-            {},
-            ATTEMPT,
-            new AbortController().signal,
-          );
-          expect(completed.claimEvidence).toHaveLength(1);
-          const evidence = completed.claimEvidence![0]!;
-          expect(evidence.kind).toBe("content");
-          if (evidence.kind !== "content") return;
-          expect(evidence.name).toBe("test-log.txt");
-          expect(evidence.mediaType).toBe("text/plain; charset=utf-8");
-        });
-
-        test("an oversize log is tail-capped, never dropped", async () => {
-          const adapter = createSweRebenchEvaluatorAdapter({
-            graderReportSource: source({
-              report: SWE_REBENCH_FIXTURES[0]!.report,
-              log: `${"x".repeat(4096)}TAIL`,
-            }),
-            maxTestLogBytes: 64,
-          });
-          const completed = await adapter.evaluate(
-            material("subject-task.json", "{}"),
-            [material("result.patch", "diff --git a/a b/a\n")],
-            specification(SWE_REBENCH_FIXTURES[0]!.transitions),
-            {},
-            ATTEMPT,
-            new AbortController().signal,
-          );
-          const evidence = completed.claimEvidence![0]!;
-          if (evidence.kind !== "content") throw new Error("expected content evidence");
-          expect(evidence.bytes.byteLength).toBeLessThanOrEqual(64);
-          expect(new TextDecoder().decode(evidence.bytes)).toContain("TAIL");
-        });
-
-        test("a non-deterministic-process specification is refused", async () => {
-          const adapter = createSweRebenchEvaluatorAdapter({
-            graderReportSource: source({ report: {}, log: "" }),
-          });
-          const modelGraded = {
-            ...specification({ failToPass: [], passToPass: [] }),
-            family: "model-graded",
-          } as unknown as EvaluationSpec;
-          const error = await adapter.evaluate(
-            material("subject-task.json", "{}"),
-            [material("result.patch", "")],
-            modelGraded,
-            {},
-            ATTEMPT,
-            new AbortController().signal,
-          ).catch((cause: unknown) => cause);
-          expect(error).toBeInstanceOf(EvaluationOperationalError);
-          expect((error as EvaluationOperationalError).reason)
-            .toBe("unsupported-specification");
-        });
-
-        test("an already-aborted deadline yields the cancellation path, not a verdict", async () => {
-          const controller = new AbortController();
-          controller.abort();
-          const adapter = createSweRebenchEvaluatorAdapter({
-            graderReportSource: source({
-              report: SWE_REBENCH_FIXTURES[0]!.report,
-              log: SWE_REBENCH_FIXTURES[0]!.log,
-            }),
-          });
-          const error = await adapter.evaluate(
-            material("subject-task.json", "{}"),
-            [material("result.patch", "")],
-            specification(SWE_REBENCH_FIXTURES[0]!.transitions),
-            {},
-            ATTEMPT,
-            controller.signal,
-          ).catch((cause: unknown) => cause);
-          expect(error).toBeInstanceOf(EvaluationOperationalError);
-          expect((error as EvaluationOperationalError).canonicalCode).toBe("CANCELLED");
-        });
-      });
-
-      describe("contextGraderReportSource", () => {
-        test("reads the grader report from the harness-supplied evaluation context", async () => {
-          const raw = await contextGraderReportSource().read({
-            specification: specification({ failToPass: [], passToPass: [] }),
-            task: material("subject-task.json", "{}"),
-            results: [],
-            context: {
-              graderReport: { instance_id: "acme__widget-1", exit_code: 0, error: "" },
-              graderLog: "PASSED",
-            },
-            attempt: ATTEMPT,
-            deadlineSignal: new AbortController().signal,
-          });
-          expect(raw).toEqual({
-            report: { instance_id: "acme__widget-1", exit_code: 0, error: "" },
-            log: "PASSED",
-          });
-        });
-
-        test("a context without a grader report is an operational failure, not a fail verdict", async () => {
-          const error = await contextGraderReportSource().read({
-            specification: specification({ failToPass: [], passToPass: [] }),
-            task: material("subject-task.json", "{}"),
-            results: [],
-            context: {},
-            attempt: ATTEMPT,
-            deadlineSignal: new AbortController().signal,
-          }).catch((cause: unknown) => cause);
-          expect(error).toBeInstanceOf(EvaluationOperationalError);
-          expect((error as EvaluationOperationalError).reason).toBe("provider-unavailable");
-        });
-      });
-      ```
-
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench/adapter.test.ts`
-      Expected failure: `Failed to resolve import "./adapter.js"`.
-
-- [ ] **Minimal implementation.** Create `src/swe-rebench/adapter.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        EvaluationOperationalError,
-        type CompletedEvaluation,
-        type EvaluationContext,
-        type EvaluatorAdapter,
-        type ExactEvaluationMaterial,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import type {
-        DeterministicProcessBlock,
-        EvaluationSpec,
-      } from "@jinn-network/task-execution-profiles";
-      import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-      import { parseSweRebenchReport } from "./parse.js";
-
-      /** The one measurement the canonical swe-rebench EvaluationSpec declares (Finding D). */
-      export const SWE_REBENCH_MEASUREMENT_PASSED = "passed";
-
-      /** Legacy tail cap: the pytest summary and last failures live at the end of the log. */
-      const DEFAULT_MAX_TEST_LOG_BYTES = 1024 * 1024;
-
-      const encoder = new TextEncoder();
-
-      export interface GraderReportRequest {
-        readonly specification: EvaluationSpec;
-        readonly task: ExactEvaluationMaterial;
-        readonly results: readonly ExactEvaluationMaterial[];
-        readonly context: EvaluationContext;
-        readonly attempt: AttemptIdentity;
-        readonly deadlineSignal: AbortSignal;
-      }
-
-      export interface RawGraderReport {
-        readonly report: unknown;
-        readonly log: string;
-      }
-
-      /**
-       * The method-specific execution provider the adapter is constructed with (evaluation-runner
-       * design §5.4/§11). This package ships only the hermetic context-backed implementation;
-       * a container-executing source is host or separately-chartered work (Finding A).
-       */
-      export interface GraderReportSource {
-        read(request: GraderReportRequest): Promise<RawGraderReport>;
-      }
-
-      function unavailable(detail: string, cause?: unknown): never {
-        throw new EvaluationOperationalError({
-          canonicalCode: "UNAVAILABLE",
-          reason: "provider-unavailable",
-          recoveryAdvice: "new-attempt-required",
-          safeDetail: detail,
-          cause,
-        });
-      }
-
-      /** Reads an already-produced grader report from the harness-supplied evaluation context. */
-      export function contextGraderReportSource(): GraderReportSource {
-        return {
-          async read({ context }) {
-            const report = context["graderReport"];
-            if (report === undefined) {
-              unavailable(
-                "the evaluation context carries no graderReport for the swe-rebench parser",
-              );
-            }
-            const log = context["graderLog"];
-            if (log !== undefined && typeof log !== "string") {
-              unavailable("the evaluation context graderLog is not text");
-            }
-            return { report, log: typeof log === "string" ? log : "" };
+        const completed: CompletedEvaluation = {
+          detailedOutcome: {
+            failToPassPassed: [...outcome.failToPassPassed],
+            passToPassBroken: [...outcome.passToPassBroken],
+            graderExitCode: report.exitCode ?? null,
           },
-        };
-      }
-
-      export interface SweRebenchAdapterOptions {
-        readonly graderReportSource: GraderReportSource;
-        readonly now?: () => Date;
-        readonly maxTestLogBytes?: number;
-      }
-
-      function tailCap(log: string, maxBytes: number): Uint8Array {
-        const bytes = encoder.encode(log);
-        if (bytes.byteLength <= maxBytes) return bytes;
-        return bytes.slice(bytes.byteLength - maxBytes);
-      }
-
-      export function createSweRebenchEvaluatorAdapter(
-        options: SweRebenchAdapterOptions,
-      ): EvaluatorAdapter {
-        const now = options.now ?? (() => new Date());
-        const maxTestLogBytes = options.maxTestLogBytes ?? DEFAULT_MAX_TEST_LOG_BYTES;
-
-        return {
-          async evaluate(
-            task,
-            results,
-            specification,
-            context,
-            attempt,
-            deadlineSignal,
-          ): Promise<CompletedEvaluation> {
-            if (deadlineSignal.aborted) {
-              throw new EvaluationOperationalError({
-                canonicalCode: "CANCELLED",
-                reason: "provider-unavailable",
-                recoveryAdvice: "resume-attempt",
-                safeDetail: "the evaluation deadline elapsed before grading began",
-              });
-            }
-            if (specification.family !== "deterministic-process") {
-              throw new EvaluationOperationalError({
-                canonicalCode: "FAILED_PRECONDITION",
-                reason: "unsupported-specification",
-                recoveryAdvice: "do-not-retry",
-                safeDetail:
-                  "the swe-rebench evaluator serves deterministic-process specifications only",
-              });
-            }
-            const block = specification.familyBlock as DeterministicProcessBlock;
-            const raw = await options.graderReportSource.read({
-              specification,
-              task,
-              results,
-              context,
-              attempt,
-              deadlineSignal,
-            });
-            const outcome = parseSweRebenchReport({
-              report: raw.report,
-              log: raw.log,
-              transitions: {
-                failToPass: block.transitions.failToPass,
-                passToPass: block.transitions.passToPass,
-              },
-            });
-
-            if (outcome.kind === "ungradeable") {
-              // Never a failing verdict: nothing was learned about the solution.
-              throw new EvaluationOperationalError({
-                canonicalCode: "UNAVAILABLE",
-                reason: "provider-unavailable",
-                recoveryAdvice: "new-attempt-required",
-                safeDetail:
-                  `the swe-rebench evaluation could not grade the solution (${outcome.ungradeableClass})`,
-                cause: undefined,
-              });
-            }
-
-            return {
-              detailedOutcome: {
-                instanceId: outcome.instanceId,
-                checks: outcome.checks,
-                failToPassExpected: outcome.failToPassExpected,
-                failToPassSatisfied: outcome.failToPassSatisfied,
-                passToPassExpected: outcome.passToPassExpected,
-                passToPassBroken: outcome.passToPassBroken,
-                containerExitCode: outcome.containerExitCode,
-              },
-              verdict: outcome.passed ? "pass" : "fail",
-              evaluatedAt: now().toISOString(),
-              measurements: [
-                { name: SWE_REBENCH_MEASUREMENT_PASSED, value: outcome.passed },
-              ],
-              explanation: outcome.passed
-                ? "Every declared fail-to-pass transition now passes and no declared pass-to-pass transition broke."
-                : "At least one declared transition did not hold.",
-              claimEvidence: [{
+          verdict: decided.verdict,
+          evaluatedAt: new Date().toISOString(),
+          measurements,
+          explanation: outcome.passed
+            ? "Every expected failing test now passes and no expected passing test broke."
+            : "The expected transition set was not satisfied.",
+          ...(decided.inconclusiveClass === undefined
+            ? {}
+            : { limitations: [decided.inconclusiveClass] }),
+          claimEvidence: report.log.length === 0
+            ? []
+            : [{
                 kind: "content",
-                name: "test-log.txt",
-                bytes: tailCap(raw.log, maxTestLogBytes),
+                name: "grader-log.txt",
+                bytes: new TextEncoder().encode(report.log),
                 mediaType: "text/plain; charset=utf-8",
               }],
-            };
-          },
         };
-      }
-      ```
+        return completed;
+      },
+    },
+  });
+}
+```
 
-      Extend `src/index.ts`:
+- [ ] **Step 5: Run the tests**
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/swe-rebench.test.ts && yarn typecheck`
+Expected: PASS. If `buildSweRebenchEvaluationSpec`'s default `parserDigest` no longer matches a real declaration, update the kit builder's default to call `parserIdentity("jinn.parser.pytest-json-report").digest` — the kit may import `./declarations.js`, both are production modules of this package.
 
-      export * from "./parser-identity.js";
-      export * from "./swe-rebench/parse.js";
-      export * from "./swe-rebench/adapter.js";
-      ```
+- [ ] **Step 6: Commit**
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/swe-rebench && yarn typecheck`
-      Expected: all swe-rebench suites passing; `tsc --noEmit` prints nothing.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): add the swe-rebench evaluator adapter"
-      ```
+```bash
+git add packages/task-execution/evaluator-adapters/src
+git commit -m "feat(task-execution): add the transition-scored swe-rebench evaluator adapter"
+```
 
 ---
 
-## Task 6 — prediction fixtures
+### Task 8: The prediction-market evaluator adapter
 
-**Files**
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/decimal.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/decimal.test.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/prediction.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/prediction.test.ts`
 
-- `packages/task-execution/evaluator-adapters/fixtures/prediction/README.md` (new)
-- `packages/task-execution/evaluator-adapters/src/prediction/fixtures.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/prediction/fixtures.test.ts` (new)
-
-**Interfaces**
-
+**Interfaces:**
+- Consumes: `resolveReportMaterial` / `deliverMeasurements` (Task 7), `parserDeclaration` (Task 3), `buildPredictionEvaluationSpec` / `loadFixtureFamily` (Task 2).
 - Produces:
-  ```ts
-  export interface PredictionResolutionSnapshot {
-    readonly status: "resolved" | "unresolved" | "unavailable";
-    readonly outcome?: "YES" | "NO";
-    readonly resolvedAt?: string;
-    readonly marketId: string;
-    readonly conditionId: string;
-    readonly sourceUrl: string;
+  - `brierLoss(probability: string, outcomeIsYes: boolean): string` — exact, six fractional digits, half-up
+  - `subtractDecimals(left: string, right: string): string` — exact, six fractional digits
+  - `createPredictionRegistration(options: { readonly signerHandle?: string; readonly evaluatorId?: string }): EvaluatorRegistration`
+  - `PREDICTION_REGISTRATION_ID = "jinn.evaluator.binary-prediction-market.v1"`
+
+- [ ] **Step 1: Write the failing decimal test**
+
+`packages/task-execution/evaluator-adapters/src/decimal.test.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, expect, it } from "vitest";
+import { brierLoss, subtractDecimals } from "./decimal.js";
+
+describe("exact decimal scoring", () => {
+  it("computes the Brier loss without float arithmetic", () => {
+    expect(brierLoss("0.9", true)).toBe("0.010000");
+    expect(brierLoss("0.6", true)).toBe("0.160000");
+    expect(brierLoss("0.2", true)).toBe("0.640000");
+    expect(brierLoss("0.5", false)).toBe("0.250000");
+    expect(brierLoss("1", true)).toBe("0.000000");
+    expect(brierLoss("0", true)).toBe("1.000000");
+  });
+
+  it("rounds half-up at the sixth fractional digit", () => {
+    // 0.1234565^2 exceeds six digits and must round, not truncate.
+    expect(brierLoss("0.8765435", true)).toBe("0.015242");
+  });
+
+  it("subtracts exactly and keeps the sign", () => {
+    expect(subtractDecimals("0.010000", "0.160000")).toBe("-0.150000");
+    expect(subtractDecimals("0.640000", "0.160000")).toBe("0.480000");
+    expect(subtractDecimals("0.160000", "0.160000")).toBe("0.000000");
+  });
+
+  it("rejects anything that is not a decimal string", () => {
+    expect(() => brierLoss("1e-3", true)).toThrow(TypeError);
+    expect(() => brierLoss("", true)).toThrow(TypeError);
+  });
+});
+```
+
+The `0.8765435` expectation must be computed, not guessed: `(0.8765435 - 1)^2 = 0.0152418...`. Run the implementation once and pin the observed six-digit value; correct the test literal if it differs.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/decimal.test.ts`
+Expected: FAIL — `Cannot find module './decimal.js'`
+
+- [ ] **Step 3: Write the decimal module**
+
+`packages/task-execution/evaluator-adapters/src/decimal.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Exact decimal arithmetic over `BigInt` scaled integers. Fractional quantities in a sealed
+ * document are decimal strings, never JSON numbers, and a float round-trip would make a score
+ * host-dependent — so nothing here ever touches `Number`, `parseFloat`, or `toFixed`.
+ */
+
+const DECIMAL = /^-?\d+(?:\.\d+)?$/u;
+
+/** Delivered scores carry exactly this many fractional digits. */
+export const SCORE_SCALE = 6;
+
+function scaled(value: string, scale: number): bigint {
+  if (!DECIMAL.test(value)) {
+    throw new TypeError(`not a decimal string: ${JSON.stringify(value)}`);
   }
-  export interface PredictionFixture {
-    readonly name: string;
-    readonly provenance: string;
-    readonly resultBytes: Uint8Array;
-    readonly snapshot: unknown;
-    readonly market: { readonly marketId: string; readonly conditionId: string };
-    readonly window: { readonly startTs: number; readonly endTs: number };
-    readonly consensusProbabilityYes: string;
-    readonly expect: {
-      readonly verdict: "pass" | "fail" | "inconclusive";
-      readonly integrity: boolean;
-      readonly resolved: boolean;
-      readonly solverBrier?: string;
-      readonly consensusBrier?: string;
-      readonly brierSpread?: string;
-    };
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [whole, fraction = ""] = unsigned.split(".");
+  if (fraction.length > scale) {
+    throw new TypeError(`decimal ${value} exceeds scale ${scale}`);
   }
-  export const PREDICTION_FIXTURES: readonly PredictionFixture[];
-  ```
+  const digits = whole! + fraction.padEnd(scale, "0");
+  return BigInt(negative ? `-${digits}` : digits);
+}
 
-### Steps
+function render(value: bigint, scale: number): string {
+  const negative = value < 0n;
+  const digits = (negative ? -value : value).toString().padStart(scale + 1, "0");
+  const whole = digits.slice(0, digits.length - scale);
+  const fraction = digits.slice(digits.length - scale);
+  return `${negative ? "-" : ""}${whole}.${fraction}`;
+}
 
-- [ ] **Failing test.** Create `src/prediction/fixtures.test.ts`:
+function fractionDigits(value: string): number {
+  const index = value.indexOf(".");
+  return index === -1 ? 0 : value.length - index - 1;
+}
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+/** Rounds a value scaled at `from` down to `SCORE_SCALE`, half away from zero. */
+function roundToScoreScale(value: bigint, from: number): bigint {
+  if (from <= SCORE_SCALE) return value * 10n ** BigInt(SCORE_SCALE - from);
+  const divisor = 10n ** BigInt(from - SCORE_SCALE);
+  const negative = value < 0n;
+  const magnitude = negative ? -value : value;
+  const quotient = magnitude / divisor;
+  const remainder = magnitude % divisor;
+  const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
+  return negative ? -rounded : rounded;
+}
 
-      import { describe, expect, test } from "vitest";
-      import { PREDICTION_FIXTURES } from "./fixtures.js";
+/**
+ * The Brier loss of one probability against a binary outcome: `(p - target)^2`, where `target` is
+ * 1 for YES and 0 for NO. Lower is better.
+ */
+export function brierLoss(probability: string, outcomeIsYes: boolean): string {
+  const scale = Math.max(fractionDigits(probability), 1);
+  const p = scaled(probability, scale);
+  const target = outcomeIsYes ? 10n ** BigInt(scale) : 0n;
+  const difference = p - target;
+  return render(roundToScoreScale(difference * difference, scale * 2), SCORE_SCALE);
+}
 
-      describe("prediction fixtures", () => {
-        test("every fixture names its legacy provenance", () => {
-          expect(PREDICTION_FIXTURES.length).toBeGreaterThanOrEqual(9);
-          for (const fixture of PREDICTION_FIXTURES) {
-            expect(fixture.provenance).toMatch(/^client\/(src|test)\/.+:\d+/u);
-          }
-        });
+/** Exact difference of two `SCORE_SCALE` decimals. */
+export function subtractDecimals(left: string, right: string): string {
+  return render(scaled(left, SCORE_SCALE) - scaled(right, SCORE_SCALE), SCORE_SCALE);
+}
+```
 
-        test("all three protocol verdicts are represented", () => {
-          const verdicts = new Set(PREDICTION_FIXTURES.map((f) => f.expect.verdict));
-          expect(verdicts).toEqual(new Set(["pass", "fail", "inconclusive"]));
-        });
+- [ ] **Step 4: Run the decimal test, then write the failing adapter test**
 
-        test("scored fixtures carry six-fraction-digit decimal strings, never JSON numbers", () => {
-          for (const fixture of PREDICTION_FIXTURES) {
-            for (const value of [
-              fixture.expect.solverBrier,
-              fixture.expect.consensusBrier,
-              fixture.expect.brierSpread,
-            ]) {
-              if (value === undefined) continue;
-              expect(typeof value).toBe("string");
-              expect(value).toMatch(/^-?\d+\.\d{6}$/u);
-            }
-          }
-        });
-      });
-      ```
+Run the decimal test (expect PASS after pinning the rounding literal), then create `packages/task-execution/evaluator-adapters/src/prediction.test.ts`:
 
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction/fixtures.test.ts`
-      Expected failure: `Failed to resolve import "./fixtures.js"`.
+```ts
+// SPDX-License-Identifier: Apache-2.0
 
-- [ ] **Minimal implementation.** Create `src/prediction/fixtures.ts`. Provenance for the
-      cases below, from
-      `client/src/harnesses/impls/prediction-v1-evaluator/index.ts:88-146` (checks and verdict
-      derivation), `:223-229` (`deriveVerdict`), `:231-250` (`checkResolutionIdentity`),
-      `:252-273` (`scoreBrier`), and
-      `client/src/harnesses/impls/prediction-v0-evaluator/score.ts:8-22` (a non-PASS verdict
-      never carries a score).
+import { describe, expect, it } from "vitest";
+import { buildPredictionEvaluationSpec, loadFixtureFamily } from "./testing.js";
+import { createPredictionRegistration } from "./prediction.js";
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+const encoder = new TextEncoder();
 
-      /**
-       * Behavioral oracles for the prediction scorer. Composition design §6.6: legacy behavior
-       * enters as fixtures, never as ported code.
-       */
+function material(name: string, text: string) {
+  const bytes = encoder.encode(text);
+  return { descriptor: { name, digest: { sha256: "0".repeat(64) } }, bytes };
+}
 
-      const encoder = new TextEncoder();
+const attempt = { attemptUri: "jinn:attempt:test", nonce: "n", attemptNumber: 1 } as const;
 
-      export interface PredictionResolutionSnapshot {
-        readonly status: "resolved" | "unresolved" | "unavailable";
-        readonly outcome?: "YES" | "NO";
-        readonly resolvedAt?: string;
-        readonly marketId: string;
-        readonly conditionId: string;
-        readonly sourceUrl: string;
+describe("binary prediction-market evaluator adapter", () => {
+  const registration = createPredictionRegistration({});
+  const spec = buildPredictionEvaluationSpec();
+
+  it("reproduces every pinned adapter fixture", async () => {
+    for (const fixtureCase of await loadFixtureFamily("prediction-adapter")) {
+      const input = fixtureCase.input as {
+        taskPayload: unknown;
+        solution: unknown;
+        outcome: unknown;
+      };
+      const expected = fixtureCase.expect as {
+        verdict: "pass" | "fail" | "inconclusive";
+        measurements: Record<string, unknown>;
+        limitations?: string[];
+      };
+      const completed = await registration.adapter.evaluate(
+        material("task.sealed", JSON.stringify({ payload: input.taskPayload })),
+        [
+          material("prediction.json", JSON.stringify(input.solution)),
+          material("prediction-outcome.json", JSON.stringify(input.outcome)),
+        ],
+        spec,
+        {},
+        attempt,
+        new AbortController().signal,
+      );
+      expect(completed.verdict, fixtureCase.name).toBe(expected.verdict);
+      const delivered = Object.fromEntries(
+        (completed.measurements ?? []).map((entry) => [entry.name, entry.value]),
+      );
+      expect(delivered, fixtureCase.name).toEqual(expected.measurements);
+      if (expected.limitations !== undefined) {
+        expect([...(completed.limitations ?? [])], fixtureCase.name).toEqual(expected.limitations);
       }
+    }
+  });
 
-      export interface PredictionFixture {
-        readonly name: string;
-        readonly provenance: string;
-        readonly resultBytes: Uint8Array;
-        readonly snapshot: unknown;
-        readonly market: { readonly marketId: string; readonly conditionId: string };
-        readonly window: { readonly startTs: number; readonly endTs: number };
-        readonly consensusProbabilityYes: string;
-        readonly expect: {
-          readonly verdict: "pass" | "fail" | "inconclusive";
-          readonly integrity: boolean;
-          readonly resolved: boolean;
-          readonly solverBrier?: string;
-          readonly consensusBrier?: string;
-          readonly brierSpread?: string;
-        };
-      }
+  it("only claims specs that commit to its own parser identity", () => {
+    expect(registration.specificationCompatibility(spec)).toBe(true);
+  });
+});
+```
 
-      const MARKET = { marketId: "0x5150", conditionId: "0xABCDEF" } as const;
-      const WINDOW = { startTs: 1_780_000_000_000, endTs: 1_780_086_400_000 } as const;
+- [ ] **Step 5: Write the prediction adapter**
 
-      function result(payload: Record<string, unknown>): Uint8Array {
-        return encoder.encode(JSON.stringify(payload));
-      }
+`packages/task-execution/evaluator-adapters/src/prediction.ts`:
 
-      function resolved(outcome: "YES" | "NO"): PredictionResolutionSnapshot {
-        return {
-          status: "resolved",
-          outcome,
-          resolvedAt: "2026-06-02T00:00:00.000Z",
-          marketId: MARKET.marketId,
-          conditionId: MARKET.conditionId,
-          sourceUrl: "https://example.invalid/markets/0x5150",
-        };
-      }
+```ts
+// SPDX-License-Identifier: Apache-2.0
 
-      export const PREDICTION_FIXTURES: readonly PredictionFixture[] = Object.freeze([
-        {
-          name: "scored-yes-solver-beats-consensus",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
-          resultBytes: result({
-            probabilityYes: "0.900000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: {
-            verdict: "pass",
-            integrity: true,
-            resolved: true,
-            solverBrier: "0.010000",
-            consensusBrier: "0.160000",
-            brierSpread: "-0.150000",
-          },
-        },
-        {
-          name: "scored-no-solver-worse-than-consensus",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:252-273",
-          resultBytes: result({
-            probabilityYes: "0.800000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: resolved("NO"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.300000",
-          expect: {
-            verdict: "pass",
-            integrity: true,
-            resolved: true,
-            solverBrier: "0.640000",
-            consensusBrier: "0.090000",
-            brierSpread: "0.550000",
-          },
-        },
-        {
-          name: "inconclusive-market-unresolved",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:136-141",
-          resultBytes: result({
-            probabilityYes: "0.500000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: {
-            status: "unresolved",
-            marketId: MARKET.marketId,
-            conditionId: MARKET.conditionId,
-            sourceUrl: "https://example.invalid/markets/0x5150",
-          },
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.500000",
-          expect: { verdict: "inconclusive", integrity: true, resolved: false },
-        },
-        {
-          name: "rejected-submission-outside-window",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:120-131",
-          resultBytes: result({
-            probabilityYes: "0.900000",
-            submittedAt: "2026-05-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-        {
-          name: "rejected-market-identity-mismatch",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:231-250",
-          resultBytes: result({
-            probabilityYes: "0.900000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: { ...resolved("YES"), marketId: "0x0000" },
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-        {
-          name: "market-identity-condition-id-is-case-insensitive",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:236",
-          resultBytes: result({
-            probabilityYes: "1.000000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: { ...resolved("YES"), conditionId: "0xabcdef" },
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.500000",
-          expect: {
-            verdict: "pass",
-            integrity: true,
-            resolved: true,
-            solverBrier: "0.000000",
-            consensusBrier: "0.250000",
-            brierSpread: "-0.250000",
-          },
-        },
-        {
-          name: "adversarial-result-is-not-json",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:112-118",
-          resultBytes: encoder.encode("{ this is not json"),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-        {
-          name: "adversarial-result-is-not-utf8",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:112-118",
-          resultBytes: Uint8Array.from([0xff, 0xfe, 0xfd, 0x00]),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-        {
-          name: "adversarial-result-is-empty",
-          provenance: "client/src/harnesses/impls/prediction-v1-evaluator/index.ts:112-118",
-          resultBytes: new Uint8Array(0),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-        {
-          name: "adversarial-probability-out-of-range",
-          provenance: "client/src/harnesses/impls/prediction-v0-evaluator/score.ts:8-22",
-          resultBytes: result({
-            probabilityYes: "1.500000",
-            submittedAt: "2026-06-01T00:00:00.000Z",
-            modelId: "model-a",
-          }),
-          snapshot: resolved("YES"),
-          market: MARKET,
-          window: WINDOW,
-          consensusProbabilityYes: "0.600000",
-          expect: { verdict: "fail", integrity: false, resolved: true },
-        },
-      ]);
-      ```
+import {
+  defineEvaluatorRegistration,
+  EvaluationOperationalError,
+  type CompletedEvaluation,
+  type EvaluationMeasurementValue,
+  type EvaluatorRegistration,
+} from "@jinn-network/task-execution-evaluation-harness";
+import {
+  evaluateVerdictRule,
+  type DeterministicProcessBlock,
+  type EvaluationSpec,
+  type MeasurementMap,
+  type VerdictRule,
+} from "@jinn-network/task-execution-profiles";
+import { brierLoss, subtractDecimals } from "./decimal.js";
+import { parserDeclaration, parserIdentity } from "./declarations.js";
+import { deliverMeasurements, resolveReportMaterial } from "./material.js";
 
-      Write `fixtures/prediction/README.md` naming the four checks, the verdict derivation, the
-      Brier basis, and the decimal-string encoding rule, with the same citations.
+export const PREDICTION_PARSER_ID = "jinn.parser.prediction-market-v1" as const;
+export const PREDICTION_REGISTRATION_ID = "jinn.evaluator.binary-prediction-market.v1" as const;
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction/fixtures.test.ts`
-      Expected: 3 passing tests over 10 fixtures.
+interface TaskPayload {
+  readonly window: { readonly startTs: number; readonly endTs: number };
+  readonly market: { readonly marketId: string; readonly conditionId: string };
+  readonly consensusProbabilityYes: string;
+}
 
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "test(task-execution): land prediction evaluator fixtures from the legacy oracles"
-      ```
+interface Solution {
+  readonly probabilityYes: string;
+  readonly submittedAt: string;
+}
 
----
+interface Outcome {
+  readonly status: "resolved" | "unresolved" | "invalid";
+  readonly outcome?: "YES" | "NO";
+  readonly marketId: string;
+  readonly conditionId: string;
+}
 
-## Task 7 — the prediction ingestion parser (pure)
+const decoder = new TextDecoder("utf-8", { fatal: true });
 
-**Files**
+function invalid(detail: string, cause?: unknown): never {
+  throw new EvaluationOperationalError({
+    canonicalCode: "FAILED_PRECONDITION",
+    reason: "invalid-evaluator-output",
+    recoveryAdvice: "do-not-retry",
+    safeDetail: detail,
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
 
-- `packages/task-execution/evaluator-adapters/src/prediction/parse.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/prediction/parse.test.ts` (new)
-
-**Interfaces**
-
-- Consumes: `PREDICTION_FIXTURES`, `PredictionResolutionSnapshot` from `./fixtures.js`.
-- Produces:
-  ```ts
-  export interface PredictionCheck {
-    readonly name: "result.schema" | "result.window" | "market.identity" | "market.resolution";
-    readonly status: "pass" | "fail" | "indeterminate";
-    readonly detail?: string;
+function json(text: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    invalid(`${label} is not valid JSON`, cause);
   }
-  export interface PredictionScores {
-    readonly scoreBasis: "brier-loss.v1";
-    readonly solverBrier: string;
-    readonly consensusBrier: string;
-    readonly brierSpread: string;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    invalid(`${label} must be an object`);
   }
-  export interface PredictionOutcome {
-    readonly verdict: "pass" | "fail" | "inconclusive";
-    readonly integrity: boolean;
-    readonly resolved: boolean;
-    readonly outcomeYes?: boolean;
-    readonly scores?: PredictionScores;
-    readonly checks: readonly PredictionCheck[];
-  }
-  export interface PredictionParseInput {
-    readonly resultBytes: Uint8Array;
-    readonly snapshot: unknown;
-    readonly market: { readonly marketId: string; readonly conditionId: string };
-    readonly window: { readonly startTs: number; readonly endTs: number };
-    readonly consensusProbabilityYes: string;
-  }
-  export function parsePredictionResult(input: PredictionParseInput): PredictionOutcome;
-  export function brierLoss(probability: string, target: 0 | 1): string;
-  ```
+  return parsed as Record<string, unknown>;
+}
 
-### Steps
+/** ASCII-only lowercase; the guard forbids locale-sensitive case mapping in this tree. */
+function lowerAscii(value: string): string {
+  return value.replace(/[A-Z]/gu, (character) =>
+    String.fromCharCode(character.charCodeAt(0) + 32));
+}
 
-- [ ] **Failing test.** Create `src/prediction/parse.test.ts`:
+/**
+ * Scores one binary prediction against a provisioned market outcome. The adapter reads only
+ * provisioned material — the sealed Task for the window and market identity, the solver's Result
+ * for the claimed probability, and the outcome document for the resolution. It never contacts a
+ * venue; a resolution snapshot is ingested, not fetched.
+ */
+export function createPredictionRegistration(options: {
+  readonly signerHandle?: string;
+  readonly evaluatorId?: string;
+} = {}): EvaluatorRegistration {
+  const identity = parserIdentity(PREDICTION_PARSER_ID);
+  const declaration = parserDeclaration(PREDICTION_PARSER_ID);
+  return defineEvaluatorRegistration({
+    registrationId: PREDICTION_REGISTRATION_ID,
+    evaluatorIdentity: { id: options.evaluatorId ?? PREDICTION_REGISTRATION_ID },
+    signer: { handle: options.signerHandle ?? "evaluator-signing-key" },
+    interruptionBehavior: "repeatable",
+    evaluationMethod: {
+      name: PREDICTION_REGISTRATION_ID,
+      digest: { sha256: identity.digest.slice("sha256:".length) },
+    },
+    specificationCompatibility(specification: EvaluationSpec) {
+      if (specification.family !== "deterministic-process") return false;
+      const block = specification.familyBlock as DeterministicProcessBlock;
+      return block.parser.id === PREDICTION_PARSER_ID
+        && block.parser.version === identity.version
+        && block.parser.digest === identity.digest;
+    },
+    outcomeValidator(evaluation) {
+      return evaluation;
+    },
+    adapter: {
+      async evaluate(task, results, specification, context, _attempt, _deadlineSignal) {
+        const taskDocument = json(decoder.decode(task.bytes), "subject Task");
+        const payload = taskDocument["payload"] as TaskPayload | undefined;
+        if (payload === undefined) invalid("subject Task carries no payload");
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+        const solution = json(
+          resolveReportMaterial({ results, context, materialName: "prediction.json" }).text,
+          "prediction Result",
+        ) as unknown as Solution;
+        const outcome = json(
+          resolveReportMaterial({ results, context, materialName: declaration.materialName }).text,
+          "market outcome",
+        ) as unknown as Outcome;
 
-      import { describe, expect, test } from "vitest";
-      import { PREDICTION_FIXTURES } from "./fixtures.js";
-      import { brierLoss, parsePredictionResult } from "./parse.js";
+        const identityMatched = outcome.marketId === payload.market.marketId
+          && lowerAscii(outcome.conditionId) === lowerAscii(payload.market.conditionId);
+        const submittedAt = Date.parse(solution.submittedAt);
+        const withinWindow = Number.isFinite(submittedAt)
+          && submittedAt >= payload.window.startTs
+          && submittedAt <= payload.window.endTs;
+        const resolved = outcome.status === "resolved" && outcome.outcome !== undefined;
 
-      describe("parsePredictionResult", () => {
-        test.each(PREDICTION_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
-          "%s reproduces the legacy outcome",
-          (_name, fixture) => {
-            const outcome = parsePredictionResult({
-              resultBytes: fixture.resultBytes,
-              snapshot: fixture.snapshot,
-              market: fixture.market,
-              window: fixture.window,
-              consensusProbabilityYes: fixture.consensusProbabilityYes,
-            });
-            expect(outcome.verdict).toBe(fixture.expect.verdict);
-            expect(outcome.integrity).toBe(fixture.expect.integrity);
-            expect(outcome.resolved).toBe(fixture.expect.resolved);
-            if (fixture.expect.solverBrier === undefined) {
-              expect(outcome.scores).toBeUndefined();
-            } else {
-              expect(outcome.scores).toEqual({
-                scoreBasis: "brier-loss.v1",
-                solverBrier: fixture.expect.solverBrier,
-                consensusBrier: fixture.expect.consensusBrier,
-                brierSpread: fixture.expect.brierSpread,
-              });
-            }
-          },
-        );
-
-        test("every outcome reports all four checks", () => {
-          for (const fixture of PREDICTION_FIXTURES) {
-            const outcome = parsePredictionResult({
-              resultBytes: fixture.resultBytes,
-              snapshot: fixture.snapshot,
-              market: fixture.market,
-              window: fixture.window,
-              consensusProbabilityYes: fixture.consensusProbabilityYes,
-            });
-            expect(outcome.checks.map((check) => check.name)).toEqual([
-              "result.schema",
-              "result.window",
-              "market.identity",
-              "market.resolution",
-            ]);
-          }
-        });
-
-        test("a failed integrity check is never laundered into inconclusive", () => {
-          const outcome = parsePredictionResult({
-            resultBytes: new Uint8Array(0),
-            snapshot: {
-              status: "unresolved",
-              marketId: "0x5150",
-              conditionId: "0xABCDEF",
-              sourceUrl: "https://example.invalid/markets/0x5150",
-            },
-            market: { marketId: "0x5150", conditionId: "0xABCDEF" },
-            window: { startTs: 0, endTs: 1 },
-            consensusProbabilityYes: "0.500000",
-          });
-          expect(outcome.verdict).toBe("fail");
-        });
-
-        test("an unrecognizable resolution snapshot fails, never scores", () => {
-          const outcome = parsePredictionResult({
-            resultBytes: new TextEncoder().encode(JSON.stringify({
-              probabilityYes: "0.500000",
-              submittedAt: "2026-06-01T00:00:00.000Z",
-              modelId: "model-a",
-            })),
-            snapshot: "not a snapshot",
-            market: { marketId: "0x5150", conditionId: "0xABCDEF" },
-            window: { startTs: 0, endTs: 4_102_444_800_000 },
-            consensusProbabilityYes: "0.500000",
-          });
-          expect(outcome.verdict).toBe("fail");
-          expect(outcome.scores).toBeUndefined();
-        });
-      });
-
-      describe("brierLoss", () => {
-        test("is exact at the endpoints", () => {
-          expect(brierLoss("1", 1)).toBe("0.000000");
-          expect(brierLoss("0", 1)).toBe("1.000000");
-        });
-
-        test("rounds to six fraction digits as a decimal string", () => {
-          expect(brierLoss("0.5", 1)).toBe("0.250000");
-          expect(brierLoss("0.333333", 0)).toBe("0.111111");
-        });
-      });
-      ```
-
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction/parse.test.ts`
-      Expected failure: `Failed to resolve import "./parse.js"`.
-
-- [ ] **Minimal implementation.** Create `src/prediction/parse.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      /**
-       * Ingestion parser for a prediction Result plus its resolution snapshot. Pure: no network, no
-       * clock. The commitment it implements is `fixtures/parsers/prediction-market.parser.json`,
-       * whose digest is this parser's identity.
-       */
-
-      const decoder = new TextDecoder("utf-8", { fatal: true });
-      const DECIMAL = /^-?\d+(\.\d+)?$/u;
-      const FRACTION_DIGITS = 6;
-
-      export interface PredictionCheck {
-        readonly name:
-          | "result.schema"
-          | "result.window"
-          | "market.identity"
-          | "market.resolution";
-        readonly status: "pass" | "fail" | "indeterminate";
-        readonly detail?: string;
-      }
-
-      export interface PredictionScores {
-        readonly scoreBasis: "brier-loss.v1";
-        readonly solverBrier: string;
-        readonly consensusBrier: string;
-        readonly brierSpread: string;
-      }
-
-      export interface PredictionOutcome {
-        readonly verdict: "pass" | "fail" | "inconclusive";
-        readonly integrity: boolean;
-        readonly resolved: boolean;
-        readonly outcomeYes?: boolean;
-        readonly scores?: PredictionScores;
-        readonly checks: readonly PredictionCheck[];
-      }
-
-      export interface PredictionParseInput {
-        readonly resultBytes: Uint8Array;
-        readonly snapshot: unknown;
-        readonly market: { readonly marketId: string; readonly conditionId: string };
-        readonly window: { readonly startTs: number; readonly endTs: number };
-        readonly consensusProbabilityYes: string;
-      }
-
-      /**
-       * Squared error as a fixed six-fraction-digit decimal string. Sealed bytes admit only I-JSON
-       * integers, so every fractional quantity leaves this parser as a decimal string.
-       */
-      export function brierLoss(probability: string, target: 0 | 1): string {
-        const difference = Number(probability) - target;
-        return (difference * difference).toFixed(FRACTION_DIGITS);
-      }
-
-      function subtract(left: string, right: string): string {
-        return (Number(left) - Number(right)).toFixed(FRACTION_DIGITS);
-      }
-
-      function isObject(value: unknown): value is Record<string, unknown> {
-        return typeof value === "object" && value !== null && !Array.isArray(value);
-      }
-
-      interface PredictionResult {
-        readonly probabilityYes: string;
-        readonly submittedAt: string;
-      }
-
-      function readResult(bytes: Uint8Array): PredictionResult | undefined {
-        let text: string;
-        try {
-          text = decoder.decode(bytes);
-        } catch {
-          return undefined;
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          return undefined;
-        }
-        if (!isObject(parsed)) return undefined;
-        const probabilityYes = parsed["probabilityYes"];
-        const submittedAt = parsed["submittedAt"];
-        if (typeof probabilityYes !== "string" || !DECIMAL.test(probabilityYes)) return undefined;
-        const probability = Number(probabilityYes);
-        if (!Number.isFinite(probability) || probability < 0 || probability > 1) return undefined;
-        if (typeof submittedAt !== "string" || !Number.isFinite(Date.parse(submittedAt))) {
-          return undefined;
-        }
-        return { probabilityYes, submittedAt };
-      }
-
-      interface Snapshot {
-        readonly status: "resolved" | "unresolved" | "unavailable";
-        readonly outcome?: "YES" | "NO";
-        readonly marketId: string;
-        readonly conditionId: string;
-      }
-
-      function readSnapshot(value: unknown): Snapshot | undefined {
-        if (!isObject(value)) return undefined;
-        const status = value["status"];
-        if (status !== "resolved" && status !== "unresolved" && status !== "unavailable") {
-          return undefined;
-        }
-        const marketId = value["marketId"];
-        const conditionId = value["conditionId"];
-        if (typeof marketId !== "string" || typeof conditionId !== "string") return undefined;
-        const outcome = value["outcome"];
-        return {
-          status,
-          ...(outcome === "YES" || outcome === "NO" ? { outcome } : {}),
-          marketId,
-          conditionId,
-        };
-      }
-
-      /** Lowercase via a code-unit map — never `toLocaleLowerCase`, which consults host ICU data. */
-      function asciiLower(value: string): string {
-        let out = "";
-        for (const character of value) {
-          const code = character.charCodeAt(0);
-          out += code >= 65 && code <= 90 ? String.fromCharCode(code + 32) : character;
-        }
-        return out;
-      }
-
-      export function parsePredictionResult(
-        input: PredictionParseInput,
-      ): PredictionOutcome {
-        const result = readResult(input.resultBytes);
-        const snapshot = readSnapshot(input.snapshot);
-
-        const schemaCheck: PredictionCheck = result === undefined
-          ? {
-            name: "result.schema",
-            status: "fail",
-            detail: "the Result is not a decodable prediction document in range",
-          }
-          : { name: "result.schema", status: "pass" };
-
-        const submittedAt = result === undefined ? Number.NaN : Date.parse(result.submittedAt);
-        const inWindow = Number.isFinite(submittedAt)
-          && submittedAt >= input.window.startTs
-          && submittedAt <= input.window.endTs;
-        const windowCheck: PredictionCheck = result === undefined
-          ? { name: "result.window", status: "fail", detail: "no decodable submission time" }
-          : inWindow
-          ? { name: "result.window", status: "pass" }
-          : {
-            name: "result.window",
-            status: "fail",
-            detail: "the submission time is outside the declared window",
-          };
-
-        const identityMatches = snapshot !== undefined
-          && snapshot.marketId === input.market.marketId
-          && asciiLower(snapshot.conditionId) === asciiLower(input.market.conditionId);
-        const identityCheck: PredictionCheck = identityMatches
-          ? { name: "market.identity", status: "pass" }
-          : {
-            name: "market.identity",
-            status: "fail",
-            detail: "the resolution snapshot does not identify the declared market",
-          };
-
-        const resolutionCheck: PredictionCheck = snapshot === undefined
-          ? {
-            name: "market.resolution",
-            status: "fail",
-            detail: "the resolution snapshot is unreadable",
-          }
-          : snapshot.status === "resolved" && snapshot.outcome !== undefined
-          ? { name: "market.resolution", status: "pass" }
-          : snapshot.status === "unresolved"
-          ? { name: "market.resolution", status: "indeterminate" }
-          : {
-            name: "market.resolution",
-            status: "fail",
-            detail: `the venue reported ${snapshot.status}`,
-          };
-
-        const checks: readonly PredictionCheck[] = [
-          schemaCheck,
-          windowCheck,
-          identityCheck,
-          resolutionCheck,
-        ];
-
-        // Integrity is every check EXCEPT resolution: an unresolved market says nothing about the
-        // solution, so it must not be laundered into a failing verdict — and a broken integrity
-        // check must not be laundered into `inconclusive`.
-        const integrity = checks
-          .filter((check) => check.name !== "market.resolution")
-          .every((check) => check.status === "pass");
-        const resolved = resolutionCheck.status === "pass";
-
-        if (!integrity || resolutionCheck.status === "fail") {
-          return { verdict: "fail", integrity, resolved, checks };
-        }
-        if (!resolved) {
-          return { verdict: "inconclusive", integrity, resolved, checks };
-        }
-
-        const outcomeYes = snapshot!.outcome === "YES";
-        const target: 0 | 1 = outcomeYes ? 1 : 0;
-        const solverBrier = brierLoss(result!.probabilityYes, target);
-        const consensusBrier = brierLoss(input.consensusProbabilityYes, target);
-        return {
-          verdict: "pass",
-          integrity,
+        const computed: Record<string, EvaluationMeasurementValue> = {
+          identityMatched,
+          withinWindow,
           resolved,
-          outcomeYes,
-          scores: {
-            scoreBasis: "brier-loss.v1",
-            solverBrier,
-            consensusBrier,
-            brierSpread: subtract(solverBrier, consensusBrier),
-          },
-          checks,
         };
-      }
-      ```
-
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction/parse.test.ts`
-      Expected: 10 parametrized cases plus 5 named tests passing.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): parse prediction results at the adapter edge"
-      ```
-
----
-
-## Task 8 — the prediction `EvaluatorAdapter`
-
-**Files**
-
-- `packages/task-execution/evaluator-adapters/src/prediction/adapter.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/prediction/adapter.test.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/index.ts` (edit)
-
-**Interfaces**
-
-- Consumes: the same harness/profiles/supervisor types as Task 5; `parsePredictionResult`,
-  `PredictionOutcome` from `./parse.js`.
-- Produces:
-  ```ts
-  export const PREDICTION_MEASUREMENTS: {
-    readonly integrity: "integrity";
-    readonly resolved: "resolved";
-    readonly outcomeYes: "outcomeYes";
-    readonly solverBrier: "solverBrier";
-    readonly consensusBrier: "consensusBrier";
-    readonly brierSpread: "brierSpread";
-  };
-  export interface ResolutionSnapshotRequest {
-    readonly specification: EvaluationSpec;
-    readonly task: ExactEvaluationMaterial;
-    readonly results: readonly ExactEvaluationMaterial[];
-    readonly context: EvaluationContext;
-    readonly attempt: AttemptIdentity;
-    readonly deadlineSignal: AbortSignal;
-  }
-  export interface PredictionEvaluationInputs {
-    readonly snapshot: unknown;
-    readonly market: { readonly marketId: string; readonly conditionId: string };
-    readonly window: { readonly startTs: number; readonly endTs: number };
-    readonly consensusProbabilityYes: string;
-  }
-  export interface ResolutionSnapshotSource {
-    read(request: ResolutionSnapshotRequest): Promise<PredictionEvaluationInputs>;
-  }
-  export function contextResolutionSnapshotSource(): ResolutionSnapshotSource;
-  export interface PredictionAdapterOptions {
-    readonly resolutionSnapshotSource: ResolutionSnapshotSource;
-    readonly now?: () => Date;
-  }
-  export function createPredictionEvaluatorAdapter(
-    options: PredictionAdapterOptions,
-  ): EvaluatorAdapter;
-  export function predictionEvaluationSpecMeasurements(): EvaluationSpec["measurements"];
-  export function predictionEvaluationSpecVerdictRule(): EvaluationSpec["verdictRule"];
-  ```
-
-  `predictionEvaluationSpecMeasurements()` and `predictionEvaluationSpecVerdictRule()` exist so
-  the stage-2 spec author cannot drift from the adapter's delivered vocabulary; they return
-  plain data, not a new document format.
-
-### Steps
-
-- [ ] **Failing test.** Create `src/prediction/adapter.test.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        EvaluationOperationalError,
-        type ExactEvaluationMaterial,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import {
-        checkMeasurementCoverage,
-        checkVerdictConsistency,
-        EVALUATION_SPEC_FORMAT_URI,
-        EVAL_SEMANTICS_VERSION,
-        type EvaluationSpec,
-        type MeasurementMap,
-      } from "@jinn-network/task-execution-profiles";
-      import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-      import { describe, expect, test } from "vitest";
-      import { PREDICTION_PARSER } from "../parser-identity.js";
-      import { PREDICTION_FIXTURES } from "./fixtures.js";
-      import {
-        contextResolutionSnapshotSource,
-        createPredictionEvaluatorAdapter,
-        predictionEvaluationSpecMeasurements,
-        predictionEvaluationSpecVerdictRule,
-        type PredictionEvaluationInputs,
-        type ResolutionSnapshotSource,
-      } from "./adapter.js";
-
-      const encoder = new TextEncoder();
-
-      const ATTEMPT: AttemptIdentity = {
-        attemptUri: "urn:uuid:22222222-2222-4222-8222-222222222222" as AttemptIdentity["attemptUri"],
-        nonce: "evaluation-nonce",
-        attemptNumber: 1,
-      };
-
-      function material(name: string, bytes: Uint8Array): ExactEvaluationMaterial {
-        return { descriptor: { name, digest: { sha256: "1".repeat(64) } }, bytes };
-      }
-
-      function specification(): EvaluationSpec {
-        return {
-          protocol: EVALUATION_SPEC_FORMAT_URI,
-          semanticsVersion: EVAL_SEMANTICS_VERSION,
-          family: "deterministic-process",
-          grader: {
-            name: PREDICTION_PARSER.id,
-            digest: { sha256: PREDICTION_PARSER.digest.slice("sha256:".length) },
-            accessClass: "public",
-          },
-          familyBlock: {
-            image: { name: "scorer-image", digest: { sha256: "3".repeat(64) } },
-            platform: "linux/amd64",
-            workspace: {},
-            testMaterial: [],
-            parser: PREDICTION_PARSER,
-            transitions: { failToPass: [], passToPass: [] },
-            timeout: 300,
-          },
-          measurements: predictionEvaluationSpecMeasurements(),
-          verdictRule: predictionEvaluationSpecVerdictRule(),
-          unscorable: [
-            { name: "market-unresolved", disposition: "recorded-inconclusive" },
-            { name: "venue-unavailable", disposition: "retryable-infrastructure" },
-          ],
-          evidenceConventions: { requiredRefs: [] },
-        } as EvaluationSpec;
-      }
-
-      function source(inputs: PredictionEvaluationInputs): ResolutionSnapshotSource {
-        return { async read() { return inputs; } };
-      }
-
-      describe("createPredictionEvaluatorAdapter", () => {
-        test.each(PREDICTION_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
-          "%s maps to the harness verdict shape and stays verdict-consistent",
-          async (_name, fixture) => {
-            const adapter = createPredictionEvaluatorAdapter({
-              resolutionSnapshotSource: source({
-                snapshot: fixture.snapshot,
-                market: fixture.market,
-                window: fixture.window,
-                consensusProbabilityYes: fixture.consensusProbabilityYes,
-              }),
-              now: () => new Date("2026-07-30T09:00:00.000Z"),
-            });
-            const spec = specification();
-            const completed = await adapter.evaluate(
-              material("subject-task.json", encoder.encode("{}")),
-              [material("result.json", fixture.resultBytes)],
-              spec,
-              {},
-              ATTEMPT,
-              new AbortController().signal,
-            );
-
-            expect(completed.verdict).toBe(fixture.expect.verdict);
-            expect(completed.evaluatedAt).toBe("2026-07-30T09:00:00.000Z");
-
-            const measurements: MeasurementMap = {};
-            for (const measurement of completed.measurements ?? []) {
-              measurements[measurement.name] = measurement.value as string | number | boolean;
-            }
-            expect(checkMeasurementCoverage(spec, measurements).ok).toBe(true);
-            expect(checkVerdictConsistency({
-              spec,
-              delivered: { verdict: completed.verdict },
-              measurements,
-            })).toEqual({ ok: true });
-          },
-        );
-
-        test("every delivered measurement is declared by the specification", async () => {
-          const spec = specification();
-          const declared = new Set(spec.measurements.map((entry) => entry.name));
-          for (const fixture of PREDICTION_FIXTURES) {
-            const adapter = createPredictionEvaluatorAdapter({
-              resolutionSnapshotSource: source({
-                snapshot: fixture.snapshot,
-                market: fixture.market,
-                window: fixture.window,
-                consensusProbabilityYes: fixture.consensusProbabilityYes,
-              }),
-            });
-            const completed = await adapter.evaluate(
-              material("subject-task.json", encoder.encode("{}")),
-              [material("result.json", fixture.resultBytes)],
-              spec,
-              {},
-              ATTEMPT,
-              new AbortController().signal,
-            );
-            for (const measurement of completed.measurements ?? []) {
-              expect(declared).toContain(measurement.name);
-            }
-          }
-        });
-
-        test("exactly one Result subject is required", async () => {
-          const adapter = createPredictionEvaluatorAdapter({
-            resolutionSnapshotSource: source({
-              snapshot: PREDICTION_FIXTURES[0]!.snapshot,
-              market: PREDICTION_FIXTURES[0]!.market,
-              window: PREDICTION_FIXTURES[0]!.window,
-              consensusProbabilityYes: "0.500000",
-            }),
-          });
-          const error = await adapter.evaluate(
-            material("subject-task.json", encoder.encode("{}")),
-            [],
-            specification(),
-            {},
-            ATTEMPT,
-            new AbortController().signal,
-          ).catch((cause: unknown) => cause);
-          expect(error).toBeInstanceOf(EvaluationOperationalError);
-          expect((error as EvaluationOperationalError).reason).toBe("subject-not-found");
-        });
-      });
-
-      describe("contextResolutionSnapshotSource", () => {
-        test("reads the snapshot and market frame from the evaluation context", async () => {
-          const inputs = await contextResolutionSnapshotSource().read({
-            specification: specification(),
-            task: material("subject-task.json", encoder.encode("{}")),
-            results: [],
-            context: {
-              resolutionSnapshot: { status: "unresolved", marketId: "m", conditionId: "c" },
-              market: { marketId: "m", conditionId: "c" },
-              window: { startTs: 1, endTs: 2 },
-              consensusProbabilityYes: "0.500000",
-            },
-            attempt: ATTEMPT,
-            deadlineSignal: new AbortController().signal,
-          });
-          expect(inputs.consensusProbabilityYes).toBe("0.500000");
-          expect(inputs.window).toEqual({ startTs: 1, endTs: 2 });
-        });
-
-        test("a context missing the snapshot is an operational failure, not a fail verdict", async () => {
-          const error = await contextResolutionSnapshotSource().read({
-            specification: specification(),
-            task: material("subject-task.json", encoder.encode("{}")),
-            results: [],
-            context: {},
-            attempt: ATTEMPT,
-            deadlineSignal: new AbortController().signal,
-          }).catch((cause: unknown) => cause);
-          expect(error).toBeInstanceOf(EvaluationOperationalError);
-          expect((error as EvaluationOperationalError).reason).toBe("provider-unavailable");
-        });
-      });
-      ```
-
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction/adapter.test.ts`
-      Expected failure: `Failed to resolve import "./adapter.js"`.
-
-- [ ] **Minimal implementation.** Create `src/prediction/adapter.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        EvaluationOperationalError,
-        type CompletedEvaluation,
-        type EvaluationContext,
-        type EvaluationMeasurement,
-        type EvaluatorAdapter,
-        type ExactEvaluationMaterial,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import type { EvaluationSpec } from "@jinn-network/task-execution-profiles";
-      import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-      import { parsePredictionResult } from "./parse.js";
-
-      export const PREDICTION_MEASUREMENTS = Object.freeze({
-        integrity: "integrity",
-        resolved: "resolved",
-        outcomeYes: "outcomeYes",
-        solverBrier: "solverBrier",
-        consensusBrier: "consensusBrier",
-        brierSpread: "brierSpread",
-      } as const);
-
-      /**
-       * The measurement vocabulary this adapter delivers. A specification that declares anything
-       * else makes the harness runtime reject the evaluation, so the spec author consumes this.
-       */
-      export function predictionEvaluationSpecMeasurements(): EvaluationSpec["measurements"] {
-        return [
-          { name: PREDICTION_MEASUREMENTS.integrity, type: "boolean", required: true },
-          { name: PREDICTION_MEASUREMENTS.resolved, type: "boolean", required: true },
-          { name: PREDICTION_MEASUREMENTS.outcomeYes, type: "boolean", required: false },
-          { name: PREDICTION_MEASUREMENTS.solverBrier, type: "string", direction: "lower-better", required: false },
-          { name: PREDICTION_MEASUREMENTS.consensusBrier, type: "string", required: false },
-          { name: PREDICTION_MEASUREMENTS.brierSpread, type: "string", direction: "lower-better", required: false },
-        ];
-      }
-
-      /**
-       * The verdict rule the delivered measurements satisfy. The `inconclusiveWhen` predicate is
-       * load-bearing: the harness runtime recomputes the rule and never forwards a declared
-       * unscorable class (Finding C), so an unresolved market is expressible only this way.
-       */
-      export function predictionEvaluationSpecVerdictRule(): EvaluationSpec["verdictRule"] {
-        return {
-          all: [
-            { threshold: { measurement: PREDICTION_MEASUREMENTS.integrity, op: "eq", value: true } },
-            {
-              inconclusiveWhen: {
-                threshold: { measurement: PREDICTION_MEASUREMENTS.resolved, op: "eq", value: false },
-              },
-              class: "market-unresolved",
-            },
-          ],
-        };
-      }
-
-      export interface ResolutionSnapshotRequest {
-        readonly specification: EvaluationSpec;
-        readonly task: ExactEvaluationMaterial;
-        readonly results: readonly ExactEvaluationMaterial[];
-        readonly context: EvaluationContext;
-        readonly attempt: AttemptIdentity;
-        readonly deadlineSignal: AbortSignal;
-      }
-
-      export interface PredictionEvaluationInputs {
-        readonly snapshot: unknown;
-        readonly market: { readonly marketId: string; readonly conditionId: string };
-        readonly window: { readonly startTs: number; readonly endTs: number };
-        readonly consensusProbabilityYes: string;
-      }
-
-      /** The injected execution provider (evaluation-runner design §5.4). See Finding B. */
-      export interface ResolutionSnapshotSource {
-        read(request: ResolutionSnapshotRequest): Promise<PredictionEvaluationInputs>;
-      }
-
-      function unavailable(detail: string): never {
-        throw new EvaluationOperationalError({
-          canonicalCode: "UNAVAILABLE",
-          reason: "provider-unavailable",
-          recoveryAdvice: "new-attempt-required",
-          safeDetail: detail,
-        });
-      }
-
-      function isObject(value: unknown): value is Record<string, unknown> {
-        return typeof value === "object" && value !== null && !Array.isArray(value);
-      }
-
-      export function contextResolutionSnapshotSource(): ResolutionSnapshotSource {
-        return {
-          async read({ context }) {
-            const snapshot = context["resolutionSnapshot"];
-            const market = context["market"];
-            const window = context["window"];
-            const consensusProbabilityYes = context["consensusProbabilityYes"];
-            if (snapshot === undefined) {
-              unavailable("the evaluation context carries no resolutionSnapshot");
-            }
-            if (
-              !isObject(market) ||
-              typeof market["marketId"] !== "string" ||
-              typeof market["conditionId"] !== "string"
-            ) {
-              unavailable("the evaluation context carries no market identity");
-            }
-            if (
-              !isObject(window) ||
-              typeof window["startTs"] !== "number" ||
-              typeof window["endTs"] !== "number"
-            ) {
-              unavailable("the evaluation context carries no submission window");
-            }
-            if (typeof consensusProbabilityYes !== "string") {
-              unavailable("the evaluation context carries no consensus probability");
-            }
-            return {
-              snapshot,
-              market: {
-                marketId: market["marketId"],
-                conditionId: market["conditionId"],
-              },
-              window: { startTs: window["startTs"], endTs: window["endTs"] },
-              consensusProbabilityYes,
-            };
-          },
-        };
-      }
-
-      export interface PredictionAdapterOptions {
-        readonly resolutionSnapshotSource: ResolutionSnapshotSource;
-        readonly now?: () => Date;
-      }
-
-      export function createPredictionEvaluatorAdapter(
-        options: PredictionAdapterOptions,
-      ): EvaluatorAdapter {
-        const now = options.now ?? (() => new Date());
-
-        return {
-          async evaluate(
-            task,
-            results,
-            specification,
-            context,
-            attempt,
-            deadlineSignal,
-          ): Promise<CompletedEvaluation> {
-            if (deadlineSignal.aborted) {
-              throw new EvaluationOperationalError({
-                canonicalCode: "CANCELLED",
-                reason: "provider-unavailable",
-                recoveryAdvice: "resume-attempt",
-                safeDetail: "the evaluation deadline elapsed before scoring began",
-              });
-            }
-            if (specification.family !== "deterministic-process") {
-              throw new EvaluationOperationalError({
-                canonicalCode: "FAILED_PRECONDITION",
-                reason: "unsupported-specification",
-                recoveryAdvice: "do-not-retry",
-                safeDetail:
-                  "the prediction evaluator serves deterministic-process specifications only",
-              });
-            }
-            const [subject] = results;
-            if (subject === undefined || results.length !== 1) {
-              throw new EvaluationOperationalError({
-                canonicalCode: "INVALID_ARGUMENT",
-                reason: "subject-not-found",
-                recoveryAdvice: "do-not-retry",
-                safeDetail: "the prediction evaluator requires exactly one Result subject",
-              });
-            }
-
-            const inputs = await options.resolutionSnapshotSource.read({
-              specification,
-              task,
-              results,
-              context,
-              attempt,
-              deadlineSignal,
-            });
-            const outcome = parsePredictionResult({
-              resultBytes: subject.bytes,
-              snapshot: inputs.snapshot,
-              market: inputs.market,
-              window: inputs.window,
-              consensusProbabilityYes: inputs.consensusProbabilityYes,
-            });
-
-            const measurements: EvaluationMeasurement[] = [
-              { name: PREDICTION_MEASUREMENTS.integrity, value: outcome.integrity },
-              { name: PREDICTION_MEASUREMENTS.resolved, value: outcome.resolved },
-            ];
-            if (outcome.outcomeYes !== undefined) {
-              measurements.push({
-                name: PREDICTION_MEASUREMENTS.outcomeYes,
-                value: outcome.outcomeYes,
-              });
-            }
-            if (outcome.scores !== undefined) {
-              measurements.push(
-                { name: PREDICTION_MEASUREMENTS.solverBrier, value: outcome.scores.solverBrier },
-                { name: PREDICTION_MEASUREMENTS.consensusBrier, value: outcome.scores.consensusBrier },
-                { name: PREDICTION_MEASUREMENTS.brierSpread, value: outcome.scores.brierSpread },
-              );
-            }
-
-            return {
-              detailedOutcome: {
-                checks: outcome.checks,
-                ...(outcome.scores === undefined ? {} : { scores: outcome.scores }),
-              },
-              verdict: outcome.verdict,
-              evaluatedAt: now().toISOString(),
-              measurements,
-              explanation: outcome.verdict === "inconclusive"
-                ? "The market had not resolved when the evaluation ran."
-                : outcome.verdict === "pass"
-                ? "Every integrity check passed and the market resolved."
-                : "At least one integrity check failed.",
-              ...(outcome.verdict === "inconclusive"
-                ? { limitations: ["market-unresolved"] }
-                : {}),
-            };
-          },
-        };
-      }
-      ```
-
-      Extend `src/index.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      export * from "./parser-identity.js";
-      export * from "./swe-rebench/parse.js";
-      export * from "./swe-rebench/adapter.js";
-      export * from "./prediction/parse.js";
-      export * from "./prediction/adapter.js";
-      ```
-
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/prediction && yarn typecheck`
-      Expected: all prediction suites passing; `tsc --noEmit` prints nothing.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): add the prediction evaluator adapter"
-      ```
-
----
-
-## Task 9 — deployment-allowlist registrations and runtime resolution
-
-**Files**
-
-- `packages/task-execution/evaluator-adapters/src/registrations.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/registrations.test.ts` (new)
-- `packages/task-execution/evaluator-adapters/src/index.ts` (edit)
-
-**Interfaces**
-
-- Consumes: `defineEvaluatorRegistration`, `validateEvaluatorRegistrationSet`,
-  `EvaluatorRegistration`, `ResourceDescriptor` from
-  `@jinn-network/task-execution-evaluation-harness`; `DeterministicProcessBlock`,
-  `parserAllowlistKey` from `@jinn-network/task-execution-profiles`;
-  `SWE_REBENCH_PARSER`, `PREDICTION_PARSER` from `./parser-identity.js`;
-  the two `create*EvaluatorAdapter` factories.
-- Produces:
-  ```ts
-  export const SWE_REBENCH_REGISTRATION_ID = "swe-rebench-v2";
-  export const PREDICTION_REGISTRATION_ID = "prediction-market";
-  export interface EvaluatorRegistrationOptions {
-    readonly evaluatorId: string;
-    readonly signerHandle: string;
-    readonly evaluationMethod: ResourceDescriptor;
-  }
-  export function createSweRebenchEvaluatorRegistration(
-    options: EvaluatorRegistrationOptions & { readonly graderReportSource: GraderReportSource },
-  ): EvaluatorRegistration;
-  export function createPredictionEvaluatorRegistration(
-    options: EvaluatorRegistrationOptions & { readonly resolutionSnapshotSource: ResolutionSnapshotSource },
-  ): EvaluatorRegistration;
-  ```
-
-### Steps
-
-- [ ] **Failing test.** Create `src/registrations.test.ts`. It drives the real
-      `selectRegistration` path by constructing an `EvaluationHarnessDeployment` and calling
-      `validateEvaluatorRegistrationSet`, and asserts the allowlist refuses an unlisted parser:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        validateEvaluatorRegistrationSet,
-        type EvaluationHarnessDeployment,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import {
-        EVALUATION_SPEC_FORMAT_URI,
-        EVAL_SEMANTICS_VERSION,
-        parserAllowlistKey,
-        type DeterministicProcessBlock,
-        type EvaluationSpec,
-        type ParserIdentity,
-      } from "@jinn-network/task-execution-profiles";
-      import { describe, expect, test } from "vitest";
-      import {
-        evaluatorAdaptersParserAllowlist,
-        PREDICTION_PARSER,
-        SWE_REBENCH_PARSER,
-      } from "./parser-identity.js";
-      import { contextGraderReportSource } from "./swe-rebench/adapter.js";
-      import { contextResolutionSnapshotSource } from "./prediction/adapter.js";
-      import {
-        createPredictionEvaluatorRegistration,
-        createSweRebenchEvaluatorRegistration,
-        PREDICTION_REGISTRATION_ID,
-        SWE_REBENCH_REGISTRATION_ID,
-      } from "./registrations.js";
-
-      const method = {
-        name: "evaluator-adapters",
-        digest: { sha256: "9".repeat(64) },
-        uri: "https://jinn.network/software/evaluator-adapters/v1",
-      };
-
-      function registrations() {
-        return [
-          createSweRebenchEvaluatorRegistration({
-            evaluatorId: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
-            signerHandle: "evaluator-agent-key.pem",
-            evaluationMethod: method,
-            graderReportSource: contextGraderReportSource(),
-          }),
-          createPredictionEvaluatorRegistration({
-            evaluatorId: "did:key:z6MkhzYwRj8TvZEp41ApnVVDN5a5hBCk8tQYp4w7vGkVn5F8",
-            signerHandle: "evaluator-agent-key.pem",
-            evaluationMethod: method,
-            resolutionSnapshotSource: contextResolutionSnapshotSource(),
-          }),
-        ];
-      }
-
-      function specFor(parser: ParserIdentity): EvaluationSpec {
-        return {
-          protocol: EVALUATION_SPEC_FORMAT_URI,
-          semanticsVersion: EVAL_SEMANTICS_VERSION,
-          family: "deterministic-process",
-          grader: {
-            name: parser.id,
-            digest: { sha256: parser.digest.slice("sha256:".length) },
-            accessClass: "public",
-          },
-          familyBlock: {
-            image: { name: "grader-image", digest: { sha256: "2".repeat(64) } },
-            platform: "linux/amd64",
-            workspace: {},
-            testMaterial: [],
-            parser,
-            transitions: { failToPass: [], passToPass: [] },
-            timeout: 60,
-          },
-          measurements: [{ name: "passed", type: "boolean", required: true }],
-          verdictRule: { threshold: { measurement: "passed", op: "eq", value: true } },
-          unscorable: [],
-          evidenceConventions: { requiredRefs: [] },
-        } as EvaluationSpec;
-      }
-
-      /** Mirrors runtime.ts's own selection: exactly one compatible registration, or refuse. */
-      function resolve(
-        deployment: EvaluationHarnessDeployment,
-        specification: EvaluationSpec,
-      ): string {
-        const compatible = validateEvaluatorRegistrationSet(deployment.registrations)
-          .filter((registration) => registration.specificationCompatibility(specification));
-        if (compatible.length !== 1) {
-          throw new Error(
-            compatible.length === 0
-              ? "no host evaluator registration supports the EvaluationSpec"
-              : "more than one host evaluator registration supports the EvaluationSpec",
-          );
+        if (resolved && identityMatched && withinWindow) {
+          const outcomeIsYes = outcome.outcome === "YES";
+          const solverBrier = brierLoss(solution.probabilityYes, outcomeIsYes);
+          const consensusBrier = brierLoss(payload.consensusProbabilityYes, outcomeIsYes);
+          computed["solverBrier"] = solverBrier;
+          computed["consensusBrier"] = consensusBrier;
+          computed["brierSpread"] = subtractDecimals(solverBrier, consensusBrier);
         }
-        return compatible[0]!.registrationId;
-      }
 
-      const deployment = {
-        registrations: registrations(),
-        parserAllowlist: evaluatorAdaptersParserAllowlist(),
-        maxClaimEvidenceBytes: 1024 * 1024,
-        evidenceWriter: {
-          async putClaimEvidence({ name }: { name: string }) {
-            return { name, digest: { sha256: "4".repeat(64) } };
+        const measurements = deliverMeasurements(specification, computed);
+        const map: MeasurementMap = Object.fromEntries(
+          measurements.map((entry) => [entry.name, entry.value as string | number | boolean]),
+        );
+        const decided = evaluateVerdictRule(specification.verdictRule as VerdictRule, map);
+
+        const completed: CompletedEvaluation = {
+          detailedOutcome: {
+            marketStatus: outcome.status,
+            claimedProbabilityYes: solution.probabilityYes,
+            consensusProbabilityYes: payload.consensusProbabilityYes,
           },
-        },
-      } as unknown as EvaluationHarnessDeployment;
-
-      describe("deployment registrations", () => {
-        test("the set validates and has unique ids", () => {
-          expect(validateEvaluatorRegistrationSet(deployment.registrations)).toHaveLength(2);
-        });
-
-        test("the swe-rebench parser identity resolves the swe-rebench registration", () => {
-          expect(resolve(deployment, specFor(SWE_REBENCH_PARSER)))
-            .toBe(SWE_REBENCH_REGISTRATION_ID);
-        });
-
-        test("the prediction parser identity resolves the prediction registration", () => {
-          expect(resolve(deployment, specFor(PREDICTION_PARSER)))
-            .toBe(PREDICTION_REGISTRATION_ID);
-        });
-
-        test("an unlisted parser identity matches no registration", () => {
-          const unlisted: ParserIdentity = {
-            id: "network.jinn.parser.unlisted",
-            version: "1.0.0",
-            digest: `sha256:${"7".repeat(64)}`,
-          };
-          expect(() => resolve(deployment, specFor(unlisted)))
-            .toThrow("no host evaluator registration supports the EvaluationSpec");
-        });
-
-        test("an unlisted parser identity is also outside the deployment allowlist", () => {
-          const spec = specFor({
-            id: "network.jinn.parser.unlisted",
-            version: "1.0.0",
-            digest: `sha256:${"7".repeat(64)}`,
-          });
-          const key = parserAllowlistKey(
-            (spec.familyBlock as DeterministicProcessBlock).parser,
-          );
-          expect(deployment.parserAllowlist.has(key)).toBe(false);
-        });
-
-        test("a matching id at a different digest is refused (the digest is the commitment)", () => {
-          const drifted: ParserIdentity = {
-            id: SWE_REBENCH_PARSER.id,
-            version: SWE_REBENCH_PARSER.version,
-            digest: `sha256:${"8".repeat(64)}`,
-          };
-          expect(() => resolve(deployment, specFor(drifted)))
-            .toThrow("no host evaluator registration supports the EvaluationSpec");
-          expect(deployment.parserAllowlist.has(parserAllowlistKey(drifted))).toBe(false);
-        });
-
-        test("the two registrations never both claim one specification", () => {
-          for (const parser of [SWE_REBENCH_PARSER, PREDICTION_PARSER]) {
-            const spec = specFor(parser);
-            const claimed = deployment.registrations
-              .filter((registration) => registration.specificationCompatibility(spec));
-            expect(claimed).toHaveLength(1);
-          }
-        });
-      });
-      ```
-
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/registrations.test.ts`
-      Expected failure: `Failed to resolve import "./registrations.js"`.
-
-- [ ] **Minimal implementation.** Create `src/registrations.ts`:
-
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
-
-      import {
-        defineEvaluatorRegistration,
-        type EvaluatorRegistration,
-        type ResourceDescriptor,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import type {
-        DeterministicProcessBlock,
-        EvaluationSpec,
-        ParserIdentity,
-      } from "@jinn-network/task-execution-profiles";
-      import { parserAllowlistKey } from "@jinn-network/task-execution-profiles";
-      import { PREDICTION_PARSER, SWE_REBENCH_PARSER } from "./parser-identity.js";
-      import {
-        createPredictionEvaluatorAdapter,
-        type ResolutionSnapshotSource,
-      } from "./prediction/adapter.js";
-      import {
-        createSweRebenchEvaluatorAdapter,
-        type GraderReportSource,
-      } from "./swe-rebench/adapter.js";
-
-      export const SWE_REBENCH_REGISTRATION_ID = "swe-rebench-v2";
-      export const PREDICTION_REGISTRATION_ID = "prediction-market";
-
-      export interface EvaluatorRegistrationOptions {
-        readonly evaluatorId: string;
-        readonly signerHandle: string;
-        readonly evaluationMethod: ResourceDescriptor;
-      }
-
-      /**
-       * Compatibility is exact parser identity — id, version, and digest together. A drifted digest
-       * is a different semantic commitment and must not be served by this adapter.
-       */
-      function matchesParser(parser: ParserIdentity) {
-        const expected = parserAllowlistKey(parser);
-        return (specification: EvaluationSpec): boolean => {
-          if (specification.family !== "deterministic-process") return false;
-          const block = specification.familyBlock as DeterministicProcessBlock;
-          return parserAllowlistKey(block.parser) === expected;
+          verdict: decided.verdict,
+          evaluatedAt: new Date().toISOString(),
+          measurements,
+          explanation: resolved
+            ? "The market resolved and the claimed probability was scored against consensus."
+            : "The market has not resolved.",
+          ...(decided.inconclusiveClass === undefined
+            ? {}
+            : { limitations: [decided.inconclusiveClass] }),
         };
-      }
+        return completed;
+      },
+    },
+  });
+}
+```
 
-      export function createSweRebenchEvaluatorRegistration(
-        options: EvaluatorRegistrationOptions & {
-          readonly graderReportSource: GraderReportSource;
-          readonly maxTestLogBytes?: number;
-        },
-      ): EvaluatorRegistration {
-        return defineEvaluatorRegistration({
-          registrationId: SWE_REBENCH_REGISTRATION_ID,
-          adapter: createSweRebenchEvaluatorAdapter({
-            graderReportSource: options.graderReportSource,
-            ...(options.maxTestLogBytes === undefined
-              ? {}
-              : { maxTestLogBytes: options.maxTestLogBytes }),
-          }),
-          evaluationMethod: options.evaluationMethod,
-          specificationCompatibility: matchesParser(SWE_REBENCH_PARSER),
-          evaluatorIdentity: { id: options.evaluatorId },
-          signer: { handle: options.signerHandle },
-          outcomeValidator: (evaluation) => evaluation,
-          interruptionBehavior: "repeatable",
-        });
-      }
+- [ ] **Step 6: Run the tests**
 
-      export function createPredictionEvaluatorRegistration(
-        options: EvaluatorRegistrationOptions & {
-          readonly resolutionSnapshotSource: ResolutionSnapshotSource;
-        },
-      ): EvaluatorRegistration {
-        return defineEvaluatorRegistration({
-          registrationId: PREDICTION_REGISTRATION_ID,
-          adapter: createPredictionEvaluatorAdapter({
-            resolutionSnapshotSource: options.resolutionSnapshotSource,
-          }),
-          evaluationMethod: options.evaluationMethod,
-          specificationCompatibility: matchesParser(PREDICTION_PARSER),
-          evaluatorIdentity: { id: options.evaluatorId },
-          signer: { handle: options.signerHandle },
-          outcomeValidator: (evaluation) => evaluation,
-          interruptionBehavior: "repeatable",
-        });
-      }
-      ```
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test && yarn typecheck`
+Expected: PASS. Adjust the prediction fixture files if the exact six-digit values differ from what was written in Task 2; the implementation output is authoritative, and the fixture's `note` should record the value.
 
-      Extend `src/index.ts` with `export * from "./registrations.js";`.
+- [ ] **Step 7: Commit**
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/registrations.test.ts`
-      Expected: 7 passing tests.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "feat(task-execution): register both evaluator adapters in the deployment allowlist"
-      ```
+```bash
+git add packages/task-execution/evaluator-adapters/src packages/task-execution/evaluator-adapters/fixtures
+git commit -m "feat(task-execution): add the binary prediction-market evaluator adapter"
+```
 
 ---
 
-## Task 10 — conformance against the real evaluation harness
+### Task 9: Deployment facade and the end-to-end harness run
 
-This is the kit slice for this component: the adapters run inside the actual
-`runEvaluationHarness`, over a real workspace layout, with a real Ed25519 signer, and produce
-a real `out/verdict` DSSE envelope. It is the gate the program's stage-0 review reads.
+Closes the tree: the host-facing surface plus one real `runEvaluationHarness` execution proving the adapters seal a valid Result Evaluation through the harness they were written for.
 
-**Files**
+**Files:**
+- Create: `packages/task-execution/evaluator-adapters/src/deployment.ts`
+- Create: `packages/task-execution/evaluator-adapters/src/deployment.integration.test.ts`
+- Modify: `packages/task-execution/evaluator-adapters/src/index.ts`
+- Modify: `packages/task-execution/evaluator-adapters/README.md` (add the host-composition paragraph)
+- Modify: `packages/task-execution/evaluator-adapters/scripts/pack-smoke.mjs` (restore the export list if it was reduced in Task 1)
 
-- `packages/task-execution/evaluator-adapters/src/conformance.integration.test.ts` (new)
+**Interfaces:**
+- Consumes: `createSweRebenchRegistration` (Task 7), `createPredictionRegistration` (Task 8), `parserAllowlistEntries` (Task 3).
+- Produces — **the cross-plan surface the stage-2 cutover plan composes against**:
+  - `createEvaluatorDeployment(options: { readonly evidenceWriter: EvidenceRepositoryWriter; readonly maxClaimEvidenceBytes?: number; readonly signerHandle?: string; readonly evaluatorId?: string }): EvaluationHarnessDeployment`
+  - Default `maxClaimEvidenceBytes` is `4 * 1024 * 1024`.
+  - The returned object satisfies `EvaluationHarnessDeployment` exactly: `{ registrations, parserAllowlist, evidenceWriter, maxClaimEvidenceBytes }`.
+  - The **host** authors the tiny ESM module the spawned harness loads through `JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE` (it must export `evaluationHarnessDeployment`), because only the host owns the evidence writer. This package ships no such module.
+  - `src/index.ts` re-exports: `createEvaluatorDeployment`, `createSweRebenchRegistration`, `createPredictionRegistration`, `SWE_REBENCH_REGISTRATION_ID`, `PREDICTION_REGISTRATION_ID`, `PARSER_DECLARATIONS`, `parserDeclaration`, `parserIdentity`, `parserAllowlistEntries`, `INFRASTRUCTURE_SIGNATURES`, `classifyInfrastructureFailure`, and the `report.ts` types.
 
-**Interfaces**
+- [ ] **Step 1: Write the failing integration test**
 
-- Consumes: `runEvaluationHarness`, `EVALUATION_HARNESS_EXIT_INVALID_INPUT`,
-  `EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE`, `EvaluationHarnessDeployment` from
-  `@jinn-network/task-execution-evaluation-harness`;
-  `deriveEvaluationTask`, `sealEvaluationSpec`, `EVAL_SEMANTICS_VERSION`,
-  `EVALUATION_SPEC_FORMAT_URI` from `@jinn-network/task-execution-profiles`;
-  `sealTask`, `sealDelivery`, `documentDigest` from `@jinn-network/task-execution-protocol`;
-  `WorkspacePaths` from `@jinn-network/task-execution-workspace`.
-- Produces: no exports — a test module only.
+`packages/task-execution/evaluator-adapters/src/deployment.integration.test.ts`:
 
-### Steps
+```ts
+// SPDX-License-Identifier: Apache-2.0
 
-- [ ] **Failing test.** Create `src/conformance.integration.test.ts`. Build the Attempt input
-      directory exactly as `evaluation-harness/src/runtime.test.ts:110-236` does (same file
-      names: `task.sealed`, `subject-task.json`, `subject-delivery.json`, the Result subject,
-      `evaluation-spec.json`, `evaluation-context.json`, `dispatch-context.json`, plus an
-      Ed25519 PKCS#8 PEM at `secrets/evaluator-agent-key.pem`), then:
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { validateResultEvaluation } from "@jinn-network/evidence-protocol";
+import { runEvaluationHarness } from "@jinn-network/task-execution-evaluation-harness";
+import {
+  deriveEvaluationTask,
+  sealEvaluationSpec,
+} from "@jinn-network/task-execution-profiles";
+import { sealDelivery, sealTask } from "@jinn-network/task-execution-protocol";
+import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import { afterEach, describe, expect, it } from "vitest";
+import { createEvaluatorDeployment } from "./deployment.js";
+import { parserIdentity } from "./declarations.js";
+import { buildSweRebenchEvaluationSpec } from "./testing.js";
 
-      ```ts
-      // SPDX-License-Identifier: Apache-2.0
+const encoder = new TextEncoder();
+const roots: string[] = [];
+const sha256 = (bytes: Uint8Array): `sha256:${string}` =>
+  `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
-      import { createHash, generateKeyPairSync } from "node:crypto";
-      import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-      import { tmpdir } from "node:os";
-      import { join } from "node:path";
-      import {
-        EVALUATION_HARNESS_EXIT_INVALID_INPUT,
-        EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE,
-        runEvaluationHarness,
-        type EvaluationHarnessDeployment,
-      } from "@jinn-network/task-execution-evaluation-harness";
-      import {
-        deriveEvaluationTask,
-        EVAL_SEMANTICS_VERSION,
-        EVALUATION_SPEC_FORMAT_URI,
-        sealEvaluationSpec,
-        type EvaluationSpec,
-      } from "@jinn-network/task-execution-profiles";
-      import {
-        documentDigest,
-        sealDelivery,
-        sealTask,
-      } from "@jinn-network/task-execution-protocol";
-      import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
-      import { afterEach, describe, expect, test } from "vitest";
-      import { evaluatorAdaptersParserAllowlist, PREDICTION_PARSER, SWE_REBENCH_PARSER } from "./parser-identity.js";
-      import { PREDICTION_FIXTURES } from "./prediction/fixtures.js";
-      import { SWE_REBENCH_FIXTURES } from "./swe-rebench/fixtures.js";
-      import { contextGraderReportSource } from "./swe-rebench/adapter.js";
-      import {
-        contextResolutionSnapshotSource,
-        predictionEvaluationSpecMeasurements,
-        predictionEvaluationSpecVerdictRule,
-      } from "./prediction/adapter.js";
-      import {
-        createPredictionEvaluatorRegistration,
-        createSweRebenchEvaluatorRegistration,
-      } from "./registrations.js";
-      ```
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
 
-      The suite must assert exactly these outcomes:
+describe("evaluator deployment through the real harness", () => {
+  it("seals a signed Result Evaluation for a passing swe-rebench run", async () => {
+    const root = await mkdtemp(join(tmpdir(), "jinn-evaluator-adapters-e2e-"));
+    roots.push(root);
+    const paths: WorkspacePaths = {
+      root,
+      input: join(root, "input"),
+      work: join(root, "work"),
+      out: join(root, "out"),
+      logs: join(root, "logs"),
+      harnessState: join(root, "harness-state"),
+      secrets: join(root, "secrets"),
+      tmp: join(root, "tmp"),
+      meta: join(root, "meta"),
+    };
+    await Promise.all(Object.values(paths).map((path) => mkdir(path, { recursive: true })));
 
-      1. **swe-rebench pass** — fixture `resolved-all-transitions` with its report and log placed
-         in `evaluation-context.json` as `{ graderReport, graderLog }`; `runEvaluationHarness`
-         returns `0`; `out/verdict` exists and its DSSE payload decodes to an in-toto Statement
-         whose `predicateType` is
-         `"https://jinn.network/attestations/result-evaluation/v1"` and whose predicate carries
-         `verdict: "pass"`.
-      2. **swe-rebench fail** — fixture `unresolved-fail-to-pass-still-failing`; exit `0`;
-         predicate `verdict: "fail"`.
-      3. **swe-rebench ungradeable** — fixture `ungradeable-docker-unavailable`; exit
-         `EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE`; `out/verdict` **does not exist**. This is
-         the "unscorable is never a silent zero" gate.
-      4. **prediction pass / fail / inconclusive** — fixtures
-         `scored-yes-solver-beats-consensus`, `rejected-submission-outside-window`,
-         `inconclusive-market-unresolved`, with the prediction spec built from
-         `predictionEvaluationSpecMeasurements()` / `predictionEvaluationSpecVerdictRule()`;
-         each returns exit `0` and the matching predicate verdict.
-      5. **unlisted parser** — a spec identical to (1) but with a drifted parser digest, deployed
-         with the same `evaluatorAdaptersParserAllowlist()`; `runEvaluationHarness` returns
-         `EVALUATION_HARNESS_EXIT_INVALID_INPUT` and writes no verdict.
-      6. **verdict written exactly once** — running (1) twice against the same workspace: the
-         second run returns `EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE` because
-         `atomicExclusiveWrite` refuses an existing `out/verdict` (seal-once).
+    // Follow packages/task-execution/evaluation-harness/src/runtime.test.ts `makeFixture` for the
+    // exact provisioning shape: task.sealed, dispatch-context.json, evaluation-spec.json, and the
+    // subject Task / Delivery / Result files, each named and digested by the evaluation Task.
+    const spec = buildSweRebenchEvaluationSpec({
+      parserDigest: parserIdentity("jinn.parser.pytest-json-report").digest,
+    });
+    const sealedSpec = sealEvaluationSpec(spec);
+    await writeFile(join(paths.input, "evaluation-spec.json"), sealedSpec.bytes);
 
-      Each case builds its own `mkdtemp` root, registered in an `afterEach` cleanup array.
+    const { privateKey } = generateKeyPairSync("ed25519");
+    await writeFile(
+      join(paths.secrets, "evaluator-signing-key"),
+      privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+      { mode: 0o600 },
+    );
 
-- [ ] **Run to verify fail.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/conformance.integration.test.ts`
-      Expected failure: the first case — `runEvaluationHarness` returns a non-zero exit until
-      the deployment is assembled correctly (typically `65`, invalid input, while the sealed
-      crosswalk digests are still being wired). Iterate until the six cases hold.
+    const report = {
+      items: [{
+        instance_id: "i",
+        from_fail_to_pass: ["test_pool.py::test_retry_releases_connection"],
+        failed_from_pass_to_pass: [],
+        exit_code: 0,
+      }],
+    };
+    const reportBytes = encoder.encode(JSON.stringify(report));
+    await writeFile(join(paths.input, "evaluation-report.json"), reportBytes);
 
-- [ ] **Run to verify pass.**
-      `cd packages/task-execution/evaluator-adapters && yarn vitest run src/conformance.integration.test.ts`
-      Expected: 6+ passing tests, 0 failing.
+    // Build the subject Task/Delivery/Result set and the derived evaluation Task exactly as the
+    // harness's own runtime test does, then:
+    const deployment = createEvaluatorDeployment({
+      evidenceWriter: {
+        async putClaimEvidence(evidence) {
+          return { name: evidence.name, digest: { sha256: sha256(evidence.bytes).slice(7) } };
+        },
+      },
+    });
 
-- [ ] **Run the upstream harness suite unchanged** to prove nothing here perturbed it:
-      ```
-      cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn typecheck && yarn test
-      ```
-      Expected: the harness's own suites pass with no edits to that package (`git status` shows
-      no modification under `packages/task-execution/evaluation-harness/`).
+    const exitCode = await runEvaluationHarness(paths, deployment);
+    expect(exitCode).toBe(0);
 
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters && \
-      git commit -m "test(task-execution): drive both evaluator adapters through the real evaluation harness"
-      ```
+    const verdict = JSON.parse(await readFile(join(paths.out, "verdict"), "utf8")) as unknown;
+    expect(validateResultEvaluation(verdict)).toBeDefined();
+    void deriveEvaluationTask;
+    void sealDelivery;
+    void sealTask;
+  });
+});
+```
+
+Provision the subject Task, subject Delivery, subject Results, `task.sealed`, and `dispatch-context.json` by copying the exact construction from `packages/task-execution/evaluation-harness/src/runtime.test.ts` (`makeFixture`) — read that file first and mirror it; do not invent a shape. The evaluation-report material is provided as one of the subject Results so `verifyEvaluationSubject` covers it.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters" && yarn test src/deployment.integration.test.ts`
+Expected: FAIL — `Cannot find module './deployment.js'`
+
+- [ ] **Step 3: Write the deployment facade**
+
+`packages/task-execution/evaluator-adapters/src/deployment.ts`:
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+import {
+  validateEvaluatorRegistrationSet,
+  type EvaluationHarnessDeployment,
+  type EvidenceRepositoryWriter,
+} from "@jinn-network/task-execution-evaluation-harness";
+import { parserAllowlistEntries } from "./declarations.js";
+import { createPredictionRegistration } from "./prediction.js";
+import { createSweRebenchRegistration } from "./swe-rebench.js";
+
+/** Claim-evidence bound: a capped grader log plus headroom, well under any repository limit. */
+export const DEFAULT_MAX_CLAIM_EVIDENCE_BYTES = 4 * 1024 * 1024;
+
+export interface EvaluatorDeploymentOptions {
+  /** Host-owned evidence repository writer; this package never opens a repository itself. */
+  readonly evidenceWriter: EvidenceRepositoryWriter;
+  readonly maxClaimEvidenceBytes?: number;
+  /** Logical grant handle resolved beneath the Attempt's `secrets/` at signing time. */
+  readonly signerHandle?: string;
+  readonly evaluatorId?: string;
+}
+
+/**
+ * The host-facing composition surface: every adapter this package ships, plus the parser
+ * allowlist the harness enforces for deterministic-process specs. The host injects the evidence
+ * writer and authors the small ESM module the spawned harness loads through
+ * `JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE` — this package ships no such module because only
+ * the host owns a repository.
+ */
+export function createEvaluatorDeployment(
+  options: EvaluatorDeploymentOptions,
+): EvaluationHarnessDeployment {
+  const registrations = validateEvaluatorRegistrationSet([
+    createSweRebenchRegistration({
+      ...(options.signerHandle === undefined ? {} : { signerHandle: options.signerHandle }),
+      ...(options.evaluatorId === undefined ? {} : { evaluatorId: options.evaluatorId }),
+    }),
+    createPredictionRegistration({
+      ...(options.signerHandle === undefined ? {} : { signerHandle: options.signerHandle }),
+      ...(options.evaluatorId === undefined ? {} : { evaluatorId: options.evaluatorId }),
+    }),
+  ]);
+  return Object.freeze({
+    registrations,
+    parserAllowlist: parserAllowlistEntries(),
+    evidenceWriter: options.evidenceWriter,
+    maxClaimEvidenceBytes: options.maxClaimEvidenceBytes ?? DEFAULT_MAX_CLAIM_EVIDENCE_BYTES,
+  });
+}
+```
+
+- [ ] **Step 4: Write the public surface**
+
+`packages/task-execution/evaluator-adapters/src/index.ts` (replacing the Task 1 stub):
+
+```ts
+// SPDX-License-Identifier: Apache-2.0
+
+export {
+  PARSER_DECLARATION_FORMAT_URI,
+  PARSER_DECLARATIONS,
+  parserAllowlistEntries,
+  parserDeclaration,
+  parserDeclarationDocument,
+  parserIdentity,
+  type ParserDeclaration,
+  type ParserFormat,
+} from "./declarations.js";
+export {
+  createEvaluatorDeployment,
+  DEFAULT_MAX_CLAIM_EVIDENCE_BYTES,
+  type EvaluatorDeploymentOptions,
+} from "./deployment.js";
+export {
+  assertGradeable,
+  classifyInfrastructureFailure,
+  INFRASTRUCTURE_SIGNATURES,
+  toOperationalError,
+} from "./infrastructure.js";
+export { parseByFormat, parseJunitXml, parsePytestJsonReport, parseTap14 } from "./parsers/index.js";
+export {
+  createPredictionRegistration,
+  PREDICTION_PARSER_ID,
+  PREDICTION_REGISTRATION_ID,
+} from "./prediction.js";
+export {
+  capLogTail,
+  MAX_LOG_CHARACTERS,
+  reduceTransitions,
+  ReportParseError,
+  type TestOutcomeReport,
+  type Transitions,
+  type TransitionOutcome,
+} from "./report.js";
+export { createSweRebenchRegistration, SWE_REBENCH_REGISTRATION_ID } from "./swe-rebench.js";
+```
+
+- [ ] **Step 5: Append the host-composition paragraph to the README**
+
+```markdown
+## Host composition
+
+```ts
+import { createEvaluatorDeployment } from "@jinn-network/task-execution-evaluator-adapters";
+
+export const evaluationHarnessDeployment = createEvaluatorDeployment({
+  evidenceWriter,                 // host-owned; this package never opens a repository
+  signerHandle: "evaluator-signing-key",
+});
+```
+
+The host writes that module and points the evaluation launcher at it through
+`JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE`. The registrations are host-authored by construction:
+no Task, EvaluationSpec, or launcher option can introduce one.
+```
+
+- [ ] **Step 6: Run the whole verification set**
+
+Run:
+```bash
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071/packages/task-execution/evaluator-adapters"
+yarn typecheck && yarn test && yarn check:parsers && yarn build && yarn pack:smoke
+cd "/Users/adrianobradley/life's-work/jinn-mono/.claude/worktrees/marketplace-consumption-boundary-ca5071"
+node --test .github/scripts/task-execution-package-inventory.test.mjs
+node --test .github/scripts/task-execution-source-boundaries.test.mjs
+node .github/scripts/task-execution-packed-types.test.mjs
+```
+Expected: every command PASSES, `pack:smoke` prints `Installed evaluator-adapters surface and dependency boundary verified.`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/task-execution/evaluator-adapters
+git commit -m "feat(task-execution): compose the evaluator deployment and verify it end to end"
+```
+
+- [ ] **Step 8: Request the independent component review**
+
+Per program §4 (stage 0: "independent review per new tree before dependents build on it"), open the PR train against `integration/evidence-v1` and request review with `superpowers:requesting-code-review`. The review brief must include the five design findings above so the reviewer checks the dispositions, not just the code.
 
 ---
 
-## Task 11 — full-tree verification and completion checklist
+## Hand-offs recorded (do not action here)
 
-**Files**
-
-- `packages/task-execution/evaluator-adapters/README.md` (edit — final content)
-
-### Steps
-
-- [ ] **Run the guard trio.**
-      ```
-      node --test .github/scripts/task-execution-package-inventory.test.mjs
-      node --test .github/scripts/task-execution-source-boundaries.test.mjs
-      ```
-      Expected: 3 and 7 passing tests respectively, 0 failing.
-
-- [ ] **Run the package gates.**
-      ```
-      cd packages/task-execution/evaluator-adapters && \
-      yarn install --immutable && yarn typecheck && yarn test && yarn build && yarn pack:smoke
-      ```
-      Expected: `tsc --noEmit` silent; every vitest suite green; `dist/` populated; the pack
-      smoke's synthetic consumer compiles against the packed tarball.
-
-- [ ] **Run the packed-types guard** (requires every upstream `dist/` present — build them
-      first if the worktree is clean):
-      ```
-      for p in protocol backend profiles; do (cd packages/task-execution/$p && yarn install --immutable && yarn build); done
-      for p in supervisor workspace launchers assembly; do (cd packages/task-execution/backend-local/$p && yarn install --immutable && yarn build); done
-      for p in protocol repository discovery execution-recorder attestation-issuer; do (cd packages/evidence/$p && yarn install --immutable && yarn build); done
-      (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
-      node .github/scripts/task-execution-packed-types.test.mjs
-      ```
-      Expected: the synthetic consumer compiles every entrypoint including
-      `@jinn-network/task-execution-evaluator-adapters`.
-
-- [ ] **Confirm no out-of-scope file changed.**
-      ```
-      git diff --name-only origin/integration/evidence-v1...HEAD
-      ```
-      Expected: only `packages/task-execution/evaluator-adapters/**`,
-      `.github/scripts/task-execution-*.test.mjs`,
-      `.github/workflows/task-execution-ci.yml`, and this plan file. **No** file under
-      `client/`, `packages/task-execution/evaluation-harness/`, or
-      `packages/task-execution/profiles/`.
-
-- [ ] **Write the completion checklist into the PR description**, mapping each spec clause to
-      its task:
-
-      | Spec clause | Where it is satisfied |
-      | --- | --- |
-      | §6.3 "fresh re-homing of the concrete result parsers (swe-rebench, prediction)" | Tasks 4 and 7 — pure parsers written fresh; Tasks 3 and 6 — legacy behavior enters only as fixtures |
-      | §6.3 "into the evaluation harness's deployment allowlist" | Task 2 (`evaluatorAdaptersParserAllowlist`), Task 9 (registrations), Task 10 case 5 (an unlisted parser is refused) |
-      | §6.3 "parsers ingest … at the adapter edge" | Tasks 5 and 8 — the raw report / raw Result never leaves the adapter; only `CompletedEvaluation` does |
-      | §7.5 "bespoke verdict document, deliberately" | No new format anywhere: the outward shape is `CompletedEvaluation`, and the harness composes the Result Evaluation |
-      | §7.5 "all are parsed at the adapter edge as ingestion formats" | Task 4 (upstream report JSON + test log), Task 7 (Result JSON + resolution snapshot) |
-      | §6 "conformance kits precede implementations" | Tasks 3 and 6 land before Tasks 4/5 and 7/8 |
-      | §6 "guard trio with the packages, not after" | Task 1 |
-      | §7.4 unscorable taxonomy (`retryable-infrastructure`) | Task 5 (`EvaluationOperationalError`, never a `fail`), Task 10 case 3 |
-      | Program §6 contract 12 (fresh rewrite, legacy as fixtures) | Task 11's `git diff` check: no legacy file is read at runtime and none is modified |
-
-- [ ] **Record Findings A–D in the PR description** with their proposed dispositions, verbatim
-      from this plan's Findings section. Request the program's independent per-component review
-      (program §Global constraints) before any dependent stage builds on this tree.
-
-- [ ] **Commit.**
-      ```
-      git add packages/task-execution/evaluator-adapters/README.md && \
-      git commit -m "docs(task-execution): finalize the evaluator-adapters README and findings"
-      ```
-
-## Execution findings (2026-07-30, recorded during execution)
-
-Findings raised while executing the tasks above, each with the adaptation actually taken.
-These are plan-vs-code mismatches, not design changes.
-
-**E1 (Task 1) — the plan's `package.json` devDependency/`resolutions` set is incomplete; the
-standalone install 404s.** `yarn install` failed with
-`YN0035: @jinn-network/evidence-repository@npm:0.1.0: Package not found` because two
-transitive links have no portal entry: `@jinn-network/attestation-issuer` (a plan-declared
-devDependency) has a production dependency on `@jinn-network/evidence-repository`, and
-`task-execution-supervisor` / `task-execution-launchers` transitively require
-`@jinn-network/task-execution-backend`. Neither appears in the plan's `resolutions`, so Yarn
-reached for the unpublished registry. *Adaptation:* added `@jinn-network/evidence-repository`
-(`portal:../../evidence/repository`) and `@jinn-network/task-execution-backend`
-(`portal:../backend`) to both `devDependencies` and `resolutions`, and mirrored the same two
-names into the package-inventory guard's `JINN_DEPENDENCY_GRAPH` entry (the guard asserts
-exact equality against the manifest). This is the same "transitive gap-fill" pattern the
-evaluation-harness manifest already documents for itself; the plan simply under-counted it by
-two. No production import crosses these edges — the source-boundary guard still forbids
-`task-execution-backend` and `task-execution-launchers` in production source.
-
-**E2 (Task 1) — the source-boundary guard could not be observed red.** The plan itself
-anticipates this ("Once `src/index.ts` exists from the previous step it passes"). The
-inventory guard's red (`missing package manifest: …/evaluator-adapters/package.json`, 2 of 3
-tests failing) served as the scaffold's failing gate. No adaptation needed; recorded so the
-absent red is not mistaken for a skipped step.
-
-**E3 (Task 2) — the swe-rebench semantics document's `ungradeable.classes` list is
-incomplete.** The plan's 19-entry array omits two real `EvalCouldNotGradeError` reason codes.
-Verified by the coordinator against the real file: `eval-runner.ts:472` throws
-`'eval_timeout'` when the python eval exceeds its wall clock, and `eval-runner.ts:485` throws
-`matchInfraSignature(stderr + stdout) ?? 'eval_no_report'` when `report.json` never parses.
-There are exactly five `EvalCouldNotGradeError(` call sites in that file; these are the only
-two the plan missed. *Adaptation:* added `"eval_timeout"` and `"eval_no_report"` to `classes`
-and extended `ungradeable.rule` to describe the "no parseable report at all" case. Note the
-digest consequence: the semantics document's bytes ARE the parser identity, so this
-correction changes `SWE_REBENCH_PARSER.digest` relative to a naive verbatim transcription —
-which is the mechanism working as designed.
-
-**E4 (Task 2) — the prediction semantics document mis-transcribes the legacy check set,
-check names, inconclusive rule, and status enum.** Four separate mismatches, all verified by
-the coordinator against the real files:
-- *Check names.* The plan writes `"result.schema"` / `"result.window"`. The real code emits
-  `'solution.schema'` (`prediction-v1-evaluator/index.ts:111,114`) and `'solution.window'`
-  (`:123,126`). Corrected to the real names.
-- *Check set.* The plan lists four checks; the cited range pushes seven —
-  `solution.envelope` (`:96,101`), `integrity.manifest_signature`, `integrity.signedTask_ref`,
-  `solution.schema`, `solution.window`, `market.identity` (`:238,241`), `market.resolution`
-  (`:136,138,140`). This is material, because the document's own `verdict.fail` rule ("any
-  check other than market.resolution reports FAIL") is only meaningful over a complete check
-  set. Corrected to all seven.
-- *Inconclusive trigger.* The plan says only "the market is not resolved". `deriveVerdict`
-  (`:225`) returns `INDETERMINATE` on *any* `INDETERMINATE` check, and
-  `checkTaskRefMissingExpected()` (`:108`) also returns `INDETERMINATE` when
-  `context.solutionTaskCid` is absent. Corrected to name both triggers.
-- *Status enum.* The plan writes `resolved|unresolved|unavailable`. No `'unavailable'` value
-  exists anywhere; the real `ResolutionSnapshot.status` is
-  `'unresolved' | 'resolved' | 'invalid' | 'cancelled' | 'ambiguous'`
-  (`client/src/venues/polymarket/client.ts:73`). Corrected to the real five-value enum.
-
-**E5 (Task 2) — one plan citation points at the wrong legacy file.** The plan sources the
-prediction document's `scoring` block from
-`client/src/harnesses/impls/prediction-v0-evaluator/score.ts`. That file implements a
-*different* scheme: basis `'brier.v1'`, formula `1 - (p - outcome)^2` (accuracy, not loss),
-encoded as a `1e18`-scaled BigInt string. The plan's stated `scoring` block is in fact
-accurate to **v1**'s `scoreBrier` (`prediction-v1-evaluator/index.ts:252-273`), verified by
-the coordinator: `scoreBasis: 'brier-loss.v1'`, `(solver - target) ** 2`,
-`.toFixed(6)` on all three fields. *Adaptation:* the document content stands (it is correct
-for v1, which is the evaluator being re-homed); the plan's v0 citation is the error and is
-recorded here rather than followed. The v0 path is legacy-superseded and is not re-homed.
-
-**E6 (Task 3) — four legacy citations point at the wrong lines; one points at the wrong
-function entirely.** Every provenance string in the plan's 18-fixture list was opened and
-checked against the real file. Results:
-- `eval.py:88-101` is cited as the source of the two upstream report shapes. It is not — those
-  lines are `load_specs_from_hf`'s HuggingFace rows-pagination logic. The function that
-  actually builds both report shapes is `build_report_item` at
-  `client/test/harnesses/impls/swe-rebench-v2-evaluator/fixtures/eval.py:356-382` (verified by
-  the coordinator). *Adaptation:* citation corrected.
-- The four 2026-05-14 triage fingerprint constants are each cited ~2 lines early. Real
-  positions in `client/test/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.test.ts`:
-  `VENV_COLLISION` 578-582, `MISSING_PYTEST` 584-585, `REQUESTS_DEP_WARNING` 587-588,
-  `CONFTEST_IMPORT_ERROR` 590-591 (verified by the coordinator). The fixture *strings*
-  themselves were byte-accurate. *Adaptation:* line ranges corrected; fixture bytes unchanged.
-- `eval-runner.ts:478-489` is cited for the "report is not an object" fixture, but those lines
-  are the `JSON.parse`-failure branch (`eval_no_report`), a different path. The path that
-  actually produces `eval_report_malformed` for a non-object item is `:491-507` (the item
-  defaults to `{}`, then the missing-`exit_code` check fires). *Adaptation:* citation
-  corrected.
-- All other citations verified as matching.
-
-**E7 (Task 3) — one plan fixture did not exercise the behavior it claims to test.**
-`adversarial-truncated-log-with-no-marker` cites `eval-runner.ts:256-261` (`capLogTail` +
-signature matching), but its report data (`failed_from_pass_to_pass: []` against a
-one-element `passToPass`) leaves the `nothingPassed` gate closed, so
-`classifyInfrastructureSignature` is never reached and the fixture would pass for the wrong
-reason. *Adaptation:* the fixture's `failed_from_pass_to_pass` was opened so the gate fires
-and the no-signature fall-through is genuinely exercised. Expected outcome is unchanged
-(`graded`, `passed: false`) — the fixture now reaches that outcome through the cited code.
-
-**E8 (Task 3) — two ungradeable classes have no fixture, by construction.** `eval_timeout`
-and `eval_no_report` (added to the semantics document under E3) are raised *upstream* of the
-pure parser: they describe a grader run that produced no parseable report at all, which is
-the injected `GraderReportSource`'s failure domain, not the parser's `(report, log)` input
-domain. No fixture is possible for them in Task 3's shape. Recorded rather than papered over;
-the semantics document's `ungradeable` prose was written to cover the "no parseable report"
-case so the vocabulary stays honest about where each class originates.
-
-**E9 (Task 4) — the plan's own test contradicts the plan's own signature table.** The plan
-asserts `classifyInfrastructureSignature("docker: Error response from daemon: no such image")`
-returns `"docker_run_failed"`. That string matches two entries, and first-match-wins picks the
-earlier one: `image_pull_failed` (`/No such image|manifest unknown|pull access denied/`) sits
-at index 2, `docker_run_failed` (`/^docker: (?:error|Error response from daemon)/m`) at index
-4. The coordinator verified the real `INFRA_SIGNATURES` array
-(`client/src/harnesses/impls/swe-rebench-v2-evaluator/eval-runner.ts:216-242`): 18 entries,
-and the plan's transcription is faithful in pattern, class, and — critically — order. So the
-implementation is right and the test literal is wrong. The real legacy suite hedges around
-exactly this ambiguity: `eval-runner.test.ts:628-632` asserts only `.not.toBeNull()` for a
-similarly overlapping docker string rather than pinning a class. *Adaptation:* the test's
-input string was changed to one that matches `docker_run_failed` unambiguously
-(`"docker: Error response from daemon: conflict: unable to remove repository reference"`),
-keeping the asserted class. The signature table was NOT reordered — reordering it would
-change real classification behavior to satisfy a bad test.
-
-*(Transcription note: the plan adds Unicode `u` flags to every regex the legacy table writes
-without them. Checked entry by entry — none of the 18 patterns contains a construct whose
-behavior differs under `u`, so this is cosmetic, not a behavioral divergence.)*
-
-**E10 (Task 6) — three prediction fixtures cite a code path that cannot see their input, and
-the legacy behavior there is an uncaught crash.** The `adversarial-result-is-not-json` /
-`-is-not-utf8` / `-is-empty` fixtures cite `prediction-v1-evaluator/index.ts:112-118`, the
-`catch` that converts a schema-validation throw into `solution.schema: FAIL`. Verified by the
-coordinator: that `try` opens at line 89 and wraps only `SignedEnvelopeSchema.parse` /
-`PredictionV1RestorationPayloadSchema.parse` — i.e. already-parsed JSON. The raw
-`JSON.parse(manifestJson)` sits at line 81, *outside* the try, unguarded. Malformed, empty, or
-non-UTF-8 input therefore throws uncaught and crashes the legacy evaluator's `run()`; it
-produces no check at all. *Adaptation:* citations corrected to `:80-81`, and the fixtures keep
-`verdict: "fail"` as an explicit, documented normalization rather than a literal port of the
-crash. This is the right verdict under the plan's own unscorable rule: a malformed solver
-Result is the solver's failure to deliver a valid result, not an infrastructure failure to
-grade one, so it is a graded `fail` and NOT an `EvaluationOperationalError`. Recorded in the
-fixture module and in `fixtures/prediction/README.md` so the divergence from legacy is not
-silent.
-
-**E11 (Task 6) — `adversarial-probability-out-of-range` cites the superseded v0 scorer.** The
-plan sources it from `prediction-v0-evaluator/score.ts:8-22`, which is v0's `computeScore`
-(basis `'brier.v1'`, per E5 a different scheme that is not being re-homed) and does not
-range-check probability at all. The real v1 mechanism that rejects `"1.500000"` is
-`DecimalProbabilitySchema` — verified by the coordinator at `packages/sdk/src/prediction-v1.ts:8-10`,
-regex `/^(0(\.\d+)?|1(\.0+)?)$/` — enforced inside `PredictionV1RestorationPayloadSchema.parse()`
-at `index.ts:110` and caught by the `:112-118` block. *Adaptation:* citation corrected to
-`index.ts:110-118`. Same genre of error as E5; the plan's two v0 citations are both wrong.
-
-**E12 (Task 6) — the plan's `PredictionResolutionSnapshot.status` union contains a fabricated
-member.** `"unavailable"` appears in no legacy file. Real declaration
-(`client/src/venues/polymarket/client.ts:69-77`):
-`status: 'unresolved' | 'resolved' | 'invalid' | 'cancelled' | 'ambiguous'`. *Adaptation:*
-type corrected to the real five-value enum. No fixture value used `'unavailable'`, so no
-fixture data changed. Consistent with E4, which corrected the same fabrication in the parser
-semantics document.
-
-**E13 (Task 7, found against Task 6's deliverable) — the prediction fixtures' shared `WINDOW`
-constant does not bracket the `submittedAt` instant the fixtures use.** Task 6 landed
-`WINDOW = { startTs: 1_780_000_000_000, endTs: 1_780_086_400_000 }`, which is
-2026-05-28T20:26:40Z .. 2026-05-29T20:26:40Z, while eight of ten fixtures submit at
-`"2026-06-01T00:00:00.000Z"` = 1_780_272_000_000 — three days late. The coordinator verified
-the arithmetic independently. Six fixtures hid it (they already expect `fail` for unrelated
-reasons); four did not, and a legacy-faithful window check correctly failed
-`scored-yes-solver-beats-consensus`, `scored-no-solver-worse-than-consensus`,
-`inconclusive-market-unresolved`, and `market-identity-condition-id-is-case-insensitive`.
-*Adaptation:* `WINDOW` corrected to
-`{ startTs: 1_780_228_800_000, endTs: 1_780_315_200_000 }` — 2026-05-31T12:00:00Z ..
-2026-06-01T12:00:00Z, exactly 86_400_000ms (the maximum the legacy task schema permits per
-`client/src/types/prediction.ts:67`), bracketing the in-window instant while still excluding
-`rejected-submission-outside-window`'s deliberate `"2026-05-01T00:00:00.000Z"`. No fixture's
-own `submittedAt` or `expect` field was touched. *Process note:* the executor refused to
-relax the parser's window check to make the fixtures pass and escalated instead. That is the
-correct call and worth recording — the fixture was wrong, not the parser.
-
-**E14 (Task 7) — the prediction parser implements 4 of the 7 real legacy checks, by
-construction.** `solution.envelope`, `integrity.manifest_signature`, and
-`integrity.signedTask_ref` need envelope, signature, and expected-task-CID data that the
-plan's own `PredictionParseInput` does not carry. Rather than widen the plan's interface
-unilaterally, the parser implements `solution.schema`, `solution.window`, `market.identity`,
-`market.resolution` and documents the omission in `parse.ts`. The three integrity checks are
-envelope-layer concerns that belong to the host/adapter edge, not the pure scorer. Recorded
-so the gap between the semantics document's seven-check list and the parser's four is
-explicit rather than discovered later.
-
-**E15 (Task 7) — the plan's stale 3-value status whitelist would have passed vacuously.** No
-Task 6 fixture exercises `invalid`, `cancelled`, or `ambiguous`, so a parser carrying the
-plan's fabricated `resolved|unresolved|unavailable` union would have gone green against all
-ten fixtures while mishandling three real venue states. *Adaptation:* the parser's whitelist
-was corrected to the real five-value union (per E12) and three explicit test cases were added
-for the previously-unexercised states.
-
-**E16 (Task 9) — the plan's `resolve()` test helper mirrors only one of the runtime's two
-gates.** `runEvaluationHarness` runs `enforceParserAllowlist(specification,
-deployment.parserAllowlist)` (`runtime.ts:755`) *before* `selectRegistration`
-(`runtime.ts:756`). The plan's helper replicates only `selectRegistration`, so Task 9's
-unlisted-parser and digest-drift refusals pass through gate 2's mechanism and error message
-("no host evaluator registration supports the EvaluationSpec") rather than gate 1's
-("EvaluationSpec parser is not deployment-allowlisted"). The refusal *outcome* is still
-correct because `matchesParser` and the allowlist both key off the same
-`parserAllowlistKey`, but the mechanism under test is not the one the runtime reaches first.
-The coordinator confirmed `enforceParserAllowlist` is a module-private function in
-`runtime.ts` with no export, so no unit test can reach gate 1 directly — the only way to
-exercise it is through `runEvaluationHarness` itself. *Disposition:* left as the plan
-specifies; Task 10 case 5 is the gate that must genuinely exercise `enforceParserAllowlist`
-end-to-end, and it is checked for exactly that in the component review.
-
-*Positive verification worth recording:* `parserAllowlistKey` really does incorporate the
-digest —
-`packages/task-execution/profiles/src/evaluation-spec/parser-registry.ts:10-12` returns
-`` `${parser.id}@${parser.version}#${parser.digest}` ``. So digest drift yields a different
-key and is refused. The "digest is the semantic commitment" property holds rather than being
-a fiction, which is what Task 2's whole semantics-document mechanism rests on.
-
-**E17 (Task 11, component review) — `evaluator_cost_usd` rides nowhere, and that is the
-honest outcome.** Amendment D says the legacy `score` / `passedCount` / `totalCount` /
-`evaluator_cost_usd` fields ride `detailedOutcome`. The count fields do
-(`failToPassExpected`, `failToPassSatisfied`, `passToPassExpected`, `passToPassBroken`,
-`containerExitCode`), and the legacy `score` is derivable from them. `evaluator_cost_usd`
-does not, because nothing in this package can compute it: the legacy value is grader
-wall-clock elapsed time × `JINN_EVAL_COMPUTE_USD_PER_HOUR`, and elapsed time belongs to
-whichever `GraderReportSource` actually runs the grader. The hermetic context-backed source
-runs nothing and so has no honest elapsed time. Emitting zero or a fabricated cost would be
-worse than omitting the field. *Disposition:* omitted here and documented in the package
-README; reintroduce it with the container-executing `GraderReportSource` in stage 2, alongside
-Finding A's driver. Non-blocking.
-
-**E18 (Task 11, component review) — the guard trio was verified by negative control, not by
-assuming green.** Both guards were made to fail on a deliberately introduced violation and
-then reverted: (a) adding `import { sealTask } from "@jinn-network/task-execution-protocol"`
-to production source drove the source-boundary guard to 6 pass / 1 fail with the message
-"evaluator-adapters production source crosses its approved contract boundary"; (b) adding an
-unapproved `@jinn-network/evidence-discovery` dependency to the manifest drove the
-package-inventory guard to 2 pass / 1 fail. Both returned to 7/7 and 3/3 after
-`git checkout --`. Recorded because a guard that has never been seen red is not evidence.
-
-## Coordinator amendments (2026-07-30, binding on execution)
-
-Findings A–D ratified as proposed. A: this package defines the injected
-`GraderReportSource` port and ships the hermetic `contextGraderReportSource` only; the
-container driver for `deterministic-process` graders is **assigned to the stage-2 plan** as
-a host deliverable (recorded in the program plan). B: prediction models as
-`deterministic-process` with the resolution snapshot via the supporting-context channel. C:
-the unreachable `recorded-inconclusive` path in the harness runtime is recorded as a
-program follow-up (finding against a merged stack package — dispositioned upstream, not
-patched here). D: legacy score/count/cost fields ride `detailedOutcome`; measurable status
-is a profiles-owned follow-up.
+1. **Container execution owner** (finding 1) → stage 2 (`2026-07-30-cutover-stage-2-evaluator-flow.md`). The evaluator loop must provision the grader output the adapters parse, or the composition needs a process-runner deliverable it does not currently have.
+2. **Prediction spec authoring** → stage 3 (`2026-07-30-cutover-stage-3-posting-flow.md`). `buildPredictionEvaluationSpec` is a fixture builder; the posting loop needs a production spec author.
+3. **Grader-family taxonomy** (finding 3) → the profiles/TEP owning design: `deterministic-process` is the only home a pure-parse evaluation has, and its required `image` field has no meaning there.
+4. **Stage-2 composition surface:** `createEvaluatorDeployment({ evidenceWriter, maxClaimEvidenceBytes?, signerHandle?, evaluatorId? })` returning `EvaluationHarnessDeployment`. The host writes the deployment module; this package ships none.

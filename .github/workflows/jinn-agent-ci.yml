@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'apps/jinn-agent/**'
+      - 'plugin/frozen/**'
       - 'packages/plugin/**'
       - 'packages/core/**'
       - 'packages/layer/**'
@@ -18,6 +19,7 @@ on:
     branches: [next, main]
     paths:
       - 'apps/jinn-agent/**'
+      - 'plugin/frozen/**'
       - 'packages/plugin/**'
       - 'packages/core/**'
       - 'packages/layer/**'

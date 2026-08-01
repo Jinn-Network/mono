@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, generateKeyPairSync } from "node:crypto";
+import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import {
   mkdir,
@@ -77,10 +78,9 @@ const profileStore: ProfileStore = {
 beforeAll(async () => {
   // The public launcher spawns the packaged JavaScript entrypoint. Compile that entrypoint before
   // this integration suite because package CI intentionally runs tests before its final build.
+  const require = createRequire(import.meta.url);
   await execFileAsync(process.execPath, [
-    fileURLToPath(
-      new URL("../node_modules/typescript/bin/tsc", import.meta.url),
-    ),
+    require.resolve("typescript/bin/tsc"),
     "-p",
     fileURLToPath(new URL("../tsconfig.build.json", import.meta.url)),
   ]);
@@ -612,6 +612,9 @@ describe("evaluationLauncher", () => {
       JINN_ATTEMPT_SECRETS: paths.secrets,
       JINN_ATTEMPT_META: paths.meta,
       TMPDIR: paths.tmp,
+      ...(process.env["NODE_OPTIONS"] === undefined || process.env["NODE_OPTIONS"]!.length === 0
+        ? {}
+        : { NODE_OPTIONS: process.env["NODE_OPTIONS"]! }),
     });
     expect(first.secretForwards).toEqual([
       { grantKey: "evaluator-agent-key.pem", target: "evaluator-agent-key.pem" },

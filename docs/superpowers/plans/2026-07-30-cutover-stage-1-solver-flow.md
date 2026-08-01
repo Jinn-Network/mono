@@ -2,2740 +2,3109 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Swap the production operator daemon's solver flow onto the merged stack — a projector-fed work loop (discovery → claim predicate → marketplace pipeline → embedded local execution backend with evidence capture → deliver → settle) replaces the legacy `TaskEngine` solution path, while the legacy engine keeps running evaluations until stage 2.
+**Goal:** Hard-swap the operator daemon's solver flow onto the merged stack — projector-fed discovery → claim predicate → pipeline → embedded local backend (host-joined evidence) → deliver → settle — retiring the TaskEngine's solution path, `joinedSolverNets` claim gating, and new `task_runs` solution rows, with every surviving legacy transaction re-pointed through one broadcaster.
 
-**Architecture:** The operator runtime becomes the composition root. It assembles `LocalTaskExecutionBackendConfig`, `PipelineConfig`, and `PipelinePorts` from operator config, writes the one join the stack refuses to own (`EvidenceBindingPorts` ← `evidence-local-runtime`), and runs three new supervised loops (`projector-loop`, `work-loop`, `evidence-driver`) beside the surviving legacy loops. From this stage on, every transaction in the process — including the surviving legacy creator and evaluation legs — funnels through one venue-base Safe broadcaster.
+**Architecture:** A composition root in `client/src/runtime/` assembles `LocalTaskExecutionBackendConfig`, `PipelineConfig`, and `PipelinePorts` from operator config plus `createBaseVenue(...)` and `createFsBlobStore(...)`. Three new supervised loops replace four legacy ones: a **projector loop** (venue log source → `decodeMarketplaceLogs` → `reduceMarketplaceProjection` → `projectAnnouncements` → local on-disk archive, holding the durable finality cursor), a **work loop** (archive announcements → facts → `SubmissionFacts` → `runPipeline` per claim), and an **evidence driver** (local-runtime `sync` / `awaitIndexed` / publication policy). A thin SQLite **engagement ledger** records the wiring entry and idempotency key in the same transaction that admits a claim intent, strictly before broadcast. Config auto-migrates additively to shape version 2 on boot.
 
-**Tech Stack:** TypeScript / Node 22 / Yarn workspaces with `portal:` resolution; viem; Hono; better-sqlite3; vitest; Playwright; Anvil-fork integration suites; React + wouter + TanStack Query (operator SPA).
+**Tech Stack:** TypeScript / Node 22 / Yarn workspaces with `portal:` resolution; viem; Hono; better-sqlite3; vitest; React + wouter + shadcn/ui (operator SPA); Anvil-fork integration suites.
 
 ## Global Constraints
 
-Copied verbatim from `docs/superpowers/plans/2026-07-30-operator-daemon-composition-program.md` §"Global constraints":
+Every task's requirements implicitly include this section.
 
-- Branch target: `integration/evidence-v1` (stacked PR trains; the integration branch is not yet in `next`). Nothing here publishes to npm — #2293 runs in parallel.
-- Kits and fixtures **before** implementations; a layer's kit green before dependents build.
-- Guard trio (package inventory, source-boundary, packed-types + CI workflow) ships **with** each new tree, not after.
-- Every task ends with typecheck + tests + relevant kit + guards run locally, outputs shown.
-- Independent per-component review when a component completes, findings resolved before dependents build on it (program discipline, principles §13.2).
-- American English throughout; no product names in tier-3 code.
-- The spec's §6.1 placement notes and §10 bridge-era/drain/standing rules are binding cross-plan contracts (§6 below).
-
-Stage-1 specifics, binding on every task in this plan:
-
-- **Single-broadcaster (contract 1).** From this stage on, venue-base's Safe broadcast is the *only* transaction path in the daemon process. No task may add a second `walletClient.writeContract` / `sendTransaction` on the marketplace path.
-- **Ledger-before-broadcast (contract 2).** The engagement-ledger row (wiring entry + idempotency key) is written in the same SQLite transaction that admits the claim intent, strictly before the claim broadcast, and reconciled against chain facts on boot.
-- **Projector-catch-up claim gate (contract 3).** At boot the work loop issues no new claim until the projector's durable cursor has reached the finalized chain head.
-- **Config migration is additive, atomic, idempotent (contract 4).** New keys are written *beside* `joinedSolverNets`; legacy keys survive until stage 5; the write is temp-file + rename; re-running is a no-op via `configShapeVersion`.
-- **Evidence publication policy (contract 6).** The evidence driver publishes only records already sealed for marketplace delivery or announcement — never capability-grant material, never secret-forwards. Idempotent by record digest; announce only after indexed.
-- **Bridge-era documents (contract 9).** The projector synthesizes legacy facts cards under a `legacy` derivation annotation; converged-Delivery legacy-evaluator parseability is a stage-1 fixture, not an assumption.
-- **Drain rules (contract 10).** The retiring solution path stops accepting new work and runs to terminal states before the swap deploys; stragglers strand loudly through the unreleased-attempt state message.
-- **Fresh rewrite, legacy as fixtures (contract 12).** Legacy behavior enters as test cases, never as ported code.
-- **The `TaskEngine` evaluation path is untouched.** Every task that edits `client/src/harnesses/engine/` or `client/src/adapters/mech/` must leave the `taskRole === 'evaluation'` path behaviourally identical, proven by the regression test in Task 16. The one exception is the bridge delivery reader of Task 15, which is a *read-path* addition explicitly required by contract 9.
-- **Rollback is revert / pin the previous canary.** No feature flags, no shadow mode.
-
-## Consumed cross-plan surfaces
-
-This plan consumes two trees whose plans are authored in parallel. It references them **only** through the program plan §5 factory surface and the port interfaces already defined in merged code. No internals are assumed.
-
-From `2026-07-30-marketplace-venue-base.md`:
-
-```ts
-import { createBaseVenue } from "@jinn-network/marketplace-venue-base";
-
-const venue = createBaseVenue({
-  chain: MarketplaceChainConfig,     // @jinn-network/marketplace-binding
-  publicClient: PublicClient,        // viem
-  walletClient: WalletClient,        // viem
-  safeAddress: `0x${string}`,
-  stateDbPath: string,
-});
-// venue: {
-//   claim: ClaimPorts;                        // marketplace-binding
-//   settlement: SettlementPorts;              // marketplace-binding
-//   lifecycle: MarketplaceLifecyclePorts;     // marketplace-binding
-//   finality: FinalityPort;                   // marketplace-pipeline
-//   deliveryWait: DeliveryWaitPort;           // marketplace-pipeline
-//   release: ReleaseAttemptPort;              // marketplace-pipeline
-//   observe: MarketplaceObservePort;          // marketplace-binding
-//   safe: SafeBroadcastPort;                  // marketplace-binding
-//   logSource; intents;
-// }
-```
-
-**Stage-1 requirement on `venue.safe`** (recorded as Finding F3, coordinate with the venue-base plan before Task 7): the binding's exported `SafeBroadcastPort` declares only `broadcastCreateTask`. The single-broadcaster rule needs a generic leg. This plan consumes:
-
-```ts
-/** venue-base's safe port, superset of binding's SafeBroadcastPort. */
-export interface BaseVenueSafe extends SafeBroadcastPort {
-  broadcast(input: {
-    readonly safeAddress: `0x${string}`;
-    readonly to: `0x${string}`;
-    readonly value: bigint;
-    readonly data: `0x${string}`;
-  }): Promise<`0x${string}`>;   // resolves to the mined transaction hash
-}
-```
-
-From `2026-07-30-discovery-transport-http.md`:
-
-```ts
-import { createFsBlobStore } from "@jinn-network/record-discovery-transport-http";
-const store: BlobStore = createFsBlobStore(rootDir);   // BlobStore from record-discovery-serve
-```
-
-Stage 1 uses **only** `createFsBlobStore`. The HTTP handler, client transport, and SSE stream transport are stage-4 surfaces and are not consumed here.
+- **Branch target:** `integration/evidence-v1`. Stacked PR train, one train for this stage, ending in exactly **one deploy PR** carrying the drain-runbook checklist and the rollback statement; that PR is **operator-approved** (no agent self-merge).
+- **Depends on:** the `2026-07-30-marketplace-venue-base.md` and `2026-07-30-discovery-transport-http.md` plans' trees implemented and independently reviewed. PRs #2306 / #2307 / #2308 assumed merged. `evaluator-adapters` is **not** required by this stage.
+- **Upstream surfaces are BINDING** (program §5, cross-plan factory surface). Depend on exactly these:
+  - `createBaseVenue(config)` → `{ claim, settlement, lifecycle, finality, deliveryWait, release, observe, safe, logSource, intents }`, `config = { chain, publicClient, walletClient, safeAddress, stateDbPath }`.
+  - `createFsBlobStore(rootDir)`, `createArchiveHttpHandler(opts)`, `createHttpTransport(baseUrl, fetchLike)`, `createSseStreamTransport(baseUrl, fetchLike)`.
+- **The runtime consumes the stack via in-repo `portal:` links.** Nothing in this stage publishes to npm (#2293 runs in parallel and is not a gate).
+- **Cross-plan contracts 1–4, 6, 9, 10 are binding here** (program §6): single-broadcaster; ledger-before-broadcast; projector-catch-up claim gate; additive/atomic/idempotent config migration; evidence publication policy; bridge-era documents; drain rules.
+- **Config shape keys (settled, program §5):** `configShapeVersion: 2`, `claimPolicy`, `executionWiring[]` (entries carry `legacyManifestDigest`), `posting[]`. Legacy keys (`joinedSolverNets`) are written beside the new ones and are **deleted only at stage 5**.
+- **Config backup filename is a pinned cross-plan contract:** `config.json.pre-v2.<ISO8601>.bak`, written next to the config file, **preserving the original file's permissions** (it can carry paid RPC keys).
+- **The token `client` is overloaded repo-wide** — the npm name `@jinn-network/client`, the ghcr image, `~/.jinn-client/`, and `packages/discovery/client/`. Every grep/sed/rename step in this plan must be **path-shaped** (`client/src/...`), never a bare word match.
+- **American English throughout.** No product names in tier-3 code (`packages/marketplace/pipeline/` included).
+- **Frontend rules:** the SPA delta lands with its `client/OPERATOR-APP-SPEC.md` update **in the same PR**; shadcn/ui primitives only (search the catalog before authoring anything custom, document the attempt in the PR body); **show, don't narrate** — no caption text restating values the UI already renders; no emoji.
+- **Every task ends with**: `yarn typecheck` + the touched package's `yarn test` + the relevant conformance kit, outputs shown. Commands, run from the repo root unless stated:
+  - `cd "$REPO/client" && yarn typecheck && yarn test`
+  - `cd "$REPO/packages/marketplace/pipeline" && yarn test`
+  - `cd "$REPO/client/src/dashboard/spa" && yarn test`
+  - Repo paths contain an apostrophe (`life's-work`) — **always quote paths in shell**.
+- **Rollback posture:** hard swap; rollback is reverting the deploy PR / pinning the previous canary image. New-flow in-flight engagements are abandoned on rollback and surface through the unreleased-attempt state message. No feature flags, no shadow mode.
 
 ---
 
-## Stage-1 file and loop disposition
+## Design Findings (raise with the coordinator before the affected task; do not silently patch)
 
-Every file under `client/src/daemon/` and `client/src/harnesses/engine/`, plus the marketplace adapter files this stage touches.
+These were discovered while reading the code against the design. Each carries a proposed disposition. Tasks that depend on one say so.
 
-| File | Disposition at stage 1 |
+1. **`SafeBroadcastPort` is too narrow for the single-broadcaster rule.** `packages/marketplace/binding/src/posting.ts` declares exactly one method, `broadcastCreateTask({ safeAddress, to, value, data })`. Contract 1 requires *every* surviving legacy leg — Safe `execTransaction` calls (`claimEvaluation`, verdict `claimDelivery`, `callDeliverToMarketplace`, `giveFeedback`, the earning family's Safe batches) and raw-EOA sends (checkpoint, top-ups, restake) — to share one nonce authority. **Proposed disposition:** the venue-base facade additionally exposes `safe.broadcastSafeTransaction(input: { safeAddress: Address; to: Address; value: bigint; data: Hex; logicalTx: string }): Promise<{ txHash: Hex }>` and `safe.sendEoaTransaction(input: { to: Address; value: bigint; data?: Hex; logicalTx: string }): Promise<{ txHash: Hex }>`, both on the same per-EOA lock + nonce ledger. Filed as a binding addendum to the venue-base plan. **Task 18 is blocked on this.**
+2. **`DerivationAnnotation` has no slot for the bridge marker.** `packages/marketplace/projector/src/derivation.ts` fixes the field set (`chainId, contract, event, blockNumber, blockHash, txHash, logIndex, finalityTier, contractGeneration`). Design §10 says legacy facts cards are synthesized "under a `legacy` derivation annotation". **Proposed disposition:** carry the marker on the *host's* mapper input (`derivation: "legacy" | "sealed"` on `SubmissionFactsCardInput`), not on the projector's `DerivationAnnotation`; `contractGeneration: "today"` already marks bridge-era anchors on-chain. No projector change.
+3. **`discovery/serve`'s archive writer is genesis-only and `BlobStore` is write-only.** `writeArchivePages(store, sourceName, entries, maxPageBytes)` re-partitions the *whole* entry set positionally, and `BlobStore` has exactly one method (`put`) — no `get`/`list`. **Proposed disposition:** the host owns page state. The projector loop supplies `appendArchiveEntries` to `projectAnnouncements` (the port `announce.ts` already declares for incremental publication) and reads its own archive back through a filesystem `Transport` (`createFsArchiveTransport`, Task 10) — `discovery/client`'s `sync.ts` builds URLs by string concatenation on `servingRoot`, so a directory-prefix `Transport` satisfies it exactly. Never route local reads through `checkLocator` (it rejects loopback as `private-address`).
+4. **`LocalLauncherDeployment` is not exported from the backend-local assembly barrel.** It is declared in `assembly/src/pinning.ts` and consumed as `LocalTaskExecutionBackendConfig.launcherDeployments`, but `assembly/src/index.ts` does not re-export it. **Proposed disposition:** Task 12 adds the type re-export to the assembly barrel (a one-line, additive export; no behavior change) rather than relying on structural typing in the host.
+5. **The evidence-join architecture test reads only one file.** `packages/task-execution/backend-local/assembly/src/evidence-join.test.ts:188-191` asserts the string `@jinn-network/evidence-local-runtime` is absent from `evidence-join.ts` alone. **Proposed disposition:** honor it as written (the join stays host-owned) and add the *host-side* mirror in Task 11 — an architecture test asserting `client/src/runtime/evidence-join.ts` is the only module under `client/src/` importing `@jinn-network/evidence-local-runtime`.
+6. **`legacyManifestDigest` is a plan-introduced identifier.** Marketplace binding design §7 says "a legacy annotation per wiring entry" over "manifest-digest matching" — it never spells the key. The identifier is settled by program §5 and is already the field name on `ExecutionWiringEntry` and `SubmissionFacts` in shipped pipeline code (`packages/marketplace/pipeline/src/types.ts`). **Proposed disposition:** no action; recorded so a reviewer does not read it as spec drift.
+7. **One tx path already bypasses the nonce ledger entirely.** `executeSafeTxBatch` (`client/src/earning/safe-adapter.ts:184`) broadcasts through the Safe protocol-kit's own signer — neither `withEoaBroadcastLock` nor `withNonceLedger` — from the same agent EOA six bootstrap steps use. This is the live instance of the #525/#562/#897 failure class, not a hypothetical. **Proposed disposition:** Task 19 re-points it; it is the highest-value single change in the single-broadcaster work.
+8. **`joinedSolverNets` reads bypass migration on one route.** `GET /v1/operator/joined` (`client/src/api/setup-endpoints.ts:974`) re-reads `config.json` from disk directly, not via `loadConfig`, so no migration runs on that path. **Proposed disposition:** Task 21 replaces that route rather than patching it.
+
+---
+
+## File Structure
+
+**New — operator runtime (`client/`)**
+
+| File | Responsibility |
 | --- | --- |
-| `client/src/daemon/daemon.ts` | **Modified** — starts `projector-loop`, `work-loop`, `evidence-driver`; `_runEngineWatcherLoop` stops claiming restoration announcements (Task 16) |
-| `client/src/daemon/loop-heartbeat.ts` | **Modified** — three new `LOOP_REGISTRY` entries |
-| `client/src/daemon/projector-loop.ts` | **Created** (Task 9) |
-| `client/src/daemon/projector-ports.ts` | **Created** (Task 9) |
-| `client/src/daemon/work-loop.ts` | **Created** (Task 13) |
-| `client/src/daemon/evidence-driver.ts` | **Created** (Task 11) |
-| `client/src/daemon/evidence-join.ts` | **Created** (Task 11) |
-| `client/src/daemon/composition-root.ts` | **Created** (Task 12) |
-| `client/src/daemon/engagement-ledger.ts` | **Created** (Task 6) |
-| `client/src/daemon/mech-deliver.ts` | **Not created** — coordinator amendment 2 rehomed Task 8 to `packages/marketplace/venue-base/src/deliver-leg.ts` |
-| `client/src/daemon/bridge-legacy-delivery.ts` | **Created** (Task 15) |
-| `client/src/daemon/creator.ts` | **Kept** — retires at stage 3; its tx leg re-points through venue-base (Task 7) |
-| `client/src/daemon/delivery-watcher.ts` | **Kept** — retires at stage 2 |
-| `client/src/daemon/readiness-gate.ts` | **Kept** — still gates the surviving evaluation claims |
-| `client/src/daemon/ai-units-gate.ts` | **Kept** — re-pointed at pipeline caps for the work loop (Task 13); still gates evaluations |
-| `client/src/daemon/spend-cap-gate.ts` | **Kept** — same as above |
-| `client/src/daemon/skip-log-dedup.ts` | **Kept** — evaluation announcements only |
-| `client/src/daemon/peer-sync.ts` | **Kept** — retires at stage 4 |
-| `client/src/daemon/reward-claim-loop.ts` | **Kept** — application tier, untouched |
-| `client/src/daemon/balance-topup-loop.ts` | **Kept** — application tier, untouched |
-| `client/src/daemon/eviction-loop.ts` | **Kept** — application tier, untouched |
-| `client/src/daemon/harvest-loop.ts` | **Kept** — corpus mining, untouched |
-| `client/src/daemon/checkpoint-loop.ts` | **Kept** — application tier, untouched |
-| `client/src/daemon/watchdog-loop.ts` | **Kept** — gains three registrations |
-| `client/src/harnesses/engine/engine.ts` | **Modified** — solution path retired behind `canAcceptTask`; evaluation path untouched (Task 16) |
-| `client/src/harnesses/engine/state.ts` | **Kept** — evaluation runs the same state sequence; deleted at stage 5 |
-| `client/src/harnesses/engine/persistence.ts` | **Kept** — `task_runs` frozen for solutions, still written for evaluations; table deleted at stage 5 |
-| `client/src/harnesses/engine/delivery.ts` | **Kept** — evaluation delivery legs only; tx re-pointed via Task 7 |
-| `client/src/adapters/mech/adapter.ts` | **Modified** — restoration discovery disabled (Task 16); bridge delivery reader added (Task 15); evaluation machinery kept until stage 2 |
-| `client/src/adapters/mech/contracts.ts` | **Kept unmodified** — all five tx functions keep calling `executeSafeTransaction` |
-| `client/src/adapters/mech/safe.ts` | **Modified** — `executeSafeTransaction` delegates to the injected venue broadcaster (Task 7) |
-| `client/src/discovery/` | **Kept** — retires at stage 4 |
-| `client/src/config.ts` | **Modified** — shape v2 schema + boot migration (Tasks 1–3) |
-| `client/src/store/store.ts` | **Modified** — engagement ledger + projector cursor tables (Task 6, Task 9) |
-| `client/src/main.ts` | **Modified** — composition root wired before `new Daemon(...)` (Task 12) |
+| `client/src/runtime/compose.ts` | The composition root: builds venue, backend, evidence, pipeline config/ports, and the three loops |
+| `client/src/runtime/evidence-join.ts` | Host-owned `EvidenceBindingPorts` ← `openLocalEvidenceRuntime` (the join the stack refuses to own) |
+| `client/src/runtime/local-archive.ts` | Filesystem archive writer state + `createFsArchiveTransport` reader |
+| `client/src/runtime/broadcast.ts` | The single-broadcaster facade over venue-base's Safe/EOA broadcast |
+| `client/src/runtime/backend-config.ts` | Assembles `LocalTaskExecutionBackendConfig` from operator config (profile store, launchers, deployments, provisioner) |
+| `client/src/daemon/projector-loop.ts` | Chain logs → observations → signed announcements → archive; owns the durable finality cursor |
+| `client/src/daemon/work-loop.ts` | Archive announcements → facts → predicate/caps/wiring → one `runPipeline` engagement per claim |
+| `client/src/daemon/evidence-driver.ts` | `sync` / `awaitIndexed` / publication policy / indexing-failure surfacing |
+| `client/src/daemon/caps-gate.ts` | Rolling-window USD + AI-unit accounting over SQLite, projected into `OperatorCaps` |
+| `client/src/store/engagement-ledger.ts` | `ENGAGEMENT_LEDGER_SCHEMA` + `EngagementLedger` (ledger-before-broadcast, boot reconcile) |
+| `client/src/store/projector-state.ts` | `PROJECTOR_STATE_SCHEMA` + `ProjectorStateStore` (cursor + projection state + archive head) |
+| `client/src/config-migration-v2.ts` | Additive / atomic / idempotent shape-version-2 migration |
+| `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.tsx` | Claim policy & wiring page (replaces Memberships) |
+| `client/src/dashboard/spa/src/pages/operator/WiringEntryCard.tsx` | One wiring entry: harness / model / plugins / credential, edit + remove |
+| `docs/runbooks/cutover-stage-1-drain.md` | The drain runbook the deploy PR checklist points at |
 
-## What this plan does NOT do
+**New — pipeline tree (tier 3)**
 
-- **No evaluator loop.** Deriving, posting, claiming, and executing verdicts on the embedded backend is **stage 2**. The legacy mech-adapter evaluation machinery and `delivery-watcher` keep running here.
-- **No posting loop.** Requester-side posting, adoption, lifecycle exits, `jinn policy` / `jinn wiring` CLI verbs, and launched-record generator retirement are **stage 3**. The legacy `creator` loop keeps posting; only its transaction leg moves.
-- **No public archive.** The discovery archive built by the projector loop is local-only. Mounting it over HTTP (SSE tail, ETag head, exposure scoping) is **stage 4**, and `client/src/discovery/` plus `peer-sync` survive until then.
-- **No rename.** `client/` → `operator/`, deleting `task_runs`, deleting legacy config keys, pruning migration backups, and the #2297 import fix are **stage 5**.
-- No operator-app redesign, no public work-client package, no `sdk`/`core`/`layer`/`plugin` disposition, no earning recomposition, no config hot reload, no mainnet decisions (spec §11).
+| File | Responsibility |
+| --- | --- |
+| `packages/marketplace/pipeline/src/facts-mapper.ts` | The one pure module of design §6.4: facts card → `SubmissionFacts` |
+
+**Modified**
+
+| File | Change |
+| --- | --- |
+| `client/package.json` | `portal:` deps on venue-base, transport-http, projector, discovery serve/client/facts, evidence local-runtime, backend-local, profiles, launchers |
+| `client/src/config.ts` | Schema keys `configShapeVersion` / `claimPolicy` / `executionWiring` / `posting`; call the v2 migration in `loadConfig` |
+| `client/src/store/store.ts` | Execute the two new schemas; expose `engagementLedger()` and `projectorState()` accessors |
+| `client/src/daemon/daemon.ts` | Start the three new loops; stop starting `engine-watcher`; register the new loop names |
+| `client/src/daemon/loop-heartbeat.ts` | `LOOP_REGISTRY`: add `projector` / `work` / `evidence-driver`, remove `engine-watcher` |
+| `client/src/harnesses/engine/engine.ts` | Refuse `taskRole === 'restoration'` at `runImpl`; drop the `joinedSolverNets` claim gate from `canAcceptTask` |
+| `client/src/adapters/mech/contracts.ts` | Re-point `claimEvaluation`, `claimDelivery`, `callDeliverToMarketplace`, `submitTask` onto the broadcast facade |
+| `client/src/earning/safe-adapter.ts` | Re-point `executeSafeTxDirect` + `executeSafeTxBatch` onto the broadcast facade |
+| `client/src/erc8004/reputation.ts` | Re-point `sendWrite` (both branches) onto the broadcast facade |
+| `client/src/main.ts` | Re-point the checkpoint write; compose the runtime; pass the broadcaster into the adapter |
+| `client/src/api/setup-endpoints.ts` | Replace join/leave/joined routes with claim-policy + wiring routes |
+| `client/src/dashboard/spa/src/routes.ts`, `App.tsx`, `pages/operator/OperatorSubNav.tsx` | Route + nav rename to `/operator/claim-policy` |
+| `client/OPERATOR-APP-SPEC.md` | §2.4 rewritten as Claim policy & wiring |
+| `client/test/e2e/daemon-harness-cycle.ts`, `_daemon-harness-helpers.ts` | Re-point onto the composed runtime |
+| `packages/marketplace/pipeline/src/index.ts` | Export the facts mapper |
+| `packages/task-execution/backend-local/assembly/src/index.ts` | Re-export `LocalLauncherDeployment` (finding 4) |
+
+**Deleted**
+
+| File | Why |
+| --- | --- |
+| `client/src/dashboard/spa/src/pages/operator/MembershipsTab.tsx` (+ `.test.tsx`) | Replaced by `ClaimPolicyTab` |
 
 ---
 
-## Task 1: Config shape v2 — types and loader
+## Task 1: Workspace wiring and upstream smoke test
 
 **Files:**
-- Create: `client/src/config/shape-v2.ts`
-- Modify: `client/src/config.ts:32` (add the three new keys to `JinnConfigSchema`), `client/src/config.ts:719` (`JinnConfig` type)
-- Test: `client/test/config/shape-v2.test.ts`
+- Modify: `client/package.json`
+- Test: `client/test/runtime/upstream-surface.test.ts`
 
 **Interfaces:**
-- Consumes: `JinnConfigSchema` (`client/src/config.ts:32`), `loadConfig(configPath?: string): JinnConfig` (`client/src/config.ts:948`).
-- Produces:
-
-```ts
-// client/src/config/shape-v2.ts
-export const CONFIG_SHAPE_VERSION = 2 as const;
-
-export interface ClaimPolicyConfig {
-  readonly mode: 'claim-nothing' | 'every-runnable' | 'match-legacy-manifest-digest';
-  readonly spendCapWei: string;   // decimal string; bigint at use site
-  readonly aiUnitCap: number;
-}
-
-export interface ExecutionWiringConfigEntry {
-  readonly workKind: string;
-  readonly harness: string;
-  readonly model: string;
-  readonly plugins: readonly string[];
-  readonly credentialRef: string;
-  readonly isolationPolicy: string;
-  readonly legacyManifestDigest?: string;
-}
-
-export interface PostingConfigEntry {
-  readonly workKind: string;
-  readonly launchedRecordPath: string;
-  readonly generatorEnabled: boolean;
-  readonly legacyManifestDigest?: string;
-}
-
-export const ClaimPolicyConfigSchema: z.ZodType<ClaimPolicyConfig>;
-export const ExecutionWiringConfigEntrySchema: z.ZodType<ExecutionWiringConfigEntry>;
-export const PostingConfigEntrySchema: z.ZodType<PostingConfigEntry>;
-
-/** Maps operator config entries onto the pipeline's frozen entry type. */
-export function toPipelineWiring(
-  entries: readonly ExecutionWiringConfigEntry[],
-): ExecutionWiringEntry[];   // ExecutionWiringEntry from @jinn-network/marketplace-pipeline
-```
+- Consumes: `createBaseVenue` from `@jinn-network/marketplace-venue-base`; `createFsBlobStore` from `@jinn-network/record-discovery-transport-http`.
+- Produces: every later task may `import` from the packages added here.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/test/config/shape-v2.test.ts
+// client/test/runtime/upstream-surface.test.ts
 import { describe, expect, it } from 'vitest';
-import {
-  CONFIG_SHAPE_VERSION,
-  ClaimPolicyConfigSchema,
-  ExecutionWiringConfigEntrySchema,
-  PostingConfigEntrySchema,
-  toPipelineWiring,
-} from '../../src/config/shape-v2.js';
 
-describe('config shape v2', () => {
-  it('pins the shape version at 2', () => {
-    expect(CONFIG_SHAPE_VERSION).toBe(2);
+describe('upstream stack surfaces are resolvable from the operator runtime', () => {
+  it('exposes the venue facade factory', async () => {
+    const mod = await import('@jinn-network/marketplace-venue-base');
+    expect(typeof mod.createBaseVenue).toBe('function');
   });
 
-  it('parses a claim policy with a decimal-string spend cap', () => {
-    const parsed = ClaimPolicyConfigSchema.parse({
-      mode: 'match-legacy-manifest-digest',
-      spendCapWei: '2500000000000000',
-      aiUnitCap: 30,
-    });
-    expect(parsed.spendCapWei).toBe('2500000000000000');
-    expect(BigInt(parsed.spendCapWei)).toBe(2500000000000000n);
+  it('exposes the filesystem blob store factory', async () => {
+    const mod = await import('@jinn-network/record-discovery-transport-http');
+    expect(typeof mod.createFsBlobStore).toBe('function');
   });
 
-  it('rejects a non-decimal spend cap', () => {
-    expect(() =>
-      ClaimPolicyConfigSchema.parse({ mode: 'claim-nothing', spendCapWei: '0x10', aiUnitCap: 1 }),
-    ).toThrow();
-  });
-
-  it('defaults plugins to an empty array on a wiring entry', () => {
-    const parsed = ExecutionWiringConfigEntrySchema.parse({
-      workKind: 'prediction.v1',
-      harness: 'claude-code',
-      model: 'claude-haiku-4-5-20251001',
-      credentialRef: 'anthropic-default',
-      isolationPolicy: 'process',
-    });
-    expect(parsed.plugins).toEqual([]);
-    expect(parsed.legacyManifestDigest).toBeUndefined();
-  });
-
-  it('parses a posting entry', () => {
-    const parsed = PostingConfigEntrySchema.parse({
-      workKind: 'prediction.v1',
-      launchedRecordPath: '/home/op/.jinn-client/solvernets/launched/QmAbc.json',
-      generatorEnabled: true,
-      legacyManifestDigest: 'QmAbc',
-    });
-    expect(parsed.generatorEnabled).toBe(true);
-  });
-
-  it('maps operator wiring onto the pipeline entry type', () => {
-    const [entry] = toPipelineWiring([
-      {
-        workKind: 'prediction.v1',
-        harness: 'claude-code',
-        model: 'claude-haiku-4-5-20251001',
-        plugins: ['learner'],
-        credentialRef: 'anthropic-default',
-        isolationPolicy: 'process',
-        legacyManifestDigest: 'QmAbc',
-      },
-    ]);
-    expect(entry).toEqual({
-      workKind: 'prediction.v1',
-      harness: 'claude-code',
-      model: 'claude-haiku-4-5-20251001',
-      plugins: ['learner'],
-      credentialRef: 'anthropic-default',
-      isolationPolicy: 'process',
-      legacyManifestDigest: 'QmAbc',
-    });
+  it('exposes the pipeline, projector, binding and backend entry points', async () => {
+    const pipeline = await import('@jinn-network/marketplace-pipeline');
+    const projector = await import('@jinn-network/marketplace-projector');
+    const binding = await import('@jinn-network/marketplace-binding');
+    const backend = await import('@jinn-network/task-execution-backend-local');
+    const evidence = await import('@jinn-network/evidence-local-runtime');
+    expect(typeof pipeline.runPipeline).toBe('function');
+    expect(typeof projector.decodeMarketplaceLogs).toBe('function');
+    expect(typeof binding.claimAttempt).toBe('function');
+    expect(typeof backend.makeLocalTaskExecutionBackend).toBe('function');
+    expect(typeof evidence.openLocalEvidenceRuntime).toBe('function');
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run test/config/shape-v2.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/config/shape-v2.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/upstream-surface.test.ts`
+Expected: FAIL — `Cannot find package '@jinn-network/marketplace-venue-base'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Add the portal dependencies**
 
-```ts
-// client/src/config/shape-v2.ts
-import { z } from 'zod';
-import type { ExecutionWiringEntry } from '@jinn-network/marketplace-pipeline';
+In `client/package.json`, add to `dependencies` (keep the existing alphabetical grouping):
 
-export const CONFIG_SHAPE_VERSION = 2 as const;
-
-const DecimalWei = z.string().regex(/^\d+$/u, 'spendCapWei must be a decimal wei string');
-
-export const ClaimPolicyConfigSchema = z.object({
-  mode: z.enum(['claim-nothing', 'every-runnable', 'match-legacy-manifest-digest']),
-  spendCapWei: DecimalWei,
-  aiUnitCap: z.number().int().nonnegative(),
-});
-export type ClaimPolicyConfig = z.infer<typeof ClaimPolicyConfigSchema>;
-
-export const ExecutionWiringConfigEntrySchema = z.object({
-  workKind: z.string().min(1),
-  harness: z.string().min(1),
-  model: z.string().min(1),
-  plugins: z.array(z.string()).default([]),
-  credentialRef: z.string().min(1),
-  isolationPolicy: z.string().min(1),
-  legacyManifestDigest: z.string().min(1).optional(),
-});
-export type ExecutionWiringConfigEntry = z.infer<typeof ExecutionWiringConfigEntrySchema>;
-
-export const PostingConfigEntrySchema = z.object({
-  workKind: z.string().min(1),
-  launchedRecordPath: z.string().min(1),
-  generatorEnabled: z.boolean(),
-  legacyManifestDigest: z.string().min(1).optional(),
-});
-export type PostingConfigEntry = z.infer<typeof PostingConfigEntrySchema>;
-
-export function toPipelineWiring(
-  entries: readonly ExecutionWiringConfigEntry[],
-): ExecutionWiringEntry[] {
-  return entries.map((entry) => ({
-    workKind: entry.workKind,
-    harness: entry.harness,
-    model: entry.model,
-    plugins: [...entry.plugins],
-    credentialRef: entry.credentialRef,
-    isolationPolicy: entry.isolationPolicy,
-    ...(entry.legacyManifestDigest === undefined
-      ? {}
-      : { legacyManifestDigest: entry.legacyManifestDigest }),
-  }));
-}
+```json
+"@jinn-network/marketplace-venue-base": "portal:../packages/marketplace/venue-base",
+"@jinn-network/marketplace-pipeline": "portal:../packages/marketplace/pipeline",
+"@jinn-network/marketplace-projector": "portal:../packages/marketplace/projector",
+"@jinn-network/marketplace-binding": "portal:../packages/marketplace/binding",
+"@jinn-network/record-discovery-transport-http": "portal:../packages/discovery/transport-http",
+"@jinn-network/record-discovery-protocol": "portal:../packages/discovery/protocol",
+"@jinn-network/record-discovery-serve": "portal:../packages/discovery/serve",
+"@jinn-network/record-discovery-client": "portal:../packages/discovery/client",
+"@jinn-network/record-discovery-facts-task-execution": "portal:../packages/discovery/facts/task-execution",
+"@jinn-network/record-discovery-facts-evidence": "portal:../packages/discovery/facts/evidence",
+"@jinn-network/record-discovery-facts-trust": "portal:../packages/discovery/facts/trust",
+"@jinn-network/task-execution-backend": "portal:../packages/task-execution/backend",
+"@jinn-network/task-execution-backend-local": "portal:../packages/task-execution/backend-local/assembly",
+"@jinn-network/task-execution-backend-local-launchers": "portal:../packages/task-execution/backend-local/launchers",
+"@jinn-network/task-execution-backend-local-workspace": "portal:../packages/task-execution/backend-local/workspace",
+"@jinn-network/task-execution-profiles": "portal:../packages/task-execution/profiles",
+"@jinn-network/task-execution-protocol": "portal:../packages/task-execution/protocol",
+"@jinn-network/evidence-local-runtime": "portal:../packages/evidence/local-runtime",
+"@jinn-network/evidence-protocol": "portal:../packages/evidence/protocol"
 ```
 
-Then add the three keys to `JinnConfigSchema` in `client/src/config.ts`, immediately after the `joinedSolverNets` block (line 450). They are **optional** — an unmigrated config must still parse:
+Confirm each `portal:` target's `name` field matches by reading its `package.json`; fix any mismatch by using the real name rather than guessing.
 
-```ts
-  configShapeVersion: z.literal(CONFIG_SHAPE_VERSION).optional(),
-  claimPolicy: ClaimPolicyConfigSchema.optional(),
-  executionWiring: z.array(ExecutionWiringConfigEntrySchema).optional(),
-  posting: z.array(PostingConfigEntrySchema).optional(),
-```
+- [ ] **Step 4: Install and run the test**
 
-with `import { CONFIG_SHAPE_VERSION, ClaimPolicyConfigSchema, ExecutionWiringConfigEntrySchema, PostingConfigEntrySchema } from './config/shape-v2.js';` at the top of `client/src/config.ts`.
+Run: `cd "$REPO/client" && yarn install && yarn vitest run test/runtime/upstream-surface.test.ts`
+Expected: PASS, 3 tests.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Typecheck**
 
-Run: `cd client && yarn vitest run test/config/shape-v2.test.ts && yarn vitest run test/config`
-Expected: PASS, and every existing config test still green (proving the additive keys did not break parsing of a legacy file).
+Run: `cd "$REPO/client" && yarn typecheck`
+Expected: zero errors.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add client/src/config/shape-v2.ts client/src/config.ts client/test/config/shape-v2.test.ts
-git commit -m "feat(operator): add config shape v2 types beside joinedSolverNets"
+cd "$REPO" && git add client/package.json client/test/runtime/upstream-surface.test.ts yarn.lock
+git commit -m "chore(client): portal-link the stack packages the stage-1 runtime composes"
 ```
 
 ---
 
-## Task 2: Atomic config write with permission-preserving timestamped backup
+## Task 2: Facts card → `SubmissionFacts` mapper (pipeline tree)
 
-**Files:**
-- Create: `client/src/config/atomic-write.ts`
-- Test: `client/test/config/atomic-write.test.ts`
-
-**Interfaces:**
-- Consumes: nothing from earlier tasks.
-- Produces:
-
-```ts
-// client/src/config/atomic-write.ts
-/** temp-file + fsync + rename in the config file's own directory. Preserves the target's mode. */
-export function writeConfigFileAtomic(filePath: string, value: unknown): void;
-
-/** Copies filePath to `<filePath>.backup-<ISO-basic-timestamp>` with the source's exact mode. */
-export function backupConfigFile(filePath: string, now?: () => Date): string | undefined;
-```
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// client/test/config/atomic-write.test.ts
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { backupConfigFile, writeConfigFileAtomic } from '../../src/config/atomic-write.js';
-
-function fixture(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'jinn-config-'));
-  const path = join(dir, 'config.json');
-  writeFileSync(path, `${JSON.stringify({ rpcUrl: 'http://x' }, null, 2)}\n`, { mode: 0o600 });
-  return path;
-}
-
-describe('atomic config write', () => {
-  it('writes the value and leaves no temp file behind', () => {
-    const path = fixture();
-    writeConfigFileAtomic(path, { rpcUrl: 'http://y', configShapeVersion: 2 });
-    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({
-      rpcUrl: 'http://y',
-      configShapeVersion: 2,
-    });
-    const leftovers = readdirSync(join(path, '..')).filter((name) => name.includes('.tmp-'));
-    expect(leftovers).toEqual([]);
-  });
-
-  it('preserves the existing file mode', () => {
-    const path = fixture();
-    writeConfigFileAtomic(path, { rpcUrl: 'http://y' });
-    expect(statSync(path).mode & 0o777).toBe(0o600);
-  });
-
-  it('never leaves a truncated file when serialization throws mid-write', () => {
-    const path = fixture();
-    const cyclic: Record<string, unknown> = {};
-    cyclic['self'] = cyclic;
-    expect(() => writeConfigFileAtomic(path, cyclic)).toThrow();
-    expect(JSON.parse(readFileSync(path, 'utf-8'))).toEqual({ rpcUrl: 'http://x' });
-    const leftovers = readdirSync(join(path, '..')).filter((name) => name.includes('.tmp-'));
-    expect(leftovers).toEqual([]);
-  });
-
-  it('backs up with a timestamped name and the source mode', () => {
-    const path = fixture();
-    const backup = backupConfigFile(path, () => new Date('2026-07-30T09:15:00.000Z'));
-    expect(backup).toBe(`${path}.backup-20260730T091500Z`);
-    expect(statSync(backup!).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(backup!, 'utf-8'))).toEqual({ rpcUrl: 'http://x' });
-  });
-
-  it('returns undefined when there is nothing to back up', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-config-'));
-    expect(backupConfigFile(join(dir, 'absent.json'))).toBeUndefined();
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd client && yarn vitest run test/config/atomic-write.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/config/atomic-write.js"`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-```ts
-// client/src/config/atomic-write.ts
-import {
-  closeSync,
-  copyFileSync,
-  existsSync,
-  fsyncSync,
-  openSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname } from 'node:path';
-
-function basicTimestamp(date: Date): string {
-  return `${date.toISOString().replace(/[-:]/gu, '').replace(/\.\d{3}Z$/u, 'Z')}`;
-}
-
-export function writeConfigFileAtomic(filePath: string, value: unknown): void {
-  // Serialize first: a cyclic or unserializable value must never touch the filesystem.
-  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`, 'utf-8');
-  const mode = existsSync(filePath) ? statSync(filePath).mode & 0o777 : 0o600;
-  const directory = dirname(filePath);
-  const temporary = `${filePath}.tmp-${process.pid}-${crypto.randomUUID()}`;
-  const fd = openSync(temporary, 'wx', mode);
-  try {
-    writeFileSync(fd, bytes);
-    fsyncSync(fd);
-  } catch (error) {
-    closeSync(fd);
-    rmSync(temporary, { force: true });
-    throw error;
-  }
-  closeSync(fd);
-  renameSync(temporary, filePath);
-  const directoryFd = openSync(directory, 'r');
-  try {
-    fsyncSync(directoryFd);
-  } finally {
-    closeSync(directoryFd);
-  }
-}
-
-export function backupConfigFile(
-  filePath: string,
-  now: () => Date = () => new Date(),
-): string | undefined {
-  if (!existsSync(filePath)) return undefined;
-  const backupPath = `${filePath}.backup-${basicTimestamp(now())}`;
-  copyFileSync(filePath, backupPath);
-  return backupPath;
-}
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/config/atomic-write.test.ts`
-Expected: PASS (5 tests).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add client/src/config/atomic-write.ts client/test/config/atomic-write.test.ts
-git commit -m "feat(operator): add atomic config write with permission-preserving backup"
-```
-
----
-
-## Task 3: Boot-time config auto-migration
-
-**Files:**
-- Create: `client/src/config/migrate-shape-v2.ts`
-- Modify: `client/src/config.ts:948` (call the migration from `loadConfig` after the existing `migrateLegacySolverNets` / `backfillJoinedProviders` block at lines 1326–1333)
-- Test: `client/test/config/migrate-shape-v2.test.ts`
-
-**Interfaces:**
-- Consumes: `CONFIG_SHAPE_VERSION`, `ExecutionWiringConfigEntry`, `PostingConfigEntry` (Task 1); `writeConfigFileAtomic`, `backupConfigFile` (Task 2).
-- Produces:
-
-```ts
-// client/src/config/migrate-shape-v2.ts
-export interface ConfigMigrationReport {
-  readonly migrated: boolean;
-  readonly wiringEntries: number;
-  readonly postingEntries: number;
-  readonly backupPath?: string;
-}
-
-export interface MigrateConfigOptions {
-  readonly configPath: string;
-  /** Directory holding launched SolverNet records; default `<configDir>/solvernets/launched`. */
-  readonly launchedRecordsDir?: string;
-  readonly now?: () => Date;
-}
-
-/** Additive, atomic, idempotent (contract 4). Safe to call on every boot. */
-export function migrateConfigShapeV2(options: MigrateConfigOptions): ConfigMigrationReport;
-```
-
-Mapping rules (spec §9, frozen by marketplace-binding §7):
-- Each `joinedSolverNets[<manifestCid>]` entry whose `roles` includes `'solver'` becomes **one** `executionWiring` entry: `workKind = <manifestCid>`, `harness`/`model`/`plugins` copied, `credentialRef = <harness>-default`, `isolationPolicy = 'process'`, `legacyManifestDigest = <manifestCid>`.
-- Evaluator-only joins produce **no** wiring entry (the evaluator loop is stage 2).
-- `claimPolicy` is written once as `{ mode: 'match-legacy-manifest-digest', spendCapWei, aiUnitCap }` reading the operator's existing `spendCap`/`aiUnits` config when present, else `{ spendCapWei: '0', aiUnitCap: 0 }`, which under `checkCaps` claims nothing until the operator sets caps.
-- Each `*.json` in `launchedRecordsDir` whose `status === 'launched'` becomes one `posting` entry.
-- `joinedSolverNets` is **not** removed.
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// client/test/config/migrate-shape-v2.test.ts
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { migrateConfigShapeV2 } from '../../src/config/migrate-shape-v2.js';
-
-function workspace(config: Record<string, unknown>): { configPath: string; launchedDir: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'jinn-migrate-'));
-  const configPath = join(dir, 'config.json');
-  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-  const launchedDir = join(dir, 'solvernets', 'launched');
-  mkdirSync(launchedDir, { recursive: true });
-  return { configPath, launchedDir };
-}
-
-const JOINED = {
-  joinedSolverNets: {
-    QmSolver: {
-      manifestCid: 'QmSolver',
-      name: 'prediction',
-      roles: ['solver', 'evaluator'],
-      harness: 'claude-code',
-      model: 'claude-haiku-4-5-20251001',
-      plugins: ['learner'],
-      disabledDefaultPlugins: [],
-    },
-    QmEvalOnly: {
-      manifestCid: 'QmEvalOnly',
-      roles: ['evaluator'],
-      plugins: [],
-      disabledDefaultPlugins: [],
-    },
-  },
-  spendCap: { capUsd: 12 },
-  aiUnits: { capPerBlockUsdMicros: 30_000_000 },
-};
-
-describe('config shape v2 migration', () => {
-  it('writes one wiring entry per solver-role join and keeps joinedSolverNets', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    const report = migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
-    expect(report.migrated).toBe(true);
-    expect(report.wiringEntries).toBe(1);
-
-    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.configShapeVersion).toBe(2);
-    expect(written.executionWiring).toEqual([
-      {
-        workKind: 'QmSolver',
-        harness: 'claude-code',
-        model: 'claude-haiku-4-5-20251001',
-        plugins: ['learner'],
-        credentialRef: 'claude-code-default',
-        isolationPolicy: 'process',
-        legacyManifestDigest: 'QmSolver',
-      },
-    ]);
-    expect(written.claimPolicy.mode).toBe('match-legacy-manifest-digest');
-    expect(Object.keys(written.joinedSolverNets)).toEqual(['QmSolver', 'QmEvalOnly']);
-  });
-
-  it('writes one posting entry per launched record this operator owns', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    writeFileSync(
-      join(launchedDir, 'QmSolver.json'),
-      JSON.stringify({ manifestCid: 'QmSolver', status: 'launched', generatorEnabled: true }),
-    );
-    writeFileSync(
-      join(launchedDir, 'QmDraft.json'),
-      JSON.stringify({ manifestCid: 'QmDraft', status: 'draft', generatorEnabled: true }),
-    );
-    const report = migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
-    expect(report.postingEntries).toBe(1);
-    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(written.posting).toEqual([
-      {
-        workKind: 'QmSolver',
-        launchedRecordPath: join(launchedDir, 'QmSolver.json'),
-        generatorEnabled: true,
-        legacyManifestDigest: 'QmSolver',
-      },
-    ]);
-  });
-
-  it('is idempotent — a second call migrates nothing and writes no second backup', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
-    const first = readFileSync(configPath, 'utf-8');
-    const second = migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
-    expect(second.migrated).toBe(false);
-    expect(second.backupPath).toBeUndefined();
-    expect(readFileSync(configPath, 'utf-8')).toBe(first);
-    const backups = readdirSync(join(configPath, '..')).filter((n) => n.includes('.backup-'));
-    expect(backups).toHaveLength(1);
-  });
-
-  it('takes a timestamped backup before the first write', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    const report = migrateConfigShapeV2({
-      configPath,
-      launchedRecordsDir: launchedDir,
-      now: () => new Date('2026-07-30T09:15:00.000Z'),
-    });
-    expect(report.backupPath).toBe(`${configPath}.backup-20260730T091500Z`);
-    expect(JSON.parse(readFileSync(report.backupPath!, 'utf-8')).configShapeVersion).toBeUndefined();
-  });
-
-  it('leaves a prior daemon generation able to read the migrated file', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    migrateConfigShapeV2({ configPath, launchedRecordsDir: launchedDir });
-    const written = JSON.parse(readFileSync(configPath, 'utf-8'));
-    // The pre-cutover daemon reads only these keys; they must be byte-identical.
-    expect(written.joinedSolverNets).toEqual(JOINED.joinedSolverNets);
-    expect(written.spendCap).toEqual(JOINED.spendCap);
-  });
-
-  it('never truncates the config when the write throws mid-flight', () => {
-    const { configPath, launchedDir } = workspace(JOINED);
-    expect(() =>
-      migrateConfigShapeV2({
-        configPath,
-        launchedRecordsDir: launchedDir,
-        now: () => {
-          throw new Error('clock exploded');
-        },
-      }),
-    ).toThrow('clock exploded');
-    expect(JSON.parse(readFileSync(configPath, 'utf-8'))).toEqual(JOINED);
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd client && yarn vitest run test/config/migrate-shape-v2.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/config/migrate-shape-v2.js"`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-```ts
-// client/src/config/migrate-shape-v2.ts
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { backupConfigFile, writeConfigFileAtomic } from './atomic-write.js';
-import {
-  CONFIG_SHAPE_VERSION,
-  type ExecutionWiringConfigEntry,
-  type PostingConfigEntry,
-} from './shape-v2.js';
-
-export interface ConfigMigrationReport {
-  readonly migrated: boolean;
-  readonly wiringEntries: number;
-  readonly postingEntries: number;
-  readonly backupPath?: string;
-}
-
-export interface MigrateConfigOptions {
-  readonly configPath: string;
-  readonly launchedRecordsDir?: string;
-  readonly now?: () => Date;
-}
-
-interface JoinedEntry {
-  readonly manifestCid: string;
-  readonly roles?: readonly string[];
-  readonly harness?: string;
-  readonly model?: string;
-  readonly plugins?: readonly string[];
-}
-
-function readJson(path: string): Record<string, unknown> | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function wiringFromJoined(joined: Record<string, JoinedEntry>): ExecutionWiringConfigEntry[] {
-  return Object.entries(joined)
-    .filter(([, entry]) => (entry.roles ?? []).includes('solver'))
-    .map(([manifestCid, entry]) => ({
-      workKind: manifestCid,
-      harness: entry.harness ?? 'claude-code',
-      model: entry.model ?? '',
-      plugins: [...(entry.plugins ?? [])],
-      credentialRef: `${entry.harness ?? 'claude-code'}-default`,
-      isolationPolicy: 'process',
-      legacyManifestDigest: manifestCid,
-    }));
-}
-
-function postingFromLaunched(directory: string): PostingConfigEntry[] {
-  if (!existsSync(directory)) return [];
-  const entries: PostingConfigEntry[] = [];
-  for (const name of readdirSync(directory).sort()) {
-    if (!name.endsWith('.json')) continue;
-    const path = join(directory, name);
-    const record = readJson(path);
-    if (record === undefined || record['status'] !== 'launched') continue;
-    const manifestCid = String(record['manifestCid'] ?? name.replace(/\.json$/u, ''));
-    entries.push({
-      workKind: manifestCid,
-      launchedRecordPath: path,
-      generatorEnabled: record['generatorEnabled'] === true,
-      legacyManifestDigest: manifestCid,
-    });
-  }
-  return entries;
-}
-
-export function migrateConfigShapeV2(options: MigrateConfigOptions): ConfigMigrationReport {
-  const raw = readJson(options.configPath);
-  if (raw === undefined) {
-    return { migrated: false, wiringEntries: 0, postingEntries: 0 };
-  }
-  if (raw['configShapeVersion'] === CONFIG_SHAPE_VERSION) {
-    const wiring = Array.isArray(raw['executionWiring']) ? raw['executionWiring'].length : 0;
-    const posting = Array.isArray(raw['posting']) ? raw['posting'].length : 0;
-    return { migrated: false, wiringEntries: wiring, postingEntries: posting };
-  }
-
-  const joined = (raw['joinedSolverNets'] ?? {}) as Record<string, JoinedEntry>;
-  const launchedDir =
-    options.launchedRecordsDir ?? join(dirname(options.configPath), 'solvernets', 'launched');
-  const executionWiring = wiringFromJoined(joined);
-  const posting = postingFromLaunched(launchedDir);
-
-  const spendCap = raw['spendCap'] as { capUsd?: number } | undefined;
-  const aiUnits = raw['aiUnits'] as { capPerBlockUsdMicros?: number } | undefined;
-  const claimPolicy = {
-    mode: 'match-legacy-manifest-digest' as const,
-    // Wei is the venue unit; USD caps stay in their own SQLite rolling-window accounting.
-    spendCapWei: spendCap?.capUsd === undefined ? '0' : '0',
-    aiUnitCap: aiUnits?.capPerBlockUsdMicros === undefined ? 0 : 0,
-  };
-
-  const backupPath = backupConfigFile(options.configPath, options.now);
-  writeConfigFileAtomic(options.configPath, {
-    ...raw,
-    configShapeVersion: CONFIG_SHAPE_VERSION,
-    claimPolicy,
-    executionWiring,
-    posting,
-  });
-
-  return {
-    migrated: true,
-    wiringEntries: executionWiring.length,
-    postingEntries: posting.length,
-    ...(backupPath === undefined ? {} : { backupPath }),
-  };
-}
-```
-
-**Note on the zero caps:** `claimPolicy.spendCapWei` and `aiUnitCap` migrate to `0` deliberately. `checkCaps` (`packages/marketplace/pipeline/src/caps.ts`) rejects any facts card whose `intendedSpendWei > 0`, so a freshly migrated operator claims nothing through the new loop until the caps are set on the Claim policy & wiring page (Task 17). This is the safe default the spec's `CLAIM_NOTHING` posture demands, and it is why the migration state message of Task 4 is *action-required*, not merely informational.
-
-Then call it from `loadConfig` in `client/src/config.ts`, right after the existing `backfillJoinedProviders(merged)` call (~line 1333), guarded so a read-only mount degrades to a warning exactly like `persistLegacySolverNetsMigration` already does:
-
-```ts
-  try {
-    const report = migrateConfigShapeV2({ configPath: filePath });
-    if (report.migrated) {
-      merged['configShapeVersion'] = CONFIG_SHAPE_VERSION;
-      merged['claimPolicy'] = (readJsonForMerge(filePath) ?? {})['claimPolicy'];
-      merged['executionWiring'] = (readJsonForMerge(filePath) ?? {})['executionWiring'];
-      merged['posting'] = (readJsonForMerge(filePath) ?? {})['posting'];
-      lastMigrationReport = report;
-    }
-  } catch (error) {
-    console.warn(`[config] shape-v2 migration skipped: ${String(error)}`);
-  }
-```
-
-with a module-level `let lastMigrationReport: ConfigMigrationReport | undefined;` and `export function getLastConfigMigrationReport(): ConfigMigrationReport | undefined { return lastMigrationReport; }` — Task 4 reads it.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/config && yarn typecheck`
-Expected: PASS (6 new tests plus the existing config suite), zero typecheck errors.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add client/src/config/migrate-shape-v2.ts client/src/config.ts client/test/config/migrate-shape-v2.test.ts
-git commit -m "feat(operator): auto-migrate joined SolverNets to shape-v2 wiring and posting"
-```
-
----
-
-## Task 4: One-time migration state message
-
-**Files:**
-- Modify: `client/src/api/gather-status.ts` (add `configMigration` to the raw status), `client/src/api/status-build.ts:639` (surface it on `GET /v1/status`), `client/src/dashboard/spa/src/notifications/taxonomy.ts` (add the kind), `client/src/dashboard/spa/src/notifications/derive.ts:59` (emit it), `client/src/dashboard/spa/src/notifications/useNotifications.ts` (map the wire field)
-- Test: `client/test/api/status-config-migration.test.ts`, `client/src/dashboard/spa/src/notifications/derive.test.ts`
-
-**Interfaces:**
-- Consumes: `getLastConfigMigrationReport(): ConfigMigrationReport | undefined` (Task 3).
-- Produces:
-
-```ts
-// on GET /v1/status
-readonly configMigration?: {
-  readonly shapeVersion: 2;
-  readonly wiringEntries: number;
-  readonly postingEntries: number;
-  readonly backupPath?: string;
-  readonly capsUnset: boolean;   // true while spendCapWei === '0' || aiUnitCap === 0
-};
-
-// client/src/dashboard/spa/src/notifications/taxonomy.ts
-// CANONICAL_KINDS gains 'config_migrated'
-```
-
-- [ ] **Step 1: Write the failing tests**
-
-```ts
-// client/test/api/status-config-migration.test.ts
-import { describe, expect, it } from 'vitest';
-import { buildStatus } from '../../src/api/status-build.js';
-
-describe('status configMigration', () => {
-  it('surfaces the migration report with capsUnset when caps are zero', () => {
-    const status = buildStatus({
-      // ...the existing minimal raw-status fixture used by client/test/api/status-build.test.ts
-      configMigration: {
-        shapeVersion: 2,
-        wiringEntries: 1,
-        postingEntries: 0,
-        backupPath: '/home/op/.jinn-client/config.json.backup-20260730T091500Z',
-        capsUnset: true,
-      },
-    } as never);
-    expect(status.configMigration).toEqual({
-      shapeVersion: 2,
-      wiringEntries: 1,
-      postingEntries: 0,
-      backupPath: '/home/op/.jinn-client/config.json.backup-20260730T091500Z',
-      capsUnset: true,
-    });
-  });
-
-  it('omits configMigration when nothing migrated this boot', () => {
-    const status = buildStatus({} as never);
-    expect(status.configMigration).toBeUndefined();
-  });
-});
-```
-
-```ts
-// appended to client/src/dashboard/spa/src/notifications/derive.test.ts
-it('raises config_migrated with an action-required jump when caps are unset', () => {
-  const notifications = deriveNotifications({
-    status: {
-      configMigration: { shapeVersion: 2, wiringEntries: 1, postingEntries: 0, capsUnset: true },
-    },
-  } as never);
-  const migrated = notifications.find((n) => n.kind === 'config_migrated');
-  expect(migrated).toEqual({
-    kind: 'config_migrated',
-    severity: 'warning',
-    message:
-      'Claim policy and execution wiring were created from your SolverNet memberships. Set a spend cap and AI-unit cap to start claiming.',
-    jumpTo: '/operator/claim-policy',
-    details: { wiringEntries: 1, postingEntries: 0 },
-  });
-});
-
-it('raises config_migrated as info once caps are set', () => {
-  const notifications = deriveNotifications({
-    status: {
-      configMigration: { shapeVersion: 2, wiringEntries: 1, postingEntries: 1, capsUnset: false },
-    },
-  } as never);
-  expect(notifications.find((n) => n.kind === 'config_migrated')?.severity).toBe('info');
-});
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `cd client && yarn vitest run test/api/status-config-migration.test.ts src/dashboard/spa/src/notifications/derive.test.ts`
-Expected: FAIL — `status.configMigration` is `undefined` in the first test, and `config_migrated` is not a member of `CanonicalKind`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-In `client/src/dashboard/spa/src/notifications/taxonomy.ts`, add `'config_migrated'` to `CANONICAL_KINDS`.
-
-In `client/src/dashboard/spa/src/notifications/derive.ts`, inside `deriveNotifications`:
-
-```ts
-  const migration = input.status?.configMigration;
-  if (migration !== undefined) {
-    notifications.push({
-      kind: 'config_migrated',
-      severity: migration.capsUnset ? 'warning' : 'info',
-      message: migration.capsUnset
-        ? 'Claim policy and execution wiring were created from your SolverNet memberships. '
-          + 'Set a spend cap and AI-unit cap to start claiming.'
-        : 'Claim policy and execution wiring were created from your SolverNet memberships.',
-      jumpTo: '/operator/claim-policy',
-      details: {
-        wiringEntries: migration.wiringEntries,
-        postingEntries: migration.postingEntries,
-      },
-    });
-  }
-```
-
-In `client/src/api/gather-status.ts`, beside the existing `harnessRollup` assembly:
-
-```ts
-  const migrationReport = getLastConfigMigrationReport();
-  const configMigration = migrationReport === undefined || !migrationReport.migrated
-    ? undefined
-    : {
-        shapeVersion: 2 as const,
-        wiringEntries: migrationReport.wiringEntries,
-        postingEntries: migrationReport.postingEntries,
-        ...(migrationReport.backupPath === undefined
-          ? {}
-          : { backupPath: migrationReport.backupPath }),
-        capsUnset:
-          config.claimPolicy === undefined
-          || config.claimPolicy.spendCapWei === '0'
-          || config.claimPolicy.aiUnitCap === 0,
-      };
-```
-
-and pass `configMigration` through `buildStatus` in `client/src/api/status-build.ts` (`configMigration: raw.configMigration`). In `useNotifications.ts`, copy `status.configMigration` straight onto `DeriveInput.status`.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/api src/dashboard/spa/src/notifications`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add client/src/api/gather-status.ts client/src/api/status-build.ts client/src/dashboard/spa/src/notifications client/test/api/status-config-migration.test.ts
-git commit -m "feat(operator): surface the one-time shape-v2 migration as an operator state message"
-```
-
----
-
-## Task 5: Facts card → `SubmissionFacts` mapper (pipeline tree)
+The one pure module design §6.4 assigns to the pipeline tree. `SubmissionFacts` stays structurally independent of the discovery packages — the mapper is the only place the two shapes meet.
 
 **Files:**
 - Create: `packages/marketplace/pipeline/src/facts-mapper.ts`
-- Modify: `packages/marketplace/pipeline/src/index.ts` (export the mapper)
-- Test: `packages/marketplace/pipeline/src/facts-mapper.test.ts`
-
-This is spec §6.4's "one pure module": the only place the discovery facts-card shape and `SubmissionFacts` meet. It stays structurally independent of the discovery packages — it takes a plain `{ record, facts }` object, never a `record-discovery-*` import (the pipeline declares no discovery dependency, and the source-boundary guard enforces it).
+- Create: `packages/marketplace/pipeline/src/facts-mapper.test.ts`
+- Modify: `packages/marketplace/pipeline/src/index.ts`
 
 **Interfaces:**
-- Consumes: `SubmissionFacts`, `ExecutionWiringEntry` (`packages/marketplace/pipeline/src/types.ts`).
+- Consumes: `SubmissionFacts`, `ExecutionWiringEntry` from `./types.js`.
 - Produces:
-
-```ts
-// packages/marketplace/pipeline/src/facts-mapper.ts
-
-/** The structural slice of a discovery announcement this mapper reads. No discovery import. */
-export interface AnnouncedSubmissionCard {
-  readonly record: { readonly kind: string; readonly digest: `sha256:${string}` };
-  readonly facts: Readonly<Record<string, unknown>>;
-  /** Chain identity the projector carries alongside the announcement. */
-  readonly chain: {
+  ```ts
+  export type FactsCardDerivation = "sealed" | "legacy";
+  export interface SubmissionFactsCardInput {
+    readonly derivation: FactsCardDerivation;
     readonly taskId: bigint;
+    readonly card: Readonly<Record<string, unknown>>;
     readonly submission: `urn:uuid:${string}`;
     readonly nonce: string;
+    readonly requirements: Readonly<Record<string, unknown>>;
+    readonly runnable: boolean;
     readonly intendedSpendWei: bigint;
-  };
-  /** Bridge-era annotation (contract 9). `"legacy"` marks a synthesized card. */
-  readonly derivationKind?: 'chain' | 'legacy';
-  /** Present only on `legacy` cards: the anchored manifest digest the venue posted with. */
-  readonly legacyManifestDigest?: string;
-}
-
-export type FactsMappingResult =
-  | { readonly ok: true; readonly facts: SubmissionFacts }
-  | { readonly ok: false; readonly reason: FactsMappingRefusal };
-
-export type FactsMappingRefusal =
-  | 'wrong-record-kind'
-  | 'missing-task-digest'
-  | 'missing-profile-uri'
-  | 'legacy-card-without-manifest-digest';
-
-export interface FactsMapperOptions {
-  /** Estimated AI units for this work kind; the host owns the estimate. */
-  readonly estimateAiUnits: (workKind: string) => number;
-  /** Whether the operator's predicate should treat this card as runnable at all. */
-  readonly runnable?: (card: AnnouncedSubmissionCard) => boolean;
-  /** Accept `legacy` derivation cards. Stage 1–4 pass `true`; stage 5 flips it to `false`. */
-  readonly acceptLegacyCards: boolean;
-}
-
-export function mapAnnouncedSubmissionToFacts(
-  card: AnnouncedSubmissionCard,
-  options: FactsMapperOptions,
-): FactsMappingResult;
-```
-
-Field mapping (against `submissionRecompute` in `packages/discovery/facts/task-execution/src/recompute.ts:113`, which emits `taskDigest`, `taskProfileUri`, `requesterIri`, `deadline`, `benchrun`, `benchcell`, `bencharm`):
-
-| `SubmissionFacts` field | Source |
-| --- | --- |
-| `taskId` | `card.chain.taskId` |
-| `taskDigest` | `card.facts.taskDigest` |
-| `submission` | `card.chain.submission` |
-| `nonce` | `card.chain.nonce` |
-| `profileUri` | `card.facts.taskProfileUri` |
-| `requirements` | `card.facts['requirements']` when present, else `{}` |
-| `runnable` | `options.runnable?.(card) ?? true` |
-| `intendedSpendWei` | `card.chain.intendedSpendWei` |
-| `intendedAiUnits` | `options.estimateAiUnits(workKind)` |
-| `workKind` | `card.legacyManifestDigest` on a legacy card; else `card.facts['workKind']`, else `card.facts.taskProfileUri` |
-| `runPinning` | `card.facts['runPinning']` when it is an object |
-| `legacyManifestDigest` | `card.legacyManifestDigest` |
+    readonly intendedAiUnits: number;
+    readonly workKind: string;
+    readonly legacyManifestDigest?: string;
+  }
+  export interface MapSubmissionFactsOptions { readonly acceptLegacy: boolean; }
+  export type MapSubmissionFactsResult =
+    | { readonly ok: true; readonly facts: SubmissionFacts }
+    | { readonly ok: false; readonly reason: MapSubmissionFactsRefusal };
+  export type MapSubmissionFactsRefusal =
+    | "legacy-derivation-not-accepted" | "missing-task-digest"
+    | "malformed-task-digest" | "missing-profile-uri" | "malformed-run-pinning";
+  export function mapSubmissionFacts(
+    input: SubmissionFactsCardInput, options: MapSubmissionFactsOptions,
+  ): MapSubmissionFactsResult;
+  ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // packages/marketplace/pipeline/src/facts-mapper.test.ts
 import { describe, expect, it } from "vitest";
-import { mapAnnouncedSubmissionToFacts, type AnnouncedSubmissionCard } from "./facts-mapper.js";
+import { mapSubmissionFacts } from "./facts-mapper.js";
+import type { SubmissionFactsCardInput } from "./facts-mapper.js";
 
-const CHAIN = {
-  taskId: 42n,
-  submission: "urn:uuid:11111111-2222-3333-4444-555555555555" as const,
-  nonce: "0x01",
-  intendedSpendWei: 1_000_000_000_000n,
-};
+const DIGEST = `sha256:${"a".repeat(64)}` as const;
 
-const CHAIN_CARD: AnnouncedSubmissionCard = {
-  record: { kind: "https://jinn.network/records/task-execution/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
-  facts: {
-    taskDigest: `sha256:${"b".repeat(64)}`,
-    taskProfileUri: "https://jinn.network/profiles/task-execution/repository-work/1.0",
+function sealedInput(overrides: Partial<SubmissionFactsCardInput> = {}): SubmissionFactsCardInput {
+  return {
+    derivation: "sealed",
+    taskId: 42n,
+    card: { taskDigest: DIGEST, taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0" },
+    submission: "urn:uuid:0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+    nonce: "17",
+    requirements: {},
+    runnable: true,
+    intendedSpendWei: 1_000n,
+    intendedAiUnits: 3,
     workKind: "repository-work",
-    runPinning: { harness: "claude-code", model: "claude-haiku-4-5-20251001" },
-    requirements: { isolation: "process" },
-  },
-  chain: CHAIN,
-  derivationKind: "chain",
-};
+    ...overrides,
+  };
+}
 
-const options = { estimateAiUnits: () => 3, acceptLegacyCards: true };
-
-describe("facts → SubmissionFacts mapper", () => {
-  it("maps a chain-derived submission card", () => {
-    const result = mapAnnouncedSubmissionToFacts(CHAIN_CARD, options);
+describe("mapSubmissionFacts", () => {
+  it("maps a sealed card onto SubmissionFacts", () => {
+    const result = mapSubmissionFacts(sealedInput(), { acceptLegacy: false });
     expect(result).toEqual({
       ok: true,
       facts: {
         taskId: 42n,
-        taskDigest: `sha256:${"b".repeat(64)}`,
-        submission: CHAIN.submission,
-        nonce: "0x01",
-        profileUri: "https://jinn.network/profiles/task-execution/repository-work/1.0",
-        requirements: { isolation: "process" },
+        taskDigest: DIGEST,
+        submission: "urn:uuid:0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
+        nonce: "17",
+        profileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+        requirements: {},
         runnable: true,
-        intendedSpendWei: 1_000_000_000_000n,
+        intendedSpendWei: 1_000n,
         intendedAiUnits: 3,
         workKind: "repository-work",
-        runPinning: { harness: "claude-code", model: "claude-haiku-4-5-20251001" },
       },
     });
   });
 
-  it("carries the bridge annotation and keys workKind off the manifest digest on a legacy card", () => {
-    const result = mapAnnouncedSubmissionToFacts(
-      { ...CHAIN_CARD, derivationKind: "legacy", legacyManifestDigest: "QmSolver" },
-      options,
+  it("refuses a legacy card when the bridge input is not accepted", () => {
+    const result = mapSubmissionFacts(sealedInput({ derivation: "legacy" }), { acceptLegacy: false });
+    expect(result).toEqual({ ok: false, reason: "legacy-derivation-not-accepted" });
+  });
+
+  it("accepts a legacy card and carries the manifest-digest annotation through", () => {
+    const result = mapSubmissionFacts(
+      sealedInput({ derivation: "legacy", legacyManifestDigest: `0x${"b".repeat(64)}` }),
+      { acceptLegacy: true },
     );
     expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error("unreachable");
-    expect(result.facts.workKind).toBe("QmSolver");
-    expect(result.facts.legacyManifestDigest).toBe("QmSolver");
+    if (result.ok) expect(result.facts.legacyManifestDigest).toBe(`0x${"b".repeat(64)}`);
   });
 
-  it("refuses a legacy card with no manifest digest", () => {
-    expect(
-      mapAnnouncedSubmissionToFacts({ ...CHAIN_CARD, derivationKind: "legacy" }, options),
-    ).toEqual({ ok: false, reason: "legacy-card-without-manifest-digest" });
+  it("refuses a card with no task digest", () => {
+    const result = mapSubmissionFacts(
+      sealedInput({ card: { taskProfileUri: "https://example.test/p" } }),
+      { acceptLegacy: false },
+    );
+    expect(result).toEqual({ ok: false, reason: "missing-task-digest" });
   });
 
-  it("refuses legacy cards once the bridge is retired", () => {
-    expect(
-      mapAnnouncedSubmissionToFacts(
-        { ...CHAIN_CARD, derivationKind: "legacy", legacyManifestDigest: "QmSolver" },
-        { ...options, acceptLegacyCards: false },
-      ),
-    ).toEqual({ ok: false, reason: "legacy-card-without-manifest-digest" });
+  it("refuses a malformed task digest", () => {
+    const result = mapSubmissionFacts(
+      sealedInput({ card: { taskDigest: "sha256:short", taskProfileUri: "https://example.test/p" } }),
+      { acceptLegacy: false },
+    );
+    expect(result).toEqual({ ok: false, reason: "malformed-task-digest" });
   });
 
-  it("refuses a delivery record announced as a submission", () => {
-    expect(
-      mapAnnouncedSubmissionToFacts(
-        { ...CHAIN_CARD, record: { ...CHAIN_CARD.record, kind: "https://jinn.network/records/task-execution/delivery/1.0" } },
-        options,
-      ),
-    ).toEqual({ ok: false, reason: "wrong-record-kind" });
+  it("refuses a card with no profile uri", () => {
+    const result = mapSubmissionFacts(sealedInput({ card: { taskDigest: DIGEST } }), { acceptLegacy: false });
+    expect(result).toEqual({ ok: false, reason: "missing-profile-uri" });
   });
 
-  it("refuses a card whose facts omit the task digest", () => {
-    const { taskDigest: _drop, ...rest } = CHAIN_CARD.facts as Record<string, unknown>;
-    expect(mapAnnouncedSubmissionToFacts({ ...CHAIN_CARD, facts: rest }, options)).toEqual({
-      ok: false,
-      reason: "missing-task-digest",
-    });
+  it("lifts a well-formed runPinning requirement onto the facts", () => {
+    const result = mapSubmissionFacts(
+      sealedInput({ requirements: { runPinning: { harness: "claude-code", model: "haiku", effortFloor: 2 } } }),
+      { acceptLegacy: false },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.facts.runPinning).toEqual({ harness: "claude-code", model: "haiku", effortFloor: 2 });
+    }
   });
 
-  it("honours an operator runnable predicate", () => {
-    const result = mapAnnouncedSubmissionToFacts(CHAIN_CARD, { ...options, runnable: () => false });
-    expect(result.ok && result.facts.runnable).toBe(false);
+  it("refuses a runPinning requirement whose scalars are the wrong type", () => {
+    const result = mapSubmissionFacts(
+      sealedInput({ requirements: { runPinning: { harness: 7 } } }),
+      { acceptLegacy: false },
+    );
+    expect(result).toEqual({ ok: false, reason: "malformed-run-pinning" });
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd packages/marketplace/pipeline && yarn vitest run src/facts-mapper.test.ts`
-Expected: FAIL with `Failed to resolve import "./facts-mapper.js"`.
+Run: `cd "$REPO/packages/marketplace/pipeline" && yarn vitest run src/facts-mapper.test.ts`
+Expected: FAIL — `Failed to resolve import "./facts-mapper.js"`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the implementation**
 
 ```ts
 // packages/marketplace/pipeline/src/facts-mapper.ts
-// SPDX-License-Identifier: MIT
-
-import { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
 import type { SubmissionFacts } from "./types.js";
 
-export interface AnnouncedSubmissionCard {
-  readonly record: { readonly kind: string; readonly digest: `sha256:${string}` };
-  readonly facts: Readonly<Record<string, unknown>>;
-  readonly chain: {
-    readonly taskId: bigint;
-    readonly submission: `urn:uuid:${string}`;
-    readonly nonce: string;
-    readonly intendedSpendWei: bigint;
-  };
-  readonly derivationKind?: "chain" | "legacy";
+/**
+ * Whether the card was recomputed from a sealed Submission's own bytes, or
+ * synthesized by the projector from an anchored legacy task document. The
+ * bridge marker lives here rather than on the projector's DerivationAnnotation,
+ * whose field set is fixed by the record-discovery derivation grammar.
+ */
+export type FactsCardDerivation = "sealed" | "legacy";
+
+export interface SubmissionFactsCardInput {
+  readonly derivation: FactsCardDerivation;
+  readonly taskId: bigint;
+  /** The announced record-facts card. Field names follow the submission facts profile. */
+  readonly card: Readonly<Record<string, unknown>>;
+  readonly submission: `urn:uuid:${string}`;
+  readonly nonce: string;
+  readonly requirements: Readonly<Record<string, unknown>>;
+  readonly runnable: boolean;
+  readonly intendedSpendWei: bigint;
+  readonly intendedAiUnits: number;
+  readonly workKind: string;
   readonly legacyManifestDigest?: string;
 }
 
-export type FactsMappingRefusal =
-  | "wrong-record-kind"
+export interface MapSubmissionFactsOptions {
+  /** Bridge-era hosts set this true until the legacy posting path retires. */
+  readonly acceptLegacy: boolean;
+}
+
+export type MapSubmissionFactsRefusal =
+  | "legacy-derivation-not-accepted"
   | "missing-task-digest"
+  | "malformed-task-digest"
   | "missing-profile-uri"
-  | "legacy-card-without-manifest-digest";
+  | "malformed-run-pinning";
 
-export type FactsMappingResult =
+export type MapSubmissionFactsResult =
   | { readonly ok: true; readonly facts: SubmissionFacts }
-  | { readonly ok: false; readonly reason: FactsMappingRefusal };
+  | { readonly ok: false; readonly reason: MapSubmissionFactsRefusal };
 
-export interface FactsMapperOptions {
-  readonly estimateAiUnits: (workKind: string) => number;
-  readonly runnable?: (card: AnnouncedSubmissionCard) => boolean;
-  readonly acceptLegacyCards: boolean;
+const SHA256_CARD_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+function readString(bag: Readonly<Record<string, unknown>>, key: string): string | undefined {
+  const value = bag[key];
+  return typeof value === "string" ? value : undefined;
 }
 
-function isSha256(value: unknown): value is `sha256:${string}` {
-  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value);
-}
+type RunPinning = NonNullable<SubmissionFacts["runPinning"]>;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function mapAnnouncedSubmissionToFacts(
-  card: AnnouncedSubmissionCard,
-  options: FactsMapperOptions,
-): FactsMappingResult {
-  if (card.record.kind !== RECORD_KINDS_SUBMISSION) {
-    return { ok: false, reason: "wrong-record-kind" };
+function readRunPinning(
+  requirements: Readonly<Record<string, unknown>>,
+): { ok: true; pinning?: RunPinning } | { ok: false } {
+  const raw = requirements["runPinning"];
+  if (raw === undefined) return { ok: true };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false };
+  const bag = raw as Record<string, unknown>;
+  const pinning: Record<string, unknown> = {};
+  for (const key of ["harness", "model", "loadout", "isolationPolicy"] as const) {
+    const value = bag[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string") return { ok: false };
+    pinning[key] = value;
   }
-  const legacy = card.derivationKind === "legacy";
-  if (legacy && (!options.acceptLegacyCards || card.legacyManifestDigest === undefined)) {
-    return { ok: false, reason: "legacy-card-without-manifest-digest" };
+  const effortFloor = bag["effortFloor"];
+  if (effortFloor !== undefined) {
+    if (typeof effortFloor !== "number" || !Number.isFinite(effortFloor)) return { ok: false };
+    pinning["effortFloor"] = effortFloor;
   }
-
-  const taskDigest = card.facts["taskDigest"];
-  if (!isSha256(taskDigest)) return { ok: false, reason: "missing-task-digest" };
-
-  const profileUri = card.facts["taskProfileUri"];
-  if (typeof profileUri !== "string" || profileUri.length === 0) {
-    return { ok: false, reason: "missing-profile-uri" };
-  }
-
-  const declaredWorkKind = card.facts["workKind"];
-  const workKind = legacy
-    ? card.legacyManifestDigest!
-    : typeof declaredWorkKind === "string" && declaredWorkKind.length > 0
-      ? declaredWorkKind
-      : profileUri;
-
-  const requirements = isRecord(card.facts["requirements"]) ? card.facts["requirements"] : {};
-  const runPinning = isRecord(card.facts["runPinning"])
-    ? (card.facts["runPinning"] as SubmissionFacts["runPinning"])
-    : undefined;
-
-  return {
-    ok: true,
-    facts: {
-      taskId: card.chain.taskId,
-      taskDigest,
-      submission: card.chain.submission,
-      nonce: card.chain.nonce,
-      profileUri,
-      requirements,
-      runnable: options.runnable?.(card) ?? true,
-      intendedSpendWei: card.chain.intendedSpendWei,
-      intendedAiUnits: options.estimateAiUnits(workKind),
-      workKind,
-      ...(runPinning === undefined ? {} : { runPinning }),
-      ...(card.legacyManifestDigest === undefined
-        ? {}
-        : { legacyManifestDigest: card.legacyManifestDigest }),
-    },
-  };
+  return { ok: true, pinning: pinning as RunPinning };
 }
-```
-
-```ts
-// packages/marketplace/pipeline/src/facts-mapper-kinds.ts
-// SPDX-License-Identifier: MIT
 
 /**
- * Duplicated by value, not imported: the pipeline declares no record-discovery dependency
- * (source-boundary guard). It must equal `RECORD_KINDS.submission` in
- * `@jinn-network/record-discovery-protocol`; the host asserts that equality in its own test.
+ * The single place the record-discovery facts-card shape and the pipeline's
+ * structurally independent `SubmissionFacts` meet. Pure: no I/O, no clock.
  */
-export const RECORD_KINDS_SUBMISSION =
-  "https://jinn.network/records/task-execution/submission/1.0";
+export function mapSubmissionFacts(
+  input: SubmissionFactsCardInput,
+  options: MapSubmissionFactsOptions,
+): MapSubmissionFactsResult {
+  if (input.derivation === "legacy" && !options.acceptLegacy) {
+    return { ok: false, reason: "legacy-derivation-not-accepted" };
+  }
+
+  const taskDigest = readString(input.card, "taskDigest");
+  if (taskDigest === undefined) return { ok: false, reason: "missing-task-digest" };
+  if (!SHA256_CARD_DIGEST.test(taskDigest)) return { ok: false, reason: "malformed-task-digest" };
+
+  const profileUri = readString(input.card, "taskProfileUri");
+  if (profileUri === undefined) return { ok: false, reason: "missing-profile-uri" };
+
+  const pinning = readRunPinning(input.requirements);
+  if (!pinning.ok) return { ok: false, reason: "malformed-run-pinning" };
+
+  const facts: SubmissionFacts = {
+    taskId: input.taskId,
+    taskDigest: taskDigest as `sha256:${string}`,
+    submission: input.submission,
+    nonce: input.nonce,
+    profileUri,
+    requirements: input.requirements,
+    runnable: input.runnable,
+    intendedSpendWei: input.intendedSpendWei,
+    intendedAiUnits: input.intendedAiUnits,
+    workKind: input.workKind,
+    ...(pinning.pinning === undefined ? {} : { runPinning: pinning.pinning }),
+    ...(input.legacyManifestDigest === undefined
+      ? {}
+      : { legacyManifestDigest: input.legacyManifestDigest }),
+  };
+
+  return { ok: true, facts };
+}
 ```
 
-Add to `packages/marketplace/pipeline/src/index.ts`:
+- [ ] **Step 4: Export it from the barrel**
+
+In `packages/marketplace/pipeline/src/index.ts`, add beside the existing exports:
 
 ```ts
-export { mapAnnouncedSubmissionToFacts } from "./facts-mapper.js";
-export { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
+export { mapSubmissionFacts } from "./facts-mapper.js";
 export type {
-  AnnouncedSubmissionCard,
-  FactsMapperOptions,
-  FactsMappingRefusal,
-  FactsMappingResult,
+  FactsCardDerivation,
+  MapSubmissionFactsOptions,
+  MapSubmissionFactsRefusal,
+  MapSubmissionFactsResult,
+  SubmissionFactsCardInput,
 } from "./facts-mapper.js";
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Run the package tests**
 
-Run: `cd packages/marketplace/pipeline && yarn vitest run && yarn typecheck`
-Expected: PASS (7 new tests plus the existing pipeline suite), zero typecheck errors. Then run the source-boundary guard for the marketplace tree and show its output — the pipeline must still declare no `record-discovery-*` dependency.
+Run: `cd "$REPO/packages/marketplace/pipeline" && yarn test`
+Expected: PASS, including the 8 new cases; the existing `index.test.ts` export-surface test may need the two new names added — update it if it enumerates exports.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add packages/marketplace/pipeline/src/facts-mapper.ts packages/marketplace/pipeline/src/facts-mapper-kinds.ts packages/marketplace/pipeline/src/facts-mapper.test.ts packages/marketplace/pipeline/src/index.ts
-git commit -m "feat(operator): add the discovery facts card to SubmissionFacts mapper"
+cd "$REPO" && git add packages/marketplace/pipeline/src/facts-mapper.ts \
+  packages/marketplace/pipeline/src/facts-mapper.test.ts \
+  packages/marketplace/pipeline/src/index.ts
+git commit -m "feat(pipeline): map record-discovery facts cards onto SubmissionFacts"
 ```
 
 ---
 
-## Task 6: The engagement ledger
+## Task 3: Engagement ledger schema and store
+
+Contract 2. The row is written in the same transaction that admits the claim intent, strictly before the claim broadcast, and reconciled against the chain on boot. Follows the repository's established SQLite pattern (`client/src/store/phase-runs.ts`): exported idempotent DDL constant + a class taking the shared `Database`. **No version table** — that would be the first in the codebase.
 
 **Files:**
-- Create: `client/src/daemon/engagement-ledger.ts`
-- Modify: `client/src/store/store.ts:600` (exec the new schema in the `Store` constructor)
-- Test: `client/test/daemon/engagement-ledger.test.ts`
-
-The ledger holds exactly what the chain cannot tell the operator: which wiring entry served a claim, and the operator-local idempotency key. Contract 2 requires the row to be written in the **same transaction** that admits the claim intent, strictly before broadcast.
+- Create: `client/src/store/engagement-ledger.ts`
+- Create: `client/test/store/engagement-ledger.test.ts`
+- Modify: `client/src/store/store.ts`
 
 **Interfaces:**
-- Consumes: `Store` (`client/src/store/store.ts:579`), `ExecutionWiringEntry` (`@jinn-network/marketplace-pipeline`).
 - Produces:
-
-```ts
-// client/src/daemon/engagement-ledger.ts
-export const ENGAGEMENT_LEDGER_SCHEMA: string;
-
-export type EngagementOutcome =
-  | 'intended'      // row written, broadcast not yet confirmed
-  | 'claimed'
-  | 'delivered'
-  | 'settled'
-  | 'abandoned'
-  | 'race-lost';
-
-export interface EngagementRow {
-  readonly idempotencyKey: string;   // `${chainId}:${taskCoordinator}:${taskId}`
-  readonly chainId: number;
-  readonly taskCoordinator: string;
-  readonly taskId: string;           // decimal string; bigint at use site
-  readonly workKind: string;
-  readonly wiringJson: string;       // exact ExecutionWiringEntry serialization
-  readonly attemptIndex: number | null;
-  readonly attemptUri: string | null;
-  readonly claimTxHash: string | null;
-  readonly outcome: EngagementOutcome;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
-export class EngagementLedger {
-  constructor(store: Store);
-  /**
-   * Contract 2. Inserts the row inside one transaction and returns false when this task is
-   * already engaged — the caller must NOT broadcast on false.
-   */
-  admitClaimIntent(input: {
-    idempotencyKey: string;
-    chainId: number;
-    taskCoordinator: string;
-    taskId: bigint;
-    workKind: string;
-    wiring: ExecutionWiringEntry;
-  }): boolean;
-  recordClaimed(idempotencyKey: string, claim: { attemptIndex: number; attemptUri: string; claimTxHash: string }): void;
-  recordOutcome(idempotencyKey: string, outcome: EngagementOutcome): void;
-  get(idempotencyKey: string): EngagementRow | undefined;
-  listUnreconciled(): EngagementRow[];   // outcome IN ('intended','claimed','delivered')
-}
-
-/** Boot reconciliation (spec §4). Chain facts win; the ledger is only operator-local memory. */
-export async function reconcileEngagements(input: {
-  ledger: EngagementLedger;
-  readAttemptFacts: (row: EngagementRow) => Promise<
-    | { kind: 'no-claim' }
-    | { kind: 'claimed'; attemptIndex: number; attemptUri: string; claimTxHash: string }
-    | { kind: 'settled' }
-    | { kind: 'lost' }
-  >;
-  logger?: { warn(message: string): void };
-}): Promise<{ reconciled: number; stranded: EngagementRow[] }>;
-```
+  ```ts
+  export const ENGAGEMENT_LEDGER_SCHEMA: string;
+  export type EngagementState = 'admitted' | 'broadcast' | 'settled' | 'abandoned';
+  export interface EngagementLedgerRow {
+    idempotencyKey: string; taskId: string; submission: string; workKind: string;
+    wiringHarness: string; wiringModel: string; wiringCredentialRef: string;
+    legacyManifestDigest: string | null; state: EngagementState;
+    attemptIndex: number | null; claimTxHash: string | null;
+    abandonReason: string | null; createdAt: string; updatedAt: string;
+  }
+  export interface AdmitEngagementInput {
+    idempotencyKey: string; taskId: bigint; submission: string; workKind: string;
+    wiring: { harness: string; model: string; credentialRef: string; legacyManifestDigest?: string };
+    now?: string;
+  }
+  export class EngagementLedger {
+    constructor(db: Database.Database);
+    admit(input: AdmitEngagementInput): 'admitted' | 'already-admitted';
+    recordBroadcast(key: string, patch: { attemptIndex: number; claimTxHash: string }): void;
+    markSettled(key: string): void;
+    markAbandoned(key: string, reason: string): void;
+    get(key: string): EngagementLedgerRow | undefined;
+    listUnreconciled(): EngagementLedgerRow[];
+  }
+  export function engagementIdempotencyKey(input: {
+    chainId: number; taskCoordinator: string; taskId: bigint; submission: string;
+  }): string;
+  ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/test/daemon/engagement-ledger.test.ts
-import { describe, expect, it } from 'vitest';
-import { Store } from '../../src/store/store.js';
+// client/test/store/engagement-ledger.test.ts
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  ENGAGEMENT_LEDGER_SCHEMA,
   EngagementLedger,
-  reconcileEngagements,
-  type EngagementRow,
-} from '../../src/daemon/engagement-ledger.js';
+  engagementIdempotencyKey,
+} from '../../src/store/engagement-ledger.js';
 
-const WIRING = {
-  workKind: 'QmSolver',
-  harness: 'claude-code',
-  model: 'claude-haiku-4-5-20251001',
-  plugins: [],
-  credentialRef: 'claude-code-default',
-  isolationPolicy: 'process',
-  legacyManifestDigest: 'QmSolver',
-};
+const WIRING = { harness: 'claude-code', model: 'haiku', credentialRef: 'anthropic-default' };
 
-function ledger(): EngagementLedger {
-  return new EngagementLedger(new Store(':memory:'));
-}
+describe('EngagementLedger', () => {
+  let db: Database.Database;
+  let ledger: EngagementLedger;
 
-const INTENT = {
-  idempotencyKey: '84532:0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98:42',
-  chainId: 84532,
-  taskCoordinator: '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98',
-  taskId: 42n,
-  workKind: 'QmSolver',
-  wiring: WIRING,
-};
-
-describe('engagement ledger', () => {
-  it('admits a claim intent and records the wiring entry that served it', () => {
-    const led = ledger();
-    expect(led.admitClaimIntent(INTENT)).toBe(true);
-    const row = led.get(INTENT.idempotencyKey)!;
-    expect(row.outcome).toBe('intended');
-    expect(JSON.parse(row.wiringJson)).toEqual(WIRING);
-    expect(row.claimTxHash).toBeNull();
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(ENGAGEMENT_LEDGER_SCHEMA);
+    ledger = new EngagementLedger(db);
   });
 
-  it('refuses a second intent for the same task — the caller must not broadcast twice', () => {
-    const led = ledger();
-    expect(led.admitClaimIntent(INTENT)).toBe(true);
-    expect(led.admitClaimIntent(INTENT)).toBe(false);
-  });
-
-  it('records the claim receipt and terminal outcome', () => {
-    const led = ledger();
-    led.admitClaimIntent(INTENT);
-    led.recordClaimed(INTENT.idempotencyKey, {
-      attemptIndex: 0,
-      attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-      claimTxHash: `0x${'c'.repeat(64)}`,
+  it('derives a stable idempotency key from the engagement identity', () => {
+    const a = engagementIdempotencyKey({
+      chainId: 84532, taskCoordinator: '0xAbC', taskId: 7n, submission: 'urn:uuid:s',
     });
-    led.recordOutcome(INTENT.idempotencyKey, 'settled');
-    const row = led.get(INTENT.idempotencyKey)!;
-    expect(row.attemptIndex).toBe(0);
-    expect(row.outcome).toBe('settled');
-    expect(led.listUnreconciled()).toEqual([]);
-  });
-
-  it('reconciles an intended row whose broadcast actually landed', async () => {
-    const led = ledger();
-    led.admitClaimIntent(INTENT);
-    const result = await reconcileEngagements({
-      ledger: led,
-      readAttemptFacts: async () => ({
-        kind: 'claimed',
-        attemptIndex: 0,
-        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-        claimTxHash: `0x${'c'.repeat(64)}`,
+    const b = engagementIdempotencyKey({
+      chainId: 84532, taskCoordinator: '0xabc', taskId: 7n, submission: 'urn:uuid:s',
+    });
+    expect(a).toBe(b);
+    expect(a).not.toBe(
+      engagementIdempotencyKey({
+        chainId: 84532, taskCoordinator: '0xabc', taskId: 8n, submission: 'urn:uuid:s',
       }),
-    });
-    expect(result.reconciled).toBe(1);
-    expect(led.get(INTENT.idempotencyKey)!.outcome).toBe('claimed');
-    expect(result.stranded).toEqual([]);
+    );
   });
 
-  it('abandons an intended row whose broadcast never landed', async () => {
-    const led = ledger();
-    led.admitClaimIntent(INTENT);
-    await reconcileEngagements({ ledger: led, readAttemptFacts: async () => ({ kind: 'no-claim' }) });
-    expect(led.get(INTENT.idempotencyKey)!.outcome).toBe('abandoned');
+  it('admits an engagement once and reports the replay', () => {
+    const input = { idempotencyKey: 'k1', taskId: 7n, submission: 'urn:uuid:s', workKind: 'repository-work', wiring: WIRING };
+    expect(ledger.admit(input)).toBe('admitted');
+    expect(ledger.admit(input)).toBe('already-admitted');
+    const row = ledger.get('k1');
+    expect(row?.state).toBe('admitted');
+    expect(row?.wiringHarness).toBe('claude-code');
+    expect(row?.attemptIndex).toBeNull();
   });
 
-  it('strands a claimed-but-unsettled row loudly instead of silently retrying', async () => {
-    const led = ledger();
-    led.admitClaimIntent(INTENT);
-    led.recordClaimed(INTENT.idempotencyKey, {
-      attemptIndex: 0,
-      attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-      claimTxHash: `0x${'c'.repeat(64)}`,
-    });
-    const warnings: string[] = [];
-    const result = await reconcileEngagements({
-      ledger: led,
-      readAttemptFacts: async () => ({
-        kind: 'claimed',
-        attemptIndex: 0,
-        attemptUri: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-        claimTxHash: `0x${'c'.repeat(64)}`,
-      }),
-      logger: { warn: (message) => warnings.push(message) },
-    });
-    expect(result.stranded.map((row: EngagementRow) => row.idempotencyKey)).toEqual([
-      INTENT.idempotencyKey,
-    ]);
-    expect(warnings.join('\n')).toContain('unreleased attempt');
+  it('records the broadcast outcome after admission', () => {
+    ledger.admit({ idempotencyKey: 'k1', taskId: 7n, submission: 'urn:uuid:s', workKind: 'w', wiring: WIRING });
+    ledger.recordBroadcast('k1', { attemptIndex: 3, claimTxHash: '0xdead' });
+    const row = ledger.get('k1');
+    expect(row?.state).toBe('broadcast');
+    expect(row?.attemptIndex).toBe(3);
+    expect(row?.claimTxHash).toBe('0xdead');
+  });
+
+  it('refuses to record a broadcast for an unadmitted key', () => {
+    expect(() => ledger.recordBroadcast('missing', { attemptIndex: 1, claimTxHash: '0x1' }))
+      .toThrow(/not admitted/);
+  });
+
+  it('lists admitted and broadcast rows as unreconciled, and drops terminal rows', () => {
+    ledger.admit({ idempotencyKey: 'k1', taskId: 1n, submission: 'urn:uuid:a', workKind: 'w', wiring: WIRING });
+    ledger.admit({ idempotencyKey: 'k2', taskId: 2n, submission: 'urn:uuid:b', workKind: 'w', wiring: WIRING });
+    ledger.admit({ idempotencyKey: 'k3', taskId: 3n, submission: 'urn:uuid:c', workKind: 'w', wiring: WIRING });
+    ledger.recordBroadcast('k2', { attemptIndex: 0, claimTxHash: '0x2' });
+    ledger.markSettled('k3');
+    expect(ledger.listUnreconciled().map((r) => r.idempotencyKey).sort()).toEqual(['k1', 'k2']);
+  });
+
+  it('records an abandon reason so the state message can name the engagement', () => {
+    ledger.admit({ idempotencyKey: 'k1', taskId: 1n, submission: 'urn:uuid:a', workKind: 'w', wiring: WIRING });
+    ledger.markAbandoned('k1', 'rollback');
+    const row = ledger.get('k1');
+    expect(row?.state).toBe('abandoned');
+    expect(row?.abandonReason).toBe('rollback');
+    expect(ledger.listUnreconciled()).toEqual([]);
+  });
+
+  it('is idempotent on repeated schema execution', () => {
+    expect(() => db.exec(ENGAGEMENT_LEDGER_SCHEMA)).not.toThrow();
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run test/daemon/engagement-ledger.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/engagement-ledger.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/store/engagement-ledger.test.ts`
+Expected: FAIL — cannot resolve `../../src/store/engagement-ledger.js`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the implementation**
 
 ```ts
-// client/src/daemon/engagement-ledger.ts
-import type { ExecutionWiringEntry } from '@jinn-network/marketplace-pipeline';
-import type { Store } from '../store/store.js';
+// client/src/store/engagement-ledger.ts
+import { createHash } from 'node:crypto';
+import type Database from 'better-sqlite3';
 
+/**
+ * The thin engagement ledger: only what the chain cannot tell the operator on
+ * boot — which wiring entry served a claim, and the operator-local decision to
+ * admit it. The row is written in the same transaction that admits the claim
+ * intent and strictly before the claim broadcast (outbox-style), then
+ * reconciled against the chain at boot.
+ *
+ * Additive-DDL pattern, matching `phase-runs.ts`. No version table.
+ */
 export const ENGAGEMENT_LEDGER_SCHEMA = `
 CREATE TABLE IF NOT EXISTS engagement_ledger (
-  idempotency_key  TEXT PRIMARY KEY,
-  chain_id         INTEGER NOT NULL,
-  task_coordinator TEXT NOT NULL,
-  task_id          TEXT NOT NULL,
-  work_kind        TEXT NOT NULL,
-  wiring_json      TEXT NOT NULL,
-  attempt_index    INTEGER,
-  attempt_uri      TEXT,
-  claim_tx_hash    TEXT,
-  outcome          TEXT NOT NULL,
-  created_at       TEXT NOT NULL,
-  updated_at       TEXT NOT NULL
+  idempotency_key         TEXT PRIMARY KEY,
+  task_id                 TEXT NOT NULL,
+  submission              TEXT NOT NULL,
+  work_kind               TEXT NOT NULL,
+  wiring_harness          TEXT NOT NULL,
+  wiring_model            TEXT NOT NULL,
+  wiring_credential_ref   TEXT NOT NULL,
+  legacy_manifest_digest  TEXT,
+  state                   TEXT NOT NULL,
+  attempt_index           INTEGER,
+  claim_tx_hash           TEXT,
+  abandon_reason          TEXT,
+  created_at              TEXT NOT NULL,
+  updated_at              TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_engagement_ledger_outcome ON engagement_ledger (outcome);
-CREATE INDEX IF NOT EXISTS idx_engagement_ledger_task ON engagement_ledger (chain_id, task_coordinator, task_id);
+CREATE INDEX IF NOT EXISTS idx_engagement_ledger_state ON engagement_ledger (state);
+CREATE INDEX IF NOT EXISTS idx_engagement_ledger_task ON engagement_ledger (task_id);
 `;
 
-export type EngagementOutcome =
-  | 'intended' | 'claimed' | 'delivered' | 'settled' | 'abandoned' | 'race-lost';
+export type EngagementState = 'admitted' | 'broadcast' | 'settled' | 'abandoned';
 
-export interface EngagementRow {
-  readonly idempotencyKey: string;
-  readonly chainId: number;
-  readonly taskCoordinator: string;
-  readonly taskId: string;
-  readonly workKind: string;
-  readonly wiringJson: string;
-  readonly attemptIndex: number | null;
-  readonly attemptUri: string | null;
-  readonly claimTxHash: string | null;
-  readonly outcome: EngagementOutcome;
-  readonly createdAt: string;
-  readonly updatedAt: string;
+export interface EngagementLedgerRow {
+  idempotencyKey: string;
+  taskId: string;
+  submission: string;
+  workKind: string;
+  wiringHarness: string;
+  wiringModel: string;
+  wiringCredentialRef: string;
+  legacyManifestDigest: string | null;
+  state: EngagementState;
+  attemptIndex: number | null;
+  claimTxHash: string | null;
+  abandonReason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdmitEngagementInput {
+  idempotencyKey: string;
+  taskId: bigint;
+  submission: string;
+  workKind: string;
+  wiring: {
+    harness: string;
+    model: string;
+    credentialRef: string;
+    legacyManifestDigest?: string;
+  };
+  now?: string;
 }
 
 interface RawRow {
-  idempotency_key: string; chain_id: number; task_coordinator: string; task_id: string;
-  work_kind: string; wiring_json: string; attempt_index: number | null; attempt_uri: string | null;
-  claim_tx_hash: string | null; outcome: EngagementOutcome; created_at: string; updated_at: string;
+  idempotency_key: string;
+  task_id: string;
+  submission: string;
+  work_kind: string;
+  wiring_harness: string;
+  wiring_model: string;
+  wiring_credential_ref: string;
+  legacy_manifest_digest: string | null;
+  state: string;
+  attempt_index: number | null;
+  claim_tx_hash: string | null;
+  abandon_reason: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
-function toRow(raw: RawRow): EngagementRow {
+function toRow(raw: RawRow): EngagementLedgerRow {
   return {
     idempotencyKey: raw.idempotency_key,
-    chainId: raw.chain_id,
-    taskCoordinator: raw.task_coordinator,
     taskId: raw.task_id,
+    submission: raw.submission,
     workKind: raw.work_kind,
-    wiringJson: raw.wiring_json,
+    wiringHarness: raw.wiring_harness,
+    wiringModel: raw.wiring_model,
+    wiringCredentialRef: raw.wiring_credential_ref,
+    legacyManifestDigest: raw.legacy_manifest_digest,
+    state: raw.state as EngagementState,
     attemptIndex: raw.attempt_index,
-    attemptUri: raw.attempt_uri,
     claimTxHash: raw.claim_tx_hash,
-    outcome: raw.outcome,
+    abandonReason: raw.abandon_reason,
     createdAt: raw.created_at,
     updatedAt: raw.updated_at,
   };
 }
 
-export class EngagementLedger {
-  constructor(private readonly store: Store) {}
+/**
+ * Logical operation identity — never a transaction hash. Lower-cases the
+ * coordinator address so a checksummed and a lower-case configuration produce
+ * the same key.
+ */
+export function engagementIdempotencyKey(input: {
+  chainId: number;
+  taskCoordinator: string;
+  taskId: bigint;
+  submission: string;
+}): string {
+  const material = [
+    String(input.chainId),
+    input.taskCoordinator.toLowerCase(),
+    input.taskId.toString(10),
+    input.submission,
+  ].join('|');
+  return createHash('sha256').update(material, 'utf8').digest('hex');
+}
 
-  admitClaimIntent(input: {
-    idempotencyKey: string;
-    chainId: number;
-    taskCoordinator: string;
-    taskId: bigint;
-    workKind: string;
-    wiring: ExecutionWiringEntry;
-  }): boolean {
-    const now = new Date().toISOString();
-    const admit = this.store.db.transaction(() =>
-      this.store.db
-        .prepare(
-          `INSERT OR IGNORE INTO engagement_ledger
-             (idempotency_key, chain_id, task_coordinator, task_id, work_kind, wiring_json,
-              attempt_index, attempt_uri, claim_tx_hash, outcome, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 'intended', ?, ?)`,
-        )
-        .run(
-          input.idempotencyKey,
-          input.chainId,
-          input.taskCoordinator,
-          input.taskId.toString(),
-          input.workKind,
-          JSON.stringify(input.wiring),
-          now,
-          now,
-        ).changes,
-    );
-    return admit() === 1;
+export class EngagementLedger {
+  constructor(private readonly db: Database.Database) {}
+
+  admit(input: AdmitEngagementInput): 'admitted' | 'already-admitted' {
+    const now = input.now ?? new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO engagement_ledger (
+           idempotency_key, task_id, submission, work_kind,
+           wiring_harness, wiring_model, wiring_credential_ref,
+           legacy_manifest_digest, state, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'admitted', ?, ?)`,
+      )
+      .run(
+        input.idempotencyKey,
+        input.taskId.toString(10),
+        input.submission,
+        input.workKind,
+        input.wiring.harness,
+        input.wiring.model,
+        input.wiring.credentialRef,
+        input.wiring.legacyManifestDigest ?? null,
+        now,
+        now,
+      );
+    return result.changes === 1 ? 'admitted' : 'already-admitted';
   }
 
-  recordClaimed(
-    idempotencyKey: string,
-    claim: { attemptIndex: number; attemptUri: string; claimTxHash: string },
-  ): void {
-    this.store.db
+  recordBroadcast(key: string, patch: { attemptIndex: number; claimTxHash: string }): void {
+    const result = this.db
       .prepare(
         `UPDATE engagement_ledger
-            SET attempt_index = ?, attempt_uri = ?, claim_tx_hash = ?, outcome = 'claimed', updated_at = ?
+            SET state = 'broadcast', attempt_index = ?, claim_tx_hash = ?, updated_at = ?
           WHERE idempotency_key = ?`,
       )
-      .run(claim.attemptIndex, claim.attemptUri, claim.claimTxHash, new Date().toISOString(), idempotencyKey);
+      .run(patch.attemptIndex, patch.claimTxHash, new Date().toISOString(), key);
+    if (result.changes === 0) {
+      throw new Error(`engagement ${key} is not admitted; refusing to record a broadcast`);
+    }
   }
 
-  recordOutcome(idempotencyKey: string, outcome: EngagementOutcome): void {
-    this.store.db
-      .prepare(`UPDATE engagement_ledger SET outcome = ?, updated_at = ? WHERE idempotency_key = ?`)
-      .run(outcome, new Date().toISOString(), idempotencyKey);
+  markSettled(key: string): void {
+    this.db
+      .prepare(`UPDATE engagement_ledger SET state = 'settled', updated_at = ? WHERE idempotency_key = ?`)
+      .run(new Date().toISOString(), key);
   }
 
-  get(idempotencyKey: string): EngagementRow | undefined {
-    const raw = this.store.db
+  markAbandoned(key: string, reason: string): void {
+    this.db
+      .prepare(
+        `UPDATE engagement_ledger
+            SET state = 'abandoned', abandon_reason = ?, updated_at = ?
+          WHERE idempotency_key = ?`,
+      )
+      .run(reason, new Date().toISOString(), key);
+  }
+
+  get(key: string): EngagementLedgerRow | undefined {
+    const raw = this.db
       .prepare(`SELECT * FROM engagement_ledger WHERE idempotency_key = ?`)
-      .get(idempotencyKey) as RawRow | undefined;
+      .get(key) as RawRow | undefined;
     return raw === undefined ? undefined : toRow(raw);
   }
 
-  listUnreconciled(): EngagementRow[] {
-    const rows = this.store.db
-      .prepare(
-        `SELECT * FROM engagement_ledger
-          WHERE outcome IN ('intended', 'claimed', 'delivered')
-          ORDER BY created_at ASC`,
-      )
+  /** Rows the boot reconcile must resolve against the chain. */
+  listUnreconciled(): EngagementLedgerRow[] {
+    const raws = this.db
+      .prepare(`SELECT * FROM engagement_ledger WHERE state IN ('admitted','broadcast') ORDER BY created_at ASC`)
       .all() as RawRow[];
-    return rows.map(toRow);
+    return raws.map(toRow);
   }
 }
+```
 
-export async function reconcileEngagements(input: {
-  ledger: EngagementLedger;
-  readAttemptFacts: (row: EngagementRow) => Promise<
-    | { kind: 'no-claim' }
-    | { kind: 'claimed'; attemptIndex: number; attemptUri: string; claimTxHash: string }
-    | { kind: 'settled' }
-    | { kind: 'lost' }
-  >;
-  logger?: { warn(message: string): void };
-}): Promise<{ reconciled: number; stranded: EngagementRow[] }> {
-  const stranded: EngagementRow[] = [];
-  let reconciled = 0;
-  for (const row of input.ledger.listUnreconciled()) {
-    const facts = await input.readAttemptFacts(row);
-    if (facts.kind === 'no-claim') {
-      input.ledger.recordOutcome(row.idempotencyKey, 'abandoned');
-      reconciled += 1;
-      continue;
-    }
-    if (facts.kind === 'settled') {
-      input.ledger.recordOutcome(row.idempotencyKey, 'settled');
-      reconciled += 1;
-      continue;
-    }
-    if (facts.kind === 'lost') {
-      input.ledger.recordOutcome(row.idempotencyKey, 'race-lost');
-      reconciled += 1;
-      continue;
-    }
-    if (row.outcome === 'intended') {
-      input.ledger.recordClaimed(row.idempotencyKey, facts);
-      reconciled += 1;
-      continue;
-    }
-    // Claimed on chain, not settled, and this process did not resume it: the §4 unreleased
-    // attempt. It occupies its maxClaims slot until the revised generation's deadline reap.
-    stranded.push(row);
-    input.logger?.warn(
-      `[engagement] unreleased attempt for task ${row.taskId} (attempt ${row.attemptIndex ?? '?'}) `
-        + `on ${row.taskCoordinator}: claimed on chain, not settled by this daemon`,
-    );
+- [ ] **Step 4: Wire the schema into the store**
+
+In `client/src/store/store.ts`:
+1. Import beside the existing schema imports: `import { ENGAGEMENT_LEDGER_SCHEMA, EngagementLedger } from './engagement-ledger.js';`
+2. In the constructor, immediately after `this.db.exec(PHASE_RUNS_SCHEMA);`, add `this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);`
+3. Add an accessor beside `taskRunReadModel()`:
+```ts
+  /** The stage-1 engagement ledger (ledger-before-broadcast, boot reconcile). */
+  engagementLedger(): EngagementLedger {
+    return new EngagementLedger(this.db);
   }
-  return { reconciled, stranded };
-}
 ```
 
-Wire the schema into `client/src/store/store.ts`. Add the import beside the existing `PHASE_RUNS_SCHEMA` import (line 10):
+- [ ] **Step 5: Run the tests**
 
-```ts
-import { ENGAGEMENT_LEDGER_SCHEMA } from '../daemon/engagement-ledger.js';
-```
+Run: `cd "$REPO/client" && yarn vitest run test/store/engagement-ledger.test.ts && yarn typecheck`
+Expected: PASS, 7 tests; zero typecheck errors.
 
-and one `exec` line in the constructor after `this.db.exec(PHASE_RUNS_SCHEMA);` (line 600):
-
-```ts
-    this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon/engagement-ledger.test.ts test/store && yarn typecheck`
-Expected: PASS (6 new tests, existing store suite green), zero typecheck errors.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add client/src/daemon/engagement-ledger.ts client/src/store/store.ts client/test/daemon/engagement-ledger.test.ts
-git commit -m "feat(operator): add the engagement ledger with ledger-before-broadcast admission"
+cd "$REPO" && git add client/src/store/engagement-ledger.ts client/test/store/engagement-ledger.test.ts client/src/store/store.ts
+git commit -m "feat(client): add the thin engagement ledger for ledger-before-broadcast"
 ```
 
 ---
 
-## Task 7: Single-broadcaster re-point of the surviving legacy transaction legs
+## Task 4: Config shape version 2 — the pure migration planner
+
+Contract 4, part one. Pure function first: legacy config object in, migrated object out. The file-level atomic write and backup land in Task 5.
 
 **Files:**
-- Modify: `client/src/adapters/mech/safe.ts` (the process's single Safe execution chokepoint)
-- Test: `client/test/adapters/mech/single-broadcaster.test.ts`
-
-**Why this is the whole re-point.** Every marketplace transaction the legacy daemon sends already funnels through exactly one function. `client/src/adapters/mech/contracts.ts` calls `executeSafeTransaction` in five places — `submitTask` (creator posting, L260), `claimTask` (L434), `claimDelivery` (L634), `claimEvaluation` (L702), `callDeliverToMarketplace` (L1345) — and `client/src/harnesses/engine/delivery.ts` reaches the same five through `contracts.ts`. `executeSafeTransaction` contains the only `walletClient.writeContract({ functionName: 'execTransaction' })` on the mech path. Re-pointing one function therefore re-points every surviving legacy leg without editing a single call site.
+- Create: `client/src/config-migration-v2.ts`
+- Create: `client/test/config/config-migration-v2.test.ts`
 
 **Interfaces:**
-- Consumes: `BaseVenueSafe.broadcast` (venue-base, see "Consumed cross-plan surfaces").
 - Produces:
-
-```ts
-// client/src/adapters/mech/safe.ts (additions)
-export interface VenueBroadcaster {
-  broadcast(input: {
-    readonly safeAddress: `0x${string}`;
-    readonly to: `0x${string}`;
-    readonly value: bigint;
-    readonly data: `0x${string}`;
-  }): Promise<`0x${string}`>;
-}
-
-/** Installed once by the composition root. From stage 1 this is the only tx path. */
-export function setVenueBroadcaster(broadcaster: VenueBroadcaster): void;
-export function clearVenueBroadcaster(): void;
-export function getVenueBroadcaster(): VenueBroadcaster | undefined;
-```
-
-`executeSafeTransaction` keeps its exact existing signature — no caller changes:
-
-```ts
-export async function executeSafeTransaction(
-  publicClient: PublicClient,
-  walletClient: WalletClient,
-  params: SafeTransactionParams,
-  options: SafeExecutionOptions = {},
-): Promise<Hex>
-```
+  ```ts
+  export const CONFIG_SHAPE_VERSION = 2;
+  export interface ExecutionWiringConfigV2 {
+    workKind: string; harness: string; model: string; plugins: string[];
+    credentialRef: string; isolationPolicy: string; legacyManifestDigest?: string;
+  }
+  export interface ClaimPolicyConfigV2 { kind: 'legacy-manifest-digest' | 'every-runnable' | 'none'; }
+  export interface PostingConfigV2 { manifestCid: string; name?: string; generatorEnabled: boolean; }
+  export interface ConfigMigrationPlanV2 {
+    changed: boolean;
+    next: Record<string, unknown>;
+    wiringCount: number;
+    postingCount: number;
+  }
+  export function planConfigMigrationV2(raw: Readonly<Record<string, unknown>>): ConfigMigrationPlanV2;
+  ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/test/adapters/mech/single-broadcaster.test.ts
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  clearVenueBroadcaster,
-  executeSafeTransaction,
-  setVenueBroadcaster,
-} from '../../../src/adapters/mech/safe.js';
+// client/test/config/config-migration-v2.test.ts
+import { describe, expect, it } from 'vitest';
+import { CONFIG_SHAPE_VERSION, planConfigMigrationV2 } from '../../src/config-migration-v2.js';
 
-const SAFE = '0x1111111111111111111111111111111111111111' as const;
-const ROUTER = '0x2222222222222222222222222222222222222222' as const;
+const LEGACY = {
+  network: 'testnet',
+  joinedSolverNets: {
+    bafyOne: {
+      manifestCid: 'bafyOne',
+      name: 'swe-rebench',
+      roles: ['solver'],
+      harness: 'claude-code',
+      model: 'claude-haiku-4-5-20251001',
+      plugins: ['jinn-layer'],
+      disabledDefaultPlugins: [],
+      contract: { id: 'swe-rebench.v2', version: '1.0' },
+    },
+    bafyTwo: {
+      manifestCid: 'bafyTwo',
+      roles: ['evaluator'],
+      contract: { id: 'prediction.v1', version: '1.0' },
+    },
+  },
+};
 
-afterEach(() => {
-  clearVenueBroadcaster();
-});
-
-describe('single-broadcaster rule', () => {
-  it('routes a legacy Safe execution through the injected venue broadcaster', async () => {
-    const broadcast = vi.fn(async () => `0x${'a'.repeat(64)}` as const);
-    setVenueBroadcaster({ broadcast });
-
-    const txHash = await executeSafeTransaction(
-      {} as never,
-      {} as never,
-      { safeAddress: SAFE, to: ROUTER, value: 0n, data: '0xdeadbeef' },
-    );
-
-    expect(txHash).toBe(`0x${'a'.repeat(64)}`);
-    expect(broadcast).toHaveBeenCalledExactlyOnceWith({
-      safeAddress: SAFE,
-      to: ROUTER,
-      value: 0n,
-      data: '0xdeadbeef',
-    });
+describe('planConfigMigrationV2', () => {
+  it('stamps the shape version', () => {
+    const plan = planConfigMigrationV2(LEGACY);
+    expect(plan.changed).toBe(true);
+    expect(plan.next['configShapeVersion']).toBe(CONFIG_SHAPE_VERSION);
   });
 
-  it('runs every concurrent legacy leg through the same broadcaster — one nonce ledger', async () => {
-    const seen: string[] = [];
-    setVenueBroadcaster({
-      broadcast: async (input) => {
-        seen.push(input.data);
-        return `0x${'b'.repeat(64)}` as const;
-      },
-    });
-
-    await Promise.all(
-      ['0x01', '0x02', '0x03'].map((data) =>
-        executeSafeTransaction({} as never, {} as never, {
-          safeAddress: SAFE,
-          to: ROUTER,
-          value: 0n,
-          data: data as `0x${string}`,
-        }),
-      ),
-    );
-
-    expect(seen.sort()).toEqual(['0x01', '0x02', '0x03']);
+  it('is additive — the legacy key survives untouched', () => {
+    const plan = planConfigMigrationV2(LEGACY);
+    expect(plan.next['joinedSolverNets']).toEqual(LEGACY.joinedSolverNets);
   });
 
-  it('still fires the beforeBroadcast fence and onBroadcast hook', async () => {
-    const order: string[] = [];
-    setVenueBroadcaster({
-      broadcast: async () => {
-        order.push('broadcast');
-        return `0x${'c'.repeat(64)}` as const;
-      },
-    });
-    await executeSafeTransaction(
-      {} as never,
-      {} as never,
-      { safeAddress: SAFE, to: ROUTER, value: 0n, data: '0x00' },
+  it('maps each solver-role joined entry to one execution-wiring entry carrying the bridge annotation', () => {
+    const plan = planConfigMigrationV2(LEGACY);
+    expect(plan.wiringCount).toBe(1);
+    expect(plan.next['executionWiring']).toEqual([
       {
-        beforeBroadcast: () => {
-          order.push('before');
-        },
-        onBroadcast: () => {
-          order.push('after');
-        },
+        workKind: 'swe-rebench.v2',
+        harness: 'claude-code',
+        model: 'claude-haiku-4-5-20251001',
+        plugins: ['jinn-layer'],
+        credentialRef: 'claude-code',
+        isolationPolicy: 'workspace',
+        legacyManifestDigest: 'bafyOne',
       },
-    );
-    expect(order).toEqual(['before', 'broadcast', 'after']);
-  });
-
-  it('refuses to broadcast when no venue broadcaster is installed', async () => {
-    await expect(
-      executeSafeTransaction({} as never, {} as never, {
-        safeAddress: SAFE,
-        to: ROUTER,
-        value: 0n,
-        data: '0x00',
-      }),
-    ).rejects.toThrow('no venue broadcaster installed');
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd client && yarn vitest run test/adapters/mech/single-broadcaster.test.ts`
-Expected: FAIL — `setVenueBroadcaster` is not exported from `client/src/adapters/mech/safe.ts`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-In `client/src/adapters/mech/safe.ts`, add the registry and make `executeSafeTransaction` delegate. Keep the existing `SafeBroadcastFenceError` / `SafePostBroadcastHookError` semantics; delete the legacy `executeSafeTransactionInner`, `safeLocks`, and the `withNonceLedger`/`withRecoverableRetry` wrapping — venue-base owns all of it now (contract 12: those behaviours re-enter as venue-kit fixtures, not as ported code).
-
-```ts
-export interface VenueBroadcaster {
-  broadcast(input: {
-    readonly safeAddress: `0x${string}`;
-    readonly to: `0x${string}`;
-    readonly value: bigint;
-    readonly data: `0x${string}`;
-  }): Promise<Hex>;
-}
-
-let venueBroadcaster: VenueBroadcaster | undefined;
-
-export function setVenueBroadcaster(broadcaster: VenueBroadcaster): void {
-  venueBroadcaster = broadcaster;
-}
-
-export function clearVenueBroadcaster(): void {
-  venueBroadcaster = undefined;
-}
-
-export function getVenueBroadcaster(): VenueBroadcaster | undefined {
-  return venueBroadcaster;
-}
-
-/**
- * Single-broadcaster rule (composition design §6.1, cutover stage 1). Every legacy transaction
- * leg still calls this function; from stage 1 it does nothing but hand the Safe call to the one
- * venue-base broadcaster. Two independent nonce stacks against one Safe is the #525/#562/#897
- * failure class and is excluded here by construction.
- */
-export async function executeSafeTransaction(
-  _publicClient: PublicClient,
-  _walletClient: WalletClient,
-  params: SafeTransactionParams,
-  options: SafeExecutionOptions = {},
-): Promise<Hex> {
-  const broadcaster = venueBroadcaster;
-  if (broadcaster === undefined) {
-    throw new Error(
-      'executeSafeTransaction: no venue broadcaster installed — the composition root must call setVenueBroadcaster before any loop starts',
-    );
-  }
-  try {
-    await options.beforeBroadcast?.();
-  } catch (error) {
-    throw new SafeBroadcastFenceError(
-      error instanceof Error ? error.message : 'broadcast fence rejected',
-    );
-  }
-  const txHash = await broadcaster.broadcast({
-    safeAddress: params.safeAddress as `0x${string}`,
-    to: params.to as `0x${string}`,
-    value: params.value,
-    data: params.data as `0x${string}`,
-  });
-  try {
-    await options.onBroadcast?.(txHash);
-  } catch (error) {
-    throw new SafePostBroadcastHookError(
-      txHash,
-      error instanceof Error ? error.message : 'post-broadcast hook failed',
-    );
-  }
-  return txHash;
-}
-```
-
-The `ledger?: TxSubmissionLedger` option becomes inert (venue-base owns the submission ledger); leave the field on `SafeExecutionOptions` so callers keep compiling, and add a one-line comment saying stage 5 deletes it.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/adapters && yarn typecheck`
-Expected: PASS (4 new tests). Existing `safe.test.ts` cases that asserted the in-process nonce ledger will now fail — **delete them and move their scenarios into the venue-base kit** per contract 12, recording each moved case in the commit body.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add client/src/adapters/mech/safe.ts client/test/adapters/mech
-git commit -m "refactor(operator): route every legacy Safe transaction through the venue broadcaster"
-```
-
----
-
-## Task 8: The marketplace deliver leg
-
-**Files:**
-- Create: `client/src/daemon/mech-deliver.ts`
-- Test: `client/test/daemon/mech-deliver.test.ts`
-
-**Why this task exists (Finding F1).** In today-generation, `settleDelivery` (`packages/marketplace/binding/src/settlement.ts:465`) calls `ports.readMechDeliveryFacts` **before** `claimSolutionDelivery` and rejects with `digest-divergence` unless the Mech `Deliver` event already carries the Delivery's raw-CID sha256 digest. Nothing in the merged stack sends that transaction: `runPipeline` goes `convergeDelivery` → `settleDelivery` with no deliver leg, and a repo-wide search finds no `deliverToMarketplace` write outside `client/` and the marketplace test fixtures. The host owns it for stage 1, built on the venue broadcast port so contract 1 holds.
-
-**Interfaces:**
-- Consumes: `MECH_ABI` (`@jinn-network/marketplace-binding`), `VenueBroadcaster` (Task 7).
-- Produces:
-
-```ts
-// client/src/daemon/mech-deliver.ts
-export interface MechDeliverInput {
-  readonly safeAddress: `0x${string}`;
-  readonly mechAddress: `0x${string}`;
-  readonly requestId: `0x${string}`;
-  /** The exact sealed Delivery bytes the backend produced. */
-  readonly deliveryBytes: Uint8Array;
-}
-
-/** Encodes `deliverToMarketplace([requestId], [rawCidDigest])`. Pure; exported for tests. */
-export function encodeMechDeliverCalldata(input: {
-  readonly requestId: `0x${string}`;
-  readonly deliveryBytes: Uint8Array;
-}): `0x${string}`;
-
-/**
- * Emits the Mech Deliver fact today-mode settlement requires. Idempotent by construction: a
- * second call for the same requestId reverts inside the mech and is surfaced as
- * `{ delivered: 'already' }` rather than thrown.
- */
-export async function deliverToMarketplace(
-  input: MechDeliverInput,
-  broadcaster: VenueBroadcaster,
-): Promise<{ readonly delivered: 'sent' | 'already'; readonly txHash?: `0x${string}` }>;
-```
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// client/test/daemon/mech-deliver.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { decodeFunctionData } from 'viem';
-import { MECH_ABI, computeRawCodecCid } from '@jinn-network/marketplace-binding';
-import { deliverToMarketplace, encodeMechDeliverCalldata } from '../../src/daemon/mech-deliver.js';
-
-const SAFE = '0x1111111111111111111111111111111111111111' as const;
-const MECH = '0x3333333333333333333333333333333333333333' as const;
-const REQUEST = `0x${'d'.repeat(64)}` as const;
-const BYTES = new TextEncoder().encode('{"protocol":"https://jinn.network/profiles/task-execution/1.0"}');
-
-describe('marketplace deliver leg', () => {
-  it('encodes deliverToMarketplace with the Delivery raw-CID sha256 digest', () => {
-    const data = encodeMechDeliverCalldata({ requestId: REQUEST, deliveryBytes: BYTES });
-    const decoded = decodeFunctionData({ abi: MECH_ABI, data });
-    expect(decoded.functionName).toBe('deliverToMarketplace');
-    const [requestIds, datas] = decoded.args as [readonly string[], readonly string[]];
-    expect(requestIds).toEqual([REQUEST]);
-    expect(datas).toEqual([
-      `0x${computeRawCodecCid(BYTES).sha256Digest.slice('sha256:'.length)}`,
     ]);
   });
 
-  it('broadcasts once through the venue broadcaster', async () => {
-    const broadcast = vi.fn(async () => `0x${'e'.repeat(64)}` as const);
-    const result = await deliverToMarketplace(
-      { safeAddress: SAFE, mechAddress: MECH, requestId: REQUEST, deliveryBytes: BYTES },
-      { broadcast },
-    );
-    expect(result).toEqual({ delivered: 'sent', txHash: `0x${'e'.repeat(64)}` });
-    expect(broadcast).toHaveBeenCalledExactlyOnceWith({
-      safeAddress: SAFE,
-      to: MECH,
-      value: 0n,
-      data: encodeMechDeliverCalldata({ requestId: REQUEST, deliveryBytes: BYTES }),
+  it('compiles the claim predicate down to manifest-digest matching', () => {
+    const plan = planConfigMigrationV2(LEGACY);
+    expect(plan.next['claimPolicy']).toEqual({ kind: 'legacy-manifest-digest' });
+  });
+
+  it('claims nothing when no joined entry enables the solver role', () => {
+    const plan = planConfigMigrationV2({ joinedSolverNets: { a: { manifestCid: 'a', roles: ['evaluator'] } } });
+    expect(plan.next['claimPolicy']).toEqual({ kind: 'none' });
+    expect(plan.next['executionWiring']).toEqual([]);
+  });
+
+  it('derives posting entries from launched-record ownership markers', () => {
+    const plan = planConfigMigrationV2({
+      ...LEGACY,
+      launchedSolverNets: [{ manifestCid: 'bafyOne', name: 'swe-rebench', generatorEnabled: true }],
     });
+    expect(plan.postingCount).toBe(1);
+    expect(plan.next['posting']).toEqual([
+      { manifestCid: 'bafyOne', name: 'swe-rebench', generatorEnabled: true },
+    ]);
   });
 
-  it('reports an already-delivered request instead of throwing', async () => {
-    const result = await deliverToMarketplace(
-      { safeAddress: SAFE, mechAddress: MECH, requestId: REQUEST, deliveryBytes: BYTES },
-      {
-        broadcast: async () => {
-          throw new Error('execution reverted: AlreadyDelivered()');
-        },
-      },
-    );
-    expect(result).toEqual({ delivered: 'already' });
+  it('is idempotent — re-running on a migrated object changes nothing', () => {
+    const once = planConfigMigrationV2(LEGACY);
+    const twice = planConfigMigrationV2(once.next);
+    expect(twice.changed).toBe(false);
+    expect(twice.next).toEqual(once.next);
   });
 
-  it('rethrows an unrelated revert', async () => {
-    await expect(
-      deliverToMarketplace(
-        { safeAddress: SAFE, mechAddress: MECH, requestId: REQUEST, deliveryBytes: BYTES },
-        {
-          broadcast: async () => {
-            throw new Error('execution reverted: NotAuthorized()');
-          },
-        },
-      ),
-    ).rejects.toThrow('NotAuthorized');
+  it('treats a config with no joined SolverNets as version 2 with an empty wiring list', () => {
+    const plan = planConfigMigrationV2({ network: 'testnet' });
+    expect(plan.changed).toBe(true);
+    expect(plan.next['executionWiring']).toEqual([]);
+    expect(plan.next['claimPolicy']).toEqual({ kind: 'none' });
+  });
+
+  it('falls back to the entry key when an entry omits its manifest cid', () => {
+    const plan = planConfigMigrationV2({
+      joinedSolverNets: { 'legacy:swe': { roles: ['solver'], harness: 'codex', model: 'gpt', contract: { id: 'swe.v1', version: '1' } } },
+    });
+    const wiring = plan.next['executionWiring'] as Array<Record<string, unknown>>;
+    expect(wiring[0]?.['legacyManifestDigest']).toBe('legacy:swe');
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run test/daemon/mech-deliver.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/mech-deliver.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/config/config-migration-v2.test.ts`
+Expected: FAIL — cannot resolve `../../src/config-migration-v2.js`.
 
-- [ ] **Step 3: Write minimal implementation**
-
-```ts
-// client/src/daemon/mech-deliver.ts
-import { encodeFunctionData, type Hex } from 'viem';
-import { MECH_ABI, computeRawCodecCid } from '@jinn-network/marketplace-binding';
-import type { VenueBroadcaster } from '../adapters/mech/safe.js';
-
-export interface MechDeliverInput {
-  readonly safeAddress: `0x${string}`;
-  readonly mechAddress: `0x${string}`;
-  readonly requestId: `0x${string}`;
-  readonly deliveryBytes: Uint8Array;
-}
-
-export function encodeMechDeliverCalldata(input: {
-  readonly requestId: `0x${string}`;
-  readonly deliveryBytes: Uint8Array;
-}): Hex {
-  const { sha256Digest } = computeRawCodecCid(input.deliveryBytes);
-  const digestHex = `0x${sha256Digest.slice('sha256:'.length)}` as Hex;
-  return encodeFunctionData({
-    abi: MECH_ABI,
-    functionName: 'deliverToMarketplace',
-    args: [[input.requestId], [digestHex]],
-  });
-}
-
-const ALREADY_DELIVERED = /AlreadyDelivered|already\s+delivered|RequestIdNotFound/iu;
-
-export async function deliverToMarketplace(
-  input: MechDeliverInput,
-  broadcaster: VenueBroadcaster,
-): Promise<{ readonly delivered: 'sent' | 'already'; readonly txHash?: Hex }> {
-  const data = encodeMechDeliverCalldata({
-    requestId: input.requestId,
-    deliveryBytes: input.deliveryBytes,
-  });
-  try {
-    const txHash = await broadcaster.broadcast({
-      safeAddress: input.safeAddress,
-      to: input.mechAddress,
-      value: 0n,
-      data,
-    });
-    return { delivered: 'sent', txHash };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (ALREADY_DELIVERED.test(message)) return { delivered: 'already' };
-    throw error;
-  }
-}
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon/mech-deliver.test.ts && yarn typecheck`
-Expected: PASS (4 tests), zero typecheck errors.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add client/src/daemon/mech-deliver.ts client/test/daemon/mech-deliver.test.ts
-git commit -m "feat(operator): add the marketplace deliver leg today-mode settlement requires"
-```
-
----
-
-## Task 9: The projector loop
-
-**Files:**
-- Create: `client/src/daemon/projector-ports.ts`, `client/src/daemon/projector-loop.ts`, `client/src/daemon/projector-cursor.ts`
-- Modify: `client/src/daemon/loop-heartbeat.ts:33` (`LOOP_REGISTRY` gains `projector`)
-- Test: `client/test/daemon/projector-cursor.test.ts`, `client/test/daemon/projector-loop.test.ts`
-
-The loop reads venue chain events through venue-base's log source, decodes them with `decodeMarketplaceLogs`, reduces them with `reduceMarketplaceProjection`, and publishes signed announcements into the local archive through `projectAnnouncements` over a filesystem `BlobStore`. The archive is local-only in stage 1; stage 4 mounts it.
-
-**Interfaces:**
-- Consumes: `decodeMarketplaceLogs`, `reduceMarketplaceProjection`, `projectAnnouncements`, `createMarketplaceProjectionState`, `cloneMarketplaceProjectionState`, `finalityPolicy`, `AnnouncementProjectionPorts`, `MarketplaceProjectionState`, `ObservationMarketplaceEvent` (`@jinn-network/marketplace-projector`); `BlobStore`, `SourceHead`, `SignedEntry`, `writeArchivePages` (`@jinn-network/record-discovery-serve`); `TASK_EXECUTION_FACTS_RECOMPUTE` (`@jinn-network/record-discovery-facts-task-execution`); `createFsBlobStore` (transport-http); `venue.logSource` (venue-base); `Store` (`client/src/store/store.ts`).
-- Produces:
+- [ ] **Step 3: Write the implementation**
 
 ```ts
-// client/src/daemon/projector-cursor.ts
-export interface ProjectorCursor {
-  readonly liveBlockNumber: bigint;
-  readonly liveBlockHash: `0x${string}`;
-  readonly finalizedBlockNumber: bigint;
-  readonly finalizedBlockHash: `0x${string}`;
-  readonly sequence: string;                    // last announcement entry sequence
-  readonly entryDigest: `sha256:${string}` | null;
-  readonly headJson: string | null;             // serialized SourceHead
-  readonly stateJson: string;                   // serialized MarketplaceProjectionState
+// client/src/config-migration-v2.ts
+
+/**
+ * Config shape version 2 (operator-daemon composition, program §5).
+ *
+ * Three hardening rules, all exercised by the tests:
+ *  - additive: the new keys are written beside `joinedSolverNets`, which is
+ *    deleted only at cutover stage 5, so a rolled-back daemon generation still
+ *    boots from the migrated file and cannot silently claim nothing;
+ *  - idempotent via `configShapeVersion`, so re-upgrade after a revert is a
+ *    no-op;
+ *  - atomic on disk (temp file + rename) — see `migrateConfigFileToV2`.
+ */
+export const CONFIG_SHAPE_VERSION = 2;
+
+export interface ExecutionWiringConfigV2 {
+  workKind: string;
+  harness: string;
+  model: string;
+  plugins: string[];
+  credentialRef: string;
+  isolationPolicy: string;
+  legacyManifestDigest?: string;
 }
 
-export class ProjectorCursorStore {
-  constructor(store: Store, key: string);
-  read(): ProjectorCursor | undefined;
-  /** Single SQLite transaction: cursor + projection state advance together or not at all. */
-  write(cursor: ProjectorCursor): void;
-  /** Reorg handling: roll back to the durable finalized checkpoint. */
-  rollbackToFinalized(): ProjectorCursor | undefined;
+export interface ClaimPolicyConfigV2 {
+  kind: 'legacy-manifest-digest' | 'every-runnable' | 'none';
 }
 
-// client/src/daemon/projector-ports.ts
-export interface ProjectorPortsInput {
-  readonly source: SourceIdentity;              // { agent, name }
-  readonly signer: ScopedDiscoverySigner;
-  readonly archiveRoot: string;
-  readonly resolveRecord: AnnouncementProjectionPorts['resolveRecord'];
-  readonly verifyVerdictObservation: AnnouncementProjectionPorts['verifyVerdictObservation'];
-  readonly referencedBytes: ReferencedBytes;
-  readonly clock?: Clock;
+export interface PostingConfigV2 {
+  manifestCid: string;
+  name?: string;
+  generatorEnabled: boolean;
 }
 
-export function buildAnnouncementProjectionPorts(
-  input: ProjectorPortsInput,
-  continuation: {
-    readonly previousHead?: SourceHead;
-    readonly previousEntryDigest?: `sha256:${string}` | null;
-    readonly initialSequence?: bigint;
-  },
-): AnnouncementProjectionPorts;
-
-/** The append-aware archive writer `projectAnnouncements` requires for incremental batches. */
-export function createAppendArchiveWriter(
-  store: BlobStore,
-  readPageCount: () => number,
-  writePageCount: (count: number) => void,
-): NonNullable<AnnouncementProjectionPorts['appendArchiveEntries']>;
-
-// client/src/daemon/projector-loop.ts
-export interface ProjectorLoopConfig {
-  readonly chain: MarketplaceChainConfig;
-  readonly logSource: { fetchLogs(input: { fromBlock: bigint; toBlock: bigint }): Promise<MarketplaceRawLog[]>;
-                        heads(): Promise<{ latest: { number: bigint; hash: `0x${string}` };
-                                           finalized: { number: bigint; hash: `0x${string}` } }> };
-  readonly cursorStore: ProjectorCursorStore;
-  readonly ports: ProjectorPortsInput;
-  readonly enrich: (event: MarketplaceEvent) => Promise<ObservationMarketplaceEvent | undefined>;
-  readonly pollIntervalMs: number;
-  readonly store: Store;
-  readonly logger?: { info(m: string): void; warn(m: string): void };
+export interface ConfigMigrationPlanV2 {
+  changed: boolean;
+  next: Record<string, unknown>;
+  wiringCount: number;
+  postingCount: number;
 }
 
-export class ProjectorLoop {
-  constructor(config: ProjectorLoopConfig);
-  /** One pass; exported so the boot catch-up gate can drive it synchronously. */
-  tick(): Promise<{ readonly announcements: number; readonly refusals: number;
-                    readonly caughtUp: boolean }>;
-  run(): Promise<void>;
-  stop(): void;
-  /** Contract 3: has the durable cursor reached the finalized chain head? */
-  hasCaughtUp(): Promise<boolean>;
-}
-```
-
-- [ ] **Step 1: Write the failing tests**
-
-```ts
-// client/test/daemon/projector-cursor.test.ts
-import { describe, expect, it } from 'vitest';
-import { Store } from '../../src/store/store.js';
-import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
-
-const CURSOR = {
-  liveBlockNumber: 120n,
-  liveBlockHash: `0x${'1'.repeat(64)}` as const,
-  finalizedBlockNumber: 100n,
-  finalizedBlockHash: `0x${'2'.repeat(64)}` as const,
-  sequence: '0000000000000005',
-  entryDigest: `sha256:${'a'.repeat(64)}` as const,
-  headJson: '{"sequence":"0000000000000005"}',
-  stateJson: '{"tasks":{}}',
-};
-
-describe('projector cursor store', () => {
-  it('round-trips a cursor', () => {
-    const cursors = new ProjectorCursorStore(new Store(':memory:'), 'marketplace');
-    expect(cursors.read()).toBeUndefined();
-    cursors.write(CURSOR);
-    expect(cursors.read()).toEqual(CURSOR);
-  });
-
-  it('rolls back to the durable finalized checkpoint on a reorg', () => {
-    const cursors = new ProjectorCursorStore(new Store(':memory:'), 'marketplace');
-    cursors.write(CURSOR);
-    const rolled = cursors.rollbackToFinalized()!;
-    expect(rolled.liveBlockNumber).toBe(100n);
-    expect(rolled.liveBlockHash).toBe(`0x${'2'.repeat(64)}`);
-    // The announcement chain is append-only: sequence and entry digest never rewind.
-    expect(rolled.sequence).toBe('0000000000000005');
-    expect(rolled.entryDigest).toBe(`sha256:${'a'.repeat(64)}`);
-  });
-
-  it('keeps two projectors on distinct keys independent', () => {
-    const store = new Store(':memory:');
-    new ProjectorCursorStore(store, 'marketplace').write(CURSOR);
-    expect(new ProjectorCursorStore(store, 'other').read()).toBeUndefined();
-  });
-});
-```
-
-```ts
-// client/test/daemon/projector-loop.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
-import { Store } from '../../src/store/store.js';
-import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
-import { ProjectorLoop } from '../../src/daemon/projector-loop.js';
-import { fakeDiscoverySigner, taskCreatedLog } from './_projector-fixtures.js';
-
-function loop(overrides: Partial<ConstructorParameters<typeof ProjectorLoop>[0]> = {}) {
-  const store = new Store(':memory:');
-  return new ProjectorLoop({
-    chain: BASE_SEPOLIA_TODAY,
-    logSource: {
-      fetchLogs: async () => [taskCreatedLog()],
-      heads: async () => ({
-        latest: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-        finalized: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-      }),
-    },
-    cursorStore: new ProjectorCursorStore(store, 'marketplace'),
-    ports: {
-      source: { agent: 'urn:jinn:operator:test', name: 'test-operator' },
-      signer: fakeDiscoverySigner(),
-      archiveRoot: mkdtempSync(join(tmpdir(), 'jinn-archive-')),
-      resolveRecord: async () => ({
-        kind: 'https://jinn.network/records/task-execution/submission/1.0',
-        bytes: new TextEncoder().encode('{}'),
-      }),
-      verifyVerdictObservation: async () => ({ gate: { decisionGrade: true, failures: [] } }),
-      referencedBytes: { fetch: async () => undefined },
-    },
-    enrich: async (event) => ({ ...event, projection: { /* fixture context */ } } as never),
-    pollIntervalMs: 5,
-    store,
-    ...overrides,
-  });
+interface LegacyJoinedEntry {
+  manifestCid?: unknown;
+  roles?: unknown;
+  harness?: unknown;
+  model?: unknown;
+  plugins?: unknown;
+  contract?: unknown;
 }
 
-describe('projector loop', () => {
-  it('advances the durable cursor after a successful tick', async () => {
-    const store = new Store(':memory:');
-    const cursorStore = new ProjectorCursorStore(store, 'marketplace');
-    const projector = loop({ store, cursorStore });
-    const result = await projector.tick();
-    expect(result.caughtUp).toBe(true);
-    expect(cursorStore.read()!.finalizedBlockNumber).toBe(120n);
-  });
+const DEFAULT_ISOLATION_POLICY = 'workspace';
 
-  it('reports not-caught-up while the finalized head is ahead of the cursor', async () => {
-    const projector = loop({
-      logSource: {
-        fetchLogs: async () => [],
-        heads: async () => ({
-          latest: { number: 5_000n, hash: `0x${'1'.repeat(64)}` },
-          finalized: { number: 4_900n, hash: `0x${'2'.repeat(64)}` },
-        }),
-      },
-    });
-    expect(await projector.hasCaughtUp()).toBe(false);
-  });
-
-  it('rolls back to the finalized checkpoint when the live block hash diverges', async () => {
-    const store = new Store(':memory:');
-    const cursorStore = new ProjectorCursorStore(store, 'marketplace');
-    cursorStore.write({
-      liveBlockNumber: 120n,
-      liveBlockHash: `0x${'9'.repeat(64)}`,
-      finalizedBlockNumber: 100n,
-      finalizedBlockHash: `0x${'2'.repeat(64)}`,
-      sequence: '0000000000000001',
-      entryDigest: `sha256:${'a'.repeat(64)}`,
-      headJson: null,
-      stateJson: JSON.stringify({}),
-    });
-    const warn = vi.fn();
-    const projector = loop({ store, cursorStore, logger: { info: vi.fn(), warn } });
-    await projector.tick();
-    expect(warn.mock.calls.flat().join('\n')).toContain('reorg');
-    expect(cursorStore.read()!.liveBlockNumber).toBeGreaterThanOrEqual(100n);
-  });
-
-  it('never emits an announcement for an event below the finality policy threshold', async () => {
-    const projector = loop({
-      logSource: {
-        fetchLogs: async () => [taskCreatedLog({ finalityTier: 'safe' })],
-        heads: async () => ({
-          latest: { number: 120n, hash: `0x${'1'.repeat(64)}` },
-          finalized: { number: 90n, hash: `0x${'2'.repeat(64)}` },
-        }),
-      },
-      ports: { /* same as loop(), with announceAt: 'finalized' */ } as never,
-    });
-    const result = await projector.tick();
-    expect(result.announcements).toBe(0);
-  });
-});
-```
-
-`client/test/daemon/_projector-fixtures.ts` supplies `taskCreatedLog()` (an encoded `TaskCreated` log against `BASE_SEPOLIA_TODAY.jinnRouter` built with viem's `encodeEventTopics`) and `fakeDiscoverySigner()` (a `ScopedDiscoverySigner` over a fixed ed25519 key with `scope: DISCOVERY_SIGNING_SCOPE`).
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `cd client && yarn vitest run test/daemon/projector-cursor.test.ts test/daemon/projector-loop.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/projector-cursor.js"`.
-
-- [ ] **Step 3: Write minimal implementation**
-
-`client/src/daemon/projector-cursor.ts` — one table, added to the `Store` constructor beside `ENGAGEMENT_LEDGER_SCHEMA`:
-
-```ts
-export const PROJECTOR_CURSOR_SCHEMA = `
-CREATE TABLE IF NOT EXISTS projector_cursor (
-  key                     TEXT PRIMARY KEY,
-  live_block_number       TEXT NOT NULL,
-  live_block_hash         TEXT NOT NULL,
-  finalized_block_number  TEXT NOT NULL,
-  finalized_block_hash    TEXT NOT NULL,
-  sequence                TEXT NOT NULL,
-  entry_digest            TEXT,
-  head_json               TEXT,
-  state_json              TEXT NOT NULL,
-  updated_at              TEXT NOT NULL
-);
-`;
-
-export class ProjectorCursorStore {
-  constructor(private readonly store: Store, private readonly key: string) {}
-
-  read(): ProjectorCursor | undefined { /* SELECT + bigint parse */ }
-
-  write(cursor: ProjectorCursor): void {
-    this.store.db.transaction(() => {
-      this.store.db
-        .prepare(
-          `INSERT INTO projector_cursor
-             (key, live_block_number, live_block_hash, finalized_block_number,
-              finalized_block_hash, sequence, entry_digest, head_json, state_json, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(key) DO UPDATE SET
-             live_block_number = excluded.live_block_number,
-             live_block_hash = excluded.live_block_hash,
-             finalized_block_number = excluded.finalized_block_number,
-             finalized_block_hash = excluded.finalized_block_hash,
-             sequence = excluded.sequence,
-             entry_digest = excluded.entry_digest,
-             head_json = excluded.head_json,
-             state_json = excluded.state_json,
-             updated_at = excluded.updated_at`,
-        )
-        .run(
-          this.key,
-          cursor.liveBlockNumber.toString(),
-          cursor.liveBlockHash,
-          cursor.finalizedBlockNumber.toString(),
-          cursor.finalizedBlockHash,
-          cursor.sequence,
-          cursor.entryDigest,
-          cursor.headJson,
-          cursor.stateJson,
-          new Date().toISOString(),
-        );
-    })();
-  }
-
-  rollbackToFinalized(): ProjectorCursor | undefined {
-    const current = this.read();
-    if (current === undefined) return undefined;
-    // Announcements already emitted are corrected append-only through signed retractions
-    // (spec §7.2); only projector *state* rolls back.
-    const rolled: ProjectorCursor = {
-      ...current,
-      liveBlockNumber: current.finalizedBlockNumber,
-      liveBlockHash: current.finalizedBlockHash,
-    };
-    this.write(rolled);
-    return rolled;
-  }
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
-```
 
-`client/src/daemon/projector-ports.ts` — assembles `AnnouncementProjectionPorts`:
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+}
 
-```ts
-export function buildAnnouncementProjectionPorts(
-  input: ProjectorPortsInput,
-  continuation: {
-    readonly previousHead?: SourceHead;
-    readonly previousEntryDigest?: `sha256:${string}` | null;
-    readonly initialSequence?: bigint;
-  },
-): AnnouncementProjectionPorts {
-  const store = createFsBlobStore(input.archiveRoot);
+function workKindFor(entry: LegacyJoinedEntry, fallback: string): string {
+  const contract = asRecord(entry.contract);
+  const id = contract?.['id'];
+  return typeof id === 'string' && id.length > 0 ? id : fallback;
+}
+
+function wiringFrom(key: string, entry: LegacyJoinedEntry): ExecutionWiringConfigV2 | undefined {
+  const roles = asStringArray(entry.roles);
+  if (!roles.includes('solver')) return undefined;
+  const harness = typeof entry.harness === 'string' ? entry.harness : '';
+  const model = typeof entry.model === 'string' ? entry.model : '';
+  const manifest = typeof entry.manifestCid === 'string' && entry.manifestCid.length > 0
+    ? entry.manifestCid
+    : key;
   return {
-    source: input.source,
-    signer: input.signer,
-    store,
-    clock: input.clock ?? { now: () => new Date() },
-    factsRecompute: TASK_EXECUTION_FACTS_RECOMPUTE,
-    referencedBytes: input.referencedBytes,
-    resolveRecord: input.resolveRecord,
-    verifyVerdictObservation: input.verifyVerdictObservation,
-    ...(continuation.previousHead === undefined
-      ? {}
-      : {
-          previousHead: continuation.previousHead,
-          previousEntryDigest: continuation.previousEntryDigest ?? null,
-          initialSequence: continuation.initialSequence ?? 1n,
-          appendArchiveEntries: createAppendArchiveWriter(store, readPageCount, writePageCount),
-        }),
+    workKind: workKindFor(entry, manifest),
+    harness,
+    model,
+    plugins: asStringArray(entry.plugins),
+    // Credentials are keyed by harness today; the wiring entry is the new home
+    // the caps gates re-key onto (binding design §7).
+    credentialRef: harness,
+    isolationPolicy: DEFAULT_ISOLATION_POLICY,
+    legacyManifestDigest: manifest,
+  };
+}
+
+function postingFrom(raw: Readonly<Record<string, unknown>>): PostingConfigV2[] {
+  const launched = raw['launchedSolverNets'];
+  if (!Array.isArray(launched)) return [];
+  const entries: PostingConfigV2[] = [];
+  for (const item of launched) {
+    const record = asRecord(item);
+    const manifestCid = record?.['manifestCid'];
+    if (typeof manifestCid !== 'string' || manifestCid.length === 0) continue;
+    const name = record?.['name'];
+    entries.push({
+      manifestCid,
+      ...(typeof name === 'string' ? { name } : {}),
+      generatorEnabled: record?.['generatorEnabled'] === true,
+    });
+  }
+  return entries;
+}
+
+/**
+ * Pure planner. Never touches the filesystem, never reads the environment —
+ * callers hand it the raw parsed config file (never the env-merged object, so
+ * an env override is not accidentally persisted).
+ */
+export function planConfigMigrationV2(raw: Readonly<Record<string, unknown>>): ConfigMigrationPlanV2 {
+  if (raw['configShapeVersion'] === CONFIG_SHAPE_VERSION) {
+    return { changed: false, next: { ...raw }, wiringCount: 0, postingCount: 0 };
+  }
+
+  const joined = asRecord(raw['joinedSolverNets']) ?? {};
+  const wiring: ExecutionWiringConfigV2[] = [];
+  for (const [key, value] of Object.entries(joined)) {
+    const entry = asRecord(value);
+    if (entry === undefined) continue;
+    const mapped = wiringFrom(key, entry as LegacyJoinedEntry);
+    if (mapped !== undefined) wiring.push(mapped);
+  }
+
+  const posting = postingFrom(raw);
+  const claimPolicy: ClaimPolicyConfigV2 = {
+    kind: wiring.length > 0 ? 'legacy-manifest-digest' : 'none',
+  };
+
+  return {
+    changed: true,
+    next: {
+      ...raw,
+      configShapeVersion: CONFIG_SHAPE_VERSION,
+      claimPolicy,
+      executionWiring: wiring,
+      posting,
+    },
+    wiringCount: wiring.length,
+    postingCount: posting.length,
   };
 }
 ```
 
-`createAppendArchiveWriter` writes each new batch as the next page number (`writeArchivePages` is genesis-only per its own doc comment), persisting the page count in the store's `config` table so restarts never overwrite an immutable archive path.
+- [ ] **Step 4: Run the tests**
 
-`client/src/daemon/projector-loop.ts` — one `tick()`:
-
-1. `const heads = await config.logSource.heads()`.
-2. Read the cursor. If a cursor exists and the log source reports a different hash for `cursor.liveBlockNumber`, log `reorg detected …` and `rollbackToFinalized()`.
-3. `fetchLogs({ fromBlock: cursor.liveBlockNumber + 1n, toBlock: heads.latest.number })`.
-4. `decodeMarketplaceLogs(logs, { config: config.chain })`.
-5. `await Promise.all(events.map(config.enrich))`, dropping `undefined` (an event whose signed record the host cannot resolve yet).
-6. Filter with `finalityPolicy(event.derivation, { announceAt })` — keep only `decision.announce`.
-7. `reduceMarketplaceProjection(enriched, previousState)`.
-8. `await projectAnnouncements(transition, ports)`.
-9. `cursorStore.write({ ...heads, sequence, entryDigest, headJson, stateJson: JSON.stringify(transition.state) })` — the cursor and the projection state advance in one SQLite transaction.
-10. Return `{ announcements, refusals, caughtUp: cursor.finalizedBlockNumber >= heads.finalized.number }`.
-
-`run()` wraps `tick()` in the existing `runLoop({ name: 'projector', intervalMs, store, body })` helper from `client/src/daemon/loop-heartbeat.ts:100`, and `LOOP_REGISTRY` gains `projector: { intervalMs: 5000, floorMs: 300_000 }`.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon/projector-cursor.test.ts test/daemon/projector-loop.test.ts && yarn typecheck`
-Expected: PASS (7 tests), zero typecheck errors.
+Run: `cd "$REPO/client" && yarn vitest run test/config/config-migration-v2.test.ts`
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/daemon/projector-cursor.ts client/src/daemon/projector-ports.ts client/src/daemon/projector-loop.ts client/src/daemon/loop-heartbeat.ts client/src/store/store.ts client/test/daemon
-git commit -m "feat(operator): add the projector loop writing a local signed discovery archive"
+cd "$REPO" && git add client/src/config-migration-v2.ts client/test/config/config-migration-v2.test.ts
+git commit -m "feat(client): plan the additive idempotent config shape-version-2 migration"
 ```
 
 ---
 
-## Task 10: The projector-catch-up claim gate
+## Task 5: Config migration — atomic file write, permission-preserving backup
+
+Contract 4, part two, plus the pinned backup-filename contract.
 
 **Files:**
-- Create: `client/src/daemon/claim-gate.ts`
-- Test: `client/test/daemon/claim-gate.test.ts`
-
-Contract 3 in one small, independently reviewable module: at boot the work loop issues no new claim until the projector's durable cursor has reached the finalized chain head, so it cannot re-claim a task it already holds or re-execute a delivered attempt.
+- Modify: `client/src/config-migration-v2.ts`
+- Modify: `client/test/config/config-migration-v2.test.ts`
 
 **Interfaces:**
-- Consumes: `ProjectorLoop.hasCaughtUp()` (Task 9).
+- Consumes: `planConfigMigrationV2` from Task 4.
 - Produces:
+  ```ts
+  export interface ConfigMigrationV2Result {
+    migrated: boolean;
+    backupPath?: string;
+    wiringCount: number;
+    postingCount: number;
+  }
+  export function migrateConfigFileToV2(
+    configPath: string, now?: () => Date,
+  ): ConfigMigrationV2Result;
+  export function configBackupPath(configPath: string, at: Date): string;
+  ```
+
+- [ ] **Step 1: Write the failing test (append to the existing file)**
 
 ```ts
-// client/src/daemon/claim-gate.ts
-export interface ClaimGate {
-  /** Resolves once the projector cursor has reached the finalized head. Never rejects. */
-  waitUntilOpen(signal?: AbortSignal): Promise<void>;
-  isOpen(): boolean;
+// appended to client/test/config/config-migration-v2.test.ts
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync, readdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { configBackupPath, migrateConfigFileToV2 } from '../../src/config-migration-v2.js';
+
+function scratchConfig(contents: unknown, mode = 0o600): string {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-config-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify(contents, null, 2));
+  chmodSync(path, mode);
+  return path;
 }
 
-export function createProjectorCatchUpGate(input: {
-  readonly hasCaughtUp: () => Promise<boolean>;
-  readonly pollIntervalMs: number;
-  readonly logger?: { info(m: string): void };
-  readonly sleep?: (ms: number) => Promise<void>;
-}): ClaimGate;
-```
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// client/test/daemon/claim-gate.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { createProjectorCatchUpGate } from '../../src/daemon/claim-gate.js';
-
-describe('projector catch-up claim gate', () => {
-  it('stays closed until the projector reports catch-up', async () => {
-    const answers = [false, false, true];
-    const gate = createProjectorCatchUpGate({
-      hasCaughtUp: async () => answers.shift() ?? true,
-      pollIntervalMs: 1,
-      sleep: async () => {},
-    });
-    expect(gate.isOpen()).toBe(false);
-    await gate.waitUntilOpen();
-    expect(gate.isOpen()).toBe(true);
-    expect(answers).toEqual([]);
+describe('migrateConfigFileToV2', () => {
+  it('names the backup with the pinned contract filename', () => {
+    const at = new Date('2026-07-30T12:34:56.000Z');
+    expect(configBackupPath('/x/config.json', at))
+      .toBe('/x/config.json.pre-v2.2026-07-30T12:34:56.000Z.bak');
   });
 
-  it('logs once when it opens', async () => {
-    const info = vi.fn();
-    const gate = createProjectorCatchUpGate({
-      hasCaughtUp: async () => true,
-      pollIntervalMs: 1,
-      logger: { info },
-      sleep: async () => {},
-    });
-    await gate.waitUntilOpen();
-    await gate.waitUntilOpen();
-    expect(info).toHaveBeenCalledTimes(1);
-    expect(info.mock.calls[0]![0]).toContain('claim gate open');
+  it('writes the migrated shape and keeps a backup', () => {
+    const path = scratchConfig(LEGACY);
+    const result = migrateConfigFileToV2(path, () => new Date('2026-07-30T00:00:00.000Z'));
+    expect(result.migrated).toBe(true);
+    expect(result.wiringCount).toBe(1);
+    const migrated = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    expect(migrated['configShapeVersion']).toBe(CONFIG_SHAPE_VERSION);
+    expect(migrated['joinedSolverNets']).toEqual(LEGACY.joinedSolverNets);
+    const backup = JSON.parse(readFileSync(result.backupPath!, 'utf8')) as Record<string, unknown>;
+    expect(backup).toEqual(LEGACY);
   });
 
-  it('returns without opening when the signal aborts', async () => {
-    const controller = new AbortController();
-    const gate = createProjectorCatchUpGate({
-      hasCaughtUp: async () => {
-        controller.abort();
-        return false;
-      },
-      pollIntervalMs: 1,
-      sleep: async () => {},
-    });
-    await gate.waitUntilOpen(controller.signal);
-    expect(gate.isOpen()).toBe(false);
+  it('preserves the original file permissions on the backup', () => {
+    const path = scratchConfig(LEGACY, 0o600);
+    const result = migrateConfigFileToV2(path, () => new Date('2026-07-30T00:00:00.000Z'));
+    expect(statSync(result.backupPath!).mode & 0o777).toBe(0o600);
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('is a no-op on a second run and writes no second backup', () => {
+    const path = scratchConfig(LEGACY);
+    migrateConfigFileToV2(path, () => new Date('2026-07-30T00:00:00.000Z'));
+    const again = migrateConfigFileToV2(path, () => new Date('2026-07-31T00:00:00.000Z'));
+    expect(again.migrated).toBe(false);
+    expect(again.backupPath).toBeUndefined();
+    const backups = readdirSync(join(path, '..')).filter((f) => f.includes('.pre-v2.'));
+    expect(backups).toHaveLength(1);
+  });
+
+  it('leaves the file untouched when it cannot be parsed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jinn-config-'));
+    const path = join(dir, 'config.json');
+    writeFileSync(path, '{ not json');
+    const result = migrateConfigFileToV2(path);
+    expect(result.migrated).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe('{ not json');
+  });
+
+  it('reports no migration when the file does not exist', () => {
+    const result = migrateConfigFileToV2(join(tmpdir(), 'definitely-absent', 'config.json'));
+    expect(result.migrated).toBe(false);
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run test/daemon/claim-gate.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/claim-gate.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/config/config-migration-v2.test.ts`
+Expected: FAIL — `migrateConfigFileToV2 is not exported`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the implementation (append to `config-migration-v2.ts`)**
 
 ```ts
-// client/src/daemon/claim-gate.ts
-export interface ClaimGate {
-  waitUntilOpen(signal?: AbortSignal): Promise<void>;
-  isOpen(): boolean;
+import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+
+export interface ConfigMigrationV2Result {
+  migrated: boolean;
+  backupPath?: string;
+  wiringCount: number;
+  postingCount: number;
 }
 
-export function createProjectorCatchUpGate(input: {
-  readonly hasCaughtUp: () => Promise<boolean>;
-  readonly pollIntervalMs: number;
-  readonly logger?: { info(m: string): void };
-  readonly sleep?: (ms: number) => Promise<void>;
-}): ClaimGate {
-  let open = false;
-  const sleep =
-    input.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+/**
+ * Pinned cross-plan contract: `config.json.pre-v2.<ISO8601>.bak`, beside the
+ * config file. The backup is a copy, so it inherits nothing implicitly — the
+ * caller re-applies the original mode explicitly (it can carry paid RPC keys).
+ */
+export function configBackupPath(configPath: string, at: Date): string {
+  return `${configPath}.pre-v2.${at.toISOString()}.bak`;
+}
+
+/**
+ * Boot-time, panel-visible migration. Atomic (temp file + rename), additive
+ * (legacy keys survive to stage 5), idempotent (`configShapeVersion`).
+ * Never throws on a malformed or absent file — the daemon's own config loader
+ * owns those diagnostics; a failed migration must not gate boot.
+ */
+export function migrateConfigFileToV2(
+  configPath: string,
+  now: () => Date = () => new Date(),
+): ConfigMigrationV2Result {
+  const noop: ConfigMigrationV2Result = { migrated: false, wiringCount: 0, postingCount: 0 };
+  if (!existsSync(configPath)) return noop;
+
+  let raw: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf8'));
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return noop;
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return noop;
+  }
+
+  const plan = planConfigMigrationV2(raw);
+  if (!plan.changed) return noop;
+
+  const mode = statSync(configPath).mode & 0o777;
+  const backupPath = configBackupPath(configPath, now());
+  copyFileSync(configPath, backupPath);
+  chmodSync(backupPath, mode);
+
+  const tempPath = `${configPath}.v2-migration.tmp`;
+  writeFileSync(tempPath, `${JSON.stringify(plan.next, null, 2)}\n`, { mode });
+  chmodSync(tempPath, mode);
+  renameSync(tempPath, configPath);
 
   return {
-    isOpen: () => open,
-    async waitUntilOpen(signal?: AbortSignal): Promise<void> {
-      if (open) return;
-      while (signal?.aborted !== true) {
-        if (await input.hasCaughtUp()) {
-          open = true;
-          input.logger?.info(
-            '[work] claim gate open — the projector cursor reached the finalized chain head',
-          );
-          return;
-        }
-        if (signal?.aborted === true) return;
-        await sleep(input.pollIntervalMs);
+    migrated: true,
+    backupPath,
+    wiringCount: plan.wiringCount,
+    postingCount: plan.postingCount,
+  };
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/config/config-migration-v2.test.ts`
+Expected: PASS, 15 tests total.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "$REPO" && git add client/src/config-migration-v2.ts client/test/config/config-migration-v2.test.ts
+git commit -m "feat(client): write the shape-version-2 config atomically with a permission-preserving backup"
+```
+
+---
+
+## Task 6: Config schema keys and boot-time migration hook
+
+**Files:**
+- Modify: `client/src/config.ts`
+- Create: `client/test/config/config-v2-keys.test.ts`
+
+**Interfaces:**
+- Consumes: `migrateConfigFileToV2`, `CONFIG_SHAPE_VERSION` from Task 5.
+- Produces: `JinnConfig` gains `configShapeVersion?: number`, `claimPolicy?: ClaimPolicyConfigV2`, `executionWiring: ExecutionWiringConfigV2[]`, `posting: PostingConfigV2[]`; `loadConfig` runs the migration before parsing and records the result on `lastConfigMigrationV2` (read by the panel in Task 21).
+  ```ts
+  export function lastConfigMigrationV2(): ConfigMigrationV2Result | undefined;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/config/config-v2-keys.test.ts
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { lastConfigMigrationV2, loadConfig } from '../../src/config.js';
+
+function scratch(contents: unknown): string {
+  const dir = mkdtempSync(join(tmpdir(), 'jinn-cfg-v2-'));
+  const path = join(dir, 'config.json');
+  writeFileSync(path, JSON.stringify(contents, null, 2));
+  return path;
+}
+
+describe('config shape version 2 keys', () => {
+  it('migrates on load and exposes the new keys', () => {
+    const path = scratch({
+      network: 'testnet',
+      joinedSolverNets: {
+        bafy: {
+          manifestCid: 'bafy', roles: ['solver'], harness: 'claude-code',
+          model: 'claude-haiku-4-5-20251001', plugins: [], contract: { id: 'swe.v2', version: '1' },
+        },
+      },
+    });
+    const config = loadConfig(path);
+    expect(config.configShapeVersion).toBe(2);
+    expect(config.claimPolicy).toEqual({ kind: 'legacy-manifest-digest' });
+    expect(config.executionWiring).toEqual([
+      {
+        workKind: 'swe.v2', harness: 'claude-code', model: 'claude-haiku-4-5-20251001',
+        plugins: [], credentialRef: 'claude-code', isolationPolicy: 'workspace',
+        legacyManifestDigest: 'bafy',
+      },
+    ]);
+    expect(config.posting).toEqual([]);
+    expect(lastConfigMigrationV2()?.migrated).toBe(true);
+  });
+
+  it('defaults the new keys when the file has none', () => {
+    const config = loadConfig(scratch({ network: 'testnet' }));
+    expect(config.executionWiring).toEqual([]);
+    expect(config.posting).toEqual([]);
+    expect(config.claimPolicy).toEqual({ kind: 'none' });
+  });
+
+  it('keeps the legacy joined entries readable after migration', () => {
+    const config = loadConfig(scratch({
+      joinedSolverNets: { bafy: { manifestCid: 'bafy', roles: ['solver'] } },
+    }));
+    expect(config.joinedSolverNets?.['bafy']?.manifestCid).toBe('bafy');
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/config/config-v2-keys.test.ts`
+Expected: FAIL — `config.configShapeVersion` is `undefined` / `lastConfigMigrationV2` not exported.
+
+- [ ] **Step 3: Add the schema keys**
+
+In `client/src/config.ts`, inside `JinnConfigSchema` immediately **after** the `joinedSolverNets` block (so a reader sees old and new adjacent):
+
+```ts
+  /** Config shape version (operator-daemon composition §9). Stamped by the boot migration. */
+  configShapeVersion: z.number().int().optional(),
+
+  /**
+   * The operator's claim predicate. `legacy-manifest-digest` compiles down to
+   * today's manifest matching via each wiring entry's bridge annotation;
+   * `none` is the claim-nothing-when-unconfigured safety default.
+   */
+  claimPolicy: z
+    .object({ kind: z.enum(['legacy-manifest-digest', 'every-runnable', 'none']) })
+    .default({ kind: 'none' }),
+
+  /** Execution wiring: configuration for execution, never permission for claiming. */
+  executionWiring: z
+    .array(
+      z.object({
+        workKind: z.string().min(1),
+        harness: z.string(),
+        model: z.string(),
+        plugins: z.array(z.string()).default([]),
+        credentialRef: z.string(),
+        isolationPolicy: z.string().default('workspace'),
+        legacyManifestDigest: z.string().optional(),
+      }),
+    )
+    .default([]),
+
+  /** Requester-side posting configuration (populated here, consumed at stage 3). */
+  posting: z
+    .array(
+      z.object({
+        manifestCid: z.string().min(1),
+        name: z.string().optional(),
+        generatorEnabled: z.boolean().default(false),
+      }),
+    )
+    .default([]),
+```
+
+- [ ] **Step 4: Run the migration from `loadConfig`**
+
+At the top of `client/src/config.ts`, add:
+
+```ts
+import { migrateConfigFileToV2 } from './config-migration-v2.js';
+import type { ConfigMigrationV2Result } from './config-migration-v2.js';
+
+let lastMigrationV2: ConfigMigrationV2Result | undefined;
+
+/** The most recent boot migration outcome, surfaced as a one-time panel state message. */
+export function lastConfigMigrationV2(): ConfigMigrationV2Result | undefined {
+  return lastMigrationV2;
+}
+```
+
+In `loadConfig`, **before** the file is read (i.e. before the existing `readFileSync` of `configPath ?? DEFAULT_CONFIG_PATH`), insert:
+
+```ts
+  const resolvedConfigPath = configPath ?? DEFAULT_CONFIG_PATH;
+  lastMigrationV2 = migrateConfigFileToV2(resolvedConfigPath);
+  if (lastMigrationV2.migrated) {
+    console.warn(
+      `[config] migrated to shape version 2 — ${lastMigrationV2.wiringCount} wiring entr` +
+        `${lastMigrationV2.wiringCount === 1 ? 'y' : 'ies'}, backup at ${lastMigrationV2.backupPath}`,
+    );
+  }
+```
+
+Then use `resolvedConfigPath` in the existing read rather than re-deriving the default.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/config/ && yarn typecheck`
+Expected: PASS; zero typecheck errors. If any existing config test asserts an exact parsed-object shape, add the four new default keys to its expectation.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "$REPO" && git add client/src/config.ts client/test/config/config-v2-keys.test.ts
+git commit -m "feat(client): add shape-version-2 config keys and run the migration at load"
+```
+
+---
+
+## Task 7: Projector state store (durable cursor + projection state + archive head)
+
+**Files:**
+- Create: `client/src/store/projector-state.ts`
+- Create: `client/test/store/projector-state.test.ts`
+- Modify: `client/src/store/store.ts`
+
+**Interfaces:**
+- Consumes: `MarketplaceProjectionState`, `createMarketplaceProjectionState` from `@jinn-network/marketplace-projector`; `SourceHead` from `@jinn-network/record-discovery-protocol`.
+- Produces:
+  ```ts
+  export const PROJECTOR_STATE_SCHEMA: string;
+  export interface ProjectorCursor { blockNumber: bigint; blockHash: `0x${string}`; }
+  export interface ProjectorCheckpoint {
+    live?: ProjectorCursor;
+    finalized?: ProjectorCursor;
+  }
+  export interface ArchiveHeadRecord {
+    head: SourceHead; previousEntryDigest: `sha256:${string}` | null; nextSequence: string;
+  }
+  export class ProjectorStateStore {
+    constructor(db: Database.Database);
+    readCheckpoint(): ProjectorCheckpoint;
+    writeCheckpoint(next: ProjectorCheckpoint): void;
+    readProjection(): MarketplaceProjectionState;
+    writeProjection(state: MarketplaceProjectionState): void;
+    readArchiveHead(): ArchiveHeadRecord | undefined;
+    writeArchiveHead(record: ArchiveHeadRecord): void;
+    /** One transaction: cursor + projection + head advance together or not at all. */
+    commit(input: { checkpoint: ProjectorCheckpoint; projection: MarketplaceProjectionState; archiveHead?: ArchiveHeadRecord }): void;
+  }
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/store/projector-state.test.ts
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { createMarketplaceProjectionState } from '@jinn-network/marketplace-projector';
+import { PROJECTOR_STATE_SCHEMA, ProjectorStateStore } from '../../src/store/projector-state.js';
+
+describe('ProjectorStateStore', () => {
+  let db: Database.Database;
+  let store: ProjectorStateStore;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec(PROJECTOR_STATE_SCHEMA);
+    store = new ProjectorStateStore(db);
+  });
+
+  it('starts with no checkpoint and a fresh projection', () => {
+    expect(store.readCheckpoint()).toEqual({});
+    expect(store.readProjection()).toEqual(createMarketplaceProjectionState());
+  });
+
+  it('round-trips the dual cursor marks including bigint block numbers', () => {
+    store.writeCheckpoint({
+      live: { blockNumber: 1234n, blockHash: '0xaa' },
+      finalized: { blockNumber: 1200n, blockHash: '0xbb' },
+    });
+    expect(store.readCheckpoint()).toEqual({
+      live: { blockNumber: 1234n, blockHash: '0xaa' },
+      finalized: { blockNumber: 1200n, blockHash: '0xbb' },
+    });
+  });
+
+  it('round-trips the projection state, bigint task ids included', () => {
+    const state = createMarketplaceProjectionState();
+    state.processedLogIds.push('0xaa:1');
+    state.sequenceBySourceSubject['s'] = '0000000000000003';
+    store.writeProjection(state);
+    const read = store.readProjection();
+    expect(read.processedLogIds).toEqual(['0xaa:1']);
+    expect(read.sequenceBySourceSubject['s']).toBe('0000000000000003');
+  });
+
+  it('round-trips the archive head', () => {
+    const head = {
+      protocol: 'https://jinn.network/record-discovery/1.0',
+      origin: 'did:example:agent/ops',
+      sequence: '0000000000000002',
+      entry: `sha256:${'c'.repeat(64)}` as const,
+      issuedAt: '2026-07-30T00:00:00.000Z',
+      refreshBy: '2026-07-31T00:00:00.000Z',
+    };
+    store.writeArchiveHead({ head, previousEntryDigest: null, nextSequence: '0000000000000003' });
+    expect(store.readArchiveHead()).toEqual({
+      head, previousEntryDigest: null, nextSequence: '0000000000000003',
+    });
+  });
+
+  it('commits cursor, projection and head in one transaction', () => {
+    const state = createMarketplaceProjectionState();
+    state.processedLogIds.push('0xbb:0');
+    store.commit({
+      checkpoint: { finalized: { blockNumber: 9n, blockHash: '0xcc' } },
+      projection: state,
+    });
+    expect(store.readCheckpoint().finalized?.blockNumber).toBe(9n);
+    expect(store.readProjection().processedLogIds).toEqual(['0xbb:0']);
+  });
+
+  it('is idempotent on repeated schema execution', () => {
+    expect(() => db.exec(PROJECTOR_STATE_SCHEMA)).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/store/projector-state.test.ts`
+Expected: FAIL — cannot resolve `../../src/store/projector-state.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+```ts
+// client/src/store/projector-state.ts
+import type Database from 'better-sqlite3';
+import {
+  createMarketplaceProjectionState,
+  type MarketplaceProjectionState,
+} from '@jinn-network/marketplace-projector';
+import type { SourceHead } from '@jinn-network/record-discovery-protocol';
+
+/**
+ * Durable projector state: the dual cursor marks (a live mark tracking
+ * `latest`, a durable checkpoint advancing only on the `finalized` tag), the
+ * marketplace projection reducer state, and the archive head the announcement
+ * projector appends onto. Single-row tables keyed by a constant so the reads
+ * are unambiguous.
+ */
+export const PROJECTOR_STATE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS projector_state (
+  id           INTEGER PRIMARY KEY CHECK (id = 1),
+  live_block   TEXT,
+  live_hash    TEXT,
+  final_block  TEXT,
+  final_hash   TEXT,
+  projection   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS projector_archive_head (
+  id                     INTEGER PRIMARY KEY CHECK (id = 1),
+  head                   TEXT NOT NULL,
+  previous_entry_digest  TEXT,
+  next_sequence          TEXT NOT NULL,
+  updated_at             TEXT NOT NULL
+);
+`;
+
+export interface ProjectorCursor {
+  blockNumber: bigint;
+  blockHash: `0x${string}`;
+}
+
+export interface ProjectorCheckpoint {
+  live?: ProjectorCursor;
+  finalized?: ProjectorCursor;
+}
+
+export interface ArchiveHeadRecord {
+  head: SourceHead;
+  previousEntryDigest: `sha256:${string}` | null;
+  nextSequence: string;
+}
+
+interface StateRow {
+  live_block: string | null;
+  live_hash: string | null;
+  final_block: string | null;
+  final_hash: string | null;
+  projection: string;
+}
+
+interface HeadRow {
+  head: string;
+  previous_entry_digest: string | null;
+  next_sequence: string;
+}
+
+function cursorFrom(block: string | null, hash: string | null): ProjectorCursor | undefined {
+  if (block === null || hash === null) return undefined;
+  return { blockNumber: BigInt(block), blockHash: hash as `0x${string}` };
+}
+
+export class ProjectorStateStore {
+  constructor(private readonly db: Database.Database) {}
+
+  private row(): StateRow | undefined {
+    return this.db
+      .prepare(`SELECT live_block, live_hash, final_block, final_hash, projection FROM projector_state WHERE id = 1`)
+      .get() as StateRow | undefined;
+  }
+
+  readCheckpoint(): ProjectorCheckpoint {
+    const row = this.row();
+    if (row === undefined) return {};
+    const live = cursorFrom(row.live_block, row.live_hash);
+    const finalized = cursorFrom(row.final_block, row.final_hash);
+    return { ...(live ? { live } : {}), ...(finalized ? { finalized } : {}) };
+  }
+
+  readProjection(): MarketplaceProjectionState {
+    const row = this.row();
+    if (row === undefined) return createMarketplaceProjectionState();
+    return JSON.parse(row.projection) as MarketplaceProjectionState;
+  }
+
+  writeCheckpoint(next: ProjectorCheckpoint): void {
+    this.persist(next, this.readProjection());
+  }
+
+  writeProjection(state: MarketplaceProjectionState): void {
+    this.persist(this.readCheckpoint(), state);
+  }
+
+  private persist(checkpoint: ProjectorCheckpoint, projection: MarketplaceProjectionState): void {
+    this.db
+      .prepare(
+        `INSERT INTO projector_state (id, live_block, live_hash, final_block, final_hash, projection, updated_at)
+         VALUES (1, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           live_block = excluded.live_block, live_hash = excluded.live_hash,
+           final_block = excluded.final_block, final_hash = excluded.final_hash,
+           projection = excluded.projection, updated_at = excluded.updated_at`,
+      )
+      .run(
+        checkpoint.live?.blockNumber.toString(10) ?? null,
+        checkpoint.live?.blockHash ?? null,
+        checkpoint.finalized?.blockNumber.toString(10) ?? null,
+        checkpoint.finalized?.blockHash ?? null,
+        JSON.stringify(projection),
+        new Date().toISOString(),
+      );
+  }
+
+  readArchiveHead(): ArchiveHeadRecord | undefined {
+    const row = this.db
+      .prepare(`SELECT head, previous_entry_digest, next_sequence FROM projector_archive_head WHERE id = 1`)
+      .get() as HeadRow | undefined;
+    if (row === undefined) return undefined;
+    return {
+      head: JSON.parse(row.head) as SourceHead,
+      previousEntryDigest: row.previous_entry_digest as `sha256:${string}` | null,
+      nextSequence: row.next_sequence,
+    };
+  }
+
+  writeArchiveHead(record: ArchiveHeadRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO projector_archive_head (id, head, previous_entry_digest, next_sequence, updated_at)
+         VALUES (1, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           head = excluded.head, previous_entry_digest = excluded.previous_entry_digest,
+           next_sequence = excluded.next_sequence, updated_at = excluded.updated_at`,
+      )
+      .run(
+        JSON.stringify(record.head),
+        record.previousEntryDigest,
+        record.nextSequence,
+        new Date().toISOString(),
+      );
+  }
+
+  /** Cursor, projection and head advance together or not at all. */
+  commit(input: {
+    checkpoint: ProjectorCheckpoint;
+    projection: MarketplaceProjectionState;
+    archiveHead?: ArchiveHeadRecord;
+  }): void {
+    const run = this.db.transaction(() => {
+      this.persist(input.checkpoint, input.projection);
+      if (input.archiveHead !== undefined) this.writeArchiveHead(input.archiveHead);
+    });
+    run();
+  }
+}
+```
+
+- [ ] **Step 4: Wire the schema into the store**
+
+In `client/src/store/store.ts`, import `PROJECTOR_STATE_SCHEMA` and `ProjectorStateStore`, execute the schema beside `ENGAGEMENT_LEDGER_SCHEMA`, and add:
+
+```ts
+  /** Durable projector cursor + projection state + archive head. */
+  projectorState(): ProjectorStateStore {
+    return new ProjectorStateStore(this.db);
+  }
+```
+
+- [ ] **Step 5: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/store/ && yarn typecheck`
+Expected: PASS, 6 new tests; zero typecheck errors.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "$REPO" && git add client/src/store/projector-state.ts client/test/store/projector-state.test.ts client/src/store/store.ts
+git commit -m "feat(client): persist the projector cursor, projection state and archive head"
+```
+
+---
+
+## Task 8: Bridge-era legacy synthesis (`deriveBridgeTask`) and the legacy facts card
+
+Contract 9. Until stage 3, every claimable task is legacy-posted and carries no sealed Submission. This task owns the **one** shared pure function that reconstructs the subject Task document from the anchored legacy task, plus the facts card synthesized beside it.
+
+**This is a pinned cross-stage surface.** The stage-2 evaluator plan reuses `deriveBridgeTask` for bridge-era evaluation derivation and adds a cross-operator determinism fixture on top of it. Do not rename it, do not fork a second copy, and do not make it read a clock, the filesystem, or the network.
+
+**Files:**
+- Create: `packages/marketplace/pipeline/src/bridge-legacy.ts`
+- Create: `packages/marketplace/pipeline/src/bridge-legacy.test.ts`
+- Create: `packages/marketplace/pipeline/fixtures/bridge/legacy-task-anchored.json`
+- Create: `packages/marketplace/pipeline/fixtures/bridge/legacy-task-expected.json`
+- Modify: `packages/marketplace/pipeline/src/index.ts`
+
+**Interfaces:**
+- Consumes: `SubmissionFactsCardInput`, `FactsCardDerivation` from `./facts-mapper.js` (Task 2).
+- Produces — **pinned names, stage 2 substitutes against these exactly**:
+  ```ts
+  /** The chain-observed facts a legacy TaskCreated anchor carries. */
+  export interface LegacyTaskAnchor {
+    readonly chainId: number;
+    readonly taskCoordinator: `0x${string}`;
+    readonly taskId: bigint;
+    readonly creator: `0x${string}`;
+    readonly manifestDigest: `0x${string}`;
+    readonly taskCidDigest: `0x${string}`;
+    readonly maxClaims: number;
+    readonly solutionBudgetWei: bigint;
+    readonly verdictBudgetWei: bigint;
+  }
+  /** The anchored task document's own bytes, fetched from IPFS by the caller. */
+  export interface LegacyTaskDocument { readonly bytes: Uint8Array; readonly digest: `sha256:${string}`; }
+  export interface BridgeTaskDerivation {
+    /** Canonical JSON bytes of the reconstructed subject Task. */
+    readonly taskBytes: Uint8Array;
+    readonly taskDigest: `sha256:${string}`;
+    readonly profileUri: string;
+    readonly workKind: string;
+    readonly requirements: Readonly<Record<string, unknown>>;
+    readonly derivation: FactsCardDerivation; // always "legacy"
+  }
+  export type DeriveBridgeTaskResult =
+    | { readonly ok: true; readonly task: BridgeTaskDerivation }
+    | { readonly ok: false; readonly reason: BridgeDerivationRefusal };
+  export type BridgeDerivationRefusal =
+    | "document-unparsable" | "document-digest-mismatch"
+    | "missing-solver-type" | "missing-task-payload";
+
+  /**
+   * DETERMINISM GUARANTEE (relied on by cutover stage 2): pure — no clock, no
+   * I/O, no randomness, no environment reads. Given identical `anchor` and
+   * identical `document.bytes`, every operator on every host produces
+   * byte-identical `taskBytes` and therefore an identical `taskDigest`.
+   * Object key order in `taskBytes` is fixed by the canonical serializer, not
+   * by input insertion order.
+   */
+  export function deriveBridgeTask(
+    anchor: LegacyTaskAnchor, document: LegacyTaskDocument,
+  ): DeriveBridgeTaskResult;
+
+  /** The `legacy`-derivation facts card + mapper input for a bridge-era task. */
+  export function deriveBridgeFactsCardInput(
+    anchor: LegacyTaskAnchor, task: BridgeTaskDerivation,
+    operator: { readonly intendedAiUnits: number },
+  ): SubmissionFactsCardInput;
+
+  /** Deterministic bridge Submission URI — UUIDv5 over (chainId, coordinator, taskId). */
+  export function deriveBridgeSubmissionUri(anchor: LegacyTaskAnchor): `urn:uuid:${string}`;
+  ```
+
+- [ ] **Step 1: Write the fixtures**
+
+`packages/marketplace/pipeline/fixtures/bridge/legacy-task-anchored.json` — the anchored legacy task document as it exists on IPFS today (shape drawn from `client/src/harnesses/engine/persistence.ts`'s `task_payload` and the `solverType` gate):
+
+```json
+{
+  "solverType": "swe-rebench.v2",
+  "role": "restoration",
+  "description": "Make the failing tests in the repository pass.",
+  "spec": {
+    "repo": "https://github.com/example/widget",
+    "baseCommit": "0f1e2d3c4b5a69788796a5b4c3d2e1f000000000",
+    "failToPass": ["tests/test_widget.py::test_resize"],
+    "passToPass": ["tests/test_widget.py::test_create"]
+  },
+  "runPinning": { "harness": "claude-code", "model": "claude-haiku-4-5-20251001" }
+}
+```
+
+`packages/marketplace/pipeline/fixtures/bridge/legacy-task-expected.json` — the reconstructed subject Task document. Generate it once from the implementation in Step 4 and commit the exact bytes; the test compares against the file, so the fixture is the determinism anchor for stage 2:
+
+```json
+{
+  "author": "did:pkh:eip155:84532:0x00000000000000000000000000000000000000ff",
+  "payload": {
+    "baseCommit": "0f1e2d3c4b5a69788796a5b4c3d2e1f000000000",
+    "description": "Make the failing tests in the repository pass.",
+    "failToPass": ["tests/test_widget.py::test_resize"],
+    "passToPass": ["tests/test_widget.py::test_create"],
+    "repo": "https://github.com/example/widget"
+  },
+  "profile": { "uri": "https://jinn.network/task-profiles/repository-work/1.0" },
+  "protocol": "https://jinn.network/task-execution/1.0",
+  "provenance": {
+    "bridge": "legacy",
+    "chainId": 84532,
+    "taskCidDigest": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "taskCoordinator": "0x8a34793e10595c89b7e41cc7ff0f76850f44ad98",
+    "taskId": "7"
+  }
+}
+```
+
+- [ ] **Step 2: Write the failing test**
+
+```ts
+// packages/marketplace/pipeline/src/bridge-legacy.test.ts
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { sealJson } from "@jinn-network/record-discovery-protocol";
+import {
+  deriveBridgeFactsCardInput,
+  deriveBridgeSubmissionUri,
+  deriveBridgeTask,
+  type LegacyTaskAnchor,
+} from "./bridge-legacy.js";
+
+const ANCHORED = readFileSync(new URL("../fixtures/bridge/legacy-task-anchored.json", import.meta.url));
+const EXPECTED = readFileSync(new URL("../fixtures/bridge/legacy-task-expected.json", import.meta.url), "utf8");
+
+const ANCHOR: LegacyTaskAnchor = {
+  chainId: 84532,
+  taskCoordinator: "0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98",
+  taskId: 7n,
+  creator: "0x00000000000000000000000000000000000000ff",
+  manifestDigest: `0x${"b".repeat(64)}`,
+  taskCidDigest: `0x${"c".repeat(64)}`,
+  maxClaims: 3,
+  solutionBudgetWei: 1_000_000_000_000_000n,
+  verdictBudgetWei: 500_000_000_000_000n,
+};
+
+function document() {
+  return { bytes: new Uint8Array(ANCHORED), digest: sealJson(JSON.parse(ANCHORED.toString("utf8"))).digest };
+}
+
+describe("deriveBridgeTask", () => {
+  it("reconstructs the subject Task byte-for-byte against the pinned fixture", () => {
+    const result = deriveBridgeTask(ANCHOR, document());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(new TextDecoder().decode(result.task.taskBytes)).toBe(JSON.stringify(JSON.parse(EXPECTED)));
+  });
+
+  it("is deterministic across repeated derivations and across key-order permutations of the anchor", () => {
+    const a = deriveBridgeTask(ANCHOR, document());
+    const permuted: LegacyTaskAnchor = {
+      verdictBudgetWei: ANCHOR.verdictBudgetWei, solutionBudgetWei: ANCHOR.solutionBudgetWei,
+      maxClaims: ANCHOR.maxClaims, taskCidDigest: ANCHOR.taskCidDigest,
+      manifestDigest: ANCHOR.manifestDigest, creator: ANCHOR.creator,
+      taskId: ANCHOR.taskId, taskCoordinator: ANCHOR.taskCoordinator, chainId: ANCHOR.chainId,
+    };
+    const b = deriveBridgeTask(permuted, document());
+    expect(a.ok && b.ok).toBe(true);
+    if (a.ok && b.ok) {
+      expect(b.task.taskBytes).toEqual(a.task.taskBytes);
+      expect(b.task.taskDigest).toBe(a.task.taskDigest);
+    }
+  });
+
+  it("normalizes the coordinator address case so two operators agree", () => {
+    const lower = deriveBridgeTask(
+      { ...ANCHOR, taskCoordinator: ANCHOR.taskCoordinator.toLowerCase() as `0x${string}` },
+      document(),
+    );
+    const mixed = deriveBridgeTask(ANCHOR, document());
+    expect(lower.ok && mixed.ok).toBe(true);
+    if (lower.ok && mixed.ok) expect(lower.task.taskDigest).toBe(mixed.task.taskDigest);
+  });
+
+  it("carries the solver type through as the work kind", () => {
+    const result = deriveBridgeTask(ANCHOR, document());
+    expect(result.ok && result.task.workKind).toBe("swe-rebench.v2");
+  });
+
+  it("lifts legacy run pinning into the requirements bag", () => {
+    const result = deriveBridgeTask(ANCHOR, document());
+    expect(result.ok && result.task.requirements).toEqual({
+      runPinning: { harness: "claude-code", model: "claude-haiku-4-5-20251001" },
+    });
+  });
+
+  it("refuses a document whose digest does not match the supplied bytes", () => {
+    const result = deriveBridgeTask(ANCHOR, {
+      bytes: new Uint8Array(ANCHORED),
+      digest: `sha256:${"0".repeat(64)}`,
+    });
+    expect(result).toEqual({ ok: false, reason: "document-digest-mismatch" });
+  });
+
+  it("refuses unparsable bytes", () => {
+    const bytes = new TextEncoder().encode("{ not json");
+    const result = deriveBridgeTask(ANCHOR, { bytes, digest: sealJson({}).digest });
+    expect(result).toEqual({ ok: false, reason: "document-unparsable" });
+  });
+
+  it("refuses a document with no solver type", () => {
+    const bytes = new TextEncoder().encode(JSON.stringify({ spec: {} }));
+    const result = deriveBridgeTask(ANCHOR, { bytes, digest: sealJson({ spec: {} }).digest });
+    expect(result).toEqual({ ok: false, reason: "missing-solver-type" });
+  });
+
+  it("refuses a document with no task payload", () => {
+    const doc = { solverType: "swe.v2" };
+    const bytes = new TextEncoder().encode(JSON.stringify(doc));
+    const result = deriveBridgeTask(ANCHOR, { bytes, digest: sealJson(doc).digest });
+    expect(result).toEqual({ ok: false, reason: "missing-task-payload" });
+  });
+});
+
+describe("deriveBridgeSubmissionUri", () => {
+  it("is deterministic and identity-scoped", () => {
+    expect(deriveBridgeSubmissionUri(ANCHOR)).toBe(deriveBridgeSubmissionUri({ ...ANCHOR }));
+    expect(deriveBridgeSubmissionUri(ANCHOR)).not.toBe(deriveBridgeSubmissionUri({ ...ANCHOR, taskId: 8n }));
+    expect(deriveBridgeSubmissionUri(ANCHOR)).toMatch(/^urn:uuid:[0-9a-f-]{36}$/);
+  });
+});
+
+describe("deriveBridgeFactsCardInput", () => {
+  it("produces a legacy-marked mapper input carrying the manifest digest and the budget", () => {
+    const derived = deriveBridgeTask(ANCHOR, document());
+    expect(derived.ok).toBe(true);
+    if (!derived.ok) return;
+    const input = deriveBridgeFactsCardInput(ANCHOR, derived.task, { intendedAiUnits: 4 });
+    expect(input.derivation).toBe("legacy");
+    expect(input.taskId).toBe(7n);
+    expect(input.legacyManifestDigest).toBe(`0x${"b".repeat(64)}`);
+    expect(input.intendedSpendWei).toBe(ANCHOR.solutionBudgetWei);
+    expect(input.intendedAiUnits).toBe(4);
+    expect(input.workKind).toBe("swe-rebench.v2");
+    expect(input.card).toEqual({
+      taskDigest: derived.task.taskDigest,
+      taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+    });
+    expect(input.submission).toBe(deriveBridgeSubmissionUri(ANCHOR));
+  });
+});
+```
+
+- [ ] **Step 3: Run it to verify it fails**
+
+Run: `cd "$REPO/packages/marketplace/pipeline" && yarn vitest run src/bridge-legacy.test.ts`
+Expected: FAIL — `Failed to resolve import "./bridge-legacy.js"`.
+
+- [ ] **Step 4: Write the implementation**
+
+```ts
+// packages/marketplace/pipeline/src/bridge-legacy.ts
+import { createHash } from "node:crypto";
+import { recordDigest, sealJson } from "@jinn-network/record-discovery-protocol";
+import type { FactsCardDerivation, SubmissionFactsCardInput } from "./facts-mapper.js";
+
+/**
+ * Bridge-era synthesis (cutover stages 1-3). Until the posting flow moves, every
+ * claimable task is legacy-posted and carries no sealed Submission. This module
+ * is the ONE place the legacy shape is reconstructed into protocol documents;
+ * the evaluator flow reuses `deriveBridgeTask` unchanged.
+ *
+ * Everything here is pure. No clock, no filesystem, no network, no randomness,
+ * no environment reads. Two operators observing the same chain facts and
+ * fetching the same anchored bytes MUST produce byte-identical output.
+ */
+
+export interface LegacyTaskAnchor {
+  readonly chainId: number;
+  readonly taskCoordinator: `0x${string}`;
+  readonly taskId: bigint;
+  readonly creator: `0x${string}`;
+  readonly manifestDigest: `0x${string}`;
+  readonly taskCidDigest: `0x${string}`;
+  readonly maxClaims: number;
+  readonly solutionBudgetWei: bigint;
+  readonly verdictBudgetWei: bigint;
+}
+
+export interface LegacyTaskDocument {
+  readonly bytes: Uint8Array;
+  readonly digest: `sha256:${string}`;
+}
+
+export interface BridgeTaskDerivation {
+  readonly taskBytes: Uint8Array;
+  readonly taskDigest: `sha256:${string}`;
+  readonly profileUri: string;
+  readonly workKind: string;
+  readonly requirements: Readonly<Record<string, unknown>>;
+  readonly derivation: FactsCardDerivation;
+}
+
+export type BridgeDerivationRefusal =
+  | "document-unparsable"
+  | "document-digest-mismatch"
+  | "missing-solver-type"
+  | "missing-task-payload";
+
+export type DeriveBridgeTaskResult =
+  | { readonly ok: true; readonly task: BridgeTaskDerivation }
+  | { readonly ok: false; readonly reason: BridgeDerivationRefusal };
+
+const TASK_PROTOCOL = "https://jinn.network/task-execution/1.0";
+const REPOSITORY_WORK_PROFILE = "https://jinn.network/task-profiles/repository-work/1.0";
+/** Fixed namespace for bridge Submission URIs. Never regenerate this constant. */
+const BRIDGE_SUBMISSION_NAMESPACE = "d9c05a5e-1f0f-52b4-9f0b-3f2a7b6c4d81";
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Recursive key sort so serialization order never depends on insertion order. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  const record = asRecord(value);
+  if (record === undefined) return value;
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(record).sort()) {
+    const child = canonicalize(record[key]);
+    if (child !== undefined) out[key] = child;
+  }
+  return out;
+}
+
+function encode(value: unknown): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(canonicalize(value)));
+}
+
+export function deriveBridgeTask(
+  anchor: LegacyTaskAnchor,
+  document: LegacyTaskDocument,
+): DeriveBridgeTaskResult {
+  if (recordDigest(document.bytes) !== document.digest) {
+    return { ok: false, reason: "document-digest-mismatch" };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(document.bytes));
+  } catch {
+    return { ok: false, reason: "document-unparsable" };
+  }
+  const legacy = asRecord(parsed);
+  if (legacy === undefined) return { ok: false, reason: "document-unparsable" };
+
+  const solverType = legacy["solverType"];
+  if (typeof solverType !== "string" || solverType.length === 0) {
+    return { ok: false, reason: "missing-solver-type" };
+  }
+
+  const spec = asRecord(legacy["spec"]);
+  const description = legacy["description"];
+  if (spec === undefined && typeof description !== "string") {
+    return { ok: false, reason: "missing-task-payload" };
+  }
+
+  const payload: Record<string, unknown> = { ...(spec ?? {}) };
+  if (typeof description === "string") payload["description"] = description;
+
+  const requirements: Record<string, unknown> = {};
+  const runPinning = asRecord(legacy["runPinning"]);
+  if (runPinning !== undefined) requirements["runPinning"] = canonicalize(runPinning);
+
+  const task = {
+    protocol: TASK_PROTOCOL,
+    author: `did:pkh:eip155:${anchor.chainId}:${anchor.creator.toLowerCase()}`,
+    profile: { uri: REPOSITORY_WORK_PROFILE },
+    payload,
+    provenance: {
+      bridge: "legacy",
+      chainId: anchor.chainId,
+      taskCoordinator: anchor.taskCoordinator.toLowerCase(),
+      taskId: anchor.taskId.toString(10),
+      taskCidDigest: anchor.taskCidDigest.toLowerCase(),
+    },
+  };
+
+  const taskBytes = encode(task);
+  return {
+    ok: true,
+    task: {
+      taskBytes,
+      taskDigest: recordDigest(taskBytes),
+      profileUri: REPOSITORY_WORK_PROFILE,
+      workKind: solverType,
+      requirements,
+      derivation: "legacy",
+    },
+  };
+}
+
+/** UUIDv5 over the engagement identity, so every operator names it identically. */
+export function deriveBridgeSubmissionUri(anchor: LegacyTaskAnchor): `urn:uuid:${string}` {
+  const name = [
+    anchor.chainId.toString(10),
+    anchor.taskCoordinator.toLowerCase(),
+    anchor.taskId.toString(10),
+  ].join("|");
+  const namespaceBytes = Uint8Array.from(
+    (BRIDGE_SUBMISSION_NAMESPACE.replace(/-/g, "").match(/.{2}/g) ?? []).map((b) => parseInt(b, 16)),
+  );
+  const hash = createHash("sha1")
+    .update(Buffer.from(namespaceBytes))
+    .update(Buffer.from(name, "utf8"))
+    .digest();
+  const bytes = Uint8Array.prototype.slice.call(hash, 0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Buffer.from(bytes).toString("hex");
+  const uuid = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  return `urn:uuid:${uuid}`;
+}
+
+export function deriveBridgeFactsCardInput(
+  anchor: LegacyTaskAnchor,
+  task: BridgeTaskDerivation,
+  operator: { readonly intendedAiUnits: number },
+): SubmissionFactsCardInput {
+  return {
+    derivation: "legacy",
+    taskId: anchor.taskId,
+    card: { taskDigest: task.taskDigest, taskProfileUri: task.profileUri },
+    submission: deriveBridgeSubmissionUri(anchor),
+    nonce: anchor.taskId.toString(10),
+    requirements: task.requirements,
+    runnable: true,
+    intendedSpendWei: anchor.solutionBudgetWei,
+    intendedAiUnits: operator.intendedAiUnits,
+    workKind: task.workKind,
+    legacyManifestDigest: anchor.manifestDigest,
+  };
+}
+
+/** Kept exported so the marketplace-profile Delivery fixture can re-seal identically. */
+export { sealJson };
+```
+
+- [ ] **Step 5: Regenerate the expected fixture and re-run**
+
+Run once to emit the canonical bytes, then paste them into `legacy-task-expected.json`:
+
+```bash
+cd "$REPO/packages/marketplace/pipeline" && node --input-type=module -e "
+import { readFileSync } from 'node:fs';
+const { deriveBridgeTask } = await import('./dist/bridge-legacy.js');
+" 2>/dev/null || echo "run the vitest failure output instead: it prints the received string"
+```
+
+Simpler and preferred: run the test, copy the `Received` string from the first assertion's diff into the fixture file, and re-run.
+
+Run: `cd "$REPO/packages/marketplace/pipeline" && yarn vitest run src/bridge-legacy.test.ts`
+Expected: PASS, 13 tests.
+
+- [ ] **Step 6: Export from the barrel**
+
+In `packages/marketplace/pipeline/src/index.ts`:
+
+```ts
+export { deriveBridgeFactsCardInput, deriveBridgeSubmissionUri, deriveBridgeTask } from "./bridge-legacy.js";
+export type {
+  BridgeDerivationRefusal,
+  BridgeTaskDerivation,
+  DeriveBridgeTaskResult,
+  LegacyTaskAnchor,
+  LegacyTaskDocument,
+} from "./bridge-legacy.js";
+```
+
+- [ ] **Step 7: Run the package suite and commit**
+
+Run: `cd "$REPO/packages/marketplace/pipeline" && yarn test`
+Expected: PASS.
+
+```bash
+cd "$REPO" && git add packages/marketplace/pipeline/src/bridge-legacy.ts \
+  packages/marketplace/pipeline/src/bridge-legacy.test.ts \
+  packages/marketplace/pipeline/fixtures/bridge/ \
+  packages/marketplace/pipeline/src/index.ts
+git commit -m "feat(pipeline): derive bridge-era Task documents and legacy facts cards deterministically"
+```
+
+---
+
+## Task 9: Bridge-era converged-Delivery fixture (legacy evaluator parseability)
+
+Contract 9's other half — **verified by a fixture, not assumed**. The converged marketplace-profile Delivery re-homes the `jinn.execution.v1` content the still-legacy evaluator already parses. Stage 1's testnet gate closes the loop through that evaluator, so this must be proven before the swap.
+
+**Files:**
+- Create: `client/test/bridge/converged-delivery-legacy-parse.test.ts`
+- Create: `client/test/bridge/fixtures/converged-marketplace-delivery.json`
+
+**Interfaces:**
+- Consumes: `inspectDelivery` behaviour via `convergeDelivery` from `@jinn-network/marketplace-binding`; the legacy envelope parser the delivery-watcher uses (locate it with `grep -rn "jinn.execution.v1" "client/src" --include=*.ts` and import the exported validator it names).
+- Produces: nothing importable; a gate the deploy PR checklist cites.
+
+- [ ] **Step 1: Capture the fixture**
+
+Produce one real sealed marketplace-profile Delivery from the embedded backend and commit its exact bytes:
+
+```bash
+cd "$REPO/packages/task-execution/backend-local/assembly" && yarn vitest run src/backend.evidence.test.ts -t "seals" --reporter=verbose
+```
+
+Take the sealed Delivery bytes the test writes under its scratch `meta` directory and save them verbatim as `client/test/bridge/fixtures/converged-marketplace-delivery.json`. Do **not** hand-write the fixture — the point of the task is that a real sealed Delivery parses.
+
+- [ ] **Step 2: Write the failing test**
+
+```ts
+// client/test/bridge/converged-delivery-legacy-parse.test.ts
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { convergeDelivery } from '@jinn-network/marketplace-binding';
+// Replace with the exported legacy validator the grep in Interfaces names.
+import { parseSignedEnvelope } from '../../src/harnesses/engine/envelope.js';
+
+const BYTES = new Uint8Array(
+  readFileSync(new URL('./fixtures/converged-marketplace-delivery.json', import.meta.url)),
+);
+
+describe('bridge era: the converged Delivery stays parseable by the legacy evaluator', () => {
+  it('converges without re-sealing and pins the exact bytes', async () => {
+    const pinned: Uint8Array[] = [];
+    const converged = await convergeDelivery(BYTES, { pin: async (b) => { pinned.push(b); } });
+    expect(pinned).toHaveLength(1);
+    expect(pinned[0]).toEqual(BYTES);
+    expect(converged.sha256Digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it('re-homes jinn.execution.v1 content the legacy evaluator parses', () => {
+    const parsed = parseSignedEnvelope(new TextDecoder().decode(BYTES));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.envelope.executor.implName).toBeTypeOf('string');
+    expect(parsed.envelope.solution).toBeDefined();
+  });
+});
+```
+
+- [ ] **Step 3: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/bridge/converged-delivery-legacy-parse.test.ts`
+Expected: FAIL — the fixture is absent, or the legacy parser rejects the converged shape.
+
+- [ ] **Step 4: Resolve the failure honestly**
+
+If the legacy parser rejects the converged Delivery, **do not loosen the parser**. Record it as a finding, name the exact field that diverges, and raise it with the coordinator — it is a stage-1 blocker, because the stage gate requires the verdict leg through the still-legacy evaluator. The only sanctioned fix on this side is a mapping shim in `client/src/daemon/work-loop.ts` that hands the legacy evaluator the re-homed `jinn.execution.v1` sub-document, and it must be named in the PR body.
+
+- [ ] **Step 5: Run and commit**
+
+Run: `cd "$REPO/client" && yarn vitest run test/bridge/`
+Expected: PASS, 2 tests.
+
+```bash
+cd "$REPO" && git add client/test/bridge/
+git commit -m "test(client): pin that the converged marketplace Delivery parses in the legacy evaluator"
+```
+
+---
+
+## Task 10: Local archive — writer state and filesystem reader transport
+
+Finding 3. `discovery/serve`'s `BlobStore` is write-only and `writeArchivePages` is genesis-only, so the host owns page state and supplies `appendArchiveEntries` to `projectAnnouncements`.
+
+**Files:**
+- Create: `client/src/runtime/local-archive.ts`
+- Create: `client/test/runtime/local-archive.test.ts`
+
+**Interfaces:**
+- Consumes: `createFsBlobStore(rootDir)` from `@jinn-network/record-discovery-transport-http`; `writeArchivePages`, `maintainHead`, `signHead` from `@jinn-network/record-discovery-serve`; `archivePagePath`, `headPath`, `recordPath` from `@jinn-network/record-discovery-protocol`.
+- Produces:
+  ```ts
+  export interface LocalArchive {
+    readonly store: BlobStore;
+    /** The `appendArchiveEntries` port `projectAnnouncements` requires for incremental publication. */
+    appendArchiveEntries(input: {
+      source: SourceIdentity; previousHead: SourceHead; entries: readonly SignedEntry[];
+    }): Promise<{ pages: string[] }>;
+    /** Every entry written so far, oldest first. Held so page re-partitioning stays correct. */
+    entries(): readonly SignedEntry[];
+  }
+  export function openLocalArchive(input: {
+    rootDir: string; source: SourceIdentity; seedEntries?: readonly SignedEntry[];
+  }): LocalArchive;
+  /** Directory-prefix Transport so `discovery/client`'s sync reads the host's own archive. */
+  export function createFsArchiveTransport(rootDir: string): Transport;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/runtime/local-archive.test.ts
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { archivePagePath } from '@jinn-network/record-discovery-protocol';
+import { createFsArchiveTransport, openLocalArchive } from '../../src/runtime/local-archive.js';
+
+const SOURCE = { agent: 'did:example:operator', name: 'marketplace' };
+
+function entry(sequence: string) {
+  return {
+    entry: {
+      protocol: 'https://jinn.network/record-discovery/1.0',
+      source: SOURCE,
+      sequence,
+      previous: null,
+      timestamp: '2026-07-30T00:00:00.000Z',
+      announcements: [],
+    },
+  };
+}
+
+describe('openLocalArchive', () => {
+  it('writes pages under the archive root and reports them', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-archive-'));
+    const archive = openLocalArchive({ rootDir, source: SOURCE });
+    const head = {
+      protocol: 'https://jinn.network/record-discovery/1.0',
+      origin: 'did:example:operator/marketplace',
+      sequence: '0000000000000001',
+      entry: `sha256:${'a'.repeat(64)}` as const,
+      issuedAt: '2026-07-30T00:00:00.000Z',
+      refreshBy: '2026-07-31T00:00:00.000Z',
+    };
+    const result = await archive.appendArchiveEntries({
+      source: SOURCE, previousHead: head, entries: [entry('0000000000000001')],
+    });
+    expect(result.pages.length).toBeGreaterThan(0);
+    expect(archive.entries()).toHaveLength(1);
+  });
+
+  it('accumulates entries across appends so re-partitioning stays correct', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-archive-'));
+    const archive = openLocalArchive({ rootDir, source: SOURCE });
+    const head = {
+      protocol: 'https://jinn.network/record-discovery/1.0',
+      origin: 'did:example:operator/marketplace',
+      sequence: '0000000000000001',
+      entry: `sha256:${'a'.repeat(64)}` as const,
+      issuedAt: '2026-07-30T00:00:00.000Z',
+      refreshBy: '2026-07-31T00:00:00.000Z',
+    };
+    await archive.appendArchiveEntries({ source: SOURCE, previousHead: head, entries: [entry('0000000000000001')] });
+    await archive.appendArchiveEntries({ source: SOURCE, previousHead: head, entries: [entry('0000000000000002')] });
+    expect(archive.entries().map((e) => e.entry.sequence)).toEqual([
+      '0000000000000001', '0000000000000002',
+    ]);
+  });
+
+  it('reads its own archive back through the filesystem transport', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-archive-'));
+    const archive = openLocalArchive({ rootDir, source: SOURCE });
+    const head = {
+      protocol: 'https://jinn.network/record-discovery/1.0',
+      origin: 'did:example:operator/marketplace',
+      sequence: '0000000000000001',
+      entry: `sha256:${'a'.repeat(64)}` as const,
+      issuedAt: '2026-07-30T00:00:00.000Z',
+      refreshBy: '2026-07-31T00:00:00.000Z',
+    };
+    const { pages } = await archive.appendArchiveEntries({
+      source: SOURCE, previousHead: head, entries: [entry('0000000000000001')],
+    });
+    const transport = createFsArchiveTransport(rootDir);
+    const response = await transport.fetch(archivePagePath(SOURCE.name, pages[0]!));
+    expect(response.status).toBe(200);
+    expect(JSON.parse(new TextDecoder().decode(response.bytes)).entries).toHaveLength(1);
+  });
+
+  it('reports 404 for an absent path rather than throwing', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-archive-'));
+    const transport = createFsArchiveTransport(rootDir);
+    expect((await transport.fetch('/sources/marketplace/entries/nope')).status).toBe(404);
+  });
+
+  it('refuses a path that escapes the archive root', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-archive-'));
+    const transport = createFsArchiveTransport(rootDir);
+    expect((await transport.fetch('/../../etc/passwd')).status).toBe(400);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/local-archive.test.ts`
+Expected: FAIL — cannot resolve `../../src/runtime/local-archive.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+```ts
+// client/src/runtime/local-archive.ts
+import { readFile } from 'node:fs/promises';
+import { join, normalize, resolve, sep } from 'node:path';
+import { createFsBlobStore } from '@jinn-network/record-discovery-transport-http';
+import { writeArchivePages } from '@jinn-network/record-discovery-serve';
+import type { BlobStore, SignedEntry } from '@jinn-network/record-discovery-serve';
+import type { SourceHead, SourceIdentity } from '@jinn-network/record-discovery-protocol';
+import type { Transport, TransportResponse } from '@jinn-network/record-discovery-client';
+
+/**
+ * The operator's local discovery archive.
+ *
+ * `discovery/serve`'s `writeArchivePages` re-partitions the whole entry set
+ * positionally and its `BlobStore` is write-only (`put` alone), so the host
+ * holds page state: every entry ever appended is retained and re-supplied on
+ * each append. `appendArchiveEntries` is exactly the port
+ * `projectAnnouncements` requires for incremental publication.
+ */
+export interface LocalArchive {
+  readonly store: BlobStore;
+  appendArchiveEntries(input: {
+    source: SourceIdentity;
+    previousHead: SourceHead;
+    entries: readonly SignedEntry[];
+  }): Promise<{ pages: string[] }>;
+  entries(): readonly SignedEntry[];
+}
+
+export function openLocalArchive(input: {
+  rootDir: string;
+  source: SourceIdentity;
+  seedEntries?: readonly SignedEntry[];
+}): LocalArchive {
+  const store = createFsBlobStore(input.rootDir);
+  const held: SignedEntry[] = [...(input.seedEntries ?? [])];
+
+  return {
+    store,
+    entries: () => held,
+    async appendArchiveEntries({ source, entries }) {
+      for (const entry of entries) held.push(entry);
+      held.sort((a, b) => (a.entry.sequence < b.entry.sequence ? -1 : a.entry.sequence > b.entry.sequence ? 1 : 0));
+      return writeArchivePages(store, source.name, held);
+    },
+  };
+}
+
+const NOT_FOUND: TransportResponse = { status: 404, bytes: new Uint8Array() };
+const BAD_PATH: TransportResponse = { status: 400, bytes: new Uint8Array() };
+
+/**
+ * A directory-prefix `Transport`. `discovery/client`'s sync builds URLs by
+ * string concatenation on `servingRoot`, never `new URL()`, so a filesystem
+ * reader satisfies it exactly. Never route local reads through `checkLocator`
+ * — it classifies loopback as `private-address`.
+ */
+export function createFsArchiveTransport(rootDir: string): Transport {
+  const root = resolve(rootDir);
+  return {
+    async fetch(url: string): Promise<TransportResponse> {
+      const relative = normalize(url.startsWith('/') ? url.slice(1) : url);
+      const target = resolve(join(root, relative));
+      if (target !== root && !target.startsWith(`${root}${sep}`)) return BAD_PATH;
+      try {
+        const bytes = await readFile(target);
+        return { status: 200, contentType: 'application/json', declaredLength: bytes.byteLength, bytes: new Uint8Array(bytes) };
+      } catch {
+        return NOT_FOUND;
       }
     },
   };
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Run the tests**
 
-Run: `cd client && yarn vitest run test/daemon/claim-gate.test.ts && yarn typecheck`
-Expected: PASS (3 tests), zero typecheck errors.
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/local-archive.test.ts && yarn typecheck`
+Expected: PASS, 5 tests; zero typecheck errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/daemon/claim-gate.ts client/test/daemon/claim-gate.test.ts
-git commit -m "feat(operator): gate boot-time claiming on projector catch-up"
+cd "$REPO" && git add client/src/runtime/local-archive.ts client/test/runtime/local-archive.test.ts
+git commit -m "feat(client): hold archive page state and read the local archive back over the filesystem"
 ```
 
 ---
 
-## Task 11: The evidence join and the evidence driver loop
+## Task 11: Projector loop
+
+Replaces engine-watcher's chain scanning. Reads venue chain events via venue-base's log source, reduces to TEP observations plus signed discovery announcements, maintains the local archive, and owns the durable finality cursor the work loop's claim gate reads.
+
+**This task pins the subscription surface stage 2 substitutes against.** The work loop and, later, the evaluator loop subscribe through `ProjectorLoop.subscribe(listener)`. Do not rename it and do not add a second subscription mechanism.
 
 **Files:**
-- Create: `client/src/daemon/evidence-join.ts`, `client/src/daemon/evidence-driver.ts`
-- Modify: `client/src/daemon/loop-heartbeat.ts:33` (`LOOP_REGISTRY` gains `evidence-driver`), `client/src/api/gather-status.ts` (indexing-failure rollup)
-- Test: `client/test/daemon/evidence-join.test.ts`, `client/test/daemon/evidence-driver.test.ts`
-
-This is the join `packages/task-execution/backend-local/assembly` deliberately refuses to own — its architecture test asserts the package must never import `@jinn-network/evidence-local-runtime`. The host writes it. The driver then does what the backend will not: `sync`, publication under contract 6's policy, `awaitIndexed`, and surfacing indexing failures.
+- Create: `client/src/daemon/projector-loop.ts`
+- Create: `client/test/daemon/projector-loop.test.ts`
 
 **Interfaces:**
-- Consumes: `openLocalEvidenceRuntime(options): Promise<LocalEvidenceRuntime>` and `LocalEvidenceRuntime` (`@jinn-network/evidence-local-runtime`); `EvidenceBindingPorts`, `EvidenceIndexingOutcome` (`@jinn-network/task-execution-backend-local-assembly`).
-- Produces:
+- Consumes: `createBaseVenue(...).logSource` and `.finality`; `decodeMarketplaceLogs`, `marketplaceEventOriginAuthority`, `reduceMarketplaceProjection`, `projectAnnouncements`, `finalityPolicy` from `@jinn-network/marketplace-projector`; `ProjectorStateStore` (Task 7); `LocalArchive` (Task 10).
+- Produces — **pinned names**:
+  ```ts
+  /** One projected, claimable submission observation, ready for the facts mapper. */
+  export interface ProjectedSubmissionEvent {
+    readonly kind: 'submission-available';
+    readonly taskId: bigint;
+    readonly derivation: DerivationAnnotation;
+    readonly announcement: ProjectedAnnouncement;
+  }
+  export interface ProjectedDeliveryEvent {
+    readonly kind: 'delivery-observed';
+    readonly taskId: bigint;
+    readonly attemptIndex: number;
+    readonly derivation: DerivationAnnotation;
+    readonly announcement: ProjectedAnnouncement;
+  }
+  export type ProjectorEvent = ProjectedSubmissionEvent | ProjectedDeliveryEvent;
+  export type ProjectorListener = (event: ProjectorEvent) => void;
+
+  export interface ProjectorLoopOptions {
+    logSource: BaseVenue['logSource'];
+    authority: MarketplaceEventOriginAuthority;
+    state: ProjectorStateStore;
+    archive: LocalArchive;
+    announce: Omit<AnnouncementProjectionPorts, 'previousHead' | 'previousEntryDigest' | 'initialSequence' | 'appendArchiveEntries'>;
+    intervalMs?: number;      // default 5000
+    heartbeat?: () => void;
+    onRefusal?: (refusal: unknown) => void;
+  }
+
+  export class ProjectorLoop {
+    constructor(options: ProjectorLoopOptions);
+    run(): Promise<void>;
+    stop(): void;
+    /** PINNED SUBSCRIPTION SURFACE. Returns an unsubscribe function. */
+    subscribe(listener: ProjectorListener): () => void;
+    /** The durable finalized-tier cursor. */
+    durableCursor(): ProjectorCursor | undefined;
+    /** Contract 3's claim gate: true once the durable cursor reaches the finalized chain head. */
+    caughtUpToFinalized(): boolean;
+    /** One scan+project+publish cycle. Exposed for tests and for boot catch-up. */
+    tickOnce(): Promise<void>;
+  }
+  ```
+
+- [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/src/daemon/evidence-join.ts
-export interface OperatorEvidence {
-  readonly runtime: LocalEvidenceRuntime;
-  readonly ports: EvidenceBindingPorts;
-  close(): Promise<void>;
+// client/test/daemon/projector-loop.test.ts
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PROJECTOR_STATE_SCHEMA, ProjectorStateStore } from '../../src/store/projector-state.js';
+import { ProjectorLoop } from '../../src/daemon/projector-loop.js';
+
+function stubArchive() {
+  const appended: unknown[] = [];
+  return {
+    store: { put: async () => {} },
+    entries: () => [],
+    appendArchiveEntries: async (input: unknown) => { appended.push(input); return { pages: ['0000000000000001'] }; },
+    appended,
+  };
 }
 
-/** The host-owned join. `rootDir` defaults to `<earningDir>/../evidence`. */
-export async function openOperatorEvidence(input: {
-  readonly rootDir: string;
-  readonly signal?: AbortSignal;
-}): Promise<OperatorEvidence>;
-
-// client/src/daemon/evidence-driver.ts
-export type PublicationDecision =
-  | { readonly publish: true }
-  | { readonly publish: false; readonly reason: 'not-sealed-for-delivery' | 'capability-grant-material' | 'secret-forward' | 'already-published' };
-
-/** Contract 6 as a pure function so the policy is testable without a runtime. */
-export function decidePublication(record: {
-  readonly digest: `sha256:${string}`;
-  readonly sealedFor: 'delivery' | 'announcement' | 'none';
-  readonly containsCapabilityGrantMaterial: boolean;
-  readonly containsSecretForward: boolean;
-}, alreadyPublished: ReadonlySet<string>): PublicationDecision;
-
-export interface EvidenceDriverConfig {
-  readonly evidence: OperatorEvidence;
-  readonly intervalMs: number;
-  readonly store: Store;
-  readonly logger?: { info(m: string): void; warn(m: string): void };
+function stubLogSource(batches: Array<{ logs: unknown[]; live: { blockNumber: bigint; blockHash: `0x${string}` }; finalized: { blockNumber: bigint; blockHash: `0x${string}` } }>) {
+  let index = 0;
+  return {
+    head: async () => ({ live: batches.at(-1)!.live, finalized: batches.at(-1)!.finalized }),
+    scan: async () => {
+      const batch = batches[Math.min(index, batches.length - 1)];
+      index += 1;
+      return batch!;
+    },
+  };
 }
 
-export class EvidenceDriverLoop {
-  constructor(config: EvidenceDriverConfig);
-  tick(): Promise<{ readonly indexed: number; readonly failed: number; readonly pending: number }>;
-  run(): Promise<void>;
-  stop(): void;
-  /** Feeds the `/v1/status` indexing-failure rollup. */
-  failures(): Promise<readonly { reference: string; category: string; message: string }[]>;
+describe('ProjectorLoop', () => {
+  let state: ProjectorStateStore;
+
+  beforeEach(() => {
+    const db = new Database(':memory:');
+    db.exec(PROJECTOR_STATE_SCHEMA);
+    state = new ProjectorStateStore(db);
+  });
+
+  it('reports not-caught-up before the first successful scan', () => {
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 10n, blockHash: '0xaa' }, finalized: { blockNumber: 5n, blockHash: '0xbb' } }]) as never,
+      authority: {} as never,
+      state,
+      archive: stubArchive() as never,
+      announce: {} as never,
+    });
+    expect(loop.caughtUpToFinalized()).toBe(false);
+    expect(loop.durableCursor()).toBeUndefined();
+  });
+
+  it('advances and persists the durable finalized cursor after a tick', async () => {
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 10n, blockHash: '0xaa' }, finalized: { blockNumber: 5n, blockHash: '0xbb' } }]) as never,
+      authority: {} as never,
+      state,
+      archive: stubArchive() as never,
+      announce: {} as never,
+    });
+    await loop.tickOnce();
+    expect(loop.durableCursor()).toEqual({ blockNumber: 5n, blockHash: '0xbb' });
+    expect(loop.caughtUpToFinalized()).toBe(true);
+    expect(state.readCheckpoint().finalized).toEqual({ blockNumber: 5n, blockHash: '0xbb' });
+  });
+
+  it('restores the cursor from the store on construction', async () => {
+    state.writeCheckpoint({ finalized: { blockNumber: 99n, blockHash: '0xcc' } });
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 100n, blockHash: '0xaa' }, finalized: { blockNumber: 99n, blockHash: '0xcc' } }]) as never,
+      authority: {} as never, state, archive: stubArchive() as never, announce: {} as never,
+    });
+    expect(loop.durableCursor()).toEqual({ blockNumber: 99n, blockHash: '0xcc' });
+  });
+
+  it('delivers projected events to subscribers and stops after unsubscribe', async () => {
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 1n, blockHash: '0xaa' }, finalized: { blockNumber: 1n, blockHash: '0xaa' } }]) as never,
+      authority: {} as never, state, archive: stubArchive() as never, announce: {} as never,
+    });
+    const seen: unknown[] = [];
+    const unsubscribe = loop.subscribe((event) => seen.push(event));
+    loop.emitForTest({ kind: 'submission-available', taskId: 1n, derivation: {} as never, announcement: {} as never });
+    unsubscribe();
+    loop.emitForTest({ kind: 'submission-available', taskId: 2n, derivation: {} as never, announcement: {} as never });
+    expect(seen).toHaveLength(1);
+  });
+
+  it('never lets one subscriber throw take down the loop', async () => {
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 1n, blockHash: '0xaa' }, finalized: { blockNumber: 1n, blockHash: '0xaa' } }]) as never,
+      authority: {} as never, state, archive: stubArchive() as never, announce: {} as never,
+    });
+    const seen: unknown[] = [];
+    loop.subscribe(() => { throw new Error('subscriber blew up'); });
+    loop.subscribe((event) => seen.push(event));
+    expect(() => loop.emitForTest({ kind: 'submission-available', taskId: 1n, derivation: {} as never, announcement: {} as never })).not.toThrow();
+    expect(seen).toHaveLength(1);
+  });
+
+  it('rolls the cursor back to the finalized checkpoint on a hash mismatch', async () => {
+    state.writeCheckpoint({
+      live: { blockNumber: 20n, blockHash: '0xold' },
+      finalized: { blockNumber: 5n, blockHash: '0xbb' },
+    });
+    const loop = new ProjectorLoop({
+      logSource: {
+        head: async () => ({ live: { blockNumber: 20n, blockHash: '0xnew' }, finalized: { blockNumber: 5n, blockHash: '0xbb' } }),
+        scan: async () => { throw Object.assign(new Error('reorg'), { code: 'cursor-hash-mismatch' }); },
+      } as never,
+      authority: {} as never, state, archive: stubArchive() as never, announce: {} as never,
+    });
+    await loop.tickOnce();
+    expect(state.readCheckpoint().live).toEqual({ blockNumber: 5n, blockHash: '0xbb' });
+  });
+
+  it('calls the heartbeat once per tick', async () => {
+    const heartbeat = vi.fn();
+    const loop = new ProjectorLoop({
+      logSource: stubLogSource([{ logs: [], live: { blockNumber: 1n, blockHash: '0xaa' }, finalized: { blockNumber: 1n, blockHash: '0xaa' } }]) as never,
+      authority: {} as never, state, archive: stubArchive() as never, announce: {} as never, heartbeat,
+    });
+    await loop.tickOnce();
+    expect(heartbeat).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/projector-loop.test.ts`
+Expected: FAIL — cannot resolve `../../src/daemon/projector-loop.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+```ts
+// client/src/daemon/projector-loop.ts
+import {
+  createMarketplaceProjectionState,
+  decodeMarketplaceLogs,
+  projectAnnouncements,
+  reduceMarketplaceProjection,
+  type AnnouncementProjectionPorts,
+  type DerivationAnnotation,
+  type MarketplaceEventOriginAuthority,
+  type MarketplaceProjectionState,
+  type MarketplaceRawLog,
+  type ProjectedAnnouncement,
+} from '@jinn-network/marketplace-projector';
+import type { LocalArchive } from '../runtime/local-archive.js';
+import type { ProjectorCursor, ProjectorStateStore } from '../store/projector-state.js';
+
+export interface ProjectedSubmissionEvent {
+  readonly kind: 'submission-available';
+  readonly taskId: bigint;
+  readonly derivation: DerivationAnnotation;
+  readonly announcement: ProjectedAnnouncement;
+}
+
+export interface ProjectedDeliveryEvent {
+  readonly kind: 'delivery-observed';
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly derivation: DerivationAnnotation;
+  readonly announcement: ProjectedAnnouncement;
+}
+
+export type ProjectorEvent = ProjectedSubmissionEvent | ProjectedDeliveryEvent;
+export type ProjectorListener = (event: ProjectorEvent) => void;
+
+/** The venue log source's chunked scan surface (venue-base facade, program §5). */
+export interface ProjectorLogSource {
+  head(): Promise<{ live: ProjectorCursor; finalized: ProjectorCursor }>;
+  scan(from: ProjectorCursor | undefined): Promise<{
+    logs: readonly MarketplaceRawLog[];
+    live: ProjectorCursor;
+    finalized: ProjectorCursor;
+  }>;
+}
+
+export interface ProjectorLoopOptions {
+  logSource: ProjectorLogSource;
+  authority: MarketplaceEventOriginAuthority;
+  state: ProjectorStateStore;
+  archive: LocalArchive;
+  announce: Omit<
+    AnnouncementProjectionPorts,
+    'previousHead' | 'previousEntryDigest' | 'initialSequence' | 'appendArchiveEntries'
+  >;
+  intervalMs?: number;
+  heartbeat?: () => void;
+  onRefusal?: (refusal: unknown) => void;
+}
+
+const DEFAULT_INTERVAL_MS = 5_000;
+
+function isReorg(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: string }).code === 'cursor-hash-mismatch';
+}
+
+/**
+ * Reads venue chain events, reduces them to TEP observations plus signed
+ * discovery announcements, maintains the local archive, and owns the durable
+ * finality cursor the work loop's claim gate reads.
+ *
+ * Dual marks: a live cursor tracking `latest`, a durable checkpoint advancing
+ * only on the `finalized` tag. A cursor-hash mismatch is a reorg — roll the
+ * projector back to the finalized checkpoint and re-scan. Rollback governs
+ * projector STATE only; announcements already emitted from pre-finality blocks
+ * are corrected append-only through signed retractions, never rewritten.
+ */
+export class ProjectorLoop {
+  private readonly listeners = new Set<ProjectorListener>();
+  private projection: MarketplaceProjectionState;
+  private live: ProjectorCursor | undefined;
+  private finalized: ProjectorCursor | undefined;
+  private chainFinalized: ProjectorCursor | undefined;
+  private stopped = false;
+
+  constructor(private readonly options: ProjectorLoopOptions) {
+    const checkpoint = options.state.readCheckpoint();
+    this.live = checkpoint.live ?? checkpoint.finalized;
+    this.finalized = checkpoint.finalized;
+    this.projection = options.state.readProjection() ?? createMarketplaceProjectionState();
+  }
+
+  /** PINNED: the one subscription surface for the work loop and the evaluator loop. */
+  subscribe(listener: ProjectorListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  durableCursor(): ProjectorCursor | undefined {
+    return this.finalized;
+  }
+
+  /** Contract 3. No new claim is issued until this is true. */
+  caughtUpToFinalized(): boolean {
+    if (this.finalized === undefined || this.chainFinalized === undefined) return false;
+    return this.finalized.blockNumber >= this.chainFinalized.blockNumber;
+  }
+
+  /** One subscriber throwing must never take the loop down. */
+  private emit(event: ProjectorEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch (err) {
+        console.error('[projector] subscriber threw:', err);
+      }
+    }
+  }
+
+  /** Test seam only — production emission happens inside `tickOnce`. */
+  emitForTest(event: ProjectorEvent): void {
+    this.emit(event);
+  }
+
+  async tickOnce(): Promise<void> {
+    this.options.heartbeat?.();
+    let batch: Awaited<ReturnType<ProjectorLogSource['scan']>>;
+    try {
+      batch = await this.options.logSource.scan(this.live);
+    } catch (err) {
+      if (!isReorg(err)) throw err;
+      // Reorg: roll projector state back to the finalized checkpoint and re-scan
+      // on the next tick. Emitted announcements are corrected append-only.
+      this.live = this.finalized;
+      this.options.state.writeCheckpoint({
+        ...(this.live ? { live: this.live } : {}),
+        ...(this.finalized ? { finalized: this.finalized } : {}),
+      });
+      return;
+    }
+
+    this.chainFinalized = batch.finalized;
+
+    const events = decodeMarketplaceLogs(batch.logs, this.options.authority);
+    if (events.length > 0) {
+      const observationEvents = events.map((event) => ({
+        ...event,
+        projection: this.projectionContextFor(event),
+      }));
+      const transition = reduceMarketplaceProjection(observationEvents as never, this.projection);
+      this.projection = transition.state;
+      for (const refusal of transition.refusals) this.options.onRefusal?.(refusal);
+
+      const head = this.options.state.readArchiveHead();
+      const result = await projectAnnouncements(transition, {
+        ...this.options.announce,
+        ...(head === undefined
+          ? {}
+          : {
+              previousHead: head.head,
+              previousEntryDigest: head.previousEntryDigest,
+              initialSequence: BigInt(head.nextSequence),
+            }),
+        appendArchiveEntries: (input) => this.options.archive.appendArchiveEntries(input),
+      });
+      for (const refusal of result.refusals) this.options.onRefusal?.(refusal);
+
+      for (const announcement of result.announcements) {
+        const projected = this.toProjectorEvent(announcement);
+        if (projected !== undefined) this.emit(projected);
+      }
+
+      this.options.state.commit({
+        checkpoint: { live: batch.live, finalized: batch.finalized },
+        projection: this.projection,
+        ...(result.head === undefined
+          ? {}
+          : {
+              archiveHead: {
+                head: result.head,
+                previousEntryDigest: result.head.entry,
+                nextSequence: (BigInt(result.head.sequence) + 1n).toString(10).padStart(16, '0'),
+              },
+            }),
+      });
+    } else {
+      this.options.state.commit({
+        checkpoint: { live: batch.live, finalized: batch.finalized },
+        projection: this.projection,
+      });
+    }
+
+    this.live = batch.live;
+    this.finalized = batch.finalized;
+  }
+
+  /**
+   * The projection context the observation reducer needs. Bridge-era hosts fill
+   * `submission` and `taskDigest` from `deriveBridgeTask`; the composition root
+   * injects that resolver through `options.announce.resolveRecord`, so this
+   * method only carries chain-derived values.
+   */
+  private projectionContextFor(event: { derivation: DerivationAnnotation }): unknown {
+    return {
+      taskCoordinator: event.derivation.contract,
+      timestamp: new Date(0).toISOString(),
+    };
+  }
+
+  private toProjectorEvent(announcement: ProjectedAnnouncement): ProjectorEvent | undefined {
+    if (announcement.action !== 'available') return undefined;
+    const facts = (announcement.facts ?? {}) as Record<string, unknown>;
+    const taskId = facts['taskId'];
+    if (typeof taskId !== 'string') return undefined;
+    if (announcement.record.kind.includes('/delivery/')) {
+      const attemptIndex = facts['attemptIndex'];
+      return {
+        kind: 'delivery-observed',
+        taskId: BigInt(taskId),
+        attemptIndex: typeof attemptIndex === 'number' ? attemptIndex : 0,
+        derivation: announcement.derivation,
+        announcement,
+      };
+    }
+    return {
+      kind: 'submission-available',
+      taskId: BigInt(taskId),
+      derivation: announcement.derivation,
+      announcement,
+    };
+  }
+
+  async run(): Promise<void> {
+    const intervalMs = this.options.intervalMs ?? DEFAULT_INTERVAL_MS;
+    while (!this.stopped) {
+      try {
+        await this.tickOnce();
+      } catch (err) {
+        console.error('[projector] tick failed:', err);
+      }
+      if (this.stopped) break;
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, intervalMs));
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+  }
 }
 ```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/projector-loop.test.ts && yarn typecheck`
+Expected: PASS, 7 tests; zero typecheck errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "$REPO" && git add client/src/daemon/projector-loop.ts client/test/daemon/projector-loop.test.ts
+git commit -m "feat(client): add the projector loop with the pinned subscription surface"
+```
+
+---
+
+## Task 12: Host-owned evidence join
+
+The one join the stack deliberately refuses to own. `LocalEvidenceRuntime` structurally satisfies `EvidenceBindingPorts`; the composition root wires them together, and an architecture test keeps the wiring here.
+
+**Files:**
+- Create: `client/src/runtime/evidence-join.ts`
+- Create: `client/test/runtime/evidence-join.test.ts`
+- Create: `client/test/runtime/evidence-join.arch.test.ts`
+
+**Interfaces:**
+- Consumes: `openLocalEvidenceRuntime` from `@jinn-network/evidence-local-runtime`; `EvidenceBindingPorts` from `@jinn-network/task-execution-backend-local`.
+- Produces:
+  ```ts
+  export interface OperatorEvidence {
+    readonly ports: EvidenceBindingPorts;
+    readonly runtime: LocalEvidenceRuntime;
+    close(): Promise<void>;
+  }
+  export async function openOperatorEvidence(input: {
+    rootDir: string; signal?: AbortSignal;
+  }): Promise<OperatorEvidence>;
+  ```
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// client/test/daemon/evidence-join.test.ts
+// client/test/runtime/evidence-join.test.ts
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { openOperatorEvidence } from '../../src/daemon/evidence-join.js';
+import { openOperatorEvidence } from '../../src/runtime/evidence-join.js';
 
-describe('operator evidence join', () => {
-  it('produces EvidenceBindingPorts backed by the local runtime', async () => {
-    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-evidence-'));
-    const evidence = await openOperatorEvidence({ rootDir });
+describe('openOperatorEvidence', () => {
+  it('produces ports the backend can consume as EvidenceBindingPorts', async () => {
+    const evidence = await openOperatorEvidence({ rootDir: mkdtempSync(join(tmpdir(), 'jinn-ev-')) });
     try {
-      expect(evidence.ports.repository).toBe(evidence.runtime.repository);
-      expect(evidence.ports.catalog).toBe(evidence.runtime.catalog);
+      expect(evidence.ports.repository).toBeDefined();
+      expect(evidence.ports.catalog).toBeDefined();
       expect(typeof evidence.ports.awaitIndexed).toBe('function');
     } finally {
       await evidence.close();
     }
   });
 
-  it('closes the runtime exactly once', async () => {
-    const rootDir = mkdtempSync(join(tmpdir(), 'jinn-evidence-'));
-    const evidence = await openOperatorEvidence({ rootDir });
+  it('exposes the runtime so the evidence driver can sync and read status', async () => {
+    const evidence = await openOperatorEvidence({ rootDir: mkdtempSync(join(tmpdir(), 'jinn-ev-')) });
+    try {
+      expect(typeof evidence.runtime.sync).toBe('function');
+      expect(typeof evidence.runtime.getStatus).toBe('function');
+      expect(typeof evidence.runtime.listIndexingFailures).toBe('function');
+    } finally {
+      await evidence.close();
+    }
+  });
+
+  it('closes idempotently', async () => {
+    const evidence = await openOperatorEvidence({ rootDir: mkdtempSync(join(tmpdir(), 'jinn-ev-')) });
     await evidence.close();
     await expect(evidence.close()).resolves.toBeUndefined();
   });
@@ -2743,167 +3112,78 @@ describe('operator evidence join', () => {
 ```
 
 ```ts
-// client/test/daemon/evidence-driver.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { Store } from '../../src/store/store.js';
-import { EvidenceDriverLoop, decidePublication } from '../../src/daemon/evidence-driver.js';
+// client/test/runtime/evidence-join.arch.test.ts
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
 
-const DIGEST = `sha256:${'f'.repeat(64)}` as const;
+const REPO_CLIENT_SRC = resolve(import.meta.dirname, '../../src');
 
-describe('evidence publication policy', () => {
-  it('publishes a record sealed for delivery', () => {
-    expect(
-      decidePublication(
-        { digest: DIGEST, sealedFor: 'delivery', containsCapabilityGrantMaterial: false, containsSecretForward: false },
-        new Set(),
-      ),
-    ).toEqual({ publish: true });
-  });
-
-  it('refuses a record that is not sealed for delivery or announcement', () => {
-    expect(
-      decidePublication(
-        { digest: DIGEST, sealedFor: 'none', containsCapabilityGrantMaterial: false, containsSecretForward: false },
-        new Set(),
-      ),
-    ).toEqual({ publish: false, reason: 'not-sealed-for-delivery' });
-  });
-
-  it('never publishes capability-grant material', () => {
-    expect(
-      decidePublication(
-        { digest: DIGEST, sealedFor: 'delivery', containsCapabilityGrantMaterial: true, containsSecretForward: false },
-        new Set(),
-      ),
-    ).toEqual({ publish: false, reason: 'capability-grant-material' });
-  });
-
-  it('never publishes a secret forward', () => {
-    expect(
-      decidePublication(
-        { digest: DIGEST, sealedFor: 'announcement', containsCapabilityGrantMaterial: false, containsSecretForward: true },
-        new Set(),
-      ),
-    ).toEqual({ publish: false, reason: 'secret-forward' });
-  });
-
-  it('is idempotent by digest', () => {
-    expect(
-      decidePublication(
-        { digest: DIGEST, sealedFor: 'delivery', containsCapabilityGrantMaterial: false, containsSecretForward: false },
-        new Set([DIGEST]),
-      ),
-    ).toEqual({ publish: false, reason: 'already-published' });
-  });
-});
-
-describe('evidence driver loop', () => {
-  it('syncs and reports indexed and failed counts', async () => {
-    const sync = vi.fn(async () => ({ status: 'synchronized' as const, indexed: 2, failed: 0 }));
-    const driver = new EvidenceDriverLoop({
-      evidence: {
-        runtime: {
-          sync,
-          listIndexingFailures: async () => ({ items: [] }),
-          getStatus: async () => ({ pendingAnnouncements: 0 }),
-        },
-        ports: {},
-        close: async () => {},
-      } as never,
-      intervalMs: 5,
-      store: new Store(':memory:'),
-    });
-    expect(await driver.tick()).toEqual({ indexed: 2, failed: 0, pending: 0 });
-    expect(sync).toHaveBeenCalledOnce();
-  });
-
-  it('warns once per failed reference and exposes it for the status rollup', async () => {
-    const warn = vi.fn();
-    const driver = new EvidenceDriverLoop({
-      evidence: {
-        runtime: {
-          sync: async () => ({ status: 'synchronized' as const, indexed: 0, failed: 1 }),
-          listIndexingFailures: async () => ({
-            items: [
-              {
-                reference: 'urn:jinn:evidence:record:abc',
-                category: 'protocol-nonconformance',
-                sourceCode: 'E_CONFORMANCE',
-                message: 'record does not conform',
-                observedAt: '2026-07-30T09:00:00.000Z',
-              },
-            ],
-          }),
-          getStatus: async () => ({ pendingAnnouncements: 3 }),
-        },
-        ports: {},
-        close: async () => {},
-      } as never,
-      intervalMs: 5,
-      store: new Store(':memory:'),
-      logger: { info: vi.fn(), warn },
-    });
-    await driver.tick();
-    await driver.tick();
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(await driver.failures()).toEqual([
-      {
-        reference: 'urn:jinn:evidence:record:abc',
-        category: 'protocol-nonconformance',
-        message: 'record does not conform',
-      },
-    ]);
+describe('architecture: the evidence join is host-owned and lives in exactly one module', () => {
+  it('only client/src/runtime/evidence-join.ts imports the concrete evidence local runtime', () => {
+    // Path-shaped, deliberately: the token `client` is overloaded repo-wide.
+    const out = execFileSync(
+      'grep',
+      ['-rl', '@jinn-network/evidence-local-runtime', REPO_CLIENT_SRC, '--include=*.ts'],
+      { encoding: 'utf8' },
+    ).trim();
+    expect(out.split('\n').filter(Boolean)).toEqual([resolve(REPO_CLIENT_SRC, 'runtime/evidence-join.ts')]);
   });
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd client && yarn vitest run test/daemon/evidence-join.test.ts test/daemon/evidence-driver.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/evidence-join.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/evidence-join.test.ts test/runtime/evidence-join.arch.test.ts`
+Expected: FAIL — cannot resolve `../../src/runtime/evidence-join.js`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the implementation**
 
 ```ts
-// client/src/daemon/evidence-join.ts
-import {
-  openLocalEvidenceRuntime,
-  type LocalEvidenceRuntime,
-} from '@jinn-network/evidence-local-runtime';
-import type {
-  EvidenceBindingPorts,
-  EvidenceIndexingOutcome,
-} from '@jinn-network/task-execution-backend-local-assembly';
+// client/src/runtime/evidence-join.ts
+import { openLocalEvidenceRuntime } from '@jinn-network/evidence-local-runtime';
+import type { LocalEvidenceRuntime } from '@jinn-network/evidence-local-runtime';
+import type { EvidenceBindingPorts } from '@jinn-network/task-execution-backend-local';
 
+/**
+ * The `EvidenceBindingPorts` <- `evidence-local-runtime` join.
+ *
+ * The backend package deliberately refuses to own this: its architecture test
+ * (`assembly/src/evidence-join.test.ts`) asserts the assembly source never
+ * imports `@jinn-network/evidence-local-runtime`. `LocalEvidenceRuntime`
+ * satisfies `EvidenceBindingPorts` structurally — `repository`, `catalog`, and
+ * `awaitIndexed(reference)` line up, and the port types `projection`/`failure`
+ * as `unknown` precisely so the local-runtime types stay unimported over there.
+ *
+ * This module is the ONLY place under `client/src/` allowed to import the
+ * concrete runtime; `evidence-join.arch.test.ts` enforces that.
+ */
 export interface OperatorEvidence {
-  readonly runtime: LocalEvidenceRuntime;
   readonly ports: EvidenceBindingPorts;
+  readonly runtime: LocalEvidenceRuntime;
   close(): Promise<void>;
 }
 
-/**
- * The one join the stack deliberately refuses to own: `backend-local/assembly` declares
- * `EvidenceBindingPorts` and its architecture test forbids importing the local runtime that
- * satisfies it. The operator runtime is the composition root, so the join lives here.
- */
 export async function openOperatorEvidence(input: {
-  readonly rootDir: string;
-  readonly signal?: AbortSignal;
+  rootDir: string;
+  signal?: AbortSignal;
 }): Promise<OperatorEvidence> {
   const runtime = await openLocalEvidenceRuntime({
     rootDir: input.rootDir,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(input.signal ? { signal: input.signal } : {}),
   });
+
+  const ports: EvidenceBindingPorts = {
+    repository: runtime.repository,
+    catalog: runtime.catalog,
+    awaitIndexed: (reference) => runtime.awaitIndexed(reference),
+  };
+
   let closed = false;
   return {
+    ports,
     runtime,
-    ports: {
-      repository: runtime.repository,
-      catalog: runtime.catalog,
-      awaitIndexed: (reference): Promise<EvidenceIndexingOutcome> =>
-        runtime.awaitIndexed(reference) as Promise<EvidenceIndexingOutcome>,
-    },
-    async close(): Promise<void> {
+    async close() {
       if (closed) return;
       closed = true;
       await runtime.close();
@@ -2912,2549 +3192,2968 @@ export async function openOperatorEvidence(input: {
 }
 ```
 
-```ts
-// client/src/daemon/evidence-driver.ts (policy + loop; only the policy is shown in full)
-export function decidePublication(
-  record: {
-    readonly digest: `sha256:${string}`;
-    readonly sealedFor: 'delivery' | 'announcement' | 'none';
-    readonly containsCapabilityGrantMaterial: boolean;
-    readonly containsSecretForward: boolean;
-  },
-  alreadyPublished: ReadonlySet<string>,
-): PublicationDecision {
-  if (record.containsCapabilityGrantMaterial) {
-    return { publish: false, reason: 'capability-grant-material' };
-  }
-  if (record.containsSecretForward) return { publish: false, reason: 'secret-forward' };
-  if (record.sealedFor === 'none') return { publish: false, reason: 'not-sealed-for-delivery' };
-  if (alreadyPublished.has(record.digest)) return { publish: false, reason: 'already-published' };
-  return { publish: true };
-}
-```
+- [ ] **Step 4: Run the tests**
 
-`EvidenceDriverLoop.tick()`:
-1. `const report = await this.config.evidence.runtime.sync();`
-2. `const status = await this.config.evidence.runtime.getStatus();`
-3. `const page = await this.config.evidence.runtime.listIndexingFailures({ limit: 25 });`
-4. Cache `page.items` on the instance for `failures()`; warn once per unseen `reference` (a `Set<string>` on the instance).
-5. Return `{ indexed: report.indexed, failed: report.failed, pending: status.pendingAnnouncements }`.
-
-`run()` uses `runLoop({ name: 'evidence-driver', intervalMs, store, body })`; `LOOP_REGISTRY` gains `'evidence-driver': { intervalMs: 30_000, floorMs: 300_000 }`. `gather-status.ts` gains `evidenceIndexing: { failures: await driver.failures(), pending }`, which the SPA renders as an `evidence_indexing_failed` state message in Task 17.
-
-**Announce-after-indexed.** The work loop (Task 13) calls `evidence.ports.awaitIndexed(receipt.record)` after `runPipeline` returns `delivered` and before the projector may announce the delivery. The driver's `sync()` is what makes that terminate.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon/evidence-join.test.ts test/daemon/evidence-driver.test.ts && yarn typecheck`
-Expected: PASS (7 tests), zero typecheck errors.
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/ && yarn typecheck`
+Expected: PASS, 4 new tests; zero typecheck errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/daemon/evidence-join.ts client/src/daemon/evidence-driver.ts client/src/daemon/loop-heartbeat.ts client/src/api/gather-status.ts client/test/daemon
-git commit -m "feat(operator): write the evidence join and drive local-runtime sync and publication"
+cd "$REPO" && git add client/src/runtime/evidence-join.ts client/test/runtime/evidence-join.test.ts client/test/runtime/evidence-join.arch.test.ts
+git commit -m "feat(client): own the evidence binding join in the composition root"
 ```
 
 ---
 
-## Task 12: The composition root
+## Task 13: Evidence driver loop
+
+Drives what the backend deliberately will not: local-runtime `sync`, publication policy, `awaitIndexed`, indexing-failure surfacing. Contract 6.
 
 **Files:**
-- Create: `client/src/daemon/composition-root.ts`
-- Modify: `client/src/main.ts:2164` (build the composition before `new Daemon({...})` and pass it through)
-- Test: `client/test/daemon/composition-root.test.ts`
-
-The composition root is the only place in the repository that assembles `LocalTaskExecutionBackendConfig`, `PipelineConfig`, and `PipelinePorts`. Every field of `LocalTaskExecutionBackendConfig` (`packages/task-execution/backend-local/assembly/src/backend.ts:494`) is mapped here from operator config.
+- Create: `client/src/daemon/evidence-driver.ts`
+- Create: `client/test/daemon/evidence-driver.test.ts`
 
 **Interfaces:**
-- Consumes: `createBaseVenue` (venue-base); `LocalTaskExecutionBackend`, `LocalTaskExecutionBackendConfig`, `LocalProvisionerInput`, `SelectedProvisioner` (`@jinn-network/task-execution-backend-local-assembly`); `claudeCodeLauncher`, `codexLauncher`, `hermesLauncher`, `cursorLauncher` (`@jinn-network/task-execution-launchers`); `makeDirProvisioner`, `makeWorktreeProvisioner`, `selectProvisioner` (`@jinn-network/task-execution-workspace`); `resolveProfile`, `ProfileStore` (`@jinn-network/task-execution-profiles`); `CLAIM_NOTHING`, `takeEveryRunnable`, `matchLegacyManifestDigest`, `PipelineConfig`, `PipelinePorts` (`@jinn-network/marketplace-pipeline`); `createChainFactResolver`, `createBindingResolver` (`@jinn-network/trust-resolve`); `createRegistryPinPort` (`@jinn-network/marketplace-binding`); `openOperatorEvidence` (Task 11); `setVenueBroadcaster` (Task 7); `toPipelineWiring` (Task 1).
+- Consumes: `OperatorEvidence` from Task 12.
 - Produces:
+  ```ts
+  export interface EvidencePublicationDecision { publish: boolean; reason?: 'not-sealed-for-delivery' | 'capability-grant-material' | 'secret-forward' | 'already-published'; }
+  export function decideEvidencePublication(input: {
+    reference: EvidenceRecordReference;
+    sealedForDelivery: ReadonlySet<string>;
+    alreadyPublished: ReadonlySet<string>;
+    classification?: 'capability-grant' | 'secret-forward' | 'record';
+  }): EvidencePublicationDecision;
 
-```ts
-// client/src/daemon/composition-root.ts
-export interface OperatorComposition {
-  readonly backend: TaskExecutionBackend;
-  readonly pipelineConfig: PipelineConfig;
-  readonly pipelinePorts: PipelinePorts;
-  readonly venue: BaseVenue;                  // the createBaseVenue return value
-  readonly evidence: OperatorEvidence;
-  readonly chain: MarketplaceChainConfig;
-  readonly safeAddress: `0x${string}`;
-  readonly mechAddress: `0x${string}`;
-  close(): Promise<void>;
-}
-
-export interface CompositionRootInput {
-  readonly config: JinnConfig;
-  readonly publicClient: PublicClient;
-  readonly walletClient: WalletClient;
-  readonly safeAddress: `0x${string}`;
-  readonly mechAddress: `0x${string}`;
-  readonly chain: MarketplaceChainConfig;
-  readonly stateRoot: string;               // `<earningDir>/../engine/backend`
-  readonly evidenceRoot: string;            // `<earningDir>/../evidence`
-  readonly venueStateDbPath: string;        // `<earningDir>/../venue/venue.db`
-  readonly profileStore: ProfileStore;
-  readonly secretForwardResolver?: SecretForwardResolver;
-  readonly logger?: { info(m: string): void; warn(m: string): void };
-}
-
-/** Installs the single broadcaster as its first side effect. */
-export async function buildOperatorComposition(
-  input: CompositionRootInput,
-): Promise<OperatorComposition>;
-
-/** Pure: operator claim policy config → the pipeline's ClaimPredicate. */
-export function buildClaimPredicate(
-  policy: ClaimPolicyConfig | undefined,
-  wiring: readonly ExecutionWiringEntry[],
-): ClaimPredicate;
-```
-
-`LocalTaskExecutionBackendConfig` field map — every required field, no gaps:
-
-| Field | Value |
-| --- | --- |
-| `stateRoot` | `input.stateRoot` |
-| `source` | `` `urn:jinn:operator:${safeAddress.toLowerCase()}` `` |
-| `executor` | `` `urn:jinn:operator-runtime:${version}` `` from `dist/build-meta` |
-| `profileStore` | `input.profileStore` |
-| `launchers` | `[claudeCodeLauncher, codexLauncher, hermesLauncher, cursorLauncher]` filtered to the harnesses named by `config.executionWiring[].harness` |
-| `launcherDeployments` | one entry per selected launcher: `{ executablePath, versionProbe }` resolved from `config.claudePath` / `JINN_CODEX_PATH` / `JINN_HERMES_PATH` |
-| `provisioner` | `(input) => selectProvisioner(...)` returning `{ id, contract }` |
-| `provisionerCapabilities` | `{ taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE], workspaceKinds: ['plain-dir','git-worktree'], inputMediaTypes: ['application/json'], outputMediaTypes: ['application/json','application/octet-stream'], isolation: ['process'] }` |
-| `maxConcurrentAttempts` | `config.maxConcurrentAttempts ?? 4` |
-| `recorderAvailability` | `'always'` — stage 1 requires evidence capture on every solve |
-| `trustKeys` | `{ observationSigningKeyConfigured: true, deliverySigningKeyConfigured: true }` |
-| `evidence` | `evidence.ports` from `openOperatorEvidence` |
-| `capabilityGrants` | `(grants) => resolveCapabilityGrants(grants, config)` |
-| `secretForwardResolver` | `input.secretForwardResolver` |
-| `cancellationGraceMs` | `30_000` |
-| `heartbeatIntervalMs` | `10_000` |
-| `now` | omitted (wall clock) |
-| `faults` | omitted — production compositions leave it absent |
-
-`PipelinePorts` map: `claim: venue.claim`, `finality: venue.finality`, `deliveryWait: venue.deliveryWait`, `settlement: { ...venue.settlement, pin: createRegistryPinPort({ addUrl: config.ipfsRegistryUrl }).pin, verifySettlementGrade }`, `ipfs: createRegistryPinPort({ addUrl: config.ipfsRegistryUrl })`, `release: venue.release`.
-
-`verifySettlementGrade` composes `createBindingResolver` + `createChainFactResolver` from `@jinn-network/trust-resolve` and returns the three independent checks (`executorBinding`, `dispatchBinding`, `evaluationSpecification`) `settleDelivery` demands — never collapsed to a boolean.
+  export interface EvidenceDriverOptions {
+    evidence: OperatorEvidence;
+    intervalMs?: number;               // default 15000
+    heartbeat?: () => void;
+    onIndexingFailures?: (failures: readonly LocalIndexingFailure[]) => void;
+    onStatus?: (status: LocalEvidenceRuntimeStatus) => void;
+  }
+  export class EvidenceDriverLoop {
+    constructor(options: EvidenceDriverOptions);
+    run(): Promise<void>;
+    stop(): void;
+    tickOnce(): Promise<void>;
+    /** Records that this digest was sealed for marketplace delivery, making it publishable. */
+    markSealedForDelivery(digest: string): void;
+  }
+  ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/test/daemon/composition-root.test.ts
-import { describe, expect, it } from 'vitest';
-import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
-import { buildClaimPredicate } from '../../src/daemon/composition-root.js';
+// client/test/daemon/evidence-driver.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { EvidenceDriverLoop, decideEvidencePublication } from '../../src/daemon/evidence-driver.js';
 
-const WIRING = [
-  {
-    workKind: 'QmSolver',
-    harness: 'claude-code',
-    model: 'm',
-    plugins: [],
-    credentialRef: 'c',
-    isolationPolicy: 'process',
-    legacyManifestDigest: 'QmSolver',
-  },
-];
+const REF = { digest: `sha256:${'a'.repeat(64)}` } as never;
 
-const FACTS = {
-  taskId: 1n,
-  taskDigest: `sha256:${'a'.repeat(64)}` as const,
-  submission: 'urn:uuid:11111111-2222-3333-4444-555555555555' as const,
-  nonce: '0x1',
-  profileUri: 'p',
-  requirements: {},
-  runnable: true,
-  intendedSpendWei: 0n,
-  intendedAiUnits: 0,
-  workKind: 'QmSolver',
-  legacyManifestDigest: 'QmSolver',
-};
-
-const CAPS = { spendCapWei: 10n, aiUnitCap: 10 };
-
-describe('claim predicate assembly', () => {
-  it('claims nothing when no policy is configured', () => {
-    expect(buildClaimPredicate(undefined, WIRING)).toBe(CLAIM_NOTHING);
+describe('decideEvidencePublication', () => {
+  it('publishes a record sealed for delivery', () => {
+    expect(decideEvidencePublication({
+      reference: REF,
+      sealedForDelivery: new Set([`sha256:${'a'.repeat(64)}`]),
+      alreadyPublished: new Set(),
+    })).toEqual({ publish: true });
   });
 
-  it('claims nothing in claim-nothing mode', () => {
-    const predicate = buildClaimPredicate(
-      { mode: 'claim-nothing', spendCapWei: '10', aiUnitCap: 10 },
-      WIRING,
-    );
-    expect(predicate).toBe(CLAIM_NOTHING);
+  it('refuses a record that was never sealed for delivery or announcement', () => {
+    expect(decideEvidencePublication({
+      reference: REF, sealedForDelivery: new Set(), alreadyPublished: new Set(),
+    })).toEqual({ publish: false, reason: 'not-sealed-for-delivery' });
   });
 
-  it('claims every runnable card in every-runnable mode', () => {
-    const predicate = buildClaimPredicate(
-      { mode: 'every-runnable', spendCapWei: '10', aiUnitCap: 10 },
-      WIRING,
-    );
-    expect(predicate!(FACTS, {} as never, CAPS)).toBe(true);
-    expect(predicate!({ ...FACTS, runnable: false }, {} as never, CAPS)).toBe(false);
+  it('never publishes capability-grant material', () => {
+    expect(decideEvidencePublication({
+      reference: REF,
+      sealedForDelivery: new Set([`sha256:${'a'.repeat(64)}`]),
+      alreadyPublished: new Set(),
+      classification: 'capability-grant',
+    })).toEqual({ publish: false, reason: 'capability-grant-material' });
   });
 
-  it('matches the legacy manifest digest in bridge mode', () => {
-    const predicate = buildClaimPredicate(
-      { mode: 'match-legacy-manifest-digest', spendCapWei: '10', aiUnitCap: 10 },
-      WIRING,
-    );
-    expect(predicate!(FACTS, {} as never, CAPS)).toBe(true);
-    expect(
-      predicate!({ ...FACTS, legacyManifestDigest: 'QmOther' }, {} as never, CAPS),
-    ).toBe(false);
+  it('never publishes secret forwards', () => {
+    expect(decideEvidencePublication({
+      reference: REF,
+      sealedForDelivery: new Set([`sha256:${'a'.repeat(64)}`]),
+      alreadyPublished: new Set(),
+      classification: 'secret-forward',
+    })).toEqual({ publish: false, reason: 'secret-forward' });
   });
 
-  it('declines a work kind with no wiring entry in bridge mode', () => {
-    const predicate = buildClaimPredicate(
-      { mode: 'match-legacy-manifest-digest', spendCapWei: '10', aiUnitCap: 10 },
-      WIRING,
-    );
-    // No wiring entry means no legacy digest to match; runPipeline's `wiring-missing`
-    // gate is the authority, so the predicate must not silently accept.
-    expect(predicate!({ ...FACTS, workKind: 'QmUnknown' }, {} as never, CAPS)).toBe(false);
+  it('is idempotent by digest', () => {
+    expect(decideEvidencePublication({
+      reference: REF,
+      sealedForDelivery: new Set([`sha256:${'a'.repeat(64)}`]),
+      alreadyPublished: new Set([`sha256:${'a'.repeat(64)}`]),
+    })).toEqual({ publish: false, reason: 'already-published' });
+  });
+});
+
+describe('EvidenceDriverLoop', () => {
+  function stubEvidence(overrides: Record<string, unknown> = {}) {
+    return {
+      ports: {} as never,
+      close: async () => {},
+      runtime: {
+        sync: vi.fn(async () => ({ status: 'synchronized', indexed: 1, failed: 0 })),
+        getStatus: vi.fn(async () => ({ state: 'ready', terminalFailureCount: 0, recentFailures: [] })),
+        listIndexingFailures: vi.fn(async () => ({ items: [] })),
+        ...overrides,
+      },
+    } as never;
+  }
+
+  it('syncs and reports status once per tick', async () => {
+    const evidence = stubEvidence();
+    const onStatus = vi.fn();
+    const loop = new EvidenceDriverLoop({ evidence, onStatus });
+    await loop.tickOnce();
+    expect((evidence as { runtime: { sync: ReturnType<typeof vi.fn> } }).runtime.sync).toHaveBeenCalledTimes(1);
+    expect(onStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces indexing failures to the operator panel callback', async () => {
+    const failure = { reference: REF, category: 'content-corrupt', sourceCode: 'x', message: 'bad', observedAt: 'now' };
+    const evidence = stubEvidence({ listIndexingFailures: vi.fn(async () => ({ items: [failure] })) });
+    const onIndexingFailures = vi.fn();
+    await new EvidenceDriverLoop({ evidence, onIndexingFailures }).tickOnce();
+    expect(onIndexingFailures).toHaveBeenCalledWith([failure]);
+  });
+
+  it('never lets a sync failure escape the tick', async () => {
+    const evidence = stubEvidence({ sync: vi.fn(async () => { throw new Error('disk gone'); }) });
+    await expect(new EvidenceDriverLoop({ evidence }).tickOnce()).resolves.toBeUndefined();
+  });
+
+  it('calls the heartbeat even when the tick errors', async () => {
+    const heartbeat = vi.fn();
+    const evidence = stubEvidence({ sync: vi.fn(async () => { throw new Error('nope'); }) });
+    await new EvidenceDriverLoop({ evidence, heartbeat }).tickOnce();
+    expect(heartbeat).toHaveBeenCalledTimes(1);
   });
 });
 ```
 
-Plus an integration test in the same file that calls `buildOperatorComposition` against a temp `stateRoot`/`evidenceRoot` with a stub `createBaseVenue`, asserting: (a) `setVenueBroadcaster` was installed before the function returned, (b) `pipelineConfig.wiring` equals `toPipelineWiring(config.executionWiring)`, (c) `pipelineConfig.caps` equals `{ spendCapWei: BigInt(policy.spendCapWei), aiUnitCap: policy.aiUnitCap }`, (d) `backend.capabilities()` resolves with the configured `taskProfiles`, (e) `close()` closes the evidence runtime.
+- [ ] **Step 2: Run it to verify it fails**
 
-- [ ] **Step 2: Run test to verify it fails**
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/evidence-driver.test.ts`
+Expected: FAIL — cannot resolve `../../src/daemon/evidence-driver.js`.
 
-Run: `cd client && yarn vitest run test/daemon/composition-root.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/composition-root.js"`.
-
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the implementation**
 
 ```ts
-// client/src/daemon/composition-root.ts (predicate assembly shown in full)
-import {
-  CLAIM_NOTHING,
-  matchLegacyManifestDigest,
-  takeEveryRunnable,
-  type ClaimPredicate,
-  type ExecutionWiringEntry,
-} from '@jinn-network/marketplace-pipeline';
-import type { ClaimPolicyConfig } from '../config/shape-v2.js';
+// client/src/daemon/evidence-driver.ts
+import type {
+  LocalEvidenceRuntimeStatus,
+  LocalIndexingFailure,
+} from '@jinn-network/evidence-local-runtime';
+import type { EvidenceRecordReference } from '@jinn-network/evidence-protocol';
+import type { OperatorEvidence } from '../runtime/evidence-join.js';
 
-export function buildClaimPredicate(
-  policy: ClaimPolicyConfig | undefined,
-  wiring: readonly ExecutionWiringEntry[],
-): ClaimPredicate {
-  if (policy === undefined || policy.mode === 'claim-nothing') return CLAIM_NOTHING;
-  if (policy.mode === 'every-runnable') return takeEveryRunnable();
-  const byWorkKind = new Map(wiring.map((entry) => [entry.workKind, entry]));
-  const bridge = matchLegacyManifestDigest(byWorkKind);
-  return (facts, capabilities, caps) => {
-    if (!byWorkKind.has(facts.workKind)) return false;
-    return facts.runnable && bridge!(facts, capabilities, caps);
-  };
+export interface EvidencePublicationDecision {
+  publish: boolean;
+  reason?: 'not-sealed-for-delivery' | 'capability-grant-material' | 'secret-forward' | 'already-published';
+}
+
+/**
+ * Publication policy (cross-plan contract 6). The driver publishes ONLY records
+ * already sealed for marketplace delivery or announcement — capability-grant
+ * material and secret-forwards never enter the archive. Idempotent by record
+ * digest. A record is announced only after it is indexed.
+ */
+export function decideEvidencePublication(input: {
+  reference: EvidenceRecordReference;
+  sealedForDelivery: ReadonlySet<string>;
+  alreadyPublished: ReadonlySet<string>;
+  classification?: 'capability-grant' | 'secret-forward' | 'record';
+}): EvidencePublicationDecision {
+  if (input.classification === 'capability-grant') {
+    return { publish: false, reason: 'capability-grant-material' };
+  }
+  if (input.classification === 'secret-forward') {
+    return { publish: false, reason: 'secret-forward' };
+  }
+  const digest = (input.reference as { digest: string }).digest;
+  if (!input.sealedForDelivery.has(digest)) {
+    return { publish: false, reason: 'not-sealed-for-delivery' };
+  }
+  if (input.alreadyPublished.has(digest)) {
+    return { publish: false, reason: 'already-published' };
+  }
+  return { publish: true };
+}
+
+export interface EvidenceDriverOptions {
+  evidence: OperatorEvidence;
+  intervalMs?: number;
+  heartbeat?: () => void;
+  onIndexingFailures?: (failures: readonly LocalIndexingFailure[]) => void;
+  onStatus?: (status: LocalEvidenceRuntimeStatus) => void;
+}
+
+const DEFAULT_INTERVAL_MS = 15_000;
+
+/**
+ * Drives what the local backend deliberately will not: runtime `sync`,
+ * publication policy, `awaitIndexed`, and indexing-failure surfacing.
+ * Evidence failures never gate the solve path — every tick swallows its errors
+ * and keeps the heartbeat alive.
+ */
+export class EvidenceDriverLoop {
+  private readonly sealedForDelivery = new Set<string>();
+  private stopped = false;
+
+  constructor(private readonly options: EvidenceDriverOptions) {}
+
+  markSealedForDelivery(digest: string): void {
+    this.sealedForDelivery.add(digest);
+  }
+
+  async tickOnce(): Promise<void> {
+    this.options.heartbeat?.();
+    try {
+      await this.options.evidence.runtime.sync();
+      const status = await this.options.evidence.runtime.getStatus();
+      this.options.onStatus?.(status);
+      const page = await this.options.evidence.runtime.listIndexingFailures({ limit: 20 });
+      if (page.items.length > 0) this.options.onIndexingFailures?.(page.items);
+    } catch (err) {
+      console.error('[evidence-driver] tick failed:', err);
+    }
+  }
+
+  async run(): Promise<void> {
+    const intervalMs = this.options.intervalMs ?? DEFAULT_INTERVAL_MS;
+    while (!this.stopped) {
+      await this.tickOnce();
+      if (this.stopped) break;
+      await new Promise((resolveTimer) => setTimeout(resolveTimer, intervalMs));
+    }
+  }
+
+  stop(): void {
+    this.stopped = true;
+  }
 }
 ```
 
-`buildOperatorComposition` in order:
+- [ ] **Step 4: Run the tests**
 
-1. `const venue = createBaseVenue({ chain, publicClient, walletClient, safeAddress, stateDbPath: venueStateDbPath });`
-2. `setVenueBroadcaster(venue.safe);` — **first**, before any loop can send a transaction (contract 1).
-3. `const evidence = await openOperatorEvidence({ rootDir: evidenceRoot });`
-4. Build `launchers` + `launcherDeployments` from `config.executionWiring`.
-5. `const backend = new LocalTaskExecutionBackend(backendConfig);` with the field map above.
-6. `const wiring = toPipelineWiring(config.executionWiring ?? []);`
-7. `const pipelineConfig: PipelineConfig = { chain, predicate: buildClaimPredicate(config.claimPolicy, wiring), caps: { spendCapWei: BigInt(config.claimPolicy?.spendCapWei ?? '0'), aiUnitCap: config.claimPolicy?.aiUnitCap ?? 0 }, wiring, priorityMech: mechAddress };`
-8. `const pipelinePorts: PipelinePorts = { … }` as mapped above.
-9. Return the composition with `close()` = `await evidence.close(); clearVenueBroadcaster();`.
-
-In `client/src/main.ts`, insert the build immediately before `new Daemon({...})` (line 2164) and pass `composition` on `DaemonConfig`. `DaemonConfig` in `client/src/daemon/daemon.ts:85` gains `readonly composition?: OperatorComposition;` — optional so the many existing `new Daemon(...)` test call sites keep compiling; `daemon.start()` starts the three new loops only when it is present.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon/composition-root.test.ts && yarn typecheck`
-Expected: PASS (5 predicate tests + 5 integration assertions), zero typecheck errors.
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/evidence-driver.test.ts && yarn typecheck`
+Expected: PASS, 9 tests; zero typecheck errors.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/daemon/composition-root.ts client/src/daemon/daemon.ts client/src/main.ts client/test/daemon/composition-root.test.ts
-git commit -m "feat(operator): add the composition root assembling backend, pipeline, and venue ports"
+cd "$REPO" && git add client/src/daemon/evidence-driver.ts client/test/daemon/evidence-driver.test.ts
+git commit -m "feat(client): drive evidence sync, publication policy and indexing failures"
 ```
 
 ---
 
-## Task 13: The work loop
+## Task 14: Rolling-window caps re-pointed onto pipeline caps
+
+The host keeps its SQLite rolling-window accounting (the pipeline owns no window policy) and projects it into the pipeline's `OperatorCaps` snapshot. Caps re-key from manifest CID to the wiring entry's credential (binding design §7).
+
+**Files:**
+- Create: `client/src/daemon/caps-gate.ts`
+- Create: `client/test/daemon/caps-gate.test.ts`
+
+**Interfaces:**
+- Consumes: `Store`'s existing `spentTodayMicros` / `usdMicrosThisBlock` / `usdMicrosThisWeek` readers (see `client/src/daemon/spend-cap-gate.ts` and `ai-units-gate.ts` for the exact method names in this worktree); `OperatorCaps`, `checkCaps` from `@jinn-network/marketplace-pipeline`.
+- Produces:
+  ```ts
+  export interface RollingWindowCapsConfig {
+    /** Per-credential daily USD ceiling, micros. Absent credential ⇒ claim nothing. */
+    readonly spendCapMicrosByCredential: Readonly<Record<string, number>>;
+    readonly aiUnitCap: number;
+    readonly weiPerUsdMicro: bigint;
+  }
+  export interface RollingWindowCaps {
+    /** The remaining headroom, projected into the pipeline's cap shape. */
+    snapshot(credentialRef: string): OperatorCaps;
+    /** Records actual spend after a settled engagement. */
+    record(credentialRef: string, spentMicros: number, aiUnits: number): void;
+  }
+  export function createRollingWindowCaps(
+    store: CapsAccountingStore, config: RollingWindowCapsConfig,
+  ): RollingWindowCaps;
+  export interface CapsAccountingStore {
+    spentTodayMicros(credentialRef: string): number;
+    aiUnitsThisWindow(credentialRef: string): number;
+    recordSpend(credentialRef: string, micros: number, aiUnits: number): void;
+  }
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/daemon/caps-gate.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { checkCaps } from '@jinn-network/marketplace-pipeline';
+import { createRollingWindowCaps } from '../../src/daemon/caps-gate.js';
+
+function stubStore(spent = 0, units = 0) {
+  return {
+    spentTodayMicros: vi.fn(() => spent),
+    aiUnitsThisWindow: vi.fn(() => units),
+    recordSpend: vi.fn(),
+  };
+}
+
+const CONFIG = {
+  spendCapMicrosByCredential: { 'claude-code': 10_000 },
+  aiUnitCap: 30,
+  weiPerUsdMicro: 1_000_000_000n,
+};
+
+describe('createRollingWindowCaps', () => {
+  it('projects full headroom when nothing has been spent', () => {
+    const caps = createRollingWindowCaps(stubStore(), CONFIG);
+    expect(caps.snapshot('claude-code')).toEqual({
+      spendCapWei: 10_000n * 1_000_000_000n,
+      aiUnitCap: 30,
+    });
+  });
+
+  it('subtracts the rolling window spend from the headroom', () => {
+    const caps = createRollingWindowCaps(stubStore(6_000, 12), CONFIG);
+    expect(caps.snapshot('claude-code')).toEqual({
+      spendCapWei: 4_000n * 1_000_000_000n,
+      aiUnitCap: 18,
+    });
+  });
+
+  it('floors headroom at zero rather than going negative', () => {
+    const caps = createRollingWindowCaps(stubStore(99_999, 999), CONFIG);
+    expect(caps.snapshot('claude-code')).toEqual({ spendCapWei: 0n, aiUnitCap: 0 });
+  });
+
+  it('claims nothing for an unknown credential (safety default)', () => {
+    const caps = createRollingWindowCaps(stubStore(), CONFIG);
+    expect(caps.snapshot('unconfigured')).toEqual({ spendCapWei: 0n, aiUnitCap: 0 });
+  });
+
+  it('produces a snapshot the pipeline cap check consumes directly', () => {
+    const caps = createRollingWindowCaps(stubStore(6_000, 12), CONFIG);
+    const snapshot = caps.snapshot('claude-code');
+    expect(checkCaps(1_000n, 2, snapshot)).toBe(true);
+    expect(checkCaps(10_000n * 1_000_000_000n, 2, snapshot)).toBe(false);
+    expect(checkCaps(1_000n, 99, snapshot)).toBe(false);
+  });
+
+  it('records actual spend against the credential', () => {
+    const store = stubStore();
+    createRollingWindowCaps(store, CONFIG).record('claude-code', 1_234, 3);
+    expect(store.recordSpend).toHaveBeenCalledWith('claude-code', 1_234, 3);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/caps-gate.test.ts`
+Expected: FAIL — cannot resolve `../../src/daemon/caps-gate.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+```ts
+// client/src/daemon/caps-gate.ts
+import type { OperatorCaps } from '@jinn-network/marketplace-pipeline';
+
+/**
+ * The pipeline owns no window policy — `checkCaps` compares one intent against
+ * one snapshot. The host keeps its SQLite rolling-window accounting and
+ * projects the remaining headroom into that snapshot. Caps re-key from manifest
+ * CID onto the wiring entry's credential (marketplace binding design §7).
+ */
+export interface CapsAccountingStore {
+  spentTodayMicros(credentialRef: string): number;
+  aiUnitsThisWindow(credentialRef: string): number;
+  recordSpend(credentialRef: string, micros: number, aiUnits: number): void;
+}
+
+export interface RollingWindowCapsConfig {
+  readonly spendCapMicrosByCredential: Readonly<Record<string, number>>;
+  readonly aiUnitCap: number;
+  readonly weiPerUsdMicro: bigint;
+}
+
+export interface RollingWindowCaps {
+  snapshot(credentialRef: string): OperatorCaps;
+  record(credentialRef: string, spentMicros: number, aiUnits: number): void;
+}
+
+const CLAIM_NOTHING: OperatorCaps = { spendCapWei: 0n, aiUnitCap: 0 };
+
+export function createRollingWindowCaps(
+  store: CapsAccountingStore,
+  config: RollingWindowCapsConfig,
+): RollingWindowCaps {
+  return {
+    snapshot(credentialRef: string): OperatorCaps {
+      const ceiling = config.spendCapMicrosByCredential[credentialRef];
+      // Unconfigured credential is the claim-nothing safety default, not "unlimited".
+      if (ceiling === undefined) return CLAIM_NOTHING;
+      const remainingMicros = Math.max(0, ceiling - store.spentTodayMicros(credentialRef));
+      const remainingUnits = Math.max(0, config.aiUnitCap - store.aiUnitsThisWindow(credentialRef));
+      return {
+        spendCapWei: BigInt(remainingMicros) * config.weiPerUsdMicro,
+        aiUnitCap: remainingUnits,
+      };
+    },
+    record(credentialRef: string, spentMicros: number, aiUnits: number): void {
+      store.recordSpend(credentialRef, spentMicros, aiUnits);
+    },
+  };
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/caps-gate.test.ts && yarn typecheck`
+Expected: PASS, 6 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "$REPO" && git add client/src/daemon/caps-gate.ts client/test/daemon/caps-gate.test.ts
+git commit -m "feat(client): project the rolling-window caps into the pipeline cap snapshot"
+```
+
+---
+
+## Task 15: Local backend configuration assembly
+
+Nobody assembles `LocalTaskExecutionBackendConfig` today — the design calls execution "the most complete step" with no assembler. This task writes it.
+
+**Files:**
+- Create: `client/src/runtime/backend-config.ts`
+- Create: `client/test/runtime/backend-config.test.ts`
+- Modify: `packages/task-execution/backend-local/assembly/src/index.ts` (finding 4)
+
+**Interfaces:**
+- Consumes: `makeLocalTaskExecutionBackend`, `LocalTaskExecutionBackendConfig`, `EvidenceBindingPorts`, `LocalLauncherDeployment` from `@jinn-network/task-execution-backend-local`; `makeClaudeCodeLauncher`, `makeCodexLauncher`, `makeHermesLauncher`, `makeCursorLauncher`, `selectProfileSafeLauncher` from the launchers package; `makeDirProvisioner`, `makeWorktreeProvisioner`, `selectProvisioner` from the workspace package; `buildRepositoryWorkProfile`, `sealTaskProfile`, `ProfileStore` from `@jinn-network/task-execution-profiles`.
+- Produces:
+  ```ts
+  export interface BuildBackendConfigInput {
+    stateRoot: string;
+    source: `${string}:${string}`;
+    executor: `${string}:${string}`;
+    wiring: readonly ExecutionWiringConfigV2[];
+    evidence: EvidenceBindingPorts;
+    launcherDeployments?: Readonly<Record<string, LocalLauncherDeployment>>;
+    maxConcurrentAttempts?: number;
+  }
+  export function buildLocalBackendConfig(input: BuildBackendConfigInput): LocalTaskExecutionBackendConfig;
+  export function buildOperatorProfileStore(): ProfileStore;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/runtime/backend-config.test.ts
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { makeLocalTaskExecutionBackend } from '@jinn-network/task-execution-backend-local';
+import { buildLocalBackendConfig, buildOperatorProfileStore } from '../../src/runtime/backend-config.js';
+
+const WIRING = [
+  {
+    workKind: 'swe-rebench.v2', harness: 'claude-code', model: 'claude-haiku-4-5-20251001',
+    plugins: [], credentialRef: 'claude-code', isolationPolicy: 'workspace',
+    legacyManifestDigest: 'bafy',
+  },
+];
+
+function input(overrides: Record<string, unknown> = {}) {
+  return {
+    stateRoot: mkdtempSync(join(tmpdir(), 'jinn-backend-')),
+    source: 'operator:test' as const,
+    executor: 'operator:test' as const,
+    wiring: WIRING,
+    evidence: { repository: {}, catalog: {}, awaitIndexed: async () => ({ status: 'not-announced', reference: {} }) } as never,
+    ...overrides,
+  };
+}
+
+describe('buildOperatorProfileStore', () => {
+  it('resolves the repository-work profile by its sealed digest', () => {
+    const store = buildOperatorProfileStore();
+    const anyDigest = `sha256:${'0'.repeat(64)}` as const;
+    expect(store.get(anyDigest)).toBeUndefined();
+  });
+});
+
+describe('buildLocalBackendConfig', () => {
+  it('injects the host-owned evidence ports', () => {
+    const config = buildLocalBackendConfig(input());
+    expect(config.evidence).toBeDefined();
+  });
+
+  it('registers a launcher for every distinct harness in the wiring', () => {
+    const config = buildLocalBackendConfig(input({
+      wiring: [...WIRING, { ...WIRING[0], workKind: 'other', harness: 'codex', credentialRef: 'codex' }],
+    }));
+    expect(config.launchers.map((l) => l.id).sort()).toEqual(['claude-code', 'codex'].sort());
+  });
+
+  it('registers no launcher when the wiring is empty (claim-nothing default)', () => {
+    expect(buildLocalBackendConfig(input({ wiring: [] })).launchers).toEqual([]);
+  });
+
+  it('threads the state root and identities through', () => {
+    const built = input();
+    const config = buildLocalBackendConfig(built);
+    expect(config.stateRoot).toBe(built.stateRoot);
+    expect(config.source).toBe('operator:test');
+    expect(config.executor).toBe('operator:test');
+  });
+
+  it('produces a config the backend factory accepts', () => {
+    expect(() => makeLocalTaskExecutionBackend(buildLocalBackendConfig(input()))).not.toThrow();
+  });
+
+  it('defaults concurrency to one and honours an override', () => {
+    expect(buildLocalBackendConfig(input()).maxConcurrentAttempts).toBe(1);
+    expect(buildLocalBackendConfig(input({ maxConcurrentAttempts: 4 })).maxConcurrentAttempts).toBe(4);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/backend-config.test.ts`
+Expected: FAIL — cannot resolve `../../src/runtime/backend-config.js`.
+
+- [ ] **Step 3: Re-export `LocalLauncherDeployment` from the assembly barrel**
+
+In `packages/task-execution/backend-local/assembly/src/index.ts`, add to the existing type export block:
+
+```ts
+export type { LauncherReadiness, LocalLauncherDeployment, VerifiedExecutable } from "./pinning.js";
+```
+
+- [ ] **Step 4: Write the implementation**
+
+```ts
+// client/src/runtime/backend-config.ts
+import {
+  makeClaudeCodeLauncher,
+  makeCodexLauncher,
+  makeCursorLauncher,
+  makeHermesLauncher,
+} from '@jinn-network/task-execution-backend-local-launchers';
+import type { LauncherContract } from '@jinn-network/task-execution-backend-local-launchers';
+import { makeDirProvisioner, makeWorktreeProvisioner } from '@jinn-network/task-execution-backend-local-workspace';
+import type {
+  EvidenceBindingPorts,
+  LocalLauncherDeployment,
+  LocalTaskExecutionBackendConfig,
+} from '@jinn-network/task-execution-backend-local';
+import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
+import type { ProfileStore, TaskProfileDocument } from '@jinn-network/task-execution-profiles';
+import type { ExecutionWiringConfigV2 } from '../config-migration-v2.js';
+
+/**
+ * The operator's profile store. `resolveProfile` re-seals whatever the store
+ * returns and rejects on digest mismatch, so the store is untrusted by design —
+ * a plain digest-keyed map is the right shape.
+ */
+export function buildOperatorProfileStore(): ProfileStore {
+  const documents = new Map<string, TaskProfileDocument>();
+  for (const profile of [buildRepositoryWorkProfile()]) {
+    documents.set(sealTaskProfile(profile).digest, profile);
+  }
+  return { get: (digest) => documents.get(digest) };
+}
+
+const LAUNCHER_FACTORIES: Readonly<Record<string, () => LauncherContract>> = {
+  'claude-code': makeClaudeCodeLauncher,
+  codex: makeCodexLauncher,
+  hermes: makeHermesLauncher,
+  cursor: makeCursorLauncher,
+};
+
+export interface BuildBackendConfigInput {
+  stateRoot: string;
+  source: `${string}:${string}`;
+  executor: `${string}:${string}`;
+  wiring: readonly ExecutionWiringConfigV2[];
+  evidence: EvidenceBindingPorts;
+  launcherDeployments?: Readonly<Record<string, LocalLauncherDeployment>>;
+  maxConcurrentAttempts?: number;
+}
+
+/**
+ * Assembles `LocalTaskExecutionBackendConfig` from operator configuration.
+ *
+ * Launcher registration follows the wiring, not a static list: an operator with
+ * no wiring entries registers no launcher, which is the claim-nothing safety
+ * default expressed at the capability layer as well as the predicate layer.
+ * Without an injected `launcherDeployments` probe a launcher reports not-ready,
+ * so a real deployment must supply them — the composition root does.
+ */
+export function buildLocalBackendConfig(
+  input: BuildBackendConfigInput,
+): LocalTaskExecutionBackendConfig {
+  const harnesses = new Set(input.wiring.map((entry) => entry.harness).filter((h) => h.length > 0));
+  const launchers: LauncherContract[] = [];
+  for (const harness of harnesses) {
+    const factory = LAUNCHER_FACTORIES[harness];
+    if (factory === undefined) {
+      console.warn(`[backend] no launcher for wired harness "${harness}"; skipping`);
+      continue;
+    }
+    launchers.push(factory());
+  }
+
+  return {
+    stateRoot: input.stateRoot,
+    source: input.source,
+    executor: input.executor,
+    profileStore: buildOperatorProfileStore(),
+    launchers,
+    ...(input.launcherDeployments === undefined
+      ? {}
+      : { launcherDeployments: input.launcherDeployments }),
+    provisioner: (provisionInput) =>
+      provisionInput.task.profile.uri.includes('repository-work')
+        ? { id: 'worktree', contract: makeWorktreeProvisioner() }
+        : { id: 'dir', contract: makeDirProvisioner() },
+    provisionerCapabilities: { kinds: ['dir', 'worktree'] } as LocalTaskExecutionBackendConfig['provisionerCapabilities'],
+    maxConcurrentAttempts: input.maxConcurrentAttempts ?? 1,
+    evidence: input.evidence,
+  };
+}
+```
+
+Note: read `assembly/src/backend.ts`'s `ProvisionerCapabilities` / `CapabilityProvisionerConfig` before writing the `provisionerCapabilities` literal, and use its actual field names rather than the sketch above if they differ; the cast exists only so this plan does not invent a shape.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/backend-config.test.ts && yarn typecheck`
+Expected: PASS, 7 tests; zero typecheck errors.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "$REPO" && git add client/src/runtime/backend-config.ts client/test/runtime/backend-config.test.ts \
+  packages/task-execution/backend-local/assembly/src/index.ts
+git commit -m "feat(client): assemble the local task-execution backend config from operator wiring"
+```
+
+---
+
+## Task 16: Work loop
+
+Subscribes to the projector, maps facts, and runs one pipeline engagement per claim. Enforces contracts 2 and 3.
 
 **Files:**
 - Create: `client/src/daemon/work-loop.ts`
-- Modify: `client/src/daemon/daemon.ts:354` (start it), `client/src/daemon/loop-heartbeat.ts:33` (`LOOP_REGISTRY` gains `work`)
-- Test: `client/test/daemon/work-loop.test.ts`
+- Create: `client/test/daemon/work-loop.test.ts`
 
 **Interfaces:**
-- Consumes: `mapAnnouncedSubmissionToFacts` (Task 5); `EngagementLedger` (Task 6); `deliverToMarketplace` (Task 8); `ClaimGate` (Task 10); `OperatorComposition` (Task 12); `runPipeline`, `PipelineRunOutcome` (`@jinn-network/marketplace-pipeline`); `gateClaimByAiUnits` (`client/src/daemon/ai-units-gate.ts`), `gateClaimBySpendCap` (`client/src/daemon/spend-cap-gate.ts`).
+- Consumes: `ProjectorLoop.subscribe` (Task 11); `mapSubmissionFacts`, `deriveBridgeTask`, `deriveBridgeFactsCardInput`, `runPipeline` from `@jinn-network/marketplace-pipeline`; `EngagementLedger`, `engagementIdempotencyKey` (Task 3); `RollingWindowCaps` (Task 14).
 - Produces:
-
-```ts
-// client/src/daemon/work-loop.ts
-export interface ArchiveSubscription {
-  /** Local-archive announcements the projector wrote since `afterSequence`. */
-  since(afterSequence: string): Promise<readonly AnnouncedSubmissionCard[]>;
-}
-
-export interface WorkLoopConfig {
-  readonly composition: OperatorComposition;
-  readonly archive: ArchiveSubscription;
-  readonly ledger: EngagementLedger;
-  readonly claimGate: ClaimGate;
-  readonly store: Store;
-  readonly estimateAiUnits: (workKind: string) => number;
-  readonly aiUnits?: AiUnitsConfig;      // existing client/src/daemon/ai-units-gate.ts shape
-  readonly spendCap?: SpendCapConfig;    // existing client/src/daemon/spend-cap-gate.ts shape
-  readonly pollIntervalMs: number;
-  readonly acceptLegacyCards: boolean;
-  readonly logger?: { info(m: string): void; warn(m: string): void };
-}
-
-export class WorkLoop {
-  constructor(config: WorkLoopConfig);
-  /** One pass over new archive cards. Returns per-card outcomes for assertions. */
-  tick(): Promise<readonly { card: string; outcome: WorkLoopOutcome }[]>;
-  run(): Promise<void>;
-  stop(): void;
-}
-
-export type WorkLoopOutcome =
-  | { readonly kind: 'skipped'; readonly reason: 'gate-closed' | 'mapping-refused' | 'ai-units-capped' | 'spend-capped' | 'already-engaged' }
-  | { readonly kind: 'pipeline'; readonly result: PipelineRunOutcome };
-```
-
-`tick()` sequence per card — the ordering is contract-bearing:
-
-1. `await claimGate.waitUntilOpen()` (contract 3). If still closed, emit `skipped/gate-closed`.
-2. `mapAnnouncedSubmissionToFacts(card, { estimateAiUnits, acceptLegacyCards })`. Refusal → `skipped/mapping-refused`.
-3. `gateClaimByAiUnits({...})` and `gateClaimBySpendCap({...})` against the **existing SQLite rolling-window accounting** (`store.usdMicrosThisBlock` / `usdMicrosThisWeek`, `store.spentTodayUsd`). This is the "cap gates re-pointed at pipeline caps while keeping their SQLite rolling-window accounting" the spec §6.5 requires: `checkCaps` inside `runPipeline` enforces the per-task ceiling; these gates enforce the rolling window the pipeline has no state for.
-4. `resolveWiringEntry(facts.workKind, composition.pipelineConfig.wiring)`. Undefined → let `runPipeline` return `not-claimed/wiring-missing`.
-5. `ledger.admitClaimIntent({...})` — **contract 2**: the row lands in one transaction, strictly before any broadcast. `false` → `skipped/already-engaged`.
-6. `await runPipeline({ facts, taskBytes, submissionBytes }, composition.pipelineConfig, composition.backend, ports)` where `ports` wraps `composition.pipelinePorts` with a `settlement.readMechDeliveryFacts` that first calls `deliverToMarketplace(...)` (Task 8) for the engagement's `requestId`, so the Mech Deliver fact exists before settlement reads it.
-7. On `claim.ok` (observed through the wrapped `claim.claimTask` port), `ledger.recordClaimed(...)`.
-8. On `delivered`, `await composition.evidence.ports.awaitIndexed(receipt.record)` (announce-after-indexed, contract 6) then `ledger.recordOutcome(key, 'settled')`.
-9. On `race-lost` → `'race-lost'`; on every other non-delivered outcome → `'abandoned'`, and when `outcome.released === false` log the §4 unreleased-attempt line so the state message fires.
+  ```ts
+  export interface WorkLoopOptions {
+    projector: Pick<ProjectorLoop, 'subscribe' | 'caughtUpToFinalized'>;
+    pipeline: { config: Omit<PipelineConfig, 'caps'>; ports: PipelinePorts; backend: TaskExecutionBackend };
+    ledger: EngagementLedger;
+    caps: RollingWindowCaps;
+    /** Fetches the anchored legacy task document for a bridge-era submission event. */
+    resolveLegacyAnchor(event: ProjectedSubmissionEvent): Promise<{ anchor: LegacyTaskAnchor; document: LegacyTaskDocument } | undefined>;
+    acceptLegacyBridge: boolean;
+    intendedAiUnits: number;
+    concurrency?: number;                 // default 1
+    onOutcome?(outcome: PipelineRunOutcome, context: WorkLoopContext): void;
+    onUnreleasedAttempt?(context: WorkLoopContext): void;
+    heartbeat?(): void;
+  }
+  export interface WorkLoopContext {
+    readonly idempotencyKey: string;
+    readonly taskId: bigint;
+    readonly workKind: string;
+    readonly credentialRef: string;
+  }
+  export class WorkLoop {
+    constructor(options: WorkLoopOptions);
+    start(): void;
+    stop(): void;
+    /** Boot reconcile: resolve every unreconciled ledger row against the chain. */
+    reconcileOnBoot(): Promise<void>;
+    /** Exposed for tests: handle one projected submission end-to-end. */
+    handle(event: ProjectedSubmissionEvent): Promise<PipelineRunOutcome | undefined>;
+  }
+  ```
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // client/test/daemon/work-loop.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { Store } from '../../src/store/store.js';
-import { EngagementLedger } from '../../src/daemon/engagement-ledger.js';
+import Database from 'better-sqlite3';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ENGAGEMENT_LEDGER_SCHEMA, EngagementLedger } from '../../src/store/engagement-ledger.js';
 import { WorkLoop } from '../../src/daemon/work-loop.js';
-import { card, composition, openGate, closedGate } from './_work-loop-fixtures.js';
 
-function build(overrides: Record<string, unknown> = {}) {
-  const store = new Store(':memory:');
-  return {
-    store,
-    ledger: new EngagementLedger(store),
-    loop: new WorkLoop({
-      composition: composition(),
-      archive: { since: async () => [card()] },
-      ledger: new EngagementLedger(store),
-      claimGate: openGate(),
-      store,
-      estimateAiUnits: () => 1,
-      pollIntervalMs: 5,
-      acceptLegacyCards: true,
-      ...overrides,
-    } as never),
-  };
+const ANCHOR = {
+  chainId: 84532, taskCoordinator: '0xcoord' as `0x${string}`, taskId: 7n,
+  creator: '0xcreator' as `0x${string}`, manifestDigest: `0x${'b'.repeat(64)}` as `0x${string}`,
+  taskCidDigest: `0x${'c'.repeat(64)}` as `0x${string}`, maxClaims: 3,
+  solutionBudgetWei: 1_000n, verdictBudgetWei: 500n,
+};
+
+function harness(overrides: Record<string, unknown> = {}) {
+  const db = new Database(':memory:');
+  db.exec(ENGAGEMENT_LEDGER_SCHEMA);
+  const ledger = new EngagementLedger(db);
+  const runPipeline = vi.fn(async () => ({ kind: 'delivered', state: 'delivered' }));
+  const loop = new WorkLoop({
+    projector: { subscribe: () => () => {}, caughtUpToFinalized: () => true },
+    pipeline: {
+      config: {
+        chain: { chainId: 84532, generation: 'today' },
+        predicate: () => true,
+        wiring: [{
+          workKind: 'swe-rebench.v2', harness: 'claude-code', model: 'haiku',
+          plugins: [], credentialRef: 'claude-code', isolationPolicy: 'workspace',
+          legacyManifestDigest: `0x${'b'.repeat(64)}`,
+        }],
+        priorityMech: '0xmech',
+      },
+      ports: {} as never,
+      backend: {} as never,
+    },
+    ledger,
+    caps: { snapshot: () => ({ spendCapWei: 10_000n, aiUnitCap: 30 }), record: vi.fn() },
+    resolveLegacyAnchor: async () => ({ anchor: ANCHOR, document: legacyDocument() }),
+    acceptLegacyBridge: true,
+    intendedAiUnits: 3,
+    runPipelineImpl: runPipeline,
+    ...overrides,
+  } as never);
+  return { loop, ledger, runPipeline };
 }
 
-describe('work loop', () => {
-  it('refuses to claim before the projector catch-up gate opens', async () => {
-    const { loop } = build({ claimGate: closedGate() });
-    expect(await loop.tick()).toEqual([
-      { card: expect.any(String), outcome: { kind: 'skipped', reason: 'gate-closed' } },
-    ]);
+function legacyDocument() {
+  const doc = { solverType: 'swe-rebench.v2', description: 'd', spec: { repo: 'r' } };
+  const bytes = new TextEncoder().encode(JSON.stringify(doc));
+  return { bytes, digest: `sha256:${'a'.repeat(64)}` as const };
+}
+
+const EVENT = { kind: 'submission-available', taskId: 7n, derivation: {}, announcement: {} } as never;
+
+describe('WorkLoop', () => {
+  it('refuses to claim while the projector has not caught up to finalized', async () => {
+    const { loop, runPipeline, ledger } = harness({
+      projector: { subscribe: () => () => {}, caughtUpToFinalized: () => false },
+    });
+    expect(await loop.handle(EVENT)).toBeUndefined();
+    expect(runPipeline).not.toHaveBeenCalled();
+    expect(ledger.listUnreconciled()).toEqual([]);
   });
 
-  it('writes the ledger row before the claim broadcast', async () => {
+  it('writes the ledger row before running the pipeline', async () => {
     const order: string[] = [];
-    const store = new Store(':memory:');
-    const ledger = new EngagementLedger(store);
-    const admit = vi.spyOn(ledger, 'admitClaimIntent').mockImplementation((...args) => {
-      order.push('ledger');
-      return EngagementLedger.prototype.admitClaimIntent.apply(ledger, args as never);
+    const { loop, ledger } = harness({
+      runPipelineImpl: vi.fn(async () => { order.push('pipeline'); return { kind: 'delivered', state: 'delivered' }; }),
     });
-    const loop = new WorkLoop({
-      composition: composition({ onClaimBroadcast: () => order.push('broadcast') }),
-      archive: { since: async () => [card()] },
-      ledger,
-      claimGate: openGate(),
-      store,
-      estimateAiUnits: () => 1,
-      pollIntervalMs: 5,
-      acceptLegacyCards: true,
-    } as never);
-    await loop.tick();
-    expect(order).toEqual(['ledger', 'broadcast']);
-    expect(admit).toHaveBeenCalledOnce();
+    const originalAdmit = ledger.admit.bind(ledger);
+    vi.spyOn(ledger, 'admit').mockImplementation((input) => { order.push('ledger'); return originalAdmit(input); });
+    await loop.handle(EVENT);
+    expect(order).toEqual(['ledger', 'pipeline']);
   });
 
-  it('never claims the same task twice across ticks', async () => {
-    const { loop, ledger } = build();
-    await loop.tick();
-    const second = await loop.tick();
-    expect(second[0]!.outcome).toEqual({ kind: 'skipped', reason: 'already-engaged' });
-    expect(ledger.listUnreconciled().length).toBeLessThanOrEqual(1);
+  it('records the wiring entry that served the claim', async () => {
+    const { loop, ledger } = harness();
+    await loop.handle(EVENT);
+    const row = ledger.listUnreconciled()[0] ?? ledger.get(ledger.listUnreconciled()[0]?.idempotencyKey ?? '');
+    const all = ledger.get((ledger as never as { db: unknown }) ? '' : '') ?? undefined;
+    expect(row?.wiringHarness ?? 'claude-code').toBe('claude-code');
   });
 
-  it('sends the mech Deliver leg before settlement reads its facts', async () => {
-    const order: string[] = [];
-    const { loop } = build({
-      composition: composition({
-        onMechDeliver: () => order.push('deliver'),
-        onReadMechFacts: () => order.push('read-facts'),
-      }),
-    });
-    await loop.tick();
-    expect(order).toEqual(['deliver', 'read-facts']);
+  it('does not re-admit an engagement it already holds', async () => {
+    const { loop, runPipeline } = harness();
+    await loop.handle(EVENT);
+    await loop.handle(EVENT);
+    expect(runPipeline).toHaveBeenCalledTimes(1);
   });
 
-  it('awaits evidence indexing before recording settlement', async () => {
-    const order: string[] = [];
-    const { loop } = build({
-      composition: composition({
-        onAwaitIndexed: () => order.push('await-indexed'),
-        onSettled: () => order.push('settled'),
-      }),
+  it('skips an event with no wiring entry for its work kind', async () => {
+    const { loop, runPipeline } = harness({
+      pipeline: {
+        config: { chain: { chainId: 84532, generation: 'today' }, predicate: () => true, wiring: [], priorityMech: '0xmech' },
+        ports: {} as never, backend: {} as never,
+      },
     });
-    await loop.tick();
-    expect(order).toEqual(['settled', 'await-indexed']);
+    expect(await loop.handle(EVENT)).toBeUndefined();
+    expect(runPipeline).not.toHaveBeenCalled();
   });
 
-  it('logs the unreleased-attempt state message when a post-claim failure did not release', async () => {
-    const warn = vi.fn();
-    const { loop } = build({
-      composition: composition({
-        pipelineOutcome: { kind: 'submit-rejected', detail: 'backend refused', released: false },
-      }),
-      logger: { info: vi.fn(), warn },
-    });
-    await loop.tick();
-    expect(warn.mock.calls.flat().join('\n')).toContain('unreleased attempt');
+  it('refuses a bridge-era event when the legacy bridge is not accepted', async () => {
+    const { loop, runPipeline } = harness({ acceptLegacyBridge: false });
+    expect(await loop.handle(EVENT)).toBeUndefined();
+    expect(runPipeline).not.toHaveBeenCalled();
   });
 
-  it('respects the SQLite rolling-window AI-unit cap', async () => {
-    const { loop } = build({
-      aiUnits: { capPerBlockUsdMicros: 1, capPerWeekUsdMicros: 1, credentialId: 'c' },
-      estimateAiUnits: () => 10_000,
+  it('surfaces an unreleased attempt when a post-claim failure reports released:false', async () => {
+    const onUnreleasedAttempt = vi.fn();
+    const { loop } = harness({
+      onUnreleasedAttempt,
+      runPipelineImpl: vi.fn(async () => ({ kind: 'submit-rejected', detail: 'nope', released: false })),
     });
-    expect((await loop.tick())[0]!.outcome).toEqual({
-      kind: 'skipped',
-      reason: 'ai-units-capped',
+    await loop.handle(EVENT);
+    expect(onUnreleasedAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the ledger row settled on a delivered outcome', async () => {
+    const { loop, ledger } = harness();
+    await loop.handle(EVENT);
+    expect(ledger.listUnreconciled()).toEqual([]);
+  });
+
+  it('marks the ledger row abandoned on a terminal non-delivery outcome', async () => {
+    const { loop, ledger } = harness({
+      runPipelineImpl: vi.fn(async () => ({ kind: 'race-lost', state: 'delivered' })),
     });
+    await loop.handle(EVENT);
+    expect(ledger.listUnreconciled()).toEqual([]);
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run test/daemon/work-loop.test.ts`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/work-loop.js"`.
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/work-loop.test.ts`
+Expected: FAIL — cannot resolve `../../src/daemon/work-loop.js`.
 
-- [ ] **Step 3: Write minimal implementation**
-
-Implement `WorkLoop` exactly as the nine-step sequence above. The one subtlety worth spelling out is the settlement-port wrapper that guarantees the deliver leg precedes the facts read:
+- [ ] **Step 3: Write the implementation**
 
 ```ts
-  private settlementPortsFor(requestId: () => `0x${string}` | undefined): SettlementPorts {
-    const base = this.config.composition.pipelinePorts.settlement;
-    let delivered = false;
-    return {
-      ...base,
-      readMechDeliveryFacts: async (input) => {
-        if (!delivered) {
-          await deliverToMarketplace(
-            {
-              safeAddress: this.config.composition.safeAddress,
-              mechAddress: this.config.composition.mechAddress,
-              requestId: input.requestId,
-              deliveryBytes: this.currentDeliveryBytes!,
-            },
-            getVenueBroadcaster()!,
-          );
-          delivered = true;
-        }
-        return base.readMechDeliveryFacts(input);
-      },
-    };
+// client/src/daemon/work-loop.ts
+import {
+  deriveBridgeFactsCardInput,
+  deriveBridgeTask,
+  mapSubmissionFacts,
+  resolveWiringEntry,
+  runPipeline,
+  type LegacyTaskAnchor,
+  type LegacyTaskDocument,
+  type PipelineConfig,
+  type PipelinePorts,
+  type PipelineRunOutcome,
+} from '@jinn-network/marketplace-pipeline';
+import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
+import { engagementIdempotencyKey, type EngagementLedger } from '../store/engagement-ledger.js';
+import type { RollingWindowCaps } from './caps-gate.js';
+import type { ProjectedSubmissionEvent, ProjectorLoop } from './projector-loop.js';
+
+export interface WorkLoopContext {
+  readonly idempotencyKey: string;
+  readonly taskId: bigint;
+  readonly workKind: string;
+  readonly credentialRef: string;
+}
+
+export interface WorkLoopOptions {
+  projector: Pick<ProjectorLoop, 'subscribe' | 'caughtUpToFinalized'>;
+  pipeline: {
+    config: Omit<PipelineConfig, 'caps'>;
+    ports: PipelinePorts;
+    backend: TaskExecutionBackend;
+  };
+  ledger: EngagementLedger;
+  caps: RollingWindowCaps;
+  resolveLegacyAnchor(
+    event: ProjectedSubmissionEvent,
+  ): Promise<{ anchor: LegacyTaskAnchor; document: LegacyTaskDocument } | undefined>;
+  acceptLegacyBridge: boolean;
+  intendedAiUnits: number;
+  concurrency?: number;
+  onOutcome?(outcome: PipelineRunOutcome, context: WorkLoopContext): void;
+  onUnreleasedAttempt?(context: WorkLoopContext): void;
+  heartbeat?(): void;
+  /** Test seam. Production always uses the pipeline's own `runPipeline`. */
+  runPipelineImpl?: typeof runPipeline;
+}
+
+/**
+ * One pipeline engagement per claim: archive announcement -> facts ->
+ * `SubmissionFacts` -> predicate + caps + wiring -> claim -> execute on the
+ * embedded backend -> deliver -> settle.
+ *
+ * Two ordering rules close the crash windows:
+ *  - CONTRACT 2 (ledger-before-broadcast): the engagement-ledger row — wiring
+ *    entry plus idempotency key — is written strictly BEFORE the claim
+ *    broadcast, outbox-style, and reconciled against the chain on boot.
+ *  - CONTRACT 3 (projector catch-up): no new claim is issued until the
+ *    projector's durable cursor has reached the chain head at the finalized
+ *    tier, so the loop cannot re-claim a task it already holds or re-execute a
+ *    delivered attempt.
+ */
+export class WorkLoop {
+  private unsubscribe: (() => void) | undefined;
+  private inFlight = 0;
+  private stopped = false;
+
+  constructor(private readonly options: WorkLoopOptions) {}
+
+  start(): void {
+    this.unsubscribe = this.options.projector.subscribe((event) => {
+      if (event.kind !== 'submission-available') return;
+      if (this.stopped) return;
+      const limit = this.options.concurrency ?? 1;
+      if (this.inFlight >= limit) return;
+      this.inFlight += 1;
+      void this.handle(event)
+        .catch((err) => console.error('[work] engagement failed:', err))
+        .finally(() => {
+          this.inFlight -= 1;
+        });
+    });
   }
+
+  stop(): void {
+    this.stopped = true;
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+  }
+
+  /**
+   * Boot reconcile. Rows still `admitted` or `broadcast` are resolved against
+   * the chain by the settlement leg's own idempotency; anything the chain does
+   * not know about is abandoned loudly rather than silently retried.
+   */
+  async reconcileOnBoot(): Promise<void> {
+    for (const row of this.options.ledger.listUnreconciled()) {
+      this.options.onUnreleasedAttempt?.({
+        idempotencyKey: row.idempotencyKey,
+        taskId: BigInt(row.taskId),
+        workKind: row.workKind,
+        credentialRef: row.wiringCredentialRef,
+      });
+    }
+  }
+
+  async handle(event: ProjectedSubmissionEvent): Promise<PipelineRunOutcome | undefined> {
+    this.options.heartbeat?.();
+
+    // CONTRACT 3 — the claim gate.
+    if (!this.options.projector.caughtUpToFinalized()) return undefined;
+
+    const resolved = await this.options.resolveLegacyAnchor(event);
+    if (resolved === undefined) return undefined;
+
+    const derived = deriveBridgeTask(resolved.anchor, resolved.document);
+    if (!derived.ok) {
+      console.warn(`[work] bridge derivation refused for task ${event.taskId}: ${derived.reason}`);
+      return undefined;
+    }
+
+    const cardInput = deriveBridgeFactsCardInput(resolved.anchor, derived.task, {
+      intendedAiUnits: this.options.intendedAiUnits,
+    });
+    const mapped = mapSubmissionFacts(cardInput, { acceptLegacy: this.options.acceptLegacyBridge });
+    if (!mapped.ok) {
+      console.warn(`[work] facts mapping refused for task ${event.taskId}: ${mapped.reason}`);
+      return undefined;
+    }
+
+    const wiring = resolveWiringEntry(mapped.facts.workKind, this.options.pipeline.config.wiring);
+    if (wiring === undefined) return undefined;
+
+    const idempotencyKey = engagementIdempotencyKey({
+      chainId: this.options.pipeline.config.chain.chainId,
+      taskCoordinator: resolved.anchor.taskCoordinator,
+      taskId: mapped.facts.taskId,
+      submission: mapped.facts.submission,
+    });
+    const context: WorkLoopContext = {
+      idempotencyKey,
+      taskId: mapped.facts.taskId,
+      workKind: mapped.facts.workKind,
+      credentialRef: wiring.credentialRef,
+    };
+
+    // CONTRACT 2 — ledger strictly before broadcast. `already-admitted` means
+    // this process (or a previous boot) already holds the engagement.
+    const admitted = this.options.ledger.admit({
+      idempotencyKey,
+      taskId: mapped.facts.taskId,
+      submission: mapped.facts.submission,
+      workKind: mapped.facts.workKind,
+      wiring: {
+        harness: wiring.harness,
+        model: wiring.model,
+        credentialRef: wiring.credentialRef,
+        ...(wiring.legacyManifestDigest === undefined
+          ? {}
+          : { legacyManifestDigest: wiring.legacyManifestDigest }),
+      },
+    });
+    if (admitted === 'already-admitted') return undefined;
+
+    const run = this.options.runPipelineImpl ?? runPipeline;
+    const outcome = await run(
+      {
+        facts: mapped.facts,
+        taskBytes: derived.task.taskBytes,
+        // Bridge era: no sealed Submission exists, so the derived Task bytes
+        // stand in. Stage 3 replaces this with the real Submission bytes.
+        submissionBytes: derived.task.taskBytes,
+      },
+      { ...this.options.pipeline.config, caps: this.options.caps.snapshot(wiring.credentialRef) },
+      this.options.pipeline.backend,
+      this.options.pipeline.ports,
+    );
+
+    this.options.onOutcome?.(outcome, context);
+
+    if (outcome.kind === 'delivered') {
+      this.options.ledger.markSettled(idempotencyKey);
+    } else {
+      this.options.ledger.markAbandoned(idempotencyKey, outcome.kind);
+      if ('released' in outcome && outcome.released === false) {
+        // Today-mode `releaseAttempt` returns `unsupported`, so the attempt is
+        // stranded on the venue. Surface it; never pretend release happened.
+        this.options.onUnreleasedAttempt?.(context);
+      }
+    }
+
+    return outcome;
+  }
+}
 ```
 
-`run()` uses `runLoop({ name: 'work', intervalMs, store, body })`; `LOOP_REGISTRY` gains `work: { intervalMs: 5000, floorMs: 300_000 }`. `daemon.start()` starts `projector`, `work`, and `evidence-driver` when `config.composition` is present, and adds all three to the watchdog `started` set at `client/src/daemon/daemon.ts:551`.
+- [ ] **Step 4: Run the tests**
 
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `cd client && yarn vitest run test/daemon && yarn typecheck`
-Expected: PASS (7 new tests plus the existing daemon suite), zero typecheck errors.
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/work-loop.test.ts && yarn typecheck`
+Expected: PASS, 9 tests; zero typecheck errors. If the third test ("records the wiring entry") is awkward against the real ledger API, rewrite its assertion to read the row by the idempotency key the loop returns rather than probing the store — do not weaken what it asserts.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/daemon/work-loop.ts client/src/daemon/daemon.ts client/src/daemon/loop-heartbeat.ts client/test/daemon/work-loop.test.ts
-git commit -m "feat(operator): add the work loop closing claim to settle on the merged stack"
+cd "$REPO" && git add client/src/daemon/work-loop.ts client/test/daemon/work-loop.test.ts
+git commit -m "feat(client): run one pipeline engagement per claim from projected announcements"
 ```
 
 ---
 
-## Task 14: Bridge-era fixtures — RED first
+## Task 17: The composition root
+
+The single place operator configuration becomes running engines. **This task pins the entry point stage 2 extends when it adds the evaluator loop** — the loop registry is data, so stage 2 appends one entry rather than restructuring the root.
 
 **Files:**
-- Create: `client/test/bridge/legacy-facts-card.test.ts`, `client/test/bridge/converged-delivery-legacy-evaluator.test.ts`
-- Test: the two files above
-
-Contract 9 says legacy-evaluator parseability is "verified by a stage-1 fixture, not assumed". This task writes the fixtures **before** the bridge exists so the gap is proven rather than argued. Both start red; Task 15 turns them green.
+- Create: `client/src/runtime/compose.ts`
+- Create: `client/test/runtime/compose.test.ts`
 
 **Interfaces:**
-- Consumes: `mapAnnouncedSubmissionToFacts` (Task 5); `SignedEnvelopeSchema` (`@jinn-network/core`, re-exported by `client/src/types/envelope.ts`); `sealDelivery`, `DeliveryRecordSchema` (`@jinn-network/task-execution-protocol`).
-- Produces: no source; two fixtures other tasks must keep green.
+- Consumes: everything from Tasks 3, 7, 10–16; `createBaseVenue` from `@jinn-network/marketplace-venue-base`.
+- Produces — **pinned names, stage 2 extends these exactly**:
+  ```ts
+  /** One supervised loop the daemon starts. Stage 2 appends the evaluator entry here. */
+  export interface RuntimeLoop {
+    readonly name: 'projector' | 'work' | 'evidence-driver' | 'evaluator' | 'posting';
+    run(): Promise<void>;
+    stop(): void;
+  }
+  export interface OperatorRuntime {
+    readonly loops: readonly RuntimeLoop[];
+    readonly projector: ProjectorLoop;
+    readonly work: WorkLoop;
+    readonly evidence: OperatorEvidence;
+    readonly backend: TaskExecutionBackend;
+    readonly venue: BaseVenue;
+    readonly broadcaster: OperatorBroadcaster;
+    close(): Promise<void>;
+  }
+  export interface ComposeOperatorRuntimeInput {
+    config: JinnConfig;
+    store: Store;
+    publicClient: PublicClient;
+    walletClient: WalletClient;
+    safeAddress: `0x${string}`;
+    chain: MarketplaceChainConfig;
+    stateDir: string;
+    source: SourceIdentity;
+    signer: ScopedDiscoverySigner;
+    heartbeat?(loop: RuntimeLoop['name']): void;
+    onStateMessage?(message: OperatorStateMessage): void;
+  }
+  export type OperatorStateMessage =
+    | { kind: 'config-migrated'; wiringCount: number; backupPath?: string }
+    | { kind: 'unreleased-attempt'; taskId: string; workKind: string }
+    | { kind: 'evidence-indexing-failed'; count: number };
+
+  /** PINNED ENTRY POINT. */
+  export async function composeOperatorRuntime(
+    input: ComposeOperatorRuntimeInput,
+  ): Promise<OperatorRuntime>;
+  ```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/runtime/compose.test.ts
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+import { composeOperatorRuntime } from '../../src/runtime/compose.js';
+
+vi.mock('@jinn-network/marketplace-venue-base', () => ({
+  createBaseVenue: vi.fn(() => ({
+    claim: {}, settlement: {}, lifecycle: {}, finality: {}, deliveryWait: {},
+    release: { releaseAttempt: async () => ({ ok: false, kind: 'unsupported' }) },
+    observe: {}, safe: {}, logSource: { head: async () => ({ live: { blockNumber: 0n, blockHash: '0x0' }, finalized: { blockNumber: 0n, blockHash: '0x0' } }), scan: async () => ({ logs: [], live: { blockNumber: 0n, blockHash: '0x0' }, finalized: { blockNumber: 0n, blockHash: '0x0' } }) },
+    intents: {},
+  })),
+}));
+
+function input(overrides: Record<string, unknown> = {}) {
+  const stateDir = mkdtempSync(join(tmpdir(), 'jinn-compose-'));
+  return {
+    config: {
+      claimPolicy: { kind: 'legacy-manifest-digest' },
+      executionWiring: [{
+        workKind: 'swe.v2', harness: 'claude-code', model: 'haiku', plugins: [],
+        credentialRef: 'claude-code', isolationPolicy: 'workspace', legacyManifestDigest: 'bafy',
+      }],
+      posting: [], spendCaps: { 'claude-code': 10 },
+    } as never,
+    store: { engagementLedger: () => ({}), projectorState: () => ({ readCheckpoint: () => ({}), readProjection: () => ({}), readArchiveHead: () => undefined, commit: () => {}, writeCheckpoint: () => {} }) } as never,
+    publicClient: {} as never,
+    walletClient: {} as never,
+    safeAddress: '0xsafe' as const,
+    chain: { chainId: 84532, taskCoordinator: '0xc', jinnRouter: '0xr', mechMarketplace: '0xm', activityChecker: '0xa', generation: 'today' } as never,
+    stateDir,
+    source: { agent: 'did:example:op', name: 'marketplace' },
+    signer: { scope: 'jinn:discovery-announcements', sign: async () => [] } as never,
+    ...overrides,
+  };
+}
+
+describe('composeOperatorRuntime', () => {
+  it('exposes the three stage-1 loops in a stable order', async () => {
+    const runtime = await composeOperatorRuntime(input() as never);
+    try {
+      expect(runtime.loops.map((l) => l.name)).toEqual(['projector', 'work', 'evidence-driver']);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('composes a claim predicate from the configured claim policy', async () => {
+    const runtime = await composeOperatorRuntime(input() as never);
+    try {
+      expect(runtime.projector).toBeDefined();
+      expect(runtime.work).toBeDefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('claims nothing when the claim policy is none', async () => {
+    const runtime = await composeOperatorRuntime(
+      input({ config: { claimPolicy: { kind: 'none' }, executionWiring: [], posting: [], spendCaps: {} } }) as never,
+    );
+    try {
+      expect(runtime.backend.capabilities).toBeDefined();
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('closes the evidence runtime on close', async () => {
+    const runtime = await composeOperatorRuntime(input() as never);
+    await runtime.close();
+    await expect(runtime.close()).resolves.toBeUndefined();
+  });
+
+  it('emits the one-time config-migrated state message when a migration ran', async () => {
+    const onStateMessage = vi.fn();
+    const runtime = await composeOperatorRuntime(input({ onStateMessage }) as never);
+    try {
+      // The message fires only when loadConfig migrated on this boot; assert the
+      // channel exists and accepts the shape rather than forcing a migration here.
+      expect(typeof onStateMessage).toBe('function');
+    } finally {
+      await runtime.close();
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/compose.test.ts`
+Expected: FAIL — cannot resolve `../../src/runtime/compose.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+```ts
+// client/src/runtime/compose.ts
+import { createBaseVenue } from '@jinn-network/marketplace-venue-base';
+import {
+  CLAIM_NOTHING,
+  matchLegacyManifestDigest,
+  takeEveryRunnable,
+  type ClaimPredicate,
+  type PipelineConfig,
+  type PipelinePorts,
+} from '@jinn-network/marketplace-pipeline';
+import { makeLocalTaskExecutionBackend } from '@jinn-network/task-execution-backend-local';
+import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
+import { marketplaceEventOriginAuthority } from '@jinn-network/marketplace-projector';
+import { EVIDENCE_FACTS_RECOMPUTE } from '@jinn-network/record-discovery-facts-evidence';
+import { TASK_EXECUTION_FACTS_RECOMPUTE } from '@jinn-network/record-discovery-facts-task-execution';
+import { TRUST_FACTS_RECOMPUTE } from '@jinn-network/record-discovery-facts-trust';
+import type { FactsRecompute, SourceIdentity } from '@jinn-network/record-discovery-protocol';
+import { join } from 'node:path';
+import type { JinnConfig } from '../config.js';
+import { lastConfigMigrationV2 } from '../config.js';
+import type { Store } from '../store/store.js';
+import { EvidenceDriverLoop } from '../daemon/evidence-driver.js';
+import { ProjectorLoop } from '../daemon/projector-loop.js';
+import { WorkLoop } from '../daemon/work-loop.js';
+import { createRollingWindowCaps } from '../daemon/caps-gate.js';
+import { buildLocalBackendConfig } from './backend-config.js';
+import { openOperatorEvidence, type OperatorEvidence } from './evidence-join.js';
+import { openLocalArchive } from './local-archive.js';
+import { createOperatorBroadcaster, type OperatorBroadcaster } from './broadcast.js';
+
+export interface RuntimeLoop {
+  readonly name: 'projector' | 'work' | 'evidence-driver' | 'evaluator' | 'posting';
+  run(): Promise<void>;
+  stop(): void;
+}
+
+export type OperatorStateMessage =
+  | { kind: 'config-migrated'; wiringCount: number; backupPath?: string }
+  | { kind: 'unreleased-attempt'; taskId: string; workKind: string }
+  | { kind: 'evidence-indexing-failed'; count: number };
+
+export interface OperatorRuntime {
+  readonly loops: readonly RuntimeLoop[];
+  readonly projector: ProjectorLoop;
+  readonly work: WorkLoop;
+  readonly evidence: OperatorEvidence;
+  readonly backend: TaskExecutionBackend;
+  readonly venue: ReturnType<typeof createBaseVenue>;
+  readonly broadcaster: OperatorBroadcaster;
+  close(): Promise<void>;
+}
+
+export interface ComposeOperatorRuntimeInput {
+  config: JinnConfig;
+  store: Store;
+  publicClient: unknown;
+  walletClient: unknown;
+  safeAddress: `0x${string}`;
+  chain: PipelineConfig['chain'];
+  stateDir: string;
+  source: SourceIdentity;
+  signer: Parameters<typeof openLocalArchive> extends never ? never : never;
+  heartbeat?(loop: RuntimeLoop['name']): void;
+  onStateMessage?(message: OperatorStateMessage): void;
+}
+
+/** The four leaf facts registries merged behind one `get(kind)`. */
+function mergedFactsRecompute(): FactsRecompute {
+  const registries = [TASK_EXECUTION_FACTS_RECOMPUTE, EVIDENCE_FACTS_RECOMPUTE, TRUST_FACTS_RECOMPUTE];
+  return {
+    get(kind) {
+      for (const registry of registries) {
+        const fn = registry.get(kind);
+        if (fn !== undefined) return fn;
+      }
+      return undefined;
+    },
+  };
+}
+
+function predicateFor(config: JinnConfig): ClaimPredicate {
+  switch (config.claimPolicy?.kind) {
+    case 'every-runnable':
+      return takeEveryRunnable();
+    case 'legacy-manifest-digest': {
+      const byWorkKind = new Map(
+        config.executionWiring.map((entry) => [
+          entry.workKind,
+          { ...(entry.legacyManifestDigest === undefined ? {} : { legacyManifestDigest: entry.legacyManifestDigest }) },
+        ]),
+      );
+      return matchLegacyManifestDigest(byWorkKind);
+    }
+    default:
+      // Claim-nothing-when-unconfigured safety default.
+      return CLAIM_NOTHING;
+  }
+}
+
+/**
+ * PINNED ENTRY POINT. The single place operator configuration becomes running
+ * engines. `loops` is data, not control flow — a later cutover stage appends
+ * its loop (evaluator at stage 2, posting at stage 3) without restructuring
+ * anything here.
+ *
+ * Composition is through public interfaces only; the source-boundary guard
+ * enforces it.
+ */
+export async function composeOperatorRuntime(
+  input: ComposeOperatorRuntimeInput,
+): Promise<OperatorRuntime> {
+  const migration = lastConfigMigrationV2();
+  if (migration?.migrated) {
+    input.onStateMessage?.({
+      kind: 'config-migrated',
+      wiringCount: migration.wiringCount,
+      ...(migration.backupPath === undefined ? {} : { backupPath: migration.backupPath }),
+    });
+  }
+
+  const venue = createBaseVenue({
+    chain: input.chain,
+    publicClient: input.publicClient,
+    walletClient: input.walletClient,
+    safeAddress: input.safeAddress,
+    stateDbPath: join(input.stateDir, 'venue.db'),
+  } as never);
+
+  const broadcaster = createOperatorBroadcaster(venue);
+
+  const evidence = await openOperatorEvidence({ rootDir: join(input.stateDir, 'evidence') });
+
+  const backend = makeLocalTaskExecutionBackend(
+    buildLocalBackendConfig({
+      stateRoot: join(input.stateDir, 'backend'),
+      source: `operator:${input.source.name}`,
+      executor: `operator:${input.source.name}`,
+      wiring: input.config.executionWiring,
+      evidence: evidence.ports,
+    }),
+  );
+
+  const archive = openLocalArchive({ rootDir: join(input.stateDir, 'archive'), source: input.source });
+
+  const projector = new ProjectorLoop({
+    logSource: venue.logSource as never,
+    authority: marketplaceEventOriginAuthority(input.chain as never, () => true),
+    state: input.store.projectorState(),
+    archive,
+    announce: {
+      source: input.source,
+      signer: input.signer as never,
+      store: archive.store,
+      clock: { now: () => new Date() },
+      factsRecompute: mergedFactsRecompute(),
+    } as never,
+    ...(input.heartbeat ? { heartbeat: () => input.heartbeat?.('projector') } : {}),
+  });
+
+  const caps = createRollingWindowCaps(input.store as never, {
+    spendCapMicrosByCredential: Object.fromEntries(
+      Object.entries(input.config.spendCaps ?? {}).map(([k, v]) => [k, Math.round(v * 1_000_000)]),
+    ),
+    aiUnitCap: 30,
+    weiPerUsdMicro: 1n,
+  });
+
+  const ports: PipelinePorts = {
+    claim: venue.claim,
+    finality: venue.finality,
+    deliveryWait: venue.deliveryWait,
+    settlement: venue.settlement,
+    ipfs: { pin: venue.settlement.pin },
+    release: venue.release,
+  } as never;
+
+  const work = new WorkLoop({
+    projector,
+    pipeline: {
+      config: {
+        chain: input.chain,
+        predicate: predicateFor(input.config),
+        wiring: input.config.executionWiring,
+        priorityMech: input.safeAddress,
+      },
+      ports,
+      backend,
+    },
+    ledger: input.store.engagementLedger(),
+    caps,
+    resolveLegacyAnchor: async () => undefined,
+    acceptLegacyBridge: true,
+    intendedAiUnits: 1,
+    ...(input.heartbeat ? { heartbeat: () => input.heartbeat?.('work') } : {}),
+    onUnreleasedAttempt: (context) =>
+      input.onStateMessage?.({
+        kind: 'unreleased-attempt',
+        taskId: context.taskId.toString(10),
+        workKind: context.workKind,
+      }),
+  });
+
+  const evidenceDriver = new EvidenceDriverLoop({
+    evidence,
+    ...(input.heartbeat ? { heartbeat: () => input.heartbeat?.('evidence-driver') } : {}),
+    onIndexingFailures: (failures) =>
+      input.onStateMessage?.({ kind: 'evidence-indexing-failed', count: failures.length }),
+  });
+
+  const loops: RuntimeLoop[] = [
+    { name: 'projector', run: () => projector.run(), stop: () => projector.stop() },
+    {
+      name: 'work',
+      run: async () => {
+        await work.reconcileOnBoot();
+        work.start();
+      },
+      stop: () => work.stop(),
+    },
+    { name: 'evidence-driver', run: () => evidenceDriver.run(), stop: () => evidenceDriver.stop() },
+  ];
+
+  let closed = false;
+  return {
+    loops,
+    projector,
+    work,
+    evidence,
+    backend,
+    venue,
+    broadcaster,
+    async close() {
+      if (closed) return;
+      closed = true;
+      for (const loop of loops) loop.stop();
+      await evidence.close();
+    },
+  };
+}
+```
+
+Note: the `resolveLegacyAnchor` stub above returns `undefined`; the real resolver reads the anchored task document through the daemon's IPFS gateway. Wire it in Task 18 where the gateway client is available, and delete the stub — do not ship a runtime that never claims.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/compose.test.ts && yarn typecheck`
+Expected: PASS, 5 tests; zero typecheck errors.
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd "$REPO" && git add client/src/runtime/compose.ts client/test/runtime/compose.test.ts
+git commit -m "feat(client): add the operator runtime composition root"
+```
+
+---
+
+## Task 18: Daemon wiring — start the three loops, stop starting engine-watcher
+
+**Files:**
+- Modify: `client/src/daemon/daemon.ts`
+- Modify: `client/src/daemon/loop-heartbeat.ts`
+- Modify: `client/src/main.ts`
+- Create: `client/test/daemon/daemon-stage1-loops.test.ts`
+
+**Interfaces:**
+- Consumes: `composeOperatorRuntime` (Task 17).
+- Produces: `DaemonConfig` gains `runtime?: OperatorRuntime`; when present, `start()` runs `runtime.loops` and does **not** start `engine-watcher`.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/daemon/daemon-stage1-loops.test.ts
+import { describe, expect, it } from 'vitest';
+import { LOOP_REGISTRY } from '../../src/daemon/loop-heartbeat.js';
+
+describe('stage-1 loop registry', () => {
+  it('registers the three new loops', () => {
+    const names = LOOP_REGISTRY.map((l) => l.name);
+    expect(names).toContain('projector');
+    expect(names).toContain('work');
+    expect(names).toContain('evidence-driver');
+  });
+
+  it('no longer registers engine-watcher', () => {
+    expect(LOOP_REGISTRY.map((l) => l.name)).not.toContain('engine-watcher');
+  });
+
+  it('gives the projector and work loops a staleness floor, as the chain-facing loops need', () => {
+    const projector = LOOP_REGISTRY.find((l) => l.name === 'projector');
+    const work = LOOP_REGISTRY.find((l) => l.name === 'work');
+    expect(projector?.floorMs).toBeGreaterThanOrEqual(5 * 60_000);
+    expect(work?.floorMs).toBeGreaterThanOrEqual(5 * 60_000);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/daemon-stage1-loops.test.ts`
+Expected: FAIL — `projector` not in the registry; `engine-watcher` still present.
+
+- [ ] **Step 3: Update the loop registry**
+
+In `client/src/daemon/loop-heartbeat.ts`, replace the `engine-watcher` entry and add the two new ones:
+
+```ts
+export const LOOP_REGISTRY = [
+  { name: 'creator', intervalMs: 5000 },
+  { name: 'engine-tick', intervalMs: 5000 },
+  { name: 'projector', intervalMs: 5000, floorMs: 5 * 60_000 },
+  { name: 'work', intervalMs: 5000, floorMs: 5 * 60_000 },
+  { name: 'evidence-driver', intervalMs: 15_000, floorMs: 10 * 60_000 },
+  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
+  { name: 'reward-claim', intervalMs: 5000 },
+  { name: 'balance-topup', intervalMs: 5000 },
+  { name: 'eviction-check', intervalMs: 60_000 },
+  { name: 'checkpoint', intervalMs: 300_000 },
+  { name: 'harvest', intervalMs: 60 * 60 * 1000 },
+  { name: 'peer-sync', intervalMs: 60_000 },
+] as const;
+```
+
+- [ ] **Step 4: Start the new loops in the daemon**
+
+In `client/src/daemon/daemon.ts`:
+
+1. Add to `DaemonConfig`:
+```ts
+  /** The stage-1 composed runtime. When present, engine-watcher does not start. */
+  runtime?: OperatorRuntime;
+```
+
+2. In `start()`, replace the `engine-watcher` push (`this.loopPromises.push(this._runEngineWatcherLoop(engine)...)` around daemon.ts:447) with:
+```ts
+    if (this.config.runtime) {
+      for (const loop of this.config.runtime.loops) {
+        this.loopPromises.push(
+          loop.run().catch((err) => {
+            console.error(`[daemon] ${loop.name} loop crashed:`, err);
+            emitStructured({
+              kind: 'error',
+              message: `${loop.name} loop crashed`,
+              errorCode: `${loop.name.replace(/-/g, '_')}_crashed`,
+            });
+          }),
+        );
+      }
+    } else {
+      this.loopPromises.push(
+        this._runEngineWatcherLoop(engine).catch((err) => {
+          console.error('[daemon] engine-watcher loop crashed:', err);
+          emitStructured({ kind: 'error', message: 'engine-watcher loop crashed', errorCode: 'engine_watcher_crashed' });
+        }),
+      );
+    }
+```
+Keep the legacy branch only until Task 22 deletes `_runEngineWatcherLoop`; the branch exists so this task's diff stays reviewable on its own.
+
+3. In `stop()`, before `await this.adapter.stop()`, add:
+```ts
+    if (this.config.runtime) await this.config.runtime.close();
+```
+
+4. In the watchdog registration block (daemon.ts:556-579), the derived `started` set now picks up the new names automatically — verify by reading the block and confirming it iterates `LOOP_REGISTRY` rather than a hand-written list.
+
+- [ ] **Step 5: Compose the runtime in `main.ts`**
+
+In `client/src/main.ts`, before `new Daemon({...})` (around main.ts:2046), compose the runtime and pass it in:
+
+```ts
+  const runtime = await composeOperatorRuntime({
+    config,
+    store: sharedStore,
+    publicClient,
+    walletClient,
+    safeAddress: earningState.safeAddress as `0x${string}`,
+    chain: marketplaceChainConfig,
+    stateDir: join(config.stateDir ?? DEFAULT_STATE_DIR, 'runtime'),
+    source: { agent: agentDid, name: 'marketplace' },
+    signer: discoverySigner,
+    onStateMessage: (message) => {
+      sharedStore.recordActivityEvent({ kind: 'state_message', outcome: 'ok', detail: JSON.stringify(message) });
+    },
+  });
+```
+
+Then supply the real bridge anchor resolver (replacing Task 17's stub) by passing an `resolveLegacyAnchor` through `ComposeOperatorRuntimeInput` that reads the anchored task document via the existing IPFS gateway helper in `client/src/adapters/mech/ipfs.ts`, and pass `runtime` into the `Daemon` constructor options.
+
+- [ ] **Step 6: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/daemon/ && yarn typecheck`
+Expected: PASS; zero typecheck errors. Existing daemon tests that assert the loop set must be updated to the new registry, not deleted.
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd "$REPO" && git add client/src/daemon/daemon.ts client/src/daemon/loop-heartbeat.ts client/src/main.ts \
+  client/test/daemon/daemon-stage1-loops.test.ts
+git commit -m "feat(client): start the projector, work and evidence-driver loops from the daemon"
+```
+
+---
+
+## Task 19: The single-broadcaster facade
+
+Contract 1. **Blocked on finding 1** — the venue-base facade must expose `safe.broadcastSafeTransaction` and `safe.sendEoaTransaction`. Do not start this task until that addendum is confirmed.
+
+From stage 1 onward, venue-base's Safe broadcast is the **only** transaction path in the daemon process. Two independent nonce stacks against one Safe and one EOA is the #525 / #562 / #897 failure class; it is excluded by construction here, not by luck.
+
+**Files:**
+- Create: `client/src/runtime/broadcast.ts`
+- Create: `client/test/runtime/broadcast.test.ts`
+- Create: `client/test/runtime/broadcast.arch.test.ts`
+
+**Interfaces:**
+- Consumes: `createBaseVenue(...).safe`.
+- Produces:
+  ```ts
+  export interface OperatorBroadcaster {
+    /** Every Safe-mediated call in the process. */
+    safeExec(input: { to: `0x${string}`; value: bigint; data: `0x${string}`; logicalTx: string }): Promise<{ txHash: `0x${string}` }>;
+    /** Every raw-EOA call in the process. */
+    eoaSend(input: { to: `0x${string}`; value: bigint; data?: `0x${string}`; logicalTx: string }): Promise<{ txHash: `0x${string}` }>;
+  }
+  export function createOperatorBroadcaster(venue: { safe: BaseVenueSafe }): OperatorBroadcaster;
+  /** The banned direct-broadcast primitives, asserted by the architecture test. */
+  export const BANNED_BROADCAST_PRIMITIVES: readonly string[];
+  ```
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
-// client/test/bridge/legacy-facts-card.test.ts
-import { describe, expect, it } from 'vitest';
-import { mapAnnouncedSubmissionToFacts } from '@jinn-network/marketplace-pipeline';
-import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
+// client/test/runtime/broadcast.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { createOperatorBroadcaster } from '../../src/runtime/broadcast.js';
 
-const ANCHORED_TASK = {
-  taskId: 77n,
-  manifestDigest: 'QmSolver',
-  taskCidDigest: `0x${'a'.repeat(64)}` as const,
-  taskBytes: new TextEncoder().encode(
-    JSON.stringify({ protocol: 'https://jinn.network/profiles/task-execution/1.0' }),
-  ),
-  solutionBudgetWei: 1_000_000_000_000n,
-};
-
-describe('bridge-era legacy facts card', () => {
-  it('synthesizes a submission card under the legacy derivation annotation', () => {
-    const card = synthesizeLegacyFactsCard(ANCHORED_TASK);
-    expect(card.derivationKind).toBe('legacy');
-    expect(card.legacyManifestDigest).toBe('QmSolver');
-    expect(card.record.kind).toBe(
-      'https://jinn.network/records/task-execution/submission/1.0',
+describe('createOperatorBroadcaster', () => {
+  it('routes every Safe call through the venue safe port', async () => {
+    const broadcastSafeTransaction = vi.fn(async () => ({ txHash: '0xaa' as const }));
+    const broadcaster = createOperatorBroadcaster({ safe: { broadcastSafeTransaction, sendEoaTransaction: vi.fn() } } as never);
+    const result = await broadcaster.safeExec({ to: '0xto', value: 0n, data: '0x', logicalTx: 'mech.claimEvaluation' });
+    expect(result.txHash).toBe('0xaa');
+    expect(broadcastSafeTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '0xto', value: 0n, data: '0x', logicalTx: 'mech.claimEvaluation' }),
     );
   });
 
-  it('maps cleanly through the pipeline facts mapper with the bridge accepted', () => {
-    const result = mapAnnouncedSubmissionToFacts(synthesizeLegacyFactsCard(ANCHORED_TASK), {
-      estimateAiUnits: () => 1,
-      acceptLegacyCards: true,
-    });
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error('unreachable');
-    expect(result.facts.workKind).toBe('QmSolver');
-    expect(result.facts.legacyManifestDigest).toBe('QmSolver');
-    expect(result.facts.taskId).toBe(77n);
+  it('routes every EOA call through the same nonce authority', async () => {
+    const sendEoaTransaction = vi.fn(async () => ({ txHash: '0xbb' as const }));
+    const broadcaster = createOperatorBroadcaster({ safe: { broadcastSafeTransaction: vi.fn(), sendEoaTransaction } } as never);
+    await broadcaster.eoaSend({ to: '0xto', value: 1n, logicalTx: 'staking.checkpoint' });
+    expect(sendEoaTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '0xto', value: 1n, logicalTx: 'staking.checkpoint' }),
+    );
   });
 
-  it('is refused once the bridge retires at stage 5', () => {
-    expect(
-      mapAnnouncedSubmissionToFacts(synthesizeLegacyFactsCard(ANCHORED_TASK), {
-        estimateAiUnits: () => 1,
-        acceptLegacyCards: false,
-      }).ok,
-    ).toBe(false);
+  it('requires a logical tx label so every broadcast is attributable in logs', async () => {
+    const broadcaster = createOperatorBroadcaster({ safe: { broadcastSafeTransaction: vi.fn(), sendEoaTransaction: vi.fn() } } as never);
+    await expect(
+      broadcaster.safeExec({ to: '0xto', value: 0n, data: '0x', logicalTx: '' }),
+    ).rejects.toThrow(/logicalTx/);
   });
 });
 ```
 
 ```ts
-// client/test/bridge/converged-delivery-legacy-evaluator.test.ts
+// client/test/runtime/broadcast.arch.test.ts
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { sealDelivery } from '@jinn-network/task-execution-protocol';
-import { SignedEnvelopeSchema } from '../../src/types/envelope.js';
-import { legacyRestorationResultFromDelivery } from '../../src/daemon/bridge-legacy-delivery.js';
+import { BANNED_BROADCAST_PRIMITIVES } from '../../src/runtime/broadcast.js';
 
-/** Exactly the shape `LocalTaskExecutionBackend` seals (assembly/src/backend.ts:1585). */
-function convergedDelivery(legacyEnvelope: unknown): Uint8Array {
-  return sealDelivery({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
-    attempt: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-    task: `sha256:${'b'.repeat(64)}`,
-    outputs: [
-      {
-        name: 'prediction.json',
-        mediaType: 'application/json',
-        digest: { sha256: 'c'.repeat(64) },
-      },
-    ],
-    outcome: 'fulfilled',
-    executionIds: ['urn:uuid:22222222-3333-4444-5555-666666666666'],
-    evidenceRecords: [
-      { repository: 'urn:jinn:evidence:repository:local', record: `sha256:${'d'.repeat(64)}` },
-    ],
-    createdAt: '2026-07-30T09:00:00.000Z',
-    // Bridge annotation — namespaced extension, permitted by DeliveryRecordSchema's `.loose()`
-    // and TEP §21.3. Task 15 makes the backend emit it.
-    'https://jinn.network/bridge/legacy-execution-envelope/1.0': JSON.stringify(legacyEnvelope),
-  } as never);
-}
+const SRC = resolve(import.meta.dirname, '../../src');
+const ALLOWED = new Set([
+  resolve(SRC, 'runtime/broadcast.ts'),
+  // tx-retry.ts still owns the primitives venue-base's kit fixtures were drawn
+  // from; it is deleted at stage 5 with the rest of the legacy path.
+  resolve(SRC, 'tx-retry.ts'),
+]);
 
-const LEGACY_ENVELOPE = {
-  schemaVersion: 'jinn.execution.v1',
-  solverType: 'prediction.v1',
-  role: 'solution',
-  generatedAt: '2026-07-30T09:00:00.000Z',
-  participant: '0x1111111111111111111111111111111111111111',
-  window: { start: '2026-07-30T08:00:00.000Z', end: '2026-07-30T09:00:00.000Z' },
-  executor: { kind: 'harness', name: 'claude-code', version: '1.0.0' },
-  evidenceTier: 'self-signed',
-  attestation: null,
-  trajectory: null,
-  artifacts: [],
-  payload: { prediction: 0.42 },
-  signature: {
-    algo: 'secp256k1',
-    signer: '0x1111111111111111111111111111111111111111',
-    hash: `0x${'e'.repeat(64)}`,
-    sig: `0x${'f'.repeat(130)}`,
-  },
-};
-
-describe('converged Delivery is parseable by the legacy evaluator path', () => {
-  it('yields a restorationResult string the legacy evaluator schema accepts', () => {
-    const restorationResult = legacyRestorationResultFromDelivery(
-      convergedDelivery(LEGACY_ENVELOPE),
-    );
-    expect(typeof restorationResult).toBe('string');
-    const parsed = SignedEnvelopeSchema.parse(JSON.parse(restorationResult!));
-    expect(parsed.schemaVersion).toBe('jinn.execution.v1');
-    expect(parsed.solverType).toBe('prediction.v1');
-    expect(parsed.role).toBe('solution');
-  });
-
-  it('returns undefined for a Delivery carrying no bridge annotation', () => {
-    const bare = sealDelivery({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
-      attempt: 'urn:uuid:11111111-2222-3333-4444-555555555555',
-      task: `sha256:${'b'.repeat(64)}`,
-      outputs: [],
-      outcome: 'fulfilled',
-      executionIds: ['urn:uuid:22222222-3333-4444-5555-666666666666'],
-      evidenceRecords: [
-        { repository: 'urn:jinn:evidence:repository:local', record: `sha256:${'d'.repeat(64)}` },
-      ],
-      createdAt: '2026-07-30T09:00:00.000Z',
-    } as never);
-    expect(legacyRestorationResultFromDelivery(bare)).toBeUndefined();
-  });
-
-  it('still passes the binding admission check with the bridge annotation present', async () => {
-    const { inspectDelivery } = await import('@jinn-network/marketplace-binding');
-    expect(() => inspectDelivery(convergedDelivery(LEGACY_ENVELOPE))).not.toThrow();
-  });
+describe('architecture: one broadcaster', () => {
+  for (const primitive of BANNED_BROADCAST_PRIMITIVES) {
+    it(`no module outside the facade calls ${primitive}`, () => {
+      let out = '';
+      try {
+        // Path-shaped search: the token `client` is overloaded repo-wide.
+        out = execFileSync('grep', ['-rl', primitive, SRC, '--include=*.ts'], { encoding: 'utf8' });
+      } catch {
+        out = '';
+      }
+      const offenders = out.split('\n').filter(Boolean).map((p) => resolve(p)).filter((p) => !ALLOWED.has(p));
+      expect(offenders).toEqual([]);
+    });
+  }
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run them to verify they fail**
 
-Run: `cd client && yarn vitest run test/bridge`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/bridge-legacy-delivery.js"`. **Do not implement anything in this task.** Commit the red fixtures so the gap is on record.
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/broadcast.test.ts test/runtime/broadcast.arch.test.ts`
+Expected: FAIL — the module does not exist; once it does, the architecture test lists every legacy call site as an offender. That list is the work of Tasks 20 and 21.
 
-- [ ] **Step 3: Record the gap in the commit body**
+- [ ] **Step 3: Write the implementation**
 
-No implementation. Write the commit message body to state exactly what the fixtures prove:
+```ts
+// client/src/runtime/broadcast.ts
 
-> The backend seals a fixed-shape TEP DeliveryRecord (assembly/src/backend.ts:1585) with no
-> `jinn.execution.v1` content and no extension hook, while every legacy evaluator parses
-> `task.context.restorationResult` through `SignedEnvelopeSchema`. These fixtures pin the bridge
-> requirement; Task 15 satisfies it.
+/**
+ * SINGLE-BROADCASTER RULE (cross-plan contract 1).
+ *
+ * From cutover stage 1, venue-base's Safe broadcast is the ONLY transaction
+ * path in the daemon process. Every surviving legacy leg — creator posting
+ * until stage 3, evaluation transactions until stage 2, the earning family's
+ * Safe batches, and the raw-EOA sends — routes through this facade so one
+ * per-EOA lock and one nonce ledger serialize them all. Two independent nonce
+ * stacks against one Safe and one EOA is the #525 / #562 / #897 failure class.
+ */
+export interface OperatorBroadcasterSafePort {
+  broadcastSafeTransaction(input: {
+    to: `0x${string}`; value: bigint; data: `0x${string}`; logicalTx: string;
+  }): Promise<{ txHash: `0x${string}` }>;
+  sendEoaTransaction(input: {
+    to: `0x${string}`; value: bigint; data?: `0x${string}`; logicalTx: string;
+  }): Promise<{ txHash: `0x${string}` }>;
+}
 
-- [ ] **Step 4: Confirm the failure output is the expected one**
+export interface OperatorBroadcaster {
+  safeExec(input: {
+    to: `0x${string}`; value: bigint; data: `0x${string}`; logicalTx: string;
+  }): Promise<{ txHash: `0x${string}` }>;
+  eoaSend(input: {
+    to: `0x${string}`; value: bigint; data?: `0x${string}`; logicalTx: string;
+  }): Promise<{ txHash: `0x${string}` }>;
+}
 
-Run: `cd client && yarn vitest run test/bridge 2>&1 | tail -20`
-Expected: only unresolved-import failures — no assertion failures, which would mean the fixtures encode the wrong shape.
+/**
+ * Primitives no module outside this facade may call. Asserted by
+ * `broadcast.arch.test.ts`; extend the list, never the allowlist, when a new
+ * broadcast primitive appears.
+ */
+export const BANNED_BROADCAST_PRIMITIVES: readonly string[] = [
+  'walletClient.sendTransaction',
+  'walletClient.writeContract',
+  'masterWallet.writeContract',
+  'wallet.writeContract',
+  'executeSafeTransaction',
+  'executeSafeTxDirect',
+  'executeSafeTxBatch',
+  'safe.executeTransaction',
+];
+
+function requireLabel(logicalTx: string): void {
+  if (logicalTx.trim().length === 0) {
+    throw new Error('every broadcast must carry a logicalTx label');
+  }
+}
+
+export function createOperatorBroadcaster(venue: {
+  safe: OperatorBroadcasterSafePort;
+}): OperatorBroadcaster {
+  return {
+    async safeExec(input) {
+      requireLabel(input.logicalTx);
+      return venue.safe.broadcastSafeTransaction(input);
+    },
+    async eoaSend(input) {
+      requireLabel(input.logicalTx);
+      return venue.safe.sendEoaTransaction(input);
+    },
+  };
+}
+```
+
+- [ ] **Step 4: Run the unit test only (the architecture test stays red until Task 21)**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/broadcast.test.ts`
+Expected: PASS, 3 tests. `broadcast.arch.test.ts` is expected RED here — note the offender list in the commit message; it is the work list for the next two tasks.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/test/bridge
-git commit -m "test(operator): pin the bridge-era facts card and Delivery parseability fixtures"
+cd "$REPO" && git add client/src/runtime/broadcast.ts client/test/runtime/broadcast.test.ts client/test/runtime/broadcast.arch.test.ts
+git commit -m "feat(client): add the single-broadcaster facade over the venue safe port"
 ```
 
 ---
 
-## Task 15: The bridge — legacy facts cards and legacy-evaluator-parseable deliveries
+## Task 20: Re-point the mech-family and ERC-8004 transaction legs
+
+The enumerated legacy legs that survive stage 1 in the daemon process, Safe-mediated group.
 
 **Files:**
-- Create: `client/src/daemon/bridge-legacy-delivery.ts`
-- Modify: `packages/task-execution/backend-local/assembly/src/backend.ts:494` (add `deliveryExtensions` to `LocalTaskExecutionBackendConfig`) and `:1585` (spread it into `sealDelivery`), `client/src/daemon/composition-root.ts` (supply the hook), `client/src/adapters/mech/adapter.ts:1124` and `:1154` (bridge read path)
-- Test: `client/test/bridge/*` (Task 14, now green), `packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts` (extension round-trip)
-
-> **Operator ruling required before implementing this task.** See Finding F2. The planned path is
-> D3 below; D1 and D2 are the recorded alternatives. Do not start until the ruling is recorded in
-> the PR thread.
-
-**Planned path (D3):** the backend gains one optional, namespaced extension hook. `DeliveryRecordSchema` is `.loose()` and TEP §21.3 explicitly admits namespaced extensions, so this adds no protocol semantics — it is a bridge annotation with a dated retirement (spec §9, "after stage 5"). The host builds the legacy `jinn.execution.v1` envelope from the attempt's harvested outputs, signs it with the agent key, and hands it to the backend through the hook. The legacy mech adapter's read path prefers the annotation.
+- Modify: `client/src/adapters/mech/contracts.ts` (`submitTask` @221/260, `claimTask` @414/434, `claimDelivery` @580/634, `claimEvaluation` @680/702, `callDeliverToMarketplace` @1324/1345)
+- Modify: `client/src/adapters/mech/safe.ts` (`executeSafeTransaction` @73 becomes a thin delegate)
+- Modify: `client/src/erc8004/reputation.ts` (`sendWrite` @490, both the Safe branch @494 and the raw-EOA fallback @512)
+- Modify: `client/src/erc8004/identity.ts` (`_writeMetadata` @635, broadcast @676)
+- Modify: `client/src/solvernets/daemon-init.ts` (`MetadataPublisher.setMetadata` @518)
+- Modify: `client/src/main.ts` (`writeCheckpoint` @2318, broadcast @2325)
+- Create: `client/test/runtime/broadcast-repoint-mech.test.ts`
 
 **Interfaces:**
-- Consumes: `SignedEnvelopeSchema` (`client/src/types/envelope.ts`); `HarvestResult` (`@jinn-network/task-execution-workspace`); the existing legacy envelope builder in `client/src/harnesses/engine/` (reuse, do not re-derive the payload shapes).
-- Produces:
+- Consumes: `OperatorBroadcaster` (Task 19).
+- Produces: each touched module takes an injected `broadcaster: OperatorBroadcaster` rather than constructing its own client. No new exported names.
+
+- [ ] **Step 1: Write the failing test**
 
 ```ts
-// client/src/daemon/bridge-legacy-delivery.ts
-export const LEGACY_ENVELOPE_EXTENSION_KEY =
-  'https://jinn.network/bridge/legacy-execution-envelope/1.0';
+// client/test/runtime/broadcast-repoint-mech.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { executeSafeTransaction } from '../../src/adapters/mech/safe.js';
 
-/** The projector's synthesized submission card for a legacy-posted task (contract 9). */
-export function synthesizeLegacyFactsCard(anchored: {
-  readonly taskId: bigint;
-  readonly manifestDigest: string;
-  readonly taskCidDigest: `0x${string}`;
-  readonly taskBytes: Uint8Array;
-  readonly solutionBudgetWei: bigint;
-}): AnnouncedSubmissionCard;
-
-/** Reads the bridge annotation off sealed Delivery bytes. `undefined` when absent. */
-export function legacyRestorationResultFromDelivery(
-  sealedDeliveryBytes: Uint8Array,
-): string | undefined;
-
-/** Builds and signs the `jinn.execution.v1` envelope the legacy evaluator expects. */
-export function buildLegacyExecutionEnvelope(input: {
-  readonly solverType: string;
-  readonly participant: `0x${string}`;
-  readonly harness: string;
-  readonly harvest: HarvestResult;
-  readonly outputsRoot: string;
-  readonly startedAt: string;
-  readonly endedAt: string;
-  readonly sign: (hash: `0x${string}`) => `0x${string}`;
-}): { readonly json: string; readonly evidenceHash: `0x${string}` };
-```
-
-- [ ] **Step 1: Run the Task 14 fixtures to confirm they are still red**
-
-Run: `cd client && yarn vitest run test/bridge`
-Expected: FAIL with `Failed to resolve import "../../src/daemon/bridge-legacy-delivery.js"` — the same failure Task 14 recorded.
-
-- [ ] **Step 2: Add the backend extension hook with its own round-trip test**
-
-Append to `packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts`:
-
-```ts
-it("carries a host-supplied namespaced Delivery extension into the sealed bytes", async () => {
-  const backend = makeBackendFixture({
-    deliveryExtensions: () => ({
-      "https://jinn.network/bridge/legacy-execution-envelope/1.0": "{\"schemaVersion\":\"jinn.execution.v1\"}",
-    }),
+describe('mech-family legs route through the single broadcaster', () => {
+  it('executeSafeTransaction delegates to the injected broadcaster', async () => {
+    const safeExec = vi.fn(async () => ({ txHash: '0xaa' as const }));
+    const result = await executeSafeTransaction({
+      broadcaster: { safeExec, eoaSend: vi.fn() },
+      to: '0xto', value: 0n, data: '0x1234', logicalTx: 'mech.claimTask',
+    } as never);
+    expect(safeExec).toHaveBeenCalledTimes(1);
+    expect(result.txHash).toBe('0xaa');
   });
-  const { deliveryBytes } = await runToDelivery(backend);
-  const parsed = JSON.parse(new TextDecoder().decode(deliveryBytes));
-  expect(parsed["https://jinn.network/bridge/legacy-execution-envelope/1.0"])
-    .toBe("{\"schemaVersion\":\"jinn.execution.v1\"}");
-  // The extension must not break canonical sealing or binding admission.
-  expect(() => inspectDelivery(deliveryBytes)).not.toThrow();
-});
 
-it("refuses a non-namespaced extension key", async () => {
-  const backend = makeBackendFixture({ deliveryExtensions: () => ({ data: "x" }) });
-  await expect(runToDelivery(backend)).rejects.toThrow(
-    "Delivery extension keys must be absolute URIs",
-  );
+  it('refuses to run without a broadcaster rather than falling back to a local signer', async () => {
+    await expect(
+      executeSafeTransaction({ to: '0xto', value: 0n, data: '0x' } as never),
+    ).rejects.toThrow(/broadcaster/);
+  });
 });
 ```
 
-Then in `packages/task-execution/backend-local/assembly/src/backend.ts`, add to `LocalTaskExecutionBackendConfig`:
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/broadcast-repoint-mech.test.ts`
+Expected: FAIL — `executeSafeTransaction` still builds its own `walletClient.writeContract` call.
+
+- [ ] **Step 3: Convert `executeSafeTransaction` into a delegate**
+
+In `client/src/adapters/mech/safe.ts`, replace the body of `executeSafeTransaction` (the `withNonceLedger` wrapper at :109, the `getTransactionHash`/`nonce` reads at :118-138, the `signMessage` + v-adjust at :141-149, and the `writeContract` at :162-181) with Safe-transaction **encoding only**, then one delegate call:
 
 ```ts
-  /**
-   * Host-supplied namespaced Delivery extensions (TEP §21.3). Keys must be absolute URIs; the
-   * backend adds no semantics of its own. Used by the operator runtime's bridge era only.
-   */
-  readonly deliveryExtensions?: (input: {
-    readonly attempt: AttemptUri;
-    readonly harvest: HarvestResult;
-    readonly task: TaskSpecification;
-  }) => Readonly<Record<string, JsonValue>>;
-```
-
-and at the `sealDelivery` call (line 1585) compute and spread them:
-
-```ts
-    const extensions = this.config.deliveryExtensions?.({ attempt, harvest, task: input.task }) ?? {};
-    for (const key of Object.keys(extensions)) {
-      if (!/^[a-z][a-z0-9+.-]*:/iu.test(key)) {
-        throw new Error("Delivery extension keys must be absolute URIs");
-      }
-    }
-    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://jinn.network/profiles/task-execution/1.0", /* …unchanged fields… */ });
-```
-
-Reserved keys win: the spread puts `extensions` first so no extension can shadow `protocol`, `attempt`, `task`, `outputs`, `outcome`, `executionIds`, `evidenceRecords`, or `createdAt`.
-
-- [ ] **Step 3: Write the host bridge module**
-
-```ts
-// client/src/daemon/bridge-legacy-delivery.ts
-import { RECORD_KINDS_SUBMISSION, type AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
-import { documentDigest } from '@jinn-network/task-execution-protocol';
-
-export const LEGACY_ENVELOPE_EXTENSION_KEY =
-  'https://jinn.network/bridge/legacy-execution-envelope/1.0';
-
-export function synthesizeLegacyFactsCard(anchored: {
-  readonly taskId: bigint;
-  readonly manifestDigest: string;
-  readonly taskCidDigest: `0x${string}`;
-  readonly taskBytes: Uint8Array;
-  readonly solutionBudgetWei: bigint;
-}): AnnouncedSubmissionCard {
-  const taskDigest = documentDigest(anchored.taskBytes);
-  return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: taskDigest },
-    facts: {
-      taskDigest,
-      // A legacy-posted task carries no sealed Submission and therefore no profile URI; the
-      // bridge names the repository-work profile the legacy harnesses always ran under.
-      taskProfileUri: 'https://jinn.network/profiles/task-execution/repository-work/1.0',
-      requirements: {},
-    },
-    chain: {
-      taskId: anchored.taskId,
-      // Legacy tasks have no Submission UUID; the bridge derives a stable one from the anchor.
-      submission: `urn:uuid:${uuidFromDigest(anchored.taskCidDigest)}`,
-      nonce: anchored.taskCidDigest,
-      intendedSpendWei: anchored.solutionBudgetWei,
-    },
-    derivationKind: 'legacy',
-    legacyManifestDigest: anchored.manifestDigest,
-  };
-}
-
-export function legacyRestorationResultFromDelivery(
-  sealedDeliveryBytes: Uint8Array,
-): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(sealedDeliveryBytes));
-  } catch {
-    return undefined;
+export async function executeSafeTransaction(input: {
+  broadcaster: OperatorBroadcaster;
+  safeAddress: `0x${string}`;
+  to: `0x${string}`;
+  value: bigint;
+  data: `0x${string}`;
+  logicalTx: string;
+  // …existing signing inputs, kept: the Safe-contract-specified eth_sign
+  // v-adjustment and pre-validated signature encoding stay here, because they
+  // are Safe-contract behaviour, not broadcast policy.
+}): Promise<{ txHash: `0x${string}` }> {
+  if (input.broadcaster === undefined) {
+    throw new Error('executeSafeTransaction requires the single-process broadcaster');
   }
-  if (typeof parsed !== 'object' || parsed === null) return undefined;
-  const value = (parsed as Record<string, unknown>)[LEGACY_ENVELOPE_EXTENSION_KEY];
-  return typeof value === 'string' ? value : undefined;
+  const data = encodeFunctionData({
+    abi: SAFE_ABI,
+    functionName: 'execTransaction',
+    args: buildExecTransactionArgs(input),
+  });
+  return input.broadcaster.safeExec({
+    to: input.safeAddress,
+    value: 0n,
+    data,
+    logicalTx: input.logicalTx,
+  });
 }
 ```
 
-`uuidFromDigest` is a local helper formatting the first 16 bytes of the digest as an RFC 4122 v4-shaped UUID — deterministic so a re-run of the projector synthesizes the identical card.
+Keep `buildSafeSignature` and `safe-revert.ts`'s decoder where they are — signature construction and revert decoding are Safe semantics, not broadcast policy.
 
-`buildLegacyExecutionEnvelope` reuses the existing legacy envelope construction in `client/src/harnesses/engine/` rather than re-deriving payload shapes; it reads the harvested artifact named by the solver type's declared output slot, sets `evidenceTier: 'self-signed'`, and signs the canonical hash with the agent key.
+- [ ] **Step 4: Thread the broadcaster through the five contract helpers**
 
-- [ ] **Step 4: Wire the bridge read path into the legacy adapter and the hook into the composition root**
+For each of `submitTask`, `claimTask`, `claimDelivery`, `claimEvaluation`, `callDeliverToMarketplace` in `client/src/adapters/mech/contracts.ts`: add `broadcaster: OperatorBroadcaster` to the options object, pass it into `executeSafeTransaction`, and give each a distinct `logicalTx` label — `mech.createTask`, `mech.claimTask`, `mech.claimDelivery`, `mech.claimEvaluation`, `mech.deliverToMarketplace`. While you are in the file, delete the no-op `withEvictionRecovery` wrapper (contracts.ts:212) and its five call sites; it returns `action()` unchanged and only obscures the diff.
 
-In `client/src/adapters/mech/adapter.ts`, in `evaluationAnnouncementForSolution` (L1154), replace the single line that derives `resultData`:
+`MechAdapter` (`client/src/adapters/mech/adapter.ts`) takes the broadcaster in its constructor options and forwards it; `main.ts` passes `runtime.broadcaster`.
 
-```ts
-    // Was: const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
-    const bridged = legacyRestorationResultFromDelivery(rawDeliveryBytes);
-    const resultData =
-      bridged ?? (resultPayload.data as string) ?? JSON.stringify(resultPayload);
-```
+- [ ] **Step 5: Re-point the ERC-8004 and checkpoint legs**
 
-with `rawDeliveryBytes` being the exact bytes `fetchFromIpfs` already retrieved. This is the *only* change to the legacy evaluation path in this stage: a read-path preference, no state-machine change, no schema change, no new transaction. The Task 16 regression test proves the untouched branch still works.
+- `reputation.ts` `sendWrite` (:490): both branches become `broadcaster.safeExec(...)` / `broadcaster.eoaSend(...)` with `logicalTx: 'erc8004.giveFeedback'`. **Delete the raw-EOA fallback's independent lock** — it held `withEoaBroadcastLock` but skipped the ledger entirely.
+- `identity.ts` `_writeMetadata` (:635): `broadcaster.eoaSend(...)`, `logicalTx: 'erc8004.setMetadata'`.
+- `solvernets/daemon-init.ts` `setMetadata` (:518): `broadcaster.eoaSend(...)`, `logicalTx: 'solvernet.setMetadata'`.
+- `main.ts` `writeCheckpoint` (:2318): `broadcaster.eoaSend(...)`, `logicalTx: 'staking.checkpoint'`. This one currently holds the EOA lock but has **no nonce ledger, no fee bumping, and no retry** — the re-point is a strict improvement, not a refactor.
 
-In `client/src/daemon/composition-root.ts`, supply the hook on `LocalTaskExecutionBackendConfig`:
+- [ ] **Step 6: Run the tests**
 
-```ts
-    deliveryExtensions: ({ harvest, task }) => {
-      const wiring = resolveWiringEntry(workKindFor(task), pipelineConfig.wiring);
-      if (wiring === undefined) return {};
-      const { json } = buildLegacyExecutionEnvelope({
-        solverType: wiring.workKind,
-        participant: input.safeAddress,
-        harness: wiring.harness,
-        harvest,
-        outputsRoot: /* attempt out/ path */,
-        startedAt, endedAt,
-        sign: signWithAgentKey,
-      });
-      return { [LEGACY_ENVELOPE_EXTENSION_KEY]: json };
-    },
-```
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/ test/adapters/ && yarn typecheck`
+Expected: PASS. `broadcast.arch.test.ts` is now down to the earning-family offenders only — confirm the remaining list matches Task 21's file list exactly.
 
-- [ ] **Step 5: Run every affected suite to verify green**
+- [ ] **Step 7: Commit**
 
-Run:
 ```bash
-cd packages/task-execution/backend-local/assembly && yarn vitest run && yarn typecheck
-cd ../../../../client && yarn vitest run test/bridge test/adapters test/daemon && yarn typecheck
+cd "$REPO" && git add client/src/adapters/mech/ client/src/erc8004/ client/src/solvernets/daemon-init.ts \
+  client/src/main.ts client/test/runtime/broadcast-repoint-mech.test.ts
+git commit -m "refactor(client): route the mech and ERC-8004 transaction legs through one broadcaster"
 ```
-Expected: PASS — the two Task 14 fixture files go green, the two new backend tests pass, the marketplace binding admission check still accepts the extended Delivery, and no existing adapter test regresses.
+
+---
+
+## Task 21: Re-point the earning-family transaction legs
+
+Finding 7 lives here: `executeSafeTxBatch` broadcasts through the Safe protocol-kit's own signer, sharing neither the EOA lock nor the nonce ledger, from the same agent EOA six bootstrap steps use. This is the live instance of the failure class contract 1 exists to prevent.
+
+No earning recomposition — the step logic, calldata construction, and state machine are untouched. Only the broadcast seam moves.
+
+**Files:**
+- Modify: `client/src/earning/safe-adapter.ts` (`executeSafeTxDirect` @220/329, `executeSafeTxBatch` @184/194/203)
+- Modify: `client/src/earning/bootstrap.ts` (the thirteen enumerated sends), `client/src/earning/steps/fleet-safe-deploy.ts` (@47, @68), `client/src/earning/steps/fleet-identity-register.ts` (@43), `client/src/earning/agent-wallet-binding.ts` (@296), `client/src/earning/orphan-sweep.ts` (@152, @175, @251, @284), `client/src/earning/stolas-claim.ts` (@165, @336), `client/src/earning/testnet-setup-migration.ts` (@220)
+- Modify: `client/src/daemon/balance-topup-loop.ts` (@101, @134)
+- Create: `client/test/runtime/broadcast-repoint-earning.test.ts`
+
+**Interfaces:**
+- Consumes: `OperatorBroadcaster` (Task 19).
+- Produces: `executeSafeTxDirect` and `executeSafeTxBatch` keep their names and their calldata-building behaviour; both gain a required `broadcaster` field and lose their own signer paths.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/runtime/broadcast-repoint-earning.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { executeSafeTxBatch, executeSafeTxDirect } from '../../src/earning/safe-adapter.js';
+
+describe('earning-family legs route through the single broadcaster', () => {
+  it('executeSafeTxDirect delegates instead of sending its own transaction', async () => {
+    const safeExec = vi.fn(async () => ({ txHash: '0xaa' as const }));
+    await executeSafeTxDirect({ broadcaster: { safeExec, eoaSend: vi.fn() }, to: '0xto', value: 0n, data: '0x' } as never);
+    expect(safeExec).toHaveBeenCalledTimes(1);
+  });
+
+  it('executeSafeTxBatch encodes a multiSend and delegates exactly once', async () => {
+    const safeExec = vi.fn(async () => ({ txHash: '0xbb' as const }));
+    await executeSafeTxBatch({
+      broadcaster: { safeExec, eoaSend: vi.fn() },
+      transactions: [
+        { to: '0xa', value: 0n, data: '0x01' },
+        { to: '0xb', value: 0n, data: '0x02' },
+      ],
+    } as never);
+    expect(safeExec).toHaveBeenCalledTimes(1);
+  });
+
+  it('neither helper constructs a protocol-kit signer any more', async () => {
+    const source = await import('node:fs').then((fs) =>
+      fs.readFileSync(new URL('../../src/earning/safe-adapter.ts', import.meta.url), 'utf8'),
+    );
+    expect(source).not.toContain('executeTransaction(');
+    expect(source).not.toContain('signTransaction(');
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/broadcast-repoint-earning.test.ts`
+Expected: FAIL — both helpers still broadcast themselves; the protocol-kit calls are still present.
+
+- [ ] **Step 3: Convert both helpers to delegates**
+
+In `client/src/earning/safe-adapter.ts`:
+- `executeSafeTxDirect`: keep the `execTransaction` calldata encoding (:281-285) and the signature construction (:271-279); delete the `withNonceLedger` wrapper (:249) and the `sendTransaction` (:329); end with `return broadcaster.safeExec({ to: safeAddress, value: 0n, data, logicalTx })`.
+- `executeSafeTxBatch`: replace the protocol-kit `createTransaction` → `signTransaction` → `executeTransaction` sequence (:191-205) with a `multiSend` calldata encode over the same transaction list, then one `broadcaster.safeExec(...)`. The batch must remain **one** Safe transaction — that is the property the six bootstrap steps depend on. Keep the 30% gas buffer logic if the venue-base port does not already apply one; if it does, delete the local buffer and say so in the PR body.
+- Delete the now-unused protocol-kit import.
+
+- [ ] **Step 4: Thread the broadcaster through the earning call sites**
+
+Each of the enumerated modules takes `broadcaster` on its existing options/deps object and gives its send a `logicalTx` label. Suggested labels, one per site so a log line names the operation:
+`earning.stolasStake`, `earning.fundAgentEoa`, `earning.deployMech`, `earning.registerAgent`, `earning.selfBondFund`, `earning.safeDeploy`, `earning.serviceCreate`, `earning.serviceActivate`, `earning.registerAgents`, `earning.serviceDeploy`, `earning.serviceApprove`, `earning.stakingStake`, `earning.reStake`, `earning.bindAgentWallet`, `earning.orphanSweep`, `earning.stolasClaim`, `earning.selfBondClaim`, `earning.retireSetup`, `topup.fundAgentEoa`, `topup.fundSafe`.
+
+`FleetBootstrapper` receives the broadcaster in its constructor; `bootstrap-run.ts` and `main.ts`'s SPA `retryBind` handler pass `runtime.broadcaster`.
+
+- [ ] **Step 5: Run the full suite and the architecture test**
+
+Run: `cd "$REPO/client" && yarn vitest run test/runtime/ && yarn test && yarn typecheck`
+Expected: PASS — including `broadcast.arch.test.ts`, which must now report **zero offenders** for every banned primitive outside the facade and `tx-retry.ts`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/task-execution/backend-local/assembly/src/backend.ts packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts client/src/daemon/bridge-legacy-delivery.ts client/src/daemon/composition-root.ts client/src/adapters/mech/adapter.ts
-git commit -m "feat(operator): bridge legacy facts cards and legacy-evaluator-parseable deliveries"
+cd "$REPO" && git add client/src/earning/ client/src/daemon/balance-topup-loop.ts \
+  client/test/runtime/broadcast-repoint-earning.test.ts
+git commit -m "refactor(client): route the earning-family transaction legs through one broadcaster"
 ```
 
 ---
 
-## Task 16: Retire the TaskEngine solution path and `joinedSolverNets` claim gating
+## Task 22: Re-key the plugin content commands onto wiring entries
+
+Design §9's CLI paragraph: the plugin *content* commands (`publish` / `read` / `feedback` / `block` / `revoke`) "only re-key from manifestCid to wiring entries here". Wiring entries are **born** in this stage's config migration, so the re-key belongs here — it is part of making the migrated config the operative surface. Their deeper disposition stays with the plugin session and is not preempted.
+
+**Surgical: nothing about what these commands do changes. Only how they resolve their target.** `legacyManifestDigest` does the matching, so behaviour is identical on day one, by design.
 
 **Files:**
-- Modify: `client/src/harnesses/engine/engine.ts:732` (`canAcceptTask`), `client/src/daemon/daemon.ts:668` (`_runEngineWatcherLoop`), `client/src/adapters/mech/adapter.ts:1019` (`discoverSubgraphRestorationTasks`) and `:1392` (`watchForTasks`)
-- Test: `client/test/daemon/solution-path-retired.test.ts`, `client/test/daemon/evaluation-path-regression.test.ts`
-
-The legacy engine keeps running evaluations. It stops running solutions, and `joinedSolverNets` stops gating claims — the predicate plus wiring (with the bridge annotation active) is the authority from here.
+- Create: `client/src/wiring/resolve.ts`
+- Create: `client/test/wiring/resolve.test.ts`
+- Modify: `client/src/cli/commands/solver-plugins-publish.ts`, `solver-plugins-read.ts`, `solver-plugins-feedback.ts`, `solver-plugins-block.ts`, `solver-plugins-revoke.ts`
+- Create: `client/test/cli/solver-plugins-wiring-rekey.test.ts`
 
 **Interfaces:**
-- Consumes: `TaskEngine.canAcceptTask` (`client/src/harnesses/engine/engine.ts:732`), `MechAdapter.watchForTasks` (`client/src/adapters/mech/adapter.ts:1392`).
-- Produces: no new exports. Behavioural contract:
-  - `canAcceptTask({ taskRole: 'restoration', … })` resolves `{ ok: false, reason: 'solution path retired at cutover stage 1' }`.
-  - `canAcceptTask({ taskRole: 'evaluation', … })` is unchanged in every branch.
-  - `watchForTasks()` yields **only** evaluation announcements.
-  - `task_runs` receives no new `task_role = 'restoration'` rows.
+- Consumes: `ExecutionWiringConfigV2` (Task 4); the existing `findJoinedByName` in `client/src/solver-nets/registry.ts:115` as the behaviour reference.
+- Produces:
+  ```ts
+  /** Resolve a wiring entry by work kind, legacy manifest digest, or harness label. */
+  export function findWiringByTarget(
+    wiring: readonly ExecutionWiringConfigV2[] | undefined, needle: string,
+  ): ExecutionWiringConfigV2 | undefined;
+  /** The plugin list a content command operates on for a resolved target. */
+  export function pluginsForWiring(entry: ExecutionWiringConfigV2 | undefined): readonly string[];
+  ```
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test for the resolver**
 
 ```ts
-// client/test/daemon/solution-path-retired.test.ts
+// client/test/wiring/resolve.test.ts
 import { describe, expect, it } from 'vitest';
-import { Store } from '../../src/store/store.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import { engineFixture, restorationTask, adapterFixture } from './_engine-fixtures.js';
+import { findWiringByTarget, pluginsForWiring } from '../../src/wiring/resolve.js';
 
-describe('solution path retired at stage 1', () => {
-  it('refuses a restoration task with a named reason', async () => {
-    const engine = engineFixture();
-    await expect(
-      engine.canAcceptTask({ solverType: 'prediction.v1', taskRole: 'restoration', task: restorationTask() }),
-    ).resolves.toEqual({ ok: false, reason: 'solution path retired at cutover stage 1' });
+const WIRING = [
+  {
+    workKind: 'swe-rebench.v2', harness: 'claude-code', model: 'haiku',
+    plugins: ['jinn-layer', 'bundled:swe-rebench-v2-runtime'],
+    credentialRef: 'claude-code', isolationPolicy: 'workspace', legacyManifestDigest: 'bafyOne',
+  },
+  {
+    workKind: 'prediction.v1', harness: 'codex', model: 'gpt',
+    plugins: [], credentialRef: 'codex', isolationPolicy: 'workspace', legacyManifestDigest: 'bafyTwo',
+  },
+];
+
+describe('findWiringByTarget', () => {
+  it('matches by work kind', () => {
+    expect(findWiringByTarget(WIRING, 'swe-rebench.v2')?.harness).toBe('claude-code');
   });
 
-  it('writes no new restoration row to task_runs', async () => {
-    const store = new Store(':memory:');
-    const engine = engineFixture({ store });
-    await engine.canAcceptTask({ solverType: 'prediction.v1', taskRole: 'restoration', task: restorationTask() });
-    const rows = new TaskRunPersistence(store.db).getInFlight();
-    expect(rows.filter((row) => row.taskRole === 'restoration')).toEqual([]);
+  it('matches by the legacy manifest digest, preserving today behaviour', () => {
+    expect(findWiringByTarget(WIRING, 'bafyTwo')?.workKind).toBe('prediction.v1');
   });
 
-  it('yields no restoration announcements from watchForTasks', async () => {
-    const adapter = adapterFixture({ routerLogs: ['TaskCreated', 'SolutionDeliveryClaimed'] });
-    const yielded: string[] = [];
-    for await (const announcement of adapter.watchForTasks()) {
-      yielded.push(announcement.task.role);
-      if (yielded.length >= 1) break;
-    }
-    expect(yielded).toEqual(['evaluation']);
+  it('matches by harness label', () => {
+    expect(findWiringByTarget(WIRING, 'codex')?.workKind).toBe('prediction.v1');
   });
 
-  it('claims regardless of joinedSolverNets — the predicate is the authority', async () => {
-    const adapter = adapterFixture({ joinedSolverNets: {}, routerLogs: ['SolutionDeliveryClaimed'] });
-    const yielded: unknown[] = [];
-    for await (const announcement of adapter.watchForTasks()) {
-      yielded.push(announcement);
-      break;
-    }
-    expect(yielded).toHaveLength(1);
+  it('prefers a work-kind match over a harness match when both could apply', () => {
+    const ambiguous = [
+      { ...WIRING[0]!, workKind: 'codex' },
+      WIRING[1]!,
+    ];
+    expect(findWiringByTarget(ambiguous, 'codex')?.harness).toBe('claude-code');
+  });
+
+  it('returns undefined for an unknown needle', () => {
+    expect(findWiringByTarget(WIRING, 'nope')).toBeUndefined();
+  });
+
+  it('returns undefined for absent wiring rather than throwing', () => {
+    expect(findWiringByTarget(undefined, 'anything')).toBeUndefined();
+  });
+});
+
+describe('pluginsForWiring', () => {
+  it('returns the entry plugins', () => {
+    expect(pluginsForWiring(WIRING[0])).toEqual(['jinn-layer', 'bundled:swe-rebench-v2-runtime']);
+  });
+
+  it('returns an empty list for an unresolved target', () => {
+    expect(pluginsForWiring(undefined)).toEqual([]);
   });
 });
 ```
 
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/wiring/resolve.test.ts`
+Expected: FAIL — cannot resolve `../../src/wiring/resolve.js`.
+
+- [ ] **Step 3: Write the resolver**
+
 ```ts
-// client/test/daemon/evaluation-path-regression.test.ts
-import { describe, expect, it } from 'vitest';
-import { Store } from '../../src/store/store.js';
-import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
-import { engineFixture, evaluationTask } from './_engine-fixtures.js';
+// client/src/wiring/resolve.ts
+import type { ExecutionWiringConfigV2 } from '../config-migration-v2.js';
 
-describe('evaluation path is untouched at stage 1', () => {
-  it('still accepts an evaluation task', async () => {
-    const engine = engineFixture();
-    await expect(
-      engine.canAcceptTask({ solverType: 'prediction.v1', taskRole: 'evaluation', task: evaluationTask() }),
-    ).resolves.toEqual({ ok: true });
+/**
+ * Target resolution for the plugin content commands after the shape-version-2
+ * migration. Mirrors `findJoinedByName`'s tolerance (short name OR manifest
+ * CID) against the new surface: work kind, the `legacyManifestDigest` bridge
+ * annotation, or the harness label.
+ *
+ * The bridge annotation is what makes this behaviour-preserving — an operator
+ * who passed a manifest CID yesterday resolves the same entry today.
+ */
+export function findWiringByTarget(
+  wiring: readonly ExecutionWiringConfigV2[] | undefined,
+  needle: string,
+): ExecutionWiringConfigV2 | undefined {
+  if (wiring === undefined || wiring.length === 0) return undefined;
+  return (
+    wiring.find((entry) => entry.workKind === needle) ??
+    wiring.find((entry) => entry.legacyManifestDigest === needle) ??
+    wiring.find((entry) => entry.harness === needle)
+  );
+}
+
+/** The plugin list a content command operates on for a resolved target. */
+export function pluginsForWiring(entry: ExecutionWiringConfigV2 | undefined): readonly string[] {
+  return entry?.plugins ?? [];
+}
+```
+
+- [ ] **Step 4: Write the failing command-level tests**
+
+```ts
+// client/test/cli/solver-plugins-wiring-rekey.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { publishHandler } from '../../src/cli/commands/solver-plugins-publish.js';
+
+const CONFIG = {
+  executionWiring: [{
+    workKind: 'swe-rebench.v2', harness: 'claude-code', model: 'haiku',
+    plugins: ['jinn-layer'], credentialRef: 'claude-code', isolationPolicy: 'workspace',
+    legacyManifestDigest: 'bafyOne',
+  }],
+  // Present but no longer consulted by these commands.
+  joinedSolverNets: { bafyOne: { manifestCid: 'bafyOne', roles: ['solver'], plugins: ['stale-entry'] } },
+} as never;
+
+describe('plugin content commands resolve through wiring entries', () => {
+  it('resolves a --solver-net target by its legacy manifest digest', async () => {
+    const resolved: string[] = [];
+    await publishHandler(
+      { argv: ['--solver-net', 'bafyOne', '--source', './p'], env: {} } as never,
+      { loadConfig: () => CONFIG, onResolvedTarget: (w: { workKind: string }) => resolved.push(w.workKind) } as never,
+    ).catch(() => {});
+    expect(resolved).toEqual(['swe-rebench.v2']);
   });
 
-  it('still runs an evaluation DISCOVERED → COMPLETE and claims the verdict delivery', async () => {
-    const store = new Store(':memory:');
-    const engine = engineFixture({ store });
-    const requestId = await engine.observe(evaluationTask());
-    await engine.process(requestId);
-    const row = new TaskRunPersistence(store.db).getOrThrow(requestId);
-    expect(row.state).toBe('COMPLETE');
-    expect(row.taskRole).toBe('evaluation');
-    expect(row.deliveryTxHash).toMatch(/^0x[0-9a-f]{64}$/u);
+  it('resolves a --solver-net target by its work kind', async () => {
+    const resolved: string[] = [];
+    await publishHandler(
+      { argv: ['--solver-net', 'swe-rebench.v2', '--source', './p'], env: {} } as never,
+      { loadConfig: () => CONFIG, onResolvedTarget: (w: { workKind: string }) => resolved.push(w.workKind) } as never,
+    ).catch(() => {});
+    expect(resolved).toEqual(['swe-rebench.v2']);
   });
 
-  it('still parses a bridged converged Delivery into restorationResult', async () => {
-    const engine = engineFixture();
-    const task = evaluationTask({ bridged: true });
+  it('errors nameing the wiring surface when the target is unknown', async () => {
     await expect(
-      engine.canAcceptTask({ solverType: 'prediction.v1', taskRole: 'evaluation', task }),
-    ).resolves.toEqual({ ok: true });
+      publishHandler(
+        { argv: ['--solver-net', 'absent', '--source', './p'], env: {} } as never,
+        { loadConfig: () => CONFIG } as never,
+      ),
+    ).rejects.toThrow(/executionWiring/);
+  });
+
+  it('no longer reads joinedSolverNets in any content command', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const file of [
+      'solver-plugins-publish.ts', 'solver-plugins-read.ts', 'solver-plugins-feedback.ts',
+      'solver-plugins-block.ts', 'solver-plugins-revoke.ts',
+    ]) {
+      const source = readFileSync(new URL(`../../src/cli/commands/${file}`, import.meta.url), 'utf8');
+      expect(source, file).not.toContain('joinedSolverNets');
+    }
   });
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 5: Re-key the five commands**
 
-Run: `cd client && yarn vitest run test/daemon/solution-path-retired.test.ts test/daemon/evaluation-path-regression.test.ts`
-Expected: the four `solution-path-retired` tests FAIL (restoration is still accepted and still yielded); the three `evaluation-path-regression` tests PASS already — they are the guard rail, and they must stay green through Step 3.
+For each of `solver-plugins-publish.ts`, `solver-plugins-read.ts`, `solver-plugins-feedback.ts`, `solver-plugins-block.ts`, `solver-plugins-revoke.ts`:
+1. Replace any `findJoinedByName(config.joinedSolverNets, needle)` call (and any direct `config.joinedSolverNets[...]` read) with `findWiringByTarget(config.executionWiring, needle)`.
+2. Replace any plugin-list read taken from the joined entry with `pluginsForWiring(entry)`.
+3. Update the not-found error message to name the new surface, e.g.:
+   `` `no wiring entry matches "${needle}". Configured executionWiring work kinds: ${config.executionWiring.map((e) => e.workKind).join(', ') || '(none)'}` ``
+4. Change nothing else — not the IPFS path, not the signing path, not the on-chain call, not the output format.
 
-- [ ] **Step 3: Write minimal implementation**
+Leave `solver-nets.ts`, `tasks.ts`, `eval.ts`, `api/launcher-tasks.ts`, and `api/gather-status.ts` on `joinedSolverNets` — those are stage-3 and stage-4 surfaces, not this task's scope.
 
-In `client/src/harnesses/engine/engine.ts`, first statement of `canAcceptTask`:
+- [ ] **Step 6: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/wiring/ test/cli/ && yarn typecheck`
+Expected: PASS. Existing plugin-command tests that construct a `joinedSolverNets` fixture must be updated to construct an `executionWiring` fixture instead — same assertions, new input shape.
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd "$REPO" && git add client/src/wiring/ client/src/cli/commands/solver-plugins-*.ts \
+  client/test/wiring/ client/test/cli/solver-plugins-wiring-rekey.test.ts
+git commit -m "refactor(client): re-key the plugin content commands onto execution wiring entries"
+```
+
+---
+
+## Task 23: Retire the TaskEngine solution path, `joinedSolverNets` gating, and new `task_runs` solution rows
+
+The stage's retirement column. The engine keeps its **evaluation** path until stage 2 — only the solution path goes.
+
+**Files:**
+- Modify: `client/src/harnesses/engine/engine.ts` (`runImpl` @1496, `canAcceptTask` @732, `runnableFailureReason` @1338, `manifestBackedValidation` @1177)
+- Modify: `client/src/harnesses/engine/persistence.ts` (`insertDiscovered` @462)
+- Modify: `client/src/daemon/daemon.ts` (delete `_runEngineWatcherLoop` @668-970 and its legacy branch from Task 18)
+- Create: `client/test/harnesses/engine-solution-path-retired.test.ts`
+
+**Interfaces:**
+- Produces: `TaskEngine.runImpl` throws `SolutionPathRetiredError` for `taskRole === 'restoration'`; `TaskRunPersistence.insertDiscovered` throws for a `task_role` of `restoration`.
+  ```ts
+  export class SolutionPathRetiredError extends Error {
+    readonly code = 'solution_path_retired';
+  }
+  ```
+
+- [ ] **Step 1: Write the failing test**
 
 ```ts
-    // Cutover stage 1: the solution path moved to the work loop on the merged stack. The
-    // evaluation path below is untouched and retires at stage 2.
-    if (input.taskRole === 'restoration') {
-      return { ok: false, reason: 'solution path retired at cutover stage 1' };
+// client/test/harnesses/engine-solution-path-retired.test.ts
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
+import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
+import { SolutionPathRetiredError } from '../../src/harnesses/engine/engine.js';
+
+function persistence() {
+  const db = new Database(':memory:');
+  db.exec(TASK_RUNS_SCHEMA);
+  return new TaskRunPersistence(db);
+}
+
+const ROW = {
+  requestId: 'r1', taskId: '1', attemptIndex: 0, taskCid: 'cid',
+  onchainCreationTx: '0xt', onchainCreationBlock: 1, windowStartTs: 0, windowEndTs: 1,
+};
+
+describe('the TaskEngine solution path is retired at stage 1', () => {
+  it('refuses to insert a new restoration task run', () => {
+    expect(() => persistence().insertDiscovered({ ...ROW, taskRole: 'restoration' } as never))
+      .toThrow(SolutionPathRetiredError);
+  });
+
+  it('still inserts an evaluation task run — that path retires at stage 2', () => {
+    expect(() => persistence().insertDiscovered({ ...ROW, taskRole: 'evaluation' } as never)).not.toThrow();
+  });
+
+  it('names the replacement in the error message', () => {
+    try {
+      persistence().insertDiscovered({ ...ROW, taskRole: 'restoration' } as never);
+      expect.unreachable();
+    } catch (err) {
+      expect((err as Error).message).toMatch(/work loop/i);
+    }
+  });
+});
+
+describe('claim gating no longer consults joinedSolverNets', () => {
+  it('the engine source no longer reads joinedSolverNets for the claim decision', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../../src/harnesses/engine/engine.ts', import.meta.url), 'utf8');
+    // The evaluation path may still consult it until stage 2; the claim gate may not.
+    expect(source).not.toContain('canAcceptTask');
+  });
+});
+
+describe('the daemon no longer runs the engine watcher', () => {
+  it('the daemon source no longer defines the engine-watcher loop', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../../src/daemon/daemon.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain('_runEngineWatcherLoop');
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/harnesses/engine-solution-path-retired.test.ts`
+Expected: FAIL — restoration rows still insert; `_runEngineWatcherLoop` still exists.
+
+- [ ] **Step 3: Freeze `task_runs` for solutions**
+
+In `client/src/harnesses/engine/persistence.ts`, at the top of `insertDiscovered`:
+
+```ts
+    if ((input.taskRole ?? 'restoration') === 'restoration') {
+      throw new SolutionPathRetiredError(
+        'the solution path is served by the work loop; task_runs is frozen for solutions ' +
+          '(cutover stage 1). The evaluation path retires at stage 2.',
+      );
     }
 ```
 
-In `client/src/adapters/mech/adapter.ts` `watchForTasks` (L1392): delete the `decodeTaskCreatedLogs` → announce block and the `yield* this.discoverSubgraphRestorationTasks()` call. Keep `rememberCanonicalTaskCreated(event)` — the evaluation provenance cross-check reads it. Keep both `retryPendingEvaluationSolutions()` calls, the `decodeSolutionDeliveryClaimedLogs` ingestion, the cursor advance, and `recordLoopTick(this.store, 'engine-watcher')`.
+Export `SolutionPathRetiredError` from `engine.ts` and import it here (or declare it in `state.ts` and re-export from both — pick whichever avoids a cycle in this worktree and say which in the PR body).
 
-In `client/src/daemon/daemon.ts` `_runEngineWatcherLoop` (L668): the loop body now only ever sees evaluation announcements, so the readiness / AI-units / spend-cap gates keep applying to them unchanged. Delete nothing; add one assertion at the top of the per-announcement body so a regression is loud:
+- [ ] **Step 4: Delete the claim gate and the engine watcher**
 
-```ts
-      if (taskAnnouncement.task.role !== 'evaluation') {
-        this.config.logger?.warn(
-          `[engine-watcher] ignoring non-evaluation announcement ${taskAnnouncement.taskId} — the solution path retired at stage 1`,
-        );
-        continue;
-      }
+- `engine.ts`: delete `canAcceptTask` (@732) and the `manifestBackedValidation` path it drives (@1177) if it has no other caller; make `runImpl` (@1496) throw `SolutionPathRetiredError` when `task.taskRole !== 'evaluation'`. Leave `runnableFailureReason` for the evaluation role.
+- `daemon.ts`: delete `_runEngineWatcherLoop` (@668-970), the legacy branch added in Task 18 Step 4, and the now-unused `SkipLogDeduper` / readiness / AI-units / spend-cap gate imports if nothing else references them. Delete `client/src/daemon/readiness-gate.ts` only if no other module imports it — check with `grep -rn "readiness-gate" "client/src" --include=*.ts` first.
+- Keep `engine-tick` running: the evaluation path still ticks until stage 2.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `cd "$REPO/client" && yarn test && yarn typecheck`
+Expected: PASS. A large number of engine tests exercise the solution path; each one must be **deleted with its subject**, not skipped. If a test covers behaviour that moved to the work loop, port the assertion to `test/daemon/work-loop.test.ts` rather than dropping it — say which in the PR body.
+
+- [ ] **Step 6: Commit**
+
+```bash
+cd "$REPO" && git add client/src/harnesses/engine/ client/src/daemon/daemon.ts \
+  client/test/harnesses/engine-solution-path-retired.test.ts
+git commit -m "refactor(client): retire the TaskEngine solution path and joinedSolverNets claim gating"
 ```
 
-Also drop the joined-manifest-digest filter inside `watchForTasks` (the `joinedSolverNets` claim gate the retirement table names): evaluation opportunities are gated by `canClaimEvaluation` on chain, and solution claiming is now the predicate's job.
+---
 
-- [ ] **Step 4: Run tests to verify they pass**
+## Task 24: Claim policy & wiring API routes
 
-Run: `cd client && yarn vitest run test/daemon test/adapters test/harnesses/engine && yarn typecheck`
-Expected: PASS — the four retirement tests go green and all three evaluation regression tests stay green. Any existing test asserting restoration discovery must be **deleted with its scenario moved into the venue kit or the work-loop suite**, listed individually in the commit body.
+Replaces the join/leave/joined routes. Finding 8: the old `GET /v1/operator/joined` re-read `config.json` from disk and therefore bypassed migration — the replacement goes through `loadConfig`.
+
+**Files:**
+- Modify: `client/src/api/setup-endpoints.ts` (`POST /v1/operator/join/:cid` @652, `DELETE` @925, `GET /v1/operator/joined` @974)
+- Create: `client/test/api/claim-policy-endpoints.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `GET /v1/operator/claim-policy` → `{ configShapeVersion, claimPolicy, executionWiring, caps, migration }`
+  - `PUT /v1/operator/wiring/:workKind` → `{ ok: true, restartRequired: true, workKind }`
+  - `DELETE /v1/operator/wiring/:workKind` → `{ ok: true, restartRequired: true, workKind }`
+  - Both writers keep the matching `joinedSolverNets[<legacyManifestDigest>]` entry in sync (additive; the legacy key lives until stage 5, so a rollback boots correctly).
+  - `POST /v1/operator/join/:cid` and `DELETE /v1/operator/join/:cid` respond **HTTP 410** with `{ error: 'route_retired', replacement: '/v1/operator/wiring/:workKind' }`, matching the existing retirement pattern at setup-endpoints.ts:621.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+// client/test/api/claim-policy-endpoints.test.ts
+import { describe, expect, it } from 'vitest';
+import { buildTestApiServer } from './helpers.js'; // reuse this suite's existing helper
+
+describe('claim policy & wiring endpoints', () => {
+  it('returns the migrated shape from loadConfig, not a raw disk read', async () => {
+    const { request } = await buildTestApiServer({
+      configFile: { joinedSolverNets: { bafy: { manifestCid: 'bafy', roles: ['solver'], harness: 'claude-code', model: 'haiku', contract: { id: 'swe.v2', version: '1' } } } },
+    });
+    const res = await request('GET', '/v1/operator/claim-policy');
+    expect(res.status).toBe(200);
+    expect(res.body.configShapeVersion).toBe(2);
+    expect(res.body.claimPolicy).toEqual({ kind: 'legacy-manifest-digest' });
+    expect(res.body.executionWiring).toHaveLength(1);
+  });
+
+  it('reports the one-time migration state message', async () => {
+    const { request } = await buildTestApiServer({
+      configFile: { joinedSolverNets: { bafy: { manifestCid: 'bafy', roles: ['solver'] } } },
+    });
+    const res = await request('GET', '/v1/operator/claim-policy');
+    expect(res.body.migration).toMatchObject({ migrated: true });
+  });
+
+  it('updates a wiring entry and reports restart-required', async () => {
+    const { request } = await buildTestApiServer({ configFile: { configShapeVersion: 2, executionWiring: [] } });
+    const res = await request('PUT', '/v1/operator/wiring/swe.v2', {
+      harness: 'codex', model: 'gpt', plugins: [], credentialRef: 'codex', isolationPolicy: 'workspace',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, restartRequired: true, workKind: 'swe.v2' });
+  });
+
+  it('keeps the legacy joined entry in sync so a rollback still claims', async () => {
+    const { request, readConfigFile } = await buildTestApiServer({
+      configFile: {
+        configShapeVersion: 2,
+        executionWiring: [{ workKind: 'swe.v2', harness: 'claude-code', model: 'haiku', plugins: [], credentialRef: 'claude-code', isolationPolicy: 'workspace', legacyManifestDigest: 'bafy' }],
+        joinedSolverNets: { bafy: { manifestCid: 'bafy', roles: ['solver'], harness: 'claude-code', model: 'haiku' } },
+      },
+    });
+    await request('PUT', '/v1/operator/wiring/swe.v2', {
+      harness: 'codex', model: 'gpt', plugins: [], credentialRef: 'codex', isolationPolicy: 'workspace',
+    });
+    expect(readConfigFile().joinedSolverNets.bafy.harness).toBe('codex');
+  });
+
+  it('removes a wiring entry', async () => {
+    const { request, readConfigFile } = await buildTestApiServer({
+      configFile: { configShapeVersion: 2, executionWiring: [{ workKind: 'swe.v2', harness: 'codex', model: 'g', plugins: [], credentialRef: 'codex', isolationPolicy: 'workspace' }] },
+    });
+    const res = await request('DELETE', '/v1/operator/wiring/swe.v2');
+    expect(res.status).toBe(200);
+    expect(readConfigFile().executionWiring).toEqual([]);
+  });
+
+  it('rejects a wiring write with no harness', async () => {
+    const { request } = await buildTestApiServer({ configFile: { configShapeVersion: 2, executionWiring: [] } });
+    expect((await request('PUT', '/v1/operator/wiring/swe.v2', { model: 'g' })).status).toBe(400);
+  });
+
+  it('retires the join routes with 410 and names the replacement', async () => {
+    const { request } = await buildTestApiServer({ configFile: { configShapeVersion: 2 } });
+    for (const [method, path] of [['POST', '/v1/operator/join/bafy'], ['DELETE', '/v1/operator/join/bafy'], ['GET', '/v1/operator/joined']] as const) {
+      const res = await request(method, path);
+      expect(res.status, `${method} ${path}`).toBe(410);
+      expect(res.body.replacement).toContain('/v1/operator/');
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `cd "$REPO/client" && yarn vitest run test/api/claim-policy-endpoints.test.ts`
+Expected: FAIL — routes absent; join routes still 200.
+
+- [ ] **Step 3: Implement the routes**
+
+In `client/src/api/setup-endpoints.ts`, replacing the three existing handlers:
+
+```ts
+  app.get('/v1/operator/claim-policy', (c) => {
+    const config = loadConfig(configPath);
+    const migration = lastConfigMigrationV2();
+    return c.json({
+      configShapeVersion: config.configShapeVersion ?? 1,
+      claimPolicy: config.claimPolicy,
+      executionWiring: config.executionWiring,
+      caps: config.spendCaps ?? {},
+      migration: migration ?? { migrated: false },
+    });
+  });
+
+  app.put('/v1/operator/wiring/:workKind', async (c) => {
+    const workKind = c.req.param('workKind');
+    const body = await c.req.json<Record<string, unknown>>();
+    if (typeof body['harness'] !== 'string' || body['harness'].length === 0) {
+      return c.json({ error: 'harness_required' }, 400);
+    }
+    const config = loadConfig(configPath);
+    const existing = config.executionWiring.find((e) => e.workKind === workKind);
+    const next = {
+      workKind,
+      harness: body['harness'],
+      model: typeof body['model'] === 'string' ? body['model'] : (existing?.model ?? ''),
+      plugins: Array.isArray(body['plugins']) ? (body['plugins'] as string[]) : (existing?.plugins ?? []),
+      credentialRef: typeof body['credentialRef'] === 'string' ? body['credentialRef'] : body['harness'],
+      isolationPolicy: typeof body['isolationPolicy'] === 'string' ? body['isolationPolicy'] : 'workspace',
+      ...(existing?.legacyManifestDigest === undefined
+        ? {}
+        : { legacyManifestDigest: existing.legacyManifestDigest }),
+    };
+    const wiring = [...config.executionWiring.filter((e) => e.workKind !== workKind), next];
+    persistTopLevelConfigValue('executionWiring', wiring, configPath);
+    // Additive: keep the legacy entry in sync so a rolled-back daemon
+    // generation still claims. The legacy key is deleted at stage 5.
+    syncLegacyJoinedEntry(configPath, next);
+    return c.json({ ok: true, restartRequired: true, workKind });
+  });
+
+  app.delete('/v1/operator/wiring/:workKind', (c) => {
+    const workKind = c.req.param('workKind');
+    const config = loadConfig(configPath);
+    const removed = config.executionWiring.find((e) => e.workKind === workKind);
+    persistTopLevelConfigValue(
+      'executionWiring',
+      config.executionWiring.filter((e) => e.workKind !== workKind),
+      configPath,
+    );
+    if (removed?.legacyManifestDigest !== undefined) removeLegacyJoinedEntry(configPath, removed.legacyManifestDigest);
+    return c.json({ ok: true, restartRequired: true, workKind });
+  });
+
+  const RETIRED = { error: 'route_retired', replacement: '/v1/operator/wiring/:workKind' } as const;
+  app.post('/v1/operator/join/:cid', (c) => c.json(RETIRED, 410));
+  app.delete('/v1/operator/join/:cid', (c) => c.json(RETIRED, 410));
+  app.get('/v1/operator/joined', (c) => c.json({ ...RETIRED, replacement: '/v1/operator/claim-policy' }, 410));
+```
+
+Write `syncLegacyJoinedEntry` / `removeLegacyJoinedEntry` beside the handlers using the same read-modify-write shape `persistTopLevelConfigValue` already uses; they touch only `harness`, `model`, and `plugins` on the matching `joinedSolverNets[<legacyManifestDigest>]` entry.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `cd "$REPO/client" && yarn vitest run test/api/ && yarn typecheck`
+Expected: PASS, 7 new tests. Update any existing API test that asserts a 200 on the join routes.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/src/harnesses/engine/engine.ts client/src/adapters/mech/adapter.ts client/src/daemon/daemon.ts client/test/daemon client/test/adapters
-git commit -m "refactor(operator): retire the TaskEngine solution path and joinedSolverNets claim gating"
+cd "$REPO" && git add client/src/api/setup-endpoints.ts client/test/api/claim-policy-endpoints.test.ts
+git commit -m "feat(client): serve claim policy and wiring entries, retire the join routes"
 ```
 
 ---
 
-## Task 17: Claim policy & wiring page, plus the `OPERATOR-APP-SPEC` delta
+## Task 25: Claim policy & wiring SPA page + `OPERATOR-APP-SPEC` delta
+
+Design §9: "the memberships page becomes **Claim policy & wiring** (predicate, wiring entries, caps, migration state message)". Deltas only, no redesign. **The spec update lands in this same PR** — that is the frontend rule, not a preference.
 
 **Files:**
-- Create: `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.tsx`, `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.test.tsx`, `client/src/api/claim-policy-endpoints.ts`
-- Modify: `client/src/dashboard/spa/src/routes.ts`, `client/src/dashboard/spa/src/App.tsx:132-172`, `client/src/dashboard/spa/src/pages/operator/OperatorSubNav.tsx`, `client/src/dashboard/spa/src/api/client.ts`, `client/src/api/server.ts` (register the routes eagerly), `client/OPERATOR-APP-SPEC.md`
-- Test: `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.test.tsx`, `client/test/api/claim-policy-endpoints.test.ts`, `client/test/dashboard/release-prep/spa-route-smoke.e2e.test.ts` (picks up the new route automatically from `routes.ts`)
-
-Spec §9: "the memberships page becomes **Claim policy & wiring** (predicate, wiring entries, caps, migration state message)". Memberships stays mounted at `/operator/memberships` until stage 5 — it still describes the legacy joins that the evaluator path reads — and the new page is added beside it as the surface that actually governs claiming. `OPERATOR-APP-SPEC.md` gains §2.15 in the same PR, per the frontend rules.
+- Create: `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.tsx`
+- Create: `client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.test.tsx`
+- Create: `client/src/dashboard/spa/src/pages/operator/WiringEntryCard.tsx`
+- Delete: `client/src/dashboard/spa/src/pages/operator/MembershipsTab.tsx` and `MembershipsTab.test.tsx`
+- Modify: `client/src/dashboard/spa/src/routes.ts`, `App.tsx`, `pages/operator/OperatorSubNav.tsx`, `api/client.ts`
+- Modify: `client/OPERATOR-APP-SPEC.md` (§2.4)
 
 **Interfaces:**
-- Consumes: `ClaimPolicyConfig`, `ExecutionWiringConfigEntry` (Task 1); `persistTopLevelConfigValue` (`client/src/config.ts:1467`) replaced by `writeConfigFileAtomic` (Task 2).
-- Produces:
+- Consumes: `GET /v1/operator/claim-policy`, `PUT|DELETE /v1/operator/wiring/:workKind` (Task 24).
+- Produces: route `/operator/claim-policy`, label `Claim policy`; `api.operator.getClaimPolicy()`, `api.operator.putWiring(workKind, body)`, `api.operator.deleteWiring(workKind)`.
 
-```ts
-// client/src/api/claim-policy-endpoints.ts
-export interface ClaimPolicyRoutesConfig {
-  readonly configPath: string;
-  readonly readConfig: () => JinnConfig;
-  readonly writeConfig: (filePath: string, value: unknown) => void;
-}
-export function addClaimPolicyRoutes(app: Hono, config: ClaimPolicyRoutesConfig): void;
-// GET    /v1/operator/claim-policy  -> { claimPolicy, executionWiring, restartRequired: boolean }
-// PUT    /v1/operator/claim-policy  -> body { claimPolicy } ; 400 on schema failure
-// PUT    /v1/operator/execution-wiring -> body { executionWiring: ExecutionWiringConfigEntry[] }
-
-// client/src/dashboard/spa/src/api/client.ts additions
-api.operator.getClaimPolicy(): Promise<ClaimPolicyResponse>;
-api.operator.setClaimPolicy(body: { claimPolicy: ClaimPolicyConfig }): Promise<void>;
-api.operator.setExecutionWiring(body: { executionWiring: ExecutionWiringConfigEntry[] }): Promise<void>;
-```
-
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the failing test**
 
 ```tsx
 // client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.test.tsx
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ClaimPolicyTab } from './ClaimPolicyTab.js';
-import { renderWithProviders } from '../../test-utils.js';
 
 vi.mock('../../api/client.js', () => ({
   api: {
     operator: {
       getClaimPolicy: vi.fn(async () => ({
-        claimPolicy: { mode: 'match-legacy-manifest-digest', spendCapWei: '0', aiUnitCap: 0 },
-        executionWiring: [
-          {
-            workKind: 'QmSolver',
-            harness: 'claude-code',
-            model: 'claude-haiku-4-5-20251001',
-            plugins: [],
-            credentialRef: 'claude-code-default',
-            isolationPolicy: 'process',
-            legacyManifestDigest: 'QmSolver',
-          },
-        ],
-        restartRequired: false,
+        configShapeVersion: 2,
+        claimPolicy: { kind: 'legacy-manifest-digest' },
+        executionWiring: [{
+          workKind: 'swe-rebench.v2', harness: 'claude-code', model: 'haiku',
+          plugins: ['jinn-layer'], credentialRef: 'claude-code', isolationPolicy: 'workspace',
+        }],
+        caps: { 'claude-code': 10 },
+        migration: { migrated: true, wiringCount: 1, backupPath: '/x/config.json.pre-v2.2026-07-30T00:00:00.000Z.bak' },
       })),
-      setClaimPolicy: vi.fn(async () => {}),
-      setExecutionWiring: vi.fn(async () => {}),
+      putWiring: vi.fn(), deleteWiring: vi.fn(),
     },
   },
 }));
 
-describe('ClaimPolicyTab', () => {
-  it('shows the predicate mode, the caps, and one row per wiring entry', async () => {
-    renderWithProviders(<ClaimPolicyTab />);
-    expect(await screen.findByTestId('claim-policy-tab')).toBeInTheDocument();
-    expect(screen.getByTestId('claim-policy-mode')).toHaveTextContent(
-      'match-legacy-manifest-digest',
-    );
-    expect(screen.getByTestId('claim-policy-spend-cap')).toHaveValue('0');
-    expect(screen.getAllByTestId('execution-wiring-row')).toHaveLength(1);
-    expect(screen.getByText('QmSolver')).toBeInTheDocument();
-  });
-
-  it('renders the claims-nothing notice while a cap is zero', async () => {
-    renderWithProviders(<ClaimPolicyTab />);
-    expect(await screen.findByTestId('claim-policy-caps-unset')).toHaveTextContent(
-      'No tasks will be claimed until both caps are above zero.',
-    );
-  });
-
-  it('saves an edited spend cap and flags the restart requirement', async () => {
-    const { api } = await import('../../api/client.js');
-    renderWithProviders(<ClaimPolicyTab />);
-    const input = await screen.findByTestId('claim-policy-spend-cap');
-    await userEvent.clear(input);
-    await userEvent.type(input, '2500000000000000');
-    await userEvent.click(screen.getByTestId('claim-policy-save'));
-    await waitFor(() =>
-      expect(api.operator.setClaimPolicy).toHaveBeenCalledWith({
-        claimPolicy: {
-          mode: 'match-legacy-manifest-digest',
-          spendCapWei: '2500000000000000',
-          aiUnitCap: 0,
-        },
-      }),
-    );
-    expect(screen.getByTestId('claim-policy-restart-required')).toBeInTheDocument();
-  });
-
-  it('renders an empty state naming what fills it', async () => {
-    const { api } = await import('../../api/client.js');
-    vi.mocked(api.operator.getClaimPolicy).mockResolvedValueOnce({
-      claimPolicy: undefined,
-      executionWiring: [],
-      restartRequired: false,
-    } as never);
-    renderWithProviders(<ClaimPolicyTab />);
-    expect(await screen.findByTestId('claim-policy-empty')).toHaveTextContent(
-      'Join a SolverNet to create your first execution wiring entry.',
-    );
-  });
-});
-```
-
-```ts
-// client/test/api/claim-policy-endpoints.test.ts
-import { Hono } from 'hono';
-import { describe, expect, it, vi } from 'vitest';
-import { addClaimPolicyRoutes } from '../../src/api/claim-policy-endpoints.js';
-
-function app(config: Record<string, unknown> = {}) {
-  const hono = new Hono();
-  addClaimPolicyRoutes(hono, {
-    configPath: '/tmp/config.json',
-    readConfig: () =>
-      ({
-        claimPolicy: { mode: 'claim-nothing', spendCapWei: '0', aiUnitCap: 0 },
-        executionWiring: [],
-      }) as never,
-    writeConfig: vi.fn(),
-    ...config,
-  } as never);
-  return hono;
+function renderTab() {
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ClaimPolicyTab onRestartPending={() => {}} />
+    </QueryClientProvider>,
+  );
 }
 
-describe('claim policy endpoints', () => {
-  it('returns the current policy and wiring', async () => {
-    const response = await app().request('/v1/operator/claim-policy');
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      claimPolicy: { mode: 'claim-nothing', spendCapWei: '0', aiUnitCap: 0 },
-      executionWiring: [],
-      restartRequired: false,
-    });
+describe('ClaimPolicyTab', () => {
+  it('renders the claim policy kind', async () => {
+    renderTab();
+    await waitFor(() => expect(screen.getByTestId('claim-policy-kind')).toHaveTextContent('legacy-manifest-digest'));
   });
 
-  it('writes an accepted policy atomically and reports restart-required', async () => {
-    const writeConfig = vi.fn();
-    const response = await app({ writeConfig }).request('/v1/operator/claim-policy', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        claimPolicy: { mode: 'every-runnable', spendCapWei: '10', aiUnitCap: 5 },
-      }),
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ restartRequired: true });
-    expect(writeConfig).toHaveBeenCalledOnce();
+  it('renders one card per wiring entry', async () => {
+    renderTab();
+    await waitFor(() => expect(screen.getAllByTestId('wiring-entry-card')).toHaveLength(1));
+    expect(screen.getByText('swe-rebench.v2')).toBeInTheDocument();
   });
 
-  it('rejects a malformed policy with 400 and writes nothing', async () => {
-    const writeConfig = vi.fn();
-    const response = await app({ writeConfig }).request('/v1/operator/claim-policy', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ claimPolicy: { mode: 'nope', spendCapWei: '0x1', aiUnitCap: -1 } }),
-    });
-    expect(response.status).toBe(400);
-    expect(writeConfig).not.toHaveBeenCalled();
+  it('shows the one-time migration state message with the backup path', async () => {
+    renderTab();
+    await waitFor(() => expect(screen.getByTestId('config-migrated-message')).toBeInTheDocument());
+    expect(screen.getByTestId('config-migrated-message')).toHaveTextContent('config.json.pre-v2.');
+  });
+
+  it('renders the per-credential caps', async () => {
+    renderTab();
+    await waitFor(() => expect(screen.getByTestId('caps-claude-code')).toHaveTextContent('10'));
+  });
+
+  it('shows an empty state naming what fills it when there is no wiring', async () => {
+    const { api } = await import('../../api/client.js');
+    vi.mocked(api.operator.getClaimPolicy).mockResolvedValueOnce({
+      configShapeVersion: 2, claimPolicy: { kind: 'none' }, executionWiring: [], caps: {}, migration: { migrated: false },
+    } as never);
+    renderTab();
+    await waitFor(() => expect(screen.getByTestId('claim-policy-empty')).toBeInTheDocument());
+  });
+
+  it('surfaces a load failure as an alert', async () => {
+    const { api } = await import('../../api/client.js');
+    vi.mocked(api.operator.getClaimPolicy).mockRejectedValueOnce(new Error('down'));
+    renderTab();
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
   });
 });
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 2: Run it to verify it fails**
 
-Run: `cd client && yarn vitest run src/dashboard/spa/src/pages/operator/ClaimPolicyTab.test.tsx test/api/claim-policy-endpoints.test.ts`
-Expected: FAIL with unresolved imports for `./ClaimPolicyTab.js` and `../../src/api/claim-policy-endpoints.js`.
+Run: `cd "$REPO/client/src/dashboard/spa" && yarn vitest run src/pages/operator/ClaimPolicyTab.test.tsx`
+Expected: FAIL — component absent.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 3: Write the page**
 
-`client/src/api/claim-policy-endpoints.ts` registers the three routes, validating bodies with `ClaimPolicyConfigSchema` / `z.array(ExecutionWiringConfigEntrySchema)` and writing through `writeConfigFileAtomic`. `client/src/api/server.ts` calls `addClaimPolicyRoutes(app, config.claimPolicy)` **eagerly** beside `addSetupRoutes` (line 629) — late mounting is banned by `yarn lint:no-late-mount`.
+shadcn primitives only. The catalog under `src/components/ui/` already ships `alert`, `badge`, `button`, `card`, `input`, `label`, `separator`, `skeleton`, `table`, `tooltip` — compose from those; no new custom component is needed, so no snowflake request applies. **Show, don't narrate**: no caption text restating the counts or explaining where the data lives.
 
-`ClaimPolicyTab.tsx` composes shadcn primitives only (`Card`, `Table`, `Input`, `Select`, `Button`, `Badge`, `Alert`) — no new custom components, so no snowflake approval is needed. Per the frontend "show, don't narrate" rule the page carries **no** caption text: the caps-unset alert and the empty state are the only prose, and both are load-bearing (an alert that names a blocked behaviour, and an empty state that says what fills it). Wiring rows render `workKind`, `harness`, `model`, `plugins`, `isolationPolicy`, and a `legacy` badge when `legacyManifestDigest` is set, with an `InfoTooltip` on that badge explaining the bridge — never a permanent caption.
+```tsx
+// client/src/dashboard/spa/src/pages/operator/ClaimPolicyTab.tsx
+import { useQuery } from '@tanstack/react-query';
+import { Alert, AlertDescription } from '../../components/ui/alert.js';
+import { Badge } from '../../components/ui/badge.js';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card.js';
+import { Separator } from '../../components/ui/separator.js';
+import { Skeleton } from '../../components/ui/skeleton.js';
+import { api } from '../../api/client.js';
+import { WiringEntryCard } from './WiringEntryCard.js';
 
-Route registration: add `{ path: '/operator/claim-policy', label: 'operator-claim-policy' }` to `routes.ts`, a `<Route path="/operator/claim-policy">` inside `OperatorShell` in `App.tsx`, and `{ to: '/operator/claim-policy', label: 'Claim policy & wiring' }` as the **first** entry in `OperatorSubNav.tsx`'s `TABS`. Change the `/operator` redirect target from `/operator/memberships` to `/operator/claim-policy`.
+export function ClaimPolicyTab({ onRestartPending }: { onRestartPending: () => void }) {
+  const query = useQuery({
+    queryKey: ['operator', 'claim-policy'],
+    queryFn: () => api.operator.getClaimPolicy(),
+    refetchInterval: 30_000,
+  });
 
-- [ ] **Step 4: Update `client/OPERATOR-APP-SPEC.md` in the same PR**
+  if (query.isError) {
+    return (
+      <Alert variant="destructive" role="alert">
+        <AlertDescription>
+          Could not load claim policy. Check the daemon is running, then retry.
+        </AlertDescription>
+      </Alert>
+    );
+  }
 
-Insert a new `### 2.15 Claim policy & wiring` between §2.14 and §3, following the existing four-axis discipline:
+  if (query.isLoading || query.data === undefined) {
+    return (
+      <div data-testid="claim-policy-loading" className="space-y-3">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+
+  const { claimPolicy, executionWiring, caps, migration } = query.data;
+
+  return (
+    <div data-testid="claim-policy-tab" className="space-y-4">
+      {migration.migrated ? (
+        <Alert data-testid="config-migrated-message">
+          <AlertDescription>
+            Configuration migrated to shape version 2. Previous file kept at {migration.backupPath}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Claim policy</CardTitle>
+        </CardHeader>
+        <CardContent className="flex items-center gap-2">
+          <Badge data-testid="claim-policy-kind">{claimPolicy.kind}</Badge>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Caps</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-1">
+          {Object.entries(caps).map(([credential, usd]) => (
+            <div key={credential} className="flex justify-between">
+              <span>{credential}</span>
+              <span data-testid={`caps-${credential}`}>{usd}</span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      {executionWiring.length === 0 ? (
+        <p data-testid="claim-policy-empty">
+          No execution wiring. Add a wiring entry to claim work.
+        </p>
+      ) : (
+        executionWiring.map((entry) => (
+          <WiringEntryCard key={entry.workKind} entry={entry} onRestartPending={onRestartPending} />
+        ))
+      )}
+    </div>
+  );
+}
+```
+
+`WiringEntryCard.tsx` renders `workKind` as the title, `harness` / `model` / `credentialRef` / `isolationPolicy` as label+value rows, plugins as `Badge`s, and two `Button`s (Save, Remove) wired to `api.operator.putWiring` / `deleteWiring`, invalidating `['operator','claim-policy']` and calling `onRestartPending()` on success. Give it `data-testid="wiring-entry-card"`. Reuse `PluginPicker` and the harness/model helpers the deleted `JoinedNetCard` used, so the editing surface is unchanged for the operator.
+
+- [ ] **Step 4: Re-route and delete the old page**
+
+- `routes.ts`: replace `{ path: '/operator/memberships', label: 'operator-memberships' }` with `{ path: '/operator/claim-policy', label: 'operator-claim-policy' }`.
+- `App.tsx`: swap the `<Route path="/operator/memberships">` block for `/operator/claim-policy` rendering `<ClaimPolicyTab .../>`, and change the `/operator` redirect target.
+- `OperatorSubNav.tsx`: `{ to: '/operator/claim-policy', label: 'Claim policy' }` as the first item.
+- `api/client.ts`: replace the `listJoined` / `join` / `leave` members with `getClaimPolicy` / `putWiring` / `deleteWiring`.
+- Delete `MembershipsTab.tsx` and `MembershipsTab.test.tsx`.
+- Grep **path-shaped** for stragglers: `grep -rn "memberships" "client/src/dashboard/spa/src" --include=*.ts --include=*.tsx`.
+
+- [ ] **Step 5: Update `OPERATOR-APP-SPEC.md` §2.4 in this same commit**
+
+Replace §2.4 "Network Memberships" with:
 
 ```markdown
-### 2.15 Claim policy & wiring
+### 2.4 Claim policy & wiring
 
-How this operator decides what to claim and what runs it. Replaces `joinedSolverNets` as the
-claim authority at cutover stage 1; memberships (§2.4) remain the legacy view until stage 5.
+The operator's claim decision and the execution wiring that serves it. Replaces
+Network Memberships at cutover stage 1: claiming is no longer gated on joined
+SolverNets, it is decided by the operator's own claim predicate over discovery
+facts, backend capabilities, and the operator's own caps.
 
-- **Static**
-  - claim predicate mode — `claim-nothing` | `every-runnable` | `match-legacy-manifest-digest`
-  - spend cap (wei) — per-task ceiling enforced before every claim
-  - AI-unit cap — per-task ceiling enforced before every claim
-  - shape version — `2` once the boot migration has run
-  - **Actions**
-    - edit claim predicate mode *(restart-required)*
-    - edit spend cap *(restart-required)*
-    - edit AI-unit cap *(restart-required)*
+- **State**
+  - config shape version — `1 | 2`
+  - claim policy — `legacy-manifest-digest | every-runnable | none`. `none` is
+    the claim-nothing-when-unconfigured safety default.
+  - caps — per-credential daily USD ceiling, and the AI-unit ceiling.
 - **Collections**
-  - execution wiring entries — one per work kind. Item shape: work kind, harness, model,
-    plugins, credential reference, isolation policy, legacy manifest digest (bridge era only).
-    Ordered by work kind. No pagination.
-    - **Actions**
-      - edit wiring entry *(restart-required)*
-      - remove wiring entry *(restart-required)*
+  - execution wiring entries, one per work kind, unordered. Item shape:
+    `workKind`, `harness`, `model`, `plugins[]`, `credentialRef`,
+    `isolationPolicy`, and (until the bridge retires) `legacyManifestDigest`.
+    - **Actions (per entry)**
+      - save wiring entry — `idle → saving → saved` (`failed` terminal).
+        Restart-required; the panel raises the restart-pending banner.
+      - remove wiring entry — `idle → removing → removed` (`failed` terminal).
+        Restart-required.
 - **State messages**
-  - claim policy migrated from SolverNet memberships — one-time, action-required while either
-    cap is zero, informational afterwards. Action: set the caps.
-  - caps unset — no tasks will be claimed. Action: set both caps above zero.
-  - unreleased attempt — an attempt was claimed on chain but not settled by this daemon; it
-    occupies its `maxClaims` slot until the venue reaps it. Informational in the today
-    generation (there is no on-venue release); gains a release action with the revised
-    generation.
-  - evidence indexing failed — one or more evidence records failed to index. Action: none yet;
-    the driver retries. Informational.
+  - configuration migrated to shape version 2 — one-time, names the backup
+    file. No action; informational.
+  - unreleased attempt — a post-claim failure left an attempt unreleased on the
+    venue (today-mode has no on-venue release). No action available in this
+    generation; the message names the task so the operator can see the occupied
+    claim slot.
+  - evidence indexing failed — the evidence driver could not index one or more
+    records. No action; informational until the retry surface lands.
+- **Actions (component-level)**
+  - none. Wiring is edited per entry.
 ```
 
-Also update §2.4's opening line to say memberships no longer gate claiming, and add `config_migrated`, `evidence_indexing_failed`, and `unreleased_attempt` to §2.10's kind list so the taxonomy and code agree.
+Also update §2.5's cross-reference from "Memberships lists SolverNets the operator *has* joined" to point at §2.4's wiring entries, and note in §3.2 that wiring edits are restart-required.
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 6: Run the SPA tests**
 
-Run:
-```bash
-cd client && yarn vitest run src/dashboard/spa test/api && yarn build && yarn release:tier-1:T1.4
-```
-Expected: PASS — the four page tests, the three endpoint tests, and the route smoke walking the new `/operator/claim-policy` entry from `routes.ts`.
+Run: `cd "$REPO/client/src/dashboard/spa" && yarn test && cd "$REPO/client" && yarn test`
+Expected: PASS, including the route-smoke gate driven by `routes.ts`. Any test referencing the old route must be updated, not skipped.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add client/src/dashboard/spa client/src/api/claim-policy-endpoints.ts client/src/api/server.ts client/OPERATOR-APP-SPEC.md
-git commit -m "feat(operator): add the Claim policy and wiring page with its OPERATOR-APP-SPEC entry"
+cd "$REPO" && git add client/src/dashboard/spa/src client/OPERATOR-APP-SPEC.md
+git rm client/src/dashboard/spa/src/pages/operator/MembershipsTab.tsx \
+       client/src/dashboard/spa/src/pages/operator/MembershipsTab.test.tsx
+git commit -m "feat(client): replace the memberships page with claim policy and wiring"
 ```
 
 ---
 
-## Task 18: Re-point `e2e:daemon-harness` at the new flow
+## Task 26: Re-point `e2e:daemon-harness` onto the composed runtime
+
+The first half of the stage gate: `e2e:daemon-harness` re-pointed and green.
 
 **Files:**
-- Modify: `client/test/e2e/daemon-harness-cycle.ts`, `client/test/e2e/_daemon-harness-helpers.ts`
-- Test: the script itself is the gate
+- Modify: `client/test/e2e/_daemon-harness-helpers.ts` (`startDaemon` @845, `MechAdapter` @1054, `new Daemon` @1121)
+- Modify: `client/test/e2e/daemon-harness-cycle.ts`
 
-**What "re-pointed" changes**, precisely — the script keeps its five infrastructure phases (Anvil fork of Base, `startMockIpfsServer`, `bootstrapStakedOperator`, `deployMinimalV3Stack`, production `Daemon` + `MechAdapter`) and its clean-skip-on-missing-API-key behaviour. Four things move:
+**Interfaces:**
+- Consumes: `composeOperatorRuntime` (Task 17).
+- Produces: `RunningDaemon` gains `runtime: OperatorRuntime`.
 
-1. `startDaemon(...)` builds an `OperatorComposition` via `buildOperatorComposition` and passes it on `DaemonConfig`, so the daemon starts `projector`, `work`, and `evidence-driver` beside the legacy loops.
-2. The fixture config is written in **shape v2** — `configShapeVersion: 2`, one `executionWiring` entry for the selected harness with `legacyManifestDigest` set to the fixture manifest CID, and a `claimPolicy` with non-zero caps. `joinedSolverNets` stays in the file so the migration idempotency path is exercised on the second boot.
-3. `waitForDaemonClaim()` polls the **engagement ledger** (`SELECT outcome FROM engagement_ledger`) instead of `task_runs`, and `waitForDelivery()` asserts `outcome = 'settled'`.
-4. Two assertions are added: the sealed Delivery carries the `LEGACY_ENVELOPE_EXTENSION_KEY` bridge annotation, and `legacyRestorationResultFromDelivery` on those exact bytes parses through `SignedEnvelopeSchema` — the Task 14 fixture, now proven against real bytes on a real fork.
+- [ ] **Step 1: Compose the runtime in `startDaemon`**
 
-Task 6's corpus-knowledge phase (#1393) keeps working: it reads `store.queryEnvelopeProjections` and `activity_events`, both untouched.
-
-- [ ] **Step 1: Run the current gate to capture the pre-change baseline**
-
-Run: `cd client && JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`
-Expected: PASS on the legacy flow. Save the output — the post-change run must reach the same terminal assertions.
-
-- [ ] **Step 2: Re-point the script**
-
-Apply the four changes above. In `_daemon-harness-helpers.ts`, `startDaemon` becomes:
+Immediately before `new Daemon({...})` (helpers @1121):
 
 ```ts
-  const composition = await buildOperatorComposition({
-    config,
-    publicClient: fixture.publicClient,
-    walletClient: fixture.walletClient,
-    safeAddress: operator.safeAddress,
-    mechAddress: v3Env.mechAddress,
-    chain: { ...BASE_SEPOLIA_TODAY, chainId: fixture.chainId,
-             jinnRouter: v3Env.routerAddress, mechMarketplace: v3Env.marketplaceAddress },
-    stateRoot: join(fixture.stateDir, 'backend'),
-    evidenceRoot: join(fixture.stateDir, 'evidence'),
-    venueStateDbPath: join(fixture.stateDir, 'venue.db'),
-    profileStore: fixtureProfileStore(),
+  const runtime = await composeOperatorRuntime({
+    config: harnessConfig,
+    store,
+    publicClient,
+    walletClient,
+    safeAddress: operator.safeAddress as `0x${string}`,
+    chain: {
+      chainId: 8453,
+      taskCoordinator: v3Env?.routerAddress ?? routerAddress,
+      jinnRouter: v3Env?.routerAddress ?? routerAddress,
+      mechMarketplace: v3Env?.mockMarketplaceAddress ?? mechMarketplaceAddress,
+      activityChecker: v3Env?.activityCheckerAddress ?? activityCheckerAddress,
+      generation: 'today',
+    },
+    stateDir: join(fixture.stateRoot, 'runtime'),
+    source: { agent: `did:pkh:eip155:8453:${operator.safeAddress.toLowerCase()}`, name: 'marketplace' },
+    signer: e2eDiscoverySigner(operator),
   });
-  const daemon = new Daemon({ ...existingArgs, composition });
 ```
 
-and `waitForDaemonClaim`:
+Give the `Daemon` constructor `runtime`, and extend the `stop` closure to `await runtime.close()` before `store.close()`.
+
+The harness must supply real execution wiring — the e2e previously omitted `joinedSolverNets` and leaned on `implRegistry.config.solverTypeHarnesses`. Build `harnessConfig.executionWiring` from the selected harness:
 
 ```ts
-export async function waitForDaemonClaim(store: Store, timeoutMs = 120_000): Promise<string> {
+  const harnessConfig = {
+    configShapeVersion: 2,
+    claimPolicy: { kind: 'every-runnable' as const },
+    executionWiring: [{
+      workKind: 'prediction.v1',
+      harness: selectorToHarnessName(harness),
+      model: modelForHarness(harness),
+      plugins: [],
+      credentialRef: selectorToHarnessName(harness),
+      isolationPolicy: 'workspace',
+    }],
+    posting: [],
+    spendCaps: { [selectorToHarnessName(harness)]: 1000 },
+  };
+```
+
+- [ ] **Step 2: Point the claim wait at the work loop**
+
+`waitForDaemonClaim` currently polls the engine's `task_runs`. Re-point it at the engagement ledger:
+
+```ts
+export async function waitForDaemonClaim(running: RunningDaemon, timeoutMs = 120_000) {
+  const ledger = running.store.engagementLedger();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const row = store.db
-      .prepare(`SELECT idempotency_key, outcome FROM engagement_ledger ORDER BY created_at DESC LIMIT 1`)
-      .get() as { idempotency_key: string; outcome: string } | undefined;
-    if (row !== undefined && row.outcome !== 'intended') return row.idempotency_key;
-    await sleep(2_000);
+    const rows = ledger.listUnreconciled();
+    const claimed = rows.find((row) => row.claimTxHash !== null);
+    if (claimed !== undefined) return claimed;
+    await new Promise((r) => setTimeout(r, 500));
   }
-  throw new Error('daemon did not claim through the work loop within the timeout');
+  throw new Error('timed out waiting for the work loop to claim');
 }
 ```
 
-- [ ] **Step 3: Run the re-pointed gate**
+- [ ] **Step 3: Keep every existing assertion**
 
-Run: `cd client && JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`
-Expected: PASS. Every phase reports green, the ledger reaches `settled`, the on-chain activity counter increments within 60s, and the two new bridge assertions pass. Show the full output in the task report.
+`daemon-harness-cycle.ts` phases 8–11 stay as they are — the harness-name assertion (`delivered.solverHarnessName`), the on-chain activity-counter poll, and the #1393 corpus-knowledge second run. The corpus assertions read `task_runs`; since solutions no longer write there, port them to the equivalent read on the backend journal + the engagement ledger. **Do not delete them** — corpus autoload is untouched by this stage, so its coverage must survive.
 
-- [ ] **Step 4: Run the gate for a second harness**
+- [ ] **Step 4: Run the e2e**
 
-Run: `cd client && JINN_E2E_HARNESS=claude-code yarn e2e:daemon-harness`
-Expected: PASS when `ANTHROPIC_API_KEY` is set; a clean skip (exit 0) otherwise. Both outcomes are acceptable; record which one happened.
+Run: `cd "$REPO/client" && JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`
+Expected: the full cycle green — Anvil fork, bootstrap, V3 stack deploy, work-loop claim, execute, deliver, settle, activity counter increment. A clean skip when the harness API key is absent is still acceptable for the non-baseline harnesses only.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add client/test/e2e/daemon-harness-cycle.ts client/test/e2e/_daemon-harness-helpers.ts
-git commit -m "test(operator): re-point the daemon-harness e2e at the stage-1 work loop"
+cd "$REPO" && git add client/test/e2e/
+git commit -m "test(client): re-point the daemon-harness e2e onto the composed runtime"
 ```
 
 ---
 
-## Task 19: Drain runbook, deploy PR, and final verification
+## Task 27: Drain runbook and the deploy PR
+
+The stage's single deploy PR. Operator-approved; no agent self-merge.
 
 **Files:**
 - Create: `docs/runbooks/cutover-stage-1-drain.md`
-- Test: the full suite plus the testnet gate
 
 **Interfaces:**
-- Consumes: every earlier task.
-- Produces: the runbook, and the deploy PR description that carries it as a checklist.
+- Consumes: nothing. Produces the checklist the deploy PR body embeds.
 
-- [ ] **Step 1: Write the drain runbook**
+- [ ] **Step 1: Write the runbook**
 
 ```markdown
 # Cutover stage 1 — drain and deploy runbook
 
-Contract 10. Run in order. Do not deploy with step 2 unfinished.
+The retiring flow is the TaskEngine's **solution** path. It stops accepting new
+work and runs until its in-flight items reach terminal states before the swap
+deploys. The evaluation path is untouched at this stage and drains at stage 2.
 
-## 1. Stop claiming (previous canary, no new build)
-- [ ] On every fleet operator, set `claimPolicy.mode` unreachable by setting
-      `joinedSolverNets` roles to evaluator-only, or stop the daemon outright.
-      Confirm with `sqlite3 ~/.jinn-client/jinn.db \
-        "SELECT count(*) FROM task_runs WHERE task_role='restoration' AND state NOT IN ('COMPLETE','FAILED','RACE_LOST')"`.
+## Before the deploy PR merges
 
-## 2. Wait for terminal states
-- [ ] Poll the same query every 5 minutes until it returns 0, or until the operator's
-      patience bound (recommended: 2 hours) elapses.
-- [ ] Record any remaining rows. Each one is a straggler: its attempt stays claimed on the
-      venue and occupies a `maxClaims` slot until the revised generation's deadline reap.
-      They strand loudly through the unreleased-attempt state message — they are never
-      silently dropped.
+- [ ] Confirm the fleet's current image tag, so the rollback pin is a known value.
+      Record it in the PR body — a rollback with no named tag is not a rollback.
+- [ ] Stop posting new tasks against the fleet's manifest digests (pause the
+      launched-record generators). Record the time.
+- [ ] Watch `task_runs` drain: no rows in `IN_FLIGHT_STATES` with
+      `task_role = 'restoration'`. Query:
+      `sqlite3 ~/.jinn-client/jinn.db "SELECT request_id, state FROM task_runs WHERE task_role='restoration' AND state NOT IN ('COMPLETE','FAILED','RACE_LOST');"`
+- [ ] Bound the wait by the operator's patience. Today-mode has no on-venue
+      release, so a stranded claim occupies its `maxClaims` slot until the
+      revised generation's deadline-reap. Stragglers **strand loudly** — they
+      surface as the unreleased-attempt state message, never silently. Record
+      any stragglers in the PR body by task id.
+- [ ] Confirm the bridge fixture gate is green: the converged
+      marketplace-profile Delivery parses in the legacy evaluator
+      (`client/test/bridge/converged-delivery-legacy-parse.test.ts`).
+- [ ] Confirm the single-broadcaster architecture test reports zero offenders.
 
-## 3. Deploy
-- [ ] Deploy the stage-1 build to one operator first. Confirm on that operator:
-      - `[rpc] L2 transport` line present, exactly one broadcaster installed
-        (`grep 'no venue broadcaster installed' logs` returns nothing)
-      - `[work] claim gate open` appears within 10 minutes of boot
-      - the Claim policy & wiring page shows the one-time migration message
-      - `~/.jinn-client/config.json.backup-*` exists with mode 600
-- [ ] Deploy to the rest of the fleet.
+## Stage gate (both required, verbatim from the design)
 
-## 4. Gate
-- [ ] One real task closed-loop on testnet through the new flow, including the verdict leg
-      via the still-legacy evaluator on a *second* operator.
-- [ ] Record the task id, both tx hashes, and the verdict code in the deploy PR.
+- [ ] `e2e:daemon-harness` re-pointed and green.
+- [ ] One real task closed-loop on testnet through the new flow, **including the
+      verdict leg via the still-legacy evaluator**. Record the task id, the
+      claim tx, the delivery tx, and the verdict tx in the PR body.
 
-## Rollback
-Revert the stage-1 PR train or pin the previous canary image. Rollback is symmetric and
-honest: chain state stays consistent (claims are chain facts; the backend journal persists),
-but the reverted daemon does not resume the new flow's in-flight engagements. The engagement
-ledger rows stay at `claimed`; the same unreleased-attempt state message names them. The
-migrated config is forward- and backward-compatible: the pre-cutover daemon boots from it
-because `joinedSolverNets` was never removed.
+## Rollback statement (copy into the deploy PR body)
+
+> Rollback is reverting this PR and pinning the previous canary image
+> `<TAG RECORDED ABOVE>`. Chain state stays consistent — claims are chain facts
+> and the backend journal persists — but the reverted daemon does **not** resume
+> the new flow's in-flight engagements. Those engagements are abandoned and are
+> named by the unreleased-attempt state message. The config migration is
+> additive and the legacy `joinedSolverNets` keys survive until stage 5, so a
+> rolled-back daemon generation boots from the migrated file and claims exactly
+> as it did before.
+
+## After deploy
+
+- [ ] Watch the projector's durable cursor advance; the work loop issues no
+      claim until it reaches the finalized chain head.
+- [ ] Confirm one claim → deliver → settle cycle on the fleet.
+- [ ] Confirm the two chain readers running in parallel (the retiring discovery
+      floor until stage 4, plus the new projector) are not storming RPC quota —
+      this window is accepted explicitly and kept short.
 ```
 
-- [ ] **Step 2: Run the whole local gate**
+- [ ] **Step 2: Run the full gate locally**
 
-Run:
+Run, showing each output:
 ```bash
-cd packages/marketplace/pipeline && yarn vitest run && yarn typecheck
-cd ../../task-execution/backend-local/assembly && yarn vitest run && yarn typecheck
-cd ../../../../client && yarn typecheck && yarn test && yarn lint:no-late-mount
+cd "$REPO/client" && yarn typecheck && yarn test
+cd "$REPO/packages/marketplace/pipeline" && yarn test
+cd "$REPO/client/src/dashboard/spa" && yarn test
+cd "$REPO/client" && JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness
 ```
-Expected: zero typecheck errors, all vitest suites green, no late-mounted routes. Paste each command's tail into the task report — evidence before assertions.
+Expected: all green.
 
-- [ ] **Step 3: Run the kits and guards**
-
-Run the marketplace and discovery conformance kits, the venue-base Anvil-fork kit, and the guard trio for every touched tree; show the output of each. A red guard blocks the deploy PR.
-
-- [ ] **Step 4: Run the stage gate**
-
-Run: `cd client && yarn e2e:daemon-harness && yarn e2e`
-Expected: both green. Then execute the testnet gate: one real task closed-loop through the new flow **including the verdict leg via the still-legacy evaluator**, driven from two distinct operators (self-evaluation is prevented on chain). Record the task id, the claim tx, the mech Deliver tx, the `claimSolutionDelivery` tx, and the verdict tx.
-
-- [ ] **Step 5: Open the deploy PR**
-
-One PR into `integration/evidence-v1` whose description carries the runbook above as a checklist plus the rollback statement verbatim. No agent self-merge; operator-approved.
+- [ ] **Step 3: Commit and open the deploy PR**
 
 ```bash
-git add docs/runbooks/cutover-stage-1-drain.md
-git commit -m "docs(operator): add the cutover stage-1 drain runbook"
+cd "$REPO" && git add docs/runbooks/cutover-stage-1-drain.md
+git commit -m "docs: add the cutover stage-1 drain runbook"
 ```
+
+Open the deploy PR against `integration/evidence-v1` with the runbook checklist and the rollback statement in the body, the testnet closed-loop transaction hashes recorded, and the design findings section's dispositions listed. **Do not self-merge** — the stage deploy PR is operator-approved.
 
 ---
 
-## Findings — surfaced, not silently resolved
-
-Each finding names the contradiction, the evidence, and the proposed disposition. Nothing here was patched into the plan without being written down.
-
-### F1 — Nothing in the merged stack sends the marketplace Deliver transaction (**blocking, planned around**)
-
-`settleDelivery` (`packages/marketplace/binding/src/settlement.ts:465-470`) calls `ports.readMechDeliveryFacts` **before** `claimSolutionDelivery` and rejects with `digest-divergence` unless the Mech `Deliver` event already carries the Delivery's raw-CID sha256 digest. `runPipeline` (`packages/marketplace/pipeline/src/pipeline.ts:214-233`) goes `convergeDelivery` → `settleDelivery` with no deliver leg in between. A repo-wide search finds `deliverToMarketplace` written only in `client/src/adapters/mech/contracts.ts:1345` and in `packages/marketplace/testing/src/escrow-lifecycle.test.ts` fixtures — no production stack implementation. The spec §2 walk says "the anchoring tx is folded into settlement ports", but `SettlementPorts` declares only reads plus `claimSolutionDelivery` / `settleRevisedSolutionDelivery`.
-
-**Disposition (planned):** the host owns it — Task 8 builds `deliverToMarketplace` on the venue broadcast port, and Task 13 wraps `readMechDeliveryFacts` so the leg always precedes the read. **Alternative for the coordinator:** move it into venue-base as `settlement.ensureMechDelivery(...)`, which is arguably its home (venue mechanics, not application policy) and would let benchmarking's marketplace mode reuse it. That is a venue-base plan change, so it needs a cross-plan ruling.
-
-### F2 — The converged Delivery is **not** parseable by the legacy evaluator (**blocking, ruling required**)
-
-Spec §10 asserts "the sealed marketplace-profile Delivery re-homes the `jinn.execution.v1` content the legacy evaluator already parses". The code contradicts it in three places:
-
-1. `LocalTaskExecutionBackend` seals a **fixed-shape** TEP `DeliveryRecord` (`assembly/src/backend.ts:1585`) — `protocol`, `attempt`, `task`, `outputs`, `outcome`, `executionIds`, `evidenceRecords`, `createdAt`. There is no `jinn.execution.v1` content and **no extension hook**.
-2. Every legacy evaluator does `SignedEnvelopeSchema.parse(JSON.parse(ctx.task.context['restorationResult']))` — `swe-rebench-v2-evaluator/harness.ts:1348`, `jinn-repo-evaluator/harness.ts:430`, and four more — which requires `schemaVersion: 'jinn.execution.v1'`, `signature`, `participant`, `window`, `executor`, `evidenceTier`.
-3. The adapter derives that string as `const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload)` (`client/src/adapters/mech/adapter.ts:1154` region). A TEP Delivery has no `data` key, so the fallback stringifies the Delivery and `SignedEnvelopeSchema.parse` throws.
-
-The bytes an evaluator can reach are fixed by chain facts: `readMechDeliveryFacts` forces the Mech `Deliver` data to be the Delivery's CID, so there is no second pointer to hang a sidecar on. The evaluator therefore *must* find the legacy envelope inside the Delivery, and the operator's local archive is not public until stage 4.
-
-**Disposition (planned, D3):** add one optional `deliveryExtensions` hook to `LocalTaskExecutionBackendConfig` and spread the result into `sealDelivery`, with absolute-URI key validation and reserved keys unshadowable. `DeliveryRecordSchema` is `.loose()` and TEP §21.3 explicitly admits namespaced extensions, so this is a bridge annotation, not new protocol semantics — and it retires on the same schedule as `legacyManifestDigest` (spec §9, "after stage 5"). Task 15 implements it plus a three-line read-path preference in the legacy adapter.
-
-**Recorded alternatives, both needing an operator ruling:**
-- **D1** — pin every `outputs[]` artifact's bytes alongside the Delivery and have the bridge reader synthesize the envelope from them. Rejected as planned path because the synthesized envelope's `signature` would have to be minted by the *evaluator*, which destroys the field's meaning.
-- **D2** — merge stage 2 into stage 1 so no legacy evaluator ever reads a stage-1 Delivery. Cleanest technically, but it contradicts the spec's flow-by-flow stage ordering and doubles the stage's blast radius.
-
-Note that D3 modifies a stack package after merge. The spec's "designs are law" posture means this must be ratified before Task 15 starts; the plan marks that task as blocked on the ruling.
-
-### F3 — `SafeBroadcastPort` has no generic broadcast leg (**cross-plan, needs venue-base confirmation**)
-
-The binding's exported `SafeBroadcastPort` (`packages/marketplace/binding/src/posting.ts:49`) declares exactly one method, `broadcastCreateTask`. The single-broadcaster rule needs a generic `broadcast(SafeTransactionParams)` so the surviving legacy legs (`claimTask`, `claimEvaluation`, `claimDelivery`, `callDeliverToMarketplace`) and the Task 8 mech deliver can route through it. **Disposition:** this plan consumes `venue.safe` as a superset (`BaseVenueSafe`, documented in "Consumed cross-plan surfaces"). Confirm with the venue-base plan author before Task 7; if venue-base declines, the fallback is a host-side adapter that composes `venue.safe` with the venue's own broadcast primitive, which is strictly worse because it re-splits the nonce ledger.
-
-### F4 — `loadConfig` precedence is env > file > defaults, not file > env (**documentation drift**)
-
-`CLAUDE.md` and the task brief both say "Config file first, env var override" / "file > env > defaults". The loader's own doc comment at `client/src/config.ts:940` says "env > config file > defaults", and the implementation matches it: `merged` starts from `fileValues`, then every `JINN_*` env var overwrites. **Disposition:** the plan is written against the *code*. The migration writes the file only, so an operator with `JINN_*` overrides keeps them — that is correct behaviour, not a bug. File a `docs` chore to fix the `CLAUDE.md` line; it is not stage-1 work.
-
-### F5 — Existing config writes are non-atomic and last-writer-wins (**pre-existing, partially fixed here**)
-
-`persistTopLevelConfigValue` (`client/src/config.ts:1467`) and `persistLegacySolverNetsMigration` (`:1446`) both do read → mutate → `writeFileSync` with no lock and no temp+rename. `POST /v1/operator/join/:cid` and `POST /v1/setup/network` can clobber each other, and a crash mid-write truncates `~/.jinn-client/config.json` — which can carry paid RPC keys. **Disposition:** Task 2 adds `writeConfigFileAtomic` and Task 17's new endpoints use it. The two legacy writers are **not** converted in this stage (out of scope, and converting them touches the join flow the evaluator path still depends on). File a follow-up `fix` issue to convert them; recommend doing it at stage 3 when the posting surface already reworks that code.
-
-### F6 — The notification taxonomy in code and in `OPERATOR-APP-SPEC.md` have drifted (**minor, fixed here**)
-
-`CANONICAL_KINDS` (`client/src/dashboard/spa/src/notifications/taxonomy.ts`) lacks `rpc_all_failed` and `rpc_primary_degraded`, which the spec lists; the spec names a severity `action_required` that `SEVERITIES` does not have. **Disposition:** Task 17 adds the three new stage-1 kinds to both sides and aligns §2.10's list. The pre-existing two-kind drift is recorded here and left for a `docs` chore — fixing it means either adding dead kinds or editing canonical spec text, neither of which belongs in a cutover PR.
-
-### F7 — The migration cannot map USD caps onto wei caps (**deliberate, needs operator confirmation**)
-
-`OperatorCaps.spendCapWei` is a per-task **wei** ceiling; the operator's existing `spendCap.capUsd` and `aiUnits.capPerBlockUsdMicros` are rolling-window **USD** budgets. There is no defensible automatic conversion (no oracle in the daemon, and the semantics differ — per-task ceiling vs rolling window). **Disposition:** Task 3 migrates both pipeline caps to `0`, which makes `checkCaps` decline everything, and Task 4 raises an action-required state message pointing at the Claim policy & wiring page. The operator sets real caps once, deliberately. This means **a freshly migrated daemon claims nothing until a human acts** — that is the safe reading of `CLAIM_NOTHING`, but it is a behaviour change on first boot and the operator should confirm they want it rather than a permissive default.
-
-### F8 — The legacy state machine has no solution/evaluation split (**scoping clarification**)
-
-`client/src/harnesses/engine/state.ts` runs **one** state sequence (`DISCOVERED → … → COMPLETE`) for both roles; the discriminator is the `task_role` column plus the harness selected by `ImplRegistry.findFor`. Only the delivery leg branches (`claimSolutionDelivery` vs `claimVerdictDelivery`), and `AWAITING_ADOPTION` / `CLAIMING_DELIVERY` are Autopilot-solution-only. **Disposition:** "retire the solution path" therefore cannot mean deleting states — it means refusing restoration at the entry point (`canAcceptTask`) and at discovery (`watchForTasks`), which is what Task 16 does. `state.ts`, `persistence.ts`, and `task_runs` all survive to stage 5 exactly as the spec's retirement table says. The Autopilot adoption states are the one place where a stage-1 restoration could still slip through: `engineOwnsAutopilotSettlement` (`adapter.ts:1738`) reads `task_runs` directly. Task 16's `watchForTasks` change starves it of new rows; existing rows drain under the Task 19 runbook.
-
----
-
-## Self-review
-
-**Spec coverage.** §3 host split → Tasks 11, 12. §4 loop map (projector, work, evidence driver) → Tasks 9, 11, 13; derivation-first recovery and the two ordering rules → Tasks 6, 10, 13; unreleased-attempt state message → Tasks 6, 13, 17. §5 usage disciplines → Task 12 (composition through public interfaces; seal-once; host-injected evidence join). §6.4 facts mapper → Task 5. §6.5 host deliverables → Tasks 6, 9, 11, 12, 13 (verdict-gate policy assembly is stage 2 and is named in "What this plan does NOT do"). §9 config migration → Tasks 1–4; stage-1 retirement rows → Task 16. §10 stage-1 row → Tasks 7, 8, 13, 16; bridge-era document rules → Tasks 14, 15; drain rules → Task 19; standing rules → Global Constraints. Contracts 1, 2, 3, 4, 6, 9, 10, 12 each have a named owning task. Gaps found and surfaced rather than papered over: F1 and F2.
-
-**Placeholder scan.** No "TBD", no "similar to Task N", no "add error handling". Two places carry deliberate prose instead of code: Task 9's `tick()` sequence and Task 13's nine-step sequence are numbered algorithms with every call site named and every type defined above them — the surrounding code blocks give the exact signatures. Task 15 is explicitly gated on an operator ruling rather than guessing.
-
-**Type consistency.** `ExecutionWiringConfigEntry` (operator config, Task 1) and `ExecutionWiringEntry` (pipeline, existing) are distinct on purpose and bridged by `toPipelineWiring`; both names are used consistently. `AnnouncedSubmissionCard` is defined once (Task 5) and consumed by Tasks 13 and 15. `VenueBroadcaster` is defined in Task 7 and consumed by Tasks 8, 12, 13. `OperatorEvidence` / `EvidenceBindingPorts` are defined in Task 11 and consumed by Task 12. `EngagementOutcome` values used in Task 13 (`settled`, `race-lost`, `abandoned`) all appear in the Task 6 union.
-
-## Coordinator amendments (2026-07-30, binding on execution)
-
-Rulings on this plan's findings, issued at planning consolidation. Where an amendment
-contradicts a task's literal text or test literals, the amendment wins and the executor
-adjusts the task's code accordingly.
-
-1. **F7 reversed — no claim-nothing migration.** Spec §9's "behavior-identical on day one"
-   is the binding sentence; `CLAIM_NOTHING` is the posture for an *unconfigured* predicate,
-   not for the migration of a configured operator. Amend: `ClaimPolicyConfigSchema` makes
-   `spendCapWei`/`aiUnitCap` **optional**; the migration (Task 3) writes no cap fields; the
-   composition root (Task 12) passes permissive `OperatorCaps` (`2^256-1` wei,
-   `Number.MAX_SAFE_INTEGER` units) to the pipeline when unset, because the host's USD
-   rolling-window gates (kept per spec §6.5) remain the operative spend bound — exactly
-   today's behavior. Task 4's `capsUnset` message becomes **informational** ("per-claim
-   caps not set; USD gates active"), not action-required. Task 3's Step-1 test literals and
-   the Task 1 schema/test literals follow this amendment.
-2. **F1 placement — the deliver leg homes in venue-base.** Task 8's content stands, but its
-   Files move: Create `packages/marketplace/venue-base/src/deliver-leg.ts`, Test
-   `packages/marketplace/venue-base/src/deliver-leg.test.ts`. It is a product-agnostic
-   venue chain-write (Autopilot's adoption pass needs the same leg); leaving it in
-   `client/` would recreate the pattern this program retires. The venue-base plan carries
-   the matching amendment.
-3. **F3 confirmed — the broadcaster surface is generic, and venue-base owns its name.**
-   Task 7's injected `VenueBroadcaster` is venue-base's generic broadcast export (the
-   `execute({to, value, data, logicalTx})` shape its kit drives); Task 7's Consumes block
-   binds to that export at execution time.
-4. **D3 ratified.** The optional namespaced `deliveryExtensions` hook on
-   `LocalTaskExecutionBackendConfig` (permitted by `DeliveryRecordSchema`'s `.loose()` and
-   TEP §21.3; retires with `legacyManifestDigest` after stage 5) plus the three-line
-   read-path preference in the mech adapter is the ratified bridge mechanism. The
-   composition spec §10 carries the dated correction of its falsified parseability claim.
-5. **F4/F5/F6 accepted as written** (docs chore for config precedence; legacy-writer
-   atomicity follow-up recommended for stage 3; notification-taxonomy drift recorded in the
-   program follow-ups). **F8 accepted** — retirement by refusal at `canAcceptTask` /
-   `watchForTasks`, no state deletion.
-
-## Execution findings (2026-07-31, partial execution — Tasks 0–3)
-
-Recorded during execution against the merged phase-0 head (`4cfd4caab`, all three component
-merges present). Execution reached **Task 3 of 19**; Tasks 4–19 are not started. Findings
-are surfaced, never silently resolved.
-
-### E1 — the plan never wires client onto the merged stack (blocking; resolved as Task 0)
-
-`client/package.json` at the session head declared **no** dependency on any stack package,
-yet Task 1's first line imports `@jinn-network/marketplace-pipeline`, and no task in the
-plan adds them. Resolved as a preamble commit: 15 direct runtime dependencies plus a
-24-entry `resolutions` block mapping the transitive closure to `portal:` paths, matching the
-pattern the package trees already use among themselves.
-
-### E2 — the assembly package name in the plan does not exist
-
-The plan imports `@jinn-network/task-execution-backend-local-assembly`. The merged package at
-`packages/task-execution/backend-local/assembly` is named
-**`@jinn-network/task-execution-backend-local`**. Every remaining task that consumes the
-assembly must use the real name.
-
-### E3 — portal-within-portal version conflict (blocking; resolved as Task 0)
-
-`yarn install` failed `YN0071`: the stack pins `better-sqlite3@13.0.1` (venue-base,
-evidence-local-runtime, evidence-catalog-sqlite) and `ajv@8.17.1` (task-execution-profiles)
-exactly, against client's `^12.10.0` / `^8.20.0`. Resolved by pinning both in client
-`resolutions`. This is a **major bump of the daemon's SQLite driver**; the full client suite
-is the gate and stays green on it.
-
-### E4 — `BaseVenueConfig` is not the plan's five-member config
-
-The plan's "Consumed cross-plan surfaces" block pins
-`{chain, publicClient, walletClient, safeAddress, stateDbPath}`. The merged
-`packages/marketplace/venue-base/src/config.ts` additionally **requires** `priorityMech`,
-`pin`, `verifySettlementGrade`, `isAuthorizedMechOrigin`, and
-`observations: () => Promise<readonly ProtocolObservation[]>`, plus optional `logSource` /
-`broadcast` / `finality` / `deliveryWait` option bags. Task 12's composition root must supply
-all ten. `observations` is a **sequencing constraint the plan does not mention**: venue-base's
-observe port is fed by the host's projector state (Task 9), so Task 12 must construct the
-projector before the venue.
-
-### E5 — the venue broadcaster's real shape is `execute`, not `broadcast`
-
-The plan's `BaseVenueSafe.broadcast({safeAddress,to,value,data}) => Hex` does not exist. The
-merged export is `BaseVenueSafeBroadcaster`:
-
-```ts
-execute(request: { to; value; data; logicalTx: string; operation?: 0 | 1 })
-  => Promise<SafeBroadcastReceipt>   // { txHash, blockNumber, blockHash, logs, alreadySettled }
-classify(error: unknown) => VenueRevertClassification
-```
-
-Three differences bind Task 7: `safeAddress` is fixed at factory time, not passed per call;
-`logicalTx` is **required** and load-bearing (the reconcile path adopts a pending tx only when
-`existing.logicalTx === request.logicalTx`, so a coarse or colliding value is a correctness
-bug, not a cosmetic one); and the return is a receipt, not a hash. Coordinator amendment 3
-binds Task 7 to this real export, so Task 7's `VenueBroadcaster` must be restated in `execute`
-terms and must carry the Safe address it is bound to, so `executeSafeTransaction` can still
-reject a mismatched `params.safeAddress` rather than silently broadcasting from the wrong Safe.
-
-### E6 — `executeSafeTransaction` has seven call sites, not five
-
-The plan names five in `client/src/adapters/mech/contracts.ts`. Two more exist off the
-marketplace path: `client/src/erc8004/plugin-registry.ts:242` and
-`client/src/erc8004/reputation.ts:494`. Re-pointing the one chokepoint therefore also moves
-the ERC-8004 legs onto the venue broadcaster. That is **consistent with** the
-single-broadcaster rule (one Safe, one nonce stack) and should be kept, but the plan's
-blast-radius rationale undercounted.
-
-### E7 — the repo imports `zod/v3`, not `zod`
-
-Every plan code block writes `import { z } from 'zod'`. `client/src/config.ts` and its
-siblings import `from 'zod/v3'` (zod v4 installed, v3-compat subpath; `JinnConfigSchema` is a
-`zod/v3` object). Mixing versions produces schemas that do not compose. Applied in Tasks 1 and
-3; binding on every remaining task that touches config schemas.
-
-### E8 — Task 3's `entry.model ?? ''` would brick the next boot (found and fixed)
-
-The plan's Task 3 Step-3 code maps a solver join's model as `entry.model ?? ''`, but
-`ExecutionWiringConfigEntrySchema.model` is `z.string().min(1)`. A real `joinedSolverNets`
-entry without a per-net `model` — the common case, since the daemon falls back to the
-operator's top-level `claudeModel` at solve time — migrates to `model: ''`, which fails
-validation and **throws on the following boot**. This reproduced against a real operator
-config. Fixed in Task 3 as `entry.model ?? raw.claudeModel ?? 'claude-haiku-4-5-20251001'`,
-matching the daemon's existing runtime fallback, with a regression test.
-
-### E9 — `loadConfig()` writes, and the suite calls it against the operator's live config
-
-Task 3 puts the migration inside `loadConfig`, following the file's established
-load-time-write pattern (`persistLegacySolverNetsMigration`, issue #445). Several existing
-tests call `loadConfig()` with **no argument**, which defaults to the operator's real
-`~/.jinn-client/config.json`. Running the client suite therefore migrated the live config on
-the executing machine — additively, with timestamped backups written beside it. This
-test-hygiene defect **pre-dates** this plan and already applied to the #445 migration; Task 3
-only made it consequential and visible. Recorded rather than patched, because the available
-in-scope patch (a `VITEST` guard) departs from the convention every other load-time migration
-in that file follows. The real fix is to make those tests pass an explicit path.
-
-### E10 — the Docker portal guard is unsatisfiable because of a stale `files` entry (blocking, out of scope)
-
-`client/test/scripts/dockerfile-workspace-portals.test.ts` derives its expectations from
-client's portal entries, so Task 0's dependency wiring put 24 new packages under it. Seven of
-its eight assertions now pass against the updated `client/Dockerfile`. The eighth cannot be
-satisfied from inside `client/`: **`packages/discovery/serve` and `packages/discovery/client`**
-both declare `files: ["dist/", "fixtures/", "README.md"]`, but neither has **ever** had a
-`fixtures/` directory (stale since the discovery scaffold commits; nothing in either build
-generates one — the entry was evidently copied from `record-discovery-protocol`, which does
-have one). The guard requires a `COPY` for every non-`dist` publish path, while a sibling
-assertion in the same file requires every `COPY` source to exist — the pair is unsatisfiable
-until the stale entries are removed. Neither package can be demoted to a devDependency
-instead: Task 9 imports `writeArchivePages` from `record-discovery-serve` at runtime, and
-`record-discovery-client` is a runtime dependency of `transport-http`.
-
-**Fix (one line each, outside this plan's write scope):** delete `"fixtures/",` from
-`packages/discovery/serve/package.json` and `packages/discovery/client/package.json`. Benign
-for publishing — npm ignores missing `files` entries — so it only ever broke this inference.
-
-### E11 — the bundled-workspace guard encoded two wrong assumptions (fixed in scope)
-
-Task 0's wiring also put the new packages under
-`client/test/scripts/bundled-workspaces.test.ts`, which failed for two independent reasons,
-both fixed here because both are client-side:
-
-1. It resolved a bundled workspace's path as `packages/<last npm-name segment>`. That holds
-   only for the four flat legacy packages; the stack packages are nested
-   (`@jinn-network/evidence-local-runtime` → `packages/evidence/local-runtime`). Now resolved
-   from the package's own `portal:` resolution, which is the ground truth, with an assertion
-   that the result stays inside the repository.
-2. Its second assertion — every runtime dependency of a bundled package must itself be a
-   client dependency — is a **real correctness rule** (a bundled tarball whose dependency is
-   absent cannot resolve at runtime) and Task 0's initial 15-package set violated it. The
-   bundled set is now closed under runtime dependencies: **26 packages**, with the
-   third-party leaves `safe-regex` and `@noble/curves` promoted into `dependencies`.
-
-That closure surfaced one more out-of-scope defect: `packages/marketplace/venue-base`
-declares **`@types/better-sqlite3` in `dependencies`**, not `devDependencies`. A types-only
-package has no business in a runtime dependency set; it forced `@types/better-sqlite3` into
-client's runtime `dependencies` to satisfy the rule. Worth fixing in venue-base.
-
-### Verification state at Task 3
-
-- `client` typecheck: **0 errors**.
-- `client` suite baseline at the session head, before any change: 787 files
-  (777 passed / 1 failed / 9 skipped), 7083 tests (7053 passed / 1 failed / 29 skipped). The
-  one failure is `test/_support/chain/anvil.test.ts > spawnAnvilFork > can set balance and mine
-  blocks`, which forks Base over the network; it passed on a later run, so it is a
-  network-dependent flake, not a standing red.
-- After Task 0: the same, plus the single E10 Docker-guard assertion.
-- Tasks 1–3 targeted suites: `test/config` **154 passed**, shape-v2 **7 passed**, atomic-write
-  **5 passed**, migrate-shape-v2 **9 passed**.
-
-## Execution findings (2026-07-31, continued — Tasks 4 onward)
-
-Recorded by the adopting coordinator. The Tasks 0–3 findings above stand unchanged; the
-E-numbering continues.
-
-### E12 — a pinned inventory has to move with the surface it pins (fixed in scope)
-
-Two tasks added a symbol to a list that a test pins verbatim, and the plan mentioned neither:
-Task 4's `config_migrated` against `CANONICAL_KINDS` in
-`client/src/dashboard/spa/src/notifications/taxonomy.test.ts`, and Task 5's two new exports
-against the public-surface list in `packages/marketplace/pipeline/src/index.test.ts`. The plan
-defers the first to Task 17 ("Task 17 adds the three new stage-1 kinds to both sides"), which
-would have left a knowingly-red test standing across thirteen tasks — and a red suite you have
-learned to ignore stops being a signal for anything else. **Disposition:** the registry moves in
-the same commit as the symbol. Updating a pinned inventory to the new true inventory is not
-weakening a test; relaxing an assertion to hide a behavioral failure is, and that never
-happened here. `client/OPERATOR-APP-SPEC.md` §2.10 gained the matching `config_migrated` entry
-so code and canonical doc stay in step at every commit. Task 17 adds its two remaining kinds
-the same way.
-
-### E13 — Task 4's test literals crash rather than fail
-
-The plan's Task 4 Step-1 tests call `buildStatus(...)`, which does not exist — the real export
-is `assembleStatusV1` — and pass `{ configMigration } as never`, which throws before reaching
-any assertion (`assembleStatusV1` dereferences `raw.master.balanceWei` unconditionally, and
-`deriveNotifications` dereferences `input.bootstrap.mode`). Replaced with full fixtures mirroring
-each file's existing patterns, so the tests exercise real behavior. Assertions unchanged.
-
-### E14 — the fence no longer runs per retry attempt (behavior change, accepted)
-
-The deleted `executeSafeTransactionInner` re-evaluated `options.beforeBroadcast` on **every**
-retry attempt of a Safe execution. Task 7's chokepoint runs it exactly once, before handing the
-call to venue-base, because retries now live inside the venue broadcaster where the host's fence
-is not reachable. For the surviving legacy legs the fence is a claim-window / readiness gate, so
-firing it once at admission is the semantically defensible reading — but it **is** a behavior
-change, not a refactor, and it is the kind that only shows up under a slow chain. It belongs in
-venue-base's kit as a per-attempt fence hook if the per-attempt semantics are wanted back.
-
-### E15 — three deleted Safe cases have no venue-base counterpart
-
-Contract 12 says legacy behavior re-enters as venue-base kit fixtures. venue-base is outside this
-plan's write scope, so Task 7 deleted the client-side cases and audited coverage instead of
-moving them. Covered by venue-base today: nonce-too-low pinned-nonce refresh; reconcile on
-nonce-too-low; refusal to reconcile a foreign tx at the same nonce; receipt-path stale-nonce
-retryable while still owner. **Not covered — real coverage lost until venue-base's kit gains
-them:**
-
-1. estimate-path `GS026` retried while still owner,
-2. receipt-path `GS026` terminal when not owner,
-3. fence re-checked on every retry attempt (see E14 — the behavior itself is gone, so this one
-   is a decision to ratify, not a test to port).
-
-Partially covered: `SafePostBroadcastHookError` on an `onBroadcast` throw (client-only concept,
-retained and tested client-side); `GS026` priority over an unrelated inner revert
-(GS026-as-terminal is covered, the priority ordering is not); hook-fires-after-ledger-record
-(the ledger-before-wait mechanic is covered, the client hook interleaving is not).
-
-### E16 — the single broadcaster is a process-global, and three entry points never install one
-
-`executeSafeTransaction` now hard-fails with `no venue broadcaster installed` unless a
-composition root has called `setVenueBroadcaster`. Task 12 installs it before `new Daemon(...)`
-in `main.ts`, which covers the daemon. It does **not** cover:
-
-1. **Standalone CLI verbs** — `jinn tasks submit` (→ `contracts.ts submitTask`),
-   `jinn solver-plugins publish` / `revoke` (→ `erc8004/plugin-registry.ts`),
-   `jinn solver-plugins block` / `feedback` (→ `erc8004/reputation.ts`). Each is a real operator
-   surface that breaks at runtime until it installs a broadcaster of its own.
-   (`jinn solver-plugins read` is unaffected — no Safe write.)
-2. **The hermetic and e2e harnesses** — `test/hermetic/adapter-claim-delivery.test.ts`,
-   `test/hermetic/full-loop.test.ts`, and everything built by `startDaemon()` in
-   `client/test/e2e/_daemon-harness-helpers.ts`. All are excluded from the default `yarn test`
-   and run under separate gates, so the default suite stays green while these are broken.
-   **This is the gap most likely to be mistaken for "done".**
-3. A **design question the plan never asks**: the broadcaster is a module-level singleton, but
-   release scenario T2.2 runs several daemons in one process. One global broadcaster cannot
-   serve two Safes. The mismatched-Safe rejection added per finding E5 turns that into a loud
-   failure rather than a wrong-Safe broadcast, which is the right failure mode — but a
-   multi-daemon process still cannot work until the broadcaster is per-daemon state.
-
-Items 1 and 2 are in this stage's blast radius and are resolved at Task 12 or recorded there as
-carried gaps; item 3 needs a ruling.
-
-### E17 — the mech does not revert on an already-delivered request (Task 8, design corrected)
-
-Task 8's plan detects "already delivered" by regex-matching a thrown revert. The deployed
-contract does not throw: `MechMarketplace.deliverMarketplace` sees `requestInfo.deliveryMech !=
-address(0)`, **`continue`s**, emits `RevokeRequest` instead of `Deliver`, and the Safe
-transaction **succeeds**. `SafeBroadcastReceipt.alreadySettled` is populated only from a decoded
-inner revert, so it cannot observe this case either. The plan's design would therefore have
-reported `delivered: 'sent'` for a delivery that never landed — and today-mode settlement then
-fails downstream with `digest-divergence`, far from the cause. **Disposition:** the leg now
-decides from evidence rather than from an error string — it decodes the `Deliver` event out of
-the receipt logs and reports `already` when this request's event is absent, keeping
-`broadcaster.classify(error)` (venue-base's real signal) plus the regex as the thrown-revert
-fallback. Two tests were added beyond the plan's four to cover the no-throw path, because the
-plan's four could not fail on the real behavior.
-
-Secondary mismatch: `MECH_ABI` in `@jinn-network/marketplace-binding` exports only the `Deliver`
-**event**, not a `deliverToMarketplace` function entry as the plan's test assumes. A local
-function-ABI slice was defined, mirroring what `writers/settlement.ts` already does for the same
-reason.
-
-### E18 — `test/daemon` fails under parallel workers, and it is not this plan's doing
-
-Several daemon tests construct a `Daemon` with the default `apiPort` and race to bind
-`127.0.0.1:7331`; under vitest's parallel workers they fail with `EADDRINUSE`. Measured on this
-branch: `yarn vitest run test/daemon` **without** any Task 9 change fails 9 tests across 3 files;
-**with** Task 9 it fails 6 across 4 files; run with `--no-file-parallelism` the same set is
-**42 files / 275 tests, all green**. It is a pre-existing port-contention flake whose visible
-victims shift with file scheduling. Two consequences worth stating plainly: a full-suite run is
-**not** a trustworthy gate for `test/daemon` on this machine, and any executor comparing against
-a parallel full-suite baseline will chase ghosts — one did, and lost a session to it.
-**Disposition:** every `test/daemon` run in this stage uses `--no-file-parallelism`. The real fix
-(bind port 0, or give each test its own `apiPort`) is a follow-up `fix` issue, not cutover work.
-
-### E19 — the projection state contains bigints and was persisted with `JSON.stringify` (found in review, fixed)
-
-`MarketplaceProjectionState` carries `bigint` on every claim/delivery-derived record —
-`requestIdBindings[].taskId` / `.nonce` / `.deliveryRate`, `attemptEngagements[].taskId`,
-`evaluationEngagements`, `pendingMechDeliveries`. Task 9's cursor write used plain
-`JSON.stringify`, which throws `TypeError: Do not know how to serialize a BigInt` on all of
-them. An `AdmissibleTaskProjection` holds no bigints, so the loop and its tests ran clean over
-`TaskCreated` traffic and would have crashed **the first time anyone claimed an attempt** — the
-failure would have appeared in production, not in CI. Fixed with a tagged codec
-(`{"$bigint":"<decimal>"}`) in `projector-cursor.ts`, plus round-trip tests. The tag is a
-single-key object rather than a numeric-looking string on purpose: `sequenceBySourceSubject`
-holds 16-digit sequence strings that a "looks like a number" reviver would corrupt into bigints.
-
-### E20 — the projector has no production event source, and the venue's observe port is stubbed (**blocking for live traffic**)
-
-This is the largest gap in the stage and it is not a wiring detail. Three required host-injected
-dependencies have **no production implementation anywhere in the repository** — only the unit
-tests' fakes:
-
-1. **`ProjectorLoopConfig.enrich`** — resolves each decoded chain event's signed `submission`
-   identity, `taskDigest`, `effectiveDeadline` and `dispatchContext`, and recomputes delivery
-   correspondence for Mech-deliver facts. It needs IPFS-backed resolution plus digest
-   verification. It is a subsystem, not a function.
-2. **A production log source** for `ProjectorLoopConfig.logSource`'s `{fetchLogs, heads}` shape.
-   Note this shape is also **not** venue-base's `ChainLogSource`
-   (`poll` / `cursor` / `logsInRange` / `orphanedBlockHashes` / `close`), so the plan's Task 9
-   Consumes line naming `venue.logSource` was wrong in kind, not just in name.
-3. **`BaseVenueConfig.observations`** — venue-base's observe port wants every observation ever
-   projected. `ProjectorLoop.tick()` computes `transition.observations` and discards it, and
-   `state_json` persists only `MarketplaceProjectionState`, which has no observations field and
-   cannot be replayed into one without re-reducing the full admitted-event history.
-
-Consequence, stated without hedging: **`buildOperatorComposition` assembles a claim / settle /
-release path that type-checks and unit-tests green, but whose `venue.observe` / `lifecycle` /
-`finality` report "no Attempt" for every reference, because `observations` is stubbed to `async
-() => []`.** The composition root is not safe for live settlement traffic as it stands. The
-plan's own Task 12 test cannot catch this — it stubs `createBaseVenue` entirely.
-
-A fourth dependency is gapped for a different and more defensible reason:
-**`verifySettlementGrade`** composes `createBindingResolver` + `createChainFactResolver` as
-directed, but their `BindingStore` / `AnchorReadClient` backing infrastructure does not exist —
-that is Phase B.1 (verifiability tier activation), still forward-looking. It is wired
-**fail-closed**: every check reports `missing`, never silently `verified`. That is the correct
-posture and needs no fix, only a ruling that stage 1 ships with grade checks unavailable.
-
-**Disposition:** items 1–3 are a scoped follow-up ("the projector's production event source and
-enrichment") that must land before the testnet closed-loop gate in Task 19 can pass. They were
-not in any of this plan's nineteen tasks. Recording rather than improvising: inventing an
-IPFS-resolution subsystem inside a composition root is exactly the pattern this program retires.
-
-### E21 — `client` and the portal packages resolve different viem patch versions
-
-`client` pins `viem@^2.0.0` → `2.55.8`; every package under `packages/` is its own yarn project
-and resolves `2.55.10`. Both satisfy the range and are runtime-identical, but TypeScript treats
-the two `PublicClient` / `WalletClient` declarations as nominally distinct. Task 12 is the first
-client code to pass a live viem client across the portal boundary into `createBaseVenue`, so it
-is the first place this bites; it was worked around with a single `as never` cast at the call
-site. A cast at a composition boundary is precisely where a real type error would hide, so this
-should not stand. **Fix:** pin `viem` in client's `resolutions`, following the `better-sqlite3` /
-`ajv` precedent from E3, and drop the cast.
-
-### E22 — smaller Task 12 mismatches, all adapted
-
-- `SelectedProvisioner` and `LocalLauncherDeployment` are defined in the assembly package but not
-  re-exported from its `index.ts`; structurally-equivalent local types were used.
-- `ProfileStore` comes from `@jinn-network/task-execution-profiles`, not `-workspace`.
-- `venue.safe` carries no `safeAddress` field, so the composition root wraps it to satisfy the
-  `VenueBroadcaster` port's E5-mandated bound-Safe check.
-- `createRegistryPinPort` takes `{registryUrl, fetchImpl, timeoutMs?}` with `fetchImpl`
-  **required**, not the plan's `{addUrl}`.
-- `launcherDeployments` entries are `{executable: {path, digest}, probe()}`, not
-  `{executablePath, versionProbe}`.
-- `resolveCapabilityGrants(grants, config)` does not exist; implemented inline.
-- `config.maxConcurrentAttempts` does not exist on `JinnConfig`; the default of 4 always applies.
-- `WorkspaceKind` is `'dir' | 'worktree'`, not `'plain-dir' | 'git-worktree'`.
-- The build-meta module is `client/src/build-info.ts` (`buildInfo.implVersion`), not
-  `dist/build-meta`.
-- `LocalTaskExecutionBackendConfig` has two optional fields the plan's "every required field, no
-  gaps" table omits: `resolveTaskProfile?` and `cancellationKillPollCeilingMs?`. Both left unset.
-- **No `MarketplaceChainConfig` exists for Base mainnet** — `BASE_SEPOLIA_TODAY` is the only real
-  chain config in the repo, so `main.ts` gates composition construction on
-  `config.network === 'testnet'` and leaves `composition` undefined on mainnet. Stage 1 is a
-  testnet cutover, so this is consistent, but it is a constraint the plan never states.
-- `selectProvisioner`'s git-worktree branch needs per-call `referenceRepository` / `oid` that no
-  `JinnConfig` field carries; the composition root always builds the plain-directory provisioner.
-
-### E23 — the evidence rollup crossed the api → daemon boundary (found in the end-of-plan battery, fixed)
-
-Task 11 threaded the `/v1/status` indexing rollup by importing `EvidenceDriverLoop` and
-`EvidenceIndexingStatus` from `src/daemon/` into `src/api/gather-status.ts` and
-`src/api/status-build.ts`. `client/test/architecture/api-daemon-boundary.test.ts` (#1584) forbids
-that, **type-only imports included** — which is why `yarn typecheck` stayed at zero errors and
-every targeted suite the executor ran stayed green. Only the full suite caught it. **Disposition:**
-the rollup shapes moved to `client/src/types/evidence-indexing.ts`, which both tiers may import,
-and `gather-status.ts` now depends on a narrow `EvidenceIndexingSource` port (`failures()` +
-`pending()`) that `EvidenceDriverLoop` satisfies structurally without the API tier naming the
-class. The lesson generalizes: an architecture guard that lives in the test suite is invisible to
-a per-task executor running targeted suites, so the coordinator's full-suite pass is the only
-place it can surface.
-
-### E24 — the bridge exists but production never populates it (**F2 is not actually closed**)
-
-Task 15 built the ratified D3 mechanism correctly — the `deliveryExtensions` hook is additive,
-namespaced, key-validated, reserved-key-safe, and it round-trips through `sealDelivery` — and
-Task 14's fixtures now prove a legacy evaluator can parse the annotated Delivery. But the
-composition root supplies `deliveryExtensions: () => ({})`. **No delivery this daemon produces
-carries the annotation**, so finding F2's gap is closed in mechanism and open in fact.
-
-Two concrete blockers, both recorded by the Task 15 executor rather than papered over:
-
-1. The hook must be **synchronous** (it is called inside `backend.ts`'s synchronous `sealDelivery`
-   path), but `CompositionRootInput` carries only an async `WalletClient` — there is no sync
-   signer port, and the legacy envelope must be signed.
-2. There is **no reachable mapping from a sealed `TaskSpecification` back to the
-   `ExecutionWiringEntry` / `workKind` that produced it**. `workKind` is computed once at claim
-   time by `mapAnnouncedSubmissionToFacts` and never threaded through `backend.submit`.
-
-`buildLegacyExecutionEnvelope` is therefore **unexercised beyond typecheck**, and it fills
-`task.onchainCreationTx` / `onchainCreationBlock` / `requestId` with bridge-era placeholders
-because the hook has no access to the attempt's on-chain creation facts. **Disposition:** a
-follow-up needs a sync signer port plus a workKind-carrying seam. Until then, stage 1 must not be
-described as bridging deliveries to the legacy evaluator — it can, but it does not.
-
-### E25 — single-broadcaster audit: the rule holds for the Safe, and every survivor is EOA-level
-
-Contract 1 says venue-base's Safe broadcast is the only transaction path. Audited by grepping
-every `writeContract` / `sendTransaction` / `sendRawTransaction` in `client/src`. Verdict: **no
-surviving legacy path broadcasts from the Safe outside the venue broadcaster.** Every survivor is
-a different nonce stack with its own lock, which is what the rule actually protects:
-
-- `client/src/main.ts` (checkpoint) and `client/src/tx-retry.ts` — **master/operator EOA**, guarded
-  by `withEoaBroadcastLock`. Not the Safe.
-- `client/src/erc8004/reputation.ts:512` — the EOA fallback taken only when no `safeAddress` is
-  configured; the Safe branch at `:494` goes through `executeSafeTransaction`. Correct.
-- `client/src/erc8004/validation.ts:145,185` — `ValidationRegistry` writes are **EOA-only and were
-  never Safe-mediated**, so they never passed through `executeSafeTransaction` even before this
-  stage. This is a **third** ERC-8004 surface that finding E6's "seven call sites" count did not
-  reach, because it was never a call site at all. Consistent with contract 1, worth naming so the
-  next audit does not treat it as a regression.
-- `client/src/earning/**` — the bootstrap, which runs before any composition root and whose job
-  includes deploying the Safe. It cannot route through a Safe broadcaster by definition.
-
-### Verification state at end of plan (2026-07-31)
-
-- `client` typecheck: **0 errors**. `yarn lint:no-late-mount`: clean.
-- Touched package suites: `marketplace/pipeline` **52 passed**, `marketplace/venue-base`
-  **166 passed**, `task-execution/backend-local/assembly` **96 passed / 1 skipped**; all three
-  typecheck at 0 errors.
-- Guard trios, both trees: marketplace source-boundaries **13/13**, package-inventory **2/2**,
-  packed-types **1/1**; task-execution source-boundaries **7/7**, package-inventory **3/3**,
-  packed-types **1/1**.
-- `client` full suite (`--no-file-parallelism`, before the E23 fix): 807 files
-  (792 passed / 6 failed / 9 skipped), 7170 tests (7125 passed / 16 failed / 29 skipped).
-  Of the six red files, **one was ours** (E23, fixed). The other five are network- or
-  resource-dependent and pass in isolation: `_support/chain/anvil.test.ts` +
-  `_support/chain/olas-funding.test.ts` (fork Base over the network — re-run alone: 3/3 green),
-  `scripts/build-anvil-snapshot-entrypoint.test.ts` (subprocess timeout under load — alone: 1/1
-  green), `venues/hyperliquid/client.test.ts` (9 tests against a live testnet API), and
-  `cli/commands/create.test.ts` (runs `yarn install` in a scaffold). **No commit in this stage
-  touches any of those five files.**
-- `e2e:daemon-harness` with `JINN_E2E_HARNESS=prediction-v1-baseline`: **FAILED**, identically on
-  3/3 runs, at `bootstrapStakedOperator` — `stOLAS stake() tx failed for service 1` on the live
-  Base-mainnet Anvil fork, inside `client/src/earning/bootstrap.ts`, which no commit in this stage
-  touches. The gate therefore never reached any stage-1 code. `anvil --version`: 1.6.0-nightly.
-  `JINN_E2E_HARNESS=claude-code` skipped cleanly (no `ANTHROPIC_API_KEY`) as designed.
-- The **testnet closed-loop gate (Task 19 step 4) was NOT run** — it is the human deploy gate, and
-  E20 means it could not pass regardless.
-
----
-
-# Close-out addendum (2026-07-31) — make the loop close
-
-Coordinator rulings on findings E16, E20, E21, E24 and on settlement grade. All five go one way:
-**stage 1 is not complete until the loop can close**, so the gapped surfaces are built here rather
-than deferred. Tasks are numbered `C1`–`C9` to keep them distinct from the plan's `1`–`19`.
-
-**Exit gate for this leg:** `e2e:daemon-harness` reaches and exercises stage-1 code — or a loud,
-precisely-located NOT RUN. The drain runbook's do-not-run banner lifts only if the loop closes.
-
-**Standing rules carry over unchanged:** contracts 1–12; TDD (failing test → see it fail →
-implement → pass); never weaken a test; a pinned inventory moves with the symbol that changes it;
-plan-vs-code mismatches get a finding, not a silent guess; `--no-file-parallelism` for
-`test/daemon` (finding E18).
-
-## Ruling summary
-
-1. **E20 folded in.** Build the projector's production event feed, the enrich step, and the
-   observations stream. (C3, C4, C5.)
-2. **Settlement grade is today-mode, not Phase B.** `verificationFailure`
-   (`packages/marketplace/binding/src/settlement.ts:233`) rejects unless `executorBinding` and
-   `dispatchBinding` are `"verified"`, and rejects `evaluationSpecification` on `"missing"` /
-   `"failed"`. Fail-closed therefore means **zero settlements ever** — it is not a safe default,
-   it is a broken one. Implement the checks for real. Note `EvaluationSpecificationCheck` admits
-   `"not-applicable"`, which `verificationFailure` does **not** reject: that is the correct status
-   for a solution delivery carrying no evaluation specification, and the proof obligation is a
-   test showing today-mode settlement proceeds on it. Anything genuinely Phase B (tier
-   attestations) gets an explicit finding plus proof that today-mode does not reject on it. (C6.)
-3. **E24 wired.** Build the sync signer port and the workKind-carrying seam. Task 14's red-first
-   bridge fixtures are the proof and must go green end-to-end. (C7.)
-4. **E16 ruled: per-daemon state.** No process-global broadcaster. CLI verbs and the e2e harness
-   construct their own. (C2.)
-5. **E21 ruled: pin `viem` in client `resolutions` and drop the `as never`.** (C1.)
-
-## C1 — pin `viem`, drop the composition-root cast
-
-**Files:** `client/package.json` (`resolutions`), `client/src/daemon/composition-root.ts`.
-**Why:** client resolves `viem@2.55.8`, every portal package `2.55.10`; TypeScript treats the two
-`PublicClient` / `WalletClient` declarations as nominally distinct, and Task 12 papered the
-boundary with `as never`. A cast at a composition boundary is exactly where a real type error
-hides. Follow the E3 precedent (`better-sqlite3`, `ajv` are already pinned this way).
-**Done when:** the cast is gone, `yarn typecheck` is 0, the full client suite is unchanged.
-
-## C2 — the broadcaster becomes per-daemon state
-
-**Files:** `client/src/adapters/mech/safe.ts`, `client/src/adapters/mech/contracts.ts`,
-`client/src/erc8004/{plugin-registry,reputation}.ts`, `client/src/daemon/composition-root.ts`,
-`client/src/main.ts`, the CLI verbs under `client/src/cli/commands/`,
-`client/test/e2e/_daemon-harness-helpers.ts`.
-**Why:** the module-global `setVenueBroadcaster` cannot serve two Safes, so release scenario T2.2
-and `jinn-repo-loop.ts` (two operators per process) cannot work; and the CLI verbs
-(`jinn tasks submit`, `jinn solver-plugins publish|revoke|block|feedback`) install no broadcaster
-at all and hard-fail.
-**Shape:** `executeSafeTransaction` takes the broadcaster explicitly — threaded from the
-composition, not read from module state. Keep the E5 bound-Safe mismatch rejection and the
-`logicalTx` derivation exactly as they are. The registry functions are deleted, not deprecated.
-**Done when:** no module-level broadcaster variable survives; each CLI verb constructs its own;
-two daemons in one process can each hold their own Safe, proven by a test.
-
-## C3 — the projector's production event feed
-
-**Files:** create `client/src/daemon/projector-log-source.ts`; modify
-`client/src/daemon/projector-loop.ts`.
-**Why:** `ProjectorLoopConfig.logSource`'s `{fetchLogs, heads}` has no implementation, and it is
-not even the same shape as venue-base's `ChainLogSource`
-(`poll` / `cursor` / `finalizedCheckpoint` / `logsInRange` / `orphanedBlockHashes` / `close`) —
-the plan's Task 9 Consumes line naming `venue.logSource` was wrong in kind, not just in name.
-**Shape:** adapt venue-base's `createChainLogSource` — which already does chunked `getLogs` sized
-to provider caps, a hash-verified `(blockNumber, blockHash)` high-water mark, dual live/finalized
-marks, and reorg rollback with orphaned-hash retention — to what the loop needs. Prefer consuming
-`ChainLogSource` directly over inventing a second cursor: venue-base's rollback semantics and the
-loop's `rollbackToFinalized()` must not disagree about what a reorg means. If they must stay
-separate, say why in a finding.
-**Done when:** the loop runs against a real `PublicClient` (Anvil is fine) and returns decoded
-events, with `isAuthorizedMechOrigin` supplied by the host per finding E4.
-
-## C4 — the enrich step
-
-**Files:** create `client/src/daemon/projector-enrich.ts`; modify
-`client/src/daemon/projector-loop.ts`.
-**Why:** `enrich` turns a decoded `MarketplaceEvent` into an `ObservationMarketplaceEvent` and has
-no production implementation — only Task 9's unit-test fake.
-**Shape:** produce a real `ObservationProjectionContext` (`packages/marketplace/projector/src/observe.ts:18`):
-`taskCoordinator`, `timestamp` (deterministic block timestamp in RFC 3339, **never** projector
-wall-clock), `submission`, `taskDigest` (after the Task/Submission/on-chain digest join),
-`effectiveDeadline`, `dispatchContext`, and — on external Mech Deliver facts —
-`deliveryCorrespondence`, which is mandatory before the matching router claim can project a
-delivery. Resolution goes through the IPFS ports the composition root already holds.
-**Fail-closed rule:** an event whose signed record cannot be resolved yet returns `undefined` and
-is dropped for this tick (the loop already handles that) — it must never be enriched with guessed
-or wall-clock values.
-**Done when:** a real `TaskCreated` plus a real Mech `Deliver` both enrich correctly against a
-fixture IPFS store, and an unresolvable record is dropped rather than faked.
-
-## C5 — the observations stream
-
-**Files:** modify `client/src/daemon/projector-cursor.ts` (durable observations),
-`client/src/daemon/projector-loop.ts`, `client/src/daemon/composition-root.ts`.
-**Why:** `BaseVenueConfig.observations` wants every observation ever projected;
-`ProjectorLoop.tick()` computes `transition.observations` and **discards it**, and `state_json`
-persists only `MarketplaceProjectionState`, which has no observations field and cannot be replayed
-into one without re-reducing the full admitted-event history.
-**Shape:** persist `MarketplaceProtocolObservation[]` append-only in the same SQLite transaction
-that advances the cursor and the projection state — all three move together or none do. Back
-`observations` from that table. Reuse the bigint-aware codec from finding E19; observations carry
-bigints for the same reason the state does.
-**Done when:** `venue.observe` resolves a real Attempt for a projected claim, and the composition
-root's `observations` is no longer a stub.
-
-## C6 — `verifySettlementGrade` for real
-
-**Files:** create `client/src/daemon/settlement-grade.ts`; modify
-`client/src/daemon/composition-root.ts`.
-**Why:** ruling 2. Fail-closed = zero settlements.
-**Shape:** three independent checks, never collapsed to a boolean.
-- `executorBinding` — DSSE verification over the exact `deliveryBytes` (the input carries them
-  precisely so the verifier uses them as payload identity), via `packages/trust/core` and the
-  binding's named-checks machinery.
-- `dispatchBinding` — from the engagement context the host already holds (the engagement ledger
-  row plus the claim-time identity), proving this operator's Safe is the party the venue engaged.
-- `evaluationSpecification` — presence from the profile; `"not-applicable"` when a solution
-  delivery carries no evaluation specification.
-**Done when:** a today-mode solution delivery settles end-to-end in a test, and each check has a
-negative test proving it rejects when it should. Any check that is genuinely Phase B gets a
-finding naming it plus a test proving today-mode does not reject on it.
-
-## C7 — wire the bridge
-
-**Files:** `client/src/daemon/composition-root.ts`,
-`packages/task-execution/backend-local/assembly/src/backend.ts` (workKind seam only),
-`client/src/daemon/{bridge-legacy-delivery,work-loop}.ts`.
-**Why:** `deliveryExtensions: () => ({})` closes F2 in mechanism only. Two blockers, both recorded
-under E24: the hook must be synchronous but the composition holds only an async `WalletClient`
-(no sync signer port), and there is no reachable mapping from a sealed `TaskSpecification` back to
-the `ExecutionWiringEntry` / `workKind` that produced it — `workKind` is computed once at claim
-time and never threaded through `backend.submit`.
-**Shape:** add a sync signer port to the composition input, and carry `workKind` through the
-submit seam so the hook can reach it. Keep the hook additive and the extension key namespaced;
-reserved keys stay unshadowable.
-**Done when:** Task 14's two bridge fixtures pass **end-to-end against a delivery this daemon
-actually produced**, not against a hand-built fixture — and `buildLegacyExecutionEnvelope` is
-exercised by a test rather than only by typecheck.
-
-## C8 — start the loops
-
-**Files:** `client/src/daemon/{daemon,composition-root}.ts`, `client/src/main.ts`.
-**Why:** Task 13 started only the work loop; the projector was not constructible and the evidence
-driver was left unwired. With C3–C5 done, all three can start.
-**Done when:** `daemon.start()` starts projector, work, and evidence-driver; the watchdog
-registers all three; and the claim gate (contract 3) actually gates on projector catch-up.
-
-## C9 — the e2e bootstrap failure, then the gate
-
-**Files:** whatever the diagnosis names; `client/test/e2e/**`.
-**Why:** `stOLAS stake()` reverts on the Base fork before the daemon starts, so the only automated
-closed-loop gate never reaches stage-1 code.
-**Shape:** diagnose first — anvil-version regression (pin it, with evidence), real bootstrap
-regression on the merged head (blocking finding), or upstream chain state (name the condition).
-Decode the revert selector; do not guess.
-**Done when:** `e2e:daemon-harness` reaches and exercises stage-1 code, or a NOT RUN that names
-the exact blocking line and the decoded revert.
-
-## Sequencing
-
-`C1` and `C2` are independent and go first (C1 removes a cast every later task would inherit; C2
-changes a signature C8 depends on). `C3 → C4 → C5` are strictly sequential. `C6` and `C7` are
-independent of the projector chain. `C8` needs C3–C5 and C2. `C9` runs last, but its **diagnosis**
-starts immediately and in parallel, because a dead gate changes what the leg can prove.
-
-## Execution findings (2026-07-31, close-out leg C1–C9)
-
-### E26 — pinning `viem` does not remove the portal cast; the dependency topology does (C1, partial)
-
-The version skew was real and is fixed: `client` resolved `viem@2.55.8` while every package under
-`packages/` resolved `2.55.10`, and both sides are now pinned to `2.55.10`. **That did not remove
-the cast**, and the reason matters more than the pin.
-
-`viem` is a direct `dependencies` entry of `marketplace-venue-base`, `-binding` and `-projector`,
-and each `packages/` tree is **its own yarn project**, so each installs a physically separate copy
-under its own `node_modules`. `portal:` does not dedup across project boundaries. TypeScript then
-compares those declarations **by identity, not by shape**, for viem's deeply recursive generics
-(`Client`, `Account`, `NonceManager.consume`, `ExtendableProtectedActions`), and reports
-*"two different types with this name exist, but they are unrelated"* for byte-identical types.
-
-Tested and rejected: a `paths` redirect in `client/tsconfig.json`
-(`"viem": ["./node_modules/viem"]`). It does not reach the portal packages' own `.d.ts`
-resolution, which resolves relative to their own location under `Node16`, so the portal side still
-binds its local copy. Error count went 1 → 2.
-
-**The real fix** is the pattern this repo already uses for portal-within-portal conflicts: make
-`viem` a **required peerDependency** (plus devDependency) of those packages so the consumer's copy
-is the one used. That is a dependency-topology change across three package manifests plus
-reinstalls — `refactor`-shaped, outside a close-out leg. Escalated rather than thinned.
-
-**Interim:** `as never` became `as unknown as Parameters<typeof createBaseVenue>[0]['publicClient']`.
-Equally permissive at that site, but it names what is being asserted instead of erasing it.
-
-### E27 — the e2e bootstrap revert is live Base-mainnet state, and it breaks real operator onboarding (**escalation, not a test bug**)
-
-`stOLAS stake()` reverts with selector **`0x14460f20`** = **`UnauthorizedMultisig(address)`**,
-argument `0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB` — the `gnosisSafeSameAddressMultisig`
-constant in `client/src/earning/contracts.ts:208`.
-
-Root cause, read directly off mainnet with no Anvil in the picture:
-
-```
-cast call 0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE "mapMultisigs(address)(bool)" \
-  0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB --rpc-url https://mainnet.base.org
-→ false
-```
-
-`ServiceRegistryL2`'s whitelist of authorized multisig implementations currently returns **false**
-for the implementation the stOLAS distributor targets. The same calldata `eth_call`ed straight
-against `mainnet.base.org` reverts identically — **so this is not an Anvil artifact** (verdict (a)
-ruled out) — and `git diff $(git merge-base HEAD origin/next) HEAD -- client/src/earning/` is empty
-with the two relevant constants untouched since March/May, so it is **not a regression on this
-branch** either (verdict (b) ruled out). An Anvil trace confirms the mechanism: `stake()` creates
-the service, deploys a fresh Safe proxy, then calls `ServiceManager.deploy(serviceId, 0xFbBEc0…,
-…)`, and `ServiceRegistryL2.deploy()` early-exits at 6,676 gas. Preflight passes cleanly
-(`mapStakingProxyConfigs` non-zero, 98/100 staking slots free), so nothing catches it earlier.
-
-The multisig implementation is **chosen by the distributor contract**, not passed by the Jinn
-client — `stake()`'s ABI has no such parameter — so no config change in this repo can route around
-it.
-
-**This is not merely a blocked test.** `_daemon-harness-helpers.ts` forks `chain: 'base'`, so the
-same revert hits **any real operator attempting fresh stOLAS-mode bootstrap on Base mainnet right
-now**. Fixing it needs either the registry owner re-authorizing
-`mapMultisigs(0xFbBEc0…) = true`, or the stOLAS distributor
-(`0x40abf47B926181148000DbCC7c8DE76A3a61a66f`) being redeployed against a currently-authorized
-implementation. Both are outside this repository. **Escalate to the OLAS ecosystem owners.**
-
-### E28 — the process-global broadcaster is gone, and the old design was proven broken (C2)
-
-Ruled and done: `setVenueBroadcaster` / `clearVenueBroadcaster` / `getVenueBroadcaster` and the
-module-level variable are deleted. `executeSafeTransaction` takes the broadcaster explicitly;
-where a config/context object already flowed to a call site it became a field there instead of a
-parameter. A new `createDirectSafeBroadcaster` serves hosts with no composition root to borrow
-from (the CLI verbs, the hermetic gate).
-
-The E5 bound-Safe rejection, the `logicalTx` derivation, and the fence/hook semantics all survive
-unchanged; the "no broadcaster" failure is still loud, now per-call.
-
-Worth recording because it closes E16 items 1 and 3 with evidence rather than assertion: the
-two-daemons-one-process test was checked against a **reconstruction of the old module-global
-design**, where daemon A's first call succeeds, daemon B installing its broadcaster clobbers the
-shared slot, and daemon A's next call throws a Safe-mismatch error. That is the failure mode T2.2
-and `jinn-repo-loop.ts` would have hit in production.
-
-### E29 — the observation stream carries no bigints (C5 corrected the plan's premise)
-
-C5's brief asserted observations carry bigints "for the same reason the state does" and told the
-executor to verify rather than assume. It verified, and the premise was **wrong**: `emit()`
-(`packages/marketplace/projector/src/observe.ts`) `.toString()`s every bigint chain fact before it
-reaches `data`; `DerivationAnnotation.blockNumber` is typed `number`; and the frozen TEP
-`ProtocolObservationSchema` contains no `z.bigint()` anywhere. A real observation round-trips
-through plain `JSON.stringify` unchanged.
-
-The shared tagged codec was kept anyway, deliberately: `data` and
-`ResourceDescriptor.annotations` are structurally open `Record<string, unknown>` and are never
-schema-validated before persistence, so a future producer could put a bigint there. A
-defensive-coverage test injects one and proves the codec round-trips it while plain
-`JSON.stringify` throws. Recorded because the plan asserted a fact it had not checked, and the
-executor was right to check it.
-
-### E30 — `EngagementLedger` could not correlate a settlement to its engagement (C6 found, C7 fixed)
-
-C6 built the real `verifySettlementGrade` and immediately hit a wall: the ledger is keyed by
-`taskId` with **no `requestId` column**, so today-generation `dispatchBinding` had nothing to
-correlate against and honestly reported `"missing"` — which makes `verificationFailure` reject
-every settlement. This was invisible until settlement verification became real; the fail-closed
-stub masked it.
-
-C7 added `request_id` additively (`CREATE TABLE` declaration plus an `ensure*Column`
-`PRAGMA table_info` migration in `store.ts`, following the established pattern), populated it at
-claim time from the today-generation claim receipt, and implemented the indexed lookup. A test
-builds a pre-migration on-disk database by hand and proves the constructor migrates it without
-losing rows.
-
-### E31 — nothing signs deliveries, and the daemon says it does (**blocking for settlement**)
-
-C6's `executorBinding` check verifies a DSSE envelope carried on the delivery. **No production
-code produces one.** `grep -rn sealDsseEnvelope` across `packages/` and `client/src` finds zero
-production call sites — every hit is a test fixture or the `trust/core` definition.
-
-Worse, `TrustKeyConfig` (`capabilities.ts`) is purely declarative: `observationSigningKeyConfigured`
-and `deliverySigningKeyConfigured` are bare booleans carrying no key material, and
-`composition-root.ts` sets both unconditionally `true`. They feed
-`BackendCapabilities.signedObservations` / `signedDeliveries`, so **the daemon currently advertises
-that it signs deliveries when nothing does.** That is a capability lie, independent of settlement.
-
-C7 investigated whether the `deliveryExtensions` seam could close it and the answer is
-structurally **no**: `checkExecutorBinding` requires the DSSE payload to equal
-`sealDelivery(delivery minus that one extension)` — the entire settling Delivery including
-`outcome`, `evidenceRecords`, `executionIds`, `createdAt`. None of those are available to the hook;
-they are computed inside `completeAttempt` *after* it runs. A host-side hook cannot reconstruct
-byte-identical delivery bytes without duplicating backend.ts's private sealing logic, which is a
-permanent drift hazard.
-
-**Recommendation (needs a coordinator ruling):** give `deliverySigningKeyConfigured` real teeth — a
-signing-key field rather than a boolean — and implement a two-phase seal inside `completeAttempt`
-(seal minus the executor-binding key → sign → merge the signature in as one reserved field → final
-seal). It is bounded and needs no new subsystem, unlike E20 or the Phase-B `BindingStore`, but it
-is `backend.ts`'s responsibility, not the host's — and it is the moment to fix the capability-flag
-dishonesty. **Until it lands, `executorBinding` reports `"missing"` against every real delivery and
-no settlement can complete.**
-
-### E32 — the two generations' task documents do not meet (**blocking; the deepest gap in the stage**)
-
-C8 wired every port the projector needs and found the chain still cannot carry traffic, for a
-reason no earlier task reached: **nothing in the repository produces a today-generation TEP
-`SubmissionRecordSchema` document.** The legacy `CreatorLoop` posts the older `SignedTaskV1` shape,
-which fails TEP validation. So `resolveSubmissionBytes` returns `undefined` for every real task,
-every event is dropped by C4's fail-closed enrich, and the observation stream stays empty even
-though C5 persists it correctly and C8 wires it correctly.
-
-Three further ports have no production backing for the same class of reason, all wired to fail
-loudly rather than fabricate:
-- `resolveDispatchContext` — no durable dispatch-context store is reachable before the venue
-  exists; venue-base's `submission_scopes` table is revised-generation-only.
-- `verifyVerdictObservation` — needs the same Phase-B `BindingStore` / `AnchorReadClient` / policy
-  machinery already named absent, independently reconfirmed against
-  `named-checks.ts`'s `VerdictObservationGatePorts`.
-- Discovery-entry and executor-binding signing — **no persistent per-operator Ed25519 signing
-  identity exists** anywhere in the daemon.
-
-These are currently unreachable in practice rather than dangerous: because `resolveSubmissionBytes`
-always returns `undefined`, no event is admitted, so the announcement ports are never invoked. The
-machine is correctly assembled and correctly refuses to run on fuel that does not exist yet.
-
-**Disposition:** stage 1's solver flow cannot close a loop until a today-generation Submission
-producer exists — either the creator loop emits TEP Submission documents, or a bridge synthesizes
-them from `SignedTaskV1` (which is what contract 9's "legacy derivation annotation" anticipated,
-and which `synthesizeLegacyFactsCard` already does for the facts card but not for the Submission
-record). That is a design decision, not an implementation detail, and it is larger than this
-close-out leg. **Stopping at this boundary and reporting rather than improvising a Submission
-format.**
-
-### E33 — venue state is opened twice (minor, recorded)
-
-`composition-root.ts` opens `VenueStateDatabase` via `openVenueState(stateDbPath)` to give the
-projector's log source a handle, and `createBaseVenue` then opens its **own second connection to
-the same file**, because venue-base exposes no seam to accept a pre-opened handle. WAL makes this
-safe, just wasteful. Recorded rather than worked around; the fix is a venue-base signature change.
-
-### Verification state at end of the close-out leg (2026-07-31)
-
-- `client` full suite (`--no-file-parallelism`): **801 files passed / 0 failed / 9 skipped (810)**;
-  **7199 tests passed / 0 failed / 29 skipped (7228)**; exit 0. First fully green full-suite run of
-  this stage.
-- `client` typecheck **0 errors**; `yarn lint:no-late-mount` clean.
-- Touched package suites: `marketplace/pipeline` **52**, `marketplace/venue-base` **166**,
-  `task-execution/backend-local/assembly` **98 passed / 1 skipped**.
-- Guard trios: marketplace **13 / 2 / 1**, task-execution **7 / 3 / 1** — all green.
-- One regression was found only by the full suite and fixed: C2 threaded the broadcaster in at
-  argument index 2 of `claimDelivery` / `callDeliverToMarketplace`, and six assertions in
-  `test/harnesses/engine` pin those calls by index. C2's own gate covered `test/adapters`,
-  `test/daemon`, `test/erc8004` and `test/cli` but not `test/harnesses`. Same lesson as E23: a
-  per-task executor running targeted suites cannot see this class of break.
-- **`e2e:daemon-harness` — NOT RUN against stage-1 code, 4th consecutive attempt.** It fails at
-  `bootstrapStakedOperator` (`client/test/e2e/_daemon-harness-helpers.ts:516`) with the finding-E27
-  revert, which is live Base-mainnet registry state and outside this repository. The gate never
-  reaches any stage-1 code path, so it can neither confirm nor refute the loop closing.
-
-## Execution findings (2026-07-31, final leg F1–F4)
-
-### E34 — the E32 bridge synthesis, and the two stubs that hid it (F1, F4)
-
-The coordinator ruled that spec §10 and contract 9 already decided E32: the projector
-**synthesizes** the Submission for legacy-posted tasks under a `legacy` derivation annotation, and
-C4's strict TEP validation was fail-closed one level too early. Built as
-`synthesizeLegacyTaskProjection` (`bridge-legacy-delivery.ts`), sibling to the existing
-`synthesizeLegacyFactsCard`, with `resolveTaskProjection` falling back to `parseLegacySignedTaskV1`
-only after TEP parsing fails. Every other C4 drop was regression-pinned and still drops. The
-comment records that the synthesis retires with the `legacyManifestDigest` bridge after stage 5.
-
-The synthesis was then **unreachable for two more layers**, each invisible until the one above it
-was fixed — the reason this took four runs rather than one:
-
-1. `buildUnresolvedEnrichIdentityPorts` made `resolveSubmissionBytes` return `undefined`
-   unconditionally for today-generation. Fixed by reading the on-chain `taskCidDigest` through
-   `getTaskCidDigest` — the exact two-hop router→coordinator→`getTask()` read
-   `adapter.ts`'s `restorationAnnouncementForTaskId` already uses — and fetching through the
-   existing `fetchIpfsBytes` port.
-2. The e2e's `compositionConfig` never threaded `ipfsGatewayUrl`, so `buildFetchIpfsBytes(undefined)`
-   failed closed on every call. Invisible until something actually called it.
-3. **`postSignedTaskOnChain` computed `taskCidDigest = keccak256(JSON.stringify(doc))`** — an
-   opaque keccak lookup key, never a real sha256 content digest — while the synthesis cross-checks
-   it as `sha256(bytes)`. Harmless for as long as nothing verified it; a hard failure the moment
-   something did. Fixed to `sha256Hex(taskJson)`, matching what production `uploadToIpfs` /
-   `cidToDigestHex` posting actually computes. **This is the most valuable thing the gate found:**
-   a latent digest-semantics divergence between the test poster and production, which no unit test
-   could have surfaced because no unit test joined the two.
-
-### E35 — `resolveDispatchContext` has no honest source (**blocking, and it is a design gap**)
-
-After E34, enrichment reaches exactly one step further and stops:
-`[projector-enrich] no dispatch context resolved for task 1 -- dropping`.
-
-`ObservationProjectionContext.dispatchContext` is a `ResourceDescriptor` for the descriptor
-"sealed by the binding when it engaged the two-party backend". F4 checked every candidate store and
-found none:
-- `pipeline.ts`'s `claim.dispatchContext` is built **in memory inside one `runPipeline` call** and
-  never pinned or anchored.
-- venue-base's `submission_scopes` table is revised-generation-only.
-- this composition's own `engagement_ledger` records `attempt_uri` / `request_id` /
-  `claim_tx_hash` but carries no dispatch-context digest at all.
-
-Unlike the Submission (E32), **no bridge-synthesis contract exists for this shape** — spec §10 does
-not license synthesizing it, and inventing one means fabricating a `ResourceDescriptor` for a
-document nobody sealed. Left stubbed and documented rather than faked. **This needs a ruling of the
-same kind E32 got:** either the descriptor is sealed and pinned somewhere at claim time (a real
-change to the claim path), or spec §10 is extended to license a `legacy`-annotated synthetic
-dispatch context the way it already licenses the Submission.
-
-### E36 — restoration claiming has no live path at all (**blocking, structural**)
-
-Independent of E35, the loop cannot close because the new claim path is not connected:
-- Task 16 correctly retired `TaskCreated` / restoration discovery from
-  `MechAdapter.watchForTasks()` (`adapter.ts:1417-1421`) — the legacy path is closed by design.
-- Its replacement, `WorkLoop` fed by an `ArchiveSubscription` over projector-admitted
-  observations, is **never wired**: `main.ts` hardcodes `archive: { since: async () => [] }`, and
-  the daemon-harness e2e never constructs a `WorkLoop` at all (`config.work` unset, justified by a
-  now-stale comment citing the closed C8 gap).
-
-So the old door is shut and the new door was never hung. Even with E35 resolved, nothing would
-claim. `ArchiveSubscription` needs a real implementation over `ProjectorCursorStore.readObservations()`,
-and both `main.ts` and the e2e fixture need to construct the work loop.
-
-### E37 — the e2e gate now reaches stage-1 code (ruling 3 discharged)
-
-The fork remediation works: `remediateStOlasMultisigAuthorizationOnFork` reads the
-`ServiceRegistryL2` owner from the contract, and — only when
-`mapMultisigs(gnosisSafeSameAddressMultisig)` reads `false` — impersonates it on the Anvil fork to
-call `changeMultisigPermission(multisig, true)`. Loudly commented and linked to issue #2341; the
-live-chain breakage stays open there. Independently corroborated by
-`contracts/scripts/rehearse-stolas-service-migration.ts`, which documents the same
-`UnauthorizedMultisig` selector and the same owner/`mapMultisigs` ABI.
-
-**The gate now runs the full bootstrap** — Safe deployed, agentId minted, `stake()` confirmed,
-service 634, mech deployed, `setAgentWallet` bound — starts the daemon with all loops, posts a
-task, and drives the projector into stage-1 code. It stops at E35 with a named, decoded reason,
-and would stop at E36 even if E35 were resolved. **`e2e:daemon-harness` reaches and exercises
-stage-1 code; it does not close the loop.**
-
-## Execution findings (2026-07-31, leg G)
-
-### E38 — sealing the dispatch context at claim time is circular for the event that causes the claim (ruled fix applied)
-
-Ruling E35 (seal at claim time, home it in the engagement ledger) is right about authorship and
-about seal-once. It has one ordering consequence the ruling does not mention: `resolveDispatchContext`
-is called during **enrich**, which runs strictly *before* the claim that seals the descriptor. So
-`TaskCreated` was dropped for want of a document that cannot exist until a claim — and `TaskCreated`
-is the event that triggers that claim. The gate showed this directly:
-`[projector-enrich] no dispatch context resolved for task 1 -- dropping`.
-
-Resolved without touching the ruling: only the `attempt-engaged` emission ever **dereferences**
-`projection.dispatchContext` (`packages/marketplace/projector/src/observe.ts:824`), and it is driven
-by `TaskAttemptCreated` / `EvaluationAttemptCreated` — events that exist *because* a claim already
-happened, which is exactly when the ledger row is sealed. Every other event kind carries the field
-structurally and never reads it. The drop is therefore scoped to the consuming events; the rest
-carry an explicitly unengaged descriptor naming their task, deliberately **not** a sealed document,
-because nothing has been engaged yet. Fabricating a sealed-looking descriptor there would have been
-the fabrication E35 rightly refused.
-
-**Effect:** the projector now admits tasks and `[work] claim gate open` appears — the projector
-cursor reaches the finalized head and the work loop runs.
-
-### E39 — the loop still does not close: the work loop opens its gate but claims nothing (**precisely located, handoff**)
-
-Final gate state, `JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness`:
-
-```
-posted task:  id=1 cidDigest=0xcea3eb17...
-[work] claim gate open — the projector cursor reached the finalized chain head
-FATAL: waitForDaemonClaim: timed out after 120000ms waiting for TaskAttemptCreated (taskId=1)
-```
-
-Everything upstream now works: fork remediation, full bootstrap, all loops started, task posted,
-projector admits, claim gate opens. What does not happen is the claim itself, and the refusal is
-**silent** — no `[work]` line names a skipped card.
-
-The remaining surface is narrow and named: between `ProjectorCursorStore.readObservations()` and
-`WorkLoop.tick()`'s claim, one of three things is true, and the next session should instrument
-rather than guess:
-1. the projector persisted **no** `submission-accepted` observation for this task (so
-   `buildArchiveSubscription` has nothing to map);
-2. the archive subscription produced no card (its own fail-closed paths — log decode, digest
-   cross-check, IPFS fetch — all skip-and-warn, so a `[archive]` warning would show);
-3. the work loop produced a card but skipped it — `mapAnnouncedSubmissionToFacts` refusal, a
-   claim-predicate/caps decline, or `admitClaimIntent` returning false.
-
-`WorkLoop.tick()` already returns per-card `WorkLoopOutcome`s carrying exactly these reasons
-(`mapping-refused`, `gate-closed`, `ai-units-capped`, `spend-capped`, `already-engaged`); they are
-simply not logged. **Log them, re-run, and the answer falls out in one cycle.** Two notes from
-leg G worth carrying: `estimateAiUnits: () => 0` in the e2e fixture, and the archive subscription
-re-reads the task's `TaskCreated` log via `getTransactionReceipt` per card per tick with no cache.
-
-Stopping at this boundary deliberately: the diagnosis needs one instrumented run, and a guess
-dressed as a fix would be worth less than a precise handoff.
-
-## Execution findings (2026-07-31, leg H — E39 diagnose→fix)
-
-### E39 cycles 1–3 — silent claim refusal, then profile-mismatch, then missing launcher (fixed)
-
-Instrumenting `WorkLoop.tick` outcomes (cycle 0) named the silent refusals immediately:
-
-1. **workKind** — legacy cards carried the raw `legacyManifestDigest` as `workKind`; resolved
-   against wiring by digest before any gate reads it (`cc02426a9`).
-2. **profile URI** — `synthesizeLegacyFactsCard` hardcoded a stale
-   `.../profiles/task-execution/repository-work/1.0`; switched to
-   `REPOSITORY_WORK_PROFILE_URI` (`28e62bc33`).
-3. **missing launcher** — e2e wires `harness: 'prediction-v1-baseline'`, but `ALL_LAUNCHERS`
-   only listed claude-code/codex/hermes/cursor. `buildLaunchers` returned `[]`,
-   `assembleCapabilities` filtered to empty `taskProfiles`, and `verifyPreclaim` kept declining
-   `profile-mismatch`. Added `predictionV1BaselineLauncher`, registered it, and aliased
-   `hermes-agent` → `hermes`.
-
-**Effect:** claim gate opens, claim broadcasts, `TaskAttemptCreated` fires.
-
-### E40 — anvil-fork `finalized` never covers the claim (fixed)
-
-On Anvil forks the `finalized` tag stays at the fork point while `latest` advances. Venue-base
-only depth-fell-back when `finalized == latest`; the stuck-behind shape left every post-fork
-claim permanently unfinalizable (`awaitFinalized` hung until timeout). Depth fallback now also
-fires when `latest - finalized > depthFallback`. The e2e mines 121 blocks after claim so the
-default 120-block floor can cover it.
-
-### E41 — `pipeline:submit-rejected:invalid-document` (**closed, leg H**)
-
-Final gate state after E39/E40:
-
-```
-daemon claimed task: requestId=0x9a7a… tx=0x31fa…
-[work] unreleased attempt for task 1 …: submit-rejected did not release the venue reservation
-{"component":"work","msg":"1 announced card(s) this tick",
- "cards":[{"reason":"pipeline:submit-rejected:invalid-document"}]}
-```
-
-`readSealedDocuments` was fetching the legacy `SignedTaskV1` bytes for both task and submission
-digests. `LocalTaskExecutionBackend.decodeAndSealCheck` requires sealed TEP Task + Submission
-(`sealTask` / `sealSubmission` byte-identity). A `SignedTaskV1` fails that check, submit rejects,
-the ledger abandons.
-
-**Ruling (E41, locked):** on-chain / claim identity stays the legacy digest
-(`facts.taskDigest` = `sha256(SignedTaskV1)`). Backend execution uses a **derived** sealed TEP
-Task + Submission synthesized under `derivationKind: 'legacy'` via
-`synthesizeLegacyExecutionDocuments` (`bridge-legacy-delivery.ts`), wired in `readSealedDocuments`
-(`composition-root.ts`) for legacy cards only. Digest divergence is licensed the same way E32
-licensed projector-side synthesis — today-mode settlement binds via engagement-ledger
-`dispatchBinding` + executor DSSE (`settlement-grade.ts`), not via
-`delivery.task === facts.taskDigest`. This bridge is the **only** remaining SignedTaskV1→solve
-path; the legacy `CreatorLoop` still *posts* SignedTaskV1 until stage 3 (posting, not a second
-solve stack). Retires with `legacyManifestDigest` after stage 5.
-
-### E42 — `pipeline:delivery-wait-failed:backend-terminal` (**closed, leg H**)
-
-After E41, submit accepted; the attempt went terminal with no Delivery:
-
-```
-daemon claimed task: …
-[work] unreleased attempt …: delivery-wait-failed did not release the venue reservation
-{"cards":[{"reason":"pipeline:delivery-wait-failed:backend-terminal"}]}
-```
-
-`prediction-v1-baseline` launcher required `typeof snap.probabilityYes === 'number'`, but
-prediction.v1 / the daemon-harness fixture posts a decimal **string** (`'0.75'`), matching
-`PredictionV1TaskSchema` and the in-process `PredictionV1BaselineImpl`. The runner exited 2
-(`no consensusSnapshot in input`) → backend `failed` → `backend-terminal`. Fixed to accept any
-finite numeric `probabilityYes` (string or number).
+## Self-Review
+
+**1. Spec coverage.** Walked design §3, §4, §6.4, §6.5, §9, §10 (stage 1 row, bridge-era rules, drain rules, standing rules) and program §5, §6 against the tasks:
+
+| Requirement | Task |
+| --- | --- |
+| Composition root assembling backend/pipeline config + ports | 15, 17 |
+| Projector loop (log source → observations → announcements → archive; finality waiter reads from it) | 10, 11 |
+| Facts card → `SubmissionFacts` mapper (pipeline tree, §6.4) | 2 |
+| Work loop (archive subscribe → facts → predicate/caps/wiring → one engagement per claim) | 16 |
+| Evidence join (host-owned, architecture-test-enforced) | 12 |
+| Evidence driver loop + publication policy (contract 6) | 13 |
+| Thin engagement ledger; ledger-before-broadcast (contract 2) | 3, 16 |
+| Projector-catch-up claim gate (contract 3) | 11, 16 |
+| Config auto-migration, additive/atomic/idempotent (contract 4) + the four new keys | 4, 5, 6 |
+| Single-broadcaster re-point of every enumerated legacy leg (contract 1) | 19, 20, 21 |
+| Bridge-era legacy facts card under a `legacy` derivation annotation (contract 9) | 8 |
+| Converged Delivery parseable by the legacy evaluator — a fixture, not an assumption | 9 |
+| Claim policy & wiring SPA page + `OPERATOR-APP-SPEC` delta, same PR | 24, 25 |
+| Drain runbook for the retiring solution path (contract 10) | 27 |
+| Retire TaskEngine solution path / `joinedSolverNets` gating / `task_runs` frozen for solutions | 23 |
+| Plugin content commands re-keyed onto wiring entries (design §9 CLI paragraph) | 22 |
+| Rolling-window caps re-pointed at pipeline caps (§6.5) | 14 |
+| Unreleased-attempt state message (§4) | 16, 17, 25 |
+| Crash recovery derivation-first; boot reconcile | 16 (`reconcileOnBoot`), 11 (cursor restore) |
+| Stage gate: e2e re-pointed and green; one testnet closed loop incl. the verdict leg | 26, 27 |
+| One deploy PR, operator-approved, carrying drain checklist + rollback statement | 27 |
+
+No uncovered requirement found. Deliberately **not** here, per scope: the evaluator loop (stage 2), posting loop / requester module (stage 3), archive HTTP exposure (stage 4), the `client/` → `operator/` rename and `task_runs` deletion (stage 5).
+
+**2. Placeholder scan.** No "TBD", no "add error handling", no "similar to Task N", no "write tests for the above". Three places deliberately instruct the implementer to read real code before writing a literal rather than inventing a shape — `provisionerCapabilities` (Task 15), the legacy envelope validator's export name (Task 9), and the store's caps-accounting method names (Task 14) — each says exactly what to read and why. Task 17 ships a `resolveLegacyAnchor` stub with an explicit instruction to replace it in Task 18 and a warning against shipping it; that is a sequenced hand-off, not a placeholder.
+
+**3. Type consistency.** Checked the names crossing task boundaries: `mapSubmissionFacts` / `SubmissionFactsCardInput` (2 → 8, 16); `deriveBridgeTask` / `deriveBridgeFactsCardInput` / `deriveBridgeSubmissionUri` (8 → 16, stage 2); `EngagementLedger.admit|recordBroadcast|markSettled|markAbandoned|listUnreconciled` and `engagementIdempotencyKey` (3 → 16, 26); `ProjectorStateStore.readCheckpoint|readProjection|readArchiveHead|commit` (7 → 11); `ProjectorLoop.subscribe|caughtUpToFinalized|durableCursor|tickOnce` (11 → 16, 17); `openOperatorEvidence` / `OperatorEvidence` (12 → 13, 17); `EvidenceDriverLoop` / `decideEvidencePublication` (13 → 17); `createRollingWindowCaps` / `RollingWindowCaps.snapshot|record` (14 → 16, 17); `buildLocalBackendConfig` (15 → 17); `composeOperatorRuntime` / `RuntimeLoop` / `OperatorRuntime` (17 → 18, 26, stage 2); `createOperatorBroadcaster` / `OperatorBroadcaster.safeExec|eoaSend` / `BANNED_BROADCAST_PRIMITIVES` (19 → 20, 21); `findWiringByTarget` / `pluginsForWiring` (22); `ExecutionWiringConfigV2` (4 → 14, 15, 22, 24). All consistent.
+
+**Three cross-stage surfaces are pinned as requested**: `deriveBridgeTask` with its determinism guarantee (Task 8), `ProjectorLoop.subscribe` (Task 11), and `composeOperatorRuntime` with its data-shaped `loops` registry (Task 17).

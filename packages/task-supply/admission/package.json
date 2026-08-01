@@ -1,0 +1,64 @@
+{
+  "name": "@jinn-network/task-admission",
+  "version": "0.1.0",
+  "description": "Source-agnostic differential admission: candidate task + environment record to a sealed DifferentialAdmissionReceipt/3.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-supply/admission"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/environment-record": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "resolutions": {
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

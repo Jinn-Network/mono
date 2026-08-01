@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeCodeLauncher, codexLauncher, cursorLauncher, hermesLauncher, interpretResult, predictionV1BaselineLauncher } from "./index.js";
+import type { LaunchPlan } from "./contract.js";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
@@ -83,5 +84,17 @@ describe("v1 launchers", () => {
     expect(result.status, result.stderr).toBe(0);
     const solution = JSON.parse(readFileSync(join(outDir, "prediction-v1-solution.json"), "utf8"));
     expect(solution.probabilityYes).toBe("0.75");
+  });
+
+  it("does not treat an unspecified blame-rule signal as matching every exit", () => {
+    const plan = {
+      validExitCodes: [0],
+      blameExitCodes: [
+        { match: { exitCode: 65 }, blame: "task", reasonCode: "invalid-evaluation-input" },
+        { match: { signal: "SIGKILL" }, blame: "infrastructure", reasonCode: "killed" },
+      ],
+    } as unknown as LaunchPlan;
+    expect(interpretResult(plan, { exitCode: 1 }).reasonCode).toBe("invalid-exit");
+    expect(interpretResult(plan, { signal: "SIGKILL" }).reasonCode).toBe("killed");
   });
 });

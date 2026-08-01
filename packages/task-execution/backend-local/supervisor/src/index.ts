@@ -32,3 +32,4 @@ export type { JournalEvent, JournalEventIntent, SubmissionEvent, SubmissionEvent
 export type { AttemptRecord, AttemptHarvestInput, AttemptOutputArtifact } from "./attempt-record.js";
 export type { AttemptReality, ReconciliationResult, ReconciliationClassification } from "./reconciler.js";
 export type { CancellationAttempt, CancellationDriver, CancellationOptions, CancellationResult } from "./cancellation.js";
+export { fsyncBestEffort, fsyncBestEffortSync, isFsyncUnsupportedError } from "./fs-atomic.js";

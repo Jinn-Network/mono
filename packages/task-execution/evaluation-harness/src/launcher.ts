@@ -59,6 +59,14 @@ function nonEmpty(value: string, label: string): string {
   return value;
 }
 
+/** Forward Yarn PnP bootstrap when the launcher itself runs under PnP (CI/dev). */
+function nodeBootstrapEnv(): Record<string, string> {
+  const nodeOptions = process.env["NODE_OPTIONS"];
+  return nodeOptions === undefined || nodeOptions.length === 0
+    ? {}
+    : { NODE_OPTIONS: nodeOptions };
+}
+
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
   secretForwards: readonly { readonly grantKey: string; readonly target: string }[],
@@ -115,6 +123,7 @@ function launchPlan(
       JINN_ATTEMPT_SECRETS: paths.secrets,
       JINN_ATTEMPT_META: paths.meta,
       TMPDIR: paths.tmp,
+      ...nodeBootstrapEnv(),
     },
     cwd: paths.work,
     validExitCodes: [0],

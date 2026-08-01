@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"stuck"}]}}
+{"type":"result","subtype":"error_max_turns","is_error":true}

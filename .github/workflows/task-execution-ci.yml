@@ -9,6 +9,16 @@ on:
       - ".github/scripts/task-execution-*.test.mjs"
       - ".github/workflows/task-execution-ci.yml"
       - "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md"
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Which Task Execution slice to run"
+        required: true
+        default: evaluation-harness
+        type: choice
+        options:
+          - evaluation-harness
+          - full
 
 permissions:
   contents: read
@@ -390,7 +400,10 @@ jobs:
           name: task-execution-supervisor-dist
           path: packages/task-execution/backend-local/supervisor/dist
       - name: Restore executable bit on native custody binaries
-        run: chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
+        run: |
+          chmod +x packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim*
+          # Rebuild on this runner so artifact bit-loss cannot leave a non-exec probe/spawn path.
+          (cd packages/task-execution/backend-local/supervisor && node scripts/build-native.mjs)
       - name: Restore Task Execution Workspace distribution
         uses: actions/download-artifact@v4
         with:
@@ -417,7 +430,13 @@ jobs:
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
       - name: Verify Task Execution Backend Local (assembly)
         working-directory: packages/task-execution/backend-local/assembly
+        env:
+          # Pin the production binary so Vitest dependency optimization cannot lose dist/native.
+          JINN_NATIVE_CUSTODY_BINARY: ${{ github.workspace }}/packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim
         run: |
+          (cd ../supervisor && node scripts/build-native.mjs)
+          test -x "$JINN_NATIVE_CUSTODY_BINARY"
+          "$JINN_NATIVE_CUSTODY_BINARY" --probe
           yarn install --immutable
           yarn typecheck
           yarn test
@@ -612,11 +631,14 @@ jobs:
           done
           mkdir -p "packages/task-execution/backend-local/assembly/dist"
           cp -R ".task-execution-dist/task-execution-backend-local-dist/." "packages/task-execution/backend-local/assembly/dist/"
+          mkdir -p packages/task-execution/evaluation-harness/dist
+          cp -R ".task-execution-dist/task-execution-evaluation-harness-dist/." packages/task-execution/evaluation-harness/dist/
       - name: Build evidence contract packages from source (cross-tree CI convention, program §7.8)
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
           (cd packages/evidence/repository && yarn install --immutable && yarn build)
           (cd packages/evidence/discovery && yarn install --immutable && yarn build)
           (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/task-execution-packed-types.test.mjs

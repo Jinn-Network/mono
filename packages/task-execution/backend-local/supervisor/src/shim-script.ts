@@ -46,6 +46,28 @@ interface ShimCancellationCommand {
   readonly killPollCeilingMs: number;
 }
 
+function isFsyncUnsupportedError(cause: unknown): boolean {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const code =
+    typeof cause === "object" &&
+    cause !== null &&
+    "code" in cause &&
+    typeof (cause as { code: unknown }).code === "string"
+      ? (cause as { code: string }).code
+      : "";
+  return code === "ENOSYS" || message === "Method not implemented.";
+}
+
+function fsyncBestEffortSync(fd: number): void {
+  try {
+    fsyncSync(fd);
+  } catch (cause) {
+    if (!isFsyncUnsupportedError(cause)) {
+      throw cause;
+    }
+  }
+}
+
 function atomicWriteFileSync(path: string, data: string): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
@@ -53,14 +75,14 @@ function atomicWriteFileSync(path: string, data: string): void {
   const fd = openSync(tmp, "w");
   try {
     writeSync(fd, data);
-    fsyncSync(fd);
+    fsyncBestEffortSync(fd);
   } finally {
     closeSync(fd);
   }
   renameSync(tmp, path);
   const dirFd = openSync(dir, "r");
   try {
-    fsyncSync(dirFd);
+    fsyncBestEffortSync(dirFd);
   } finally {
     closeSync(dirFd);
   }

@@ -2,11 +2,14 @@
 
 import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { accessSync, chmodSync, constants, existsSync, readFileSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { atomicWriteFileSync, readAtomicFileSync } from "./fs-atomic.js";
 import { establishSubreaperCustody } from "./shim-control.js";
 import type { SpawnRequest } from "./attempt-identity.js";
+
+const requireFromShim = createRequire(import.meta.url);
 
 /** The shim's `(pid, start-time)` fingerprint plus the attempt nonce (design §6.1 step 3, frozen interface §14 item 2). Every liveness conclusion passes through this — a bare PID is never trusted. */
 export interface ShimFingerprint {
@@ -62,11 +65,22 @@ export function decodeNonceIdentity(identity: string): string | null {
   } catch { return null; }
 }
 
+function nativeDirPath(): string {
+  // Prefer the package entry so Vitest/Yarn portal resolution cannot point import.meta.url
+  // at a bundled copy that has no sibling dist/native binaries.
+  try {
+    const entry = requireFromShim.resolve("@jinn-network/task-execution-supervisor");
+    return join(dirname(entry), "native");
+  } catch {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return join(here, "..", "dist", "native");
+  }
+}
+
 function nativeShimPath(): string {
   const configured = process.env["JINN_NATIVE_CUSTODY_BINARY"];
   if (configured !== undefined) return configured;
-  const here = dirname(fileURLToPath(import.meta.url));
-  const nativeDir = join(here, "..", "dist", "native");
+  const nativeDir = nativeDirPath();
   const production = join(nativeDir, "jinn-attempt-shim");
   if (process.env["VITEST"] === undefined) return production;
   const testing = join(nativeDir, "jinn-attempt-shim-test");
@@ -394,7 +408,9 @@ export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest 
   if (process.platform === "linux") {
     const support = nativeCustodySupport();
     if (!support.ready) throw new Error(support.detail ?? "Linux native custody is not ready");
-    const child = spawn(nativeShimPath(), [writeNativeSpawnSpec(request, harness)], {
+    const binary = nativeShimPath();
+    ensureNativeBinaryExecutable(binary);
+    const child = spawn(binary, [writeNativeSpawnSpec(request, harness)], {
       env: {
         ...(process.env as Record<string, string>),
         JINN_ATTEMPT_ID: request.attemptId,
@@ -403,6 +419,9 @@ export function spawnShim(request: BuildShimSpawnRequest, harness: SpawnRequest 
       detached: true,
       stdio: ["ignore", "ignore", "ignore"],
     });
+    if (child.pid === undefined) {
+      throw new Error(`native custody shim spawned without a pid (${binary})`);
+    }
     child.unref();
     return child;
   }

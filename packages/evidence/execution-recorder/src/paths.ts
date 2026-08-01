@@ -18,6 +18,7 @@ import {
 } from "node:path";
 
 import { ExecutionRecorderError } from "./errors.js";
+import { fsyncBestEffort } from "./fs-sync.js";
 
 export interface WorkspacePaths {
   readonly root: string;
@@ -197,17 +198,7 @@ async function syncDirectory(path: string): Promise<void> {
       (constants.O_DIRECTORY ?? 0),
   );
   try {
-    try {
-      await handle.sync();
-    } catch (error) {
-      if (
-        !["EINVAL", "ENOSYS", "ENOTSUP"].includes(
-          nodeErrorCode(error) ?? "",
-        )
-      ) {
-        throw error;
-      }
-    }
+    await fsyncBestEffort(handle);
   } finally {
     await handle.close();
   }

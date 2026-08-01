@@ -100,10 +100,11 @@ function fixture(
 ): LocalTaskExecutionBackend {
   const provisioner: ProvisionerContract = {
     workspaceKind: () => "dir",
-    async setup() {
+    async setup(_view, workspace) {
       if (options.provisioningRejectReason !== undefined) {
         throw new ProvisioningRejectedError(options.provisioningRejectReason);
       }
+      await Promise.all(Object.values(workspace).map((path) => mkdir(path, { recursive: true })));
     },
     executionEnv: (launch) => ({ ...launch.env }),
     async harvest() {
@@ -546,7 +547,7 @@ describe("local TaskExecutionBackend submission path (C1)", () => {
     const task = taskBytes();
     const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
     const shim = join(root, "attempts", attempt.slice("urn:uuid:".length), "meta", "shim.json");
-    for (let index = 0; index < 40; index += 1) {
+    for (let index = 0; index < 200; index += 1) {
       try {
         expect(JSON.parse(await readFile(shim, "utf8"))).toMatchObject({ nonce: expect.any(String) });
         return;

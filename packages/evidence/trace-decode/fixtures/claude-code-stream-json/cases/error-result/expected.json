@@ -1,0 +1,93 @@
+{
+  "sourceDigest": "sha256:50eb5d52ca2bc547d5f753ec1c76002011144ac4236ca931e98610c4be0ebb1f",
+  "traceId": "b0eb350f18d52c351c3fb0aa3f77dc63",
+  "timebase": "synthetic-ordinal",
+  "completeness": {
+    "decoded": "full"
+  },
+  "spans": [
+    {
+      "spanId": "fc261d08d38c1510",
+      "parentSpanId": null,
+      "name": "invoke_agent claude-code",
+      "kind": 1,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "2",
+      "attributes": [
+        {
+          "key": "gen_ai.agent.name",
+          "value": {
+            "stringValue": "claude-code"
+          }
+        },
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "invoke_agent"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trajectory.outcome",
+          "value": {
+            "stringValue": "error"
+          }
+        },
+        {
+          "key": "jinn.trajectory.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 2
+      }
+    },
+    {
+      "spanId": "4474311fdec69d71",
+      "parentSpanId": "fc261d08d38c1510",
+      "name": "chat",
+      "kind": 3,
+      "startTimeUnixNano": "0",
+      "endTimeUnixNano": "1",
+      "attributes": [
+        {
+          "key": "gen_ai.operation.name",
+          "value": {
+            "stringValue": "chat"
+          }
+        },
+        {
+          "key": "gen_ai.provider.name",
+          "value": {
+            "stringValue": "anthropic"
+          }
+        },
+        {
+          "key": "jinn.trajectory.source.ordinal",
+          "value": {
+            "intValue": "0"
+          }
+        },
+        {
+          "key": "jinn.trajectory.turn.role",
+          "value": {
+            "stringValue": "assistant"
+          }
+        }
+      ],
+      "events": [],
+      "status": {
+        "code": 1
+      }
+    }
+  ],
+  "recordDigest": "sha256:d189a45250c01f23af4655170746a7f785c9c986e43033247671c6d71dc86df4"
+}

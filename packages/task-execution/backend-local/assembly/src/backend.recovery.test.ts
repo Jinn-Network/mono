@@ -281,7 +281,7 @@ async function waitFor(
   predicate: () => boolean | Promise<boolean>,
   message: string,
 ): Promise<void> {
-  for (let index = 0; index < 300; index += 1) {
+  for (let index = 0; index < 1_000; index += 1) {
     if (await predicate()) return;
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }

@@ -8,6 +8,7 @@ on:
       - "packages/marketplace/**"
       - "contracts/**"
       - ".github/scripts/marketplace-*.test.mjs"
+      - ".github/scripts/custody-boundaries.test.mjs"
       - ".github/workflows/marketplace-ci.yml"
       - "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md"
 
@@ -29,6 +30,8 @@ jobs:
         run: node --test .github/scripts/marketplace-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
         run: node --test .github/scripts/marketplace-source-boundaries.test.mjs
+      - name: Custody boundaries (tripwire, marketplace-surfaces design §4.1)
+        run: node --test .github/scripts/custody-boundaries.test.mjs
 
   binding:
     runs-on: ubuntu-latest
