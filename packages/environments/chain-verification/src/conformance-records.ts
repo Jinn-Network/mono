@@ -24,6 +24,9 @@ const require = createRequire(import.meta.url);
 const closedLocalFixture = require(
   "@jinn-network/chain-environment-record/fixtures/chain/closed-local.json",
 ) as Record<string, unknown>;
+const closedAnchoredSubsetFixture = require(
+  "@jinn-network/chain-environment-record/fixtures/chain/closed-anchored-subset.json",
+) as Record<string, unknown>;
 const archiveDependentFixture = require(
   "@jinn-network/chain-environment-record/fixtures/chain/archive-dependent.json",
 ) as Record<string, unknown>;
@@ -35,13 +38,54 @@ export const CONFORMANCE_AGENT_ACCOUNT = "0x2f1c6ba4f0d7e4b8c9a3057e61d2b8f4a7c0
 export const CONFORMANCE_COUNTERPARTY_ACCOUNT = "0x8d43a5e2907c16bf4de0913a7bc25f8e04617d2a";
 export const CONFORMANCE_PROTOCOL_ACCOUNT = "0xb17e05c3f4a2986d1c7be0435928fda6017c34e8";
 
+export const CONFORMANCE_PROTOCOL_ACCOUNT_A = "0x00000000000000000000000000000000000000aa";
+export const CONFORMANCE_PROTOCOL_ACCOUNT_B = "0x00000000000000000000000000000000000000bb";
+export const CONFORMANCE_PROTOCOL_SLOT_1 = `0x${"0".repeat(63)}1`;
+export const CONFORMANCE_PROTOCOL_SLOT_2 = `0x${"0".repeat(63)}2`;
+
 export interface ConformanceRecordOptions {
   readonly closureClass?: "closed-state" | "archive-dependent";
   readonly fidelityClass?: "local" | "anchored-subset" | "full-state";
+  readonly mutatesSourceProtocolState?: boolean;
+  readonly mutatedProofCoveredAccounts?: number;
+}
+
+export function conformanceSourceProofManifest(): Record<string, unknown> {
+  return {
+    anchorStateRoot: `0x${"f".repeat(64)}`,
+    accounts: [
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, verified: true },
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, verified: true },
+    ],
+    codeEntries: [{
+      address: CONFORMANCE_PROTOCOL_ACCOUNT_A,
+      codeHash: `0x${"4".repeat(64)}`,
+      verified: true,
+    }],
+    storageSlots: [
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, slot: CONFORMANCE_PROTOCOL_SLOT_1, verified: true },
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, slot: CONFORMANCE_PROTOCOL_SLOT_2, verified: true },
+    ],
+  };
+}
+
+function conformanceFixtureCoverageDocument(): Record<string, unknown> {
+  return {
+    format: "jinn.chain-fixture-coverage/1",
+    declarations: [
+      { address: CONFORMANCE_COUNTERPARTY_ACCOUNT, kind: "account" },
+    ],
+  };
 }
 
 /** Bytes the verify suite's stub artifact store serves for a named resolution request. */
 export function conformanceArtifactBytes(resourceName: string): Uint8Array {
+  if (resourceName === "source-proof-manifest") {
+    return canonicalJsonBytes(conformanceSourceProofManifest());
+  }
+  if (resourceName === "fixture-coverage-manifest") {
+    return canonicalJsonBytes(conformanceFixtureCoverageDocument());
+  }
   return canonicalJsonBytes({
     conformanceArtifact: resourceName,
     package: "@jinn-network/chain-environment-verification",
@@ -110,6 +154,13 @@ function alignConformanceArtifacts(candidate: Record<string, unknown>): void {
       conformanceBareDigest("source-proof-manifest");
   }
 
+  const fixtureCoverage = stateMaterialization.fixtureCoverage as
+    | { manifest?: { digest: { sha256: string } } }
+    | undefined;
+  if (fixtureCoverage?.manifest !== undefined) {
+    fixtureCoverage.manifest.digest.sha256 = conformanceBareDigest("fixture-coverage-manifest");
+  }
+
   const sourceAnchor = candidate.sourceAnchor as
     | { headerProof?: { digest: { sha256: string } } }
     | undefined;
@@ -133,9 +184,12 @@ export function buildConformanceChainRecord(
   options: ConformanceRecordOptions = {},
 ): ChainEnvironmentRecord {
   const closureClass = options.closureClass ?? "closed-state";
+  const fidelityClass = options.fidelityClass ?? "local";
   const base = closureClass === "archive-dependent"
     ? structuredClone(archiveDependentFixture)
-    : structuredClone(closedLocalFixture);
+    : fidelityClass === "anchored-subset"
+      ? structuredClone(closedAnchoredSubsetFixture)
+      : structuredClone(closedLocalFixture);
 
   if (options.fidelityClass !== undefined) {
     (base.stateMaterialization as { fidelityClass: string }).fidelityClass =
@@ -144,6 +198,18 @@ export function buildConformanceChainRecord(
   if (options.closureClass !== undefined) {
     (base.stateMaterialization as { closureClass: string }).closureClass =
       options.closureClass;
+  }
+  if (options.mutatesSourceProtocolState !== undefined) {
+    (base.stateMaterialization as { mutatesSourceProtocolState: boolean }).mutatesSourceProtocolState =
+      options.mutatesSourceProtocolState;
+  }
+  if (options.mutatedProofCoveredAccounts !== undefined) {
+    const fixtureCoverage = (base.stateMaterialization as {
+      fixtureCoverage?: { mutatedProofCoveredAccounts: number };
+    }).fixtureCoverage;
+    if (fixtureCoverage !== undefined) {
+      fixtureCoverage.mutatedProofCoveredAccounts = options.mutatedProofCoveredAccounts;
+    }
   }
 
   replaceConformanceAddresses(base);

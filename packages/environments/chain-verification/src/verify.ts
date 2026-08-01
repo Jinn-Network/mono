@@ -36,6 +36,7 @@ import {
   type CanonicalChainObservation,
 } from "./observation.js";
 import {
+  isRunBearingOutcome,
   outcomeForFailureReason,
   stageForFailureReason,
   type ChainVerificationFailureReason,
@@ -124,6 +125,7 @@ type Observed =
     readonly context: ObservationContext;
     readonly partial?: FailureBlock["coverage"];
     readonly divergence?: FailureBlock["divergence"];
+    readonly completedRuns?: readonly RunRecord[];
     readonly instanceIds: readonly string[];
     readonly observations: readonly CanonicalChainObservation[];
   };
@@ -214,6 +216,12 @@ function materialRequests(record: ChainEnvironmentRecord): readonly ResolutionRe
       descriptor: asResourceDescriptor(record.stateMaterialization.sourceProofManifest.proofs),
     });
   }
+  if (record.stateMaterialization.fixtureCoverage?.manifest !== undefined) {
+    requests.push({
+      name: "fixture-coverage-manifest",
+      descriptor: asResourceDescriptor(record.stateMaterialization.fixtureCoverage.manifest),
+    });
+  }
   if (record.sourceAnchor?.headerProof !== undefined) {
     requests.push({
       name: "header-proof",
@@ -257,10 +265,55 @@ function declaredFixtureAccounts(record: ChainEnvironmentRecord): readonly strin
   return [...accounts];
 }
 
+interface FixtureCoverageDocument {
+  readonly format?: string;
+  readonly declarations: readonly FixtureMutationDeclaration[];
+}
+
+function fixtureCoverageManifestDigest(record: ChainEnvironmentRecord): Sha256Digest {
+  const manifest = record.stateMaterialization.fixtureCoverage?.manifest;
+  if (manifest === undefined) {
+    invalidInput("fixtureCoverage.manifest is absent on this record.");
+  }
+  return fromDigestSet(asDigestSet(manifest.digest));
+}
+
+function decodeFixtureCoverageDocument(
+  resolution: Extract<ResolutionResult, { ok: true }>,
+  record: ChainEnvironmentRecord,
+): FixtureCoverageDocument {
+  const bytes = resolution.bytes.get(fixtureCoverageManifestDigest(record));
+  if (bytes === undefined) {
+    conformanceFailure(
+      "Resolved fixture-coverage manifest bytes are missing from the resolution map.",
+    );
+  }
+  return JSON.parse(new TextDecoder().decode(bytes)) as FixtureCoverageDocument;
+}
+
 function declaredFixtureMutations(
-  _record: ChainEnvironmentRecord,
+  record: ChainEnvironmentRecord,
+  resolution: Extract<ResolutionResult, { ok: true }>,
 ): readonly FixtureMutationDeclaration[] {
-  return [];
+  if (record.stateMaterialization.fixtureCoverage?.manifest === undefined) {
+    return [];
+  }
+  return decodeFixtureCoverageDocument(resolution, record).declarations;
+}
+
+function checkSourceProof(
+  record: ChainEnvironmentRecord,
+  manifest: SourceProofManifest,
+): { readonly reason: ChainVerificationFailureReason; readonly detail: string } | undefined {
+  const anchor = record.sourceAnchor;
+  if (anchor === undefined) return undefined;
+  if (manifest.anchorStateRoot !== anchor.stateRoot) {
+    return {
+      reason: "state-proof-invalid",
+      detail: `manifest anchor ${manifest.anchorStateRoot} does not match record ${anchor.stateRoot}`,
+    };
+  }
+  return undefined;
 }
 
 function checkRuntimeIdentity(
@@ -312,6 +365,13 @@ function checkSourceAnchor(
     return {
       reason: "anchor-block-mismatch",
       detail: `runtime chain id ${verified.report.runtimeIdentity.chainId} does not match anchor ${anchor.nativeChainId}`,
+    };
+  }
+  const observedRoot = verified.report.runtimeIdentity.appliedControls.anchorStateRoot;
+  if (observedRoot !== undefined && observedRoot !== anchor.stateRoot) {
+    return {
+      reason: "anchor-root-mismatch",
+      detail: `runtime anchor root ${observedRoot} does not match record ${anchor.stateRoot}`,
     };
   }
   return undefined;
@@ -378,16 +438,24 @@ function buildEnvironmentObservation(
       },
       egressPolicyId: envelope.egressPolicyId,
     },
-    ...(coverage === undefined || !coverage.applicable
+    ...(record.stateMaterialization.fidelityClass === "local"
       ? {}
       : {
-        coverage: {
-          proofCovered: coverage.proofCovered,
-          fixtureDeclared: coverage.fixtureDeclared,
-          uncovered: coverage.uncovered,
-          mutatesSourceProtocolState:
-            record.stateMaterialization.mutatesSourceProtocolState ?? false,
-        },
+        coverage: coverage?.applicable
+          ? {
+            proofCovered: coverage.proofCovered,
+            fixtureDeclared: coverage.fixtureDeclared,
+            uncovered: coverage.uncovered,
+            mutatesSourceProtocolState:
+              record.stateMaterialization.mutatesSourceProtocolState ?? false,
+          }
+          : {
+            proofCovered: 0,
+            fixtureDeclared: 0,
+            uncovered: 0,
+            mutatesSourceProtocolState:
+              record.stateMaterialization.mutatesSourceProtocolState ?? false,
+          },
       }),
   };
 }
@@ -413,6 +481,14 @@ function emptyContext(record: ChainEnvironmentRecord, options: ObserveOptions): 
     environment: buildEnvironmentObservation(record, undefined, undefined),
     isolation: {
       networkPolicy: options.networkPolicy,
+      ...(options.networkPolicy.forkBackend === "absent"
+        ? {
+          boundaryProbe: {
+            probeId: "out-of-slice-read",
+            readsEmptyOutsideSlice: false,
+          },
+        }
+        : {}),
       egressAttempts: [],
       forbiddenProbes: [],
       signerScope: {
@@ -504,9 +580,20 @@ export async function verifyChainEnvironment(
     options.signal,
   );
 
+  const window = { startedAt, endedAt };
   const predicate = observed.kind === "runs"
-    ? await buildRunsPredicate(deps, { startedAt, endedAt }, observed, resolutionLog, options.signal)
-    : buildFailurePredicate(deps, { startedAt, endedAt }, observed, resolutionLog);
+    ? await buildRunsPredicate(deps, window, observed, resolutionLog, options.signal)
+    : observed.completedRuns !== undefined
+      && isRunBearingOutcome(outcomeForFailureReason(observed.reason))
+      ? await buildDivergencePredicate(
+        deps,
+        window,
+        observed,
+        observed.completedRuns,
+        resolutionLog,
+        options.signal,
+      )
+      : buildFailurePredicate(deps, window, observed, resolutionLog);
 
   const stateArtifact = record.stateMaterialization.stateArtifact;
   const statement = buildChainEnvironmentVerificationStatement({
@@ -554,7 +641,15 @@ async function observe(
       kind: "failed",
       reason: resolution.reason,
       detail: resolution.detail,
-      context: emptyContext(record, options),
+      context: {
+        ...emptyContext(record, options),
+        resolved: resolution.resolved,
+        cost: {
+          artifactBytes: resolution.resolved.reduce((total, one) => total + one.size, 0),
+          artifactCount: resolution.resolved.length,
+          wallSeconds: 0,
+        },
+      },
       instanceIds: [],
       observations: [],
     };
@@ -574,6 +669,7 @@ async function observe(
   };
   let loadedResources: string[] = [];
   let resetCommitment: `0x${string}` | undefined;
+  let pendingResetFailure: { readonly detail: string } | undefined;
   let wallSeconds = 0;
 
   for (let index = 0; index < options.runCount; index += 1) {
@@ -607,13 +703,18 @@ async function observe(
       if (identityFailure !== undefined) return fail(identityFailure.reason, identityFailure.detail);
 
       if (coverage === undefined) {
+        const manifest = record.stateMaterialization.sourceProofManifest !== undefined
+          ? decodeSourceProofManifest(resolution, record)
+          : undefined;
+        if (manifest !== undefined) {
+          const proofFailure = checkSourceProof(record, manifest);
+          if (proofFailure !== undefined) return fail(proofFailure.reason, proofFailure.detail);
+        }
         coverage = assessArtifactCoverage({
           fidelityClass: record.stateMaterialization.fidelityClass,
           entries: verified.report.artifactEntries,
-          ...(record.stateMaterialization.sourceProofManifest !== undefined
-            ? { manifest: decodeSourceProofManifest(resolution, record) }
-            : {}),
-          fixtureMutations: declaredFixtureMutations(record),
+          ...(manifest === undefined ? {} : { manifest }),
+          fixtureMutations: declaredFixtureMutations(record, resolution),
           mutatesSourceProtocolState:
             record.stateMaterialization.mutatesSourceProtocolState ?? false,
         });
@@ -705,15 +806,23 @@ async function observe(
         const postReset = await deps.runtime.materializer.reset(instance, options.signal);
         resetCommitment = postReset;
         if (postReset !== verified.report.postFixtureCommitment) {
-          return fail(
-            "reset-observation-divergence",
-            `reset produced ${postReset}, baseline is ${verified.report.postFixtureCommitment}`,
-          );
+          pendingResetFailure = {
+            detail: `reset produced ${postReset}, baseline is ${verified.report.postFixtureCommitment}`,
+          };
         }
       }
     } finally {
       await instance.stop();
     }
+  }
+
+  if (pendingResetFailure !== undefined) {
+    return fail(
+      "reset-observation-divergence",
+      pendingResetFailure.detail,
+      undefined,
+      runs,
+    );
   }
 
   const reference = runs[0]!;
@@ -771,6 +880,7 @@ async function observe(
       reason: "probe-observation-divergence",
       detail: `${divergent.length} of ${runs.length} runs diverged from run 0`,
       context,
+      completedRuns: runs,
       instanceIds,
       observations,
       divergence: {
@@ -792,19 +902,31 @@ async function observe(
     reason: ChainVerificationFailureReason,
     detail: string,
     partial?: FailureBlock["coverage"],
+    completedRuns?: readonly RunRecord[],
   ): Observed {
+    const sealed = options.networkPolicy.forkBackend === "absent";
+    const latestObservation = observations[observations.length - 1];
     return {
       kind: "failed",
       reason,
       detail,
+      ...(completedRuns === undefined ? {} : { completedRuns }),
       context: {
-        resolved: resolution.ok ? resolution.resolved : [],
+        resolved: resolution.resolved,
         environment: buildEnvironmentObservation(record, identity, coverage),
         isolation: {
           networkPolicy: options.networkPolicy,
+          ...(sealed
+            ? {
+              boundaryProbe: latestObservation === undefined
+                ? { probeId: "out-of-slice-read", readsEmptyOutsideSlice: false }
+                : boundaryProbeFrom(latestObservation, record),
+            }
+            : {}),
           egressAttempts,
           forbiddenProbes,
           signerScope,
+          ...(resetCommitment === undefined ? {} : { resetCommitment }),
         },
         closure: {
           mode: options.networkPolicy.forkBackend === "present"
@@ -825,9 +947,8 @@ async function observe(
           undeclaredMutations: [],
         },
         cost: {
-          artifactBytes: resolution.ok
-            ? resolution.resolved.reduce((total, one) => total + one.size, 0) : 0,
-          artifactCount: resolution.ok ? resolution.resolved.length : 0,
+          artifactBytes: resolution.resolved.reduce((total, one) => total + one.size, 0),
+          artifactCount: resolution.resolved.length,
           wallSeconds,
         },
       },
@@ -885,6 +1006,56 @@ async function buildRunsPredicate(
       resolutionLog,
     },
     cost: observed.context.cost,
+  } as ChainEnvironmentVerificationPredicate;
+}
+
+/**
+ * `probe-divergence` is run-bearing: the K runs completed and disagreed, which is a fact
+ * about the environment and carries the full repetition evidence. `baseline` is run 0's
+ * observation -- one observation among divergent ones, not the environment's answer -- and a
+ * reader who takes it without also reading `failure.divergence` is reading past the claim.
+ */
+async function buildDivergencePredicate(
+  deps: ChainVerificationDeps,
+  window: { readonly startedAt: string; readonly endedAt: string },
+  observed: Extract<Observed, { kind: "failed" }>,
+  runs: readonly RunRecord[],
+  resolutionLog: ResourceDescriptor,
+  signal: AbortSignal | undefined,
+): Promise<ChainEnvironmentVerificationPredicate> {
+  const reference = runs[0]!;
+  const baselineDescriptor = await storeArtifact(
+    deps.artifactStore,
+    canonicalChainObservationBytes(reference.observation),
+    { name: "observation", mediaType: "application/json" },
+    signal,
+  );
+  for (const run of runs.slice(1).filter((one) => one.digest !== reference.digest)) {
+    await storeArtifact(
+      deps.artifactStore,
+      canonicalChainObservationBytes(run.observation),
+      { name: `observation-${run.instanceId}`, mediaType: "application/json" },
+      signal,
+    );
+  }
+  const allObservationsEqual = runs.every((run) => run.digest === reference.digest);
+  return {
+    ...buildFailurePredicate(deps, window, observed, resolutionLog),
+    runs: {
+      count: runs.length,
+      observationDigest: reference.digest,
+      perRun: runs.map((run) => ({
+        instanceId: run.instanceId,
+        observationDigest: run.digest,
+        wallSeconds: run.wallSeconds,
+      })),
+      allObservationsEqual,
+      freshInstances: new Set(runs.map((run) => run.instanceId)).size === runs.length,
+    },
+    baseline: {
+      commitment: observed.context.environment.postFixtureCommitment,
+      observation: baselineDescriptor,
+    },
   } as ChainEnvironmentVerificationPredicate;
 }
 

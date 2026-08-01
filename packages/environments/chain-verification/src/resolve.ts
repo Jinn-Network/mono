@@ -25,6 +25,8 @@ export type ResolutionResult =
     readonly ok: false;
     readonly reason: "resource-unresolvable" | "resource-digest-mismatch";
     readonly detail: string;
+    readonly resolved: readonly ResolvedResource[];
+    readonly bytes: ReadonlyMap<string, Uint8Array>;
   };
 
 /**
@@ -56,6 +58,8 @@ export async function resolveMaterials(
         detail: `${request.name} (${expected}): ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
+        resolved,
+        bytes,
       };
     }
     const actual = recordDigest(payload);
@@ -64,6 +68,8 @@ export async function resolveMaterials(
         ok: false,
         reason: "resource-digest-mismatch",
         detail: `${request.name} resolved to ${actual}, not ${expected}`,
+        resolved,
+        bytes,
       };
     }
     resolved.push({

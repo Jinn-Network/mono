@@ -397,7 +397,10 @@ export const ChainEnvironmentVerificationPredicateSchema = PredicateShapeSchema.
       if (predicate.isolation.boundaryProbe !== undefined) {
         issue("the boundary probe is the sealed mode's evidence", ["isolation", "boundaryProbe"]);
       }
-      if (predicate.isolation.egressAttempts.length === 0) {
+      if (
+        predicate.isolation.egressAttempts.length === 0
+        && predicate.failure?.reason !== "fork-backend-fetch-unrefused"
+      ) {
         issue(
           "fork-backend closure is evidenced by a refused fetch, so an attempt must be recorded",
           ["isolation", "egressAttempts"],
