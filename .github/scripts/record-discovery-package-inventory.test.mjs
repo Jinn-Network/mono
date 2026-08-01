@@ -19,6 +19,7 @@ const DISCOVERY_PACKAGES = [
   ['facts/task-execution', '@jinn-network/record-discovery-facts-task-execution'],
   ['facts/benchmarking', '@jinn-network/record-discovery-facts-benchmarking'],
   ['facts/environments', '@jinn-network/record-discovery-facts-environments'],
+  ['facts/chain-environments', '@jinn-network/record-discovery-facts-chain-environments'],
   ['sources/evidence-journal', '@jinn-network/record-discovery-source-evidence-journal'],
   ['transport-http', '@jinn-network/record-discovery-transport-http'],
 ];
@@ -33,6 +34,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
+  ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -107,6 +109,13 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // transitive trust-core dependency. environment-record has no Jinn dependency of its own,
   // so unlike facts/benchmarking this leaf needs no second shadow entry.
   ['facts/environments', { dependencies: ['@jinn-network/environment-record', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  // facts/chain-environments carries the one sanctioned edge between the discovery tree and the
+  // chain-environment record-kind tree (discovery design §12; chain design §3): protocol +
+  // chain-environment-record. `record-discovery-testing` is a test-only devDependency for the
+  // conformance driver, and `trust-core` is the usual shadow entry — protocol's own transitive
+  // dependency needs a matching top-level override in every standalone per-package project.
+  // chain-environment-record has NO Jinn dependency of its own, so no second shadow is needed.
+  ['facts/chain-environments', { dependencies: ['@jinn-network/chain-environment-record', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // sources/evidence-journal's own source imports protocol + serve +
   // evidence-discovery + evidence-repository (plan Task 25; program §6/F7
   // widens the "one edge per discovery leaf meets a record-kind tree" rule
