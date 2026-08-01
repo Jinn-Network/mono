@@ -23,3 +23,8 @@ export * from "./documents/evaluation-task-1.0.js";
 export * from "./evaluation-subject.js";
 export * from "./result-evaluation.js";
 export * from "./documents/swe-rebench.js";
+export * from "./evaluation-spec/state-predicate/vocabulary.js";
+export * from "./evaluation-spec/state-predicate/observation.js";
+export * from "./evaluation-spec/state-predicate/reads.js";
+export * from "./evaluation-spec/state-predicate/evaluate.js";
+export * from "./evaluation-spec/state-predicate/spec-checks.js";

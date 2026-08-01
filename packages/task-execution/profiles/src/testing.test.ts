@@ -9,8 +9,11 @@ import {
   checkAdmissionReceipt,
   checkAllOfConstruction,
   checkMeasurementCoverage,
+  checkStatePredicateBlock,
+  checkStatePredicateSpec,
   checkVerdictConsistency,
   deriveEvaluationTask,
+  evaluatePredicates,
   loadFixtureFamily,
   resolveFamilyUri,
   runStructuralCheck,
@@ -86,8 +89,19 @@ describe("./testing re-export surface (design §12, plan Task 15)", () => {
     expect(typeof checkAdmissionReceipt).toBe("function");
     expect(typeof checkAllOfConstruction).toBe("function");
     expect(typeof checkMeasurementCoverage).toBe("function");
+    expect(typeof checkStatePredicateBlock).toBe("function");
+    expect(typeof checkStatePredicateSpec).toBe("function");
     expect(typeof checkVerdictConsistency).toBe("function");
     expect(typeof deriveEvaluationTask).toBe("function");
+    expect(typeof evaluatePredicates).toBe("function");
     expect(typeof resolveFamilyUri).toBe("function");
+  });
+
+  it("loads state-predicate fixture families through the kit path", async () => {
+    const fixturesRoot = fileURLToPath(new URL("../fixtures", import.meta.url));
+    for (const family of ["state-predicate-block", "state-predicate-evaluation"] as const) {
+      const cases = await loadFixtureFamily(`${fixturesRoot}/${family}`);
+      expect(cases.length).toBeGreaterThan(0);
+    }
   });
 });
