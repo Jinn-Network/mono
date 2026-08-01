@@ -80,6 +80,10 @@ import { runLoop } from './loop-heartbeat.js';
 import { gateClaimByAiUnits } from './ai-units-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
 import { blockIdUtc } from '../spend/ai-units.js';
+import {
+  persistWorkLoopDeliveredCorpus,
+  wrapBackendWithWorkLoopCorpus,
+} from './work-loop-corpus.js';
 
 export type { AnnouncedSubmissionCard };
 
@@ -195,6 +199,14 @@ function describeOutcome(outcome: WorkLoopOutcome): string {
       return `pipeline:submit-rejected:${result.detail}`;
     case 'delivery-wait-failed':
       return `pipeline:delivery-wait-failed:${result.waitKind}`;
+    case 'settlement-failed': {
+      const gate = result.result;
+      const detail =
+        gate !== undefined && typeof gate === 'object' && 'kind' in gate
+          ? String((gate as { kind: unknown }).kind)
+          : 'unknown';
+      return `pipeline:settlement-failed:${detail}`;
+    }
     default:
       return `pipeline:${result.kind}`;
   }
@@ -357,11 +369,22 @@ export class WorkLoop {
     // 6. Drive the pipeline, with the deliver leg funneled through the settlement port so the
     // mech Deliver fact exists before settlement reads it.
     const { taskBytes, submissionBytes } = await this.config.readSealedDocuments(card);
-    const { ports, getDeliveryBytes } = this.buildPorts(idempotencyKey, admitted, facts);
+    let claimedRequestId: `0x${string}` | undefined;
+    const { ports, getDeliveryBytes } = this.buildPorts(
+      idempotencyKey,
+      admitted,
+      facts,
+      (requestId) => { claimedRequestId = requestId; },
+    );
+    const backend = wrapBackendWithWorkLoopCorpus(this.config.composition.backend, {
+      store: this.config.store,
+      facts,
+      getRequestId: () => claimedRequestId,
+    });
     const result = await runPipeline(
       { facts, taskBytes, submissionBytes },
       this.config.composition.pipelineConfig,
-      this.config.composition.backend,
+      backend,
       ports,
     );
 
@@ -369,10 +392,10 @@ export class WorkLoop {
     await this.recordOutcome(
       idempotencyKey,
       admitted,
-      facts.taskId,
-      chain.taskCoordinator,
+      facts,
       result,
       getDeliveryBytes(),
+      claimedRequestId,
     );
 
     return { kind: 'pipeline', result };
@@ -382,6 +405,7 @@ export class WorkLoop {
     idempotencyKey: string,
     admitted: boolean,
     facts: SubmissionFacts,
+    setClaimedRequestId: (requestId: `0x${string}`) => void,
   ): { readonly ports: PipelinePorts; readonly getDeliveryBytes: () => Uint8Array | undefined } {
     const composition = this.config.composition;
     const base = composition.pipelinePorts;
@@ -405,6 +429,9 @@ export class WorkLoop {
         capabilityMatch: async () => ({ ok: true }),
         claimTask: async (input) => {
           const receipt = await base.claim.claimTask(input);
+          if (receipt.requestId !== undefined) {
+            setClaimedRequestId(receipt.requestId);
+          }
           const attemptUri = deriveMarketplaceAttemptUri({
             chainId: chain.chainId,
             coordinator: chain.taskCoordinator,
@@ -491,10 +518,10 @@ export class WorkLoop {
   private async recordOutcome(
     idempotencyKey: string,
     admitted: boolean,
-    taskId: bigint,
-    taskCoordinator: string,
+    facts: SubmissionFacts,
     result: PipelineRunOutcome,
     deliveryBytes: Uint8Array | undefined,
+    requestId: `0x${string}` | undefined,
   ): Promise<void> {
     if (!admitted) return;
 
@@ -505,6 +532,14 @@ export class WorkLoop {
           family: 'execution-evidence',
           digest,
         });
+        if (requestId !== undefined) {
+          persistWorkLoopDeliveredCorpus({
+            store: this.config.store,
+            deliveryBytes,
+            requestId,
+            facts,
+          });
+        }
       }
       this.config.ledger.recordOutcome(idempotencyKey, 'settled');
       return;
@@ -519,7 +554,7 @@ export class WorkLoop {
     this.config.ledger.recordOutcome(idempotencyKey, 'abandoned');
     if ('released' in result && result.released === false) {
       this.logger().warn(
-        `[work] unreleased attempt for task ${taskId} on ${taskCoordinator}: `
+        `[work] unreleased attempt for task ${facts.taskId} on ${this.config.composition.chain.taskCoordinator}: `
           + `${result.kind} did not release the venue reservation`,
       );
     }

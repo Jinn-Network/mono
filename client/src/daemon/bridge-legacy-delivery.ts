@@ -16,8 +16,10 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
-import { keccak256 } from 'viem';
+import { keccak256, type Hex } from 'viem';
+import { keccakEvidenceHash } from '@jinn-network/marketplace-binding';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { SignedEnvelopeSchema } from '../types/envelope.js';
 import type { SignedTaskV1 } from '../types/task-document.js';
 
 export const LEGACY_ENVELOPE_EXTENSION_KEY =
@@ -216,6 +218,40 @@ export function signedEnvelopeJsonFromDeliveryOrRaw(document: unknown): unknown 
   } catch {
     return document;
   }
+}
+
+/** True when `sealedBytes` decode to a TEP Delivery carrying the bridge envelope extension. */
+export function isBridgedTepDeliveryBytes(sealedBytes: Uint8Array): boolean {
+  return legacyRestorationResultFromDelivery(sealedBytes) !== undefined;
+}
+
+/**
+ * E46: router delivery-claim evidence hash for the exact IPFS-fetched bytes.
+ * Bridged TEP Deliveries settle on `keccakEvidenceHash(sealedBytes)`; bare
+ * `jinn.execution.v1` envelopes keep the legacy envelope JCS keccak.
+ */
+export function deliveryClaimEvidenceHash(exactFetchedBytes: Uint8Array): Hex {
+  if (isBridgedTepDeliveryBytes(exactFetchedBytes)) {
+    return keccakEvidenceHash(exactFetchedBytes);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(exactFetchedBytes));
+  } catch {
+    throw new Error('delivery claim: IPFS payload is not valid JSON');
+  }
+  const envelopeSource = signedEnvelopeJsonFromDeliveryOrRaw(parsed);
+  const envelopeRecord = SignedEnvelopeSchema.parse(envelopeSource);
+  const rawSigned = envelopeSource as Record<string, unknown>;
+  const { signature: _rawSignature, ...unsignedBody } = rawSigned;
+  const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+  const recomputed = keccak256(jcsBytes);
+  if (recomputed !== envelopeRecord.signature.hash) {
+    throw new Error(
+      `recomputed hash ${recomputed} !== envelope.signature.hash ${envelopeRecord.signature.hash}`,
+    );
+  }
+  return recomputed;
 }
 
 /**
