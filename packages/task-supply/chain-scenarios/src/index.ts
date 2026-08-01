@@ -26,3 +26,21 @@ export type {
   ScenarioAccountPort,
   ScenarioAccountRequest,
 } from "./fixture-accounts.js";
+export {
+  CHAIN_REFERENCE_SCRIPT_MEDIA_TYPE,
+  CHAIN_REFERENCE_SCRIPT_SCHEMA_VERSION,
+  CHAIN_SOLUTION_MEDIA_TYPE,
+  CHAIN_SOLUTION_SCHEMA_VERSION,
+  ChainSolutionScriptSchema,
+  ReferenceScriptSchema,
+  assertScriptWithinEnvelope,
+  referenceScriptDigest,
+  sealReferenceScript,
+  sealSolutionScript,
+} from "./solution-script.js";
+export type {
+  CapabilityEnvelope,
+  ChainSolutionScript,
+  ReferenceScript,
+  SealedScriptDocument,
+} from "./solution-script.js";
