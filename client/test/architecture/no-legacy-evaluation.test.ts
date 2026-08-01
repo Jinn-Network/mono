@@ -18,4 +18,18 @@ describe('stage 2 retirement', () => {
     const source = readFileSync(join(root, 'adapters/mech/contracts.ts'), 'utf8');
     expect(source).not.toMatch(/functionName: 'claimEvaluation'/);
   });
+
+  it('has no TaskEngine', () => {
+    expect(existsSync(join(root, 'harnesses/engine/engine.ts'))).toBe(false);
+    expect(existsSync(join(root, 'harnesses/engine/recovery.ts'))).toBe(false);
+  });
+
+  it('keeps task_runs readable for the API until stage 5', () => {
+    expect(existsSync(join(root, 'harnesses/engine/persistence.ts'))).toBe(true);
+  });
+
+  it('starts no engine loops', () => {
+    const source = readFileSync(join(root, 'daemon/daemon.ts'), 'utf8');
+    expect(source).not.toMatch(/TaskEngine|runTickLoop|_runEngineWatcherLoop|recoverInFlight/);
+  });
 });

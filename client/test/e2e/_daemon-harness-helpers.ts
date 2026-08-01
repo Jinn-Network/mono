@@ -1347,43 +1347,6 @@ export async function startDaemon(
     mechAdapter.setBroadcaster(composition.broadcaster);
   }
 
-  // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
-  //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
-  //      No artifact donation in tests; donation.enabled = false.
-  //    - envelopeDeps: agent EOA private key + IPFS registry URL for envelope upload.
-  //    - deliveryDeps: viem clients + contract addresses for on-chain delivery.
-  //    The safeAddress in envelopeDeps matches the operator Safe so the
-  //    envelope's participant.safeAddress is correct.
-  const packagingDeps = {
-    operatorEndpoint: daemonApiUrl,
-    defaultPriceUsdc: '0',
-    perArtifactTypePrice: {} as Record<string, string>,
-    donation: {
-      enabled: false,
-      ipfsRegistryUrl: resolvedIpfsRegistryUrl,
-    },
-  };
-
-  const envelopeDeps = {
-    ipfsRegistryUrl: resolvedIpfsRegistryUrl,
-    agentEoaPrivateKey: operator.agentPrivateKey,
-    safeAddress: operator.safeAddress,
-  };
-
-  const deliveryDeps = {
-    publicClient: agentClients.publicClient,
-    walletClient: agentClients.walletClient as unknown as WalletClient,
-    safeAddress: operator.safeAddress as Address,
-    mechContractAddress: (v3Env ? v3Env.mockMechAddress : operator.mechAddress) as Address,
-    routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
-    claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
-    // evictionRecovery: omitted — no master wallet in test
-    // Finding E16 / the C2 ruling: the SAME broadcaster instance `mechAdapter` above just picked
-    // up — undefined when `opts.enableComposition` was not set (no composition, no broadcaster,
-    // same as production on a network with no composition).
-    broadcaster: composition?.broadcaster,
-  };
-
   // 8. Construct Daemon. Translation of main.ts §2046.
   //    - store: injected so Daemon does NOT own it (our stop() closes it explicitly)
   //    - taskSources: omitted (no creator-side tasks in Task 5+)
@@ -1432,57 +1395,6 @@ export async function startDaemon(
       : {}),
     // subgraphUrl / nodeEndpoint / signer: omitted
     // rewardClaim / balanceTopup: omitted → those loops don't start
-    restorationEngine: {
-      paths: {
-        // Default consumer (daemon-harness-cycle.ts) calls startDaemon with no
-        // opts → label === 'daemon'; keep its working dir at the fixture root
-        // exactly as before. Multi-operator scenarios (T2.2) pass a distinct
-        // instanceLabel and get a per-label subdir so two daemons don't collide.
-        workingDirRoot:
-          label === 'daemon'
-            ? fixture.workingDirRoot
-            : join(fixture.workingDirRoot, label),
-        implStateDirRoot: join(fixture.implStateRoot, `${label}-impl-state`),
-      },
-      implRegistry,
-      // Production (main.ts:2654) always wires operatorSafeAddress into the
-      // engine so the synthetic-task claim guard (syntheticClaimBlocked,
-      // engine.ts:1134) can compare `task.eligibility.syntheticProvenance`
-      // against the running daemon's own Safe. This test rig previously never
-      // set it, which silently no-oped that guard for every e2e daemon built
-      // here. Setting it unconditionally is safe for existing consumers: the
-      // guard is a no-op unless a task carries `syntheticProvenance` (only
-      // task-creator-marketplace.ts does).
-      operatorSafeAddress: operator.safeAddress,
-      // Optional registry: undefined for the prediction consumer (no change);
-      // the jinn-repo driver passes one so the engine resolves the
-      // jinn-repo-runtime bundled plugin into solverPluginRoots and the solver
-      // agent receives the checkout-mono SKILL.
-      ...(solverNetRegistry ? { solverNetRegistry } : {}),
-      packagingDeps,
-      envelopeDeps,
-      deliveryDeps,
-      // #1827: mirrors main.ts's blockTimestamp wiring so this rig covers
-      // envelope.task.createdAt resolution against the Anvil fork.
-      blockTimestamp: {
-        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          const block = await agentClients.publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-          return Number(block.timestamp);
-        },
-        configuredRpcUrls: [rpcUrl],
-      },
-      // joinedSolverNets: omitted — engine falls back to legacy solverType gate.
-      // Harness dispatch for non-baseline selectors is driven by
-      // implRegistry.config.solverTypeHarnesses (wired in step 4 above).
-      // manifestResolver / identityPublisher / reputationFeedback: omitted
-      operatorConfig: {
-        publicEndpoint: daemonApiUrl,
-        defaultPriceUsdc: '0',
-        perArtifactTypePrice: {},
-        donation: { enabled: false },
-      },
-      harnessMode: 'train',
-    },
   });
 
   // 9. Start the daemon (kicks off all configured loops).

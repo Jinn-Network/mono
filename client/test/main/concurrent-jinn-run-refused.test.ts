@@ -27,7 +27,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 import {
   applyPidfileLivenessGate,
@@ -37,17 +36,6 @@ import {
   __setExecSyncForTesting,
   __resetExecSyncForTesting,
 } from '../../src/lifecycle/process-discovery.js';
-
-function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
-  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
-  return {
-    implRegistry,
-    paths: {
-      workingDirRoot: join(root, 'work'),
-      implStateDirRoot: join(root, 'impl-state'),
-    },
-  };
-}
 
 describe('#649 — second jinn run refuses without corrupting state', () => {
   let tmp: string;
@@ -73,7 +61,6 @@ describe('#649 — second jinn run refuses without corrupting state', () => {
       apiPort: 0, // OS picks
       pollIntervalMs: 60_000,
       taskSources: [],
-      restorationEngine: minimalEngineConfig(tmp),
     });
     await daemon.start();
     // First (sibling) daemon writes its own pidfile, exactly like main.ts does

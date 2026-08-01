@@ -75,9 +75,8 @@ import {
   DEFAULT_HARNESS,
   HarnessRegistry,
 } from './harnesses/engine/registry.js';
-import { createMutableJoinedSolverNetsView } from './harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from './harnesses/engine/joined-solver-nets-view.js';
 import { createAutopilotEvaluationContextResolver } from './autopilot/autopilot-evaluation-context-resolver.js';
-import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github-adoption-receipt-observer.js';
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
@@ -1415,8 +1414,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   });
   const autopilotEvaluationContextResolver =
     createAutopilotEvaluationContextResolver({ github: autopilotGitHubRead });
-  const autopilotAdoptionReceiptObserver =
-    createAutopilotGitHubAdoptionReceiptObserver({ github: autopilotGitHubRead });
 
   const adapter = new MechAdapter({
     rpcUrl: config.rpcUrls,
@@ -1435,8 +1432,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     evaluatorEnabled,
     autopilotEvaluationContextResolver,
   }, sharedStore);
-
-  // ── TaskEngine wiring ─────────────────────────────────────────────────
 
   // Build agent viem clients (same creds as MechAdapter uses internally).
   const viemChains = await import('viem/chains');
@@ -1597,82 +1592,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // discovers none) and still passes legacy no-cid tasks. See plan §behaviour-change.
   const joinedSolverNetsView = createMutableJoinedSolverNetsView(config.joinedSolverNets);
 
-  // ── Engine deps ───────────────────────────────────────────────────────────────
-
-  // Packaging deps: artifacts are always written to served_artifacts
-  // (operator-local SQLite). In public-testnet donation mode, scrubbed artifact
-  // bytes are also pinned to IPFS and advertised as signed donation sources;
-  // that IPFS path is the canonical release path. The HTTP endpoint and price
-  // fields are kept as compatibility/future data-market fallback plumbing.
-  const operatorPublicEndpoint =
-    config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
-  const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
-  const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
-  const donationRequested = config.operator?.donation?.enabled === true;
-  const donationEnabled = donationRequested && config.network === 'testnet';
-  if (donationRequested && !donationEnabled) {
-    console.warn('[main] operator.donation.enabled is testnet-only; donation disabled on mainnet.');
-  }
-  if (!config.operator?.publicEndpoint) {
-    if (donationEnabled) {
-      console.log(
-        '[main] config.operator.publicEndpoint not set; using IPFS donation as the public artifact path. ' +
-          'Direct HTTP artifact fallback will remain local-only.',
-      );
-    } else {
-      console.warn(
-        '[main] operator donation is disabled and config.operator.publicEndpoint is not set; ' +
-          'new artifacts will remain local-only until donation mode is enabled.',
-      );
-    }
-  }
-  const packagingDeps = {
-    operatorEndpoint: operatorPublicEndpoint,
-    defaultPriceUsdc: operatorDefaultPrice,
-    perArtifactTypePrice: operatorPerTypePrice,
-    donation: {
-      enabled: donationEnabled,
-      ipfsRegistryUrl: config.ipfsRegistryUrl,
-      scrub: {
-        identity: {
-          username: userInfo().username,
-          hostname: hostname(),
-        },
-        path: { home: homedir() },
-      },
-    },
-  };
-  const operatorConfig = {
-    publicEndpoint: operatorPublicEndpoint,
-    defaultPriceUsdc: operatorDefaultPrice,
-    perArtifactTypePrice: operatorPerTypePrice,
-    donation: { enabled: donationEnabled },
-    // Daemon-wide LLM model — stamped as executor.model fallback in envelopes
-    // when a SolverNet does not specify its own model (jinn-mono-gbut, gh#191).
-    claudeModel: config.claudeModel,
-  };
-
-  // Envelope assembly deps: sign envelopes with agent EOA private key
-  const envelopeDeps = {
-    ipfsRegistryUrl: config.ipfsRegistryUrl,
-    agentEoaPrivateKey: agentPrivateKey,
-    safeAddress,
-  };
-
-  // Delivery deps: deliver to marketplace + claimDelivery via JinnRouter.
-  // `broadcaster` starts unset and is late-bound below, once the Stage-1 cutover composition
-  // root (if any — testnet only) has built one (finding E16 / the C2 ruling: no process-global —
-  // this daemon's one broadcaster is threaded explicitly to every legacy call site that needs it).
-  const deliveryDeps: import('./harnesses/engine/delivery.js').DeliveryDeps = {
-    publicClient: agentClients.publicClient,
-    walletClient: agentClients.walletClient,
-    safeAddress,
-    mechContractAddress: mechAddress,
-    routerAddress: ROUTER_ADDRESS,
-    claimDeliveryVariant: CHAIN_CONFIG.routerClaimDeliveryVersion,
-    evictionRecovery,
-  };
-
   // ── Contribution reference queue (task-creator spec §10) ─────────────────
   //
   // ALWAYS constructed so legacy v1/v2 files migrate once to the reference-only
@@ -1713,12 +1632,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   }
 
   // ── Seller-side scrub pipeline (publish-time) ─────────────────────────────
-  // One pipeline shared by the task engine and the live capture publisher so
-  // every published trajectory passes through the same maintained scrub stack
-  // (structural key policy → owned detectors → secretlint/entropy → GLiNER ML
-  // PII on by default). The OTLP receiver above runs best-effort ingest-time
-  // scrubbers; this is the authoritative final gate before a trajectory becomes
-  // public/sellable.
+  const operatorPublicEndpoint =
+    config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`;
+  const operatorDefaultPrice = config.operator?.defaultPriceUsdc ?? '0';
+  const operatorPerTypePrice = config.operator?.perArtifactTypePrice ?? {};
   const sellerPiiDetector = await maybeBuildPiiDetector(config.captures.piiDetection);
   const sellerScrubPipeline = buildScrubPipeline(
     sellerPiiDetector ? { piiDetector: sellerPiiDetector } : {},
@@ -1740,61 +1657,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
 
-  // ── Reputation feedback hook (jinn-mono-yg4) ──────────────────────────────
-  //
-  // After the evaluator's claimDelivery succeeds, the engine fires
-  // `ReputationRegistry.giveFeedback(harnessAgentId, …)` so the harness's
-  // agent NFT accrues a rating (DR §4.3). This requires:
-  //
-  //   1. A `ReputationRegistryClient` for the active chain. We use the
-  //      canonical 0x8004… deployment; writes route through the operator's
-  //      Safe so `msg.sender` matches the OLAS staking + 8004 IdentityRegistry
-  //      identity.
-  //   2. An agentId resolver — looks up the harness's agentId from the
-  //      parent manifest's evidenceHash via the shared `DiscoveryAPI`. When
-  //      no DiscoveryAPI is available the resolver returns null cleanly and
-  //      the hook becomes a no-op (defensive: feedback is non-fatal).
-  //
-  // Skipped when the operator hasn't minted an agent NFT yet (matches the
-  // IdentityPublisher gating above).
-  let reputationFeedback:
-    | NonNullable<import('./harnesses/engine/engine.js').TaskEngineOptions['reputationFeedback']>
-    | undefined;
-  if (agentId) {
-    const { getReputationRegistryAddress, ReputationRegistryClient } = await import(
-      './erc8004/index.js'
-    );
-    const chainId = config.network === 'testnet' ? 84532 : 8453;
-    const reputationRegistryAddress = getReputationRegistryAddress(chainId);
-    if (reputationRegistryAddress) {
-      const reputationClient = new ReputationRegistryClient({
-        reputationRegistryAddress,
-        publicClient: agentClients.publicClient,
-        walletClient: agentClients.walletClient,
-        safeAddress,
-      });
-      const { resolveAgentIdForManifest } = await import(
-        './erc8004/index.js'
-      );
-      reputationFeedback = {
-        client: reputationClient,
-        resolveAgentId: (manifestHash) =>
-          resolveAgentIdForManifest({ manifestHash, discoveryApi: sharedDiscoveryApi }),
-      };
-      console.log(
-        `[main] ReputationFeedback: registry=${reputationRegistryAddress}${sharedDiscoveryApi ? ' discoveryApi=active' : ' (no discoveryApi — resolver always null)'}`,
-      );
-    } else {
-      console.log(
-        `[main] ReputationFeedback: disabled (no canonical ReputationRegistry deployed on chainId=${chainId})`,
-      );
-    }
-  } else {
-    console.log(
-      '[main] ReputationFeedback: disabled (no agent_id on active service — same gating as IdentityPublisher)',
-    );
-  }
-
   // ── SolverNet subsystem (Task 11 of solvernet-creation-and-launch.md) ─────
   //
   // Loads owned launched records from `~/.jinn-client/solvernets/launched/`,
@@ -1806,12 +1668,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // The launch state machine resumes correctly through the receipt-confirmation
   // path; discovery is now exclusively via DiscoveryAPI (280n.6).
   let solverNetSubsystem: import('./solvernets/daemon-init.js').SolverNetSubsystem | undefined;
-  // Hoisted so the engine wiring below can pick the registry client up as
-  // its `manifestResolver` (Task 27 of the SolverNet creation-and-launch
-  // spec — task validation goes manifest → contract → schemas).
-  let solverNetRegistryClientForEngine:
-    | import('./solvernets/registry-client.js').SolverNetRegistryClient
-    | undefined;
   if (agentId && identityRegistryAddress && config.network === 'testnet') {
     const {
       initSolverNetSubsystem,
@@ -1837,7 +1693,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       discoveryApi: sharedDiscoveryApi,
       network: 'base-sepolia',
     });
-    solverNetRegistryClientForEngine = solverNetRegistryClient;
 
     const launcherSigner: import('./solvernets/registry-client.js').SignerWithAgentEoa = {
       agentEoaAddress: privateKeyToAccount(agentPrivateKey).address as `0x${string}`,
@@ -2213,10 +2068,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // they pick up the one broadcaster rather than each racing to build their own against the
     // same Safe.
     adapter.setBroadcaster(composition.broadcaster);
-    deliveryDeps.broadcaster = composition.broadcaster;
-    reputationFeedback?.client.setBroadcaster(composition.broadcaster);
 
-    // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
+    // C8: the work loop's own config
     // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
     // `ArchiveSubscription` over the projector's durable observation stream
     // (`archive-subscription.js`). It stays empty in practice until the projector's own
@@ -2303,55 +2156,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             distributorAddress: CHAIN_CONFIG.distributorAddress,
           }
         : undefined,
-    restorationEngine: {
-      paths: {
-        workingDirRoot: config.engine.workingDirRoot,
-        implStateDirRoot: config.engine.implStateDirRoot,
-      },
-      packagingDeps,
-      envelopeDeps,
-      deliveryDeps,
-      adoptionReceiptObserver: autopilotAdoptionReceiptObserver,
-      implRegistry,
-      solverNetRegistry,
-      // #1827: resolves envelope.task.createdAt at claim() time. getBlock
-      // errors propagate deliberately — engine.ts retries a bounded number of
-      // times and keeps/fails the task before signing rather than emitting a
-      // provenance tuple without its authoritative creation timestamp.
-      blockTimestamp: {
-        getBlockTimestamp: async (blockNumber: number): Promise<number | undefined> => {
-          const block = await publicClient.getBlock({ blockNumber: BigInt(blockNumber) });
-          return Number(block.timestamp);
-        },
-        configuredRpcUrls: config.rpcUrls,
-      },
-      // Spec §14, Task 28: per-launch claim eligibility filter. Operators
-      // populate `joinedSolverNets[<manifestCid>]` via the SPA's join flow;
-      // the engine refuses tasks whose `manifestDigest = keccak256(cid)`
-      // doesn't match a joined entry (plus a role gate). Absent when the
-      // operator hasn't joined any nets yet — the engine then falls back to
-      // the legacy solverType-keyed gate.
-      // #1037: always wire the (mutable) view so a hot-applied join is live.
-      joinedSolverNets: joinedSolverNetsView,
-      // Spec §14: task validation resolves manifest → contract → schemas.
-      // Threaded only when the SolverNet registry client was constructed
-      // (testnet branch above). The engine treats absence as "schema
-      // validation skipped" — production callers always have it.
-      ...(solverNetRegistryClientForEngine
-        ? { manifestResolver: solverNetRegistryClientForEngine }
-        : {}),
-      identityPublisher,
-      reputationFeedback,
-      operatorConfig,
-      operatorSafeAddress: safeAddress,
-      harnessMode: config.harness.mode,
-      // #1393: corpus knowledge autoload — operator opt-out flag. The corpus
-      // instance itself is injected by the Daemon (built from corpusFactory).
-      knowledge: { enabled: config.engine.knowledgeAutoload },
-      // Share the one maintained scrub pipeline (incl. optional ML PII) so task
-      // trajectories and captures are scrubbed by the same stack before publish.
-      scrubPipeline: sellerScrubPipeline,
-    },
     balanceTopup:
       config.balanceTopupIntervalMs > 0
         ? {

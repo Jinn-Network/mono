@@ -30,7 +30,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 
 const marker = vi.hoisted(() => ({ calls: [] as string[] }));
@@ -49,17 +48,6 @@ vi.mock('../../src/api/server.js', async (importOriginal) => {
     }),
   };
 });
-
-function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
-  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
-  return {
-    implRegistry,
-    paths: {
-      workingDirRoot: join(root, 'work'),
-      implStateDirRoot: join(root, 'impl-state'),
-    },
-  };
-}
 
 describe('#649 — Daemon.start binds API before mutating store', () => {
   let tmp: string;
@@ -104,7 +92,6 @@ describe('#649 — Daemon.start binds API before mutating store', () => {
       apiPort: 0, // OS picks an ephemeral port
       pollIntervalMs: 60_000,
       taskSources: [],
-      restorationEngine: minimalEngineConfig(tmp),
     });
 
     await daemon.start();

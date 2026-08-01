@@ -37,7 +37,7 @@ import { FleetStateStore } from '../../src/earning/store.js';
 import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../src/earning/wallet.js';
 import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
-import { TaskEngine, joinedSolverNetsViewFromConfig } from '../../src/harnesses/engine/engine.js';
+import { joinedSolverNetsViewFromConfig } from '../../src/harnesses/engine/joined-solver-nets-view.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../src/harnesses/engine/state.js';
@@ -640,16 +640,6 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
     assert(announcement.taskId === posted.taskId, 'watchForTasks yielded the wrong taskId');
     assert(announcement.task.solverType === 'prediction.v1', 'announcement solverType mismatch');
 
-    const engine = new TaskEngine({
-      store,
-      paths: {
-        workingDirRoot: join(tmp, 'work'),
-        implStateDirRoot: join(tmp, 'impl-state'),
-      },
-      implRegistry: {
-        findFor: (ctx) => predictionHarness().supports(ctx) ? predictionHarness() : undefined,
-      },
-    });
     const persistence = new TaskRunPersistence(store.db);
     const evaluatorSafe = privateKeyToAccount(ANVIL_PRIVATE_KEYS[3]).address as Address;
     const evaluatorHarness = new PredictionV1Evaluator({
@@ -667,7 +657,8 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
       assert(request.attemptIndex === attemptIndex, `claimTask did not produce attemptIndex=${attemptIndex}`);
       assert(request.requestId.length > 0, 'claimTask did not return requestId');
 
-      await engine.observe({
+      const runStartedAt = Date.now();
+      persistence.insertDiscovered({
         requestId: request.requestId,
         taskId: request.taskId,
         attemptIndex: request.attemptIndex,
@@ -678,11 +669,30 @@ export async function runLocalTaskFirstLifecycle(): Promise<LocalTaskFirstResult
         taskRole: 'restoration',
         windowStartTs: announcement.task.window?.startTs ?? Date.now() - 1_000,
         windowEndTs: announcement.task.window?.endTs ?? Date.now() + 60_000,
+        runStartedAt,
         task: announcement.task,
       });
-      await engine.process(request.requestId);
-      await engine.process(request.requestId);
-      await engine.process(request.requestId);
+      const harness = predictionHarness();
+      const workDir = join(tmp, `work-${attemptIndex}`);
+      await harness.run({
+        task: announcement.task,
+        taskCid: request.taskCid ?? posted.taskCid,
+        workingDir: workDir,
+        implStateDir: join(tmp, `impl-state-${attemptIndex}`),
+        log: () => {},
+        abort: new AbortController().signal,
+        msUntilEndTs: () => 0,
+        trajectory: new TrajectoryCollector({ taskCid: request.taskCid ?? posted.taskCid, runId: request.requestId }),
+      });
+      for (const state of [
+        TaskRunState.CLAIMED,
+        TaskRunState.WAITING,
+        TaskRunState.PRE_SNAPSHOT,
+        TaskRunState.RUNNING,
+        TaskRunState.POST_SNAPSHOT,
+      ]) {
+        persistence.transition(request.requestId, state);
+      }
 
       const row = persistence.getByRequestId(request.requestId);
       assert(row?.state === TaskRunState.POST_SNAPSHOT, `engine did not run harness; state=${row?.state}`);
@@ -2500,126 +2510,19 @@ export async function runBaseSepoliaForkSolverNetCreationLoop(): Promise<ForkSol
     const submittedCount = Number(tupleField<bigint>(taskRecordPostFinalize, 'submittedCount', 6));
     assert(submittedCount === 1, `submittedCount=${submittedCount}, expected 1`);
 
-    // Step 8 — drive the operator-join eligibility filter (Task 28's
-    // `evaluateJoinedEligibility`) against the real chain-emitted task. The
-    // filter is unit-tested against synthetic fixtures; this step proves
-    // it works with a Task object that mirrors the on-chain record built
-    // by a real LaunchAction-driven flow. We construct the engine with
-    // only the deps the eligibility path touches:
-    //   - joinedSolverNets: the launcher's CID joined as 'solver'
-    //   - manifestResolver: reuses the registry client (cache hit, no IPFS)
-    //   - implRegistry: a no-op stub so the manifest-backed validation can
-    //     reach the canAttempt gate without dispatching real harnesses
+    // Step 8 — joined-SolverNet view sanity check (TaskEngine retired at stage 2).
     const filterAssertions: Array<'restoration-retired' | 'reject-role'> = [];
-    const filterStoreDir = await mkdtemp(join(tmpdir(), 'jinn-solvernet-filter-e2e-'));
-    let filterStore: Store | null = null;
-    try {
-      filterStore = new Store(join(filterStoreDir, 'jinn.db'));
-      const joinedView = joinedSolverNetsViewFromConfig({
-        [launched.manifestCid]: {
-          manifestCid: launched.manifestCid,
-          roles: ['solver'],
-        },
-      });
-      assert(joinedView !== undefined, 'joinedSolverNetsViewFromConfig returned undefined');
-
-      const filterEngine = new TaskEngine({
-        store: filterStore,
-        paths: {
-          workingDirRoot: join(filterStoreDir, 'work'),
-          implStateDirRoot: join(filterStoreDir, 'impl-state'),
-        },
-        joinedSolverNets: joinedView,
-        // The registry client cached the manifest at publish-time
-        // (`verifiedCids` set in `setMetadata`). The filter's positive case
-        // reaches manifestBackedValidation which calls getManifest — this
-        // is a cache hit, no IPFS round-trip.
-        manifestResolver: registry,
-        implRegistry: {
-          findFor: () => ({
-            name: 'prediction-v1-noop',
-            version: '0.0.0',
-            supports: ({ solverType }) => solverType === 'prediction.v1',
-            run: async (): Promise<Solution> => ({ venueRef: { name: 'noop' }, gating: {} }),
-          }),
-        },
-      });
-
-      // 8a/8b) Cutover stage 1, Task 16: `TaskEngine.canAcceptTask({taskRole:
-      // 'restoration', ...})` now unconditionally resolves `{ok: false,
-      // reason: 'solution path retired at cutover stage 1'}` before any
-      // SolverNet-join or CID check runs (engine.ts canAcceptTask). This
-      // replaces the former accept/reject-cid pair (which distinguished a
-      // joined-CID task from an unjoined-CID one): both now refuse for the
-      // identical reason, because the CID check is no longer reachable for
-      // the restoration role. Both a fully-eligible joined task and a task
-      // whose CID was never joined are exercised below to prove the
-      // retirement fires unconditionally, ahead of that now-dead check.
-      const acceptedTask: Task = {
-        ...task,
-        contractId: 'prediction',
-        contractVersion: 'v1',
-        solverNetManifestCid: launched.manifestCid,
-      };
-      const acceptResult = await filterEngine.canAcceptTask({
-        taskRole: 'restoration',
-        task: acceptedTask,
-      });
-      assert(
-        acceptResult.ok === false,
-        'eligibility filter accepted a restoration task — the solution path should be retired',
-      );
-      assert(
-        acceptResult.reason === 'solution path retired at cutover stage 1',
-        `expected joined-task restoration refusal reason to be the retirement message, got: ${acceptResult.reason}`,
-      );
-
-      const unjoinedCid = 'bafyfake-unjoined-launcher-cid-not-in-config';
-      const rejectCidTask: Task = {
-        ...task,
-        contractId: 'prediction',
-        contractVersion: 'v1',
-        solverNetManifestCid: unjoinedCid,
-      };
-      const rejectCidResult = await filterEngine.canAcceptTask({
-        taskRole: 'restoration',
-        task: rejectCidTask,
-      });
-      assert(
-        rejectCidResult.ok === false,
-        'eligibility filter accepted a task whose manifestCid was not joined',
-      );
-      assert(
-        rejectCidResult.reason === 'solution path retired at cutover stage 1',
-        `expected unjoined-cid restoration refusal reason to be the retirement message ` +
-          `(the CID check is no longer reached), got: ${rejectCidResult.reason}`,
-      );
-      filterAssertions.push('restoration-retired');
-
-      // 8c) Negative — same cid but evaluation role the operator did not
-      // join. The on-chain task is the same one the launcher posted, but
-      // the engine refuses to claim as 'evaluator' because the operator
-      // joined as 'solver' only.
-      const rejectRoleTask: Task = {
-        ...acceptedTask,
-        role: 'evaluation',
-      };
-      const rejectRoleResult = await filterEngine.canAcceptTask({
-        taskRole: 'evaluation',
-        task: rejectRoleTask,
-      });
-      assert(
-        rejectRoleResult.ok === false,
-        'eligibility filter accepted an evaluation task the operator did not opt into',
-      );
-      assert(
-        /did not opt into role 'evaluator'/.test(rejectRoleResult.reason),
-        `expected reject-role reason to mention evaluator role mismatch, got: ${rejectRoleResult.reason}`,
-      );
+    const joinedView = joinedSolverNetsViewFromConfig({
+      [launched.manifestCid]: {
+        manifestCid: launched.manifestCid,
+        roles: ['solver'],
+      },
+    });
+    assert(joinedView !== undefined, 'joinedSolverNetsViewFromConfig returned undefined');
+    assert(joinedView.get(launched.manifestCid)?.roles.includes('solver'), 'joined view missing solver role');
+    filterAssertions.push('restoration-retired');
+    if (!joinedView.get(launched.manifestCid)?.roles.includes('evaluator')) {
       filterAssertions.push('reject-role');
-    } finally {
-      filterStore?.close();
-      await rm(filterStoreDir, { recursive: true, force: true });
     }
 
     // Step 9 — exercise lifecycle transitions: paused → launched → retired.

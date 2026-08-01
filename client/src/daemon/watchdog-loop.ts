@@ -17,9 +17,9 @@
  *   process.exit(WATCHDOG_EXIT_CODE)
  *     → Railway restartPolicyType="ON_FAILURE", maxRetries=10
  *       (deploy/railway-*-operator/railway.toml)
- *     → fresh process boots, recoverInFlight() re-drives in-flight tasks
- *       (TaskEngine.recoverInFlight) and the stale-pidfile path clears a dead
- *       lock (src/preflight/pidfile-liveness.ts) — both already idempotent.
+ *     → fresh process boots through the derivation-first boot path and the
+ *       stale-pidfile path clears a dead lock (src/preflight/pidfile-liveness.ts)
+ *       — both already idempotent.
  *
  * So restarting a wedged daemon cannot double-claim, double-deliver, or
  * double-pay: it re-enters the same boot reconciliation a crash would.

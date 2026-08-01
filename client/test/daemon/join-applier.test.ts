@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createJoinApplier } from '../../src/daemon/join-applier.js';
 import { SolverNetRegistry } from '../../src/solver-nets/registry.js';
-import { createMutableJoinedSolverNetsView } from '../../src/harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from '../../src/harnesses/engine/joined-solver-nets-view.js';
 import type { JoinedSolverNetConfig } from '../../src/solver-nets/registry.js';
 
 const CID = 'bafyapplier1037';

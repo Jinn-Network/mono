@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createMutableJoinedSolverNetsView } from '../../../src/harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from '../../../src/harnesses/engine/joined-solver-nets-view.js';
 
 describe('createMutableJoinedSolverNetsView', () => {
   it('starts empty and reflects entries set after construction', () => {

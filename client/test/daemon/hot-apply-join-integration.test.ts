@@ -18,7 +18,7 @@ import type { DiscoveryAPI, ClaimableTaskCandidate } from '../../src/discovery/t
 import type { SignedTaskV1 } from '../../src/types/task-document.js';
 import { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import { HarnessReadinessRegistry } from '../../src/harnesses/readiness-registry.js';
-import { createMutableJoinedSolverNetsView } from '../../src/harnesses/engine/engine.js';
+import { createMutableJoinedSolverNetsView } from '../../src/harnesses/engine/joined-solver-nets-view.js';
 import { createJoinApplier } from '../../src/daemon/join-applier.js';
 import type { JoinedSolverNetConfig } from '../../src/solver-nets/registry.js';
 import type { Harness } from '../../src/harnesses/types.js';

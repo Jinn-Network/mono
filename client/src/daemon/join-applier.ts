@@ -14,7 +14,7 @@
  */
 
 import type { HarnessReadinessRegistry } from '../harnesses/readiness-registry.js';
-import type { JoinedSolverNetsView } from '../harnesses/engine/engine.js';
+import type { JoinedSolverNetsView } from '../harnesses/engine/joined-solver-nets-view.js';
 import {
   SolverNetRegistry,
   registerJoinedNet,

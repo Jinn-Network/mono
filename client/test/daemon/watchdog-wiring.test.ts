@@ -14,22 +14,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
-import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 import { getLoopTick } from '../../src/daemon/loop-heartbeat.js';
 
-function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
-  const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
-  return {
-    implRegistry,
-    paths: {
-      workingDirRoot: join(root, 'work'),
-      implStateDirRoot: join(root, 'impl-state'),
-    },
-  };
-}
-
-function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog']): Daemon {
+function makeDaemon(store: Store, watchdog?: DaemonConfig['watchdog']): Daemon {
   return new Daemon({
     adapter: new LocalAdapter(),
     runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
@@ -38,7 +26,6 @@ function makeDaemon(store: Store, tmp: string, watchdog?: DaemonConfig['watchdog
     apiPort: 0,
     pollIntervalMs: 60_000,
     taskSources: [],
-    restorationEngine: minimalEngineConfig(tmp),
     watchdog,
   });
 }
@@ -59,11 +46,11 @@ describe('#1043 Daemon watchdog wiring', () => {
   });
 
   it('seeds heartbeats for started loops and runs while running (autoRestart off)', async () => {
-    daemon = makeDaemon(store, tmp, { autoRestart: false });
+    daemon = makeDaemon(store, { autoRestart: false });
     await daemon.start();
 
-    // Minimal daemon starts creator only; engine-tick/engine-watcher retired from
-    // LOOP_REGISTRY at cutover stage 2.
+    // Minimal daemon starts creator only; engine-tick/engine-watcher retired at
+    // cutover stage 2.
     expect(getLoopTick(store, 'creator')).not.toBeNull();
 
     expect(daemon.getShutdownState()).toBe('running');
@@ -74,12 +61,9 @@ describe('#1043 Daemon watchdog wiring', () => {
   });
 
   it('does not seed heartbeats or trip when watchdog config is omitted', async () => {
-    daemon = makeDaemon(store, tmp, undefined);
+    daemon = makeDaemon(store, undefined);
     await daemon.start();
 
-    // No watchdog → no boot-seed of heartbeats by the watchdog wiring.
-    // (Loops still tick at runtime, but at apiPort:0 / pollInterval 60s nothing
-    // has ticked yet on this synchronous start path.)
     expect(daemon.getShutdownState()).toBe('running');
 
     await daemon.stop();
