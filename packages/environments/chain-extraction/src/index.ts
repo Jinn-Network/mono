@@ -64,6 +64,20 @@ export {
 } from "./budget.js";
 
 export {
+  STATE_ARTIFACT_FORMAT,
+  StateArtifactAccountSchema,
+  StateArtifactSchema,
+  mergeIntoStateArtifact,
+  parseStateArtifact,
+  serializeStateArtifact,
+  stateArtifactDigest,
+  stateArtifactEntryCount,
+  stateArtifactKeySet,
+  type StateArtifact,
+  type StateArtifactAccount,
+} from "./artifact.js";
+
+export {
   asChainStateBackend,
   type ArchiveAccountProof,
   type ArchiveAccountState,
