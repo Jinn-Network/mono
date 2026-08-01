@@ -109,7 +109,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import {
   createBaseVenue,
@@ -869,6 +869,9 @@ export async function buildOperatorComposition(
   // before `buildProjector` (finding E35): the projector's dispatch-context resolver reads back
   // through this SAME ledger instance.
   const engagementLedger = new EngagementLedger(input.store);
+
+  // C2: venue-base refuses ambient filesystem authority; tier-4 composition prepares the path.
+  await mkdir(dirname(input.venueStateDbPath), { recursive: true });
 
   // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
   // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding

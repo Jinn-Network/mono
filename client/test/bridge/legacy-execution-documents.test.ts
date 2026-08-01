@@ -172,4 +172,33 @@ describe('synthesizeLegacyExecutionDocuments (E41 bridge-era execution documents
     }
     expect(thrown).toBeUndefined();
   });
+
+  it('accepts millisecond submissionDeadlineTs from jinn tasks submit (stage-1 closed-loop)', () => {
+    const nowMs = Date.now();
+    const signed = legacySignedTaskV1({
+      window: { startTs: nowMs - 60_000, endTs: nowMs + 3_600_000 },
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 5,
+        maxClaimsPerOperator: 5,
+        claimLeaseTtlSeconds: 3660,
+        claimWindowStartTs: nowMs - 60_000,
+        claimWindowEndTs: nowMs + 3_600_000,
+        submissionDeadlineTs: nowMs + 3_600_000,
+        requiredVerdicts: 1,
+      },
+      createdAt: nowMs,
+    });
+    const signedBytes = new TextEncoder().encode(JSON.stringify(signed));
+    const { submissionBytes } = synthesizeLegacyExecutionDocuments({
+      task: signed,
+      taskBytes: signedBytes,
+      submissionUri: 'urn:uuid:aaa7eb70-fe0d-1b54-5109-64ddb6c2cf7a',
+      nonce: `0x${'d'.repeat(64)}`,
+      profile,
+    });
+    const reparsed = JSON.parse(new TextDecoder().decode(submissionBytes)) as { deadline: string };
+    expect(Number.isNaN(Date.parse(reparsed.deadline))).toBe(false);
+    expect(Date.parse(reparsed.deadline)).toBeGreaterThan(nowMs);
+  });
 });

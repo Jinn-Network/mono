@@ -96,16 +96,19 @@ export function synthesizeLegacyFactsCard(anchored: {
  * `CreatorLoop` posts sealed TEP Submissions, `resolveTaskProjection` resolves a real Submission
  * on its first attempt and never reaches this fallback.
  */
-/** RFC 3339 deadline for a legacy SignedTaskV1 (seconds in claimPolicy, mixed units in window). */
+/** RFC 3339 deadline for a legacy SignedTaskV1 (claimPolicy / window may use sec or ms). */
+function epochToIso(ts: number): string {
+  // Same heuristic as window.endTs: values past ~2001-09-09 in ms-space are ms.
+  const ms = ts > 1_000_000_000_000 ? ts : ts * 1000;
+  return new Date(ms).toISOString();
+}
+
 function legacyEffectiveDeadline(task: SignedTaskV1): string {
   const submissionDeadlineTs = task.claimPolicy.submissionDeadlineTs;
   if (typeof submissionDeadlineTs === 'number') {
-    return new Date(submissionDeadlineTs * 1000).toISOString();
+    return epochToIso(submissionDeadlineTs);
   }
-  const endTs = task.window.endTs;
-  // Harness/e2e fixtures store millisecond timestamps in `window`; older fixtures use seconds.
-  const endMs = endTs > 1_000_000_000_000 ? endTs : endTs * 1000;
-  return new Date(endMs).toISOString();
+  return epochToIso(task.window.endTs);
 }
 
 export function synthesizeLegacyTaskProjection(input: {

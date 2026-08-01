@@ -2391,7 +2391,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchSignedEnvelopeFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchRawBytesFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
 
     const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));

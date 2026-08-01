@@ -2186,7 +2186,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     composition = await buildOperatorComposition({
       config,
       publicClient,
-      walletClient: masterWallet,
+      // Service Safe is owned by the agent EOA (index N), not the master (index 0).
+      // Passing masterWallet here produces GS026 on every venue claim/Deliver/settle.
+      walletClient: agentClients.walletClient,
       safeAddress,
       mechAddress,
       chain: BASE_SEPOLIA_TODAY,

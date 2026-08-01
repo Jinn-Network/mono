@@ -281,4 +281,20 @@ describe('automatic testnet setup migration', () => {
       currentStakingContract: NEW_STAKING_PROXY,
     }).services).toHaveLength(0);
   });
+
+  it('skips detection when JINN_SKIP_TESTNET_SETUP_MIGRATION=1 (stage-1 closed-loop)', () => {
+    const prev = process.env['JINN_SKIP_TESTNET_SETUP_MIGRATION'];
+    process.env['JINN_SKIP_TESTNET_SETUP_MIGRATION'] = '1';
+    try {
+      expect(detectDeprecatedTestnetSetup({
+        state: legacyState(),
+        chain: 'base-sepolia',
+        stakingMode: 'standard',
+        currentStakingContract: CURRENT_STAKING_PROXY,
+      }).services).toHaveLength(0);
+    } finally {
+      if (prev === undefined) delete process.env['JINN_SKIP_TESTNET_SETUP_MIGRATION'];
+      else process.env['JINN_SKIP_TESTNET_SETUP_MIGRATION'] = prev;
+    }
+  });
 });
