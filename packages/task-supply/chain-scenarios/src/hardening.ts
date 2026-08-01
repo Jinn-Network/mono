@@ -13,6 +13,8 @@ import type {
 } from "./template.js";
 import { buildProbeRoleAddresses } from "./template.js";
 
+type HardeningCandidateSurface = Pick<ChainScenarioCandidate, "predicateDraft" | "roleAddresses">;
+
 function unhardened(message: string): never {
   throw new ScenarioError("unhardened-template", message);
 }
@@ -47,7 +49,7 @@ function findPredicateById(predicates: readonly Predicate[], id: string): Predic
 }
 
 function assertRequiredProtocolEvents(
-  candidate: ChainScenarioCandidate,
+  candidate: HardeningCandidateSurface,
   checklist: HardeningChecklist,
 ): void {
   for (const entry of checklist.requiredProtocolEvents) {
@@ -92,7 +94,7 @@ function forbiddenTargetsCoverRoles(
 }
 
 function assertForbiddenRoutes(
-  candidate: ChainScenarioCandidate,
+  candidate: HardeningCandidateSurface,
   checklist: HardeningChecklist,
 ): void {
   for (const entry of checklist.forbiddenRoutes) {
@@ -111,7 +113,7 @@ function assertForbiddenRoutes(
 }
 
 function assertExcludedSignerRoles(
-  candidate: ChainScenarioCandidate,
+  candidate: HardeningCandidateSurface,
   checklist: HardeningChecklist,
 ): void {
   const signerRoles = candidate.predicateDraft.envelopeTightenings?.signerRoles ?? [];
@@ -125,7 +127,7 @@ function assertExcludedSignerRoles(
 }
 
 function assertTimeAdvancementBound(
-  candidate: ChainScenarioCandidate,
+  candidate: HardeningCandidateSurface,
   checklist: HardeningChecklist,
 ): void {
   const bound = checklist.timeAdvancementBound.maxChainSeconds;
@@ -159,7 +161,7 @@ function assertResidualRisk(checklist: HardeningChecklist): void {
 }
 
 export function assertCandidateHardened(
-  candidate: ChainScenarioCandidate,
+  candidate: HardeningCandidateSurface,
   checklist: HardeningChecklist,
 ): void {
   assertUniquePredicateIds(candidate.predicateDraft.successPredicates, "successPredicates");
@@ -193,6 +195,13 @@ function buildCompatibilityProbe<TParams>(
     recordBytes: new Uint8Array(),
     record: {} as ChainDerivationEnvironment["record"],
     recordDigest: `sha256:${"0".repeat(64)}`,
+    chainRecord: {
+      stateMaterialization: { closureClass: "closed-state", fidelityClass: "local" },
+      capabilityEnvelope: {
+        limits: { maxChainSecondsAdvance: 9_999_999 },
+        signerRoles: [],
+      },
+    } as unknown as ChainDerivationEnvironment["chainRecord"],
     roleAddresses,
   };
   return { params, env };

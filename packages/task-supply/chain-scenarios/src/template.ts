@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CryptoEnvironmentRecord } from "@jinn-network/chain-environment-record";
+import type {
+  ChainEnvironmentRecord,
+  CryptoEnvironmentRecord,
+} from "@jinn-network/chain-environment-record";
 import { z } from "zod";
 
 import type { Sha256Digest } from "./digest.js";
@@ -72,6 +75,8 @@ export interface ChainDerivationEnvironment {
   readonly recordBytes: Uint8Array;
   readonly record: CryptoEnvironmentRecord;
   readonly recordDigest: Sha256Digest;
+  /** The chain world the composite references; compatibility checks read this, not the composite. */
+  readonly chainRecord: ChainEnvironmentRecord;
   readonly roleAddresses: Readonly<Record<string, string>>;
 }
 
@@ -82,10 +87,33 @@ export interface ScenarioLineage {
   readonly environmentRecordDigest: Sha256Digest;
 }
 
-/** Minimal candidate surface for hardening; task 7 extends this with sealed artifacts. */
+export interface ScenarioStatePredicateBlock {
+  readonly environmentRecord: {
+    readonly digest: { readonly sha256: string };
+    readonly mediaType: string;
+    readonly name?: string;
+  };
+  readonly predicateSemanticsVersion: "1";
+  readonly successPredicates: readonly ScenarioPredicate[];
+  readonly safetyConstraints: readonly ScenarioPredicate[];
+  readonly measurements: StatePredicateDraft["measurements"];
+  readonly envelopeTightenings?: Omit<ScenarioEnvelopeTightenings, "signerRoles">;
+  readonly timeout: number;
+}
+
 export interface ChainScenarioCandidate {
+  /** Bare hex — stable identity for pool deduplication. */
+  readonly id: string;
+  readonly lineage: ScenarioLineage;
+  readonly instructions: string;
   readonly predicateDraft: StatePredicateDraft;
+  readonly predicateBlock: ScenarioStatePredicateBlock;
   readonly roleAddresses: Readonly<Record<string, string>>;
+  readonly referenceScript: ReferenceScript;
+  readonly referenceScriptDigest: Sha256Digest;
+  readonly sourceCommitment: Sha256Digest;
+  readonly rights: { readonly sourceLicense: string };
+  readonly timeout: number;
 }
 
 export interface ScenarioTemplate<TParams> {

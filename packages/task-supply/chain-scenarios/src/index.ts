@@ -65,6 +65,14 @@ export {
   assertTemplateHardened,
 } from "./hardening.js";
 export {
+  computeScenarioCommitment,
+  parameterDigest,
+  parameterize,
+  PROMPT_INJECTION_SENTENCE,
+  SCENARIO_COMMITMENT_RULE,
+} from "./parameterize.js";
+export type { ParameterizeDeps } from "./parameterize.js";
+export {
   buildProbeRoleAddresses,
   resolveRoleAddress,
   syntheticProbeAddress,
@@ -76,6 +84,7 @@ export type {
   HardeningChecklist,
   ScenarioEnvelopeTightenings,
   ScenarioLineage,
+  ScenarioStatePredicateBlock,
   ScenarioTemplate,
   StatePredicateDraft,
 } from "./template.js";
