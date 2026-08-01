@@ -103,9 +103,11 @@ function wrapProvisioner(
       if (existsSync(join(paths.input, EVALUATION_CONTEXT_NAME))) return;
       if (subjectResultsCarryGraderOutput(paths.input)) return;
 
+      const familyBlock = specification.familyBlock as DeterministicProcessBlock;
+      const workdirRoot = familyBlock.workspace?.root;
       const result = await containerRuntime.run({
         image: graderImageUri(specification),
-        workdir: (specification.familyBlock as DeterministicProcessBlock).workspace?.root,
+        workdir: typeof workdirRoot === 'string' ? workdirRoot : undefined,
       });
       if (result.exitCode !== 0) {
         throw new Error('grader container produced no output');

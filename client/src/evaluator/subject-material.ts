@@ -80,7 +80,7 @@ export async function acquireSubjectMaterial(
   const deliveryDigest = sha256Digest(deliveryBytes);
   requireDigest(deliveryBytes, deliveryDigest);
 
-  const taskDigest = delivery.task;
+  const taskDigest = delivery.task as `sha256:${string}`;
   const taskBytes = await fetchByDigest(fetcher, taskDigest);
   requireDigest(taskBytes, taskDigest);
 
@@ -105,7 +105,11 @@ export async function acquireSubjectMaterial(
   const evaluationSpecBytes = await fetchByDigest(fetcher, evaluationSpecDigest);
   requireDigest(evaluationSpecBytes, evaluationSpecDigest);
 
-  const results: SubjectMaterial['results'] = [];
+  const results: Array<{
+    name: string;
+    digest: `sha256:${string}`;
+    bytes: Uint8Array;
+  }> = [];
   for (const output of delivery.outputs) {
     const resultDigest = descriptorSha256Digest(output);
     if (resultDigest === undefined) {
