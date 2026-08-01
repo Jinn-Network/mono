@@ -15,6 +15,7 @@ const packages = [
   ['verification', '@jinn-network/environment-verification'],
   ['chain-record', '@jinn-network/chain-environment-record'],
   ['chain-verification', '@jinn-network/chain-environment-verification'],
+  ['chain-extraction', '@jinn-network/chain-state-extraction'],
 ];
 
 const codeEntrypoints = [
@@ -26,6 +27,8 @@ const codeEntrypoints = [
   '@jinn-network/chain-environment-record/testing',
   '@jinn-network/chain-environment-verification',
   '@jinn-network/chain-environment-verification/testing',
+  '@jinn-network/chain-state-extraction',
+  '@jinn-network/chain-state-extraction/testing',
 ];
 
 // `@jinn-network/environment-record` has NO Jinn runtime dependency.
@@ -108,7 +111,28 @@ try {
       + '\n\n'
       + `export type EnvironmentsEntrypoints = [\n${codeEntrypoints
         .map((_, index) => `  typeof Entry${index},`)
-        .join('\n')}\n];\n`,
+        .join('\n')}\n];\n\n`
+      + `import {
+  DEFAULT_MAX_WIDENINGS,
+  MAX_WIDENINGS_CEILING,
+  extractEnvironment,
+  widenAndReverify,
+  type ArchiveRpcPort,
+  type ChainEnvironmentCandidate,
+  type ConvergenceResult,
+  type ExtractionResult,
+} from "@jinn-network/chain-state-extraction";
+
+const ceiling: number = MAX_WIDENINGS_CEILING;
+const widenings: number = DEFAULT_MAX_WIDENINGS;
+export type Port = ArchiveRpcPort;
+export type Candidate = ChainEnvironmentCandidate;
+export type Extract = typeof extractEnvironment extends
+  (...args: never) => Promise<ExtractionResult> ? true : never;
+export type Widen = typeof widenAndReverify extends
+  (...args: never) => Promise<ConvergenceResult> ? true : never;
+export const bounds = { ceiling, widenings };
+`,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
