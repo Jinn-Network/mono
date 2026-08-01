@@ -268,24 +268,12 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     ['dependencies:lodash'],
   );
   assert.deepEqual(
-    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '13.0.1' } }),
-    [],
+    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '12.0.0' } }),
+    ['dependencies:better-sqlite3'],
   );
   assert.deepEqual(
-    exactVersionViolations(
-      { dependencies: { 'better-sqlite3': '12.0.0' } },
-      APPROVED_RUNTIME_DEPENDENCIES,
-      'dependencies',
-    ),
-    ['dependencies:better-sqlite3=12.0.0'],
-  );
-  assert.deepEqual(
-    exactVersionViolations(
-      { dependencies: { 'better-sqlite3': '^12.0.0' } },
-      APPROVED_RUNTIME_DEPENDENCIES,
-      'dependencies',
-    ),
-    ['dependencies:better-sqlite3=^12.0.0'],
+    undeclaredRuntimeDependencies({ dependencies: { 'better-sqlite3': '^12.0.0' } }),
+    ['dependencies:better-sqlite3'],
   );
   assert.deepEqual(
     undeclaredRuntimeDependencies({ optionalDependencies: { zod: '4.4.3' } }),
