@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DerivationLogger, DerivationStrategy, SupplyPool } from "@jinn-network/task-derivation";
-
 import type {
   ChainAdmissionCandidate,
   ChainAdmissionReceiptV1,
   ChainAdmissionRefusalCode,
   ChainAdmissionResult,
-} from "./chain-admission-port-types.js";
+} from "@jinn-network/task-admission";
 import { digestsEqual, type Sha256Digest } from "./digest.js";
 import { ScenarioError, type ScenarioErrorCategory } from "./errors.js";
 import {

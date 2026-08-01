@@ -350,3 +350,5 @@ export function describeTaskAdmissionConformance(
     });
   });
 }
+
+export * from "./chain-testing.js";

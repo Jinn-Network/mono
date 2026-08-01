@@ -4,13 +4,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFilesystemSupplyPool } from "@jinn-network/task-derivation";
+import { goldenChainReceipt } from "@jinn-network/task-admission/testing";
 import { describe, expect, it } from "vitest";
 
 import type {
   ChainAdmissionReceiptV1,
   ChainAdmissionRefusalCode,
   ChainAdmissionResult,
-} from "./chain-admission-port-types.js";
+} from "@jinn-network/task-admission";
 import { lendingLifecycleTemplate } from "./families/lending-lifecycle.js";
 import { createFixtureAddressLedger, type ScenarioAccountPort } from "./fixture-accounts.js";
 import { documentDigest } from "./digest.js";
@@ -52,10 +53,15 @@ function buildStubReceipt(
   overrides: StubChainAdmissionOptions["receiptBindingOverrides"] = {},
 ): ChainAdmissionReceiptV1 {
   const specDigest = documentDigest(request.candidate.evaluationSpecBytes);
+  const referenceScriptDigest = (overrides.referenceScriptDigest
+    ?? request.candidate.referenceScriptDigest) as `sha256:${string}`;
+  const base = goldenChainReceipt();
+  const referenceObservation = {
+    ...base.observations.reference[0]!,
+    appliedScriptDigest: referenceScriptDigest,
+  };
   return {
-    schemaVersion: "https://jinn.network/records/chain-admission-receipt/1",
-    admissionPolicyVersion: "chain-admission-policy/1",
-    family: "state-predicate",
+    ...base,
     issuer: "urn:jinn:test:stub-chain-admission",
     task: {
       documentDigest: (overrides.taskDocumentDigest
@@ -63,14 +69,15 @@ function buildStubReceipt(
       evaluationSpecDigest: (overrides.evaluationSpecDigest ?? specDigest) as `sha256:${string}`,
       statementDigest: request.candidate.statementDigest,
     },
-    referenceScriptDigest: (overrides.referenceScriptDigest
-      ?? request.candidate.referenceScriptDigest) as `sha256:${string}`,
-    observations: { doNothing: [{}, {}], reference: [{}, {}] },
+    referenceScriptDigest,
+    observations: {
+      doNothing: base.observations.doNothing,
+      reference: [referenceObservation, referenceObservation],
+    },
     environment: {
       compositeRecordDigest: (overrides.compositeRecordDigest
         ?? request.environmentCompositeDigest) as `sha256:${string}`,
     },
-    sliceSufficiency: { referenceOutOfSliceReads: 0 },
     evalSemanticsVersion: request.candidate.evalSemanticsVersion,
   };
 }
