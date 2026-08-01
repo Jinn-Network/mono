@@ -150,7 +150,7 @@ export function buildFixturePoolEntry(overrides: { statement?: string } = {}): P
     environmentRecordDigest: env.recordDigest,
     strategyId: IMPORT_STRATEGY_ID,
     provenance: {
-      kind: candidate.provenance.kind,
+      kind: "mined" as const,
       sourceCommitment: computeSourceCommitment(candidate.provenance.upstream, candidate.statement),
       upstream: candidate.provenance.upstream,
     },

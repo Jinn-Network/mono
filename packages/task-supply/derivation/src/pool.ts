@@ -1,19 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from "zod";
-import { canonicalJsonBytes } from "./canonical.js";
-import type { ProvenanceKind } from "./candidate.js";
+import { canonicalJsonBytes, type CanonicalJsonValue } from "./canonical.js";
 import { assertPrefixedDigest, documentDigest, type Sha256Digest } from "./digest.js";
 import { DerivationError } from "./errors.js";
 import type { UpstreamIdentity } from "./source-commitment.js";
 
 export const POOL_ENTRY_SCHEMA_VERSION = 1 as const;
 
-export interface PoolEntryProvenance {
-  readonly kind: ProvenanceKind;
-  readonly sourceCommitment: Sha256Digest;
-  readonly upstream: UpstreamIdentity;
+/** Lineage of a synthetic instance: which template, which parameters, which environment. */
+export interface SyntheticLineage {
+  readonly templateId: string;
+  readonly templateVersion: string;
+  readonly parameterDigest: Sha256Digest;
+  readonly environmentRecordDigest: Sha256Digest;
 }
+
+export type PoolEntryProvenance =
+  | {
+      readonly kind: "mined";
+      readonly sourceCommitment: Sha256Digest;
+      readonly upstream: UpstreamIdentity;
+    }
+  | {
+      readonly kind: "synthetic";
+      readonly sourceCommitment: Sha256Digest;
+      readonly lineage: SyntheticLineage;
+    };
 
 /**
  * What the pool records about a pair. Deliberately absent: any timestamp, any status flag
@@ -48,6 +61,27 @@ export interface SupplyPool {
 
 const PrefixedDigest = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 
+const MinedProvenanceSchema = z.strictObject({
+  kind: z.literal("mined"),
+  sourceCommitment: PrefixedDigest,
+  upstream: z.strictObject({
+    dataset: z.string().min(1),
+    revision: z.string().min(1),
+    instanceId: z.string().min(1),
+  }),
+});
+
+const SyntheticProvenanceSchema = z.strictObject({
+  kind: z.literal("synthetic"),
+  sourceCommitment: PrefixedDigest,
+  lineage: z.strictObject({
+    templateId: z.string().min(1),
+    templateVersion: z.string().min(1),
+    parameterDigest: PrefixedDigest,
+    environmentRecordDigest: PrefixedDigest,
+  }),
+});
+
 export const PoolEntryManifestSchema = z.strictObject({
   schemaVersion: z.literal(POOL_ENTRY_SCHEMA_VERSION),
   taskDigest: PrefixedDigest,
@@ -55,17 +89,32 @@ export const PoolEntryManifestSchema = z.strictObject({
   receiptDigest: PrefixedDigest,
   environmentRecordDigest: PrefixedDigest,
   strategyId: z.string().min(1),
-  provenance: z.strictObject({
-    kind: z.literal("mined"),
-    sourceCommitment: PrefixedDigest,
-    upstream: z.strictObject({
-      dataset: z.string().min(1),
-      revision: z.string().min(1),
-      instanceId: z.string().min(1),
-    }),
-  }),
+  provenance: z.discriminatedUnion("kind", [MinedProvenanceSchema, SyntheticProvenanceSchema]),
   rights: z.strictObject({ sourceLicense: z.string().min(1) }),
 });
+
+function provenanceBody(provenance: PoolEntryProvenance): CanonicalJsonValue {
+  return provenance.kind === "mined"
+    ? {
+        kind: "mined",
+        sourceCommitment: provenance.sourceCommitment,
+        upstream: {
+          dataset: provenance.upstream.dataset,
+          revision: provenance.upstream.revision,
+          instanceId: provenance.upstream.instanceId,
+        },
+      }
+    : {
+        kind: "synthetic",
+        sourceCommitment: provenance.sourceCommitment,
+        lineage: {
+          templateId: provenance.lineage.templateId,
+          templateVersion: provenance.lineage.templateVersion,
+          parameterDigest: provenance.lineage.parameterDigest,
+          environmentRecordDigest: provenance.lineage.environmentRecordDigest,
+        },
+      };
+}
 
 export function poolEntryManifestBytes(summary: PoolEntrySummary): Uint8Array {
   return canonicalJsonBytes({
@@ -75,15 +124,7 @@ export function poolEntryManifestBytes(summary: PoolEntrySummary): Uint8Array {
     receiptDigest: summary.receiptDigest,
     environmentRecordDigest: summary.environmentRecordDigest,
     strategyId: summary.strategyId,
-    provenance: {
-      kind: summary.provenance.kind,
-      sourceCommitment: summary.provenance.sourceCommitment,
-      upstream: {
-        dataset: summary.provenance.upstream.dataset,
-        revision: summary.provenance.upstream.revision,
-        instanceId: summary.provenance.upstream.instanceId,
-      },
-    },
+    provenance: provenanceBody(summary.provenance),
     rights: { sourceLicense: summary.rights.sourceLicense },
   });
 }
@@ -104,15 +145,7 @@ export function poolEntryConflictKeyBytes(summary: PoolEntrySummary): Uint8Array
     evaluationSpecDigest: summary.evaluationSpecDigest,
     environmentRecordDigest: summary.environmentRecordDigest,
     strategyId: summary.strategyId,
-    provenance: {
-      kind: summary.provenance.kind,
-      sourceCommitment: summary.provenance.sourceCommitment,
-      upstream: {
-        dataset: summary.provenance.upstream.dataset,
-        revision: summary.provenance.upstream.revision,
-        instanceId: summary.provenance.upstream.instanceId,
-      },
-    },
+    provenance: provenanceBody(summary.provenance),
     rights: { sourceLicense: summary.rights.sourceLicense },
   });
 }

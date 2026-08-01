@@ -228,7 +228,7 @@ export async function runDerivation<TInputs>(
         environmentRecordDigest: env.recordDigest,
         strategyId: strategy.id,
         provenance: {
-          kind: candidate.provenance.kind,
+          kind: "mined" as const,
           sourceCommitment: computeSourceCommitment(
             candidate.provenance.upstream,
             candidate.statement,
