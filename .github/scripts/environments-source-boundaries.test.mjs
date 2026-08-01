@@ -114,6 +114,7 @@ const CHAIN_VERIFICATION_FILESYSTEM_SOURCES = [
   'chain-verification/src/staged-state-store.test.ts',
   'chain-verification/src/testing.test.ts',
   'chain-verification/src/bounded-claims.test.ts',
+  'chain-verification/src/fixture-keys.test.ts',
   'chain-verification/src/ports.test.ts',
 ];
 // Finding F-CE3-7: design §10's caveats are measured against a real pinned Anvil, which needs

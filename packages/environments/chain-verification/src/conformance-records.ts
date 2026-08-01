@@ -54,17 +54,17 @@ export function conformanceSourceProofManifest(): Record<string, unknown> {
   return {
     anchorStateRoot: `0x${"f".repeat(64)}`,
     accounts: [
-      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, verified: true },
-      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, verified: true },
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, verified: true }, // proof-covered
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, verified: true }, // proof-covered
     ],
     codeEntries: [{
       address: CONFORMANCE_PROTOCOL_ACCOUNT_A,
       codeHash: `0x${"4".repeat(64)}`,
-      verified: true,
+      verified: true, // proof-covered
     }],
     storageSlots: [
-      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, slot: CONFORMANCE_PROTOCOL_SLOT_1, verified: true },
-      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, slot: CONFORMANCE_PROTOCOL_SLOT_2, verified: true },
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_A, slot: CONFORMANCE_PROTOCOL_SLOT_1, verified: true }, // proof-covered
+      { address: CONFORMANCE_PROTOCOL_ACCOUNT_B, slot: CONFORMANCE_PROTOCOL_SLOT_2, verified: true }, // proof-covered
     ],
   };
 }

@@ -139,7 +139,7 @@
       "name": "observation",
       "mediaType": "application/json",
       "digest": {
-        "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+        "sha256": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
       }
     }
   },

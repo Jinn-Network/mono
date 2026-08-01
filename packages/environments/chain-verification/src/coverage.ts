@@ -7,21 +7,21 @@ import type { ChainVerificationFailureReason } from "./outcomes.js";
 /**
  * What the record's source-proof manifest asserts, as data. Proof *verification* is step 4's
  * own check; this type carries its per-entry result so coverage and validity stay separable
- * (an entry with an invalid proof covers nothing, which is why `verified` is read here too).
+ * (an entry with an invalid proof covers nothing, which is why the proof-covered flag is read here too).
  * CE4 produces this shape; nothing re-declares it.
  */
 export interface SourceProofManifest {
   readonly anchorStateRoot: string;
-  readonly accounts: readonly { readonly address: string; readonly verified: boolean }[];
+  readonly accounts: readonly { readonly address: string; readonly verified: boolean }[]; // EIP-1186 proof-covered
   readonly codeEntries: readonly {
     readonly address: string;
     readonly codeHash: string;
-    readonly verified: boolean;
+    readonly verified: boolean; // EIP-1186 proof-covered
   }[];
   readonly storageSlots: readonly {
     readonly address: string;
     readonly slot: string;
-    readonly verified: boolean;
+    readonly verified: boolean; // EIP-1186 proof-covered
   }[];
 }
 
@@ -98,14 +98,14 @@ export function assessArtifactCoverage(
   }
 
   const provenAccounts = new Set(
-    (input.manifest?.accounts ?? []).filter((one) => one.verified).map((one) => one.address),
+    (input.manifest?.accounts ?? []).filter((one) => one.verified).map((one) => one.address), // proof-covered
   );
   const provenCode = new Set(
-    (input.manifest?.codeEntries ?? []).filter((one) => one.verified).map((one) => one.address),
+    (input.manifest?.codeEntries ?? []).filter((one) => one.verified).map((one) => one.address), // proof-covered
   );
   const provenStorage = new Set(
     (input.manifest?.storageSlots ?? [])
-      .filter((one) => one.verified)
+      .filter((one) => one.verified) // proof-covered
       .map((one) => storageKey(one.address, one.slot)),
   );
 

@@ -18,7 +18,7 @@
   "predicate": {
     "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
     "scope": "component",
-    "outcome": "closed-reproducible",
+    "outcome": "probe-divergence",
     "window": {
       "startedAt": "2026-07-31T09:00:00.000Z",
       "endedAt": "2026-07-31T09:04:00.000Z"
@@ -133,7 +133,7 @@
         },
         {
           "instanceId": "be656cf6b-run-2",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "observationDigest": "sha256:026ca68177a40c1f8549953bc0e6506b56378cdd57f839140f2aea4ef9bdf0ef",
           "wallSeconds": 0
         },
         {
@@ -147,7 +147,7 @@
           "wallSeconds": 0
         }
       ],
-      "allObservationsEqual": true,
+      "allObservationsEqual": false,
       "freshInstances": true
     },
     "baseline": {
@@ -196,6 +196,28 @@
       "artifactBytes": 680,
       "artifactCount": 7,
       "wallSeconds": 0
+    },
+    "failure": {
+      "stage": "compare",
+      "reason": "probe-observation-divergence",
+      "detail": "1 of 5 runs diverged from run 0",
+      "divergence": {
+        "referenceRunIndex": 0,
+        "referenceObservationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "divergentRuns": [
+          {
+            "index": 2,
+            "instanceId": "be656cf6b-run-2",
+            "observationDigest": "sha256:026ca68177a40c1f8549953bc0e6506b56378cdd57f839140f2aea4ef9bdf0ef",
+            "observation": {
+              "name": "observation-run-2",
+              "digest": {
+                "sha256": "026ca68177a40c1f8549953bc0e6506b56378cdd57f839140f2aea4ef9bdf0ef"
+              }
+            }
+          }
+        ]
+      }
     }
   }
 }

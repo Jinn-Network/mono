@@ -165,14 +165,31 @@
         "egress": "denied",
         "dns": "absent",
         "archiveRpc": "unreachable",
-        "forkBackend": "absent"
+        "forkBackend": "present"
       },
-      "closureEvidenceMode": "sealed-boundary",
-      "boundaryProbe": {
-        "probeId": "out-of-slice-read",
-        "readsEmptyOutsideSlice": true
-      },
-      "egressAttempts": [],
+      "closureEvidenceMode": "fork-backend-refusal",
+      "egressAttempts": [
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "refused"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "refused"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "refused"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "refused"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "refused"
+        }
+      ],
       "forbiddenProbes": [],
       "signerScope": {
         "declaredRoles": [

@@ -18,7 +18,7 @@
   "predicate": {
     "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
     "scope": "component",
-    "outcome": "closed-reproducible",
+    "outcome": "offline-dependency-detected",
     "window": {
       "startedAt": "2026-07-31T09:00:00.000Z",
       "endedAt": "2026-07-31T09:04:00.000Z"
@@ -117,49 +117,6 @@
         "egressPolicyId": "jinn.egress.blackhole/1"
       }
     },
-    "runs": {
-      "count": 5,
-      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-      "perRun": [
-        {
-          "instanceId": "be656cf6b-run-0",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-1",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-2",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-3",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-4",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        }
-      ],
-      "allObservationsEqual": true,
-      "freshInstances": true
-    },
-    "baseline": {
-      "commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "observation": {
-        "name": "observation",
-        "mediaType": "application/json",
-        "digest": {
-          "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
-        }
-      }
-    },
     "isolation": {
       "networkPolicy": {
         "egress": "denied",
@@ -172,7 +129,28 @@
         "probeId": "out-of-slice-read",
         "readsEmptyOutsideSlice": true
       },
-      "egressAttempts": [],
+      "egressAttempts": [
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "succeeded"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "succeeded"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "succeeded"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "succeeded"
+        },
+        {
+          "target": "https://archive.example/rpc",
+          "outcome": "succeeded"
+        }
+      ],
       "forbiddenProbes": [],
       "signerScope": {
         "declaredRoles": [
@@ -196,6 +174,11 @@
       "artifactBytes": 680,
       "artifactCount": 7,
       "wallSeconds": 0
+    },
+    "failure": {
+      "stage": "isolate",
+      "reason": "egress-succeeded",
+      "detail": "egress to https://archive.example/rpc succeeded"
     }
   }
 }

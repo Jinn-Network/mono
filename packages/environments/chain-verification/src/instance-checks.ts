@@ -74,10 +74,10 @@ export function declaredFixtureMutations(
 
 export function checkRuntimeIdentity(
   record: ChainEnvironmentRecord,
-  verified: VerifiedChainInstance,
+  materialized: VerifiedChainInstance,
 ): { readonly reason: ChainVerificationFailureReason; readonly detail: string } | undefined {
   const declared = record.runtime;
-  const observed = verified.report.runtimeIdentity;
+  const observed = materialized.report.runtimeIdentity;
   if (observed.imageManifestDigest !== declared.image.manifestDigest) {
     return {
       reason: "runtime-image-mismatch",
@@ -113,17 +113,17 @@ export function checkRuntimeIdentity(
 
 export function checkSourceAnchor(
   record: ChainEnvironmentRecord,
-  verified: VerifiedChainInstance,
+  materialized: VerifiedChainInstance,
 ): { readonly reason: ChainVerificationFailureReason; readonly detail: string } | undefined {
   const anchor = record.sourceAnchor;
   if (anchor === undefined) return undefined;
-  if (verified.report.runtimeIdentity.chainId !== anchor.nativeChainId) {
+  if (materialized.report.runtimeIdentity.chainId !== anchor.nativeChainId) {
     return {
       reason: "anchor-block-mismatch",
-      detail: `runtime chain id ${verified.report.runtimeIdentity.chainId} does not match anchor ${anchor.nativeChainId}`,
+      detail: `runtime chain id ${materialized.report.runtimeIdentity.chainId} does not match anchor ${anchor.nativeChainId}`,
     };
   }
-  const observedRoot = verified.report.runtimeIdentity.appliedControls.anchorStateRoot;
+  const observedRoot = materialized.report.runtimeIdentity.appliedControls.anchorStateRoot;
   if (observedRoot !== undefined && observedRoot !== anchor.stateRoot) {
     return {
       reason: "anchor-root-mismatch",
@@ -152,7 +152,7 @@ export function buildEnvironmentObservation(
       finalityPolicy: record.sourceAnchor.finalityPolicy,
       authenticity: record.sourceAnchor.headerProof === undefined
         ? "declared" as const
-        : "header-proven" as const,
+        : "header-proven" as const, // declared-anchor authenticity when header digest is present
     };
   const controls: Record<string, string> = report === undefined
     ? {

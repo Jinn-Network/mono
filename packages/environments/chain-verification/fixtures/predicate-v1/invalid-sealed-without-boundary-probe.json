@@ -151,10 +151,6 @@
       "forkBackend": "absent"
     },
     "closureEvidenceMode": "sealed-boundary",
-    "boundaryProbe": {
-      "probeId": "out-of-slice-read",
-      "readsEmptyOutsideSlice": true
-    },
     "egressAttempts": [],
     "forbiddenProbes": [],
     "signerScope": {

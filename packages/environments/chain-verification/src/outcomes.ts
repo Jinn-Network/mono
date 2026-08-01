@@ -125,7 +125,7 @@ const OUTCOME_BY_REASON: Readonly<
   "runtime-image-mismatch": "runtime-identity-mismatch",
   "runtime-version-mismatch": "runtime-identity-mismatch",
   "runtime-chain-id-mismatch": "runtime-identity-mismatch",
-  // §5.1 step 3 verifies determinism controls as part of runtime identity, and §10 warns that
+  // §5.1 step 3 checks determinism controls as part of runtime identity, and §10 warns that
   // a pinned Anvil may not support every control a record declares. Declaring a control the
   // runtime cannot apply is exactly the over-claim contract 7 exists to stop.
   "determinism-control-unsupported": "runtime-identity-mismatch",

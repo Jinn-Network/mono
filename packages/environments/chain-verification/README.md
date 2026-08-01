@@ -8,8 +8,7 @@ protocol at all.
 
 ## What the attestation claims, exactly
 
-`outcome: "closed-reproducible"` means **K fresh materializations under blackhole produced
-identical canonical observations**, and nothing beyond that sentence. It does not speak to
+`outcome: "closed-reproducible"` means **K fresh materializations under blackhole produced identical canonical observations**, and nothing beyond that sentence. It does not speak to
 task solvability, grader discrimination, protocol security, market realism, source-chain
 fidelity beyond the class the record declares, provider longevity, cross-runtime equivalence,
 or safety outside the sandbox. Those claims have other owners.

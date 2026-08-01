@@ -37,6 +37,18 @@
       }
     },
     {
+      "name": "source-proof-manifest",
+      "digest": {
+        "sha256": "ef6327d4bbd7f70e3690f13b300874eaf479325a1abf763c2d0e9a9007d9bf49"
+      }
+    },
+    {
+      "name": "fixture-coverage-manifest",
+      "digest": {
+        "sha256": "043ce0e7282b37c2e9e552f095f4ab28fd172c8bb1911b90738aeae5135acb55"
+      }
+    },
+    {
       "name": "fixture-0-accounts",
       "digest": {
         "sha256": "c71336b36ad105700ff58f3d3e782891d51add670425da2104c4f107684c7bbb"
@@ -57,7 +69,17 @@
   ],
   "environment": {
     "closureClass": "closed-state",
-    "fidelityClass": "local",
+    "fidelityClass": "anchored-subset",
+    "anchor": {
+      "caip2": "eip155:1",
+      "chainId": 1,
+      "blockNumber": "21000000",
+      "blockHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "stateRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "timestamp": "1735689600",
+      "finalityPolicy": "finalized",
+      "authenticity": "declared"
+    },
     "runtime": {
       "family": "anvil",
       "version": "1.3.7",
@@ -68,7 +90,7 @@
       "evmConfigurationDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "chainId": 1
     },
-    "postFixtureCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "postFixtureCommitment": "0x8888888888888888888888888888888888888888888888888888888888888888",
     "controls": {
       "miningMode": "manual",
       "orderingPolicy": "fifo",
@@ -98,49 +120,12 @@
         "maxExecutionDurationMs": "600000"
       },
       "egressPolicyId": "jinn.egress.blackhole/1"
-    }
-  },
-  "runs": {
-    "count": 5,
-    "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-    "perRun": [
-      {
-        "instanceId": "be656cf6b-run-0",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      },
-      {
-        "instanceId": "be656cf6b-run-1",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      },
-      {
-        "instanceId": "be656cf6b-run-2",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      },
-      {
-        "instanceId": "be656cf6b-run-3",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      },
-      {
-        "instanceId": "be656cf6b-run-4",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      }
-    ],
-    "allObservationsEqual": true,
-    "freshInstances": true
-  },
-  "baseline": {
-    "commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "observation": {
-      "name": "observation",
-      "mediaType": "application/json",
-      "digest": {
-        "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
-      }
+    },
+    "coverage": {
+      "proofCovered": 5,
+      "fixtureDeclared": 1,
+      "uncovered": 1,
+      "mutatesSourceProtocolState": true
     }
   },
   "isolation": {
@@ -153,7 +138,7 @@
     "closureEvidenceMode": "sealed-boundary",
     "boundaryProbe": {
       "probeId": "out-of-slice-read",
-      "readsEmptyOutsideSlice": true
+      "readsEmptyOutsideSlice": false
     },
     "egressAttempts": [],
     "forbiddenProbes": [],
@@ -161,23 +146,20 @@
       "declaredRoles": [
         "agent"
       ],
-      "exposedAccounts": [
-        "0x2f1c6ba4f0d7e4b8c9a3057e61d2b8f4a7c0e913"
-      ],
+      "exposedAccounts": [],
       "unexpectedAccounts": []
     },
-    "resetCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "resolutionLog": {
       "name": "resolution-log",
       "mediaType": "application/json",
       "digest": {
-        "sha256": "0af16376ef8f85e258a41703bd31cf6c0ad5a79018ea14a4d5d113ffd27e63ef"
+        "sha256": "212669aced5616d0e575776cb90f33aa5b8aae9fd5e666202c36515f2fbe4abe"
       }
     }
   },
   "cost": {
-    "artifactBytes": 680,
-    "artifactCount": 7,
+    "artifactBytes": 1544,
+    "artifactCount": 9,
     "wallSeconds": 0
   }
 }

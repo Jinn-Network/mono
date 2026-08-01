@@ -9,8 +9,8 @@
  * What `archive-observed` means, in full: at the recorded time, these providers supplied
  * state consistent with the declared anchor and produced these observations. It does not
  * speak to offline repeatability, provider retention, or durable-pool eligibility.
- * Marketplace supply advertised as re-verifiable evidence MUST reference a `closed-state`
- * record instead, which is why this entry point can never emit `closed-reproducible`.
+ * Marketplace supply advertised as re-verifiable attestation evidence MUST reference a `closed-state`
+ * attestation instead, which is why this entry point can never emit `closed-reproducible`.
  */
 
 import {
@@ -410,7 +410,7 @@ export async function observeArchiveEnvironment(
   if (record.stateMaterialization.closureClass !== "archive-dependent") {
     invalidInput(
       "observeArchiveEnvironment runs the archive-dependent protocol; a closed-state record is "
-      + "verified through verifyChainEnvironment, which makes the stronger claim design §5.1 allows.",
+      + "checked through verifyChainEnvironment, which makes the stronger bounded claim design §5.1 allows.",
     );
   }
   if (options === undefined) {
@@ -591,13 +591,13 @@ async function observeArchive(
           `run ${runIndex}: instance ${instance.instanceId}`,
         );
       }
-      const verified = instance as VerifiedChainInstance;
-      identity ??= verified;
-      egressAttempts = [...egressAttempts, ...verified.report.isolation.egressAttempts];
-      wallSeconds += verified.report.cost.wallSeconds;
+      const materialized = instance as VerifiedChainInstance;
+      identity ??= materialized;
+      egressAttempts = [...egressAttempts, ...materialized.report.isolation.egressAttempts];
+      wallSeconds += materialized.report.cost.wallSeconds;
 
       try {
-        const identityFailure = checkRuntimeIdentity(record, verified);
+        const identityFailure = checkRuntimeIdentity(record, materialized);
         if (identityFailure !== undefined) return fail(identityFailure.reason, identityFailure.detail);
 
         if (coverage === undefined) {
@@ -610,7 +610,7 @@ async function observeArchive(
           }
           coverage = assessArtifactCoverage({
             fidelityClass: record.stateMaterialization.fidelityClass,
-            entries: verified.report.artifactEntries,
+            entries: materialized.report.artifactEntries,
             ...(manifest === undefined ? {} : { manifest }),
             fixtureMutations: declaredFixtureMutations(record, resolution),
             mutatesSourceProtocolState:
@@ -628,20 +628,20 @@ async function observeArchive(
               },
             );
           }
-          const anchorFailure = checkSourceAnchor(record, verified);
+          const anchorFailure = checkSourceAnchor(record, materialized);
           if (anchorFailure !== undefined) return fail(anchorFailure.reason, anchorFailure.detail);
         }
 
-        if (verified.report.postFixtureCommitment
+        if (materialized.report.postFixtureCommitment
           !== record.stateMaterialization.initialStateCommitment) {
           return fail(
             "post-fixture-commitment-mismatch",
-            `run ${runIndex}: instantiated ${verified.report.postFixtureCommitment}, record declares `
+            `run ${runIndex}: instantiated ${materialized.report.postFixtureCommitment}, record declares `
             + `${record.stateMaterialization.initialStateCommitment}`,
           );
         }
 
-        forbiddenProbes = verified.report.isolation.forbiddenProbes
+        forbiddenProbes = materialized.report.isolation.forbiddenProbes
           .map((probe) => ({ ...probe, passed: probe.observedClass === probe.expectedClass }));
         const failedProbe = forbiddenProbes.find((probe) => !probe.passed);
         if (failedProbe !== undefined) {
@@ -651,17 +651,17 @@ async function observeArchive(
             + `${failedProbe.expectedClass}`,
           );
         }
-        const unexpectedAccounts = verified.report.isolation.exposedSignerAccounts
+        const unexpectedAccounts = materialized.report.isolation.exposedSignerAccounts
           .filter((account) => !declaredFixtureAccounts(record).includes(account));
         signerScope = {
           declaredRoles: record.capabilityEnvelope.signerRoles.map((role) => role.role),
-          exposedAccounts: [...verified.report.isolation.exposedSignerAccounts],
+          exposedAccounts: [...materialized.report.isolation.exposedSignerAccounts],
           unexpectedAccounts,
         };
         if (unexpectedAccounts.length > 0) {
           return fail("signer-scope-violation", `run ${runIndex}: ${unexpectedAccounts.join(", ")}`);
         }
-        const unenforced = verified.report.isolation.ceilingChecks.find((one) => !one.enforced);
+        const unenforced = materialized.report.isolation.ceilingChecks.find((one) => !one.enforced);
         if (unenforced !== undefined) {
           return fail("ceiling-not-enforced", `run ${runIndex}: ${unenforced.name}`);
         }

@@ -509,14 +509,14 @@ async function observe(
     if (instance.report === undefined) {
       return fail("materialization-report-absent", `run ${index}: instance ${instance.instanceId}`);
     }
-    const verified = instance as VerifiedChainInstance;
-    identity ??= verified;
-    egressAttempts = [...egressAttempts, ...verified.report.isolation.egressAttempts];
-    loadedResources = [...loadedResources, ...verified.report.loadedResources];
-    wallSeconds += verified.report.cost.wallSeconds;
+    const materialized = instance as VerifiedChainInstance;
+    identity ??= materialized;
+    egressAttempts = [...egressAttempts, ...materialized.report.isolation.egressAttempts];
+    loadedResources = [...loadedResources, ...materialized.report.loadedResources];
+    wallSeconds += materialized.report.cost.wallSeconds;
 
     try {
-      const identityFailure = checkRuntimeIdentity(record, verified);
+      const identityFailure = checkRuntimeIdentity(record, materialized);
       if (identityFailure !== undefined) return fail(identityFailure.reason, identityFailure.detail);
 
       if (coverage === undefined) {
@@ -529,7 +529,7 @@ async function observe(
         }
         coverage = assessArtifactCoverage({
           fidelityClass: record.stateMaterialization.fidelityClass,
-          entries: verified.report.artifactEntries,
+          entries: materialized.report.artifactEntries,
           ...(manifest === undefined ? {} : { manifest }),
           fixtureMutations: declaredFixtureMutations(record, resolution),
           mutatesSourceProtocolState:
@@ -547,20 +547,20 @@ async function observe(
             },
           );
         }
-        const anchorFailure = checkSourceAnchor(record, verified);
+        const anchorFailure = checkSourceAnchor(record, materialized);
         if (anchorFailure !== undefined) return fail(anchorFailure.reason, anchorFailure.detail);
       }
 
-      if (verified.report.postFixtureCommitment
+      if (materialized.report.postFixtureCommitment
         !== record.stateMaterialization.initialStateCommitment) {
         return fail(
           "post-fixture-commitment-mismatch",
-          `run ${index}: instantiated ${verified.report.postFixtureCommitment}, record declares `
+          `run ${index}: instantiated ${materialized.report.postFixtureCommitment}, record declares `
           + `${record.stateMaterialization.initialStateCommitment}`,
         );
       }
 
-      forbiddenProbes = verified.report.isolation.forbiddenProbes
+      forbiddenProbes = materialized.report.isolation.forbiddenProbes
         .map((probe) => ({ ...probe, passed: probe.observedClass === probe.expectedClass }));
       const failedProbe = forbiddenProbes.find((probe) => !probe.passed);
       if (failedProbe !== undefined) {
@@ -570,17 +570,17 @@ async function observe(
           + failedProbe.expectedClass,
         );
       }
-      const unexpectedAccounts = verified.report.isolation.exposedSignerAccounts
+      const unexpectedAccounts = materialized.report.isolation.exposedSignerAccounts
         .filter((account) => !declaredFixtureAccounts(record).includes(account));
       signerScope = {
         declaredRoles: record.capabilityEnvelope.signerRoles.map((role) => role.role),
-        exposedAccounts: [...verified.report.isolation.exposedSignerAccounts],
+        exposedAccounts: [...materialized.report.isolation.exposedSignerAccounts],
         unexpectedAccounts,
       };
       if (unexpectedAccounts.length > 0) {
         return fail("signer-scope-violation", `run ${index}: ${unexpectedAccounts.join(", ")}`);
       }
-      const unenforced = verified.report.isolation.ceilingChecks.find((one) => !one.enforced);
+      const unenforced = materialized.report.isolation.ceilingChecks.find((one) => !one.enforced);
       if (unenforced !== undefined) {
         return fail("ceiling-not-enforced", `run ${index}: ${unenforced.name}`);
       }
@@ -622,9 +622,9 @@ async function observe(
       if (index === 0 && record.verificationContract.resetRequirements.minimumRuns > 0) {
         const postReset = await deps.runtime.materializer.reset(instance, options.signal);
         resetCommitment = postReset;
-        if (postReset !== verified.report.postFixtureCommitment) {
+        if (postReset !== materialized.report.postFixtureCommitment) {
           pendingResetFailure = {
-            detail: `reset produced ${postReset}, baseline is ${verified.report.postFixtureCommitment}`,
+            detail: `reset produced ${postReset}, baseline is ${materialized.report.postFixtureCommitment}`,
           };
         }
       }

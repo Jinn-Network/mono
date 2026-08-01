@@ -1,7 +1,7 @@
 {
   "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
   "scope": "component",
-  "outcome": "closed-reproducible",
+  "outcome": "archive-observed",
   "window": {
     "startedAt": "2026-07-31T09:00:00.000Z",
     "endedAt": "2026-07-31T09:04:00.000Z"
@@ -31,12 +31,6 @@
       }
     },
     {
-      "name": "state-artifact",
-      "digest": {
-        "sha256": "616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
-      }
-    },
-    {
       "name": "fixture-0-accounts",
       "digest": {
         "sha256": "c71336b36ad105700ff58f3d3e782891d51add670425da2104c4f107684c7bbb"
@@ -56,8 +50,18 @@
     }
   ],
   "environment": {
-    "closureClass": "closed-state",
-    "fidelityClass": "local",
+    "closureClass": "archive-dependent",
+    "fidelityClass": "anchored-subset",
+    "anchor": {
+      "caip2": "eip155:1",
+      "chainId": 1,
+      "blockNumber": "21000000",
+      "blockHash": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "stateRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "timestamp": "1735689600",
+      "finalityPolicy": "finalized",
+      "authenticity": "declared"
+    },
     "runtime": {
       "family": "anvil",
       "version": "1.3.7",
@@ -68,11 +72,11 @@
       "evmConfigurationDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
       "chainId": 1
     },
-    "postFixtureCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "postFixtureCommitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "controls": {
       "miningMode": "manual",
       "orderingPolicy": "fifo",
-      "resetMechanism": "fresh-process"
+      "resetMechanism": "snapshot-revert"
     },
     "envelope": {
       "rpcAllowlist": {
@@ -97,7 +101,13 @@
         "maxAggregateGas": "60000000",
         "maxExecutionDurationMs": "600000"
       },
-      "egressPolicyId": "jinn.egress.blackhole/1"
+      "egressPolicyId": "jinn.egress.archive-only/1"
+    },
+    "coverage": {
+      "proofCovered": 0,
+      "fixtureDeclared": 0,
+      "uncovered": 0,
+      "mutatesSourceProtocolState": false
     }
   },
   "runs": {
@@ -105,27 +115,27 @@
     "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
     "perRun": [
       {
-        "instanceId": "be656cf6b-run-0",
+        "instanceId": "3aa3580d1-provider-a-run-0",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       },
       {
-        "instanceId": "be656cf6b-run-1",
+        "instanceId": "3aa3580d1-provider-a-run-1",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       },
       {
-        "instanceId": "be656cf6b-run-2",
+        "instanceId": "3aa3580d1-provider-a-run-2",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       },
       {
-        "instanceId": "be656cf6b-run-3",
+        "instanceId": "3aa3580d1-provider-b-run-0",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       },
       {
-        "instanceId": "be656cf6b-run-4",
+        "instanceId": "3aa3580d1-provider-b-run-1",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       }
@@ -134,7 +144,7 @@
     "freshInstances": true
   },
   "baseline": {
-    "commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "commitment": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "observation": {
       "name": "observation",
       "mediaType": "application/json",
@@ -148,14 +158,31 @@
       "egress": "denied",
       "dns": "absent",
       "archiveRpc": "unreachable",
-      "forkBackend": "absent"
+      "forkBackend": "present"
     },
-    "closureEvidenceMode": "sealed-boundary",
-    "boundaryProbe": {
-      "probeId": "out-of-slice-read",
-      "readsEmptyOutsideSlice": true
-    },
-    "egressAttempts": [],
+    "closureEvidenceMode": "fork-backend-refusal",
+    "egressAttempts": [
+      {
+        "target": "https://archive.example/rpc",
+        "outcome": "refused"
+      },
+      {
+        "target": "https://archive.example/rpc",
+        "outcome": "refused"
+      },
+      {
+        "target": "https://archive.example/rpc",
+        "outcome": "refused"
+      },
+      {
+        "target": "https://archive.example/rpc",
+        "outcome": "refused"
+      },
+      {
+        "target": "https://archive.example/rpc",
+        "outcome": "refused"
+      }
+    ],
     "forbiddenProbes": [],
     "signerScope": {
       "declaredRoles": [
@@ -166,18 +193,35 @@
       ],
       "unexpectedAccounts": []
     },
-    "resetCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "resolutionLog": {
       "name": "resolution-log",
       "mediaType": "application/json",
       "digest": {
-        "sha256": "0af16376ef8f85e258a41703bd31cf6c0ad5a79018ea14a4d5d113ffd27e63ef"
+        "sha256": "58f2d858100212d56f275696d84313768c336f7da467aa1db40a1608ddbf9b0f"
       }
     }
   },
   "cost": {
-    "artifactBytes": 680,
-    "artifactCount": 7,
-    "wallSeconds": 0
-  }
+    "artifactBytes": 583,
+    "artifactCount": 6,
+    "wallSeconds": 0,
+    "rpcCalls": 20,
+    "rpcBytes": 4800
+  },
+  "providers": [
+    {
+      "id": "provider-a",
+      "observedAt": "2026-07-31T09:04:00.000Z",
+      "rpcCalls": 12,
+      "rpcBytes": 2880,
+      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+    },
+    {
+      "id": "provider-b",
+      "observedAt": "2026-07-31T09:04:00.000Z",
+      "rpcCalls": 8,
+      "rpcBytes": 1920,
+      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+    }
+  ]
 }

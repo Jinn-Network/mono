@@ -1,7 +1,7 @@
 {
   "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
   "scope": "component",
-  "outcome": "closed-reproducible",
+  "outcome": "artifact-unavailable",
   "window": {
     "startedAt": "2026-07-31T09:00:00.000Z",
     "endedAt": "2026-07-31T09:04:00.000Z"
@@ -132,16 +132,6 @@
     ],
     "allObservationsEqual": true,
     "freshInstances": true
-  },
-  "baseline": {
-    "commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "observation": {
-      "name": "observation",
-      "mediaType": "application/json",
-      "digest": {
-        "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
-      }
-    }
   },
   "isolation": {
     "networkPolicy": {

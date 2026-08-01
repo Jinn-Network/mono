@@ -173,7 +173,7 @@ export const IsolationEvidenceSchema = z.strictObject({
   networkPolicy: NetworkPolicyObservationSchema,
   closureEvidenceMode: z.enum(CLOSURE_EVIDENCE_MODES),
   /** §4.2's boundary rule as evidence: outside the committed slice, reads are empty. Present
-   * for sealed instances, where no fetch is possible and absence of errors proves nothing. */
+   * for sealed instances, where no fetch is possible and absence of errors is not closure evidence. */
   boundaryProbe: z.strictObject({
     probeId: z.string().min(1),
     readsEmptyOutsideSlice: z.boolean(),

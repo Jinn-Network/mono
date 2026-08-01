@@ -101,7 +101,7 @@
     }
   },
   "runs": {
-    "count": 5,
+    "count": 4,
     "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
     "perRun": [
       {
@@ -121,11 +121,6 @@
       },
       {
         "instanceId": "be656cf6b-run-3",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-        "wallSeconds": 0
-      },
-      {
-        "instanceId": "be656cf6b-run-4",
         "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
         "wallSeconds": 0
       }

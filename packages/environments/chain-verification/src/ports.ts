@@ -81,7 +81,7 @@ export interface ChainRuntime {
 /**
  * The information plane's runtime, injected only when a composite composes information
  * worlds. Absent-and-needed is `verification-infrastructure-failure`, never a silent skip:
- * a composite whose information plane was not exercised has not been verified (E14 sequences
+ * a composite whose information plane was not exercised has not been attested (E14 sequences
  * the chain-only path first, so v1 composites carry an empty `informationWorlds` list and
  * never reach this port).
  */

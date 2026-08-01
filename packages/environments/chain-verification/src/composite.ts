@@ -588,24 +588,24 @@ async function observeComposite(
     if (instance.report === undefined) {
       return fail("materialization-report-absent", `run ${index}: instance ${instance.instanceId}`);
     }
-    const verified = instance as VerifiedChainInstance;
-    identity ??= verified;
-    egressAttempts = [...egressAttempts, ...verified.report.isolation.egressAttempts];
-    loadedResources = [...loadedResources, ...verified.report.loadedResources];
-    wallSeconds += verified.report.cost.wallSeconds;
+    const materialized = instance as VerifiedChainInstance;
+    identity ??= materialized;
+    egressAttempts = [...egressAttempts, ...materialized.report.isolation.egressAttempts];
+    loadedResources = [...loadedResources, ...materialized.report.loadedResources];
+    wallSeconds += materialized.report.cost.wallSeconds;
 
-    if (verified.report.isolation.egressAttempts.some((attempt) => attempt.outcome === "succeeded")) {
+    if (materialized.report.isolation.egressAttempts.some((attempt) => attempt.outcome === "succeeded")) {
       wholeWorldOfflineBoot = false;
     }
 
     try {
-      forbiddenProbes = verified.report.isolation.forbiddenProbes
+      forbiddenProbes = materialized.report.isolation.forbiddenProbes
         .map((probe) => ({ ...probe, passed: probe.observedClass === probe.expectedClass }));
-      const unexpectedAccounts = verified.report.isolation.exposedSignerAccounts
+      const unexpectedAccounts = materialized.report.isolation.exposedSignerAccounts
         .filter((account) => !declaredFixtureAccounts(chainRecord).includes(account));
       signerScope = {
         declaredRoles: chainRecord.capabilityEnvelope.signerRoles.map((role) => role.role),
-        exposedAccounts: [...verified.report.isolation.exposedSignerAccounts],
+        exposedAccounts: [...materialized.report.isolation.exposedSignerAccounts],
         unexpectedAccounts,
       };
 

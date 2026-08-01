@@ -18,7 +18,7 @@
   "predicate": {
     "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
     "scope": "component",
-    "outcome": "closed-reproducible",
+    "outcome": "artifact-unavailable",
     "window": {
       "startedAt": "2026-07-31T09:00:00.000Z",
       "endedAt": "2026-07-31T09:04:00.000Z"
@@ -45,30 +45,6 @@
         "name": "comparator",
         "digest": {
           "sha256": "a827559dbc258e90dc1b0fcde5554b11ac584ddd0d8c90a76315b3b2fd6150a3"
-        }
-      },
-      {
-        "name": "state-artifact",
-        "digest": {
-          "sha256": "616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
-        }
-      },
-      {
-        "name": "fixture-0-accounts",
-        "digest": {
-          "sha256": "c71336b36ad105700ff58f3d3e782891d51add670425da2104c4f107684c7bbb"
-        }
-      },
-      {
-        "name": "fixture-1-addresses",
-        "digest": {
-          "sha256": "84e04892e9f2caeea95223075537060e4fb1d273a95a525f53dc955d92d2074d"
-        }
-      },
-      {
-        "name": "fixture-2-rates",
-        "digest": {
-          "sha256": "398c88ae79a48ac9de7e642a7641e9a37f1ca5bbbacc38605503ebc36ada28d6"
         }
       }
     ],
@@ -117,49 +93,6 @@
         "egressPolicyId": "jinn.egress.blackhole/1"
       }
     },
-    "runs": {
-      "count": 5,
-      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-      "perRun": [
-        {
-          "instanceId": "be656cf6b-run-0",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-1",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-2",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-3",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        },
-        {
-          "instanceId": "be656cf6b-run-4",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
-          "wallSeconds": 0
-        }
-      ],
-      "allObservationsEqual": true,
-      "freshInstances": true
-    },
-    "baseline": {
-      "commitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-      "observation": {
-        "name": "observation",
-        "mediaType": "application/json",
-        "digest": {
-          "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
-        }
-      }
-    },
     "isolation": {
       "networkPolicy": {
         "egress": "denied",
@@ -170,7 +103,7 @@
       "closureEvidenceMode": "sealed-boundary",
       "boundaryProbe": {
         "probeId": "out-of-slice-read",
-        "readsEmptyOutsideSlice": true
+        "readsEmptyOutsideSlice": false
       },
       "egressAttempts": [],
       "forbiddenProbes": [],
@@ -178,24 +111,26 @@
         "declaredRoles": [
           "agent"
         ],
-        "exposedAccounts": [
-          "0x2f1c6ba4f0d7e4b8c9a3057e61d2b8f4a7c0e913"
-        ],
+        "exposedAccounts": [],
         "unexpectedAccounts": []
       },
-      "resetCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "resolutionLog": {
         "name": "resolution-log",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "0af16376ef8f85e258a41703bd31cf6c0ad5a79018ea14a4d5d113ffd27e63ef"
+          "sha256": "58ffbb9029e6bd47d86d8473023e2716ba96304da8b8c8db8418d701c9ba3b9a"
         }
       }
     },
     "cost": {
-      "artifactBytes": 680,
-      "artifactCount": 7,
+      "artifactBytes": 282,
+      "artifactCount": 3,
       "wallSeconds": 0
+    },
+    "failure": {
+      "stage": "resolve",
+      "reason": "resource-unresolvable",
+      "detail": "state-artifact (sha256:616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c): artifact unavailable for sha256:616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
     }
   }
 }

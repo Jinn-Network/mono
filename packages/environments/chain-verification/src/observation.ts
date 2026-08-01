@@ -62,7 +62,7 @@ export type TouchedStateEntry = z.infer<typeof TouchedStateEntrySchema>;
 
 /** One resolved `callResult` / `reportedValue.groundTruth` read (ruling CR6). */
 export const StateReadOutcomeSchema = z.strictObject({
-  /** CE2's derived key. CE3 re-derives it identically; the equivalence fixture proves it. */
+  /** CE2's derived key. CE3 re-derives it identically; the equivalence fixture matches the digest. */
   key: z.string().min(1),
   /** Which world the read was executed against. Baseline reads are the pre-replay ground truth
    * the design's `reportedValue` rule depends on; mis-tagging one re-opens the gaming case. */

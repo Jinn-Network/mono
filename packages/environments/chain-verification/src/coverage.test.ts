@@ -20,11 +20,11 @@ function input(overrides: Record<string, unknown> = {}) {
     },
     manifest: {
       anchorStateRoot: `0x${"3".repeat(64)}`,
-      accounts: [{ address: AAVE, verified: true }, { address: ORACLE, verified: true }],
-      codeEntries: [{ address: AAVE, codeHash: `0x${"4".repeat(64)}`, verified: true }],
+      accounts: [{ address: AAVE, verified: true }, { address: ORACLE, verified: true }], // proof-covered
+      codeEntries: [{ address: AAVE, codeHash: `0x${"4".repeat(64)}`, verified: true }], // proof-covered
       storageSlots: [
-        { address: AAVE, slot: SLOT_1, verified: true },
-        { address: ORACLE, slot: SLOT_2, verified: true },
+        { address: AAVE, slot: SLOT_1, verified: true }, // proof-covered
+        { address: ORACLE, slot: SLOT_2, verified: true }, // proof-covered
       ],
     },
     fixtureMutations: [
@@ -44,7 +44,7 @@ describe("E13 artifact coverage", () => {
   });
 
   it("catches the tampered slot that no other check would see", () => {
-    // The forged-slice gap, exactly: real code and real storage proven, plus one extra slot
+    // The forged-slice gap, exactly: real code and real storage proof-covered, plus one extra slot
     // that the manifest never mentions and no fixture declares.
     const tampered = input({
       entries: {
@@ -79,8 +79,8 @@ describe("E13 artifact coverage", () => {
       manifest: {
         ...input().manifest,
         storageSlots: [
-          { address: AAVE, slot: SLOT_1, verified: true },
-          { address: ORACLE, slot: SLOT_2, verified: false },
+          { address: AAVE, slot: SLOT_1, verified: true }, // proof-covered
+          { address: ORACLE, slot: SLOT_2, verified: false }, // proof-covered flag off
         ],
       },
     }));

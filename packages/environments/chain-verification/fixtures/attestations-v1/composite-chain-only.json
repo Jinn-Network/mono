@@ -2,22 +2,22 @@
   "_type": "https://in-toto.io/Statement/v1",
   "subject": [
     {
-      "name": "environment",
+      "name": "crypto-environment",
       "digest": {
-        "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+        "sha256": "c938bb85daf9fb99cb5d3a31761e7e296eb9fd2bc860360006e57a95702c760d"
       }
     },
     {
-      "name": "state-artifact",
+      "name": "chain-world",
       "digest": {
-        "sha256": "616469ef4f320648a75973d91ae7145a761048c67a039c19892b39d9b859e52c"
+        "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
       }
     }
   ],
   "predicateType": "https://jinn.network/attestations/chain-environment-verification/v1",
   "predicate": {
     "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
-    "scope": "component",
+    "scope": "composite",
     "outcome": "closed-reproducible",
     "window": {
       "startedAt": "2026-07-31T09:00:00.000Z",
@@ -29,6 +29,12 @@
       "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
     },
     "materials": [
+      {
+        "name": "chain-world-record",
+        "digest": {
+          "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+        }
+      },
       {
         "name": "materializer",
         "digest": {
@@ -119,31 +125,31 @@
     },
     "runs": {
       "count": 5,
-      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+      "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
       "perRun": [
         {
-          "instanceId": "be656cf6b-run-0",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "instanceId": "c938bb85d-run-0",
+          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
           "wallSeconds": 0
         },
         {
-          "instanceId": "be656cf6b-run-1",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "instanceId": "c938bb85d-run-1",
+          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
           "wallSeconds": 0
         },
         {
-          "instanceId": "be656cf6b-run-2",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "instanceId": "c938bb85d-run-2",
+          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
           "wallSeconds": 0
         },
         {
-          "instanceId": "be656cf6b-run-3",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "instanceId": "c938bb85d-run-3",
+          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
           "wallSeconds": 0
         },
         {
-          "instanceId": "be656cf6b-run-4",
-          "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+          "instanceId": "c938bb85d-run-4",
+          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
           "wallSeconds": 0
         }
       ],
@@ -156,7 +162,7 @@
         "name": "observation",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+          "sha256": "ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670"
         }
       }
     },
@@ -183,19 +189,36 @@
         ],
         "unexpectedAccounts": []
       },
-      "resetCommitment": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "resolutionLog": {
         "name": "resolution-log",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "0af16376ef8f85e258a41703bd31cf6c0ad5a79018ea14a4d5d113ffd27e63ef"
+          "sha256": "6def0b6f6e8ad73fa7cca6d6cd7ec3bc1aeda11ae3b2f11dbd578840d60aa24f"
         }
       }
     },
     "cost": {
-      "artifactBytes": 680,
-      "artifactCount": 7,
+      "artifactBytes": 5355,
+      "artifactCount": 8,
       "wallSeconds": 0
+    },
+    "composition": {
+      "routing": [],
+      "collisions": [],
+      "missPolicy": "declared-miss-response",
+      "allowlistedOrigins": [],
+      "requestBudget": {
+        "requests": 0,
+        "bytes": 0,
+        "enforced": true
+      },
+      "components": [
+        {
+          "role": "chain-world",
+          "record": "sha256:be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+        }
+      ],
+      "wholeWorldOfflineBoot": true
     }
   }
 }

@@ -1,7 +1,7 @@
 {
   "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
   "scope": "component",
-  "outcome": "closed-reproducible",
+  "outcome": "capability-mismatch",
   "window": {
     "startedAt": "2026-07-31T09:00:00.000Z",
     "endedAt": "2026-07-31T09:04:00.000Z"
@@ -179,5 +179,10 @@
     "artifactBytes": 680,
     "artifactCount": 7,
     "wallSeconds": 0
+  },
+  "failure": {
+    "stage": "resolve",
+    "reason": "artifact-entry-uncovered",
+    "detail": "forged mismatch fixture"
   }
 }
