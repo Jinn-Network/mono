@@ -2,10 +2,9 @@
 
 // The one durable state file every venue adapter shares. Its location is a host parameter
 // (`BaseVenueConfig.stateDbPath`) -- this package never derives a path from the environment or
-// a home directory. WAL + synchronous=FULL matches the stack's SQLite precedent
-// (`packages/evidence/catalog-sqlite/src/database.ts`).
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+// a home directory, and never performs ambient filesystem setup (custody law C2). The host must
+// ensure the parent directory exists before calling `openVenueState`. WAL + synchronous=FULL
+// matches the stack's SQLite precedent (`packages/evidence/catalog-sqlite/src/database.ts`).
 import Database from "better-sqlite3";
 import { SCHEMA_SQL, VENUE_STATE_SCHEMA_VERSION } from "./schema.js";
 
@@ -45,7 +44,6 @@ function readSchemaVersion(db: Database.Database): number | undefined {
 
 /** Opens (creating if absent) the venue state file. Idempotent; safe to call on every boot. */
 export function openVenueState(stateDbPath: string): VenueStateDatabase {
-  mkdirSync(dirname(stateDbPath), { recursive: true });
   const db = new Database(stateDbPath);
   try {
     applyPragmas(db);
