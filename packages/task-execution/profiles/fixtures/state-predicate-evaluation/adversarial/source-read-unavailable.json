@@ -1,0 +1,82 @@
+{
+  "input": {
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        {
+          "kind": "sourceValue",
+          "world": "corpus-world",
+          "requestKey": "rate-feed",
+          "selector": "value",
+          "cmp": "eq",
+          "value": "0.05"
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600
+    },
+    "observation": {
+      "observationVersion": "1",
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"],
+      "replay": { "status": "completed" },
+      "timeline": {
+        "initialBlockNumber": "100",
+        "initialChainTimestamp": "1700000000",
+        "finalStateChangingBlockNumber": "100",
+        "finalStateChangingChainTimestamp": "1700000000"
+      },
+      "transactions": [],
+      "blocks": [
+        {
+          "number": "100",
+          "timestamp": "1700000000",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "touchedState": [],
+      "traceProjectionDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalStateCommitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "errorClasses": [],
+      "stateReads": [],
+      "sourceReads": [
+        {
+          "key": "source|corpus-world|rate-feed|value",
+          "resolution": "unavailable"
+        }
+      ],
+      "sourceConsultations": [],
+      "reports": []
+    }
+  },
+  "expect": {
+    "resolvedAgainst": {
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"]
+    },
+    "successPredicatesSatisfied": false,
+    "safetyConstraintsViolated": false,
+    "unevaluable": true,
+    "unevaluableReasons": ["source-read-not-projected"],
+    "evaluations": [
+      {
+        "slot": "success",
+        "index": 0,
+        "kind": "sourceValue",
+        "state": "unevaluable",
+        "reason": "source-read-not-projected"
+      }
+    ],
+    "measurements": {
+      "successPredicatesSatisfied": false,
+      "safetyConstraintsViolated": false,
+      "statePredicateUnevaluable": true
+    },
+    "observedStateChangingOperations": 0
+  }
+}

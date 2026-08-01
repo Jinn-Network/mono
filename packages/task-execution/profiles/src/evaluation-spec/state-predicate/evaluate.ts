@@ -15,6 +15,7 @@ import {
   CanonicalChainObservationSchema,
   type CanonicalChainObservation,
 } from "./observation.js";
+import { sourceReadKey, stateReadKey } from "./reads.js";
 import type { Predicate, PredicateComparator, PredicateKind } from "./vocabulary.js";
 
 /** A predicate is `satisfied` or `violated` **against the named information contract**, or
@@ -106,6 +107,13 @@ export function evaluatePredicates(
     evaluations.push(evaluationEntry("safety", index, predicate, result));
   }
 
+  for (const [index, measurement] of b.measurements.entries()) {
+    const result = evaluateMeasurement(o, measurement);
+    if (result === undefined) continue;
+    if (result.reason !== undefined) unevaluableReasons.add(result.reason);
+    evaluations.push(evaluationEntry("measurement", index, measurement.observe, result));
+  }
+
   const successEvaluations = evaluations.filter((entry) => entry.slot === "success");
   const safetyEvaluations = evaluations.filter((entry) => entry.slot === "safety");
 
@@ -140,17 +148,18 @@ function bareHex(digest: string): string {
 }
 
 function evaluationEntry(
-  slot: "success" | "safety",
+  slot: "success" | "safety" | "measurement",
   index: number,
-  predicate: Predicate,
+  predicate: Predicate | StatePredicateBlock["measurements"][number]["observe"],
   result: EvaluationResult,
 ): PredicateEvaluation {
+  const kind = predicate.kind as PredicateKind;
   return {
     slot,
     index,
-    kind: predicate.kind,
+    kind,
     state: result.state,
-    ...(predicate.label !== undefined ? { label: predicate.label } : {}),
+    ...("label" in predicate && predicate.label !== undefined ? { label: predicate.label } : {}),
     ...(result.reason !== undefined ? { reason: result.reason } : {}),
     ...(result.observed !== undefined ? { observed: result.observed } : {}),
     ...(result.expected !== undefined ? { expected: result.expected } : {}),
@@ -273,19 +282,237 @@ function evaluatePredicate(
     case "timeBound":
       return evaluateTimeBound(observation, predicate);
     case "nativeBalance":
+      return evaluateNativeBalance(observation, predicate);
     case "erc20Balance":
+      return evaluateErc20Balance(observation, predicate);
     case "callResult":
+      return evaluateCallResult(observation, predicate);
     case "storageValue":
-      return { state: "unevaluable", reason: "state-read-not-projected" };
+      return evaluateStorageValue(observation, predicate);
     case "reportedValue":
-      return { state: "unevaluable", reason: "report-missing" };
+      return evaluateReportedValue(observation, predicate);
     case "sourceValue":
-      return { state: "unevaluable", reason: "source-read-not-projected" };
+      return evaluateSourceValue(observation, predicate);
     case "sourceConsulted":
       return { state: "unevaluable", reason: "source-read-not-projected" };
     default:
       return { state: "unevaluable", reason: "state-read-not-projected" };
   }
+}
+
+function evaluateMeasurement(
+  observation: CanonicalChainObservation,
+  measurement: StatePredicateBlock["measurements"][number],
+): EvaluationResult | undefined {
+  if (measurement.observe.kind !== "sourceConsulted") {
+    return undefined;
+  }
+  const observe = measurement.observe;
+  const countCmp = observe.countCmp;
+  if (countCmp === undefined) {
+    return undefined;
+  }
+  const count = observation.sourceConsultations.find(
+    (consultation) => consultation.world === observe.world
+      && consultation.requestKey === observe.requestKey,
+  )?.count ?? "0";
+  const satisfied = compareUint(countCmp.cmp, count, countCmp.value);
+  return {
+    state: satisfied ? "satisfied" : "violated",
+    observed: count,
+    expected: countCmp.value,
+  };
+}
+
+/**
+ * Resolves one projected state read. The `(key, state)` pair is the whole lookup: a read
+ * projected at the OTHER state is not a fallback, it is a miss. This is the mechanism behind
+ * design §6.2's rule that `reportedValue.groundTruth` evaluates against the baseline
+ * (pre-replay) state by default — without it, an agent that moves the value it was asked to
+ * report would be graded against the value it just created.
+ */
+function resolveStateRead(
+  observation: CanonicalChainObservation,
+  key: string,
+  state: "baseline" | "post-replay",
+): { ok: true; value: string } | { ok: false; reason: PredicateUnevaluableReason } {
+  const entry = observation.stateReads.find((read) => read.key === key && read.state === state);
+  if (entry === undefined) return { ok: false, reason: "state-read-not-projected" };
+  if (entry.resolution !== "resolved" || entry.value === undefined) {
+    return { ok: false, reason: "state-read-unavailable" };
+  }
+  return { ok: true, value: entry.value };
+}
+
+function decodeReadValue(
+  word: string,
+  decode: "raw" | "uint256" | "int256",
+): string | undefined {
+  if (decode === "raw") return word;
+  if (decode === "uint256") return decodeUint256(word);
+  return decodeInt256(word);
+}
+
+function evaluateDecodedComparison(
+  observed: string,
+  predicate: {
+    cmp: PredicateComparator;
+    value: string;
+    tolerance?: string;
+  },
+): EvaluationResult {
+  const comparison = compareDecimal(predicate.cmp, observed, predicate.value, predicate.tolerance);
+  if (comparison === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed };
+  }
+  return {
+    state: comparison ? "satisfied" : "violated",
+    observed,
+    expected: predicate.value,
+  };
+}
+
+function evaluateNativeBalance(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "nativeBalance" },
+): EvaluationResult {
+  const resolved = resolveStateRead(
+    observation,
+    stateReadKey({ kind: "nativeBalance", account: predicate.account }),
+    "post-replay",
+  );
+  if (!resolved.ok) return { state: "unevaluable", reason: resolved.reason };
+  const decoded = decodeUint256(resolved.value);
+  if (decoded === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed: resolved.value };
+  }
+  return evaluateDecodedComparison(decoded, predicate);
+}
+
+function evaluateErc20Balance(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "erc20Balance" },
+): EvaluationResult {
+  const resolved = resolveStateRead(
+    observation,
+    stateReadKey({ kind: "erc20Balance", token: predicate.token, account: predicate.account }),
+    "post-replay",
+  );
+  if (!resolved.ok) return { state: "unevaluable", reason: resolved.reason };
+  const decoded = decodeUint256(resolved.value);
+  if (decoded === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed: resolved.value };
+  }
+  return evaluateDecodedComparison(decoded, predicate);
+}
+
+function evaluateCallResult(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "callResult" },
+): EvaluationResult {
+  const resolved = resolveStateRead(
+    observation,
+    stateReadKey({ kind: "call", to: predicate.to, call: predicate.call }),
+    "post-replay",
+  );
+  if (!resolved.ok) return { state: "unevaluable", reason: resolved.reason };
+  const decoded = decodeReadValue(resolved.value, predicate.decode);
+  if (decoded === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed: resolved.value };
+  }
+  return evaluateDecodedComparison(decoded, predicate);
+}
+
+function evaluateStorageValue(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "storageValue" },
+): EvaluationResult {
+  const resolved = resolveStateRead(
+    observation,
+    stateReadKey({ kind: "storageValue", address: predicate.address, slot: predicate.slot }),
+    "post-replay",
+  );
+  if (!resolved.ok) return { state: "unevaluable", reason: resolved.reason };
+  const decoded = decodeReadValue(resolved.value, predicate.decode);
+  if (decoded === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed: resolved.value };
+  }
+  return evaluateDecodedComparison(decoded, predicate);
+}
+
+function evaluateReportedValue(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "reportedValue" },
+): EvaluationResult {
+  const report = observation.reports.find((entry) => entry.name === predicate.name);
+  if (report === undefined) {
+    return { state: "unevaluable", reason: "report-missing" };
+  }
+  const groundTruthState = predicate.groundTruthState ?? "baseline";
+  const resolved = resolveStateRead(
+    observation,
+    stateReadKey({
+      kind: "call",
+      to: predicate.groundTruth.to,
+      call: predicate.groundTruth.call,
+    }),
+    groundTruthState,
+  );
+  if (!resolved.ok) return { state: "unevaluable", reason: resolved.reason };
+  const groundTruth = decodeReadValue(resolved.value, predicate.groundTruth.decode);
+  if (groundTruth === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed: resolved.value };
+  }
+  const observed = typeof report.value === "boolean" ? String(report.value) : report.value;
+  const comparison = compareDecimal(predicate.cmp, observed, groundTruth, predicate.tolerance);
+  if (comparison === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed, expected: groundTruth };
+  }
+  return {
+    state: comparison ? "satisfied" : "violated",
+    observed,
+    expected: groundTruth,
+  };
+}
+
+function evaluateSourceValue(
+  observation: CanonicalChainObservation,
+  predicate: Predicate & { kind: "sourceValue" },
+): EvaluationResult {
+  const key = sourceReadKey({
+    world: predicate.world,
+    requestKey: predicate.requestKey,
+    selector: predicate.selector,
+  });
+  const entry = observation.sourceReads.find((read) => read.key === key);
+  if (entry === undefined) {
+    return { state: "unevaluable", reason: "source-read-not-projected" };
+  }
+  if (entry.resolution === "miss") {
+    return { state: "violated", reason: "source-miss" };
+  }
+  if (entry.resolution !== "resolved" || entry.value === undefined) {
+    return { state: "unevaluable", reason: "source-read-not-projected" };
+  }
+  const observed = entry.value;
+  const expected = predicate.value;
+  if (typeof observed === "boolean" || typeof expected === "boolean") {
+    const satisfied = observed === expected;
+    return {
+      state: satisfied ? "satisfied" : "violated",
+      observed,
+      expected,
+    };
+  }
+  const comparison = compareDecimal(predicate.cmp, observed, expected, predicate.tolerance);
+  if (comparison === undefined) {
+    return { state: "unevaluable", reason: "value-not-decodable", observed, expected };
+  }
+  return {
+    state: comparison ? "satisfied" : "violated",
+    observed,
+    expected,
+  };
 }
 
 function evaluateEventEmitted(

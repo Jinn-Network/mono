@@ -1,0 +1,108 @@
+{
+  "input": {
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        {
+          "kind": "reportedValue",
+          "name": "balance",
+          "cmp": "eq",
+          "value": "1000",
+          "groundTruth": {
+            "to": "0x00000000000000000000000000000000000000aa",
+            "call": {
+              "abiRef": {
+                "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+              },
+              "function": "balanceOf(address)",
+              "args": [{ "type": "address", "value": "0x0000000000000000000000000000000000000002" }]
+            },
+            "decode": "uint256"
+          }
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [],
+      "timeout": 600
+    },
+    "observation": {
+      "observationVersion": "1",
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"],
+      "replay": { "status": "completed" },
+      "timeline": {
+        "initialBlockNumber": "100",
+        "initialChainTimestamp": "1700000000",
+        "finalStateChangingBlockNumber": "101",
+        "finalStateChangingChainTimestamp": "1700000060"
+      },
+      "transactions": [
+        {
+          "index": "0",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "from": "0x0000000000000000000000000000000000000001",
+          "to": "0x00000000000000000000000000000000000000aa",
+          "valueWei": "0",
+          "status": "success",
+          "gasUsed": "21000",
+          "returnData": "0x",
+          "logs": [],
+          "blockNumber": "101",
+          "blockTimestamp": "1700000060"
+        }
+      ],
+      "blocks": [
+        {
+          "number": "101",
+          "timestamp": "1700000060",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        }
+      ],
+      "touchedState": [],
+      "traceProjectionDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalStateCommitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "errorClasses": [],
+      "stateReads": [
+        {
+          "key": "call|0x00000000000000000000000000000000000000aa|abi|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa|balanceOf(address)|address:0x0000000000000000000000000000000000000002",
+          "state": "baseline",
+          "resolution": "resolved",
+          "value": "0x00000000000000000000000000000000000000000000000000000000000003e8"
+        }
+      ],
+      "sourceReads": [],
+      "sourceConsultations": [],
+      "reports": [{ "name": "balance", "value": "1000" }]
+    }
+  },
+  "expect": {
+    "resolvedAgainst": {
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"]
+    },
+    "successPredicatesSatisfied": true,
+    "safetyConstraintsViolated": false,
+    "unevaluable": false,
+    "unevaluableReasons": [],
+    "evaluations": [
+      {
+        "slot": "success",
+        "index": 0,
+        "kind": "reportedValue",
+        "state": "satisfied",
+        "observed": "1000",
+        "expected": "1000"
+      }
+    ],
+    "measurements": {
+      "successPredicatesSatisfied": true,
+      "safetyConstraintsViolated": false,
+      "statePredicateUnevaluable": false
+    },
+    "observedStateChangingOperations": 1
+  }
+}
