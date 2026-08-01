@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
 import type { VerdictObservationGateInput } from '@jinn-network/marketplace-binding';
@@ -7,6 +8,8 @@ import {
   EVALUATION_SPEC_FORMAT_URI,
   parseEvaluationSpec,
   sealEvaluationSpec,
+  deriveEvaluationTask,
+  buildEvaluationTaskProfile,
   type EvaluationSpec,
 } from '@jinn-network/task-execution-profiles';
 import {
@@ -14,7 +17,15 @@ import {
   documentDigest,
   sealDelivery,
   sealTask,
+  type TaskSpecification,
 } from '@jinn-network/task-execution-protocol';
+import type { LocalProvisionerInput } from '@jinn-network/task-execution-backend-local';
+import type {
+  CapabilityGrant,
+  TaskView,
+  WorkspacePaths,
+} from '@jinn-network/task-execution-workspace';
+import { GRADER_RESULT_NAME } from '../../src/evaluator/grader-execution.js';
 import type { DsseSigner } from '@jinn-network/trust-core';
 import type { VerdictGateDeps } from '../../src/evaluator/verdict-gate.js';
 import {
@@ -197,3 +208,170 @@ export function withEvaluatorEqualsSolver(
     },
   };
 }
+
+/** Deterministic-process EvaluationSpec for grader-execution provisioner tests. */
+export function deterministicProcessSpec(): EvaluationSpec {
+  return publicSpec();
+}
+
+interface ProvisionFixtureState {
+  readonly provisionerInput: LocalProvisionerInput;
+  readonly view: TaskView;
+  readonly paths: WorkspacePaths;
+  readonly resultsCarryGraderOutput: boolean;
+}
+
+const provisionFixtureByRoot = new Map<string, ProvisionFixtureState>();
+
+function workspacePaths(root: string): WorkspacePaths {
+  return {
+    root,
+    input: join(root, 'input'),
+    work: join(root, 'work'),
+    out: join(root, 'out'),
+    logs: join(root, 'logs'),
+    harnessState: join(root, 'harness-state'),
+    secrets: join(root, 'secrets'),
+    tmp: join(root, 'tmp'),
+    meta: join(root, 'meta'),
+  };
+}
+
+function buildProvisionFixtureState(input: {
+  readonly root: string;
+  readonly spec: EvaluationSpec;
+  readonly resultsCarryGraderOutput?: boolean;
+}): ProvisionFixtureState {
+  const sealedSpec = sealEvaluationSpec(input.spec);
+  const specBytes = sealedSpec.bytes;
+  const graderOutputBytes = new TextEncoder().encode(JSON.stringify({ tests_passed: 3 }));
+  const subjectResultBytes = new TextEncoder().encode('evaluation-fixture-result');
+  const subjectTaskBytes = sealTask({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    profile: {
+      uri: PROFILE_URI,
+      digest: { sha256: PROFILE_DIGEST_HEX },
+    },
+    instructions: 'Evaluation fixture subject task.',
+    outputs: [{ name: 'patch', mediaType: 'text/plain', required: true }],
+    evaluation: {
+      name: 'evaluation-spec.json',
+      digest: { sha256: sealedSpec.digest.slice('sha256:'.length) },
+    },
+  });
+  const deliveryBytes = sealDelivery({
+    protocol: TASK_EXECUTION_PROTOCOL_URI,
+    attempt: 'urn:uuid:00000000-0000-4000-8000-000000000004',
+    task: documentDigest(subjectTaskBytes),
+    outputs: [{
+      name: 'patch',
+      digest: { sha256: documentDigest(subjectResultBytes).slice('sha256:'.length) },
+    }],
+    outcome: 'fulfilled',
+    createdAt: '2026-07-30T00:00:00Z',
+  });
+
+  const subjectResults = input.resultsCarryGraderOutput
+    ? [
+        { name: GRADER_RESULT_NAME, digest: documentDigest(graderOutputBytes) },
+        { name: 'patch', digest: documentDigest(subjectResultBytes) },
+      ]
+    : [{ name: 'patch', digest: documentDigest(subjectResultBytes) }];
+
+  const evaluationTask = deriveEvaluationTask({
+    subjectTask: {
+      name: 'subject-task.json',
+      digest: documentDigest(subjectTaskBytes),
+    },
+    subjectDelivery: {
+      name: 'subject-delivery.json',
+      digest: documentDigest(deliveryBytes),
+    },
+    subjectResults,
+    evaluationSpecDigest: sealedSpec.digest,
+  });
+
+  const taskDocument = evaluationTask.document as TaskSpecification & {
+    readonly inputs: Array<{ readonly name: string; readonly content?: string; readonly digest?: { readonly sha256: string } }>;
+  };
+  const taskInputs = taskDocument.inputs.map((slot) => {
+    if (slot.name === GRADER_RESULT_NAME) {
+      return { ...slot, content: Buffer.from(graderOutputBytes).toString('base64') };
+    }
+    if (slot.name === 'subject-task.json') {
+      return { ...slot, content: Buffer.from(subjectTaskBytes).toString('base64') };
+    }
+    if (slot.name === 'subject-delivery.json') {
+      return { ...slot, content: Buffer.from(deliveryBytes).toString('base64') };
+    }
+    if (slot.name === 'patch') {
+      return { ...slot, content: Buffer.from(subjectResultBytes).toString('base64') };
+    }
+    return slot;
+  });
+
+  const task: TaskSpecification = {
+    ...taskDocument,
+    inputs: [
+      ...taskInputs,
+      {
+        name: 'evaluation-spec.json',
+        digest: { sha256: sealedSpec.digest.slice('sha256:'.length) },
+        content: Buffer.from(specBytes).toString('base64'),
+      },
+    ],
+  };
+
+  const dispatchContextBytes = new TextEncoder().encode(JSON.stringify({
+    taskDigest: evaluationTask.digest,
+    submission: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    nonce: 'evaluation-fixture-nonce',
+    attempt: 'urn:uuid:22222222-2222-4222-8222-222222222222',
+  }));
+
+  const view: TaskView = {
+    task,
+    effectiveRequirements: {},
+    profile: buildEvaluationTaskProfile(),
+  };
+
+  return {
+    provisionerInput: {
+      sealedTaskBytes: evaluationTask.bytes,
+      dispatchContextBytes,
+      task,
+      submission: {
+        submissionUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+        document: {},
+      } as LocalProvisionerInput['submission'],
+      attempt: {
+        attemptUri: 'urn:uuid:22222222-2222-4222-8222-222222222222',
+        nonce: 'evaluation-fixture-nonce',
+        attemptNumber: 1,
+      },
+    },
+    view,
+    paths: workspacePaths(input.root),
+    resultsCarryGraderOutput: input.resultsCarryGraderOutput === true,
+  };
+}
+
+export function provisionInputFixture(input: {
+  readonly root: string;
+  readonly spec: EvaluationSpec;
+  readonly resultsCarryGraderOutput?: boolean;
+}): LocalProvisionerInput {
+  const state = buildProvisionFixtureState(input);
+  provisionFixtureByRoot.set(input.root, state);
+  return state.provisionerInput;
+}
+
+provisionInputFixture.setupArgs = (input: {
+  readonly root: string;
+}): [TaskView, WorkspacePaths, readonly CapabilityGrant[]] => {
+  const state = provisionFixtureByRoot.get(input.root);
+  if (state === undefined) {
+    throw new Error('provisionInputFixture must be called before setupArgs for this root');
+  }
+  return [state.view, state.paths, []];
+};

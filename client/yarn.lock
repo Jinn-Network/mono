@@ -1039,6 +1039,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/attestation-issuer@portal:../packages/evidence/attestation-issuer::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/client@workspace:.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/client@workspace:."
@@ -1070,6 +1084,8 @@ __metadata:
     "@jinn-network/sdk": "portal:../packages/sdk"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
+    "@jinn-network/task-execution-evaluator-adapters": "npm:0.1.0"
     "@jinn-network/task-execution-launchers": "npm:0.1.0"
     "@jinn-network/task-execution-profiles": "npm:0.1.0"
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
@@ -1481,6 +1497,31 @@ __metadata:
   resolution: "@jinn-network/task-execution-backend@portal:../packages/task-execution/backend::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-evaluation-harness@portal:../packages/task-execution/evaluation-harness::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/attestation-issuer": "npm:0.1.0"
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  bin:
+    jinn-evaluation-harness: ./dist/bin.js
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-evaluator-adapters@portal:../packages/task-execution/evaluator-adapters::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-evaluation-harness": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
   languageName: node
   linkType: soft
 

@@ -170,6 +170,7 @@
     "build:stack": "yarn --cwd ../packages/evidence/protocol install --immutable && yarn --cwd ../packages/evidence/protocol build && yarn --cwd ../packages/evidence/repository install --immutable && yarn --cwd ../packages/evidence/repository build && yarn --cwd ../packages/evidence/discovery install --immutable && yarn --cwd ../packages/evidence/discovery build && yarn --cwd ../packages/evidence/catalog-sqlite install --immutable && yarn --cwd ../packages/evidence/catalog-sqlite build && yarn --cwd ../packages/evidence/local-runtime install --immutable && yarn --cwd ../packages/evidence/local-runtime build && yarn --cwd ../packages/evidence/execution-recorder install --immutable && yarn --cwd ../packages/evidence/execution-recorder build && yarn --cwd ../packages/task-execution/protocol install --immutable && yarn --cwd ../packages/task-execution/protocol build && yarn --cwd ../packages/task-execution/backend install --immutable && yarn --cwd ../packages/task-execution/backend build && yarn --cwd ../packages/task-execution/profiles install --immutable && yarn --cwd ../packages/task-execution/profiles build && yarn --cwd ../packages/trust/core install --immutable && yarn --cwd ../packages/trust/core build && yarn --cwd ../packages/trust/resolve install --immutable && yarn --cwd ../packages/trust/resolve build && yarn --cwd ../packages/marketplace/binding install --immutable && yarn --cwd ../packages/marketplace/binding build && yarn --cwd ../packages/task-execution/backend-local/supervisor install --immutable && yarn --cwd ../packages/task-execution/backend-local/supervisor build && yarn --cwd ../packages/task-execution/backend-local/workspace install --immutable && yarn --cwd ../packages/task-execution/backend-local/workspace build && yarn --cwd ../packages/task-execution/backend-local/launchers install --immutable && yarn --cwd ../packages/task-execution/backend-local/launchers build && yarn --cwd ../packages/task-execution/backend-local/assembly install --immutable && yarn --cwd ../packages/task-execution/backend-local/assembly build && yarn --cwd ../packages/marketplace/pipeline install --immutable && yarn --cwd ../packages/marketplace/pipeline build && yarn --cwd ../packages/discovery/protocol install --immutable && yarn --cwd ../packages/discovery/protocol build && yarn --cwd ../packages/discovery/serve install --immutable && yarn --cwd ../packages/discovery/serve build && yarn --cwd ../packages/marketplace/projector install --immutable && yarn --cwd ../packages/marketplace/projector build && yarn --cwd ../packages/marketplace/venue-base install --immutable && yarn --cwd ../packages/marketplace/venue-base build && yarn --cwd ../packages/discovery/client install --immutable && yarn --cwd ../packages/discovery/client build && yarn --cwd ../packages/discovery/facts/task-execution install --immutable && yarn --cwd ../packages/discovery/facts/task-execution build && yarn --cwd ../packages/discovery/transport-http install --immutable && yarn --cwd ../packages/discovery/transport-http build"
   },
   "resolutions": {
+    "@jinn-network/attestation-issuer": "portal:../packages/evidence/attestation-issuer",
     "@jinn-network/core": "portal:../packages/core",
     "@jinn-network/evidence-catalog-sqlite": "portal:../packages/evidence/catalog-sqlite",
     "@jinn-network/evidence-discovery": "portal:../packages/evidence/discovery",
@@ -191,6 +192,8 @@
     "@jinn-network/record-discovery-testing": "portal:../packages/discovery/testing",
     "@jinn-network/record-discovery-serve": "portal:../packages/discovery/serve",
     "@jinn-network/record-discovery-transport-http": "portal:../packages/discovery/transport-http",
+    "@jinn-network/task-execution-evaluator-adapters": "portal:../packages/task-execution/evaluator-adapters",
+    "@jinn-network/task-execution-evaluation-harness": "portal:../packages/task-execution/evaluation-harness",
     "@jinn-network/task-execution-backend": "portal:../packages/task-execution/backend",
     "@jinn-network/task-execution-backend-local": "portal:../packages/task-execution/backend-local/assembly",
     "@jinn-network/task-execution-launchers": "portal:../packages/task-execution/backend-local/launchers",
@@ -232,6 +235,8 @@
     "@jinn-network/record-discovery-transport-http": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-backend-local": "0.1.0",
+    "@jinn-network/task-execution-evaluation-harness": "0.1.0",
+    "@jinn-network/task-execution-evaluator-adapters": "0.1.0",
     "@jinn-network/task-execution-launchers": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",
