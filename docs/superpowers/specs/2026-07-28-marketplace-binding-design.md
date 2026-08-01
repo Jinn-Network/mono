@@ -148,7 +148,12 @@ calls Safe-routed with the client's nonce-ledger and inner-revert classification
 6. **Both contract generations, one seam.** The binding runs on today's contracts and on the
    revision through a single generation seam; flipping is configuration, not rewrite.
 7. **Honor what is pinned.** The external-consumer CLI boundary and broadcast-intent
-   crash-safety designs are honored as-is.
+   crash-safety designs are honored as-is. *(Amended 2026-07-30: the external-consumer
+   boundary is now owned by the
+   [marketplace-surfaces design](./2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md)
+   — schemas + the `jinn` CLI remain the default external surface; published packages are
+   additionally consumable under its custody law. Broadcast-intent crash-safety is
+   unchanged.)*
 
 ## 5. The contract revision (specified now, built later)
 
@@ -470,9 +475,10 @@ The pipeline is an application composing binding + embedded backend through thei
 interfaces only — no subcomponent imports (session Q&A made normative); the one exception is
 the two-party engagement entry (§6.2), a public-interface addition, not a subcomponent reach-in. The evaluation
 opportunity path re-founds on delivery announcements + mechanical derivation (§6.4),
-replacing bespoke log-scan opportunity construction. Pinned designs honored: the CLI-only
-external boundary (new consumer surfaces land as SDK schemas + `jinn` CLI commands) and
-broadcast-intent posting. Untouched: earning bootstrap, staking loops, reward claiming,
+replacing bespoke log-scan opportunity construction. Pinned designs honored: the external boundary (amended 2026-07-30 — new consumer surfaces
+land as SDK schemas + `jinn` CLI commands by default, or as published packages under the
+[marketplace-surfaces design](./2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md)'s
+custody law) and broadcast-intent posting. Untouched: earning bootstrap, staking loops, reward claiming,
 balance top-up, dashboard plumbing below the affected surfaces.
 
 ## 10. Security considerations
@@ -491,7 +497,7 @@ balance top-up, dashboard plumbing below the affected surfaces.
 | Reorg exploitation | `safe`-tag derivation; block-hash-bearing derivation annotations; append-only signed corrections; decision-grade waits for `finalized` |
 | Projector dishonesty | Signed announcements + derivation annotations = provable misbehavior; anyone can run a rival; consumers spot-check per the discovery protocol |
 | Key/settlement mismatch | §7.5a join fails closed — no partial credit across rotated or mismatched identities |
-| External-consumer abuse | CLI boundary: no key material or tx client in the SDK; Safe/keystore stays CLI-side; verification profiles fail closed |
+| External-consumer abuse | The custody law (amended 2026-07-30, [marketplace-surfaces design](./2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md) §4.1): no key material or ambient key loading in any published package; write capability via injected signers only; key loading confined to tier-4 products (CLI/operator runtime); verification profiles fail closed |
 
 ## 11. Frozen interfaces
 
@@ -544,7 +550,9 @@ contracts/     the revision (later contracts session; this design is its require
 ```
 
 Dependencies: protocol/profiles/discovery/trust/evidence **contracts**; the local backend via
-its public TEP interface only; external consumers via SDK schemas + `jinn` CLI only. The
+its public TEP interface only; external consumers via SDK schemas + `jinn` CLI (default)
+or published packages under the custody law (amended 2026-07-30,
+[marketplace-surfaces design](./2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md)). The
 conformance kit slice lives with the stack's testing package.
 
 ## 13. Conformance
