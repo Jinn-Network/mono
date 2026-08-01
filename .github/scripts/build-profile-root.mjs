@@ -2,11 +2,12 @@
 
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 
 import { loadCatalogPackages } from './platform-catalog.mjs';
 
 const PUBLIC_DOCUMENT_KINDS = ['schemas', 'profiles', 'fixtures'];
+const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
 
 const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
 
@@ -33,6 +34,11 @@ function walkFiles(directory, prefix, found) {
     else if (entry.isFile()) found.push({ servedPath: id.split(sep).join('/'), absolutePath: child });
   }
   return found;
+}
+
+function inside(child, parent) {
+  const path = relative(parent, child);
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`));
 }
 
 // A document under fixtures/ is test data, not self-identity: fixture bodies legitimately
@@ -72,6 +78,13 @@ export function buildProfileRoot({ repoRoot, outDir, commit, releaseGroup = 'pla
   const documents = [];
   for (const pkg of loadCatalogPackages(repoRoot, { releaseGroup })) {
     const visitedSources = new Set();
+    const declaredRoots = new Map(PUBLIC_DOCUMENT_KINDS.map((kind) => [
+      kind,
+      pkg.catalog.publicSurface[kind].map((source) => join(repoRoot, pkg.directory, source)),
+    ]));
+    const effectiveKindFor = (absolutePath) => PUBLIC_DOCUMENT_KIND_PRECEDENCE.find(
+      (kind) => declaredRoots.get(kind).some((root) => inside(absolutePath, root)),
+    );
     for (const kind of PUBLIC_DOCUMENT_KINDS) {
       for (const source of pkg.catalog.publicSurface[kind]) {
         const absolute = join(repoRoot, pkg.directory, source);
@@ -92,10 +105,12 @@ export function buildProfileRoot({ repoRoot, outDir, commit, releaseGroup = 'pla
           // sidecar file itself is simply not part of the served profile root.
           if (file.servedPath.endsWith('.sha256')) continue;
           const bytes = readFileSync(file.absolutePath);
-          const fallbackPath = kind === 'fixtures'
+          const effectiveKind = effectiveKindFor(file.absolutePath) ?? kind;
+          const fixture = effectiveKind === 'fixtures';
+          const fallbackPath = fixture
             ? `${pkg.name}/${file.servedPath}`
             : file.servedPath;
-          const servedPath = declaredIdentifier(file.servedPath, bytes, kind === 'fixtures') ?? fallbackPath;
+          const servedPath = declaredIdentifier(file.servedPath, bytes, fixture) ?? fallbackPath;
           const claimed = claims.get(servedPath);
           if (claimed) {
             if (claimed !== pkg.name) {

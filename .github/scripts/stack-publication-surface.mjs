@@ -64,7 +64,11 @@ function packedPublicationDirectories(repoRoot, pkg, packedRoots) {
 export function publicationSurfaceViolations(repoRoot, { releaseGroup = 'platform-v1' } = {}) {
   const violations = [];
   for (const pkg of loadCatalogPackages(repoRoot, { releaseGroup })) {
-    const packedRoots = (pkg.manifest.files ?? []).map(normalizePath).filter(Boolean);
+    const hasExplicitFiles = Array.isArray(pkg.manifest.files);
+    if (!hasExplicitFiles) {
+      violations.push(`${pkg.directory}: package.json must declare an explicit "files" allowlist`);
+    }
+    const packedRoots = (hasExplicitFiles ? pkg.manifest.files : []).map(normalizePath).filter(Boolean);
     const exportKeys = new Set(Object.keys(pkg.manifest.exports ?? {}));
     const exportTargets = flattenedStrings(pkg.manifest.exports ?? {});
     const surface = pkg.catalog.publicSurface;

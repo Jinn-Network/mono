@@ -318,6 +318,61 @@ test('fixture paths are package-qualified so equal package-relative names stay d
   }
 });
 
+test('nested fixture declarations override broader profile classification before deduplication', () => {
+  const packages = [
+    {
+      directory: 'packages/evidence/repository-ipfs',
+      name: '@jinn-network/evidence-repository-ipfs',
+      manifest: { files: ['profile/'] },
+      catalog: {
+        publicSurface: {
+          schemas: [],
+          profiles: ['profile'],
+          fixtures: ['profile/v1/fixtures'],
+          conformance: [],
+        },
+      },
+    },
+    {
+      directory: 'packages/evidence/repository-oci',
+      name: '@jinn-network/evidence-repository-oci',
+      manifest: { files: ['profile/'] },
+      catalog: {
+        publicSurface: {
+          schemas: [],
+          profiles: ['profile'],
+          fixtures: ['profile/v1/fixtures'],
+          conformance: [],
+        },
+      },
+    },
+  ];
+  const root = controlledRepo(packages);
+  for (const pkg of packages) {
+    const fixtures = join(root, pkg.directory, 'profile/v1/fixtures');
+    mkdirSync(fixtures, { recursive: true });
+    writeFileSync(
+      join(fixtures, 'registration.json'),
+      JSON.stringify({
+        profile: 'https://jinn.network/fixtures/not-a-document-identity',
+        package: pkg.name,
+      }),
+      'utf8',
+    );
+  }
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map((document) => document.path), [
+      '@jinn-network/evidence-repository-ipfs/profile/v1/fixtures/registration.json',
+      '@jinn-network/evidence-repository-oci/profile/v1/fixtures/registration.json',
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('nested catalog declarations copy each source file once', () => {
   const root = controlledRepo([{
     directory: 'packages/evidence/trajectory',

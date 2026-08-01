@@ -14,9 +14,14 @@ function controlledRepo({ publicSurface, manifest, directories = [] }) {
   const name = '@jinn-network/fixture-publication-surface';
   const directory = 'packages/fixture/publication-surface';
   catalog.packages[index] = packageEntry(name, directory, { publicSurface });
+  const manifests = Object.fromEntries(catalog.packages.map((pkg) => [
+    pkg.path,
+    { name: pkg.name, version: '0.1.0', files: [] },
+  ]));
+  manifests[directory] = { name, version: '0.1.0', ...manifest };
   const root = fixtureRepo({
     catalog,
-    manifests: { [directory]: { name, version: '0.1.0', ...manifest } },
+    manifests,
   });
   for (const path of directories) mkdirSync(join(root, directory, path), { recursive: true });
   return { root, directory };
@@ -123,6 +128,21 @@ test('compiled module directories do not become inferred static publication surf
   });
   try {
     assert.deepEqual(publicationSurfaceViolations(root), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('cataloged release packages without an explicit files allowlist fail closed', () => {
+  const { root, directory } = controlledRepo({
+    publicSurface: { schemas: [], profiles: [], fixtures: [], conformance: [] },
+    manifest: { exports: { '.': './dist/index.js' } },
+    directories: ['fixtures'],
+  });
+  try {
+    assert.deepEqual(publicationSurfaceViolations(root), [
+      `${directory}: package.json must declare an explicit "files" allowlist`,
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

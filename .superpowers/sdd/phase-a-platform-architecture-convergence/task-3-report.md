@@ -230,3 +230,116 @@ catalogued platform fixture manifests current.
 - Launcher package tests require its portal dependencies to have built `dist` entry points;
   this is pre-existing package setup behavior. After building the dependency chain, the
   relocated real test is collected and passes.
+
+## Review round 1/5 — Important findings
+
+### Finding 1: overlapping profile/fixture declarations
+
+Root cause: generation traversed `schemas`, `profiles`, then `fixtures`, and assigned the
+current traversal kind before the absolute-source deduplication check. A file beneath both
+`profiles: ["profile"]` and `fixtures: ["profile/v1/fixtures"]` was therefore first emitted
+as a profile fallback; the later fixture traversal was skipped as a duplicate.
+
+RED command (Node `v22.22.2`):
+
+```text
+node --test --test-name-pattern='nested fixture declarations override' \
+  .github/scripts/build-profile-root.test.mjs
+```
+
+Observed RED: `0` pass, `1` fail. Two packages using the real nested
+`profile/v1/fixtures/registration.json` layout collided at the unqualified path:
+
+```text
+profile/v1/fixtures/registration.json is claimed by both
+@jinn-network/evidence-repository-ipfs and @jinn-network/evidence-repository-oci
+```
+
+Fix: precompute absolute declared roots for every public-surface kind and determine each
+file's effective kind independently of the traversal that encountered it. Fixture roots
+have precedence, followed by schemas and profiles. The one-copy visited set remains in
+place, but fixture exemption and package-qualified fallback now use the effective kind.
+
+GREEN command:
+
+```text
+node --test --test-name-pattern='nested fixture declarations override' \
+  .github/scripts/build-profile-root.test.mjs
+```
+
+Observed GREEN: `1/1` pass. Both distinct nested fixtures were emitted once at their
+package-qualified paths and their top-level `profile` test values were not treated as
+document identities.
+
+### Finding 2: missing npm `files` allowlist
+
+Root cause: publication validation normalized `(manifest.files ?? [])`. An absent `files`
+field therefore looked like an explicit empty allowlist even though npm's default behavior
+packs from the package root, allowing an undeclared `fixtures/` directory to escape the
+guard.
+
+RED command (Node `v22.22.2`):
+
+```text
+node --test --test-name-pattern='without an explicit files allowlist' \
+  .github/scripts/stack-publication-surface.test.mjs
+```
+
+Observed RED: `0` pass, `1` fail; expected
+`package.json must declare an explicit "files" allowlist`, actual violations `[]`.
+
+Fix: cataloged release packages now fail closed unless `package.json.files` is an array.
+Controlled publication fixtures explicitly use `files: []` unless a test overrides it, so
+the regression isolates exactly the omitted-field behavior.
+
+GREEN command:
+
+```text
+node --test --test-name-pattern='without an explicit files allowlist' \
+  .github/scripts/stack-publication-surface.test.mjs
+```
+
+Observed GREEN: `1/1` pass.
+
+### Review-round verification
+
+Focused command:
+
+```text
+node --test .github/scripts/build-profile-root.test.mjs \
+  .github/scripts/stack-publication-surface.test.mjs
+```
+
+Observed: `26/26` pass.
+
+Full Task 3 command:
+
+```text
+node --test \
+  .github/scripts/platform-catalog.test.mjs \
+  .github/scripts/stack-package-graph.test.mjs \
+  .github/scripts/build-profile-root.test.mjs \
+  .github/scripts/stack-publication-surface.test.mjs \
+  .github/scripts/fixture-manifest.test.mjs \
+  .github/scripts/task-execution-source-boundaries.test.mjs
+```
+
+Observed fresh: `100/100` pass, `0` fail.
+
+Additional fresh verification:
+
+```text
+node .github/scripts/fixture-manifest.mjs --check
+# fixture manifests are current
+
+corepack yarn --cwd packages/task-execution/backend-local/launchers test
+# 6 files passed, 32/32 tests passed
+
+corepack yarn --cwd packages/task-execution/backend-local/launchers typecheck
+# exit 0
+
+git diff --check
+# exit 0
+```
+
+No unrelated minor findings were changed in this round.
