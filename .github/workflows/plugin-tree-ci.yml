@@ -14,6 +14,10 @@ on:
       - ".github/workflows/plugin-tree-ci.yml"
       - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
       - "docs/superpowers/plans/2026-07-30-plugin-c3-product-tree.md"
+      - "packages/evidence/**"
+      - "packages/trust/core/**"
+      - "docs/superpowers/plans/2026-07-30-plugin-c4-capture.md"
+      - "plugin/runtime/fixtures/**"
 
 permissions:
   contents: read
@@ -56,6 +60,12 @@ jobs:
       # C4-C7 add a "Build cross-tree portal dependencies from source" step here, one
       # `(cd <package> && yarn install --immutable && yarn build)` line per portal
       # dependency, matching benchmarking-ci.yml.
+      - name: Build cross-tree portal dependencies from source
+        run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          for package in protocol repository discovery catalog-sqlite execution-recorder local-runtime trajectory; do
+            (cd "packages/evidence/$package" && yarn install --immutable && yarn build)
+          done
       - name: Verify Plugin Runtime
         working-directory: plugin/runtime
         run: |

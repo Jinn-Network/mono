@@ -18,6 +18,7 @@ const LOCALE_MEMBER_APIS = new Set([
   'toLocaleString', 'toLocaleDateString', 'toLocaleTimeString',
 ]);
 const BIN_ALLOWED_PROCESS_MEMBERS = new Set(['argv', 'env', 'stdout', 'stderr', 'exitCode', 'once', 'off']);
+const CAPTURE_ALLOWED_PROCESS_MEMBERS = new Set(['platform']);
 const BIN_ALLOWED_SIGNALS = new Set(['SIGINT', 'SIGTERM']);
 const BIN_MUTATING_METHODS = new Set([
   'push', 'pop', 'shift', 'unshift', 'splice', 'sort', 'reverse', 'fill', 'copyWithin',
@@ -495,6 +496,15 @@ function bindFromInitializer(name, initializer, ts, scope, ctx) {
   }
 }
 
+function isCaptureProductionPath(filePath) {
+  return filePath.includes('/src/capture/') || filePath.includes('\\src\\capture\\');
+}
+
+function isAllowedCaptureProcessUse(node, ts, member, assignOps) {
+  if (!CAPTURE_ALLOWED_PROCESS_MEMBERS.has(member)) return false;
+  return !isAssignmentToExpression(node, node, ts, assignOps);
+}
+
 function isAllowedBinImport(specifier, node, ts) {
   if (!specifier) return false;
   const allowed = BIN_ALLOWED_IMPORTS.find((entry) => entry.module === specifier);
@@ -678,6 +688,7 @@ function scanSourceFile(filePath, content, options) {
     forbiddenPackages = [],
     forbiddenRoots = [],
     isBinEntry = false,
+    isCaptureProduction = false,
   } = options;
   const label = relativeFromRoot(filePath);
   const violations = [];
@@ -714,7 +725,7 @@ function scanSourceFile(filePath, content, options) {
   }
 
   let scope = new Scope(authCtx);
-  const ctx = { isBinEntry, add, authCtx };
+  const ctx = { isBinEntry, isCaptureProduction, add, authCtx };
   const assignOps = assignmentOperatorKinds(ts);
 
   for (const stmt of sourceFile.statements) {
@@ -760,6 +771,7 @@ function scanSourceFile(filePath, content, options) {
     }
     if (isForbiddenFs(specifier)) {
       if (isBinEntry && isAllowedBinImport(specifier, node, ts)) return;
+      if (isCaptureProduction) return;
       add(specifier);
     }
   }
@@ -774,6 +786,13 @@ function scanSourceFile(filePath, content, options) {
         add(`forbidden bin process.${member}`);
       }
       return;
+    }
+    if (isCaptureProduction) {
+      if (isBinProcessMutation(node, ts, member, assignOps)) {
+        add(`forbidden capture process.${member} mutation`);
+        return;
+      }
+      if (isAllowedCaptureProcessUse(node, ts, member, assignOps)) return;
     }
     add(`${via}.${member}`);
   }
@@ -1319,15 +1338,18 @@ export function scanProductionSources(packages, scanOptions) {
   return packages.flatMap((pkg) => pkg.productionSourceFiles.flatMap((filePath) => {
     const content = scanOptions.readFile(filePath);
     const isBinEntry = filePath.endsWith('/src/bin.ts') || filePath.endsWith('\\src\\bin.ts');
+    const isCaptureProduction = isCaptureProductionPath(filePath);
     return scanSourceFile(filePath, content, {
       ...scanOptions,
       isBinEntry,
+      isCaptureProduction,
     });
   })).sort(compareCodeUnit);
 }
 
 export {
   insideForbiddenRoot,
+  isCaptureProductionPath,
   isForbiddenChildProcess,
   isForbiddenFs,
   isNetworkModule,

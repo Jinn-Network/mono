@@ -16,6 +16,8 @@ const LogLevelSchema = z.enum(["silent", "error", "warn", "info", "debug"]);
 export const RuntimeConfigFileSchema = z.strictObject({
   home: z.string().min(1).optional(),
   logLevel: LogLevelSchema.optional(),
+  captureRetentionDays: z.number().int().positive().optional(),
+  captureArchiveBusyTimeoutMs: z.number().int().positive().optional(),
 });
 
 export type RuntimeConfigFile = z.infer<typeof RuntimeConfigFileSchema>;
@@ -36,6 +38,12 @@ export interface RuntimeConfigSource {
 export interface RuntimeConfig {
   readonly homeDirectory: string;
   readonly archiveDirectory: string;
+  /** Product-owned staging for session feeds and recorder workspaces. Never inside `archiveDirectory`. */
+  readonly captureDirectory: string;
+  /** Days of raw staging material kept before the sweep removes it. */
+  readonly captureRetentionDays: number;
+  /** How long `sealSession` waits for an archive another process holds. */
+  readonly captureArchiveBusyTimeoutMs: number;
   readonly catalogPath: string;
   readonly indexPath: string;
   readonly mirrorStatePath: string;
@@ -60,6 +68,30 @@ function present(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   const trimmed = value.trim();
   return trimmed === "" ? undefined : trimmed;
+}
+
+/**
+ * Coerces an env override through zod rather than `Number()`, so a non-numeric value fails
+ * loudly as `config-invalid` naming its field — the same shape as the `logLevel` path.
+ */
+function positiveIntegerSetting(
+  envKey: string,
+  envValue: string | undefined,
+  fileValue: number | undefined,
+  fallback: number,
+): number {
+  if (envValue === undefined) return fileValue ?? fallback;
+  const parsed = z
+    .string()
+    .regex(/^[1-9]\d*$/u)
+    .safeParse(envValue);
+  if (!parsed.success) {
+    throw new PluginRuntimeError(
+      "config-invalid",
+      `${envKey} must be a positive integer, received ${JSON.stringify(envValue)}.`,
+    );
+  }
+  return Number(parsed.data);
 }
 
 function parseFile(file: unknown): RuntimeConfigFile {
@@ -106,6 +138,22 @@ export function resolveRuntimeConfig(source: RuntimeConfigSource): RuntimeConfig
   return Object.freeze({
     homeDirectory,
     archiveDirectory: join(homeDirectory, "archive"),
+    // Product-owned staging. Deliberately NOT under archiveDirectory: `local-runtime` and the
+    // filesystem repository assert exclusive ownership and 0700 on that tree, and it is under
+    // an exclusive lock whenever a capture is sealing.
+    captureDirectory: join(homeDirectory, "capture"),
+    captureRetentionDays: positiveIntegerSetting(
+      "JINN_PLUGIN_CAPTURE_RETENTION_DAYS",
+      present(source.env.JINN_PLUGIN_CAPTURE_RETENTION_DAYS),
+      file?.captureRetentionDays,
+      30,
+    ),
+    captureArchiveBusyTimeoutMs: positiveIntegerSetting(
+      "JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS",
+      present(source.env.JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS),
+      file?.captureArchiveBusyTimeoutMs,
+      10_000,
+    ),
     catalogPath: join(homeDirectory, "catalog.sqlite"),
     indexPath: join(homeDirectory, "index.sqlite"),
     mirrorStatePath: join(homeDirectory, "mirror-state.json"),

@@ -12,6 +12,14 @@ const BUILD_ARTIFACTS = new Set(['node_modules', 'dist', 'coverage', '.git']);
 
 /** Exact install-time external dependency versions approved for C3 runtime. */
 export const APPROVED_RUNTIME_DEPENDENCIES = Object.freeze({
+  '@jinn-network/evidence-catalog-sqlite': '0.1.0',
+  '@jinn-network/evidence-discovery': '0.1.0',
+  '@jinn-network/evidence-local-runtime': '0.1.0',
+  '@jinn-network/evidence-protocol': '0.1.0',
+  '@jinn-network/evidence-repository': '0.1.0',
+  '@jinn-network/evidence-trajectory': '0.1.0',
+  '@jinn-network/execution-recorder': '0.1.0',
+  '@jinn-network/trust-core': '0.1.0',
   zod: '4.4.3',
 });
 
@@ -24,6 +32,14 @@ export const APPROVED_RUNTIME_DEV_DEPENDENCIES = Object.freeze({
 
 /** Exact resolutions the guards version-control for plugin/runtime. */
 export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
+  '@jinn-network/evidence-catalog-sqlite': 'portal:../../packages/evidence/catalog-sqlite',
+  '@jinn-network/evidence-discovery': 'portal:../../packages/evidence/discovery',
+  '@jinn-network/evidence-local-runtime': 'portal:../../packages/evidence/local-runtime',
+  '@jinn-network/evidence-protocol': 'portal:../../packages/evidence/protocol',
+  '@jinn-network/evidence-repository': 'portal:../../packages/evidence/repository',
+  '@jinn-network/evidence-trajectory': 'portal:../../packages/evidence/trajectory',
+  '@jinn-network/execution-recorder': 'portal:../../packages/evidence/execution-recorder',
+  '@jinn-network/trust-core': 'portal:../../packages/trust/core',
   vite: '6.4.3',
 });
 

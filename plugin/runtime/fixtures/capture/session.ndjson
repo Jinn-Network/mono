@@ -1,0 +1,8 @@
+{"type":"session-open","v":1,"sessionId":"s-golden","startedAt":"2026-07-30T09:00:00Z","atUnixNano":"1785488400000000000","host":{"name":"Hermes","version":"0.9.1"},"model":{"provider":"anthropic","name":"claude-opus-4.6"},"conversationId":"c-1"}
+{"type":"environment","atUnixNano":"1785488400100000000","tools":["read_file","write_file"],"skills":["superpowers:writing-plans"]}
+{"type":"user-turn","atUnixNano":"1785488401000000000","text":"Find where the retry budget is configured."}
+{"type":"tool-call","startedAtUnixNano":"1785488402000000000","atUnixNano":"1785488402400000000","toolName":"read_file","toolCallId":"call-1","status":"ok","arguments":"{\"path\":\"src/retry.ts\"}","result":"export const RETRY_BUDGET = 3;"}
+{"type":"assistant-turn","atUnixNano":"1785488403000000000","text":"It is RETRY_BUDGET in src/retry.ts.","model":"claude-opus-4.6"}
+{"type":"tool-call","startedAtUnixNano":"1785488404000000000","atUnixNano":"1785488404200000000","toolName":"write_file","toolCallId":"call-2","status":"error","arguments":"{\"path\":\"src/retry.ts\"}","result":"","errorMessage":"read-only workspace"}
+{"type":"tokens","atUnixNano":"1785488405000000000","inputTokens":1024,"outputTokens":256}
+{"type":"session-close","atUnixNano":"1785488406000000000","endedAt":"2026-07-30T09:00:06Z","outcome":"completed","summary":"Locate the retry budget"}

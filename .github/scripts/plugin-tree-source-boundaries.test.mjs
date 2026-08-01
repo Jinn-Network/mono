@@ -99,14 +99,19 @@ function scanOptions(overrides = {}) {
   };
 }
 
-function scanFixtureSource(fixtureDir, fileName, content, { isBinEntry = false } = {}) {
-  const sourceDir = join(fixtureDir, 'src');
+function scanFixtureSource(fixtureDir, fileName, content, { isBinEntry = false, isCaptureProduction = false } = {}) {
+  const sourceDir = isCaptureProduction
+    ? join(fixtureDir, 'src', 'capture')
+    : join(fixtureDir, 'src');
   mkdirSync(sourceDir, { recursive: true });
   const filePath = join(sourceDir, fileName);
   writeFileSync(filePath, content);
   return scanSourceFile(filePath, content, {
     ...scanOptions(),
     isBinEntry,
+    isCaptureProduction: isCaptureProduction
+      || filePath.includes('/src/capture/')
+      || filePath.includes('\\src\\capture\\'),
   });
 }
 
@@ -204,6 +209,37 @@ test('production runtime source must not directly import forbidden fs or child_p
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('capture production sources may import fs and read process.platform but not process.env', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-capture-custody-'));
+  try {
+    const allowed = scanFixtureSource(fixture, 'paths.ts', [
+      'import { chmod, mkdir, open, stat } from "node:fs/promises";',
+      'export async function ensure(path: string): Promise<void> {',
+      '  if (process.platform === "win32") return;',
+      '  await mkdir(path, { recursive: true });',
+      '}',
+    ].join('\n'), { isCaptureProduction: true });
+    assert.deepEqual(allowed, []);
+
+    const envLeak = scanFixtureSource(fixture, 'env-leak.ts', [
+      'import { mkdir } from "node:fs/promises";',
+      'export const home = process.env.HOME;',
+    ].join('\n'), { isCaptureProduction: true });
+    assert.ok(envLeak.some((entry) => entry.includes('process.env')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('non-capture production sources still forbid node:fs/promises imports', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-non-capture-fs-'));
+  try {
+    const violations = scanFixtureSource(fixture, 'config.ts', [
+      'import { readFile } from "node:fs/promises";',
+      'export const load = readFile;',
+    ].join('\n'));
+    assert.ok(violations.some((entry) => entry.includes('node:fs/promises')));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('bin.ts allows only the exact realpathSync import and rejects other fs or child_process', () => {
   const fixture = mkdtempSync(join(tmpdir(), 'jinn-plugin-tree-bin-fs-'));
   try {
@@ -251,7 +287,10 @@ test('undeclared third-party runtime dependencies and malformed versions are rej
     undeclaredRuntimeDependencies({ peerDependencies: { '@noble/hashes': '1.0.0' } }),
     ['peerDependencies:@noble/hashes'],
   );
-  for (const pkg of PERMITTED_PACKAGES.filter((name) => name !== 'zod')) {
+  const undeclaredPermittedPackages = PERMITTED_PACKAGES.filter(
+    (name) => name !== 'zod' && !(name in APPROVED_RUNTIME_DEPENDENCIES),
+  );
+  for (const pkg of undeclaredPermittedPackages) {
     assert.deepEqual(
       undeclaredRuntimeDependencies({ dependencies: { [pkg]: '1.0.0' } }),
       [`dependencies:${pkg}`],

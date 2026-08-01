@@ -6,6 +6,10 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { DsseSigner } from "@jinn-network/trust-core";
+
+import { createCaptureCapability } from "./capture/capability.js";
+import type { RuntimeCapability } from "./capability.js";
 import { resolveRuntimeConfig, ENVIRONMENT_KEYS } from "./config.js";
 import { createLineLogger } from "./logger.js";
 import { createPluginRuntime } from "./runtime.js";
@@ -60,6 +64,18 @@ export interface BinIo {
   readonly homeDirectory: string;
   /** Resolves when the process should shut down. */
   readonly untilShutdown: () => Promise<void>;
+  /**
+   * Injected by the composition root (C7 host adapter). Capture registers only when a signer
+   * is supplied — the runtime never acquires key material itself.
+   */
+  readonly captureSigner?: DsseSigner;
+}
+
+function buildCapabilities(captureSigner: DsseSigner | undefined): readonly RuntimeCapability[] {
+  if (captureSigner === undefined) {
+    return [];
+  }
+  return [createCaptureCapability({ producerVersion: RUNTIME_VERSION, signer: captureSigner })];
 }
 
 export async function main(
@@ -97,8 +113,11 @@ export async function main(
     archive: config.archiveDirectory,
   });
 
-  // No capabilities are wired yet; C4 onward register them here.
-  const runtime = createPluginRuntime({ config, capabilities: [], log });
+  const runtime = createPluginRuntime({
+    config,
+    capabilities: buildCapabilities(io.captureSigner),
+    log,
+  });
 
   // Register signal handlers before the first await so the process stays alive under
   // top-level await while serve waits for shutdown.

@@ -8,9 +8,23 @@ import {
   APPROVED_RUNTIME_DEV_DEPENDENCIES,
   derivePublicCodeEntrypoints,
   discoverPluginPackages,
+  root,
   validateExportSubpath,
   validateExportTarget,
 } from './plugin-tree-guard-common.mjs';
+
+// Cross-tree Jinn dependencies plugin/runtime declares, packed as file: deps so
+// npm ci resolves them without registry publishes (program §7.8).
+const CROSS_TREE_PACKAGES = [
+  ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-trajectory', join(root, 'packages', 'evidence', 'trajectory')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+];
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));
 const archivesRoot = join(temporaryRoot, 'archives');
@@ -108,14 +122,22 @@ async function validatePackedSurface(archivePath, entrypoints) {
   }
 }
 
+async function buildCrossTreePackages() {
+  for (const [, directory] of CROSS_TREE_PACKAGES) {
+    await run('corepack', ['yarn@4.13.0', 'install', '--immutable'], { cwd: directory });
+    await run('corepack', ['yarn@4.13.0', 'build'], { cwd: directory });
+  }
+}
+
 async function runLiveConsumer(archives) {
   await mkdir(consumerRoot, { recursive: true });
   const consumerManifest = {
     private: true,
     type: 'module',
-    dependencies: Object.fromEntries(
-      livePackages.map((pkg) => [pkg.name, `file:${archives.get(pkg.name)}`]),
-    ),
+    dependencies: Object.fromEntries([
+      ...livePackages.map((pkg) => [pkg.name, `file:${archives.get(pkg.name)}`]),
+      ...CROSS_TREE_PACKAGES.map(([name]) => [name, `file:${archives.get(name)}`]),
+    ]),
     devDependencies: {
       '@types/node': APPROVED_RUNTIME_DEV_DEPENDENCIES['@types/node'],
       typescript: APPROVED_RUNTIME_DEV_DEPENDENCIES.typescript,
@@ -210,7 +232,11 @@ try {
   );
 
   await mkdir(archivesRoot);
+  await buildCrossTreePackages();
   const archives = new Map();
+  for (const [name, directory] of CROSS_TREE_PACKAGES) {
+    archives.set(name, await packOne(directory, name));
+  }
   for (const pkg of livePackages) {
     const entrypoints = derivePublicCodeEntrypoints(pkg.manifest);
     const archive = await packOne(pkg.absoluteDirectory, pkg.name);
