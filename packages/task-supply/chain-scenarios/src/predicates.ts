@@ -84,17 +84,40 @@ export function callResult(input: {
   });
 }
 
+export function addressIndexedTopic(address: string): `0x${string}` {
+  const bare = normalizeAddress(address).slice(2);
+  return `0x${bare.padStart(64, "0")}` as `0x${string}`;
+}
+
+type EventArgFilter =
+  | { readonly on: "topic"; readonly index: 1 | 2 | 3; readonly equals: `0x${string}` }
+  | {
+      readonly on: "dataWord";
+      readonly index: string;
+      readonly decode: "raw" | "uint256" | "int256";
+      readonly cmp: ComparisonOp;
+      readonly value: string;
+    };
+
 export function eventEmitted(input: {
   readonly id: string;
   readonly source: string;
   readonly signature: string;
   readonly countCmp: { readonly cmp: ComparisonOp; readonly value: string };
+  readonly onBehalfOf?: string;
+  readonly argFilters?: readonly EventArgFilter[];
 }): ScenarioPredicate {
+  const argFilters =
+    input.argFilters
+    ?? (input.onBehalfOf !== undefined
+      ? [{ on: "topic" as const, index: 3 as const, equals: addressIndexedTopic(input.onBehalfOf) }]
+      : undefined);
   return withId(input.id, {
     kind: "eventEmitted",
     source: normalizeAddress(input.source),
     topic0: eventSignatureTopic0(input.signature),
     countCmp: input.countCmp,
+    ...(argFilters !== undefined ? { argFilters: [...argFilters] } : {}),
   });
 }
 

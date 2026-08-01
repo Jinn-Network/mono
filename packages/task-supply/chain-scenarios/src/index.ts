@@ -53,6 +53,7 @@ export {
   eventEmitted,
   eventForbidden,
   eventSignatureTopic0,
+  addressIndexedTopic,
   nativeBalance,
   predicateId,
   reportedValue,
@@ -110,6 +111,11 @@ export {
 } from "./strategy.js";
 export type { ChainScenarioInputs } from "./strategy.js";
 export { runChainScenarioDerivation } from "./run.js";
+export {
+  lendingLifecycleTemplate,
+  LendingLifecycleParamsSchema,
+  type LendingLifecycleParams,
+} from "./families/lending-lifecycle.js";
 export type {
   ChainAdmissionPort,
   ChainAdmissionRequest,

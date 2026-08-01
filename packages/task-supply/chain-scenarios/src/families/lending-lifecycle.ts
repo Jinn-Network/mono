@@ -71,12 +71,14 @@ function buildPredicateDraft(
         id: "borrow-event",
         source: pool,
         signature: BORROW_SIGNATURE,
+        onBehalfOf: borrower,
         countCmp: { cmp: "eq", value: "1" },
       }),
       eventEmitted({
         id: "supply-event",
         source: pool,
         signature: SUPPLY_SIGNATURE,
+        onBehalfOf: borrower,
         countCmp: { cmp: "eq", value: "1" },
       }),
       timeBound({
