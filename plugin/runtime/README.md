@@ -1,8 +1,21 @@
 # @jinn-network/plugin-runtime
 
 The Jinn Plugin runtime: a capability container with typed configuration injection, health
-reporting, structured logging, and session capture. C4 adds capture; C5 adds corpus library
-surfaces; C6 adds relevance and projection. Publication and MCP remain deferred.
+reporting, structured logging, MCP serving, and session capture. C4 adds capture; C5 adds
+corpus library surfaces; C6 adds relevance and projection; C7 ships the MCP surface
+(`tools` and `session` roles). Publication and registry acquisition remain deferred to C8.
+
+**MCP (C7).** `jinn-plugin-runtime serve` starts an MCP server on stdio. Two roles:
+
+- **`tools`** (default) — read-only corpus tools (`inspect_record`, `acquire_artifact`,
+  `pickup_context`). No capture signer required.
+- **`session`** — the same tools plus session capture. Requires the composition root to
+  inject `captureSigner` on `BinIo` (F-C4-T13-2); the runtime never acquires key material
+  itself.
+
+Use `jinn-plugin-runtime-session` (F-C7-T20-1) when the host needs the session role: that
+entry loads an ephemeral local Ed25519 key and invokes `serve --role session` with
+`captureSigner` injected. The bare `jinn-plugin-runtime` binary defaults to `tools`.
 
 **Corpus library (C5).** Exported from the package root (`src/corpus/`, re-exported
 via `index.ts`): `createCorpusCapability` composes mirror, retrieval, reader, and health
@@ -16,9 +29,11 @@ its default (`false`), the mirror indexes nothing. Operators who accept an unver
 posture set `corpus.acknowledgeUnverifiedChain: true` in config; driver wiring is
 deferred.
 
-**Binary wiring.** `bin.ts` / `jinn-plugin-runtime` still registers `capabilities: []`
-until a later wave wires corpus into the process. `health` therefore reports an empty
-check list today; pack-smoke expects that. Use the library API directly until then.
+**Binary wiring.** `bin.ts` registers MCP on `serve` and wires corpus, relevance, and
+capture capabilities when the composition root supplies the required ports and signer.
+The `health` command reports capture checks only when `captureSigner` is injected on
+`BinIo`; without it, the check list is empty. Corpus ports are optional on `serve` —
+retrieval is fail-closed when they are absent.
 
 **Relevance and projection (C6).** Exported from the package root: `openRelevanceIndex`,
 `runPickup`, `projectContext`, `renderFencedBlock`, `rebuildIndex`, sensitivity

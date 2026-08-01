@@ -6986,3 +6986,26 @@ decided once rather than negotiated at integration.
 - Capture signer is **local rehearsal / machine custody**, not production HSM or OS keychain.
 - Live chat inherits host inference auth when present (not a CI guarantee).
 - Published-registry npm acquisition remains C8; rehearsal uses packed tarballs.
+
+## 2026-08-01 wave-1 whole-component review resolution (wave 2 — final under cap)
+
+Reviewed defect head: `08dc460219081f01743c3b86c498d0bb535c42c6`. This is the only repair wave under the two-wave review cap.
+
+| ID | Severity | Disposition |
+| --- | --- | --- |
+| **C7-W1-1** Critical | Reorder `CROSS_TREE_PACKAGES` in `.github/scripts/plugin-tree-packed-types.test.mjs` to topological order matching `pack-smoke.mjs` (trust-core → protocol → repository → discovery → … → catalog-sqlite → local-runtime). Exact-head Plugin Tree verify fails: catalog-sqlite builds before evidence-discovery → TS2307. Local pass is warm-dist only. |
+| **C7-W1-2** Important | Rewrite `plugin/runtime/README.md` intro for C7: MCP roles, session-host, F-C4-T13-2 / F-C7-T20-1; publication deferred to C8. Remove “MCP remain deferred” and stale `capabilities: []` until later wave claims. |
+| **C7-W1-3** Important | Bare `jinn-plugin-runtime` default: either default CLI role to `tools`, or make bare invoke print clear pointer to `jinn-plugin-runtime-session` / `--role tools` instead of opaque `role session requires BinIo.captureSigner`. |
+| **C7-W1-4** Minor | `c7-rehearsal.sh`: default `PYTHON` to `python3` on PATH (keep override); drop machine-local pyenv path. |
+
+### Checkboxes (probe → Red → Green)
+
+- [x] **C7-W1-1** Red: cold packed-types fails (or would fail) when cross-tree `dist/` is absent / wiped; Green: topo order matches pack-smoke; cold packed-types passes (or CI-equivalent)
+- [x] **C7-W1-2** Red: README still says “MCP remain deferred” / stale `capabilities: []`; Green: intro documents MCP roles, session-host, F-C4-T13-2 / F-C7-T20-1; publication → C8
+- [x] **C7-W1-3** Red: bare `serve` without signer exits with opaque `BinIo.captureSigner` message; Green: default role `tools` (preferred) or clear pointer to session bin / `--role tools`
+- [x] **C7-W1-4** Red: `PYTHON` defaults to machine-local pyenv path; Green: `PYTHON="${PYTHON:-python3}"`
+
+### Chosen approach notes
+
+- **W1-1:** Match `plugin/runtime/scripts/pack-smoke.mjs` `portals` order exactly for the shared cross-tree set.
+- **W1-3:** Prefer default CLI role → `tools`. Session remains explicit (`--role session` or `jinn-plugin-runtime-session`). Update USAGE, `parseRole`, and `bin.test.ts` accordingly. Keep explicit `--role session` without signer as a clear F-C4-T13-2 failure (and optionally name the session-host bin).

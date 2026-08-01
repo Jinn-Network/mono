@@ -16,19 +16,19 @@ import {
 // Cross-tree Jinn dependencies plugin/runtime declares, packed as file: deps so
 // npm ci resolves them without registry publishes (program §7.8).
 const CROSS_TREE_PACKAGES = [
-  ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
-  ['@jinn-network/evidence-derivation', join(root, 'packages', 'evidence', 'derivation')],
-  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
-  ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
-  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
-  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
-  ['@jinn-network/evidence-retrieval', join(root, 'packages', 'evidence', 'retrieval')],
-  ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
-  ['@jinn-network/evidence-trajectory', join(root, 'packages', 'evidence', 'trajectory')],
-  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
-  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
-  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-derivation', join(root, 'packages', 'evidence', 'derivation')],
+  ['@jinn-network/evidence-retrieval', join(root, 'packages', 'evidence', 'retrieval')],
+  ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
+  ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
+  ['@jinn-network/evidence-trajectory', join(root, 'packages', 'evidence', 'trajectory')],
+  ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
+  ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
 ];
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-plugin-tree-packed-types-'));

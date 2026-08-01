@@ -72,13 +72,21 @@ describe("main", () => {
     expect(out).toEqual([]);
   });
 
-  test("serve defaults to the session role when captureSigner is injected", async () => {
+  test("serve defaults to the tools role even when captureSigner is injected", async () => {
     const home = await writableHome();
     const { err, value } = io(async () => {}, { homeDirectory: home, captureSigner: testSigner });
     const code = await main(["serve"], {}, value);
     expect(code).toBe(0);
-    expect(err.join("")).toContain("role=session");
-    expect(err.map((line) => JSON.parse(line).message)).toContain("mcp server listening (role=session)");
+    expect(err.join("")).toContain("role=tools");
+    expect(err.map((line) => JSON.parse(line).message)).toContain("mcp server listening (role=tools)");
+  });
+
+  test("bare serve without --role or captureSigner succeeds as tools", async () => {
+    const home = await writableHome();
+    const { err, value } = io(async () => {}, { homeDirectory: home });
+    const code = await main(["serve"], {}, value);
+    expect(code).toBe(0);
+    expect(err.join("")).toContain("role=tools");
   });
 
   test("serve --role tools starts the read-only surface", async () => {

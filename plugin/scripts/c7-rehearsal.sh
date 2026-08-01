@@ -16,7 +16,7 @@ export HERMES_HOME="$WORK/hermes"
 mkdir -p "$HERMES_HOME"
 trap 'echo "rehearsal artifacts: $WORK"' EXIT
 
-PYTHON="${PYTHON:-/Users/adrianobradley/.pyenv/versions/3.11.0/bin/python}"
+PYTHON="${PYTHON:-python3}"
 
 step() { printf '\n=== %s ===\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }

@@ -42,7 +42,7 @@ const USAGE = [
   "  serve    run the runtime until SIGINT or SIGTERM (default)",
   "  health   print one JSON health report and exit",
   "",
-  "  serve [--role tools|session]  MCP surface role (default: session)",
+  "  serve [--role tools|session]  MCP surface role (default: tools)",
   "",
   "  --help     print this message",
   "  --version  print the runtime version",
@@ -122,10 +122,10 @@ export interface BinIo {
   readonly readPolicyVersions?: (directory: string) => Promise<readonly Uint8Array[]>;
 }
 
-/** `serve [--role tools|session]`. Default `session`: the adapter is the primary caller. */
+/** `serve [--role tools|session]`. Default `tools`: read-only MCP without capture signer. */
 export function parseRole(argv: readonly string[]): RuntimeRole {
   const index = argv.indexOf("--role");
-  if (index === -1) return "session";
+  if (index === -1) return "tools";
   const value = argv[index + 1];
   if (!isRuntimeRole(value)) {
     throw new PluginRuntimeError(
