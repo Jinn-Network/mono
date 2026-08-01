@@ -1,0 +1,74 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { types } from "node:util";
+
+import { PluginRuntimeError } from "./errors.js";
+
+function readOwnStringField(value: object, key: "message" | "code"): string | null {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return null;
+  if (descriptor.get !== undefined || descriptor.set !== undefined) return null;
+  return typeof descriptor.value === "string" ? descriptor.value : null;
+}
+
+function directPrototype(value: object): object | null {
+  try {
+    return Object.getPrototypeOf(value);
+  } catch {
+    return null;
+  }
+}
+
+function isGenuinePluginRuntimeError(value: unknown): value is PluginRuntimeError {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  if (types.isProxy(value)) {
+    return false;
+  }
+  return directPrototype(value) === PluginRuntimeError.prototype;
+}
+
+function isPlainError(value: unknown): value is Error {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  if (types.isProxy(value)) {
+    return false;
+  }
+  const prototype = directPrototype(value);
+  return prototype === Error.prototype || prototype === null;
+}
+
+export function isHealthInvalidError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null || types.isProxy(error)) {
+    return false;
+  }
+  if (directPrototype(error) !== PluginRuntimeError.prototype) {
+    return false;
+  }
+  return readOwnStringField(error, "code") === "health-invalid";
+}
+
+/**
+ * Descriptor-safe normalization for unknown thrown values. Never calls String(),
+ * toString, valueOf, toJSON, inspect, or arbitrary getters on hostile objects.
+ */
+export function describeUnknownError(error: unknown): string {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error === null || error === undefined) {
+    return "an unknown error occurred";
+  }
+  if (types.isProxy(error)) {
+    return "an unknown error occurred";
+  }
+  if (isGenuinePluginRuntimeError(error)) {
+    return readOwnStringField(error, "message") ?? "an error occurred";
+  }
+  if (isPlainError(error)) {
+    return readOwnStringField(error, "message") ?? "an error occurred";
+  }
+  return "an unknown error occurred";
+}

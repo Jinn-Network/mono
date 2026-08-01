@@ -1,0 +1,258 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, test } from "vitest";
+
+import { PluginRuntimeError, RUNTIME_ERROR_CODES } from "./errors.js";
+import { normalizeHealthCheck, normalizeHealthChecks, summarizeHealth } from "./health.js";
+import { RUNTIME_VERSION } from "./version.js";
+
+const ok = (name: string) => ({ name, ok: true, detail: "ready", remedy: null });
+
+describe("normalizeHealthCheck", () => {
+  test("accepts a valid plain check and returns a frozen copy", () => {
+    const normalized = normalizeHealthCheck(ok("archive"));
+    expect(normalized).toEqual(ok("archive"));
+    expect(Object.isFrozen(normalized)).toBe(true);
+  });
+
+  test("rejects null", () => {
+    expect(() => normalizeHealthCheck(null)).toThrow(PluginRuntimeError);
+    try {
+      normalizeHealthCheck(null);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects non-boolean ok values", () => {
+    expect(() => normalizeHealthCheck({ name: "a", ok: "false", detail: "x", remedy: null }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects numeric remedy values", () => {
+    expect(() => normalizeHealthCheck({ name: "a", ok: true, detail: "x", remedy: 42 }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects empty names", () => {
+    expect(() => normalizeHealthCheck({ name: "", ok: true, detail: "x", remedy: null }))
+      .toThrow(PluginRuntimeError);
+  });
+
+  test("rejects accessor-backed fields", () => {
+    const hostile = {};
+    Object.defineProperty(hostile, "name", {
+      enumerable: true,
+      get: () => "archive",
+    });
+    Object.defineProperty(hostile, "ok", { enumerable: true, value: true });
+    Object.defineProperty(hostile, "detail", { enumerable: true, value: "ready" });
+    Object.defineProperty(hostile, "remedy", { enumerable: true, value: null });
+    expect(() => normalizeHealthCheck(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects proxy objects", () => {
+    const hostile = new Proxy(ok("archive"), {
+      get(target, key) {
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => normalizeHealthCheck(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects extra enumerable keys", () => {
+    expect(() => normalizeHealthCheck({ ...ok("archive"), extra: "field" })).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects toJSON hooks", () => {
+    expect(() => normalizeHealthCheck({
+      ...ok("archive"),
+      toJSON() {
+        return { name: "hijacked", ok: true, detail: "x", remedy: null };
+      },
+    })).toThrow(PluginRuntimeError);
+  });
+
+  test("copied checks stay frozen after source mutation", () => {
+    const source = { name: "archive", ok: true, detail: "ready", remedy: null };
+    const normalized = normalizeHealthCheck(source);
+    source.ok = false;
+    expect(normalized.ok).toBe(true);
+  });
+});
+
+describe("normalizeHealthChecks", () => {
+  test("rejects proxy arrays before iteration", () => {
+    const hostile = new Proxy([ok("archive")], {
+      get(target, key) {
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => normalizeHealthChecks(hostile)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects sparse arrays at the beginning, middle, and end", () => {
+    const sparse = [ok("a"), , ok("c")] as unknown[];
+    expect(() => normalizeHealthChecks(sparse)).toThrow(PluginRuntimeError);
+  });
+
+  test("rejects augmented arrays with extra string keys", () => {
+    const augmented = [ok("a")];
+    (augmented as unknown as Record<string, unknown>).extra = ok("b");
+    expect(() => normalizeHealthChecks(augmented)).toThrow(PluginRuntimeError);
+  });
+
+  test("accepts a dense plain array and freezes the result", () => {
+    const normalized = normalizeHealthChecks([ok("a"), ok("b")]);
+    expect(normalized).toHaveLength(2);
+    expect(Object.isFrozen(normalized)).toBe(true);
+  });
+});
+
+describe("summarizeHealth", () => {
+  test("an empty check list is healthy", () => {
+    expect(summarizeHealth("0.1.0", [])).toEqual({ ok: true, version: "0.1.0", checks: [] });
+  });
+
+  test("every check passing is healthy", () => {
+    expect(summarizeHealth("0.1.0", [ok("a"), ok("b")]).ok).toBe(true);
+  });
+
+  test("one failing check fails the report", () => {
+    const report = summarizeHealth("0.1.0", [
+      ok("a"),
+      { name: "b", ok: false, detail: "the archive directory is unreadable", remedy: "chmod u+rwx <archive>" },
+    ]);
+    expect(report.ok).toBe(false);
+    expect(report.checks).toHaveLength(2);
+  });
+
+  test("a failing check may name a state that is not fixable from this machine", () => {
+    const report = summarizeHealth("0.1.0", [
+      {
+        name: "runtime-pin",
+        ok: false,
+        detail: "the pinned runtime version is not published — channel issue",
+        remedy: null,
+      },
+    ]);
+    expect(report.ok).toBe(false);
+    expect(report.checks[0]!.remedy).toBeNull();
+  });
+
+  test("checks keep their given order and the report is frozen", () => {
+    const report = summarizeHealth("0.1.0", [ok("z"), ok("a")]);
+    expect(report.checks.map((check) => check.name)).toEqual(["z", "a"]);
+    expect(Object.isFrozen(report)).toBe(true);
+    expect(Object.isFrozen(report.checks)).toBe(true);
+  });
+
+  test("rejects two checks with the same name", () => {
+    expect(() => summarizeHealth("0.1.0", [ok("a"), ok("a")])).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [ok("a"), ok("a")]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects a check with an empty name", () => {
+    expect(() =>
+      summarizeHealth("0.1.0", [{ name: "  ", ok: true, detail: "ready", remedy: null }]),
+    ).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [{ name: "  ", ok: true, detail: "ready", remedy: null }]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects a check with an empty detail", () => {
+    expect(() =>
+      summarizeHealth("0.1.0", [{ name: "a", ok: false, detail: "", remedy: null }]),
+    ).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", [{ name: "a", ok: false, detail: "", remedy: null }]);
+    } catch (error) {
+      expect(error).toMatchObject({ code: RUNTIME_ERROR_CODES.healthInvalid });
+    }
+  });
+
+  test("rejects hostile outer arrays with prototype-filled holes", () => {
+    const hostile = [ok("a")];
+    Object.defineProperty(hostile, 1, {
+      enumerable: true,
+      get() {
+        return ok("b");
+      },
+    });
+    Object.defineProperty(hostile, "length", { value: 2 });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    try {
+      summarizeHealth("0.1.0", hostile);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "health-invalid" });
+    }
+  });
+
+  test("rejects proxy outer arrays without invoking index getters", () => {
+    let getterRuns = 0;
+    const hostile = new Proxy([ok("a")], {
+      get(target, key) {
+        if (key === "0") getterRuns += 1;
+        return Reflect.get(target, key);
+      },
+    });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    expect(getterRuns).toBe(0);
+  });
+
+  test("rejects nonstandard array prototypes without running overridden map", () => {
+    let mapRuns = 0;
+    const hostile = [ok("a")];
+    Object.setPrototypeOf(hostile, {
+      map() {
+        mapRuns += 1;
+        return [];
+      },
+    });
+    expect(() => summarizeHealth("0.1.0", hostile)).toThrow(PluginRuntimeError);
+    expect(mapRuns).toBe(0);
+  });
+
+  test("rejects non-primitive version values", () => {
+    expect(() => summarizeHealth({ toString: () => "0.1.0" }, [])).toThrow(PluginRuntimeError);
+    expect(() => summarizeHealth(new String("0.1.0"), [])).toThrow(PluginRuntimeError);
+    expect(() => summarizeHealth("", [])).toThrow(PluginRuntimeError);
+  });
+
+  test("R-C3-48 rejects revoked proxy checks without raw TypeError", () => {
+    const { proxy, revoke } = Proxy.revocable(ok("archive"), {});
+    revoke();
+    expect(() => normalizeHealthCheck(proxy)).toThrow(PluginRuntimeError);
+  });
+
+  test("R-C3-48 rejects symbol and non-enumerable extra keys", () => {
+    const withSymbol = { ...ok("archive"), [Symbol("extra")]: "field" };
+    expect(() => normalizeHealthCheck(withSymbol)).toThrow(PluginRuntimeError);
+    const withHidden = { ...ok("archive") };
+    Object.defineProperty(withHidden, "extra", { enumerable: false, value: "hidden" });
+    expect(() => normalizeHealthCheck(withHidden)).toThrow(PluginRuntimeError);
+  });
+
+  test("R-C3-61 rejects non-canonical array index keys like 00", () => {
+    const checks = [ok("archive")];
+    Object.assign(checks, { "00": ok("hidden") });
+    expect(() => summarizeHealth("0.1.0", checks)).toThrow(
+      expect.objectContaining({ code: RUNTIME_ERROR_CODES.healthInvalid }),
+    );
+  });
+});
+
+describe("RUNTIME_VERSION", () => {
+  test("matches the package manifest", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+    expect(RUNTIME_VERSION).toBe(manifest.version);
+  });
+});
