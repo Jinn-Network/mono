@@ -41,11 +41,18 @@ export interface StrategyDeps {
 
 /**
  * The strategy seam (design §7.2): *(described environment + strategy inputs) → candidate
- * tasks*. v1 ships exactly one member, the import strategy. Injection, statement
- * generation, echo mining and emergent-bug harvesting are named extensions (§14) and are
- * NOT to be built behind this interface without a design amendment (§12).
+ * tasks*. The two trailing type parameters default to this package's SWE shapes, so every
+ * existing declaration is unchanged; a sibling family (chain scenarios, CE5) supplies its
+ * own candidate and environment types and plugs into the same seam without this package
+ * learning anything about it. Injection, statement generation, echo mining and
+ * emergent-bug harvesting remain named extensions (§14) and are NOT to be built behind
+ * this interface without a design amendment (§12).
  */
-export interface DerivationStrategy<TInputs> {
+export interface DerivationStrategy<
+  TInputs,
+  TCandidate = Candidate,
+  TEnvironment = DerivationEnvironment,
+> {
   readonly id: string;
-  derive(deps: StrategyDeps, env: DerivationEnvironment, inputs: TInputs): AsyncIterable<Candidate>;
+  derive(deps: StrategyDeps, env: TEnvironment, inputs: TInputs): AsyncIterable<TCandidate>;
 }

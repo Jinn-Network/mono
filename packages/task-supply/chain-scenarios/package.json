@@ -1,0 +1,77 @@
+{
+  "name": "@jinn-network/chain-scenarios",
+  "version": "0.1.0",
+  "description": "Scenario templates and parameterization turning a verified composite crypto environment record plus parameters into admitted, sealed Task and state-predicate EvaluationSpec pairs in a supply pool.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/task-supply/chain-scenarios"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "fixtures:update": "JINN_UPDATE_FIXTURES=1 vitest run src/kit/golden.test.ts",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/chain-environment-record": "0.1.0",
+    "@jinn-network/task-admission": "0.1.0",
+    "@jinn-network/task-derivation": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@noble/hashes": "2.2.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/chain-environment-record": "portal:../../environments/chain-record",
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/task-admission": "portal:../admission",
+    "@jinn-network/task-derivation": "portal:../derivation",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core"
+  }
+}

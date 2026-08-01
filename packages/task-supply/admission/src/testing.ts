@@ -350,3 +350,7 @@ export function describeTaskAdmissionConformance(
     });
   });
 }
+
+export { admitChainCandidate } from "./chain-admit.js";
+export { verifyChainAdmissionReceiptV1 } from "./chain-receipt.js";
+export * from "./chain-testing.js";

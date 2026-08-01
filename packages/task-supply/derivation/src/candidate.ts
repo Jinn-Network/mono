@@ -4,8 +4,13 @@ import { documentDigest, type Sha256Digest } from "./digest.js";
 import { DerivationError } from "./errors.js";
 import type { UpstreamIdentity } from "./source-commitment.js";
 
-/** v1 has one strategy, and it imports (design §7.2 / §12: no synthetic strategies). */
-export type ProvenanceKind = "mined";
+/**
+ * v1's import strategy mines candidates from an upstream dataset. Sibling families derive
+ * theirs from templates and parameters instead — designed drills, honestly labeled
+ * `synthetic` (chain-environment design §7). Both kinds already exist in the
+ * `repository-work/1.0` payload schema's own enum; this type is what had narrowed them.
+ */
+export type ProvenanceKind = "mined" | "synthetic";
 
 /**
  * Evaluation material carried inline as base64 content plus its digest. `accessClass` is
