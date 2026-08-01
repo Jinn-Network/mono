@@ -2,13 +2,22 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** Leg H closed E39–E43. Re-run the gate before deploying.
+> **Gate status (2026-08-01):** E39–E47 landed on `integration/evidence-v1` via #2345 + #2351.
+> Anvil gate `JINN_E2E_HARNESS=prediction-v1-baseline yarn e2e:daemon-harness` is green.
+> **Step 4 closed-loop green** on Base Sepolia — task **1216**, two operators (op-d solver /
+> op-c evaluator), `allowSolverSelfEvaluation: false`. Evidence:
+> `.local/stage1-closed-loop/evidence.json`.
 >
 > **E41 disposition:** `synthesizeLegacyExecutionDocuments` is the sole remaining SignedTaskV1→solve
 > bridge — legacy cards only, retires with stage 5.
 >
-> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H). Step 4's gate
-> must pass before deploy.
+> See `docs/superpowers/plans/2026-07-30-cutover-stage-1-solver-flow.md` (leg H).
+> Runner: `cd client && yarn stage1:closed-loop` (`scripts/release/stage1-closed-loop.ts`).
+> Gold operators: **op-c** (evaluator/producer) + **op-d** (solver, staged from `~/.jinn-client`
+> services 72+). Do not use op-a/op-b — their Safes are stOLAS-distributor-owned (GS026).
+>
+> **Composition signer fix:** `buildOperatorComposition` must receive the **agent** walletClient
+> (service Safe owner), not `masterWallet` — master-as-signer caused GS026 on every venue claim.
 
 ## 1. Stop claiming (previous canary, no new build)
 
@@ -46,17 +55,30 @@ E22):
       Either close them or accept that they are unavailable for the stage.
 - [ ] The broadcaster is a process-wide singleton bound to one Safe. Any host running two
       operators in one process (release scenario T2.2, `jinn-repo-loop.ts`) cannot work until it
-      is per-daemon state.
+      is per-daemon state. *(E20: per-daemon broadcaster landed on the cutover train.)*
 - [ ] Composition is built only when `config.network === 'testnet'` — `BASE_SEPOLIA_TODAY` is the
       only real `MarketplaceChainConfig` in the repo. Stage 1 is a testnet cutover; mainnet
       operators get `composition: undefined` and the legacy path.
 
 ## 4. Gate
 
-- [ ] One real task closed-loop on testnet through the new flow, including the verdict leg via the
+- [x] One real task closed-loop on testnet through the new flow, including the verdict leg via the
       still-legacy evaluator on a *second* operator (self-evaluation is prevented on chain).
-- [ ] Record the task id, the claim tx, the mech `Deliver` tx, the `claimSolutionDelivery` tx, and
-      the verdict tx in the deploy PR.
+- [x] Record the task id, the claim tx, the mech `Deliver` tx, the `claimSolutionDelivery` tx,
+      and the verdict tx (written to `.local/stage1-closed-loop/evidence.json` by the runner).
+
+| Field | Value |
+|-------|-------|
+| taskId | `1216` |
+| creationTx | `0x6e432cca6a60133ec27a95a76c60e148c4ac7f7b69632430c7076eeadffbdc10` |
+| claimTx | `0x624e4a1836f65f965933dda777bbb7ba28b7aed3aaa9d1fbc88369b2e074d1af` |
+| deliverTx | `0x6257830d1e4e5e03d7ac31dd29a8347481f93d5a17a9f308ed899c883294adeb` |
+| claimSolutionDeliveryTx | `0x38ff8d32c702d688324f7d0543e163fab5a5b2bcb670152c1c4301a16fcca9a6` |
+| verdictTx | `0xecca7bb022f6ecd6f4ce095cd6cb6719af818dfdffcde1483fe761b93b8d2b4f` |
+| solver Safe | `0xf11edaf5330852bd77c79e3e30af6248c64f963b` (op-d / service 72) |
+| evaluator Safe | `0x8683f8e06555f6b30399eac4179654f830c91d12` (op-c / service 65) |
+| verdictCode | `2` |
+| finishedAt | `2026-08-01T10:08:23.317Z` |
 
 ## Rollback
 

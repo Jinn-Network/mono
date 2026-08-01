@@ -126,6 +126,7 @@
     "release:tier-3": "tsx scripts/release/run-tier-3.ts",
     "release:tier-3:T3.1": "JINN_T31_REAL=1 vitest run test/release/tier-3/T3.1-producer-evaluator-real.test.ts",
     "release:olas-rails-smoke": "tsx scripts/release/olas-rails-smoke.ts",
+    "stage1:closed-loop": "tsx scripts/release/stage1-closed-loop.ts --execute",
     "setup:testnet-acceptance-operator": "node scripts/setup-testnet-acceptance-operator-docker.mjs",
     "setup:testnet-acceptance-operator:docker": "node scripts/setup-testnet-acceptance-operator-docker.mjs",
     "setup:testnet-acceptance-operator:host": "node scripts/setup-testnet-acceptance-operator.mjs",
