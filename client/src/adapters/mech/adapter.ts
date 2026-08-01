@@ -35,7 +35,7 @@ import {
 } from './ipfs.js';
 import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
-import { legacyRestorationResultFromDelivery } from '../../daemon/bridge-legacy-delivery.js';
+import { legacyRestorationResultFromDelivery, signedEnvelopeJsonFromDeliveryOrRaw } from '../../daemon/bridge-legacy-delivery.js';
 import {
   submitTask,
   claimTask as claimTaskOnchain,
@@ -1622,8 +1622,12 @@ export class MechAdapter implements ExecutionAdapter {
       envelopeCid,
       this.ipfsFetchOpts(),
     );
-    const parsed = SignedEnvelopeSchema.parse(rawEnvelope);
-    const rawSigned = rawEnvelope as Record<string, unknown>;
+    // E43: converged Deliveries pin a sealed TEP Delivery with the legacy envelope nested
+    // under the bridge extension — unwrap before SignedEnvelopeSchema (same preference as
+    // the evaluation read path above). Bare envelopes (pre-bridge fixtures) pass through.
+    const envelopeSource = signedEnvelopeJsonFromDeliveryOrRaw(rawEnvelope);
+    const parsed = SignedEnvelopeSchema.parse(envelopeSource);
+    const rawSigned = envelopeSource as Record<string, unknown>;
     const { signature: _rawSignature, ...unsignedBody } = rawSigned;
     const signature = parsed.signature;
     const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));

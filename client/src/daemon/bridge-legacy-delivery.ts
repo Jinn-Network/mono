@@ -202,6 +202,23 @@ export function legacyRestorationResultFromDelivery(
 }
 
 /**
+ * Bridge read path (E43): IPFS pins a sealed TEP Delivery with the legacy
+ * `jinn.execution.v1` envelope nested under `LEGACY_ENVELOPE_EXTENSION_KEY`. Claim/wait
+ * callers that historically expected a bare SignedEnvelope must unwrap first. Falls back
+ * to the input when no bridge annotation is present (pre-bridge / test fixtures).
+ */
+export function signedEnvelopeJsonFromDeliveryOrRaw(document: unknown): unknown {
+  if (typeof document !== 'object' || document === null) return document;
+  const bridged = (document as Record<string, unknown>)[LEGACY_ENVELOPE_EXTENSION_KEY];
+  if (typeof bridged !== 'string') return document;
+  try {
+    return JSON.parse(bridged);
+  } catch {
+    return document;
+  }
+}
+
+/**
  * Builds and signs the `jinn.execution.v1` envelope the legacy evaluator expects.
  *
  * PLAN-VS-CODE GAP: the plan's declared input (`solverType`/`participant`/`harness`/`harvest`/

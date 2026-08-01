@@ -2,8 +2,7 @@
 
 Contract 10. Run in order. Do not deploy with step 2 unfinished.
 
-> **Do not run this runbook yet.** Leg H closed E39–E42. After E41 (sealed TEP bridge) and E42
-> (`prediction-v1-baseline` accepts string `probabilityYes`), re-run the gate before deploying.
+> **Do not run this runbook yet.** Leg H closed E39–E43. Re-run the gate before deploying.
 >
 > **E41 disposition:** `synthesizeLegacyExecutionDocuments` is the sole remaining SignedTaskV1→solve
 > bridge — legacy cards only, retires with stage 5.
