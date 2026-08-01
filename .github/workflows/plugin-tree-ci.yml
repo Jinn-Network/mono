@@ -92,8 +92,31 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  adapter:
+    name: Adapter (Hermes, Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest==9.0.2
+
+      - name: Assert the adapter has no third-party imports
+        working-directory: plugin/adapter-hermes
+        run: python3 scripts/check_stdlib_only.py
+
+      - name: Test
+        working-directory: plugin/adapter-hermes
+        run: python3 -m pytest
+
   verify:
-    needs: [architecture, runtime]
+    needs: [architecture, runtime, adapter]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -101,10 +124,12 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           RUNTIME_RESULT: ${{ needs.runtime.result }}
+          ADAPTER_RESULT: ${{ needs.adapter.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
-            "$RUNTIME_RESULT"; do
+            "$RUNTIME_RESULT" \
+            "$ADAPTER_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4

@@ -43,6 +43,8 @@ export interface CorpusCapability extends RuntimeCapability {
   readonly mirror: CorpusMirror;
   readonly reader: CorpusReader;
   readonly retrieval: CorpusRetrieval;
+  /** Producer admission composed at start — shared with the MCP pickup filter. */
+  readonly admission: CorpusAdmission;
 }
 
 interface Started {
@@ -248,6 +250,10 @@ export function createCorpusCapability(
         admission: state.admission,
         transport: options.transport,
       });
+    },
+
+    get admission(): CorpusAdmission {
+      return require_().admission;
     },
   });
 

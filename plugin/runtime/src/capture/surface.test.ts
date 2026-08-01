@@ -59,7 +59,8 @@ describe("public surface", () => {
     const bin = await readFile(new URL("../bin.ts", import.meta.url), "utf8");
     expect(bin).toContain("createCaptureCapability");
     expect(bin).toContain("captureSigner?: DsseSigner");
-    expect(bin).toMatch(/if \(captureSigner === undefined\)[\s\S]*return \[\]/);
+    expect(bin).toContain("F-C4-T13-2");
+    expect(bin).toMatch(/role === "session" && io\.captureSigner === undefined/);
 
     const entryBlock = bin.slice(bin.indexOf("if (isProcessEntry())"));
     expect(entryBlock).not.toContain("captureSigner:");
