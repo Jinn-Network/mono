@@ -18,6 +18,7 @@ import { repositoryCandidateInventory } from './repository-candidates.mjs';
 
 const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
 const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
+const GENERATED_PROFILE_ROOT_PATHS = new Set(['manifest.json', 'manifest.dsse.json']);
 
 function toPosix(value) {
   return value.split(sep).join('/');
@@ -40,6 +41,45 @@ export function normalizePackageRelativePublicPath(value, label) {
     throw new Error(`${label} must be a normalized package-relative path`);
   }
   return value;
+}
+
+export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') {
+  const invalid = () => {
+    throw new Error(`${label} must name a canonical relative jinn.network hosted path`);
+  };
+  if (typeof identifier !== 'string'
+    || !identifier.startsWith(JINN_NETWORK_ORIGIN)
+    || identifier.includes('?')
+    || identifier.includes('#')
+    || identifier.includes('%')
+    || identifier.includes('\\')) invalid();
+
+  let parsed;
+  try {
+    parsed = new URL(identifier);
+  } catch {
+    invalid();
+  }
+  if (parsed.href !== identifier || parsed.origin !== 'https://jinn.network') invalid();
+
+  const servedPath = identifier.slice(JINN_NETWORK_ORIGIN.length);
+  const segments = servedPath.split('/');
+  if (servedPath === ''
+    || isAbsolute(servedPath)
+    || win32.isAbsolute(servedPath)
+    || segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+    || GENERATED_PROFILE_ROOT_PATHS.has(servedPath)) invalid();
+  return servedPath;
+}
+
+function isJinnIdentifierCandidate(identifier) {
+  if (typeof identifier !== 'string') return false;
+  if (identifier.startsWith(JINN_NETWORK_ORIGIN)) return true;
+  try {
+    return new URL(identifier).hostname.toLowerCase().replace(/\.$/u, '') === 'jinn.network';
+  } catch {
+    return false;
+  }
 }
 
 function normalizeManifestPath(value, label) {
@@ -143,11 +183,14 @@ function declaredClaim(asset, bytes) {
   const claims = [];
   for (const field of ['$id', 'profile']) {
     const identifier = document[field];
-    if (typeof identifier === 'string' && identifier.startsWith(JINN_NETWORK_ORIGIN)) {
+    if (isJinnIdentifierCandidate(identifier)) {
       claims.push({
         field,
         identifier,
-        servedPath: identifier.slice(JINN_NETWORK_ORIGIN.length),
+        servedPath: jinnIdentifierServedPath(
+          identifier,
+          `${asset.package}: ${asset.relativeSource} ${field}`,
+        ),
       });
     }
   }

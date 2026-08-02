@@ -111,6 +111,14 @@
       "publishPolicies": [
         "canary-only"
       ],
+      "requiredGateIds": [
+        "benchmarking-ci",
+        "evidence-ci",
+        "marketplace-ci",
+        "record-discovery-ci",
+        "task-execution-ci",
+        "trust-ci"
+      ],
       "stackPublished": true,
       "canary": true,
       "stable": false
@@ -119,6 +127,11 @@
       "expectedPackageCount": 7,
       "publishPolicies": [
         "disabled"
+      ],
+      "requiredGateIds": [
+        "environments-ci",
+        "record-discovery-ci",
+        "task-supply-ci"
       ],
       "stackPublished": false,
       "canary": false,
@@ -129,6 +142,13 @@
       "publishPolicies": [
         "independent"
       ],
+      "requiredGateIds": [
+        "client-ci",
+        "core-ci",
+        "layer-ci",
+        "plugin-ci",
+        "sdk-ci"
+      ],
       "stackPublished": false,
       "canary": false,
       "stable": false
@@ -138,6 +158,14 @@
       "publishPolicies": [
         "private",
         "never"
+      ],
+      "requiredGateIds": [
+        "autopilot-ci",
+        "broadcast-bot-ci",
+        "client-ci",
+        "indexer-ci",
+        "indexer-enrichment-ci",
+        "plugin-tree-ci"
       ],
       "stackPublished": false,
       "canary": false,

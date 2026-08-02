@@ -1,8 +1,22 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  copyFileSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import {
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 
 import { catalogSha256 } from './build-prepublication-bundle.mjs';
 import {
@@ -23,6 +37,64 @@ function mediaTypeFor(path) {
     if (path.endsWith(suffix)) return mediaType;
   }
   return 'application/octet-stream';
+}
+
+function isStrictlyInside(child, parent) {
+  const path = relative(parent, child);
+  return path !== '' && path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+function lstatIfPresent(path) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function prepareOutputRoot(outDir) {
+  const outputRoot = resolve(outDir);
+  let stat = lstatIfPresent(outputRoot);
+  if (!stat) {
+    mkdirSync(outputRoot, { recursive: true });
+    stat = lstatSync(outputRoot);
+  }
+  if (stat.isSymbolicLink()) throw new Error(`output root must not be a symbolic link: ${outDir}`);
+  if (!stat.isDirectory()) throw new Error(`output root must be a real directory: ${outDir}`);
+  return realpathSync(outputRoot);
+}
+
+function preflightOutputTarget(outputRoot, servedPath) {
+  const target = resolve(outputRoot, ...servedPath.split('/'));
+  if (!isStrictlyInside(target, outputRoot)) {
+    throw new Error(`output target must remain strictly inside the output root: ${servedPath}`);
+  }
+
+  const segments = servedPath.split('/');
+  let current = outputRoot;
+  for (const [index, segment] of segments.slice(0, -1).entries()) {
+    current = join(current, segment);
+    const stat = lstatIfPresent(current);
+    if (!stat) break;
+    const partial = segments.slice(0, index + 1).join('/');
+    if (stat.isSymbolicLink()) {
+      throw new Error(`output path ${partial} contains a symbolic link`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`output path ${partial} must be a real directory`);
+    }
+    if (!isStrictlyInside(realpathSync(current), outputRoot)) {
+      throw new Error(`output path ${partial} escapes the output root`);
+    }
+  }
+
+  const targetStat = lstatIfPresent(target);
+  if (targetStat) {
+    if (targetStat.isSymbolicLink()) throw new Error(`output target ${servedPath} is a symbolic link`);
+    if (!targetStat.isFile()) throw new Error(`output target ${servedPath} must be a regular file`);
+  }
+  return target;
 }
 
 export function buildProfileRoot({
@@ -53,8 +125,10 @@ export function buildProfileRoot({
     packages,
     validateUniqueClaims: false,
   });
+  const outputRoot = prepareOutputRoot(outDir);
   const claims = new Map();
   const documents = [];
+  const copies = [];
   for (const pkg of packages) {
     for (const asset of publicAssets.filter((entry) => (
       entry.package === pkg.name && entry.kind !== 'conformance'
@@ -90,9 +164,7 @@ export function buildProfileRoot({
         mediaType: mediaTypeFor(asset.relativeSource),
         sourcePackage: pkg.name,
       });
-      const target = join(outDir, ...servedPath.split('/'));
-      mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(absolutePath, target);
+      copies.push({ absolutePath, servedPath });
     }
   }
   documents.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
@@ -105,8 +177,16 @@ export function buildProfileRoot({
     packages: packages.map(({ name }) => name),
     documents,
   };
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'manifest.json'), manifestBytes(manifest), 'utf8');
+  const preparedCopies = copies.map(({ absolutePath, servedPath }) => ({
+    absolutePath,
+    target: preflightOutputTarget(outputRoot, servedPath),
+  }));
+  const manifestTarget = preflightOutputTarget(outputRoot, 'manifest.json');
+  for (const { absolutePath, target } of preparedCopies) {
+    mkdirSync(dirname(target), { recursive: true });
+    copyFileSync(absolutePath, target);
+  }
+  writeFileSync(manifestTarget, manifestBytes(manifest), 'utf8');
   return manifest;
 }
 

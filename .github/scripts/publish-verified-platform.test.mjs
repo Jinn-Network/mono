@@ -16,8 +16,8 @@ import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import { buildProfileRoot } from './build-profile-root.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
 import {
-  REQUIRED_VERIFICATION_GATES,
   createVerificationReceipt,
+  verificationGateConclusionIds,
 } from './platform-verification-receipt.mjs';
 import {
   NPM_REGISTRY,
@@ -41,7 +41,10 @@ function sri(bytes) {
 }
 
 function successfulConclusions() {
-  return Object.fromEntries(REQUIRED_VERIFICATION_GATES.map((gate) => [gate, 'success']));
+  return Object.fromEntries(
+    verificationGateConclusionIds(fixtureCatalog(), 'platform-v1')
+      .map((gate) => [gate, 'success']),
+  );
 }
 
 function publicationFixture() {
@@ -366,12 +369,12 @@ test('every non-success or missing verification conclusion blocks npm', async ()
     const fake = registryExec(fixture);
     try {
       rewriteReceipt(fixture, (receipt) => {
-        if (conclusion === '<missing>') delete receipt.conclusions.trust;
-        else receipt.conclusions.trust = conclusion;
+        if (conclusion === '<missing>') delete receipt.conclusions.fixture;
+        else receipt.conclusions.fixture = conclusion;
       });
       await assert.rejects(
         publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec })),
-        /verification receipt|gate trust|missing required gate conclusion trust/u,
+        /verification receipt|gate fixture|missing required gate conclusion fixture/u,
       );
       assert.deepEqual(npmCalls(fake.calls), [], `${conclusion} must block npm`);
     } finally {

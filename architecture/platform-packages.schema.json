@@ -81,6 +81,7 @@
         "required": [
           "expectedPackageCount",
           "publishPolicies",
+          "requiredGateIds",
           "stackPublished",
           "canary",
           "stable"
@@ -97,6 +98,9 @@
             "items": {
               "$ref": "#/$defs/publishPolicy"
             }
+          },
+          "requiredGateIds": {
+            "$ref": "#/$defs/nonEmptyStringList"
           },
           "stackPublished": {
             "type": "boolean"
@@ -174,6 +178,15 @@
     },
     "stringList": {
       "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "nonEmptyStringList": {
+      "type": "array",
+      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "type": "string",

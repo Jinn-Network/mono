@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -46,6 +54,25 @@ function scratchRepo(extraPackages = []) {
   mkdirSync(join(packageDir, 'profiles/execution-evidence/1.0/schemas'), { recursive: true });
   writeFileSync(join(packageDir, 'profiles/execution-evidence/1.0/schemas/a.schema.json'), '{"type":"object"}', 'utf8');
   writeFileSync(join(packageDir, 'profiles/execution-evidence/1.0/profile.md'), '# profile\n', 'utf8');
+  return root;
+}
+
+function identityRepo(identifier) {
+  const root = controlledRepo([{
+    directory: 'packages/evidence/protocol',
+    name: '@jinn-network/evidence-protocol',
+    manifest: { files: ['schemas/'] },
+    catalog: {
+      publicSurface: { schemas: ['schemas'], profiles: [], fixtures: [], conformance: [] },
+    },
+  }]);
+  const schemas = join(root, 'packages/evidence/protocol/schemas');
+  mkdirSync(schemas, { recursive: true });
+  writeFileSync(
+    join(schemas, 'identity.schema.json'),
+    JSON.stringify({ $id: identifier }),
+    'utf8',
+  );
   return root;
 }
 
@@ -201,6 +228,132 @@ test('a document is served at its declared $id, not its directory location', () 
     ]);
     assert.ok(existsSync(join(outDir, 'profiles/evidence-repository-ipfs-registration/1/registration.schema.json')));
     assert.ok(!existsSync(join(outDir, 'profile/v1/registration.schema.json')));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('direct and encoded traversal identifiers fail before creating a sibling output file', () => {
+  for (const [name, identifier] of [
+    ['direct', 'https://jinn.network/../escaped.json'],
+    ['encoded', 'https://jinn.network/%2e%2e/escaped.json'],
+  ]) {
+    const root = identityRepo(identifier);
+    const outputParent = mkdtempSync(join(tmpdir(), `jinn-profile-${name}-escape-`));
+    const outDir = join(outputParent, 'profile-root');
+    const escaped = join(outputParent, 'escaped.json');
+    try {
+      assert.throws(
+        () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+        /must name a canonical relative jinn\.network hosted path/u,
+      );
+      assert.equal(existsSync(escaped), false, 'validation must precede every out-of-root write');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outputParent, { recursive: true, force: true });
+    }
+  }
+});
+
+test('reserved generated metadata paths cannot be claimed by source documents', () => {
+  for (const filename of ['manifest.json', 'manifest.dsse.json']) {
+    const root = identityRepo(`https://jinn.network/${filename}`);
+    const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-reserved-'));
+    try {
+      assert.throws(
+        () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+        /must name a canonical relative jinn\.network hosted path/u,
+      );
+      assert.equal(existsSync(join(outDir, filename)), false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('the output root must be a real canonical directory, never a symlink', () => {
+  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const outputParent = mkdtempSync(join(tmpdir(), 'jinn-profile-output-link-'));
+  const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-output-outside-'));
+  const outDir = join(outputParent, 'profile-root');
+  symlinkSync(outside, outDir);
+  try {
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /output root.*symbolic link/u,
+    );
+    assert.equal(existsSync(join(outside, 'records/valid/schema')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outputParent, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a nested output parent symlink fails before any outside document is created', () => {
+  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-parent-link-'));
+  const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-parent-outside-'));
+  symlinkSync(outside, join(outDir, 'records'));
+  try {
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /output path records.*symbolic link/u,
+    );
+    assert.equal(existsSync(join(outside, 'valid/schema')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('a dangling output target symlink fails before its outside target is created', () => {
+  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-target-link-'));
+  const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-target-outside-'));
+  mkdirSync(join(outDir, 'records/valid'), { recursive: true });
+  const outsideTarget = join(outside, 'created-by-copy');
+  symlinkSync(outsideTarget, join(outDir, 'records/valid/schema'));
+  try {
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /output target records\/valid\/schema is a symbolic link/u,
+    );
+    assert.equal(existsSync(outsideTarget), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('an existing special output target fails before any document copy', () => {
+  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-special-target-'));
+  const target = join(outDir, 'records/valid/schema');
+  mkdirSync(join(outDir, 'records/valid'), { recursive: true });
+  execFileSync('mkfifo', [target]);
+  try {
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /output target records\/valid\/schema must be a regular file/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a valid nested identifier remains safely hosted below the output root', () => {
+  const root = identityRepo('https://jinn.network/records/valid/1.0/schema');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-valid-nested-'));
+  try {
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    assert.deepEqual(manifest.documents.map(({ path }) => path), ['records/valid/1.0/schema']);
+    assert.ok(existsSync(join(outDir, 'records/valid/1.0/schema')));
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });

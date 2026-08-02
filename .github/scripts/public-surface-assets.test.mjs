@@ -8,13 +8,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const implementation = import('./public-surface-assets.mjs');
 
 const PACKAGE_NAME = '@jinn-network/public-surface-fixture';
 const PACKAGE_PATH = 'packages/fixture/public-surface';
+const repoRoot = resolve(import.meta.dirname, '../..');
 
 function fixturePackage(root, publicSurface) {
   const directory = join(root, PACKAGE_PATH);
@@ -159,6 +160,97 @@ test('rejects multiple top-level Jinn identity fields before collision selection
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Jinn identifiers map only to canonical relative hosted paths', async () => {
+  const { jinnIdentifierServedPath } = await implementation;
+  assert.equal(
+    jinnIdentifierServedPath('https://jinn.network/records/trajectory/1.0/schema'),
+    'records/trajectory/1.0/schema',
+  );
+
+  for (const identifier of [
+    'https://jinn.network/',
+    'https://jinn.network/.',
+    'https://jinn.network/../escaped.json',
+    'https://jinn.network/a//b',
+    'https://jinn.network/a/./b',
+    'https://jinn.network/a/../b',
+    'https://jinn.network/%2e%2e/escaped.json',
+    'https://jinn.network/a%2fb',
+    'https://jinn.network/a%5cb',
+    'https://jinn.network/a\\b',
+    'https://jinn.network//server/share',
+    'https://jinn.network/C:/windows/path',
+    'https://JINN.network/schema',
+    'https://jinn.network:443/schema',
+    'https://user@jinn.network/schema',
+    'https://jinn.network/schema?draft=1',
+    'https://jinn.network/schema#fragment',
+    'https://jinn.network/manifest.json',
+    'https://jinn.network/manifest.dsse.json',
+  ]) {
+    assert.throws(
+      () => jinnIdentifierServedPath(identifier, 'fixture identity'),
+      /fixture identity must name a canonical relative jinn\.network hosted path/u,
+      identifier,
+    );
+  }
+});
+
+test('enumeration rejects a semantically Jinn identifier with noncanonical URL spelling', async () => {
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/noncanonical.schema.json'),
+      JSON.stringify({ $id: 'https://JINN.network/records/noncanonical/schema' }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /noncanonical\.schema\.json \$id must name a canonical relative jinn\.network hosted path/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('enumeration rejects an encoded traversal identity before exposing a served path', async () => {
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/escape.schema.json'),
+      JSON.stringify({ $id: 'https://jinn.network/%2e%2e/escaped.json' }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /escape\.schema\.json \$id must name a canonical relative jinn\.network hosted path/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('all 30 current Jinn self-identifiers remain valid canonical hosted paths', async () => {
+  const { enumeratePublicSurfaceAssets, jinnIdentifierServedPath } = await implementation;
+  const { loadCatalogPackages } = await import('./platform-catalog.mjs');
+  const claims = enumeratePublicSurfaceAssets({
+    repoRoot,
+    packages: loadCatalogPackages(repoRoot),
+  }).filter(({ claim }) => claim !== null);
+  assert.equal(claims.length, 30);
+  for (const { claim } of claims) {
+    assert.equal(jinnIdentifierServedPath(claim.identifier), claim.servedPath);
   }
 });
 

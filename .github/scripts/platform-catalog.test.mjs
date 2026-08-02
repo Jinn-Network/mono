@@ -32,6 +32,14 @@ test('loads a controlled catalog and hydrates package metadata only from manifes
   }
 });
 
+test('release groups declare a required unique gate set in the closed schema', () => {
+  const releaseGroup = catalogSchema.properties.releaseGroups.additionalProperties;
+  assert.ok(releaseGroup.required.includes('requiredGateIds'));
+  assert.deepEqual(releaseGroup.properties.requiredGateIds, {
+    $ref: '#/$defs/nonEmptyStringList',
+  });
+});
+
 test('rejects a scoped manifest that the catalog omits', () => {
   const root = fixtureRepo({
     manifests: {
@@ -231,12 +239,81 @@ test('rejects missing ownership, gate, authority, boundary, and transition refer
   }
 });
 
+test('release-group gates are known and exactly equal the member-package gate union', async (t) => {
+  const cases = [
+    {
+      name: 'package gate swapped to another valid gate',
+      mutate(catalog) {
+        catalog.gateDefinitions['environments-ci'] = catalog.gateDefinitions['fixture-ci'];
+        catalog.packages[0].requiredGateIds = ['environments-ci'];
+      },
+      pattern: /releaseGroups\.platform-v1\.requiredGateIds must exactly equal member package gate union/u,
+    },
+    {
+      name: 'group gate swapped to another valid gate',
+      mutate(catalog) {
+        catalog.gateDefinitions['environments-ci'] = catalog.gateDefinitions['fixture-ci'];
+        catalog.releaseGroups['platform-v1'].requiredGateIds = ['environments-ci'];
+      },
+      pattern: /releaseGroups\.platform-v1\.requiredGateIds must exactly equal member package gate union/u,
+    },
+    {
+      name: 'valid gate added only to group',
+      mutate(catalog) {
+        catalog.gateDefinitions['environments-ci'] = catalog.gateDefinitions['fixture-ci'];
+        catalog.releaseGroups['platform-v1'].requiredGateIds.push('environments-ci');
+      },
+      pattern: /releaseGroups\.platform-v1\.requiredGateIds must exactly equal member package gate union/u,
+    },
+    {
+      name: 'valid gate removed only from group',
+      mutate(catalog) {
+        catalog.gateDefinitions['environments-ci'] = catalog.gateDefinitions['fixture-ci'];
+        catalog.packages[0].requiredGateIds.push('environments-ci');
+        catalog.releaseGroups['platform-v1'].requiredGateIds.push('environments-ci');
+        catalog.releaseGroups['platform-v1'].requiredGateIds = ['environments-ci'];
+      },
+      pattern: /releaseGroups\.platform-v1\.requiredGateIds must exactly equal member package gate union/u,
+    },
+    {
+      name: 'prototype-inherited group gate',
+      mutate(catalog) { catalog.releaseGroups['platform-v1'].requiredGateIds = ['toString']; },
+      pattern: /releaseGroups\.platform-v1: unknown gate toString/u,
+    },
+  ];
+  for (const entry of cases) {
+    await t.test(entry.name, () => {
+      const catalog = fixtureCatalog();
+      entry.mutate(catalog);
+      const root = fixtureRepo({ catalog });
+      try {
+        assert.throws(() => loadPlatformCatalog(root), entry.pattern);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('a valid gate move is accepted only when group and member declarations change atomically', () => {
+  const catalog = fixtureCatalog();
+  catalog.gateDefinitions['environments-ci'] = catalog.gateDefinitions['fixture-ci'];
+  catalog.packages[0].requiredGateIds.push('environments-ci');
+  catalog.releaseGroups['platform-v1'].requiredGateIds.push('environments-ci');
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('rejects reference paths that name directories instead of files', async (t) => {
   const cases = [
     {
       name: 'gate directory',
-      mutate(catalog) { catalog.gateDefinitions['fixture-gate'].path = 'docs'; },
-      pattern: /gate fixture-gate path does not exist: docs/u,
+      mutate(catalog) { catalog.gateDefinitions['fixture-ci'].path = 'docs'; },
+      pattern: /gate fixture-ci path does not exist: docs/u,
     },
     {
       name: 'authority directory',
@@ -531,6 +608,35 @@ test('the canonical repository catalog validates the exact initial topology', ()
   assert.equal(catalog.packages.filter((pkg) => pkg.path.startsWith('packages/')).length, 65);
   assert.equal(catalog.packages.filter((pkg) => !pkg.path.startsWith('packages/')).length, 4);
   assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai']);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(catalog.releaseGroups).map(([group, definition]) => (
+      [group, definition.requiredGateIds]
+    ))),
+    {
+      'platform-v1': [
+        'benchmarking-ci',
+        'evidence-ci',
+        'marketplace-ci',
+        'record-discovery-ci',
+        'task-execution-ci',
+        'trust-ci',
+      ],
+      'experimental-environment-supply': [
+        'environments-ci',
+        'record-discovery-ci',
+        'task-supply-ci',
+      ],
+      'legacy-product-lines': ['client-ci', 'core-ci', 'layer-ci', 'plugin-ci', 'sdk-ci'],
+      'transitional-or-private': [
+        'autopilot-ci',
+        'broadcast-bot-ci',
+        'client-ci',
+        'indexer-ci',
+        'indexer-enrichment-ci',
+        'plugin-tree-ci',
+      ],
+    },
+  );
   assert.deepEqual(
     catalog.packages
       .filter((pkg) => pkg.releaseGroup === 'experimental-environment-supply')

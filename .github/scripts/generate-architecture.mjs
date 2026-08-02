@@ -276,10 +276,10 @@ export function renderArchitectureMarkdown(report) {
     '',
     '## Release and trusted publishers',
     '',
-    '| Release group | Packages | Publish policies | Stack published | Canary | Stable |',
-    '| --- | ---: | --- | --- | --- | --- |',
+    '| Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |',
+    '| --- | ---: | --- | --- | --- | --- | --- |',
     ...Object.entries(report.releaseGroups).map(([groupId, group]) => (
-      `| ${groupId} | ${group.packages.length} | ${cell(group.publishPolicies)} | ${group.stackPublished} | ${group.canary} | ${group.stable} |`
+      `| ${groupId} | ${group.packages.length} | ${cell(group.requiredGateIds)} | ${cell(group.publishPolicies)} | ${group.stackPublished} | ${group.canary} | ${group.stable} |`
     )),
     '',
     `The exact ${report.release.platformV1.packages.length}-package trusted-publisher set is \`platform-v1\`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live \`jinn.network\` profile hosting verification passes.** The ${report.release.experimentalEnvironmentSupply.packages.length} experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,

@@ -439,6 +439,12 @@ function validateDefinitions(catalog, repoRoot) {
       throw new Error(`releaseGroups.${groupId}.expectedPackageCount must be a non-negative integer`);
     }
     requireStringArray(group.publishPolicies, `releaseGroups.${groupId}.publishPolicies`, { nonEmpty: true });
+    requireStringArray(group.requiredGateIds, `releaseGroups.${groupId}.requiredGateIds`, { nonEmpty: true });
+    for (const gateId of group.requiredGateIds) {
+      if (!Object.hasOwn(catalog.gateDefinitions, gateId)) {
+        throw new Error(`releaseGroups.${groupId}: unknown gate ${gateId}`);
+      }
+    }
     for (const policy of group.publishPolicies) {
       if (!PUBLISH_POLICIES.has(policy)) throw new Error(`releaseGroups.${groupId} has unknown publish policy ${policy}`);
     }
@@ -569,9 +575,17 @@ function validateReleaseGroups(catalog) {
     grouped.set(pkg.releaseGroup, entries);
   }
   for (const [groupId, definition] of Object.entries(catalog.releaseGroups)) {
-    const actual = grouped.get(groupId)?.length ?? 0;
-    if (actual !== definition.expectedPackageCount) {
-      throw new Error(`release group ${groupId} expects ${definition.expectedPackageCount} packages, found ${actual}`);
+    const members = grouped.get(groupId) ?? [];
+    if (members.length !== definition.expectedPackageCount) {
+      throw new Error(`release group ${groupId} expects ${definition.expectedPackageCount} packages, found ${members.length}`);
+    }
+    const memberGateUnion = [...new Set(members.flatMap(({ requiredGateIds }) => requiredGateIds))].sort();
+    const groupGates = [...definition.requiredGateIds].sort();
+    if (!schemaValueEquals(groupGates, memberGateUnion)) {
+      throw new Error(
+        `releaseGroups.${groupId}.requiredGateIds must exactly equal member package gate union; `
+        + `declared ${groupGates.join(', ') || '<none>'}, members require ${memberGateUnion.join(', ') || '<none>'}`,
+      );
     }
   }
   const core = grouped.get('platform-v1') ?? [];

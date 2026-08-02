@@ -3,20 +3,13 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 
+import { loadPlatformCatalog } from './platform-catalog.mjs';
+
+const repoRoot = resolve(import.meta.dirname, '../..');
 const workflowsRoot = resolve(import.meta.dirname, '../workflows');
 const platformPath = resolve(workflowsRoot, 'platform-verification.yml');
 const platform = readFileSync(platformPath, 'utf8');
-const domains = new Map([
-  ['benchmarking', 'benchmarking-ci.yml'],
-  ['discovery', 'record-discovery-ci.yml'],
-  ['evidence', 'evidence-ci.yml'],
-  ['marketplace', 'marketplace-ci.yml'],
-  ['task_execution', 'task-execution-ci.yml'],
-  ['trust', 'trust-ci.yml'],
-].map(([job, filename]) => [job, {
-  filename,
-  source: readFileSync(resolve(workflowsRoot, filename), 'utf8'),
-}]));
+const catalog = loadPlatformCatalog(repoRoot);
 
 function jobBlock(source, jobId) {
   const start = source.indexOf(`\n  ${jobId}:\n`);
@@ -24,6 +17,32 @@ function jobBlock(source, jobId) {
   const rest = source.slice(start + 1);
   const next = rest.slice(1).search(/^  [a-zA-Z0-9_-]+:\n/mu);
   return next === -1 ? rest : rest.slice(0, next + 1);
+}
+
+const platformGateIds = catalog.releaseGroups['platform-v1'].requiredGateIds;
+const platformJobIds = [...platform.matchAll(/^  ([a-zA-Z0-9_-]+):$/gmu)]
+  .map(([, jobId]) => jobId);
+const domains = new Map(platformGateIds.map((gateId) => {
+  const definition = catalog.gateDefinitions[gateId];
+  assert.equal(definition.kind, 'workflow', `${gateId} must name a workflow gate`);
+  assert.match(gateId, /-ci$/u, `${gateId} must provide a receipt conclusion key`);
+  assert.match(definition.path, /^\.github\/workflows\/[a-zA-Z0-9_-]+\.yml$/u);
+  const staticUse = `uses: ./${definition.path}`;
+  const jobs = platformJobIds.filter((jobId) => jobBlock(platform, jobId).includes(staticUse));
+  assert.equal(jobs.length, 1, `${gateId} must have exactly one static reusable job`);
+  const [jobId] = jobs;
+  const filename = definition.path.slice('.github/workflows/'.length);
+  return [jobId, {
+    gateId,
+    gate: gateId.slice(0, -3),
+    filename,
+    path: definition.path,
+    source: readFileSync(resolve(repoRoot, definition.path), 'utf8'),
+  }];
+}));
+
+function sorted(values) {
+  return [...values].sort();
 }
 
 test('the reusable interface requires source_sha and lane', () => {
@@ -112,7 +131,7 @@ test('catalog validation treats the requested source SHA as authoritative', () =
   assert.match(catalog, /catalog_digest: \$\{\{ steps\.catalog\.outputs\.digest \}\}/u);
 });
 
-test('all six domain workflows remain independently triggered and become static reusable calls', () => {
+test('every catalog-selected platform gate remains independently triggered and is one static reusable call', () => {
   for (const [jobId, { filename, source }] of domains) {
     const header = source.slice(0, source.indexOf('\npermissions:\n'));
     assert.match(header, /pull_request:/u, `${filename} lost pull_request`);
@@ -137,6 +156,15 @@ test('all six domain workflows remain independently triggered and become static 
     }
   }
   assert.match(domains.get('task_execution').source, /workflow_dispatch:/u);
+});
+
+test('the static reusable workflow set exactly equals the platform release-group gates', () => {
+  const reusablePaths = [...platform.matchAll(/^    uses: (\.\/\.github\/workflows\/[a-zA-Z0-9_-]+\.yml)$/gmu)]
+    .map(([, path]) => path.slice(2));
+  assert.deepEqual(
+    sorted(reusablePaths),
+    sorted(platformGateIds.map((gateId) => catalog.gateDefinitions[gateId].path)),
+  );
 });
 
 test('artifacts build public/profile/pack outputs and attest every prepublication subject', () => {
@@ -174,31 +202,32 @@ test('external consumer accepts only the downloaded same-run tarball bundle', ()
 test('the always-running receipt receives every exact job conclusion and is uploaded/attested only on success', () => {
   const receipt = jobBlock(platform, 'verification_receipt');
   assert.match(receipt, /if: always\(\)/u);
-  for (const need of [
-    'catalog',
-    'benchmarking',
-    'discovery',
-    'evidence',
-    'marketplace',
-    'task_execution',
-    'trust',
-    'artifacts',
-    'external_consumer',
-  ]) {
-    assert.match(receipt, new RegExp(`needs\\.${need}\\.result`, 'u'), `receipt omits ${need}`);
-  }
-  for (const gate of [
-    'catalog',
-    'benchmarking',
-    'record-discovery',
-    'evidence',
-    'marketplace',
-    'task-execution',
-    'trust',
-    'artifacts',
-    'external-consumer',
-  ]) {
-    assert.match(receipt, new RegExp(`--gate "${gate}=\\$\\{[A-Z_]+_RESULT\\}"`, 'u'));
+  const infrastructure = new Map([
+    ['catalog', 'catalog'],
+    ['artifacts', 'artifacts'],
+    ['external-consumer', 'external_consumer'],
+  ]);
+  const expectedGateJobs = new Map([
+    ...infrastructure,
+    ...[...domains].map(([jobId, { gate }]) => [gate, jobId]),
+  ]);
+  const declaredNeeds = [...receipt.matchAll(/^      - ([a-zA-Z0-9_-]+)$/gmu)]
+    .map(([, jobId]) => jobId);
+  assert.deepEqual(sorted(declaredNeeds), sorted(expectedGateJobs.values()));
+
+  const resultVariables = new Map(
+    [...receipt.matchAll(/^\s+([A-Z_]+_RESULT): \$\{\{ needs\.([a-zA-Z0-9_-]+)\.result \}\}$/gmu)]
+      .map(([, variable, jobId]) => [variable, jobId]),
+  );
+  assert.deepEqual(sorted(resultVariables.values()), sorted(expectedGateJobs.values()));
+
+  const cliGates = new Map(
+    [...receipt.matchAll(/--gate "([^="\s]+)=\$\{([A-Z_]+_RESULT)\}"/gu)]
+      .map(([, gate, variable]) => [gate, variable]),
+  );
+  assert.deepEqual(sorted(cliGates.keys()), sorted(expectedGateJobs.keys()));
+  for (const [gate, expectedJob] of expectedGateJobs) {
+    assert.equal(resultVariables.get(cliGates.get(gate)), expectedJob, `${gate} must bind ${expectedJob}.result`);
   }
   assert.match(receipt, /platform-verification-receipt\.mjs/u);
   assert.match(receipt, /uses: actions\/attest@v4/u);
@@ -209,6 +238,22 @@ test('the always-running receipt receives every exact job conclusion and is uplo
     'the dot-directory receipt must opt in to hidden files',
   );
   assert.equal((receipt.match(/if: success\(\)/gu) ?? []).length, 2);
+});
+
+test('the experimental environment-supply group remains continuously represented and disabled', () => {
+  const group = catalog.releaseGroups['experimental-environment-supply'];
+  assert.deepEqual(group.requiredGateIds, [
+    'environments-ci',
+    'record-discovery-ci',
+    'task-supply-ci',
+  ]);
+  assert.deepEqual(group.publishPolicies, ['disabled']);
+  assert.equal(group.stackPublished, false);
+  assert.equal(group.canary, false);
+  assert.equal(group.stable, false);
+  assert.ok(catalog.packages
+    .filter(({ releaseGroup }) => releaseGroup === 'experimental-environment-supply')
+    .every(({ publishPolicy }) => publishPolicy === 'disabled'));
 });
 
 test('prepublication verification cannot publish or wait permissively for a registry', () => {

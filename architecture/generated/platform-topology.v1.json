@@ -43618,6 +43618,11 @@
       "publishPolicies": [
         "disabled"
       ],
+      "requiredGateIds": [
+        "environments-ci",
+        "record-discovery-ci",
+        "task-supply-ci"
+      ],
       "stable": false,
       "stackPublished": false
     },
@@ -44103,6 +44108,11 @@
       "publishPolicies": [
         "disabled"
       ],
+      "requiredGateIds": [
+        "environments-ci",
+        "record-discovery-ci",
+        "task-supply-ci"
+      ],
       "stable": false,
       "stackPublished": false
     },
@@ -44118,6 +44128,13 @@
       ],
       "publishPolicies": [
         "independent"
+      ],
+      "requiredGateIds": [
+        "client-ci",
+        "core-ci",
+        "layer-ci",
+        "plugin-ci",
+        "sdk-ci"
       ],
       "stable": false,
       "stackPublished": false
@@ -44180,6 +44197,14 @@
       "publishPolicies": [
         "canary-only"
       ],
+      "requiredGateIds": [
+        "benchmarking-ci",
+        "evidence-ci",
+        "marketplace-ci",
+        "record-discovery-ci",
+        "task-execution-ci",
+        "trust-ci"
+      ],
       "stable": false,
       "stackPublished": true
     },
@@ -44198,6 +44223,14 @@
       "publishPolicies": [
         "private",
         "never"
+      ],
+      "requiredGateIds": [
+        "autopilot-ci",
+        "broadcast-bot-ci",
+        "client-ci",
+        "indexer-ci",
+        "indexer-enrichment-ci",
+        "plugin-tree-ci"
       ],
       "stable": false,
       "stackPublished": false

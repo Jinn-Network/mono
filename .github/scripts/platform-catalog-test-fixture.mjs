@@ -29,7 +29,7 @@ export function packageEntry(name, path, overrides = {}) {
     releaseGroup: 'platform-v1',
     publishPolicy: 'canary-only',
     ownerGroup: 'architecture-control',
-    requiredGateIds: ['fixture-gate'],
+    requiredGateIds: ['fixture-ci'],
     boundaryPolicy: {
       kind: 'source-boundary',
       path: '.github/scripts/fixture-boundary.mjs',
@@ -120,12 +120,13 @@ export function fixtureCatalog() {
       'architecture-control': ['@oaksprout', '@ritsukai'],
     },
     gateDefinitions: {
-      'fixture-gate': { kind: 'workflow', path: '.github/workflows/fixture.yml' },
+      'fixture-ci': { kind: 'workflow', path: '.github/workflows/fixture.yml' },
     },
     releaseGroups: {
       'platform-v1': {
         expectedPackageCount: 50,
         publishPolicies: ['canary-only'],
+        requiredGateIds: ['fixture-ci'],
         stackPublished: true,
         canary: true,
         stable: false,
@@ -133,6 +134,7 @@ export function fixtureCatalog() {
       'experimental-environment-supply': {
         expectedPackageCount: 7,
         publishPolicies: ['disabled'],
+        requiredGateIds: ['fixture-ci'],
         stackPublished: false,
         canary: false,
         stable: false,
@@ -140,6 +142,7 @@ export function fixtureCatalog() {
       'legacy-product-lines': {
         expectedPackageCount: 5,
         publishPolicies: ['independent'],
+        requiredGateIds: ['fixture-ci'],
         stackPublished: false,
         canary: false,
         stable: false,
@@ -147,6 +150,7 @@ export function fixtureCatalog() {
       'transitional-or-private': {
         expectedPackageCount: 7,
         publishPolicies: ['private', 'never'],
+        requiredGateIds: ['fixture-ci'],
         stackPublished: false,
         canary: false,
         stable: false,

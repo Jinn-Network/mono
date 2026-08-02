@@ -17,8 +17,8 @@ import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import { buildProfileRoot } from './build-profile-root.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
 import {
-  REQUIRED_VERIFICATION_GATES,
   createVerificationReceipt,
+  verificationGateConclusionIds,
 } from './platform-verification-receipt.mjs';
 
 const SHA = 'c'.repeat(40);
@@ -32,7 +32,10 @@ function sri(bytes) {
 }
 
 function successfulConclusions() {
-  return Object.fromEntries(REQUIRED_VERIFICATION_GATES.map((gate) => [gate, 'success']));
+  return Object.fromEntries(
+    verificationGateConclusionIds(fixtureCatalog(), 'platform-v1')
+      .map((gate) => [gate, 'success']),
+  );
 }
 
 function receiptFixture() {
@@ -179,25 +182,46 @@ test('failed, skipped, neutral, cancelled, and missing gates cannot produce a re
   try {
     for (const conclusion of ['failure', 'skipped', 'neutral', 'cancelled']) {
       const args = receiptArgs(fixture, `receipt-${conclusion}.json`);
-      args.conclusions.benchmarking = conclusion;
+      args.conclusions.fixture = conclusion;
       assert.throws(
         () => createVerificationReceipt(args),
-        new RegExp(`gate benchmarking must be exact success, got ${conclusion}`, 'u'),
+        new RegExp(`gate fixture must be exact success, got ${conclusion}`, 'u'),
       );
       assert.equal(existsSync(args.outputPath), false);
     }
 
     const missing = receiptArgs(fixture, 'receipt-missing.json');
-    delete missing.conclusions.trust;
+    delete missing.conclusions.fixture;
     assert.throws(
       () => createVerificationReceipt(missing),
-      /missing required gate conclusion trust/u,
+      /missing required gate conclusion fixture/u,
     );
     assert.equal(existsSync(missing.outputPath), false);
+
+    const extra = receiptArgs(fixture, 'receipt-extra.json');
+    extra.conclusions.benchmarking = 'success';
+    assert.throws(
+      () => createVerificationReceipt(extra),
+      /unknown gate conclusions: benchmarking/u,
+    );
+    assert.equal(existsSync(extra.outputPath), false);
   } finally {
     rmSync(fixture.repoRoot, { recursive: true, force: true });
     rmSync(fixture.root, { recursive: true, force: true });
   }
+});
+
+test('receipt conclusion keys strip a validated -ci suffix from catalog group gates', () => {
+  assert.deepEqual(
+    verificationGateConclusionIds(fixtureCatalog(), 'platform-v1'),
+    ['artifacts', 'catalog', 'external-consumer', 'fixture'],
+  );
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].requiredGateIds = ['fixture-gate'];
+  assert.throws(
+    () => verificationGateConclusionIds(catalog, 'platform-v1'),
+    /releaseGroups\.platform-v1 gate fixture-gate must end in -ci/u,
+  );
 });
 
 test('catalog digest drift cannot produce a receipt', () => {

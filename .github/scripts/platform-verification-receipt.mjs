@@ -21,6 +21,7 @@ import { buildProfileRoot } from './build-profile-root.mjs';
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
+  loadPlatformCatalog,
 } from './platform-catalog.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 import { resolvePublishVersion } from './stack-publish-manifest.mjs';
@@ -29,17 +30,29 @@ const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
 const SRI_SHA512 = /^sha512-[A-Za-z0-9+/]+={0,2}$/u;
 
-export const REQUIRED_VERIFICATION_GATES = Object.freeze([
+const INFRASTRUCTURE_VERIFICATION_GATES = Object.freeze([
   'catalog',
-  'benchmarking',
-  'record-discovery',
-  'evidence',
-  'marketplace',
-  'task-execution',
-  'trust',
   'artifacts',
   'external-consumer',
 ]);
+
+export function verificationGateConclusionIds(catalog, releaseGroup) {
+  const group = catalog?.releaseGroups?.[releaseGroup];
+  if (!group || !Array.isArray(group.requiredGateIds)) {
+    throw new Error(`release group ${releaseGroup} does not declare requiredGateIds`);
+  }
+  const domainGates = group.requiredGateIds.map((gateId) => {
+    if (typeof gateId !== 'string' || !gateId.endsWith('-ci') || gateId.length === 3) {
+      throw new Error(`releaseGroups.${releaseGroup} gate ${String(gateId)} must end in -ci`);
+    }
+    return gateId.slice(0, -3);
+  });
+  const required = [...INFRASTRUCTURE_VERIFICATION_GATES, ...domainGates];
+  if (new Set(required).size !== required.length) {
+    throw new Error(`releaseGroups.${releaseGroup} gates collide after stripping -ci`);
+  }
+  return required.sort();
+}
 
 function readJson(path, label) {
   try {
@@ -65,17 +78,17 @@ function inside(child, parent) {
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`));
 }
 
-function validateConclusions(conclusions) {
+function validateConclusions(conclusions, requiredGates) {
   if (!conclusions || typeof conclusions !== 'object' || Array.isArray(conclusions)) {
     throw new Error('gate conclusions must be a named object');
   }
-  for (const gate of REQUIRED_VERIFICATION_GATES) {
+  for (const gate of requiredGates) {
     if (!(gate in conclusions)) throw new Error(`missing required gate conclusion ${gate}`);
     if (conclusions[gate] !== 'success') {
       throw new Error(`gate ${gate} must be exact success, got ${String(conclusions[gate])}`);
     }
   }
-  const extras = Object.keys(conclusions).filter((gate) => !REQUIRED_VERIFICATION_GATES.includes(gate));
+  const extras = Object.keys(conclusions).filter((gate) => !requiredGates.includes(gate));
   if (extras.length > 0) throw new Error(`unknown gate conclusions: ${extras.sort().join(', ')}`);
 }
 
@@ -253,7 +266,6 @@ export function createVerificationReceipt({
   conclusions,
   outputPath,
 }) {
-  validateConclusions(conclusions);
   if (existsSync(outputPath)) throw new Error(`refusing to overwrite existing verification receipt ${outputPath}`);
   if (!COMMIT_SHA.test(String(sourceSha))) throw new Error('receipt source SHA must be a 40-character lowercase commit SHA');
   if (!SHA256.test(String(catalogDigest))) throw new Error('receipt catalog digest must be lowercase SHA-256');
@@ -265,6 +277,11 @@ export function createVerificationReceipt({
   if (actualCatalogDigest !== catalogDigest) {
     throw new Error(`receipt catalog digest does not match the checked-out catalog: ${actualCatalogDigest}`);
   }
+  const catalog = loadPlatformCatalog(root);
+  validateConclusions(
+    conclusions,
+    verificationGateConclusionIds(catalog, releaseGroup),
+  );
   const catalogPackages = loadCatalogPackages(root, { releaseGroup });
   const catalogNames = catalogPackages.map(({ name }) => name);
   if (catalogNames.length !== 50) throw new Error(`receipt requires exactly 50 ${releaseGroup} packages`);

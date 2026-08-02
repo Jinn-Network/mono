@@ -342,12 +342,12 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 ## Release and trusted publishers
 
-| Release group | Packages | Publish policies | Stack published | Canary | Stable |
-| --- | ---: | --- | --- | --- | --- |
-| experimental-environment-supply | 7 | disabled | false | false | false |
-| legacy-product-lines | 5 | independent | false | false | false |
-| platform-v1 | 50 | canary-only | true | true | false |
-| transitional-or-private | 7 | private<br>never | false | false | false |
+| Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |
+| --- | ---: | --- | --- | --- | --- | --- |
+| experimental-environment-supply | 7 | environments-ci<br>record-discovery-ci<br>task-supply-ci | disabled | false | false | false |
+| legacy-product-lines | 5 | client-ci<br>core-ci<br>layer-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
+| platform-v1 | 50 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
+| transitional-or-private | 7 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci | private<br>never | false | false | false |
 
 The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 7 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
