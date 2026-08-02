@@ -1,7 +1,7 @@
 import { asciiLowercase, asciiUppercase, isAsciiHost, isHttpToken } from "./ascii.js";
 import { serializeCanonicalJson } from "./canonical.js";
 import { sha256Hex } from "./hashing.js";
-import { assertIJsonString, type JsonValue } from "./json.js";
+import { assertIJsonString, assertIJsonStrings, type JsonValue } from "./json.js";
 import { compareCodeUnitStrings } from "./order.js";
 import {
   REQUEST_KEY_VERSION,
@@ -400,7 +400,33 @@ function parseJsonRejectingDuplicateNames(text: string): JsonValue {
   parseValue();
   skipWhitespace();
   if (index !== text.length) throw new SyntaxError("unexpected content after the JSON value");
-  return JSON.parse(text) as JsonValue;
+  const parsed = JSON.parse(text) as JsonValue;
+  // JCS is defined over interoperable JSON strings. Keep this separate from the sealed
+  // record encoder: request bodies may contain finite IEEE-754 decimals, whereas record
+  // quantities deliberately remain in the I-JSON-integer subset.
+  assertIJsonStrings(parsed);
+  return parsed;
+}
+
+/** RFC 8785 JSON serialization for a parsed request body, not the record's integer-only seal. */
+function serializeJsonJcs(value: JsonValue): Uint8Array {
+  const serialize = (candidate: JsonValue): string => {
+    if (candidate === null) return "null";
+    if (typeof candidate === "boolean") return candidate ? "true" : "false";
+    if (typeof candidate === "number") {
+      if (!Number.isFinite(candidate)) throw new SyntaxError("JCS cannot encode a non-finite number");
+      // ECMAScript's JSON number serialization is the RFC 8785 number algorithm: it folds
+      // negative zero and chooses the required decimal/exponent spelling for IEEE-754 values.
+      const encoded = JSON.stringify(candidate);
+      if (encoded === undefined) throw new SyntaxError("JCS cannot encode this number");
+      return encoded;
+    }
+    if (typeof candidate === "string") return JSON.stringify(candidate);
+    if (Array.isArray(candidate)) return `[${candidate.map(serialize).join(",")}]`;
+    const keys = Object.keys(candidate).sort(compareCodeUnitStrings);
+    return `{${keys.map((key) => `${JSON.stringify(key)}:${serialize(candidate[key] as JsonValue)}`).join(",")}}`;
+  };
+  return encoder.encode(serialize(value));
 }
 
 function canonicalBody(
@@ -419,14 +445,16 @@ function canonicalBody(
       let parsed: JsonValue;
       try {
         parsed = parseJsonRejectingDuplicateNames(decodeUtf8Strict(body, "body"));
-        return `sha256:${sha256Hex(serializeCanonicalJson(parsed))}`;
+        return `sha256:${sha256Hex(serializeJsonJcs(parsed))}`;
       } catch (error) {
         if (error instanceof InvalidRequestError) throw error;
         throw new InvalidRequestError("body is not canonicalizable JSON under the json-jcs policy");
       }
     }
-    case "utf8-trim":
-      return `sha256:${sha256Hex(encoder.encode(decodeUtf8Strict(body, "body").trim()))}`;
+    case "utf8-trim": {
+      const normalized = encoder.encode(decodeUtf8Strict(body, "body").trim());
+      return normalized.length === 0 ? null : `sha256:${sha256Hex(normalized)}`;
+    }
   }
 }
 

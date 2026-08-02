@@ -244,6 +244,62 @@
       ]
     },
     {
+      "name": "json-jcs-ieee754-numbers",
+      "expectedKey": "irk1:1c471e9d3db11799570535f5d126c7ce3d2232888bd100f917f3255d2a569612",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "https://api.example.test/numbers",
+          "body": "{\"fraction\":1.25,\"large\":1e+30,\"small\":1e-7,\"zero\":-0}"
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/numbers",
+          "body": "{\"zero\":0,\"small\":0.0000001,\"large\":1e30,\"fraction\":1.250}"
+        }
+      ]
+    },
+    {
+      "name": "utf8-trim-empty-is-absent",
+      "expectedKey": "irk1:1881535d942f30b748831963abfcd0e9643e9f66442b30b9e40a0a2806b22522",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "utf8-trim"
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim"
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim",
+          "body": " \t\n "
+        }
+      ]
+    },
+    {
       "name": "trailing-slash-strip",
       "expectedKey": "irk1:83f3b095b0779ab95379c1d5f6a956b07187b7f12839a1981844f48d92217876",
       "policy": {

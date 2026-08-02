@@ -67,7 +67,7 @@ describe("equivalence corpus", () => {
 describe("request-key vector corpus", () => {
   test("every same-key group collapses to one key, and groups never collide", async () => {
     const vectors = await loadRequestKeyVectors();
-    expect(vectors.groups.length).toBeGreaterThanOrEqual(9);
+    expect(vectors.groups.length).toBeGreaterThanOrEqual(11);
     const groupKeys = new Set<string>();
     for (const group of vectors.groups) {
       const keys = new Set(group.requests.map((request) => canonicalRequestKey({

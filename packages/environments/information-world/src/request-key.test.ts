@@ -339,6 +339,21 @@ describe("body canonicalization", () => {
     }, jcs));
   });
 
+  test("json-jcs uses RFC 8785 number serialization without widening sealed-record numbers", () => {
+    const jcs: RequestKeyPolicy = { ...policy, bodyCanonicalization: "json-jcs" };
+    const decimal = canonicalRequestKey({
+      method: "POST",
+      url: "https://a.test/x",
+      body: utf8('{"fraction":1.25,"large":1e+30,"small":1e-7,"zero":-0}'),
+    }, jcs);
+    expect(decimal).toBe(canonicalRequestKey({
+      method: "POST",
+      url: "https://a.test/x",
+      body: utf8('{"zero":0,"small":0.0000001,"large":1e30,"fraction":1.250}'),
+    }, jcs));
+    expect(decimal).toBe("irk1:62a87c17a903bf2ec37d8f507dcdbdda35b2e4bed084af99ac8b892da6d2f9b4");
+  });
+
   test("json-jcs refuses non-JSON input", () => {
     const jcs: RequestKeyPolicy = { ...policy, bodyCanonicalization: "json-jcs" };
     expect(() => canonicalRequestKey({
@@ -390,6 +405,15 @@ describe("body canonicalization", () => {
       url: "https://a.test/x",
       body: utf8("hello"),
     }, trim));
+  });
+
+  test("utf8-trim treats a whitespace-only body as the canonical absent body", () => {
+    const trim: RequestKeyPolicy = { ...policy, bodyCanonicalization: "utf8-trim" };
+    const request = { method: "POST", url: "https://a.test/x" };
+    expect(canonicalRequestKey({ ...request, body: utf8(" \t\n ") }, trim))
+      .toBe(canonicalRequestKey({ ...request, body: new Uint8Array() }, trim));
+    expect(canonicalRequestKey({ ...request, body: utf8(" \t\n ") }, trim))
+      .toBe(canonicalRequestKey(request, trim));
   });
 
   test("text policies refuse invalid UTF-8", () => {
