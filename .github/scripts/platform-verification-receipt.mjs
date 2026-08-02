@@ -3,15 +3,21 @@
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, relative, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
+import { buildProfileRoot } from './build-profile-root.mjs';
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
@@ -145,7 +151,48 @@ function validatePublicManifest(publicManifest, context) {
   }
 }
 
-function validateProfileManifest(profileManifest, context) {
+function profileDocumentPath(profileRoot, path) {
+  if (typeof path !== 'string' || path === '' || path.includes('\\')) {
+    throw new Error('profile manifest document path must be a non-empty forward-slash path');
+  }
+  const absolute = resolve(profileRoot, ...path.split('/'));
+  const normalized = relative(profileRoot, absolute).split(sep).join('/');
+  if (!inside(absolute, profileRoot) || normalized !== path) {
+    throw new Error(`profile manifest document path escapes the profile root: ${path}`);
+  }
+  return absolute;
+}
+
+function walkProfileRoot(directory, prefix = '') {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolute = join(directory, entry.name);
+    if (entry.isSymbolicLink()) throw new Error(`profile root contains symbolic link ${path}`);
+    if (entry.isDirectory()) files.push(...walkProfileRoot(absolute, path));
+    else if (entry.isFile()) files.push(path);
+    else throw new Error(`profile root contains unsupported entry ${path}`);
+  }
+  return files.sort();
+}
+
+function expectedProfileManifest(context) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'jinn-expected-profile-root-'));
+  try {
+    return buildProfileRoot({
+      repoRoot: context.repoRoot,
+      outDir: temporaryRoot,
+      commit: context.sourceSha,
+      catalogDigest: context.catalogDigest,
+      releaseGroup: context.releaseGroup,
+      lane: context.lane,
+    });
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+function validateProfileManifest(profileManifest, profileManifestPath, context) {
   if (profileManifest.generatedFrom?.commit !== context.sourceSha) {
     throw new Error('profile manifest source SHA does not match the receipt input');
   }
@@ -160,9 +207,36 @@ function validateProfileManifest(profileManifest, context) {
     throw new Error(`profile package set does not match ${context.releaseGroup}`);
   }
   if (!Array.isArray(profileManifest.documents)) throw new Error('profile manifest documents must be an array');
+  const profileRoot = dirname(profileManifestPath);
+  const documentPaths = new Set();
   for (const document of profileManifest.documents) {
     if (!context.catalogNames.includes(document.sourcePackage)) {
       throw new Error(`profile document ${document.path ?? '<missing>'} names an out-of-set source package`);
+    }
+    profileDocumentPath(profileRoot, document.path);
+    if (documentPaths.has(document.path)) {
+      throw new Error(`profile manifest repeats document path ${document.path}`);
+    }
+    documentPaths.add(document.path);
+  }
+
+  const expected = expectedProfileManifest(context);
+  if (canonicalJsonBytes(profileManifest.documents) !== canonicalJsonBytes(expected.documents)) {
+    throw new Error('profile manifest document inventory does not match the checked-out source');
+  }
+
+  const expectedFiles = new Set(['manifest.json', ...expected.documents.map(({ path }) => path)]);
+  for (const path of walkProfileRoot(profileRoot)) {
+    if (!expectedFiles.has(path)) throw new Error(`profile root contains unexpected file ${path}`);
+  }
+  for (const document of expected.documents) {
+    const path = profileDocumentPath(profileRoot, document.path);
+    if (!existsSync(path) || !lstatSync(path).isFile()) {
+      throw new Error(`profile root is missing declared document ${document.path}`);
+    }
+    const digest = fileSha256(path);
+    if (digest !== document.sha256) {
+      throw new Error(`profile root document digest does not match manifest for ${document.path}`);
     }
   }
 }
@@ -195,6 +269,7 @@ export function createVerificationReceipt({
   const catalogNames = catalogPackages.map(({ name }) => name);
   if (catalogNames.length !== 50) throw new Error(`receipt requires exactly 50 ${releaseGroup} packages`);
   const context = {
+    repoRoot: root,
     sourceSha,
     catalogDigest,
     releaseGroup,
@@ -211,7 +286,7 @@ export function createVerificationReceipt({
   const profileManifest = readJson(profilePath, 'profile manifest');
   const { expectedWaves, expectedOrder, version } = validatePackManifest(pack, packPath, context);
   validatePublicManifest(publicManifest, context);
-  validateProfileManifest(profileManifest, context);
+  validateProfileManifest(profileManifest, profilePath, context);
 
   const receipt = {
     schemaVersion: 1,

@@ -187,3 +187,70 @@ fresh consumers, and imported successfully.
 - Task 5's caller must grant the reusable verification jobs `id-token: write`,
   `attestations: write`, and `artifact-metadata: write`, and should pass only the optional
   marketplace RPC secret if desired. Reusable workflows cannot elevate caller permissions.
+
+## Review round 1/5 — Important findings
+
+### Finding 1: receipt trusted an incomplete profile artifact
+
+Root cause: the receipt checked profile identity, package membership, and source-package
+membership, but accepted the submitted `documents` array as its own authority. It did not
+re-derive the catalog-driven inventory or inspect the sibling profile-root files.
+
+RED command (Node `v22.22.2`):
+
+```text
+node --test .github/scripts/platform-verification-receipt.test.mjs
+```
+
+Observed RED: `10` tests, `7` pass, `3` fail. Missing, extra, and digest-drifted manifest
+documents; missing, modified, and extra profile-root files; and a `../` document path all
+failed with `Missing expected exception` because the old receipt accepted them.
+
+Fix:
+
+- Rebuild the expected profile manifest in a fresh temporary directory from the checked-out
+  source, catalog digest, source SHA, release group, and lane; the submitted manifest is not
+  used to derive expectations and source files are never modified.
+- Require the submitted document inventory to exactly equal the independently generated
+  inventory, including path, SHA-256, media type, source package, order, and cardinality.
+- Require canonical contained forward-slash paths with no duplicates or traversal.
+- Walk the submitted profile root, reject symlinks/unsupported or unexpected files, require
+  every expected document file, and recompute each actual file's SHA-256.
+
+GREEN: the focused receipt test passed `10/10`, including every drift mutation above.
+
+### Finding 2: requested SHA was implicit in reusable domain checkouts
+
+Root cause: the platform workflow and six called workflows relied on the caller event's
+default checkout SHA. The explicit `source_sha` was not passed to domains, and the catalog
+job incorrectly required it to equal `github.sha`, preventing a later caller from verifying
+an authoritative peeled tag SHA.
+
+RED command (Node `v22.22.2`):
+
+```text
+node --test .github/scripts/platform-verification-workflow.test.mjs
+```
+
+Observed RED: `12` tests, `7` pass, `5` fail. The workflows lacked required domain inputs,
+static caller propagation, explicit refs on all platform/domain checkouts, and still tied the
+input to caller context.
+
+Fix:
+
+- Added required `workflow_call.inputs.source_sha` to all six domain workflows.
+- Passed `source_sha: ${{ inputs.source_sha }}` through all six static platform calls.
+- Bound all `58` domain checkout steps to
+  `${{ inputs.source_sha || github.sha }}`, preserving direct pull-request, push, and dispatch
+  triggers while making reusable calls explicit.
+- Bound all four platform checkout steps directly to `${{ inputs.source_sha }}`.
+- Removed only the `source_sha == github.sha` restriction; catalog validation still requires
+  checked-out `HEAD == source_sha` and validates/exports the catalog digest.
+
+GREEN: the focused workflow test passed `12/12`; `actionlint` passed the platform workflow
+and all six changed domain workflows.
+
+### Review-round final verification
+
+The combined Task 4 suite passed `58/58`, `0` failed. Changed-workflow `actionlint` and
+`git diff --check` passed. Task 5 and the existing publisher were not modified.

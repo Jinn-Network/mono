@@ -23,6 +23,8 @@ jobs:
       catalog_digest: ${{ steps.catalog.outputs.digest }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -30,9 +32,7 @@ jobs:
         id: catalog
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
-          CALLER_SHA: ${{ github.sha }}
         run: |
-          test "${SOURCE_SHA}" = "${CALLER_SHA}"
           test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"
           digest="$(node --input-type=module <<'NODE'
           import { catalogSha256 } from './.github/scripts/build-prepublication-bundle.mjs';
@@ -47,28 +47,40 @@ jobs:
   benchmarking:
     needs: catalog
     uses: ./.github/workflows/benchmarking-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
 
   discovery:
     needs: catalog
     uses: ./.github/workflows/record-discovery-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
 
   evidence:
     needs: catalog
     uses: ./.github/workflows/evidence-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
 
   marketplace:
     needs: catalog
     uses: ./.github/workflows/marketplace-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
     secrets:
       JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
 
   task_execution:
     needs: catalog
     uses: ./.github/workflows/task-execution-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
 
   trust:
     needs: catalog
     uses: ./.github/workflows/trust-ci.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
 
   artifacts:
     needs: catalog
@@ -80,6 +92,8 @@ jobs:
       artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -142,6 +156,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -177,6 +193,8 @@ jobs:
       artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
+import { buildProfileRoot } from './build-profile-root.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
 import {
   REQUIRED_VERIFICATION_GATES,
@@ -39,7 +40,19 @@ function receiptFixture() {
   const root = mkdtempSync(join(tmpdir(), 'jinn-verification-receipt-'));
   const packRoot = join(root, 'pack');
   mkdirSync(join(packRoot, 'tarballs'), { recursive: true });
+  const catalogPath = join(repoRoot, 'architecture/platform-packages.v1.json');
   const catalog = fixtureCatalog();
+  const profilePackage = catalog.packages.find(
+    ({ name }) => name === '@jinn-network/fixture-protocol',
+  );
+  profilePackage.publicSurface.schemas = ['schemas'];
+  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
+  const sourceProfileRoot = join(repoRoot, profilePackage.path, 'schemas');
+  mkdirSync(sourceProfileRoot, { recursive: true });
+  writeFileSync(join(sourceProfileRoot, 'profile.schema.json'), `${JSON.stringify({
+    $id: 'https://jinn.network/fixture/profile.schema.json',
+    type: 'object',
+  }, null, 2)}\n`, 'utf8');
   const packages = catalog.packages
     .filter(({ releaseGroup }) => releaseGroup === 'platform-v1')
     .sort((left, right) => left.path.localeCompare(right.path));
@@ -49,7 +62,7 @@ function receiptFixture() {
     .sort();
   const firstWave = [...coreNames, '@jinn-network/fixture-protocol'].sort();
   const packageOrder = [...firstWave, '@jinn-network/fixture-application'];
-  const catalogDigest = sha256(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json')));
+  const catalogDigest = sha256(readFileSync(catalogPath));
   const tarballs = packageOrder.map((name, index) => {
     const filename = `tarballs/package-${String(index + 1).padStart(2, '0')}.tgz`;
     const bytes = Buffer.from(`receipt-tarball:${name}`);
@@ -80,21 +93,20 @@ function receiptFixture() {
       publicSurface: surface,
     })),
   };
-  const profile = {
-    version: 1,
-    generatedFrom: { repository: 'Jinn-Network/mono', commit: SHA },
-    catalog: { path: 'architecture/platform-packages.v1.json', sha256: catalogDigest },
+  const profileRoot = join(root, 'profile-root');
+  const profile = buildProfileRoot({
+    repoRoot,
+    outDir: profileRoot,
+    commit: SHA,
+    catalogDigest,
     releaseGroup: 'platform-v1',
     lane: 'canary',
-    packages: packageOrder,
-    documents: [],
-  };
+  });
   const packManifestPath = join(packRoot, 'manifest.json');
   const publicManifestPath = join(root, 'public-surface-manifest.json');
-  const profileManifestPath = join(root, 'profile-manifest.json');
+  const profileManifestPath = join(profileRoot, 'manifest.json');
   writeFileSync(packManifestPath, canonicalJsonBytes(pack), 'utf8');
   writeFileSync(publicManifestPath, canonicalJsonBytes(publicSurface), 'utf8');
-  writeFileSync(profileManifestPath, canonicalJsonBytes(profile), 'utf8');
   return {
     repoRoot,
     root,
@@ -102,10 +114,15 @@ function receiptFixture() {
     pack,
     publicSurface,
     profile,
+    profileRoot,
     packManifestPath,
     publicManifestPath,
     profileManifestPath,
   };
+}
+
+function writeProfileManifest(fixture) {
+  writeFileSync(fixture.profileManifestPath, canonicalJsonBytes(fixture.profile), 'utf8');
 }
 
 function receiptArgs(fixture, outputName = 'receipt.json') {
@@ -141,7 +158,13 @@ test('writes a canonical receipt binding source, catalog, gates, package order, 
     assert.deepEqual(receipt.tarballs, fixture.pack.tarballs);
     assert.deepEqual(receipt.conclusions, successfulConclusions());
     assert.equal(receipt.surfaces.public.packageCount, 50);
-    assert.equal(receipt.surfaces.profile.documentCount, 0);
+    assert.equal(receipt.surfaces.profile.documentCount, 1);
+    assert.deepEqual(receipt.surfaces.profile.documents, [{
+      path: 'fixture/profile.schema.json',
+      sha256: sha256(readFileSync(join(fixture.profileRoot, 'fixture/profile.schema.json'))),
+      mediaType: 'application/schema+json',
+      sourcePackage: '@jinn-network/fixture-protocol',
+    }]);
     assert.match(receipt.surfaces.public.manifestSha256, /^[0-9a-f]{64}$/u);
     assert.match(receipt.surfaces.profile.manifestSha256, /^[0-9a-f]{64}$/u);
     assert.equal(readFileSync(args.outputPath, 'utf8'), canonicalJsonBytes(receipt));
@@ -199,10 +222,99 @@ test('source drift cannot produce a receipt', () => {
   const args = receiptArgs(fixture);
   try {
     fixture.profile.generatedFrom.commit = 'd'.repeat(40);
-    writeFileSync(fixture.profileManifestPath, canonicalJsonBytes(fixture.profile), 'utf8');
+    writeProfileManifest(fixture);
     assert.throws(
       () => createVerificationReceipt(args),
       /profile manifest source SHA does not match the receipt input/u,
+    );
+    assert.equal(existsSync(args.outputPath), false);
+  } finally {
+    rmSync(fixture.repoRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('missing, extra, or digest-drifted profile documents cannot produce a receipt', () => {
+  for (const [name, mutate, expected] of [
+    [
+      'missing',
+      (fixture) => fixture.profile.documents.pop(),
+      /profile manifest document inventory does not match the checked-out source/u,
+    ],
+    [
+      'extra',
+      (fixture) => fixture.profile.documents.push({
+        path: 'fixture/extra.json',
+        sha256: '0'.repeat(64),
+        mediaType: 'application/json',
+        sourcePackage: '@jinn-network/fixture-protocol',
+      }),
+      /profile manifest document inventory does not match the checked-out source/u,
+    ],
+    [
+      'digest',
+      (fixture) => { fixture.profile.documents[0].sha256 = '0'.repeat(64); },
+      /profile manifest document inventory does not match the checked-out source/u,
+    ],
+  ]) {
+    const fixture = receiptFixture();
+    const args = receiptArgs(fixture, `receipt-profile-${name}.json`);
+    try {
+      mutate(fixture);
+      writeProfileManifest(fixture);
+      assert.throws(() => createVerificationReceipt(args), expected);
+      assert.equal(existsSync(args.outputPath), false);
+    } finally {
+      rmSync(fixture.repoRoot, { recursive: true, force: true });
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('missing, modified, or extra profile-root files cannot produce a receipt', () => {
+  for (const [name, mutate, expected] of [
+    [
+      'missing',
+      (fixture) => unlinkSync(join(fixture.profileRoot, fixture.profile.documents[0].path)),
+      /profile root is missing declared document/u,
+    ],
+    [
+      'modified',
+      (fixture) => writeFileSync(
+        join(fixture.profileRoot, fixture.profile.documents[0].path),
+        '{"modified":true}\n',
+        'utf8',
+      ),
+      /profile root document digest does not match manifest/u,
+    ],
+    [
+      'extra',
+      (fixture) => writeFileSync(join(fixture.profileRoot, 'extra.json'), '{}\n', 'utf8'),
+      /profile root contains unexpected file extra\.json/u,
+    ],
+  ]) {
+    const fixture = receiptFixture();
+    const args = receiptArgs(fixture, `receipt-profile-file-${name}.json`);
+    try {
+      mutate(fixture);
+      assert.throws(() => createVerificationReceipt(args), expected);
+      assert.equal(existsSync(args.outputPath), false);
+    } finally {
+      rmSync(fixture.repoRoot, { recursive: true, force: true });
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a profile document path that escapes the profile root cannot produce a receipt', () => {
+  const fixture = receiptFixture();
+  const args = receiptArgs(fixture);
+  try {
+    fixture.profile.documents[0].path = '../escape.json';
+    writeProfileManifest(fixture);
+    assert.throws(
+      () => createVerificationReceipt(args),
+      /profile manifest document path escapes the profile root/u,
     );
     assert.equal(existsSync(args.outputPath), false);
   } finally {

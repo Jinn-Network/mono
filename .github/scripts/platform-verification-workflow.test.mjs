@@ -52,11 +52,60 @@ test('the new workflow uses the repository release-gate action versions', () => 
   assert.equal((platform.match(/uses: actions\/setup-node@v7/gu) ?? []).length, 4);
 });
 
-test('catalog validation binds the requested source to the caller SHA and exports the digest', () => {
+test('platform jobs check out the exact requested source SHA', () => {
+  assert.equal(
+    (platform.match(
+      /uses: actions\/checkout@v7\n\s+with:\n\s+ref: \$\{\{ inputs\.source_sha \}\}/gu,
+    ) ?? []).length,
+    4,
+  );
+});
+
+test('platform delegates the exact requested source SHA to every domain workflow', () => {
+  for (const [jobId, { filename }] of domains) {
+    const block = jobBlock(platform, jobId);
+    assert.match(
+      block,
+      new RegExp(
+        `uses: \\.\\/.github/workflows/${filename.replace('.', '\\.')}`
+          + '\\n\\s+with:\\n\\s+source_sha: \\$\\{\\{ inputs\\.source_sha \\}\\}',
+        'u',
+      ),
+      `${filename} must receive the requested source SHA`,
+    );
+  }
+});
+
+test('domain reusable interfaces require a source SHA', () => {
+  for (const { filename, source } of domains.values()) {
+    const header = source.slice(0, source.indexOf('\npermissions:\n'));
+    assert.match(
+      header,
+      /workflow_call:\n\s+inputs:\n\s+source_sha:\n\s+required: true\n\s+type: string/u,
+      `${filename} must require source_sha from reusable callers`,
+    );
+  }
+});
+
+test('domain checkouts use the requested SHA with the event SHA fallback', () => {
+  for (const { filename, source } of domains.values()) {
+    const checkouts = (source.match(/uses: actions\/checkout@v4/gu) ?? []).length;
+    const pinnedCheckouts = (source.match(
+      /uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}/gu,
+    ) ?? []).length;
+    assert.ok(checkouts > 0, `${filename} must contain a checkout`);
+    assert.equal(
+      pinnedCheckouts,
+      checkouts,
+      `${filename} must pin every checkout with the direct-trigger fallback`,
+    );
+  }
+});
+
+test('catalog validation treats the requested source SHA as authoritative', () => {
   const catalog = jobBlock(platform, 'catalog');
   assert.match(catalog, /SOURCE_SHA: \$\{\{ inputs\.source_sha \}\}/u);
-  assert.match(catalog, /CALLER_SHA: \$\{\{ github\.sha \}\}/u);
-  assert.match(catalog, /test "\$\{SOURCE_SHA\}" = "\$\{CALLER_SHA\}"/u);
+  assert.doesNotMatch(catalog, /github\.sha|CALLER_SHA/u);
   assert.match(catalog, /git rev-parse HEAD/u);
   assert.match(catalog, /loadPlatformCatalog/u);
   assert.match(catalog, /catalogSha256/u);
@@ -80,8 +129,8 @@ test('all six domain workflows remain independently triggered and become static 
         /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL: \$\{\{ secrets\.JINN_MARKETPLACE_FORK_RPC_URL \}\}/u,
       );
       assert.match(
-        source.slice(0, source.indexOf('\npermissions:\n')),
-        /workflow_call:\n\s+secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false/u,
+        header,
+        /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false/u,
       );
     } else {
       assert.doesNotMatch(block, /\n\s+secrets:/u, `${filename} must receive no caller secrets`);
