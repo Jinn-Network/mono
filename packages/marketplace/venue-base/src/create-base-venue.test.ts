@@ -56,7 +56,7 @@ function baseConfig(
 }
 
 describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)", () => {
-  test("returns all ten named members plus close, each typed against its own port", () => {
+  test("returns all eleven named members plus close, including the feature-disabled verdict port", () => {
     const chainInstance = buildScriptedChain();
     const venue = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainInstance));
     try {
@@ -69,6 +69,7 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
       const observe: MarketplaceObservePort = venue.observe;
       const safe: SafeBroadcastPort = venue.safe;
       const intents: PostingIntentStore = venue.intents;
+      const verdict = venue.verdict;
       expect(claim).toBeDefined();
       expect(settlement).toBeDefined();
       expect(lifecycle).toBeDefined();
@@ -79,6 +80,7 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
       expect(safe).toBeDefined();
       expect(venue.logSource).toBeDefined();
       expect(intents).toBeDefined();
+      expect(verdict).toBeDefined();
       expect(typeof venue.close).toBe("function");
     } finally {
       venue.close();

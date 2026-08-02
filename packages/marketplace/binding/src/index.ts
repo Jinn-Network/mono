@@ -28,6 +28,7 @@ export type { TwoPartyEngagement } from "./two-party-engagement.js";
 export {
   computeRawCodecCid,
   decodeRawCodecCidDigestHex,
+  rawCodecCidFromSha256Digest,
   uploadRawCodecCid,
 } from "./venue/ipfs.js";
 export type { IpfsPinPort } from "./venue/ipfs.js";

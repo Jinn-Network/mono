@@ -2,8 +2,7 @@
 
 // Today-mode ABI slice for `contracts/src/staking/JinnRouterV3.sol`, hand-transcribed from the
 // deployed source (design §14 "declared impact"; re-homed per M2.1). Only the surface this
-// binding calls or decodes is included -- claim/deliver/verdict functions are added at
-// Milestone M3 without touching this file's existing entries.
+// binding calls or decodes is included.
 export const JINN_ROUTER_V3_ABI = [
   {
     type: "function",
@@ -45,6 +44,28 @@ export const JINN_ROUTER_V3_ABI = [
       { name: "attemptIndex", type: "uint32" },
       { name: "requestId", type: "bytes32" },
     ],
+  },
+  {
+    type: "function",
+    name: "claimEvaluation",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "taskId", type: "uint256" },
+      { name: "attemptIndex", type: "uint32" },
+      { name: "evaluatorMech", type: "address" },
+      { name: "evaluationTaskCidDigest", type: "bytes32" },
+    ],
+    outputs: [
+      { name: "verdictIndex", type: "uint32" },
+      { name: "verdictRequestId", type: "bytes32" },
+    ],
+  },
+  {
+    type: "function",
+    name: "claimed",
+    stateMutability: "view",
+    inputs: [{ name: "requestId", type: "bytes32" }],
+    outputs: [{ name: "", type: "bool" }],
   },
   {
     type: "function",
