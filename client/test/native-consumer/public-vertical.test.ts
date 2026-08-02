@@ -376,6 +376,7 @@ describe('native public vertical consumer', () => {
         taskCreated: {
           chainId: 84532, coordinator: CHAIN.taskCoordinator, taskId: TASK_ID.toString(), creator: REQUESTER_ADDRESS,
           taskDigest: documentDigest(taskBytes), canonical: true, finalized: true,
+          maxClaims: 1, postingTerms: association.postingTerms,
           transaction: transaction('a', '100', '2026-08-02T12:05:00Z'),
         },
         solutionSettlement: {

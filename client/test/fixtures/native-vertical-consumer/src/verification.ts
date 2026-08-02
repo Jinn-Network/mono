@@ -32,6 +32,7 @@ import type { ConsumerState } from './state.js';
 
 type Digest = `sha256:${string}`;
 type Hex = `0x${string}`;
+const UINT256_MAX = (1n << 256n) - 1n;
 
 export class NativeVerificationError extends Error {
   override readonly name = 'NativeVerificationError';
@@ -71,6 +72,8 @@ export interface TaskCreatedFact {
   readonly taskId: string;
   readonly creator: Hex;
   readonly taskDigest: Digest;
+  readonly maxClaims: 1;
+  readonly postingTerms: NativePublicGraph['roots']['requester']['postingTerms'];
   readonly canonical: true;
   readonly finalized: true;
   readonly transaction: FinalizedTransactionFact;
@@ -195,6 +198,35 @@ function requireFinalizedTransaction(fact: FinalizedTransactionFact, label: stri
   if (!/^\d{4}-\d{2}-\d{2}T/u.test(fact.blockTime)) {
     throw new NativeVerificationError('chain-fact-invalid', `${label}.blockTime`);
   }
+}
+
+function canonicalPostingTermsSpend(
+  value: NativePublicGraph['roots']['requester']['postingTerms'],
+): bigint {
+  const keys = [
+    'allowSolverSelfEvaluation',
+    'responseTimeoutSeconds',
+    'solutionMaxDeliveryRateWei',
+    'verdictMaxDeliveryRateWei',
+  ];
+  if (Object.keys(value).sort().join('|') !== keys.join('|') || value.allowSolverSelfEvaluation !== false) {
+    throw new NativeVerificationError('task-created-correspondence-failed', 'posting terms');
+  }
+  const parse = (wire: string, label: string): bigint => {
+    if (!/^(?:0|[1-9][0-9]*)$/u.test(wire)) {
+      throw new NativeVerificationError('task-created-correspondence-failed', label);
+    }
+    const parsed = BigInt(wire);
+    if (parsed > UINT256_MAX) throw new NativeVerificationError('task-created-correspondence-failed', label);
+    return parsed;
+  };
+  const solution = parse(value.solutionMaxDeliveryRateWei, 'solution rate');
+  const verdict = parse(value.verdictMaxDeliveryRateWei, 'verdict rate');
+  parse(value.responseTimeoutSeconds, 'response timeout');
+  if (solution + verdict > UINT256_MAX) {
+    throw new NativeVerificationError('task-created-correspondence-failed', 'intended spend overflow');
+  }
+  return solution + verdict;
 }
 
 function verdictStatement(bytes: Uint8Array): ResultEvaluationStatement {
@@ -335,6 +367,9 @@ export async function verifyNativeVertical(input: {
     label: 'evaluation',
   });
 
+  const chainSpend = canonicalPostingTermsSpend(input.taskCreated.postingTerms);
+  const signedSpend = canonicalPostingTermsSpend(input.graph.roots.requester.postingTerms);
+
   if (!input.taskCreated.canonical || !input.taskCreated.finalized
     || input.taskCreated.chainId !== input.graph.roots.requester.chain.chainId
     || input.taskCreated.coordinator.toLowerCase() !== input.graph.roots.requester.chain.coordinator.toLowerCase()
@@ -342,7 +377,14 @@ export async function verifyNativeVertical(input: {
     || input.taskCreated.taskDigest !== input.graph.task.digest
     || input.taskCreated.taskDigest !== input.graph.roots.requester.taskDigest
     || input.taskCreated.creator.toLowerCase() !== input.authority.requester.address.toLowerCase()
-    || !/^\d+$/u.test(input.taskCreated.taskId)) {
+    || !/^\d+$/u.test(input.taskCreated.taskId)
+    || input.taskCreated.maxClaims !== 1
+    || input.taskCreated.postingTerms.solutionMaxDeliveryRateWei !== input.graph.roots.requester.postingTerms.solutionMaxDeliveryRateWei
+    || input.taskCreated.postingTerms.verdictMaxDeliveryRateWei !== input.graph.roots.requester.postingTerms.verdictMaxDeliveryRateWei
+    || input.taskCreated.postingTerms.responseTimeoutSeconds !== input.graph.roots.requester.postingTerms.responseTimeoutSeconds
+    || input.taskCreated.postingTerms.allowSolverSelfEvaluation !== input.graph.roots.requester.postingTerms.allowSolverSelfEvaluation
+    || chainSpend !== signedSpend
+    || chainSpend.toString(10) !== input.graph.roots.requester.intendedSpendWei) {
     throw new NativeVerificationError('task-created-correspondence-failed');
   }
   requireAddress(input.taskCreated.coordinator, 'taskCreated.coordinator');

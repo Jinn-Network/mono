@@ -210,6 +210,13 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
       source: sourceRoot(SOURCES.requester, 'https://requester.example'),
       submission: { digest: submission.digest, kind: 'submission', mediaType: submission.mediaType, locator: 'https://requester.example/record' },
       taskDigest: task.digest, requesterEnvelopeDigest: requesterEnvelope.digest, admissionReceiptDigest: admissionReceipt.digest,
+      submissionUri: 'urn:uuid:50000000-0000-4000-8000-000000000005',
+      nonce: 'golden-run',
+      postingTerms: {
+        solutionMaxDeliveryRateWei: '2', verdictMaxDeliveryRateWei: '3',
+        responseTimeoutSeconds: '60', allowSolverSelfEvaluation: false,
+      },
+      intendedSpendWei: '5',
       chain: { chainId: 84532, coordinator: COORDINATOR, taskId: '7' },
     },
     solution: {
@@ -347,7 +354,9 @@ async function fixture(options: { revokedRequester?: boolean; missingAnchors?: b
   return {
     state, graph, authority, trust: makeTrust(keys, options),
     taskCreated: { chainId: 84532, coordinator: COORDINATOR, taskId: '7', creator: CREATOR,
-      taskDigest: graph.task.digest, canonical: true as const, finalized: true as const, transaction: transaction('a', '100') },
+      taskDigest: graph.task.digest, canonical: true as const, finalized: true as const,
+      maxClaims: 1 as const, postingTerms: graph.roots.requester.postingTerms,
+      transaction: transaction('a', '100') },
     solutionSettlement: { operationId: solutionOperation, attemptIndex: 0, attempt: solutionDelivery.attempt,
       deliveryDigest: graph.solution.delivery.digest, canonical: true as const, finalized: true as const, transaction: transaction('b', '120') },
     verdictSettlement: { operationId: verdictOperation, evaluationAttempt: evaluationDelivery.attempt,
@@ -405,6 +414,32 @@ describe('independent native vertical verification', () => {
     } } };
     await expect(verifyNativeVertical(input)).rejects.toMatchObject({ reason: 'settlement-not-finalized' });
     unfinalized.state.close();
+  });
+
+  it.each([
+    ['changed solution rate', (value: Awaited<ReturnType<typeof fixture>>) => ({
+      ...value.taskCreated,
+      postingTerms: { ...value.taskCreated.postingTerms, solutionMaxDeliveryRateWei: '4' },
+    })],
+    ['changed response timeout', (value: Awaited<ReturnType<typeof fixture>>) => ({
+      ...value.taskCreated,
+      postingTerms: { ...value.taskCreated.postingTerms, responseTimeoutSeconds: '61' },
+    })],
+    ['solver self-evaluation enabled', (value: Awaited<ReturnType<typeof fixture>>) => ({
+      ...value.taskCreated,
+      postingTerms: { ...value.taskCreated.postingTerms, allowSolverSelfEvaluation: true },
+    })],
+    ['maxClaims is not one', (value: Awaited<ReturnType<typeof fixture>>) => ({
+      ...value.taskCreated,
+      maxClaims: 2,
+    })],
+  ] as const)('fails canonical TaskCreated correspondence when %s', async (_label, mutate) => {
+    const value = await fixture();
+    await expect(verifyNativeVertical({
+      ...value,
+      taskCreated: mutate(value) as typeof value.taskCreated,
+    })).rejects.toMatchObject({ reason: 'task-created-correspondence-failed' });
+    value.state.close();
   });
 
   it('fails fake DSSE signatures even when the key ID is present', async () => {
