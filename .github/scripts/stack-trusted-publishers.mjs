@@ -3,18 +3,22 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { discoverStackPackages } from './stack-package-graph.mjs';
+import { loadPublishableCatalogPackages } from './platform-catalog.mjs';
 
 export const PUBLISHER_WORKFLOW = 'stack-npm-publish.yml';
 
 export function buildRegistrationList(repoRoot) {
-  return discoverStackPackages(repoRoot).map((pkg) => ({
+  return loadPublishableCatalogPackages(repoRoot, {
+    releaseGroup: 'platform-v1',
+    lane: 'canary',
+  }).map((pkg) => ({
     package: pkg.name,
     provider: 'GitHub Actions',
     organization: 'Jinn-Network',
     repository: 'mono',
     workflow: PUBLISHER_WORKFLOW,
-    environment: '',
+    environment: 'npm-publish',
+    allowedActions: ['npm publish'],
   })).sort((left, right) => (left.package < right.package ? -1 : left.package > right.package ? 1 : 0));
 }
 
@@ -34,12 +38,13 @@ export function renderRegistrationMarkdown(registrations) {
     '| Repository | `mono` |',
     `| Workflow filename | \`${PUBLISHER_WORKFLOW}\` |`,
     '| Allowed action | `npm publish` |',
-    '| Optional Environment | **Leave blank** |',
+    '| Environment | `npm-publish` |',
     '',
-    'The optional npmjs **Environment field MUST be blank**. npm permits one trusted',
-    'publisher configuration per package, and this one workflow publishes from two',
-    'GitHub environments: canaries from `npm-publish`, stable from `npm-stable-publish`.',
-    'Naming either environment in npmjs breaks the other lane.',
+    'The npmjs **Environment field MUST equal `npm-publish`** and the **Allowed action MUST be exactly `npm publish`**.',
+    'npm permits one trusted publisher configuration per package. Only the final',
+    'receipt-gated canary publisher enters that protected',
+    'environment. Stable publication remains disabled pending live `jinn.network`',
+    'hosting verification; the stable blocker never invokes npm.',
     '',
     '| Package | Workflow filename |',
     '| --- | --- |',

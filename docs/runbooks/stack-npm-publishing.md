@@ -1,68 +1,67 @@
 # Platform stack npm publishing runbook
 
-**Scope:** the 45 platform packages under `packages/{task-execution,evidence,trust,discovery,marketplace,benchmarking}`. Issue #2293. Workflow: `.github/workflows/stack-npm-publish.yml`. Driver: `.github/scripts/publish-stack.mjs`.
+**Scope:** the catalog-derived `platform-v1` release group. Its exact package set, runtime waves,
+trusted-publisher inputs, and policy are generated in the
+[live platform topology](../../architecture/generated/platform-topology.md#release-and-trusted-publishers).
+Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
+`.github/scripts/publish-verified-platform.mjs`.
 
-## What publishes, and when
+## Current release policy
 
-| Trigger | Version | Dist-tag | Environment |
-| --- | --- | --- | --- |
-| Push to `integration/evidence-v1` or `next` | `<setVersion>-canary.sha.<commit>` | `canary` | `npm-publish` |
-| Release published with a `stack-v<semver>` tag | `<semver>` | `latest` | `npm-stable-publish` |
+- The catalog-selected core candidates in `platform-v1` are eligible only for receipt-gated canary
+  publication. A push to `integration/evidence-v1` or `next` uses the `canary` dist-tag and the
+  `npm-publish` GitHub environment.
+- The catalog-selected disabled experiments in `experimental-environment-supply` are not part of the core
+  set and cannot publish through the stack workflow.
+- Stable publication is mechanically disabled. A stable event may run read-only tag resolution
+  and same-run verification, but `stable-hosting-blocker` fails before any publisher job exists.
+  The hold remains until live `jinn.network` profile hosting is implemented and verified.
+- Legacy and product packages remain independent release lines (or private/never-published) under
+  their catalog policies and existing workflows. This runbook does not change the layer, SDK,
+  client, plugin, or other independent publication paths.
 
-The whole set publishes every time, in dependency-graph order (8 waves). Nothing is
-partially released: a wave verifies before the next starts, and a final pass reverifies
-every package's tarball integrity and dist-tag together.
+The generated topology is authoritative for current membership and counts.
 
-## Branch awareness
+## Canary verification and publication
 
-The 45 packages live on `integration/evidence-v1` and are not yet on `next`. The workflow
-triggers on both branches and no-ops where the package set is absent, so it starts
-publishing today and continues from `next` after the integration merge with no edit.
+One workflow run performs the whole chain:
 
-## Inspecting the plan without publishing
+1. Check out and bind the source SHA and catalog digest.
+2. Run every catalog-selected domain gate and require exact success.
+3. Validate catalog-declared public surfaces and assemble the profile root.
+4. Pack the exact catalog release set into manifest-derived runtime waves. Development-only edges
+   never affect the order.
+5. Record every exact tarball and its SHA-512 integrity, then install those tarballs from a clean
+   external consumer.
+6. Emit and attest an immutable verification receipt binding source, catalog, lane, package order,
+   waves, tarballs, public surfaces, profile manifest, and exact job conclusions.
+7. In the dependent publisher job, independently reconstruct the receipt, recheck the exact
+   artifact inventory and trusted-publisher set, and publish only the receipt-bound tarballs.
+8. Re-read registry version, integrity, and dist-tag, then emit and attest the publication receipt.
+
+No workflow-run polling or replacement packing is allowed. The package bytes published to npm are
+the bytes verified earlier in the same run.
+
+## Inspecting generated order
+
+Regenerate or check the tracked topology without publishing:
 
 ```bash
-node .github/scripts/publish-stack.mjs --mode canary --sha "$(git rev-parse HEAD)" --dry-run
+node .github/scripts/generate-architecture.mjs
+node .github/scripts/generate-architecture.mjs --check
 ```
 
-## npmjs trusted-publisher configuration
+The generated runtime waves are the current publication plan.
 
-The registration list is generated, never hand-maintained. Download the
-`stack-trusted-publishers` artifact from any run of the workflow, or generate it locally:
+## npm trusted-publisher configuration
+
+The registration list is generated from the same exact release set:
 
 ```bash
-node .github/scripts/stack-trusted-publishers.mjs --out /tmp/registrations
+node .github/scripts/stack-trusted-publishers.mjs --out /tmp/jinn-registrations
 ```
 
-`trusted-publishers.md` in that directory is the operator-facing checklist. It states the
-exact npmjs field values and why the optional Environment field must be blank.
-
-## Recovery
-
-A failed publish is safe to re-run: every step is idempotent on exact tarball integrity, and
-an already-published version with matching integrity is skipped. A version published with
-*different* bytes is unrecoverable through this workflow by design — npm versions are
-immutable and OIDC cannot repair a dist-tag. Cut a new version instead.
-
-## Human checklist: npm trusted-publisher registration
-
-An operator with npm owner rights on the `@jinn-network` scope must do this once per
-package before the first canary of that package can publish. It cannot be automated:
-npmjs has no API for trusted-publisher configuration.
-
-- [ ] Confirm the operator is on a team in the `@jinn-network` org. A scope owner on **no**
-      team gets a 404 on first publish, not a permission error. Fix with
-      `npm team add @jinn-network:developers <user>`.
-- [ ] Regenerate the list: `node .github/scripts/stack-trusted-publishers.mjs --out /tmp/jinn-registrations`
-- [ ] For every row in `trusted-publishers.md`, open the npmjs package settings and add a
-      trusted publisher with the exact field values in the table above.
-- [ ] Leave the optional **Environment** field blank on every one of them.
-- [ ] Add no `NODE_AUTH_TOKEN` and no long-lived npm credential anywhere.
-- [ ] Confirm the two GitHub environments exist: `npm-publish` (canary, automatic) and
-      `npm-stable-publish` (stable, required reviewer, branch policy).
-- [ ] Record the date and the operator's handle in this file when complete.
-
-For every row, in the npmjs package settings, add a trusted publisher with:
+For every generated row, configure npmjs with:
 
 | npmjs field | Value |
 | --- | --- |
@@ -71,57 +70,27 @@ For every row, in the npmjs package settings, add a trusted publisher with:
 | Repository | `mono` |
 | Workflow filename | `stack-npm-publish.yml` |
 | Allowed action | `npm publish` |
-| Optional Environment | **Leave blank** |
+| Environment | `npm-publish` |
 
-The optional npmjs **Environment field MUST be blank**. npm permits one trusted
-publisher configuration per package, and this one workflow publishes from two
-GitHub environments: canaries from `npm-publish`, stable from `npm-stable-publish`.
-Naming either environment in npmjs breaks the other lane.
+The Environment field must equal `npm-publish`, and the allowed action must be exactly
+`npm publish`. This binds registry authority to the final protected publication job; build,
+external-consumer, receipt-construction, and stable-verification jobs never enter that environment.
+The stable lane remains on hold and does not publish from `npm-stable-publish`.
 
-| Package | Workflow filename |
-| --- | --- |
-| `@jinn-network/attestation-issuer` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-aggregate` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-interop` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-marketplace` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-records` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-run` | `stack-npm-publish.yml` |
-| `@jinn-network/benchmarking-testing` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-catalog-sqlite` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-contribution` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-derivation` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-discovery` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-local-runtime` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-protocol` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-publication` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-repository` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-repository-ipfs` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-repository-oci` | `stack-npm-publish.yml` |
-| `@jinn-network/evidence-retrieval` | `stack-npm-publish.yml` |
-| `@jinn-network/execution-recorder` | `stack-npm-publish.yml` |
-| `@jinn-network/execution-recorder-bridge` | `stack-npm-publish.yml` |
-| `@jinn-network/marketplace-binding` | `stack-npm-publish.yml` |
-| `@jinn-network/marketplace-pipeline` | `stack-npm-publish.yml` |
-| `@jinn-network/marketplace-projector` | `stack-npm-publish.yml` |
-| `@jinn-network/marketplace-testing` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-client` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-facts-benchmarking` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-facts-evidence` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-facts-task-execution` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-facts-trust` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-protocol` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-serve` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-source-evidence-journal` | `stack-npm-publish.yml` |
-| `@jinn-network/record-discovery-testing` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-backend` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-backend-local` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-evaluation-harness` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-launchers` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-profiles` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-protocol` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-supervisor` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-testing` | `stack-npm-publish.yml` |
-| `@jinn-network/task-execution-workspace` | `stack-npm-publish.yml` |
-| `@jinn-network/trust-core` | `stack-npm-publish.yml` |
-| `@jinn-network/trust-resolve` | `stack-npm-publish.yml` |
-| `@jinn-network/trust-testing` | `stack-npm-publish.yml` |
+An npm scope owner must complete this once for every generated registration:
+
+- [ ] Confirm the operator belongs to a team in the `@jinn-network` npm organization.
+- [ ] Regenerate the list and compare it with the generated release view.
+- [ ] Add every registration using the exact fields above, including Environment `npm-publish`.
+- [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches.
+- [ ] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
+- [ ] Run the full hosted verifier and record its exact successful source SHA.
+- [ ] Set repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true` only after every preceding item is recorded.
+- [ ] Record the operator and completion date in the operational change record.
+
+## Recovery
+
+Publication is idempotent only when an existing registry version has the exact receipt integrity
+and dist-tag. Matching bytes are skipped; missing bytes are published in receipt wave order. If a
+version already exists with different bytes, stop and cut a new version—npm versions are immutable.
+Never repair the mismatch by repacking, moving a tag, or weakening receipt verification.

@@ -38,3 +38,19 @@
 /.github/CODEOWNERS           @oaksprout @ritsukai
 /docs/engineering/handbook.md @oaksprout @ritsukai
 /log/decisions/               @oaksprout @ritsukai
+
+# Platform architecture control — deliberately last. The validator enumerates
+# every catalog/control surface and applies GitHub's last-match semantics, so a
+# later rule that weakens either required owner fails the required PR check.
+/architecture/          @oaksprout @ritsukai
+/docs/                  @oaksprout @ritsukai
+/spec/                  @oaksprout @ritsukai
+/contracts/             @oaksprout @ritsukai
+/.github/scripts/       @oaksprout @ritsukai
+/.github/workflows/     @oaksprout @ritsukai
+/apps/broadcast-bot/    @oaksprout @ritsukai
+/client/                @oaksprout @ritsukai
+/packages/              @oaksprout @ritsukai
+/plugin/runtime/        @oaksprout @ritsukai
+/scripts/               @oaksprout @ritsukai
+/.github/CODEOWNERS     @oaksprout @ritsukai

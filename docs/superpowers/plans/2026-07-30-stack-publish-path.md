@@ -8,6 +8,12 @@
 
 **Tech Stack:** Node 22, `node:test` + `node:assert/strict` (all `.github/scripts` tests), Yarn 4.13.0 per-package projects (no root workspace), npm 11.16.0 CLI, GitHub Actions with npm trusted publishing (OIDC), vitest 4.1.8 (external acceptance only).
 
+> **Historical snapshot (2026-07-30).** This implementation plan preserves the package count,
+> physical-root discovery, and stable-lane assumptions approved at the time. Those details are no
+> longer live authority. Use the [generated platform topology](../../../architecture/generated/platform-topology.md)
+> for the current catalog-derived inventory, runtime graph, release policy, public surfaces,
+> ownership, and transition state.
+
 ## Global Constraints
 
 - **Issue:** #2293. **Shape:** `feat`. **Base branch:** `integration/evidence-v1` (the 45 packages do not exist on `next`).

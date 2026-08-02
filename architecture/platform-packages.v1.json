@@ -1,0 +1,3557 @@
+{
+  "catalogVersion": 1,
+  "manifestRoots": [
+    {
+      "path": "packages",
+      "mode": "recursive",
+      "excludedDirectories": [
+        "node_modules"
+      ]
+    },
+    {
+      "path": "apps/broadcast-bot",
+      "mode": "package"
+    },
+    {
+      "path": "client",
+      "mode": "package"
+    },
+    {
+      "path": "client/src/dashboard/spa",
+      "mode": "package"
+    },
+    {
+      "path": "plugin/runtime",
+      "mode": "package"
+    },
+    {
+      "path": "scripts/chain-only-gate",
+      "mode": "package"
+    }
+  ],
+  "manifestExclusions": [],
+  "ownerGroups": {
+    "architecture-control": [
+      "@oaksprout",
+      "@ritsukai"
+    ]
+  },
+  "gateDefinitions": {
+    "benchmarking-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/benchmarking-ci.yml"
+    },
+    "record-discovery-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/record-discovery-ci.yml"
+    },
+    "evidence-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/evidence-ci.yml"
+    },
+    "marketplace-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/marketplace-ci.yml"
+    },
+    "task-execution-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/task-execution-ci.yml"
+    },
+    "trust-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/trust-ci.yml"
+    },
+    "environments-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/environments-ci.yml"
+    },
+    "task-supply-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/task-supply-ci.yml"
+    },
+    "autopilot-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/autopilot-board-painter.yml"
+    },
+    "core-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/core-ci.yml"
+    },
+    "indexer-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/indexer-ci.yml"
+    },
+    "indexer-enrichment-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/indexer-enrichment-ci.yml"
+    },
+    "layer-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/layer-ci.yml"
+    },
+    "plugin-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/plugin-ci.yml"
+    },
+    "sdk-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/sdk-ci.yml"
+    },
+    "broadcast-bot-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/broadcast-bot.yml"
+    },
+    "client-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/ci.yml"
+    },
+    "plugin-tree-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/plugin-tree-ci.yml"
+    }
+  },
+  "releaseGroups": {
+    "platform-v1": {
+      "expectedPackageCount": 50,
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "benchmarking-ci",
+        "evidence-ci",
+        "marketplace-ci",
+        "record-discovery-ci",
+        "task-execution-ci",
+        "trust-ci"
+      ],
+      "allowedClassifications": [
+        "platform",
+        "platform-support"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "platform-v1"
+      ],
+      "stackPublished": true,
+      "canary": true,
+      "stable": false
+    },
+    "experimental-environment-supply": {
+      "expectedPackageCount": 12,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "environments-ci",
+        "record-discovery-ci",
+        "task-supply-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "legacy-product-lines": {
+      "expectedPackageCount": 5,
+      "publishPolicies": [
+        "independent"
+      ],
+      "requiredGateIds": [
+        "client-ci",
+        "core-ci",
+        "layer-ci",
+        "plugin-ci",
+        "sdk-ci"
+      ],
+      "allowedClassifications": [
+        "legacy",
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "legacy-product-lines",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "transitional-or-private": {
+      "expectedPackageCount": 8,
+      "publishPolicies": [
+        "private",
+        "never"
+      ],
+      "requiredGateIds": [
+        "autopilot-ci",
+        "broadcast-bot-ci",
+        "client-ci",
+        "environments-ci",
+        "indexer-ci",
+        "indexer-enrichment-ci",
+        "plugin-tree-ci",
+        "task-supply-ci"
+      ],
+      "allowedClassifications": [
+        "product",
+        "product-support",
+        "repository-tooling",
+        "transitional"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "legacy-product-lines",
+        "platform-v1",
+        "transitional-or-private"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    }
+  },
+  "tierRules": {
+    "allowedDependencies": {
+      "1": [
+        1
+      ],
+      "2": [
+        1,
+        2
+      ],
+      "3": [
+        1,
+        2,
+        3
+      ],
+      "4": [
+        1,
+        2,
+        3,
+        4,
+        null
+      ],
+      "null": [
+        1,
+        2,
+        3,
+        4,
+        null
+      ]
+    }
+  },
+  "packages": [
+    {
+      "name": "@jinn-network/chain-environment-record",
+      "path": "packages/environments/chain-record",
+      "domain": "environments",
+      "role": "sealed chain and composite crypto environment record family",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-environment-verification",
+      "path": "packages/environments/chain-verification",
+      "domain": "environments",
+      "role": "chain environment materialization and verification capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-state-extraction",
+      "path": "packages/environments/chain-extraction",
+      "domain": "environments",
+      "role": "archive-fork chain-state extraction capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-scenarios",
+      "path": "packages/task-supply/chain-scenarios",
+      "domain": "task-supply",
+      "role": "verified chain-environment scenario derivation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-chain-environments",
+      "path": "packages/discovery/facts/chain-environments",
+      "domain": "environments",
+      "role": "chain-environment facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-only-gate-harness",
+      "path": "scripts/chain-only-gate",
+      "domain": "repository-operations",
+      "role": "live chain-environment end-to-end gate harness",
+      "tier": null,
+      "tierReason": "Repository gate tooling is outside the platform and product tier model.",
+      "classification": "repository-tooling",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci",
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/environments-ci.yml"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/broadcast-bot",
+      "path": "apps/broadcast-bot",
+      "domain": "repository-operations",
+      "role": "repository and community communications automation",
+      "tier": null,
+      "tierReason": "Repository tooling is outside the platform and product tier model.",
+      "classification": "repository-tooling",
+      "stability": "stable-semantics",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/2026-07-23-jinn-mono-architecture-map.md",
+            "status": "superseded"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "requiredGateIds": [
+        "broadcast-bot-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/broadcast-bot.yml"
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/client",
+      "path": "client",
+      "domain": "operator",
+      "role": "operator daemon and application",
+      "tier": 4,
+      "classification": "product",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-operator-daemon-composition-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
+      "requiredGateIds": [
+        "client-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/ci.yml"
+      },
+      "transition": {
+        "reason": "The operator is being recomposed onto cataloged platform applications.",
+        "status": "independently published during recomposition",
+        "sunsetCondition": "The operator-daemon cutover is complete and the legacy release coupling is retired."
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/operator-spa",
+      "path": "client/src/dashboard/spa",
+      "domain": "operator",
+      "role": "operator dashboard product",
+      "tier": 4,
+      "classification": "product",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "client/OPERATOR-APP-SPEC.md",
+            "status": "current"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "private",
+      "requiredGateIds": [
+        "client-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/ci.yml"
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/autopilot",
+      "path": "packages/autopilot",
+      "domain": "autopilot",
+      "role": "vendored tier-4 product residue",
+      "tier": 4,
+      "classification": "transitional",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-23-autopilot-oss-maintainer-product-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "private",
+      "requiredGateIds": [
+        "autopilot-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/autopilot-board-painter.yml"
+      },
+      "transition": {
+        "reason": "Autopilot has been extracted to Jinn-Network/autopilot; this package is vendored residue.",
+        "status": "removal tracked",
+        "sunsetCondition": "The monorepo no longer needs the vendored copy."
+      }
+    },
+    {
+      "name": "@jinn-network/benchmarking-aggregate",
+      "path": "packages/benchmarking/aggregate",
+      "domain": "benchmarking",
+      "role": "aggregation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-interop",
+      "path": "packages/benchmarking/interop",
+      "domain": "benchmarking",
+      "role": "task-execution import and export",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-marketplace",
+      "path": "packages/benchmarking/marketplace",
+      "domain": "benchmarking",
+      "role": "marketplace adapter",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-records",
+      "path": "packages/benchmarking/records",
+      "domain": "benchmarking",
+      "role": "benchmark record family",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-run",
+      "path": "packages/benchmarking/run",
+      "domain": "benchmarking",
+      "role": "benchmark orchestration",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-testing",
+      "path": "packages/benchmarking/testing",
+      "domain": "benchmarking",
+      "role": "benchmarking conformance kit",
+      "tier": null,
+      "classification": "platform-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "."
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/core",
+      "path": "packages/core",
+      "domain": "legacy-plugin-stack",
+      "role": "legacy product-support kernel",
+      "tier": null,
+      "tierReason": "This overloaded legacy kernel does not satisfy one platform tier.",
+      "classification": "legacy",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
+      "requiredGateIds": [
+        "core-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/core-ci.yml"
+      },
+      "transition": {
+        "reason": "The legacy kernel overlaps evidence applications and the plugin product stack.",
+        "status": "independently published during cutover",
+        "sunsetCondition": "Operator and plugin cutovers no longer import @jinn-network/core."
+      }
+    },
+    {
+      "name": "@jinn-network/record-discovery-client",
+      "path": "packages/discovery/client",
+      "domain": "discovery",
+      "role": "discovery client and resolution",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-benchmarking",
+      "path": "packages/discovery/facts/benchmarking",
+      "domain": "discovery",
+      "role": "benchmarking facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-environments",
+      "path": "packages/discovery/facts/environments",
+      "domain": "environments",
+      "role": "experimental environment facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-evidence",
+      "path": "packages/discovery/facts/evidence",
+      "domain": "discovery",
+      "role": "evidence facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-task-execution",
+      "path": "packages/discovery/facts/task-execution",
+      "domain": "discovery",
+      "role": "task-execution facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-trust",
+      "path": "packages/discovery/facts/trust",
+      "domain": "discovery",
+      "role": "trust facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-protocol",
+      "path": "packages/discovery/protocol",
+      "domain": "discovery",
+      "role": "record-discovery protocol",
+      "tier": 1,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-serve",
+      "path": "packages/discovery/serve",
+      "domain": "discovery",
+      "role": "discovery serving contract",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-source-evidence-journal",
+      "path": "packages/discovery/sources/evidence-journal",
+      "domain": "discovery",
+      "role": "evidence-journal source adapter",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-testing",
+      "path": "packages/discovery/testing",
+      "domain": "discovery",
+      "role": "record-discovery conformance kit",
+      "tier": null,
+      "classification": "platform-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "."
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+    },
+    {
+      "name": "@jinn-network/record-discovery-transport-http",
+      "path": "packages/discovery/transport-http",
+      "domain": "discovery",
+      "role": "HTTP discovery transport",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/environment-record",
+      "path": "packages/environments/record",
+      "domain": "environments",
+      "role": "environment record family",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/environment-verification",
+      "path": "packages/environments/verification",
+      "domain": "environments",
+      "role": "environment verification capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/attestation-issuer",
+      "path": "packages/evidence/attestation-issuer",
+      "domain": "evidence",
+      "role": "attestation issuance capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-catalog-sqlite",
+      "path": "packages/evidence/catalog-sqlite",
+      "domain": "evidence",
+      "role": "SQLite evidence catalog binding",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-contribution",
+      "path": "packages/evidence/contribution",
+      "domain": "evidence",
+      "role": "evidence contribution composition",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-derivation",
+      "path": "packages/evidence/derivation",
+      "domain": "evidence",
+      "role": "evidence derivation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-discovery",
+      "path": "packages/evidence/discovery",
+      "domain": "evidence",
+      "role": "evidence discovery contract",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/execution-recorder",
+      "path": "packages/evidence/execution-recorder",
+      "domain": "evidence",
+      "role": "execution recording capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/execution-recorder-bridge",
+      "path": "packages/evidence/execution-recorder-bridge",
+      "domain": "evidence",
+      "role": "execution-recorder integration bridge",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-local-runtime",
+      "path": "packages/evidence/local-runtime",
+      "domain": "evidence",
+      "role": "local evidence composition",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-protocol",
+      "path": "packages/evidence/protocol",
+      "domain": "evidence",
+      "role": "execution-evidence protocol",
+      "tier": 1,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "profiles/execution-evidence/1.0/schemas"
+        ],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-publication",
+      "path": "packages/evidence/publication",
+      "domain": "evidence",
+      "role": "evidence publication capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-repository",
+      "path": "packages/evidence/repository",
+      "domain": "evidence",
+      "role": "evidence repository contract",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-repository-ipfs",
+      "path": "packages/evidence/repository-ipfs",
+      "domain": "evidence",
+      "role": "IPFS evidence repository binding",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profile"
+        ],
+        "fixtures": [
+          "profile/v1/fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-repository-oci",
+      "path": "packages/evidence/repository-oci",
+      "domain": "evidence",
+      "role": "OCI evidence repository binding",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "profiles/evidence-repository-oci/1.0/schemas"
+        ],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-retrieval",
+      "path": "packages/evidence/retrieval",
+      "domain": "evidence",
+      "role": "evidence retrieval capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-trace-decode",
+      "path": "packages/evidence/trace-decode",
+      "domain": "evidence",
+      "role": "evidence trace decoder",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/evidence-trajectory",
+      "path": "packages/evidence/trajectory",
+      "domain": "evidence",
+      "role": "trajectory record family",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/indexer",
+      "path": "packages/indexer",
+      "domain": "read-plane",
+      "role": "transitional projector and product mixture",
+      "tier": null,
+      "tierReason": "The package mixes a tier-3 projector role with a tier-4 explorer service.",
+      "classification": "transitional",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "spec/2026-05-11-discovery-api-and-shared-indexer.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "requiredGateIds": [
+        "indexer-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/indexer-ci.yml"
+      },
+      "transition": {
+        "reason": "The package mixes platform projector and product explorer responsibilities.",
+        "status": "logical split required",
+        "sunsetCondition": "The projector is re-derived onto the platform and the explorer remains a tier-4 product."
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/indexer-enrichment",
+      "path": "packages/indexer-enrichment",
+      "domain": "read-plane",
+      "role": "transitional indexer enrichment worker",
+      "tier": null,
+      "tierReason": "The worker is product support coupled to the transitional indexer service.",
+      "classification": "transitional",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-06-14-779-envelope-enrichment-split.md",
+            "status": "current"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "requiredGateIds": [
+        "indexer-enrichment-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/indexer-enrichment-ci.yml"
+      },
+      "transition": {
+        "reason": "The worker remains coupled to the legacy indexer service boundary.",
+        "status": "re-derive with the read plane",
+        "sunsetCondition": "The indexer projector is re-derived onto the platform and the read-plane boundary is settled."
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/explorer-spa",
+      "path": "packages/indexer/explorer",
+      "domain": "read-plane",
+      "role": "network explorer product",
+      "tier": 4,
+      "classification": "product",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-05-12-network-explorer-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-05-12-network-explorer-architecture.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "private",
+      "requiredGateIds": [
+        "indexer-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/indexer-ci.yml"
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/jinn-layer",
+      "path": "packages/layer",
+      "domain": "legacy-plugin-stack",
+      "role": "legacy product composition and local runtime",
+      "tier": null,
+      "tierReason": "The legacy composition spans multiple application and product responsibilities.",
+      "classification": "legacy",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
+      "requiredGateIds": [
+        "layer-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/layer-ci.yml"
+      },
+      "transition": {
+        "reason": "The legacy local runtime overlaps platform evidence and task-execution applications.",
+        "status": "independently published during cutover",
+        "sunsetCondition": "Plugin and operator cutovers no longer resolve @jinn-network/jinn-layer."
+      }
+    },
+    {
+      "name": "@jinn-network/marketplace-binding",
+      "path": "packages/marketplace/binding",
+      "domain": "marketplace",
+      "role": "venue-neutral marketplace binding",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "marketplace-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/marketplace-pipeline",
+      "path": "packages/marketplace/pipeline",
+      "domain": "marketplace",
+      "role": "marketplace pipeline composition",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "marketplace-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/marketplace-projector",
+      "path": "packages/marketplace/projector",
+      "domain": "marketplace",
+      "role": "marketplace discovery projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "marketplace-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/marketplace-testing",
+      "path": "packages/marketplace/testing",
+      "domain": "marketplace",
+      "role": "marketplace conformance kit",
+      "tier": null,
+      "classification": "platform-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "marketplace-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./backend-conformance",
+          "./projector-conformance",
+          "./revised-contract-conformance",
+          "./venue-conformance"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+    },
+    {
+      "name": "@jinn-network/marketplace-venue-base",
+      "path": "packages/marketplace/venue-base",
+      "domain": "marketplace",
+      "role": "Base venue adapter",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "marketplace-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/plugin",
+      "path": "packages/plugin",
+      "domain": "legacy-plugin-stack",
+      "role": "legacy extension contract",
+      "tier": null,
+      "tierReason": "This product contract predates and sits outside the platform tier model.",
+      "classification": "legacy",
+      "stability": "transitional",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
+      "requiredGateIds": [
+        "plugin-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/plugin-ci.yml"
+      },
+      "transition": {
+        "reason": "The legacy extension contract is being reconciled with the product plugin boundary.",
+        "status": "independently published during cutover",
+        "sunsetCondition": "The plugin product cutover no longer imports this legacy line."
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [
+        "@jinn-network/benchmarking-records",
+        "@jinn-network/task-execution-profiles",
+        "@jinn-network/task-execution-protocol"
+      ],
+      "name": "@jinn-network/sdk",
+      "path": "packages/sdk",
+      "domain": "legacy-sdk",
+      "role": "deprecated SolverNet SDK",
+      "tier": null,
+      "tierReason": "The legacy SDK bundles product-era contracts superseded by platform record families.",
+      "classification": "legacy",
+      "stability": "deprecated",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
+      "requiredGateIds": [
+        "sdk-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/sdk-ci.yml"
+      },
+      "transition": {
+        "reason": "Platform record families supersede the legacy SolverNet SDK surfaces.",
+        "status": "independent compatibility line",
+        "sunsetCondition": "Daemon and marketplace-surface migrations have removed every live importer."
+      }
+    },
+    {
+      "name": "@jinn-network/task-execution-backend",
+      "path": "packages/task-execution/backend",
+      "domain": "task-execution",
+      "role": "backend contract",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-backend-local",
+      "path": "packages/task-execution/backend-local/assembly",
+      "domain": "task-execution",
+      "role": "local backend assembly",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-launchers",
+      "path": "packages/task-execution/backend-local/launchers",
+      "domain": "task-execution",
+      "role": "launch planning capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-supervisor",
+      "path": "packages/task-execution/backend-local/supervisor",
+      "domain": "task-execution",
+      "role": "execution supervision capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-workspace",
+      "path": "packages/task-execution/backend-local/workspace",
+      "domain": "task-execution",
+      "role": "workspace preparation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-evaluation-harness",
+      "path": "packages/task-execution/evaluation-harness",
+      "domain": "task-execution",
+      "role": "evaluation orchestration capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-evaluator-adapters",
+      "path": "packages/task-execution/evaluator-adapters",
+      "domain": "task-execution",
+      "role": "evaluator adapters",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-profiles",
+      "path": "packages/task-execution/profiles",
+      "domain": "task-execution",
+      "role": "task profile family",
+      "tier": 1,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-protocol",
+      "path": "packages/task-execution/protocol",
+      "domain": "task-execution",
+      "role": "task-execution protocol",
+      "tier": 1,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-execution-testing",
+      "path": "packages/task-execution/testing",
+      "domain": "task-execution",
+      "role": "task-execution conformance kit",
+      "tier": null,
+      "classification": "platform-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-execution-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-execution-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "."
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+    },
+    {
+      "name": "@jinn-network/task-admission",
+      "path": "packages/task-supply/admission",
+      "domain": "task-supply",
+      "role": "task admission capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-curation",
+      "path": "packages/task-supply/curation",
+      "domain": "task-supply",
+      "role": "task curation projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-derivation",
+      "path": "packages/task-supply/derivation",
+      "domain": "task-supply",
+      "role": "task derivation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/task-posting",
+      "path": "packages/task-supply/posting",
+      "domain": "task-supply",
+      "role": "task posting capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/trust-core",
+      "path": "packages/trust/core",
+      "domain": "trust",
+      "role": "trust records and policy",
+      "tier": 1,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/trust-resolve",
+      "path": "packages/trust/resolve",
+      "domain": "trust",
+      "role": "trust resolution binding",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/trust-testing",
+      "path": "packages/trust/testing",
+      "domain": "trust",
+      "role": "trust conformance kit",
+      "tier": null,
+      "classification": "platform-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "."
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "tierReason": "Conformance machinery is platform support rather than a protocol tier."
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/plugin-runtime",
+      "path": "plugin/runtime",
+      "domain": "plugin-product",
+      "role": "unpublished plugin product support runtime",
+      "tier": null,
+      "tierReason": "The runtime composes platform applications for the plugin product.",
+      "classification": "product-support",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-14-jinn-plugin-stage-1-package-architecture.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "requiredGateIds": [
+        "plugin-tree-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/plugin-tree-source-boundaries.test.mjs"
+      }
+    }
+  ]
+}

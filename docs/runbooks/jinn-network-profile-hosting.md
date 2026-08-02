@@ -1,84 +1,61 @@
 # Hosting the jinn.network profile root
 
-**Scope:** serving every reserved `https://jinn.network/…` identifier a profile or schema
-document self-declares (`profiles/…` for JSON Schemas, `records/…/facts/…` for
-record-discovery facts profiles, `task-profiles/…` for task profiles) so that external
-conformance claims become possible. Design:
-`docs/superpowers/specs/2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md`
-§8.1 (digest-bound identifiers) and §8.4 (the URI resolution gate). Issue #2293 rider 1.
+**Scope:** serving the public schemas and profiles declared by the catalog for the exact
+`platform-v1` release set. The current package declarations and self-identifying URI claims are in
+the [generated public-surface view](../../architecture/generated/platform-topology.md#public-surfaces-and-identity-claims).
 
-## What CI produces
+## What same-run verification produces
 
-Every run of `.github/workflows/stack-npm-publish.yml` uploads a `jinn-profile-root`
-artifact containing:
+`.github/workflows/platform-verification.yml` builds the profile root from catalog-declared
+`publicSurface.schemas`, `publicSurface.profiles`, and `publicSurface.fixtures`. The publication
+surface guard first proves that declarations exist and agree with package `files` and `exports`;
+the profile builder then maps a JSON Schema `$id` or facts-profile `profile` claim under
+`https://jinn.network/` to that exact served path and rejects duplicate claims.
 
-- every profile or schema document that self-declares a `https://jinn.network/…` identifier
-  (`$id` for a JSON Schema, `profile` for a record-discovery facts document), served at the
-  exact path that identifier names — `.github/scripts/build-profile-root.mjs` remaps by
-  declared identifier rather than by source directory, and
-  `.github/scripts/build-profile-root.test.mjs` guards the match against the real repository.
-  A document with no such declared identifier (specification prose, JSON-LD vocabularies,
-  fixtures) is served at its source-directory path instead, since it makes no URI claim to
-  violate. `.sha256` sidecars are the one exception: they are deliberately not served at all
-  (`.github/scripts/build-profile-root.mjs` skips every `*.sha256` file outright) because a
-  sidecar computed against the source-tree bytes would silently disagree with
-  `manifest.json`'s own digest of the served copy once identifier-based remapping moves a
-  document off its source path. `manifest.json` is the sole digest surface for the profile
-  root; the sidecars remain available inside the npm package for consumers that want them;
-- `manifest.json` — a SHA-256 digest of every served document, with its media type and
-  source package;
-- `manifest.dsse.json` — a DSSE envelope over `manifest.json`'s exact bytes, present only
-  when a signing key is provisioned.
+The core surface includes the cataloged trajectory schemas. It excludes environment records,
+environment-verification assets, and environment facts profiles because those packages belong to
+the disabled experimental release group, not `platform-v1`. Directory location alone can neither
+include nor exclude a document.
 
-`manifest.json`'s bytes never depend on whether a key exists; the signature is a sidecar.
+The same run emits:
 
-## Why the digests matter
+- the served documents with their declared media types;
+- `manifest.json`, binding every served path to SHA-256, media type, and source package;
+- an optional `manifest.dsse.json` signature sidecar when the signing key is provisioned;
+- the platform public-surface manifest;
+- the exact tarball manifest and SHA-512 integrity records; and
+- an immutable verification receipt binding source SHA, catalog digest, release group, lane,
+  package order, tarballs, surfaces, profile manifest, and required job conclusions.
 
-The profile URI is the name; the digests are the binding. A conformance claim cites document
-digests, not bare URIs, so a hosting compromise or a quiet redeploy is detectable. Serving
-the documents without the manifest reintroduces trust-the-host into a stack whose every
-other link is a hash.
+The profile manifest bytes do not depend on whether a signing key exists. Source-tree `.sha256`
+sidecars are not served; `manifest.json` is the digest authority for the hosted copy.
 
-## Deviation from the plan's source-directory list (D10)
+## Hard stable blocker
 
-The implementation plan's Task 17 specifies `PROFILE_SOURCE_DIRECTORIES = ['profiles',
-'profile', 'schemas']`. `.github/scripts/build-profile-root.mjs` ships `['profiles',
-'profile']` — the bare top-level `schemas` entry is deliberately dropped, not a missed
-implementation step. No document under either package's bare top-level `schemas/`
-(`task-execution-protocol`, `benchmarking-records`) declares a `$id`, and no
-`https://jinn.network/schemas/...` identifier exists anywhere under `packages/`, so walking
-that directory would only ever produce source-path fallback entries with no
-`jinn.network` identity to protect. A `schemas/` nested under `profiles/` or `profile/`
-(as `evidence-protocol` and `evidence-repository-oci` do) is still walked, because that
-recursion happens through the `profiles`/`profile` entries above it, not through a bare
-top-level `schemas` entry. This is a ratified deviation, not an open item — do not "restore"
-the third entry without first re-deriving that a bare top-level `schemas/` document has
-grown a declared identifier.
+Stable package publication remains mechanically disabled until the live host exists and an
+end-to-end verification gate proves that `https://jinn.network/` serves the exact same-run
+manifest and document bytes. Building or attesting an artifact is not proof that the public host
+serves it. Do not remove `stable-hosting-blocker`, enable a stable publisher, or claim external
+conformance before the live-host gate is implemented and passes.
 
-## Human checklist: hosting and key provisioning
+## Hosting and key-provisioning checklist
 
-None of this can be automated from this repository. An operator with control of the
-`jinn.network` domain and the org's GitHub settings must:
+An operator with control of `jinn.network` and the organization settings must:
 
-- [ ] Generate an ed25519 signing key for the profile manifest, offline, and keep the
-      private key out of this repository.
-- [ ] Add the private key as the GitHub Actions secret `JINN_PROFILE_MANIFEST_SIGNING_KEY`
-      (PKCS#8 PEM) on `Jinn-Network/mono`.
-- [ ] Add the key identifier as the GitHub Actions variable `JINN_PROFILE_MANIFEST_KEY_ID`.
-- [ ] Publish the corresponding **public** key at a stable URL and record that URL here, so a
-      verifier can check `manifest.dsse.json` without asking anyone.
-- [ ] Point `jinn.network` at a static host.
-- [ ] Configure the host to serve the `jinn-profile-root` artifact's contents at the domain
-      root, preserving paths exactly.
-- [ ] Serve each document with the `mediaType` its own `manifest.json` entry declares, not a
-      static per-extension rule — a record-discovery facts profile and a task profile are
-      served at an extension-less path (their declared identifier has none) and still need
-      `Content-Type: application/json`.
-- [ ] Verify a resolution end to end:
-      `curl -sSf https://jinn.network/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json | sha256sum`
-      and confirm the digest matches `manifest.json`.
-- [ ] Record the date, the operator's handle, and the public-key URL in this file when
-      complete.
+- [ ] Generate an Ed25519 signing key offline and keep the private key out of this repository.
+- [ ] Add the PKCS#8 PEM private key as `JINN_PROFILE_MANIFEST_SIGNING_KEY`.
+- [ ] Add its identifier as `JINN_PROFILE_MANIFEST_KEY_ID`.
+- [ ] Publish the corresponding public key at a stable URL and record that URL in the deployment
+      record.
+- [ ] Configure a static host for `jinn.network` that preserves manifest paths exactly.
+- [ ] Serve each document with the media type declared by `manifest.json`, including extensionless
+      task and facts profiles.
+- [ ] Deploy one exact attested profile-root artifact; never rebuild it at the host.
+- [ ] Fetch `manifest.json` from the live domain, verify its attestation/signature, and byte-compare
+      every hosted document and digest with the same-run immutable artifact.
+- [ ] Verify at least one trajectory schema and one facts/task profile by its self-declared URI.
+- [ ] Record the source SHA, catalog digest, artifact/receipt identities, operator, public-key URL,
+      and completion date.
 
-Until every box is ticked, no external party can make a conformance claim (design §8.4
-item 1), and that limitation is stated, not hidden.
+Only after this checklist is represented by a fail-closed automated live-host verification gate
+may the platform stable hold be reconsidered.

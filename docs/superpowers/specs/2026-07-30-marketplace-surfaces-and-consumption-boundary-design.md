@@ -56,6 +56,11 @@ URIs resolving.
 
 ## 2. Ground truth
 
+> **Historical snapshot (2026-07-30).** The package counts, paths, versions, and publication state
+> in this section record the evidence used by the design session; they are not current topology
+> authority. Use the [generated platform topology](../../../architecture/generated/platform-topology.md)
+> for the catalog-derived live inventory, dependency graph, release policy, and transitions.
+
 Verified by this session's research lanes against the working tree and live sources
 (2026-07-30):
 
