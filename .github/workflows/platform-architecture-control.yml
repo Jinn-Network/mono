@@ -10,9 +10,6 @@ on:
 # repository context. This workflow never uses pull_request_target.
 permissions:
   contents: read
-  id-token: write
-  attestations: write
-  artifact-metadata: write
 
 jobs:
   platform-architecture-control:
@@ -45,6 +42,11 @@ jobs:
 
   platform-verification-reusable:
     name: platform-verification-reusable
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     uses: ./.github/workflows/platform-verification.yml
     with:
       source_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}

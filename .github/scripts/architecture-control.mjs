@@ -110,7 +110,7 @@ function assertUsernameGroups(catalog) {
     throw new Error(`ownerGroups.architecture-control must be exactly ${REQUIRED_ARCHITECTURE_OWNERS.join(' ')}`);
   }
   for (const pkg of catalog.packages) {
-    if (!(pkg.ownerGroup in catalog.ownerGroups)) throw new Error(`${pkg.name}: unresolved owner group ${pkg.ownerGroup}`);
+    if (!Object.hasOwn(catalog.ownerGroups, pkg.ownerGroup)) throw new Error(`${pkg.name}: unresolved owner group ${pkg.ownerGroup}`);
   }
 }
 
@@ -191,38 +191,41 @@ function discoverSurfaceDirectories(repoRoot, packagePath, paths) {
   visit(packageRoot);
 }
 
-function discoverGenerators(repoRoot, pkg, paths) {
+function discoverGeneratorSources(repoRoot, pkg, paths) {
   const manifestPath = resolve(repoRoot, ...pkg.path.split('/'), 'package.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-  const generatedSurfaceKinds = new Set();
-  for (const [name, command] of Object.entries(manifest.scripts ?? {})) {
-    if (!/(?:codegen|generate|seal)/u.test(name)) continue;
-    if (/fixtures/u.test(name)) generatedSurfaceKinds.add('fixtures');
-    if (/schemas/u.test(name)) generatedSurfaceKinds.add('schemas');
-    if (/(?:profile|documents)/u.test(name)) generatedSurfaceKinds.add('profiles');
-    if (pkg.path === 'packages/evidence/repository-oci' && name === 'generate:profile') {
-      generatedSurfaceKinds.add('fixtures');
-    }
-    for (const match of command.matchAll(/(?:^|\s)([A-Za-z0-9_./-]+\.(?:mjs|cjs|js|ts))(?:\s|$)/gu)) {
+  for (const command of Object.values(manifest.scripts ?? {})) {
+    for (const match of command.matchAll(
+      /(?:^|\s)(?:node|tsx|bun)\s+(?:(?:--?[A-Za-z0-9-]+(?:=[^\s]+)?)\s+)*([A-Za-z0-9_./-]+\.(?:mjs|cjs|js|ts))(?:\s|$)/gu,
+    )) {
       const candidate = normalizeRelative(pkg.path, match[1]);
-      if (existsSync(resolve(repoRoot, ...candidate.split('/')))) {
-        addPath(paths, candidate, 'generatorSources', repoRoot);
-        if (candidate === 'client/scripts/skill-generate.ts') {
-          addPath(paths, 'client/skills/jinn-operator/SKILL.md', 'generatedOutputSources', repoRoot);
-        }
+      if (!candidate.split('/').some((component) => EXCLUDED_DIRECTORIES.has(component))
+        && existsSync(resolve(repoRoot, ...candidate.split('/')))) {
+        addTree(paths, dirname(candidate).split('\\').join('/'), 'generatorSources', repoRoot);
       }
     }
   }
-  for (const surface of generatedSurfaceKinds) {
-    for (const value of pkg.publicSurface[surface]) {
-      addTree(paths, normalizeRelative(pkg.path, value), 'generatedOutputSources', repoRoot);
+  const packageRoot = resolve(repoRoot, ...pkg.path.split('/'));
+  const visit = (absolute) => {
+    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+      if (!entry.isDirectory() || EXCLUDED_DIRECTORIES.has(entry.name)) continue;
+      const child = resolve(absolute, entry.name);
+      if (entry.name === 'scripts') {
+        addTree(paths, relative(repoRoot, child).split('\\').join('/'), 'generatorSources', repoRoot);
+      } else {
+        visit(child);
+      }
     }
-  }
+  };
+  visit(packageRoot);
 }
 
 export function enumerateArchitectureControlPaths(repoRoot, catalog) {
   const paths = new Map();
   for (const [path, category] of STATIC_CONTROL) addPath(paths, path, category, repoRoot);
+  for (const gate of Object.values(catalog.gateDefinitions)) {
+    addPath(paths, gate.path, 'requiredGates', repoRoot);
+  }
   for (const pkg of catalog.packages) {
     const manifest = JSON.parse(readFileSync(resolve(repoRoot, ...pkg.path.split('/'), 'package.json'), 'utf8'));
     addPath(paths, `${pkg.path}/package.json`, 'catalogManifests', repoRoot);
@@ -234,26 +237,26 @@ export function enumerateArchitectureControlPaths(repoRoot, catalog) {
       for (const value of values) {
         if (surface !== 'conformance') {
           addTree(paths, normalizeRelative(pkg.path, value), 'catalogPublicSurfaces', repoRoot);
+          addTree(paths, normalizeRelative(pkg.path, value), 'generatedOutputSources', repoRoot);
           continue;
         }
         const resolved = resolveConformanceSources(repoRoot, pkg, manifest, value);
         for (const source of resolved.sources) {
           addPath(paths, normalizeRelative(pkg.path, source), 'catalogPublicSurfaces', repoRoot);
           addPath(paths, normalizeRelative(pkg.path, source), 'conformanceSources', repoRoot);
+          addPath(paths, normalizeRelative(pkg.path, source), 'generatedOutputSources', repoRoot);
         }
         for (const target of resolved.packedTargets) {
           addPath(paths, normalizeRelative(pkg.path, target), 'conformancePackedTargets', repoRoot, { mustExist: false });
+          addPath(paths, normalizeRelative(pkg.path, target), 'generatedOutputSources', repoRoot, { mustExist: false });
         }
       }
     }
     discoverSurfaceDirectories(repoRoot, pkg.path, paths);
-    discoverGenerators(repoRoot, pkg, paths);
+    discoverGeneratorSources(repoRoot, pkg, paths);
   }
-  for (const path of readdirSync(resolve(repoRoot, '.github/scripts'))) {
-    if (!/^(?:build-|fixture-manifest|jinn-plugin-split|platform-verification-receipt|stack-publish-manifest|stack-trusted-publishers).*\.mjs$/u.test(path)) continue;
-    addPath(paths, `.github/scripts/${path}`, 'generatorSources', repoRoot);
-  }
-  addPath(paths, '.github/workflows/jinn-plugin-split.yml', 'generatorSources', repoRoot);
+  addTree(paths, '.github/scripts', 'generatorSources', repoRoot);
+  addTree(paths, '.github/workflows', 'generatorSources', repoRoot);
   return paths;
 }
 

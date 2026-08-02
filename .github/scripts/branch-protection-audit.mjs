@@ -41,13 +41,13 @@ function validateProtection(branch, protection) {
   }
   if (review.require_code_owner_reviews !== true) throw new Error(`${branch}: code-owner reviews are not required`);
   if (review.dismiss_stale_reviews !== true) throw new Error(`${branch}: stale approvals are not dismissed`);
-  const bypass = review.bypass_pull_request_allowances ?? {};
-  if (typeof bypass !== 'object' || Array.isArray(bypass)) {
+  const bypass = review.bypass_pull_request_allowances;
+  if (bypass === null || typeof bypass !== 'object' || Array.isArray(bypass)) {
     throw new Error(`${branch}: review bypass allowances must be an object`);
   }
   for (const kind of ['users', 'teams', 'apps']) {
-    const allowances = bypass[kind] ?? [];
-    if (!Array.isArray(allowances) || allowances.length !== 0) {
+    const allowances = bypass[kind];
+    if (!Object.hasOwn(bypass, kind) || !Array.isArray(allowances) || allowances.length !== 0) {
       throw new Error(`${branch}: ${kind} review bypass allowances must be empty arrays`);
     }
   }
@@ -83,7 +83,14 @@ async function auditOwner(repository, username, request) {
     'GET',
     `/repos/${repository}/collaborators/${encodeURIComponent(username)}/permission`,
   );
-  if (permission.status === 403) return { username, resolved: true, collaborator: 'visibility-unavailable' };
+  if (permission.status === 403) {
+    return {
+      username,
+      resolved: true,
+      collaborator: 'visibility-unavailable',
+      eligible: false,
+    };
+  }
   if (permission.status === 404) throw new Error(`${username}: resolved username is not a visible repository collaborator`);
   requireSuccess(permission, `collaborator ${username}`);
   const level = permission.data?.permission;
@@ -106,7 +113,11 @@ export async function auditRepositoryArchitecture({ repository, request }) {
   const errors = [];
   for (const username of AUDITED_USERNAMES) {
     try {
-      owners.push(await auditOwner(repository, username, request));
+      const owner = await auditOwner(repository, username, request);
+      owners.push(owner);
+      if (owner.collaborator === 'visibility-unavailable') {
+        errors.push(`${username}: collaborator visibility unavailable; write eligibility was not proven`);
+      }
     } catch (error) {
       const message = error?.message ?? String(error);
       owners.push({ username, resolved: false, collaborator: false, error: message });
@@ -165,6 +176,21 @@ export function formatAuditSummary(report) {
   return `${lines.join('\n')}\n`;
 }
 
+export async function runArchitectureAudit({ repository, request, out, summary }) {
+  try {
+    const report = await auditRepositoryArchitecture({ repository, request });
+    writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    writeFileSync(summary, formatAuditSummary(report), 'utf8');
+    return report;
+  } catch (error) {
+    if (error?.report) {
+      writeFileSync(out, `${JSON.stringify(error.report, null, 2)}\n`, 'utf8');
+      writeFileSync(summary, formatAuditSummary(error.report), 'utf8');
+    }
+    throw error;
+  }
+}
+
 function parseArguments(argv) {
   const options = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -187,20 +213,12 @@ async function main() {
     token: process.env.ARCHITECTURE_AUDIT_TOKEN ?? process.env.GITHUB_TOKEN,
     apiUrl: process.env.GITHUB_API_URL,
   });
-  try {
-    const report = await auditRepositoryArchitecture({
-      repository: options.repository ?? process.env.GITHUB_REPOSITORY,
-      request,
-    });
-    writeFileSync(options.out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-    writeFileSync(options.summary, formatAuditSummary(report), 'utf8');
-  } catch (error) {
-    if (error?.report) {
-      writeFileSync(options.out, `${JSON.stringify(error.report, null, 2)}\n`, 'utf8');
-      writeFileSync(options.summary, formatAuditSummary(error.report), 'utf8');
-    }
-    throw error;
-  }
+  await runArchitectureAudit({
+    repository: options.repository ?? process.env.GITHUB_REPOSITORY,
+    request,
+    out: options.out,
+    summary: options.summary,
+  });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

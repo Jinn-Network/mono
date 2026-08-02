@@ -9,6 +9,7 @@ Implementation complete. No live GitHub API calls, branch-setting mutations, pub
 - `.github/CODEOWNERS` — appends the protected architecture-control rules last, while retaining the existing canonical, UI, and governance rules.
 - `.github/scripts/architecture-control.mjs` — reusable CODEOWNERS parser/matcher, exhaustive catalog/control-path enumerator, validator, and deterministic JSON CLI.
 - `.github/scripts/architecture-control.test.mjs` — controlled-fixture and canonical-repository ownership behavior tests.
+- `.github/scripts/platform-catalog.mjs` and its test — fail-closed own-property resolution for owner groups and gate IDs.
 - `.github/scripts/branch-protection-audit.mjs` — injectable GET-only branch-protection and owner-eligibility auditor plus deterministic JSON/Markdown CLI.
 - `.github/scripts/branch-protection-audit.test.mjs` — owner/API and every required branch-policy drift test.
 - `.github/scripts/architecture-control-workflow.test.mjs` — exact required check, explicit-head, non-publishing, scheduled/manual audit workflow contracts.
@@ -45,7 +46,7 @@ The first explicit actionlint run exited 1 on `SC2129` in the scheduled audit su
 
 ## Coverage
 
-The canonical report contains 2,628 unique repository-relative control paths. Category membership is overlapping by design:
+The canonical report contains 3,019 unique repository-relative control paths. Category membership is overlapping by design:
 
 - 69 catalog manifests (all catalog packages, never a sample)
 - 19 authority documents
@@ -56,8 +57,8 @@ The canonical report contains 2,628 unique repository-relative control paths. Ca
 - 23 first-party conformance source files resolved through package `exports`
 - 46 declared conformance packed targets
 - 2,403 discovered first-party schema/profile/fixture/conformance/test/testing directories and files below all scoped roots, excluding dependency/build trees
-- 28 generator sources
-- 163 committed generated-output directories/files
+- 498 exhaustively discovered first-party generator/automation source paths
+- 997 catalog-declared generated-output directories/files and packed targets
 - 2 catalog/schema files
 - 2 marketplace control roots (`binding` and `testing`)
 - 6 other static control roots/files
@@ -73,11 +74,40 @@ Each catalog authority, decision, boundary, and gate reference is asserted indiv
 - The audit repository is pinned to exact `Jinn-Network/mono`; all three branches and both users are always attempted with GET. Username responses must retain the current handle case-insensitively. Visible collaborator permission must be `write`, `maintain`, or `admin`; `read`, `triage`, missing, unknown, and visible non-collaborators fail. A 403 is recorded explicitly as `visibility-unavailable`.
 - Branch review, context, force-push, admin, and user/team/app bypass drift variants are all tested. Extra required contexts may coexist with the exact two required architecture contexts.
 - Drift errors carry a deterministic complete report and the scheduled workflow uploads evidence and writes a summary before failing.
-- The PR workflow checks out the explicit pull-request head SHA, uses the verifier's valid `canary` lane only as a verification canary, maps only the marketplace fork secret, carries attestation permissions, never publishes, and never uses `pull_request_target`.
+- The PR workflow checks out the explicit pull-request head SHA, uses the verifier's valid `canary` lane only as a verification canary, maps only the marketplace fork secret, grants attestation writes only to the reusable verification job, never publishes, and never uses `pull_request_target`.
 - The final job named exactly `platform-verification` depends on the reusable verifier result and fails unless it is exactly `success`.
 
 ## Concerns
 
 - Branch protection and collaborator eligibility are external state. The scheduled workflow can only observe them; a repository administrator must configure or repair drift manually.
-- If `ARCHITECTURE_AUDIT_TOKEN` is not configured and `GITHUB_TOKEN` cannot view collaborator permissions or branch protection, the audit will record collaborator visibility as unavailable and may fail on unreadable branch protection. The dedicated token should remain fine-grained and read-only.
+- If `ARCHITECTURE_AUDIT_TOKEN` is not configured and `GITHUB_TOKEN` cannot view collaborator permissions or branch protection, the audit records collaborator visibility as unavailable and fails closed because write eligibility was not proven. The dedicated token should remain fine-grained and read-only.
 - Fork pull requests may lack the write-capable token permissions required by the reusable verifier's attestations. The same explicit head SHA must then be rerun by a maintainer in the trusted repository context, as documented; no elevated target-context workflow is used.
+
+## Fix round 1
+
+Reviewed base: `bf44f9dbd890cb3d873d4d6d0d058970bbfbfea3`.
+
+### RED evidence
+
+- `/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin/node --test .github/scripts/branch-protection-audit.test.mjs .github/scripts/architecture-control-workflow.test.mjs` exited 1 with 31 passed / 4 failed: collaborator-permission 403 did not reject, the injectable CLI runner did not exist, and workflow-scope permissions still included all three write grants.
+- `/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin/node --test .github/scripts/architecture-control.test.mjs .github/scripts/branch-protection-audit.test.mjs` exited 1 with 50 passed / 9 failed: a newly named `tools/refresh-assets.mjs` and its indirect helper were absent, an unreferenced gate definition was absent, prototype-inherited `toString` ownership was accepted, declared generated outputs were incomplete (`client/schemas` was the first canonical failure), and missing bypass object/users/teams/apps arrays were accepted.
+- `/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin/node --test --test-name-pattern='rejects missing ownership' .github/scripts/platform-catalog.test.mjs` exited 1: a `toString` gate ID was accepted through inherited prototype membership.
+
+### Fix rationale
+
+- A 403 collaborator-permission response remains deterministic evidence with `collaborator: "visibility-unavailable"`, but now adds policy drift. Both owners and all branches remain in the thrown error report. The exported CLI runner writes JSON and Markdown before rethrowing, so the scheduled job uploads evidence and exits nonzero.
+- Workflow-level permissions are now only `contents: read`. `id-token`, `attestations`, and `artifact-metadata` writes exist only on `platform-verification-reusable`; the ordinary control and final-result jobs cannot receive them.
+- Generator custody no longer uses generate-name or repository filename whitelists. It exhaustively includes first-party package `scripts/` trees, arbitrary Node/tsx/bun entrypoint directories declared by package scripts (including indirect helpers), and complete repository `.github/scripts/` and workflow generator surfaces, while excluding dependency/build trees.
+- Every catalog public surface and resolved conformance source/packed target is independently tagged as a declared generated output; canonical tests assert category coverage path by path rather than merely checking a nonzero count.
+- Every `gateDefinitions` implementation is enumerated independently of package references.
+- Owner-group and required-gate lookup use `Object.hasOwn`, rejecting prototype-inherited names.
+- Review bypass allowances require an explicit object with explicit empty `users`, `teams`, and `apps` arrays. Missing/malformed structures fail closed.
+
+### GREEN evidence
+
+- Focused architecture/audit/workflow/catalog suite: 115 passed, 0 failed.
+- Catalog-dependent consumers: 88 passed, 0 failed.
+- Node syntax checks for `architecture-control.mjs`, `branch-protection-audit.mjs`, and `platform-catalog.mjs`: exit 0.
+- `/opt/homebrew/bin/actionlint` on both Task 6 workflows: exit 0.
+- Two caller-selected coverage outputs compared byte-for-byte: identical; 3,019 unique paths, no timestamps or absolute paths.
+- `git diff --check` and the no-root-`.architecture-control/` assertion: exit 0.

@@ -502,10 +502,10 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
     }
     assertExistingFile(repoRoot, pkg.authority.decisionRecord.path, `${pkg.name}: decision record`);
   }
-  if (!(pkg.ownerGroup in catalog.ownerGroups)) throw new Error(`${pkg.name}: unknown owner group ${pkg.ownerGroup}`);
+  if (!Object.hasOwn(catalog.ownerGroups, pkg.ownerGroup)) throw new Error(`${pkg.name}: unknown owner group ${pkg.ownerGroup}`);
   requireStringArray(pkg.requiredGateIds, `${pkg.name}.requiredGateIds`, { nonEmpty: true });
   for (const gateId of pkg.requiredGateIds) {
-    if (!(gateId in catalog.gateDefinitions)) throw new Error(`${pkg.name}: unknown gate ${gateId}`);
+    if (!Object.hasOwn(catalog.gateDefinitions, gateId)) throw new Error(`${pkg.name}: unknown gate ${gateId}`);
   }
   requireObject(pkg.boundaryPolicy, `${pkg.name}.boundaryPolicy`);
   requireString(pkg.boundaryPolicy.kind, `${pkg.name}.boundaryPolicy.kind`);

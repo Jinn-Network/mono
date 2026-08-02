@@ -150,9 +150,19 @@ test('rejects missing ownership, gate, authority, boundary, and transition refer
       pattern: /unknown owner group missing-owner/u,
     },
     {
+      name: 'prototype-inherited owner group',
+      mutate(catalog) { catalog.packages[0].ownerGroup = 'toString'; },
+      pattern: /unknown owner group toString/u,
+    },
+    {
       name: 'gate',
       mutate(catalog) { catalog.packages[0].requiredGateIds = ['missing-gate']; },
       pattern: /unknown gate missing-gate/u,
+    },
+    {
+      name: 'prototype-inherited gate',
+      mutate(catalog) { catalog.packages[0].requiredGateIds = ['toString']; },
+      pattern: /unknown gate toString/u,
     },
     {
       name: 'authority',

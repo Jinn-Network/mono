@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
@@ -14,8 +14,19 @@ function write(path, value = '') {
   writeFileSync(path, value, 'utf8');
 }
 
-function completeFixture() {
-  const root = fixtureRepo();
+function walkFirstPartyFiles(root, current = root) {
+  const files = [];
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    if (entry.isDirectory() && ['node_modules', 'dist', 'build', '.yarn'].includes(entry.name)) continue;
+    const path = join(current, entry.name);
+    if (entry.isDirectory()) files.push(...walkFirstPartyFiles(root, path));
+    else if (entry.isFile()) files.push(path.slice(root.length + 1).split('\\').join('/'));
+  }
+  return files;
+}
+
+function completeFixture(catalog = fixtureCatalog()) {
+  const root = fixtureRepo({ catalog });
   for (const path of [
     'contracts/.keep',
     'docs/superpowers/specs/.keep',
@@ -24,7 +35,6 @@ function completeFixture() {
     '.github/workflows/jinn-plugin-split.yml',
     '.github/CODEOWNERS',
   ]) write(join(root, path));
-  const catalog = fixtureCatalog();
   const rules = [
     '/architecture/',
     '/docs/superpowers/specs/',
@@ -51,6 +61,64 @@ test('parser implements root anchoring, directories, *, **, and last match', asy
   assert.deepEqual(effectiveOwners(rules, 'packages/a/nested/schemas/item.json'), REQUIRED);
   assert.deepEqual(effectiveOwners(rules, 'exact/file.json'), REQUIRED);
   assert.deepEqual(effectiveOwners(rules, 'nested/exact/file.json'), []);
+});
+
+test('enumerates newly named and indirectly declared generator sources without build/dependency trees', async () => {
+  const { validateArchitectureControl } = await implementation;
+  const root = completeFixture();
+  try {
+    const manifestPath = join(root, 'packages/fixture/protocol/package.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.scripts = { refresh: 'node tools/refresh-assets.mjs' };
+    write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    write(join(root, 'packages/fixture/protocol/tools/refresh-assets.mjs'), "import './helpers/write-assets.mjs';\n");
+    write(join(root, 'packages/fixture/protocol/tools/helpers/write-assets.mjs'), 'export {};\n');
+    write(join(root, 'packages/fixture/protocol/tools/node_modules/ignored.mjs'), 'export {};\n');
+    write(join(root, 'packages/fixture/protocol/tools/dist/ignored.mjs'), 'export {};\n');
+    write(join(root, 'packages/fixture/protocol/tools/build/ignored.mjs'), 'export {};\n');
+    const report = validateArchitectureControl({ repoRoot: root });
+    const generators = new Set(report.paths
+      .filter((entry) => entry.categories.includes('generatorSources'))
+      .map((entry) => entry.path));
+    assert.ok(generators.has('packages/fixture/protocol/tools/refresh-assets.mjs'));
+    assert.ok(generators.has('packages/fixture/protocol/tools/helpers/write-assets.mjs'));
+    assert.equal([...generators].some((path) => /\/(?:node_modules|dist|build)\//u.test(path)), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('enumerates an unreferenced catalog gate definition independently', async () => {
+  const { validateArchitectureControl } = await implementation;
+  const catalog = fixtureCatalog();
+  catalog.gateDefinitions['unreferenced-gate'] = {
+    kind: 'workflow',
+    path: '.github/workflows/unreferenced.yml',
+  };
+  const root = completeFixture(catalog);
+  try {
+    write(join(root, '.github/workflows/unreferenced.yml'), 'name: unreferenced\n');
+    const report = validateArchitectureControl({ repoRoot: root });
+    const entry = report.paths.find((candidate) => candidate.path === '.github/workflows/unreferenced.yml');
+    assert.ok(entry?.categories.includes('requiredGates'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects prototype-inherited owner group names', async () => {
+  const { validateArchitectureControl } = await implementation;
+  const catalog = fixtureCatalog();
+  catalog.packages[0].ownerGroup = 'toString';
+  const root = completeFixture(catalog);
+  try {
+    assert.throws(
+      () => validateArchitectureControl({ repoRoot: root }),
+      /owner group toString/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('parser rejects malformed and unsupported patterns fail closed', async (t) => {
@@ -175,6 +243,16 @@ test('repository coverage enumerates every manifest and all control-path categor
   ]) assert.ok(first.counts[category] > 0, `${category} is exhaustively represented`);
   assert.equal(first.paths.some((entry) => entry.path.startsWith('/Users/')), false);
   assert.equal('generatedAt' in first, false);
+  assert.equal(first.paths.some((entry) => (
+    entry.categories.includes('generatorSources')
+      && /\/(?:node_modules|dist|build)\//u.test(`/${entry.path}/`)
+  )), false);
+  for (const entry of first.paths) {
+    if (entry.categories.includes('catalogPublicSurfaces')
+      || entry.categories.includes('conformancePackedTargets')) {
+      assert.ok(entry.categories.includes('generatedOutputSources'), `generated output category ${entry.path}`);
+    }
+  }
   const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
   const entries = new Map(first.paths.map((entry) => [entry.path, new Set(entry.categories)]));
   for (const pkg of catalog.packages) {
@@ -191,11 +269,38 @@ test('repository coverage enumerates every manifest and all control-path categor
       assert.ok(entries.get(path)?.has('requiredGates'), path);
     }
     const manifest = JSON.parse(readFileSync(join(repoRoot, pkg.path, 'package.json'), 'utf8'));
+    for (const [surface, values] of Object.entries(pkg.publicSurface)) {
+      if (surface === 'conformance') continue;
+      for (const value of values) {
+        const path = value === '.' ? pkg.path : `${pkg.path}/${value.replace(/^\.\//u, '')}`;
+        assert.ok(entries.get(path)?.has('generatedOutputSources'), `generated output ${path}`);
+      }
+    }
     for (const exportKey of pkg.publicSurface.conformance) {
-      for (const source of resolveConformanceSources(repoRoot, pkg, manifest, exportKey).sources) {
+      const resolved = resolveConformanceSources(repoRoot, pkg, manifest, exportKey);
+      for (const source of resolved.sources) {
         const path = `${pkg.path}/${source.replace(/^\.\//u, '')}`;
         assert.ok(entries.get(path)?.has('conformanceSources'), path);
+        assert.ok(entries.get(path)?.has('generatedOutputSources'), `generated conformance source ${path}`);
       }
+      for (const target of resolved.packedTargets) {
+        const path = `${pkg.path}/${target.replace(/^\.\//u, '')}`;
+        assert.ok(entries.get(path)?.has('generatedOutputSources'), `generated packed target ${path}`);
+      }
+    }
+    const scriptsRoot = join(repoRoot, pkg.path, 'scripts');
+    if (existsSync(scriptsRoot) && statSync(scriptsRoot).isDirectory()) {
+      for (const file of walkFirstPartyFiles(scriptsRoot)) {
+        const path = `${pkg.path}/scripts/${file}`;
+        assert.ok(entries.get(path)?.has('generatorSources'), `package generator ${path}`);
+      }
+    }
+  }
+  for (const root of ['.github/scripts', '.github/workflows']) {
+    const absolute = join(repoRoot, root);
+    for (const file of walkFirstPartyFiles(absolute)) {
+      const path = `${root}/${file}`;
+      assert.ok(entries.get(path)?.has('generatorSources'), `repository generator ${path}`);
     }
   }
 });

@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 
 const implementation = import('./branch-protection-audit.mjs');
@@ -97,6 +100,10 @@ test('rejects every branch-protection drift variant', async (t) => {
     ['team bypass', (p) => { p.required_pull_request_reviews.bypass_pull_request_allowances.teams = [{ slug: 'x' }]; }],
     ['app bypass', (p) => { p.required_pull_request_reviews.bypass_pull_request_allowances.apps = [{ slug: 'x' }]; }],
     ['malformed bypass', (p) => { p.required_pull_request_reviews.bypass_pull_request_allowances = 'invalid'; }],
+    ['missing bypass object', (p) => { delete p.required_pull_request_reviews.bypass_pull_request_allowances; }],
+    ['missing users bypass array', (p) => { delete p.required_pull_request_reviews.bypass_pull_request_allowances.users; }],
+    ['missing teams bypass array', (p) => { delete p.required_pull_request_reviews.bypass_pull_request_allowances.teams; }],
+    ['missing apps bypass array', (p) => { delete p.required_pull_request_reviews.bypass_pull_request_allowances.apps; }],
   ];
   for (const [name, mutate] of cases) {
     await t.test(name, async () => {
@@ -124,9 +131,40 @@ test('fails on unresolved usernames and visible non-collaborators, but records i
   });
   await t.test('visibility inaccessible', async () => {
     const fixture = fixtureRequest({ collaboratorStatus: 403 });
-    const report = await auditRepositoryArchitecture({ repository: 'Jinn-Network/mono', request: fixture.request });
-    assert.ok(report.owners.every((owner) => owner.collaborator === 'visibility-unavailable'));
+    await assert.rejects(
+      auditRepositoryArchitecture({ repository: 'Jinn-Network/mono', request: fixture.request }),
+      (error) => {
+        assert.ok(error.report.owners.every((owner) => owner.collaborator === 'visibility-unavailable'));
+        assert.deepEqual(error.report.branches.map((entry) => entry.branch), BRANCHES);
+        return /visibility unavailable/u.test(error.message);
+      },
+    );
   });
+});
+
+test('CLI audit runner preserves visibility-unavailable JSON and summary before failing', async () => {
+  const { runArchitectureAudit } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-architecture-audit-'));
+  try {
+    const fixture = fixtureRequest({ collaboratorStatus: 403 });
+    const out = join(root, 'audit.json');
+    const summary = join(root, 'summary.md');
+    await assert.rejects(
+      runArchitectureAudit({
+        repository: 'Jinn-Network/mono',
+        request: fixture.request,
+        out,
+        summary,
+      }),
+      /visibility unavailable/u,
+    );
+    const report = JSON.parse(readFileSync(out, 'utf8'));
+    assert.ok(report.owners.every((owner) => owner.collaborator === 'visibility-unavailable'));
+    assert.deepEqual(report.branches.map((entry) => entry.branch), BRANCHES);
+    assert.match(readFileSync(summary, 'utf8'), /visibility-unavailable/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('visible collaborators require write-capable permission', async (t) => {

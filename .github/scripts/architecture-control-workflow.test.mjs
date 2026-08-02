@@ -17,8 +17,20 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(source, /VERIFICATION_RESULT: \$\{\{ needs\.platform-verification-reusable\.result \}\}/u);
   assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = success/u);
   assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish|publish-verified-platform/u);
-  assert.match(source, /attestations: write/u);
-  assert.match(source, /id-token: write/u);
+  const topPermissions = source.match(/^permissions:\n(?<body>[\s\S]*?)\njobs:/mu)?.groups?.body;
+  assert.equal(topPermissions?.trimEnd(), '  contents: read');
+  const controlJob = source.slice(
+    source.indexOf('  platform-architecture-control:'),
+    source.indexOf('  platform-verification-reusable:'),
+  );
+  const reusableJob = source.slice(
+    source.indexOf('  platform-verification-reusable:'),
+    source.indexOf('  platform-verification:'),
+  );
+  const finalJob = source.slice(source.indexOf('  platform-verification:'));
+  assert.doesNotMatch(controlJob, /(?:id-token|attestations|artifact-metadata): write/u);
+  assert.match(reusableJob, /permissions:\n\s+contents: read\n\s+id-token: write\n\s+attestations: write\n\s+artifact-metadata: write/u);
+  assert.doesNotMatch(finalJob, /(?:id-token|attestations|artifact-metadata): write/u);
 });
 
 test('scheduled/manual audit is read-only, summarizes, and uploads deterministic evidence', () => {
