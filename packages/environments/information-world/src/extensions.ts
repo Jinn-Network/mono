@@ -1,23 +1,23 @@
 import { z } from "zod";
 
-const REVERSE_DNS_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)+$/;
+/**
+ * Extension names are either reverse-DNS names or URI-shaped names. A URI-shaped name has a
+ * non-empty scheme-specific part; a `//` hierarchical form additionally needs an authority.
+ * This source is also embedded in the published JSON Schema, so its grammar is one explicit,
+ * deterministic contract rather than a host URL parser on one side and a regex on the other.
+ */
+export const NAMESPACED_EXTENSION_KEY_PATTERN =
+  "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:(?:\\/\\/[^\\s\\/?#][^\\s]*|(?!\\/\\/)[^\\s]+))$";
+
+const namespacedExtensionKey = new RegExp(NAMESPACED_EXTENSION_KEY_PATTERN);
 
 /**
- * Extension names are reverse-DNS or absolute URIs (TEP §21.3); a bare key is neither.
- *
- * The whitespace rule is parity, not taste: `new URL` accepts `"http://a/b c"` by
- * percent-encoding the space, while the published schema spells absolute URIs `[^\s]+`. A
- * key this package sealed and that schema refused would give a third party a different
- * verdict on the same record, so the looser surface is brought up to the stricter one.
+ * Extension names are reverse-DNS or URI-shaped (TEP §21.3); a bare key is neither. The
+ * published JSON Schema consumes the same pattern source, so schema and runtime validators
+ * reach the same verdict without relying on `new URL`'s host-specific URL normalization.
  */
 export function isNamespacedExtensionKey(key: string): boolean {
-  if (REVERSE_DNS_KEY_PATTERN.test(key)) return true;
-  if (/\s/u.test(key)) return false;
-  try {
-    return new URL(key).protocol.length > 1;
-  } catch {
-    return false;
-  }
+  return namespacedExtensionKey.test(key);
 }
 
 /**

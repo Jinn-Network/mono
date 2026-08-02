@@ -17,9 +17,7 @@ const {
   INFORMATION_WORLD_SCHEMA_ID,
   InformationWorldRecordSchema,
 } = await import(join(root, "dist", "index.js"));
-
-const NAMESPACED =
-  "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+)$";
+const { NAMESPACED_EXTENSION_KEY_PATTERN } = await import(join(root, "dist", "extensions.js"));
 const LOWERCASE_HTTP_TOKEN = "^[a-z0-9!#$%&'*+.^_`|~-]+$";
 
 const generated = z.toJSONSchema(InformationWorldRecordSchema, {
@@ -95,7 +93,7 @@ const document = {
     + "and the capture provenance and fidelity class the author declares. The fidelity class "
     + "is a declaration: this schema makes no claim that any source returned these bytes.",
   propertyNames: {
-    anyOf: [{ enum: Object.keys(properties) }, { pattern: NAMESPACED }],
+    anyOf: [{ enum: Object.keys(properties) }, { pattern: NAMESPACED_EXTENSION_KEY_PATTERN }],
   },
   $comment: [
     `This schema describes ${INFORMATION_WORLD_MEDIA_TYPE} records.`,

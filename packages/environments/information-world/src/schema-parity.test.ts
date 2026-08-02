@@ -72,7 +72,7 @@ describe("published JSON Schema", () => {
       [key]: "extension",
     });
 
-    test.each(["note", "network.jinn.x y", "http://example.test/ext a"])(
+    test.each(["note", "network.jinn.x y", "http://example.test/ext a", "mailto:", "http://"])(
       "rejects %j on both surfaces",
       async (key) => {
         const document = await withTopLevelKey(key);
@@ -81,7 +81,12 @@ describe("published JSON Schema", () => {
       },
     );
 
-    test.each(["network.jinn.note", "http://example.test/ext"])(
+    test.each([
+      "network.jinn.note",
+      "mailto:operator@example.test",
+      "urn:jinn:information-world",
+      "https://example.test/ext",
+    ])(
       "accepts %j on both surfaces",
       async (key) => {
         const document = await withTopLevelKey(key);
