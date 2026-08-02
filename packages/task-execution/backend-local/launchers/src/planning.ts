@@ -71,9 +71,13 @@ export function capabilities(
   keys: readonly { key: string; inventory: readonly string[] }[],
   resume: boolean,
   secretForwards: readonly { readonly grantKey: string; readonly target: string }[] = [],
+  taskProfiles: readonly string[] = [
+    "https://jinn.network/task-profiles/repository-work/1.0",
+    "https://jinn.network/task-profiles/evaluation-task/1.0",
+  ],
 ): LauncherCapabilities {
   return {
-    taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0", "https://jinn.network/task-profiles/evaluation-task/1.0"],
+    taskProfiles,
     inputMediaTypes: ["application/json", "text/plain"],
     outputMediaTypes: ["application/json", "text/plain", "text/x-diff"],
     structuredOutput: true,

@@ -15,7 +15,7 @@ export function makePredictionV1BaselineLauncher(options: LauncherOptions = {}):
     capabilities: () => capabilities([
       { key: "harness", inventory: ["prediction-v1-baseline"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-    ], false),
+    ], false, [], ["https://jinn.network/task-profiles/prediction-forecast/1.0"]),
     probe: options.probe ?? (async () => ({ ready: true })),
     plan(view, paths, attempt) {
       requireHarness(view, "prediction-v1-baseline");

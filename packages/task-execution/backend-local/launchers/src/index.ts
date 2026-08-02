@@ -20,6 +20,7 @@ export { interpretResult } from "./result.js";
 export {
   EVALUATION_LAUNCHER_ID,
   EVALUATION_TASK_PROFILE,
+  PREDICTION_FORECAST_PROFILE,
   REPOSITORY_WORK_PROFILE,
   selectProfileSafeLauncher,
 } from "./routing.js";
