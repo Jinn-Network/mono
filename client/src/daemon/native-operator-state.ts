@@ -1366,6 +1366,165 @@ export class NativeOperatorStateRepository {
     })();
   }
 
+  listSolutionEngagements(): NativeEngagementRow[] {
+    return (this.store.db.prepare(
+      `SELECT * FROM native_engagements
+        WHERE state IN (
+          'claim-finalized', 'executing', 'solution-ready', 'solution-published',
+          'solution-settlement-pending'
+        )
+        ORDER BY created_at, engagement_id`,
+    ).all() as RawEngagement[]).map(engagementRow);
+  }
+
+  recordSolutionFailed(
+    engagementIdValue: NativeOperationId,
+    input: { readonly reason: string; readonly detail?: string },
+  ): void {
+    if (input.reason.length === 0) throw new TypeError('solution failure reason must not be empty');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+        .get(engagementIdValue) as RawEngagement | undefined;
+      if (engagement === undefined) throw new NativeOperatorStateConflictError(`unknown native engagement ${engagementIdValue}`);
+      if (engagement.state === 'solution-settled') {
+        throw new NativeOperatorStateConflictError('a finalized solution settlement cannot become failed');
+      }
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'failed', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, engagementIdValue);
+      const backendOperation = this.store.db.prepare(
+        `SELECT operation_id, status FROM native_operations
+          WHERE engagement_id = ? AND kind = 'backend-submit'`,
+      ).get(engagementIdValue) as { operation_id: NativeOperationId; status: NativeOperationStatus } | undefined;
+      if (backendOperation !== undefined && backendOperation.status !== 'finalized') {
+        this.store.db.prepare(
+          `UPDATE native_operations SET status = 'failed-terminal', detail_json = ?, updated_at = ?
+            WHERE operation_id = ?`,
+        ).run(detailJson(input), now, backendOperation.operation_id);
+      }
+      this.insertAudit(engagementIdValue, backendOperation?.operation_id ?? null, 'solution-failed', input, now);
+    })();
+  }
+
+  private requireSolutionSettlementOperation(
+    operationId: NativeOperationId,
+  ): { readonly operation: RawOperation; readonly engagement: RawEngagement } {
+    const operation = this.store.db.prepare(`SELECT * FROM native_operations WHERE operation_id = ?`)
+      .get(operationId) as RawOperation | undefined;
+    if (operation === undefined || operation.kind !== 'solution-settlement') {
+      throw new NativeOperatorStateConflictError(`unknown solution settlement operation ${operationId}`);
+    }
+    const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+      .get(operation.engagement_id) as RawEngagement | undefined;
+    if (engagement === undefined) throw new NativeOperatorStateConflictError('solution settlement has no engagement');
+    return { operation, engagement };
+  }
+
+  recordSolutionSettlementBroadcast(
+    operationId: NativeOperationId,
+    txHash?: `0x${string}`,
+  ): void {
+    const hash = txHash === undefined ? null : requireHash(txHash, 'solution settlement transaction hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireSolutionSettlementOperation(operationId);
+      if (!['intent', 'broadcast'].includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`cannot broadcast solution settlement from ${operation.status}`);
+      }
+      if (operation.tx_hash !== null && hash !== null && operation.tx_hash !== hash) {
+        throw new NativeOperatorStateConflictError('changed solution settlement hash requires replacement');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'broadcast', tx_hash = COALESCE(?, tx_hash),
+          updated_at = ? WHERE operation_id = ?`,
+      ).run(hash, now, operationId);
+      this.insertAudit(operation.engagement_id, operationId,
+        hash === null ? 'solution-settlement-broadcast-uncertain' : 'solution-settlement-broadcast',
+        hash === null ? {} : { txHash: hash }, now);
+    })();
+  }
+
+  recordSolutionSettlementReplacement(
+    operationId: NativeOperationId,
+    priorTxHash: `0x${string}`,
+    txHash: `0x${string}`,
+  ): void {
+    const prior = requireHash(priorTxHash, 'prior solution settlement transaction hash');
+    const replacement = requireHash(txHash, 'replacement solution settlement transaction hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireSolutionSettlementOperation(operationId);
+      if (!['broadcast', 'replaced'].includes(operation.status) || operation.tx_hash !== prior) {
+        throw new NativeOperatorStateConflictError('solution settlement replacement does not extend the current transaction');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'replaced', prior_tx_hash = ?, tx_hash = ?,
+          updated_at = ? WHERE operation_id = ?`,
+      ).run(prior, replacement, now, operationId);
+      this.insertAudit(operation.engagement_id, operationId, 'solution-settlement-replaced', {
+        priorTxHash: prior,
+        txHash: replacement,
+      }, now);
+    })();
+  }
+
+  recordSolutionSettlementFinalized(
+    operationId: NativeOperationId,
+    observation: {
+      readonly txHash: `0x${string}`;
+      readonly blockHash: `0x${string}`;
+      readonly blockNumber: bigint;
+    },
+  ): void {
+    const txHash = requireHash(observation.txHash, 'solution settlement transaction hash');
+    const blockHash = requireHash(observation.blockHash, 'solution settlement block hash');
+    if (observation.blockNumber < 0n) throw new RangeError('solution settlement block number must not be negative');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireSolutionSettlementOperation(operationId);
+      if (!['intent', 'broadcast', 'replaced', 'observed-safe', 'finalized'].includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`cannot finalize solution settlement from ${operation.status}`);
+      }
+      if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
+        throw new NativeOperatorStateConflictError('canonical solution settlement names a different transaction');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'finalized', tx_hash = ?, block_hash = ?, block_number = ?,
+          detail_json = ?, updated_at = ? WHERE operation_id = ?`,
+      ).run(txHash, blockHash, observation.blockNumber.toString(10), detailJson(observation), now, operationId);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'solution-settled', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, operation.engagement_id);
+      this.insertAudit(operation.engagement_id, operationId, 'solution-settlement-finalized', observation, now);
+    })();
+  }
+
+  recordSolutionSettlementOrphaned(
+    operationId: NativeOperationId,
+    input: { readonly txHash: `0x${string}`; readonly reason: string },
+  ): void {
+    const txHash = requireHash(input.txHash, 'orphaned solution settlement transaction hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireSolutionSettlementOperation(operationId);
+      if (operation.status === 'finalized') {
+        throw new NativeOperatorStateConflictError('cannot orphan a finalized solution settlement');
+      }
+      if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
+        throw new NativeOperatorStateConflictError('solution settlement orphan notice names a different transaction');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'orphaned', tx_hash = ?, detail_json = ?, updated_at = ?
+          WHERE operation_id = ?`,
+      ).run(txHash, detailJson(input), now, operationId);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'solution-published', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, operation.engagement_id);
+      this.insertAudit(operation.engagement_id, operationId, 'solution-settlement-orphaned', input, now);
+    })();
+  }
+
   getEngagement(id: NativeOperationId): NativeEngagementRow | undefined {
     const row = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
       .get(id) as RawEngagement | undefined;
