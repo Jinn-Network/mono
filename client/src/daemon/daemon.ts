@@ -39,6 +39,8 @@ import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
 import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
+import type { NativeOperatorHost } from './native-operator-host.js';
+import type { OperatorVerticalMode } from './native-vertical-mode.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -87,6 +89,9 @@ function emitTickErrorOrRaceLost(
 }
 
 export interface DaemonConfig {
+  /** Compatibility daemon control. Native-v1 owns its lifecycle through nativeHost. */
+  verticalMode?: OperatorVerticalMode;
+  nativeHost?: NativeOperatorHost;
   adapter: ExecutionAdapter;
   /**
    * Legacy Runner only consumed by `LegacyClaudeImpl` via `buildHarnesses`.
@@ -214,7 +219,7 @@ export interface DaemonConfig {
    * evaluation Harnesses; health-check tasks with no solverType use `legacy-claude` via
    * the registry default.
    */
-  restorationEngine: Omit<TaskEngineOptions, 'store' | 'packagingDeps'> & {
+  restorationEngine?: Omit<TaskEngineOptions, 'store' | 'packagingDeps'> & {
     /**
      * Packaging deps minus `store` (Daemon owns the SQLite handle and threads
      * it in at construction time).
@@ -283,10 +288,11 @@ export interface DaemonConfig {
 
 export class Daemon {
   private store: Store;
-  private creatorLoop: CreatorLoop;
-  private restorationEngine: TaskEngine;
+  private creatorLoop?: CreatorLoop;
+  private restorationEngine?: TaskEngine;
   private engineStopped = false;
-  private deliveryWatcherLoop: DeliveryWatcherLoop;
+  private deliveryWatcherLoop?: DeliveryWatcherLoop;
+  private nativeHost?: NativeOperatorHost;
   private adapter: ExecutionAdapter;
   private loopPromises: Promise<void>[] = [];
   private cachedShutdownState: string | null = null;
@@ -309,6 +315,16 @@ export class Daemon {
   private corpus?: Corpus;
 
   constructor(private readonly config: DaemonConfig) {
+    const verticalMode = config.verticalMode ?? 'legacy';
+    if (verticalMode === 'native-v1') {
+      if (!config.nativeHost) throw new Error('native-v1 daemon requires a native operator host');
+      if (config.restorationEngine || config.composition || config.work) {
+        throw new Error('native-v1 daemon refuses legacy restoration engine or compatibility composition');
+      }
+      this.nativeHost = config.nativeHost;
+    } else if (!config.restorationEngine) {
+      throw new Error('legacy daemon requires a restoration engine');
+    }
     if (config.store) {
       this.store = config.store;
       this.ownsStore = false;
@@ -328,32 +344,35 @@ export class Daemon {
     // so the API server still has something to compare bearer headers
     // against. Production callers (main.ts) always pass an explicit token.
     this.apiToken = config.apiToken ?? randomBytes(32).toString('hex');
-    const taskSources = config.taskSources
-      ?? (config.tasks ? [new StaticConfiguredTaskSource(config.tasks)] : []);
-    this.creatorLoop = new CreatorLoop(
-      this.adapter,
-      taskSources,
-      this.store,
-      config.creatorSafeAddress,
-      config.sweRebenchV2StateDir,
-    );
-    this.deliveryWatcherLoop = new DeliveryWatcherLoop(
-      this.adapter,
-      this.store,
-      config.sweRebenchV2StateDir,
-    );
+    if (verticalMode === 'legacy') {
+      const taskSources = config.taskSources
+        ?? (config.tasks ? [new StaticConfiguredTaskSource(config.tasks)] : []);
+      this.creatorLoop = new CreatorLoop(
+        this.adapter,
+        taskSources,
+        this.store,
+        config.creatorSafeAddress,
+        config.sweRebenchV2StateDir,
+      );
+      this.deliveryWatcherLoop = new DeliveryWatcherLoop(
+        this.adapter,
+        this.store,
+        config.sweRebenchV2StateDir,
+      );
 
-    this.restorationEngine = new TaskEngine({
-      ...config.restorationEngine,
-      store: this.store,
-      knowledge: {
-        ...config.restorationEngine.knowledge,
-        ...(this.corpus ? { corpus: this.corpus } : {}),
-      },
-      packagingDeps: config.restorationEngine.packagingDeps
-        ? { ...config.restorationEngine.packagingDeps, store: this.store }
-        : undefined,
-    });
+      const restorationEngine = config.restorationEngine!;
+      this.restorationEngine = new TaskEngine({
+        ...restorationEngine,
+        store: this.store,
+        knowledge: {
+          ...restorationEngine.knowledge,
+          ...(this.corpus ? { corpus: this.corpus } : {}),
+        },
+        packagingDeps: restorationEngine.packagingDeps
+          ? { ...restorationEngine.packagingDeps, store: this.store }
+          : undefined,
+      });
+    }
 
     if (config.rewardClaim && config.rewardClaim.intervalMs > 0) {
       this.rewardClaimLoop = new RewardClaimLoop({
@@ -433,7 +452,8 @@ export class Daemon {
 
     // Native lifecycle ownership is established only after the API bind mutex. Recovery must
     // finish and the signed source head must verify before any work loop can process a card.
-    await this.workLoop?.initialize();
+    if (this.nativeHost) await this.nativeHost.start();
+    else await this.workLoop?.initialize();
 
     // Only after API bind AND native fail-closed initialization do we report running. A lease,
     // recovery, or source-trust refusal must never leave a false startup-ok marker behind.
@@ -473,7 +493,8 @@ export class Daemon {
     // the tick/watcher loops from double-driving a task recovery is still
     // executing. Deliberately not in loopPromises either, so stop()'s
     // loop-drain never waits on an in-flight impl re-execution.
-    void engine.recoverInFlight().catch(err => {
+    if (engine) {
+      void engine.recoverInFlight().catch(err => {
       console.error('[daemon] in-flight recovery failed:', err);
       emitStructured({
         kind: 'error',
@@ -481,9 +502,9 @@ export class Daemon {
         errorCode: 'recovery_failed',
         details: { error: err instanceof Error ? err.message : String(err) },
       });
-    });
-    this.loopPromises.push(
-      this.creatorLoop.run().catch(err => {
+      });
+      this.loopPromises.push(
+      this.creatorLoop!.run().catch(err => {
         console.error('[daemon] creator crashed:', err);
         emitStructured({
           kind: 'error',
@@ -510,7 +531,7 @@ export class Daemon {
           details: { error: err instanceof Error ? err.message : String(err) },
         });
       }),
-      this.deliveryWatcherLoop.run().catch(err => {
+      this.deliveryWatcherLoop!.run().catch(err => {
         console.error('[daemon] delivery-watcher crashed:', err);
         emitStructured({
           kind: 'error',
@@ -519,7 +540,8 @@ export class Daemon {
           details: { error: err instanceof Error ? err.message : String(err) },
         });
       }),
-    );
+      );
+    }
 
     if (this.rewardClaimLoop) {
       this.loopPromises.push(
@@ -640,7 +662,13 @@ export class Daemon {
       // Derive the watchdog registrations from LOOP_REGISTRY (the single source
       // of loop names + defaults) — filter to the loops actually started, then
       // override the intervals that are operator/config-driven.
-      const started = new Set<LoopName>(['creator', 'engine-tick', 'engine-watcher', 'delivery-watcher']);
+      const started = new Set<LoopName>();
+      if (engine) {
+        started.add('creator');
+        started.add('engine-tick');
+        started.add('engine-watcher');
+        started.add('delivery-watcher');
+      }
       if (this.rewardClaimLoop) started.add('reward-claim');
       if (this.balanceTopupLoop) started.add('balance-topup');
       if (this.evictionLoop) started.add('eviction-check');
@@ -696,10 +724,10 @@ export class Daemon {
 
   async stop(): Promise<void> {
     emitStructured({ kind: 'system', message: 'daemon loops stopping' });
-    this.creatorLoop.stop();
+    this.creatorLoop?.stop();
     this.engineStopped = true;
-    this.restorationEngine.stop();
-    await this.restorationEngine.releaseClaimedNotStarted().catch(err => {
+    this.restorationEngine?.stop();
+    await this.restorationEngine?.releaseClaimedNotStarted().catch(err => {
       console.error('[daemon] engine releaseClaimedNotStarted failed (non-fatal):', err);
       emitStructured({
         kind: 'error',
@@ -708,7 +736,8 @@ export class Daemon {
         details: { error: err instanceof Error ? err.message : String(err) },
       });
     });
-    this.deliveryWatcherLoop.stop();
+    this.deliveryWatcherLoop?.stop();
+    await this.nativeHost?.close();
     this.rewardClaimLoop?.stop();
     this.balanceTopupLoop?.stop();
     this.evictionLoop?.stop();

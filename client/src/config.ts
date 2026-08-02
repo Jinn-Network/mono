@@ -574,6 +574,11 @@ export const JinnConfigSchema = z.object({
         stateDir: z.string().min(1),
         identityStorePath: z.string().min(1),
         trustRootsPath: z.string().min(1),
+        runtime: z.object({
+          /** Digest-pinned deployment composition; it supplies real B2-B7 owned ports. */
+          deploymentModule: z.string().min(1),
+          moduleDigest: NativeDigestSchema,
+        }),
         evaluator: z.object({
           deploymentModule: z.string().min(1),
           moduleDigest: NativeDigestSchema,

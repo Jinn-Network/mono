@@ -24,6 +24,36 @@ function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
 }
 
 describe('Daemon', () => {
+  it('starts native-v1 without constructing or starting the legacy TaskEngine/watcher estate', async () => {
+    const adapter = new LocalAdapter();
+    const watch = vi.spyOn(adapter, 'watchForTasks');
+    const nativeHost = { start: vi.fn(async () => undefined), health: vi.fn(), close: vi.fn(async () => undefined) };
+    const daemon = new Daemon({
+      verticalMode: 'native-v1',
+      nativeHost,
+      adapter,
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      taskSources: [],
+      dbPath: ':memory:',
+    });
+
+    await daemon.start();
+    expect(nativeHost.start).toHaveBeenCalledOnce();
+    expect(watch).not.toHaveBeenCalled();
+    await daemon.stop();
+    expect(nativeHost.close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps explicit legacy mode startable and requires its restoration engine', () => {
+    expect(() => new Daemon({
+      verticalMode: 'legacy',
+      adapter: new LocalAdapter(),
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      taskSources: [],
+      dbPath: ':memory:',
+    })).toThrow(/legacy.*restoration engine/i);
+  });
+
   it('initializes and stops cleanly', async () => {
     const config: DaemonConfig = {
       adapter: new LocalAdapter(),

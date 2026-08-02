@@ -28,6 +28,16 @@ export class NativeVerticalReadinessError extends Error {
   }
 }
 
+export interface OperatorVerticalDecision {
+  readonly requestedMode: OperatorVerticalMode | undefined;
+  readonly effectiveMode: OperatorVerticalMode;
+  readonly readiness:
+    | 'explicit-legacy'
+    | 'explicit-native-unvalidated'
+    | 'live-closure-missing'
+    | 'live-closure-validated';
+}
+
 function sameAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
@@ -39,21 +49,10 @@ function sameDeployment(actual: MarketplaceChainConfig, expected: MarketplaceCha
     && sameAddress(actual.activityChecker, expected.activityChecker);
 }
 
-export function resolveOperatorVerticalMode(input: {
-  readonly requestedMode?: OperatorVerticalMode;
+function assertNativeDeployment(input: {
   readonly network: 'mainnet' | 'testnet';
   readonly chain: MarketplaceChainConfig;
-  readonly liveClosure?: ValidatedLiveClosure;
-}): {
-  readonly requestedMode: OperatorVerticalMode;
-  readonly effectiveMode: OperatorVerticalMode;
-  readonly readiness: 'explicit-legacy' | 'live-closure-validated';
-} {
-  const requestedMode = input.requestedMode ?? 'legacy';
-  if (requestedMode === 'legacy') {
-    return { requestedMode, effectiveMode: 'legacy', readiness: 'explicit-legacy' };
-  }
-
+}): void {
   if (input.chain.chainId === 8453) {
     throw new NativeVerticalReadinessError(
       'mainnet-refused',
@@ -75,24 +74,52 @@ export function resolveOperatorVerticalMode(input: {
       'native-v1 requires the exact BASE_SEPOLIA_TODAY contract addresses',
     );
   }
-  if (input.liveClosure === undefined) {
-    throw new NativeVerticalReadinessError(
-      'live-closure-missing',
-      'native-v1 is requested but no validated live Phase B closure receipt is configured',
-    );
-  }
+}
+
+function assertValidatedLiveClosure(liveClosure: ValidatedLiveClosure): void {
   if (
-    input.liveClosure.status !== 'validated'
-    || input.liveClosure.chain.chainId !== BASE_SEPOLIA_TODAY.chainId
-    || input.liveClosure.chain.generation !== 'today'
-    || !sameDeployment(input.liveClosure.chain, BASE_SEPOLIA_TODAY)
-    || input.liveClosure.solutionSettlementFinalized !== true
-    || input.liveClosure.verdictSettlementFinalized !== true
+    liveClosure.status !== 'validated'
+    || liveClosure.chain.chainId !== BASE_SEPOLIA_TODAY.chainId
+    || liveClosure.chain.generation !== 'today'
+    || !sameDeployment(liveClosure.chain, BASE_SEPOLIA_TODAY)
+    || liveClosure.solutionSettlementFinalized !== true
+    || liveClosure.verdictSettlementFinalized !== true
   ) {
     throw new NativeVerticalReadinessError(
       'live-closure-invalid',
       'native-v1 live closure receipt does not prove both finalized Base Sepolia settlements',
     );
   }
-  return { requestedMode, effectiveMode: 'native-v1', readiness: 'live-closure-validated' };
+}
+
+export function resolveOperatorVerticalMode(input: {
+  readonly requestedMode?: OperatorVerticalMode;
+  readonly network: 'mainnet' | 'testnet';
+  readonly chain: MarketplaceChainConfig;
+  readonly liveClosure?: ValidatedLiveClosure;
+}): OperatorVerticalDecision {
+  if (input.requestedMode === 'legacy') {
+    return { requestedMode: 'legacy', effectiveMode: 'legacy', readiness: 'explicit-legacy' };
+  }
+
+  // An absent control is a default-selection request. The receipt may flip the
+  // default only after closure; until then the compatibility product remains active.
+  if (input.requestedMode === undefined && input.liveClosure === undefined) {
+    return { requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' };
+  }
+
+  assertNativeDeployment(input);
+  if (input.liveClosure === undefined) {
+    return {
+      requestedMode: 'native-v1',
+      effectiveMode: 'native-v1',
+      readiness: 'explicit-native-unvalidated',
+    };
+  }
+  assertValidatedLiveClosure(input.liveClosure);
+  return {
+    requestedMode: input.requestedMode,
+    effectiveMode: 'native-v1',
+    readiness: 'live-closure-validated',
+  };
 }

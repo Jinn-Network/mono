@@ -15,14 +15,14 @@ const VALIDATED = {
 };
 
 describe('operator vertical mode', () => {
-  it('keeps legacy as the effective default until a live closure receipt is explicitly configured', () => {
+  it('keeps legacy as the effective default and reports missing closure readiness', () => {
     const config = JinnConfigSchema.parse({});
     expect(config.operator?.verticalMode).toBeUndefined();
     expect(resolveOperatorVerticalMode({
       requestedMode: config.operator?.verticalMode,
       network: config.network,
       chain: { ...BASE_SEPOLIA_TODAY, chainId: 8453 },
-    })).toEqual({ requestedMode: 'legacy', effectiveMode: 'legacy', readiness: 'explicit-legacy' });
+    })).toEqual({ requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' });
   });
 
   it('admits native-v1 only for the exact Base Sepolia today deployment and a validated live receipt', () => {
@@ -34,14 +34,24 @@ describe('operator vertical mode', () => {
     })).toEqual({ requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'live-closure-validated' });
   });
 
-  it('reports live-closure-missing without silently downgrading requested native-v1', () => {
-    expect(() => resolveOperatorVerticalMode({
+  it('allows an explicit native-v1 closure run without pretending closure is already validated', () => {
+    expect(resolveOperatorVerticalMode({
       requestedMode: 'native-v1',
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
-    })).toThrowError(expect.objectContaining<Partial<NativeVerticalReadinessError>>({
-      reason: 'live-closure-missing',
-    }));
+    })).toEqual({
+      requestedMode: 'native-v1',
+      effectiveMode: 'native-v1',
+      readiness: 'explicit-native-unvalidated',
+    });
+  });
+
+  it('flips the default only when the live closure receipt validates', () => {
+    expect(resolveOperatorVerticalMode({
+      network: 'testnet',
+      chain: BASE_SEPOLIA_TODAY,
+      liveClosure: VALIDATED,
+    })).toEqual({ requestedMode: undefined, effectiveMode: 'native-v1', readiness: 'live-closure-validated' });
   });
 
   it('refuses mainnet and every contract/generation mismatch before considering closure readiness', () => {
@@ -75,6 +85,10 @@ describe('operator vertical mode', () => {
           stateDir: '/var/lib/jinn/native',
           identityStorePath: '/var/lib/jinn/identities',
           trustRootsPath: '/etc/jinn/trust-roots.json',
+          runtime: {
+            deploymentModule: '/opt/jinn/native-runtime.mjs',
+            moduleDigest: `sha256:${'cc'.repeat(32)}`,
+          },
           evaluator: {
             deploymentModule: '/opt/jinn/prediction-evaluator.mjs',
             moduleDigest: `sha256:${'aa'.repeat(32)}`,

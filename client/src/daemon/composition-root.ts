@@ -176,6 +176,10 @@ import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
 import type { RoleIdentitySet } from './role-identities.js';
 import {
+  assertNativeProjectorExactPorts,
+  type NativeProjectorExactPorts,
+} from './native-projector-ports.js';
+import {
   evaluateNativeClaim,
   type NativeLauncherCapabilityPort,
   type NativeTier4ClaimPolicy,
@@ -338,6 +342,8 @@ export interface CompositionRootInput {
   readonly nativeRoleIdentities?: RoleIdentitySet;
   /** Required native B5 product-owned state/chain/document ports. Legacy mode must omit it. */
   readonly nativeClaimRuntime?: NativeClaimRuntimeInput;
+  /** Required B6/B7 exact-byte/public-verdict ports. Native mode has no gap fallback. */
+  readonly nativeProjectorPorts?: NativeProjectorExactPorts;
   /**
    * Durable requester association directory for native projection. Omitted uses the operator
    * state root's `native-requester` child; it is read-only from projector composition.
@@ -835,7 +841,7 @@ export function buildEngagementLedgerDispatchContextPort(
  * Result Evaluation Statement's decision-grade gate for real. Loudly refuses rather than
  * fabricating a "verified" (or silently empty) result — `projectAnnouncements` turns this throw
  * into a fail-closed refusal, never a silent pass. */
-function verifyVerdictObservationGap(): never {
+function refuseLegacyVerdictObservation(): never {
   throw new Error(
     'verifyVerdictObservation has no production implementation: the Phase-B binding-resolver '
     + 'backing stores (BindingStore/AnchorReadClient/policy) do not exist anywhere in the repo '
@@ -894,6 +900,7 @@ function buildProjector(input: {
     readonly stateDir: string;
     readonly requesterSubmission: NativeRequesterSubmissionVerifier;
   };
+  readonly nativeProjectorPorts?: NativeProjectorExactPorts;
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }): {
   readonly projector: ProjectorLoop;
@@ -948,9 +955,11 @@ function buildProjector(input: {
     signer: input.discoverySigner,
     archiveRoot: input.archiveRoot,
     resolveRecord: input.mode === 'native'
-      ? buildNativeResolveRecord(input.chain, resolveAssociation!)
+      ? input.nativeProjectorPorts!.resolveRecord
       : buildResolveRecord(resolveSubmissionBytes, input.chain),
-    verifyVerdictObservation: verifyVerdictObservationGap,
+    verifyVerdictObservation: input.mode === 'native'
+      ? input.nativeProjectorPorts!.verifyVerdictObservation
+      : refuseLegacyVerdictObservation,
     referencedBytes: { fetch: fetchIpfsBytes },
     readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),
     writePageCount: (count) => input.store.setConfigValue(pageCountKey, String(count)),
@@ -1024,6 +1033,9 @@ export async function buildOperatorComposition(
   if (input.mode === 'native' && input.nativeClaimRuntime === undefined) {
     throw new Error('native operator boot requires durable claim state, exact-document, canonical-reader, policy, and lease ports');
   }
+  if (input.mode === 'legacy' && input.nativeProjectorPorts !== undefined) {
+    throw new Error('legacy operator composition must not receive native projector ports');
+  }
   if (input.mode === 'native' && identities!.agent !== input.nativeClaimRuntime!.operatorAgent) {
     throw new Error('native claim operator agent must equal the agent used for role trust bindings');
   }
@@ -1035,6 +1047,7 @@ export async function buildOperatorComposition(
       || input.nativeClaimRuntime!.policy.generation !== input.chain.generation
     )
   ) throw new Error('native claim policy network identity must equal the composed venue identity');
+  if (input.mode === 'native') assertNativeProjectorExactPorts(input.nativeProjectorPorts);
   const solverDeliveryIdentity = input.mode === 'native'
     ? identities!.get('solver-delivery')
     : undefined;
@@ -1131,6 +1144,7 @@ export async function buildOperatorComposition(
     store: input.store,
     pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
     engagementLedger,
+    ...(input.mode === 'native' ? { nativeProjectorPorts: input.nativeProjectorPorts } : {}),
     ...(input.mode === 'native' ? {
       nativeRequester: {
         stateDir: input.nativeRequesterStateDir ?? join(input.stateRoot, 'native-requester'),

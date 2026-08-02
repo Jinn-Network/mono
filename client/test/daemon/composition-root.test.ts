@@ -248,6 +248,13 @@ function nativeClaimRuntime(
   };
 }
 
+function nativeProjectorPorts() {
+  return {
+    resolveRecord: async () => { throw new Error('exact public record not exercised'); },
+    verifyVerdictObservation: async () => { throw new Error('decision-grade gate not exercised'); },
+  };
+}
+
 describe('buildOperatorComposition', () => {
   it('refuses native boot before opening a venue when no persistent role identities are supplied', async () => {
     createBaseVenueMock.mockReset();
@@ -288,6 +295,25 @@ describe('buildOperatorComposition', () => {
       nativeClaimRuntime: { operatorAgent: 'urn:jinn:operator:safe-derived' },
     } as never)).rejects.toThrow(/must equal the agent used for role trust bindings/i);
     expect(createBaseVenueMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses native boot when B6/B7 exact record and verdict ports are absent', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    const store = new Store(':memory:');
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      chain: {
+        chainId: 84532,
+        taskCoordinator: '0x3333333333333333333333333333333333333333',
+        generation: 'today',
+      },
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: nativeClaimRuntime(store),
+    } as never)).rejects.toThrow(/exact public solution\/evaluation record resolution.*decision-grade verdict gate/i);
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+    store.close();
   });
 
   it('keeps the explicit legacy bridge composition startable without native identities', async () => {
@@ -407,6 +433,7 @@ describe('buildOperatorComposition', () => {
       store,
       nativeRoleIdentities: identities,
       nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
 
     expect(composition.identities).toBe(identities);
@@ -580,6 +607,7 @@ describe('buildOperatorComposition', () => {
       store,
       nativeRoleIdentities: nativeRoleIdentities(),
       nativeClaimRuntime: nativeClaimRuntime(store),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
 
     const capabilities = await composition.backend.capabilities();
@@ -641,6 +669,7 @@ describe('buildOperatorComposition', () => {
       store,
       nativeRoleIdentities: identities,
       nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
 
     // Ending the lie: with a real key supplied, `signedDeliveries` reports `true`.
