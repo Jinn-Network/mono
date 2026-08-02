@@ -25,6 +25,34 @@ import {
 } from "./harness.js";
 import { loadVectorsByKind, type Vector } from "./vectors.js";
 
+function base64Utf8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/**
+ * The checked-in §18 corpus predates the published wire profile and stores legible canonical
+ * payload/signature text. Conformance explicitly serializes that abstract fixture form into the
+ * sole strict wire representation before invoking production verification; production never
+ * accepts or guesses the old raw-string form.
+ */
+function vectorEnvelopeToWire(envelope: {
+  readonly payloadType: string;
+  readonly payload: string;
+  readonly signatures: readonly { readonly keyid?: string; readonly sig: string }[];
+}) {
+  return {
+    payloadType: envelope.payloadType,
+    payload: base64Utf8(envelope.payload),
+    signatures: envelope.signatures.map((signature) => ({
+      ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
+      sig: base64Utf8(signature.sig),
+    })),
+  };
+}
+
 // The exported conformance suites (plan Task 11): each maps the §18
 // vectors of its plane onto assertions against an injected implementation.
 // `runSourceChainConformance` and `runItemConformance` drive `protocol`'s
@@ -101,8 +129,11 @@ export function runSourceChainConformance(verify: typeof verifySourceChain): voi
         });
         const outcome = await verify({
           head: input.head,
-          headSignature: input.headSignature,
-          entries: toAsyncIterable(input.entries),
+          headSignature: vectorEnvelopeToWire(input.headSignature),
+          entries: toAsyncIterable(input.entries.map((item) => ({
+            entry: item.entry,
+            signature: vectorEnvelopeToWire(item.signature),
+          }))),
           ports: {
             keys: ports.keys,
             sigs: ports.sigs,

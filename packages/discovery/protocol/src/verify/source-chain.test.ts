@@ -18,8 +18,14 @@ const AGENT = "did:key:zAgentSourceOne";
 const KEYID = "key-1";
 const SOURCE = { agent: AGENT, name: "feed" };
 
-function fakeSig(pae: Uint8Array): string {
-  return `${sha256Hex(pae)}:${KEYID}`;
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function fakeSig(pae: Uint8Array): Uint8Array {
+  return new TextEncoder().encode(`${sha256Hex(pae)}:${KEYID}`);
 }
 
 const keys: KeyResolver = {
@@ -42,16 +48,15 @@ const fresh: FreshnessPolicy = {
 };
 
 function signedHead(head: SourceHead): DsseEnvelope {
-  const payload = JSON.stringify(head);
-  const pae = dssePreAuthEncoding(MEDIA_HEAD, new TextEncoder().encode(payload));
-  return { payloadType: MEDIA_HEAD, payload, signatures: [{ keyid: KEYID, sig: fakeSig(pae) }] };
+  const payload = sealJson(head).bytes;
+  const pae = dssePreAuthEncoding(MEDIA_HEAD, payload);
+  return { payloadType: MEDIA_HEAD, payload: encodeBase64(payload), signatures: [{ keyid: KEYID, sig: encodeBase64(fakeSig(pae)) }] };
 }
 
 function signedEntry(entry: AnnouncementEntry): DsseEnvelope {
   const { bytes } = sealJson(entry);
-  const payload = new TextDecoder().decode(bytes);
   const pae = dssePreAuthEncoding(MEDIA_ENTRY, bytes);
-  return { payloadType: MEDIA_ENTRY, payload, signatures: [{ keyid: KEYID, sig: fakeSig(pae) }] };
+  return { payloadType: MEDIA_ENTRY, payload: encodeBase64(bytes), signatures: [{ keyid: KEYID, sig: encodeBase64(fakeSig(pae)) }] };
 }
 
 function genesisEntry(): AnnouncementEntry {
@@ -236,5 +241,63 @@ describe("verifySourceChain: entry source-name grammar cross-check (§16 item 2,
     });
 
     expect(outcome.status).toBe("ok");
+  });
+});
+
+describe("verifySourceChain: exact wire envelope binding", () => {
+  it("rejects a correctly signed Head payload carried under the Entry media type", async () => {
+    const entry = genesisEntry();
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${AGENT}/feed`,
+      sequence: GENESIS_SEQUENCE,
+      entry: sealJson(entry).digest,
+      issuedAt: "2026-07-28T00:00:00.000Z",
+      refreshBy: "2026-07-29T00:00:00.000Z",
+    };
+    const payload = sealJson(head).bytes;
+    const pae = dssePreAuthEncoding(MEDIA_ENTRY, payload);
+    const wrongType: DsseEnvelope = {
+      payloadType: MEDIA_ENTRY,
+      payload: encodeBase64(payload),
+      signatures: [{ keyid: KEYID, sig: encodeBase64(fakeSig(pae)) }],
+    };
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: wrongType,
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: makeHwmStore(), now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "unauthorized-signer" });
+  });
+
+  it("rejects a valid signature whose envelope payload bytes are not the exact supplied Head", async () => {
+    const entry = genesisEntry();
+    const head: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${AGENT}/feed`,
+      sequence: GENESIS_SEQUENCE,
+      entry: sealJson(entry).digest,
+      issuedAt: "2026-07-28T00:00:00.000Z",
+      refreshBy: "2026-07-29T00:00:00.000Z",
+    };
+    const other = sealJson({ ...head, issuedAt: "2026-07-28T00:00:01.000Z" }).bytes;
+    const pae = dssePreAuthEncoding(MEDIA_HEAD, other);
+    const mismatched: DsseEnvelope = {
+      payloadType: MEDIA_HEAD,
+      payload: encodeBase64(other),
+      signatures: [{ keyid: KEYID, sig: encodeBase64(fakeSig(pae)) }],
+    };
+
+    const outcome = await verifySourceChain({
+      head,
+      headSignature: mismatched,
+      entries: oneEntry(entry),
+      ports: { keys, sigs, fresh, hwm: makeHwmStore(), now: new Date("2026-07-28T01:00:00.000Z"), firstAdoption: true },
+    });
+
+    expect(outcome).toEqual({ status: "unauthorized-signer" });
   });
 });

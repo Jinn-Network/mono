@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { generateKeyPairSync, sign as signBytes, verify as verifyBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import {
   headPath,
   sealJson,
   sha256Hex,
+  verifySourceChain,
 } from "@jinn-network/record-discovery-protocol";
 import type { AnnouncementEntry, SourceHead } from "@jinn-network/record-discovery-protocol";
 import type { DsseSigner, SignedEntry } from "@jinn-network/record-discovery-serve";
@@ -24,7 +26,13 @@ import {
   writeWellKnownDocument,
 } from "@jinn-network/record-discovery-serve";
 import type { SourceEndpoint } from "@jinn-network/record-discovery-client";
-import { coldSync, fetchHead, returningSync, subscribe } from "@jinn-network/record-discovery-client";
+import {
+  coldSync,
+  decodeWireEnvelopeForVerification,
+  fetchHead,
+  returningSync,
+  subscribe,
+} from "@jinn-network/record-discovery-client";
 
 import type { FetchLike } from "./ports.js";
 import { createFsBlobStore } from "./fs-blob-store.js";
@@ -63,8 +71,12 @@ function entryAt(sequence: bigint, previous: string | null): AnnouncementEntry {
 }
 
 async function signEntry(entry: AnnouncementEntry): Promise<SignedEntry> {
+  return signEntryWith(entry, signer);
+}
+
+async function signEntryWith(entry: AnnouncementEntry, entrySigner: DsseSigner): Promise<SignedEntry> {
   const { bytes } = sealJson(entry);
-  const signatures = await signer.sign(dssePreAuthEncoding(MEDIA_ENTRY, bytes));
+  const signatures = await entrySigner.sign(dssePreAuthEncoding(MEDIA_ENTRY, bytes));
   return {
     entry,
     signature: {
@@ -224,5 +236,85 @@ describe("loopback: serve writes the layout, the handler serves it, the client r
     const recovered: string[] = [];
     for await (const synced of coldSync(endpoint, { transport })) recovered.push(synced.entry.sequence);
     expect(recovered).toEqual(["0000000000000001", "0000000000000002"]);
+  });
+
+  it("preserves non-ASCII Ed25519 signatures across serve, HTTP, client decoding, and source verification", async () => {
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const observedSignatures: Uint8Array[] = [];
+    const ed25519Signer: DsseSigner = {
+      async sign(pae) {
+        const signature = new Uint8Array(signBytes(null, pae, privateKey));
+        observedSignatures.push(signature);
+        return [{ keyid: KEYID, sig: signature }];
+      },
+    };
+    const store = createFsBlobStore(root);
+    const entry = await signEntryWith(entryAt(1n, null), ed25519Signer);
+    const { pages } = await writeArchivePages(store, SOURCE, [entry]);
+    const initialHead: SourceHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: formatOrigin(AGENT, SOURCE),
+      sequence: "0000000000000001",
+      entry: sealJson(entry.entry).digest,
+      issuedAt: "2026-07-30T11:59:00.000Z",
+      refreshBy: "2026-07-30T23:59:00.000Z",
+    } as SourceHead;
+    await maintainHead(
+      store,
+      ed25519Signer,
+      { now: () => new Date("2026-07-30T12:00:00.000Z") },
+      { agent: AGENT, name: SOURCE },
+      initialHead,
+    );
+
+    const handler = createArchiveHttpHandler({ reader: store });
+    const fetchLike: FetchLike = async (url, init) => handler(new Request(url, {
+      method: init?.method ?? "GET",
+      headers: init?.headers ?? {},
+      ...(init?.signal === undefined ? {} : { signal: init.signal }),
+    }));
+    const transport = createHttpTransport(BASE, fetchLike);
+    const endpoint: SourceEndpoint = {
+      agent: AGENT,
+      name: SOURCE,
+      servingRoot: BASE,
+      archiveRootUrl: `${BASE}${archivePagePath(SOURCE, pages[0]!)}`,
+    };
+    const fetchedHead = await fetchHead(endpoint, transport);
+    const fetchedEntries = [];
+    for await (const fetchedEntry of coldSync(endpoint, { transport })) fetchedEntries.push(fetchedEntry);
+
+    expect(fetchedHead.signature).toBeDefined();
+    expect(fetchedEntries[0]?.signature).toBeDefined();
+    expect(observedSignatures).toHaveLength(2);
+    expect(observedSignatures.every((signature) => signature.some((byte) => byte > 0x7f))).toBe(true);
+    const decodedHead = decodeWireEnvelopeForVerification(fetchedHead.signature);
+    expect(decodedHead.signatures[0]?.signatureBytes).toEqual(observedSignatures[1]);
+
+    const outcome = await verifySourceChain({
+      head: fetchedHead.head,
+      headSignature: fetchedHead.signature!,
+      entries: (async function* () {
+        for (const fetched of fetchedEntries) {
+          yield { entry: fetched.entry, signature: fetched.signature! };
+        }
+      })(),
+      ports: {
+        keys: {
+          async resolve() {
+            return [{ keyid: KEYID, publicKey: publicKey.export({ type: "spki", format: "pem" }).toString(), algorithm: "ed25519" }];
+          },
+          async everBound(_agent, keyid) { return keyid === KEYID; },
+        },
+        sigs: {
+          async verify(pae, signature) { return verifyBytes(null, pae, publicKey, signature); },
+        },
+        fresh: { isFresh: () => true },
+        hwm: { async get() { return undefined; }, async put() {} },
+        now: new Date("2026-07-30T12:00:01.000Z"),
+        firstAdoption: true,
+      },
+    });
+    expect(outcome.status).toBe("ok");
   });
 });
