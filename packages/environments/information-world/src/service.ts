@@ -45,24 +45,68 @@ export interface ReplayService {
   close(): Promise<void>;
 }
 
-const LOOPBACK_VALUES = Object.freeze(["127.0.0.1", "::1", "localhost"] as const);
-const NUMERIC_LOOPBACK_HOSTS = new Set<string>(["127.0.0.1", "::1"]);
-const TRANSPORT_CONTROL_HEADERS = new Set([
+type HeaderPair = readonly [string, string];
+type BodyResult = { readonly kind: "body"; readonly body: Uint8Array } | { readonly kind: "refused" };
+type FramedBody = { readonly body: Uint8Array | undefined; readonly contentLength: number | undefined };
+type ServerOutput = {
+  writeHead(status: number, headers: string[]): unknown;
+  end(body?: Uint8Array): unknown;
+  destroy(): unknown;
+};
+type SocketOutput = { write(chunk: string): unknown; end(chunk?: Uint8Array): unknown; destroy(): unknown };
+type Output = { readonly kind: "server"; readonly value: ServerOutput } | { readonly kind: "socket"; readonly value: SocketOutput };
+type Admission =
+  | { readonly kind: "admitted"; readonly before: { readonly requests: number; readonly bytes: number }; responded: boolean }
+  | { readonly kind: "budget-exhausted" };
+type ActiveAttempt = {
+  readonly admission: Extract<Admission, { kind: "admitted" }>;
+  readonly method: string | undefined;
+};
+
+const LOOPBACK_VALUES = Object.freeze(["127.0.0.1", "::1"] as const);
+const NUMERIC_LOOPBACK_HOSTS = new Set<string>(LOOPBACK_VALUES);
+const STATIC_HOP_BY_HOP_HEADERS = new Set([
   "connection",
-  "content-length",
   "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
   "trailer",
   "transfer-encoding",
   "upgrade",
+]);
+const SERVICE_CONTROL_HEADERS = new Set([
+  "content-length",
   "x-jinn-replay",
   "x-jinn-replay-limit",
   "x-jinn-replay-reason",
 ]);
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
 const MAX_REQUEST_HEADER_BYTES = 16 * 1024;
+const encoder = new TextEncoder();
 
-/** Legacy declaration surface; binding accepts only the two numeric members. */
-export const LOOPBACK_HOSTS: ReadonlySet<string> = Object.freeze(new Set(LOOPBACK_VALUES));
+function frozenStringSet(values: readonly string[]): ReadonlySet<string> {
+  const snapshot = Object.freeze([...values]);
+  const members = new Set(snapshot);
+  let facade: ReadonlySet<string>;
+  facade = Object.freeze({
+    size: snapshot.length,
+    has: (value: string): boolean => members.has(value),
+    keys: (): IterableIterator<string> => snapshot[Symbol.iterator](),
+    values: (): IterableIterator<string> => snapshot[Symbol.iterator](),
+    entries: (): IterableIterator<[string, string]> => snapshot
+      .map((value) => [value, value] as [string, string])[Symbol.iterator](),
+    forEach: (callback: (value: string, again: string, set: ReadonlySet<string>) => void, thisArg?: unknown): void => {
+      for (const value of snapshot) callback.call(thisArg, value, value, facade);
+    },
+    [Symbol.iterator]: (): IterableIterator<string> => snapshot[Symbol.iterator](),
+  }) as ReadonlySet<string>;
+  return facade;
+}
+
+/** The only addresses this service is permitted to bind. */
+export const LOOPBACK_HOSTS: ReadonlySet<string> = frozenStringSet(LOOPBACK_VALUES);
 
 export class NonLoopbackBindError extends InvalidDocumentError {
   constructor(host: string) {
@@ -74,10 +118,7 @@ export class NonLoopbackBindError extends InvalidDocumentError {
   }
 }
 
-type HeaderPair = readonly [string, string];
-type BodyResult = { readonly kind: "body"; readonly body: Uint8Array } | { readonly kind: "refused" };
-
-function invalidListen(path: string, message: string): InvalidDocumentError {
+function invalidDocument(path: string, message: string): InvalidDocumentError {
   return new InvalidDocumentError([{ path, message }]);
 }
 
@@ -87,39 +128,56 @@ function listenAddress(value: ListenAddress): ListenAddress {
     throw new NonLoopbackBindError(typeof host === "string" ? host : String(host));
   }
   if (!Number.isSafeInteger(port) || port < 0 || port > 65_535) {
-    throw invalidListen("listen.port", "must be an integer from 0 through 65535");
+    throw invalidDocument("listen.port", "must be an integer from 0 through 65535");
   }
   return Object.freeze({ host, port });
 }
 
-function scheme(value: ReplayServiceOptions["defaultScheme"]): "http" | "https" {
+function defaultScheme(value: ReplayServiceOptions["defaultScheme"]): "http" | "https" {
   if (value === undefined) return "https";
   if (value === "http" || value === "https") return value;
-  throw invalidListen("defaultScheme", "must be http or https");
+  throw invalidDocument("defaultScheme", "must be http or https");
 }
 
-function hasSafeHeaderValue(value: string): boolean {
+function isAsciiWithoutControls(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
-    if ((codeUnit < 0x20 && codeUnit !== 0x09) || codeUnit === 0x7f) return false;
+    if (codeUnit > 0x7e || codeUnit < 0x21 || codeUnit === 0x7f) return false;
   }
   return true;
 }
 
-function responseHeaders(
-  sealed: readonly HeaderPair[],
-  replay: "hit" | "miss" | "off-allowlist" | "budget-exhausted",
-  length: number,
-  details: readonly HeaderPair[] = [],
-): string[] {
-  const headers: string[] = [];
-  for (const [name, value] of sealed) {
-    if (TRANSPORT_CONTROL_HEADERS.has(asciiLowercase(name)) || !hasSafeHeaderValue(value)) continue;
-    headers.push(name, value);
+function validPort(value: string): boolean {
+  if (value === "" || !/^[0-9]+$/.test(value)) return false;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 65_535;
+}
+
+/** Validate a Host/authority before it can be concatenated into an absolute URL. */
+function authority(value: string): string | undefined {
+  if (value === "" || !isAsciiWithoutControls(value) || /[/?#@%\\]/.test(value)) return undefined;
+
+  if (value.startsWith("[")) {
+    const close = value.indexOf("]");
+    if (close === -1) return undefined;
+    const suffix = value.slice(close + 1);
+    if (suffix !== "" && (!suffix.startsWith(":") || !validPort(suffix.slice(1)))) return undefined;
+  } else {
+    const firstColon = value.indexOf(":");
+    if (firstColon !== -1) {
+      if (value.indexOf(":", firstColon + 1) !== -1 || !validPort(value.slice(firstColon + 1))) return undefined;
+      if (firstColon === 0) return undefined;
+    }
   }
-  headers.push("content-length", String(length), "x-jinn-replay", replay);
-  for (const [name, value] of details) headers.push(name, value);
-  return headers;
+
+  try {
+    const parsed = new URL(`http://${value}`);
+    if (parsed.username !== "" || parsed.password !== "" || parsed.hostname === ""
+      || parsed.pathname !== "/" || parsed.search !== "" || parsed.hash !== "") return undefined;
+  } catch {
+    return undefined;
+  }
+  return value;
 }
 
 function headerValue(headers: readonly HeaderPair[], wanted: string): string | undefined {
@@ -132,22 +190,25 @@ function headerValue(headers: readonly HeaderPair[], wanted: string): string | u
   return found;
 }
 
-/** Turn one HTTP target into the absolute URL expected by canonical request keys. */
+/** Turn one valid origin-form or absolute-form target into the URL a key consumes. */
 function targetUrl(
   target: string | undefined,
   headers: readonly HeaderPair[],
-  defaultScheme: "http" | "https",
+  scheme: "http" | "https",
 ): string | undefined {
-  if (target === undefined || target === "") return undefined;
-  if (/^https?:\/\//i.test(target)) return target;
+  if (target === undefined || target === "" || !isAsciiWithoutControls(target) || target.includes("#")) {
+    return undefined;
+  }
+  const absolute = /^https?:\/\/([^/?#]*)(?:[/?][\s\S]*)?$/i.exec(target);
+  if (absolute !== null) return authority(absolute[1] as string) === undefined ? undefined : target;
   if (!target.startsWith("/")) return undefined;
 
   const host = headerValue(headers, "host");
-  if (host === undefined || host === "") return undefined;
+  if (host === undefined || authority(host) === undefined) return undefined;
   const forwarded = headerValue(headers, "x-jinn-forwarded-proto");
-  const selectedScheme = forwarded === undefined ? defaultScheme : asciiLowercase(forwarded);
-  if (selectedScheme !== "http" && selectedScheme !== "https") return undefined;
-  return `${selectedScheme}://${host}${target}`;
+  const selected = forwarded === undefined ? scheme : asciiLowercase(forwarded);
+  if (selected !== "http" && selected !== "https") return undefined;
+  return `${selected}://${host}${target}`;
 }
 
 function requestHeaders(rawHeaders: readonly string[]): HeaderPair[] {
@@ -157,6 +218,61 @@ function requestHeaders(rawHeaders: readonly string[]): HeaderPair[] {
     const value = rawHeaders[index + 1];
     if (name !== undefined && value !== undefined) headers.push([name, value]);
   }
+  return headers;
+}
+
+function nodeHeaderValue(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit > 0xff || (codeUnit < 0x20 && codeUnit !== 0x09) || codeUnit === 0x7f) return false;
+  }
+  return true;
+}
+
+function nodeHeaderName(value: string): boolean {
+  return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(value);
+}
+
+function responseHeaders(sealed: readonly HeaderPair[], path: string): readonly HeaderPair[] {
+  const nominated = new Set<string>();
+  for (const [name, value] of sealed) {
+    if (!nodeHeaderName(name)) throw invalidDocument(path, `header name "${name}" cannot be expressed by node:http`);
+    if (!nodeHeaderValue(value)) throw invalidDocument(path, `header "${name}" cannot be expressed by node:http`);
+    if (asciiLowercase(name) === "connection") {
+      for (const member of value.split(",")) {
+        const normalized = asciiLowercase(member.trim());
+        if (normalized !== "") nominated.add(normalized);
+      }
+    }
+  }
+  return Object.freeze(sealed.filter(([name]) => {
+    const normalized = asciiLowercase(name);
+    return !STATIC_HOP_BY_HOP_HEADERS.has(normalized)
+      && !SERVICE_CONTROL_HEADERS.has(normalized)
+      && !nominated.has(normalized);
+  }).map(([name, value]) => Object.freeze([name, value] as [string, string])));
+}
+
+function framedBody(status: number, method: string | undefined, body: Uint8Array): FramedBody {
+  if ((status >= 100 && status < 200) || status === 204 || status === 205) {
+    return Object.freeze({ body: undefined, contentLength: undefined });
+  }
+  if (method === "HEAD" || status === 304) {
+    return Object.freeze({ body: undefined, contentLength: body.byteLength });
+  }
+  return Object.freeze({ body, contentLength: body.byteLength });
+}
+
+function wireHeaders(
+  sealed: readonly HeaderPair[],
+  replay: "hit" | "miss" | "off-allowlist" | "budget-exhausted",
+  frame: FramedBody,
+  details: readonly HeaderPair[] = [],
+): string[] {
+  const headers = sealed.flatMap(([name, value]) => [name, value]);
+  if (frame.contentLength !== undefined) headers.push("content-length", String(frame.contentLength));
+  headers.push("x-jinn-replay", replay);
+  for (const [name, value] of details) headers.push(name, value);
   return headers;
 }
 
@@ -205,35 +321,21 @@ async function requestBody(incoming: {
   });
 }
 
-function sendResponse(
-  outgoing: { writeHead(status: number, headers: string[]): unknown; end(body: Uint8Array): unknown; destroy(): unknown },
-  status: number,
-  headers: string[],
-  body: Uint8Array,
-): void {
+function send(output: Output, status: number, headers: string[], frame: FramedBody): void {
   try {
-    outgoing.writeHead(status, headers);
-    outgoing.end(body);
-  } catch {
-    outgoing.destroy();
-  }
-}
-
-function sendSocketResponse(
-  socket: { write(chunk: string): unknown; end(chunk: Uint8Array): unknown; destroy(): unknown },
-  status: number,
-  headers: string[],
-  body: Uint8Array,
-): void {
-  try {
-    socket.write(`HTTP/1.1 ${status} Replay Refusal\r\n`);
-    for (let index = 0; index < headers.length; index += 2) {
-      socket.write(`${headers[index] as string}: ${headers[index + 1] as string}\r\n`);
+    if (output.kind === "server") {
+      output.value.writeHead(status, headers);
+      output.value.end(frame.body);
+      return;
     }
-    socket.write("\r\n");
-    socket.end(body);
+    output.value.write(`HTTP/1.1 ${status} Replay Refusal\r\n`);
+    for (let index = 0; index < headers.length; index += 2) {
+      output.value.write(`${headers[index] as string}: ${headers[index + 1] as string}\r\n`);
+    }
+    output.value.write("\r\n");
+    output.value.end(frame.body);
   } catch {
-    socket.destroy();
+    output.value.destroy();
   }
 }
 
@@ -248,13 +350,21 @@ export async function createReplayService(
   options: ReplayServiceOptions,
 ): Promise<ReplayService> {
   const listen = listenAddress(options.listen);
-  const defaultScheme = scheme(options.defaultScheme);
+  const scheme = defaultScheme(options.defaultScheme);
   const onEvent = options.onEvent;
   const index = await buildReplayIndex(world, options);
   const missPolicy = index.world.missPolicy;
-  const missBody = new TextEncoder().encode(missPolicy.body.inlineUtf8);
+  const missBody = encoder.encode(missPolicy.body.inlineUtf8);
+  const missHeaders = responseHeaders(missPolicy.headers, "missPolicy.headers");
+  const hitHeaders = new Map<string, readonly HeaderPair[]>();
+  index.world.corpus.entries.forEach((entry, entryIndex) => {
+    hitHeaders.set(entry.requestKey, responseHeaders(entry.response.headers, `corpus.entries.${entryIndex}.response.headers`));
+  });
+
   const consumed = { requests: 0, bytes: 0 };
   const counts = { requests: 0, hits: 0, misses: 0, offAllowlist: 0, budgetExhausted: 0 };
+  const activeSockets = new WeakMap<object, ActiveAttempt>();
+  const terminalSockets = new WeakSet<object>();
 
   const emit = (event: ReplayEvent): void => {
     try {
@@ -263,45 +373,105 @@ export async function createReplayService(
       // An observer cannot make a sealed response fail or create a second behavior branch.
     }
   };
-  const recordMiss = (
-    outgoing: { writeHead(status: number, headers: string[]): unknown; end(body: Uint8Array): unknown; destroy(): unknown },
-    reason: "uncaptured" | "unkeyable",
-  ): void => {
+  const admit = (): Admission => {
+    counts.requests += 1;
+    if (index.budget !== undefined && consumed.requests >= index.budget.maxRequests) {
+      counts.budgetExhausted += 1;
+      return { kind: "budget-exhausted" };
+    }
+    const before = Object.freeze({ requests: consumed.requests, bytes: consumed.bytes });
     consumed.requests += 1;
-    counts.misses += 1;
-    sendResponse(outgoing, missPolicy.status, responseHeaders(
-      missPolicy.headers,
-      "miss",
-      missBody.byteLength,
-      [["x-jinn-replay-reason", reason]],
-    ), missBody);
-    emit({ kind: "miss", reason });
+    return { kind: "admitted", before, responded: false };
   };
-  const recordSocketMiss = (
-    socket: { write(chunk: string): unknown; end(chunk: Uint8Array): unknown; destroy(): unknown },
+  const answer = (
+    output: Output,
+    admission: Extract<Admission, { kind: "admitted" }>,
+    method: string | undefined,
+    outcome: ReplayOutcome,
   ): void => {
-    consumed.requests += 1;
-    counts.misses += 1;
-    sendSocketResponse(socket, missPolicy.status, responseHeaders(
-      missPolicy.headers,
-      "miss",
-      missBody.byteLength,
-      [["x-jinn-replay-reason", "unkeyable"]],
-    ), missBody);
-    emit({ kind: "miss", reason: "unkeyable" });
+    if (admission.responded) return;
+    admission.responded = true;
+    switch (outcome.kind) {
+      case "hit": {
+        const body = index.bodyOf(outcome.entry.requestKey);
+        const headers = hitHeaders.get(outcome.entry.requestKey);
+        if (headers === undefined) throw invalidDocument("corpus", "response headers were not preflighted");
+        counts.hits += 1;
+        consumed.bytes += body.byteLength;
+        const frame = framedBody(outcome.entry.response.status, method, body);
+        send(output, outcome.entry.response.status, wireHeaders(headers, "hit", frame), frame);
+        emit({ kind: "hit", requestKey: outcome.entry.requestKey, bytes: body.byteLength });
+        return;
+      }
+      case "miss": {
+        counts.misses += 1;
+        const frame = framedBody(missPolicy.status, method, missBody);
+        send(output, missPolicy.status, wireHeaders(
+          missHeaders,
+          "miss",
+          frame,
+          [["x-jinn-replay-reason", outcome.reason]],
+        ), frame);
+        emit(outcome);
+        return;
+      }
+      case "off-allowlist": {
+        counts.offAllowlist += 1;
+        const body = encoder.encode('{"error":"origin is not reachable in this world"}');
+        const frame = framedBody(403, method, body);
+        send(output, 403, wireHeaders([], "off-allowlist", frame), frame);
+        emit(outcome);
+        return;
+      }
+      case "budget-exhausted": {
+        counts.budgetExhausted += 1;
+        const body = encoder.encode('{"error":"request budget exhausted"}');
+        const frame = framedBody(429, method, body);
+        send(output, 429, wireHeaders(
+          [],
+          "budget-exhausted",
+          frame,
+          [["x-jinn-replay-limit", outcome.limit]],
+        ), frame);
+        emit(outcome);
+      }
+    }
+  };
+  const answerBudget = (output: Output, method: string | undefined): void => {
+    const body = encoder.encode('{"error":"request budget exhausted"}');
+    const frame = framedBody(429, method, body);
+    send(output, 429, wireHeaders(
+      [],
+      "budget-exhausted",
+      frame,
+      [["x-jinn-replay-limit", "requests"]],
+    ), frame);
+    emit({ kind: "budget-exhausted", limit: "requests" });
+  };
+  const begin = (output: Output, method: string | undefined): Extract<Admission, { kind: "admitted" }> | undefined => {
+    const admission = admit();
+    if (admission.kind === "budget-exhausted") {
+      answerBudget(output, method);
+      return undefined;
+    }
+    return admission;
   };
 
   const server = createServer({ maxHeaderSize: MAX_REQUEST_HEADER_BYTES }, (incoming, outgoing) => {
+    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
+    if (admission === undefined) {
+      incoming.resume();
+      return;
+    }
+    activeSockets.set(incoming.socket, { admission, method: incoming.method });
     const serve = async (): Promise<void> => {
-      counts.requests += 1;
       const body = await requestBody(incoming);
       if (body.kind === "refused") {
-        recordMiss(outgoing, "unkeyable");
+        answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
         return;
       }
-
       const headers = requestHeaders(incoming.rawHeaders);
-      const url = incoming.method === "CONNECT" ? undefined : targetUrl(incoming.url, headers, defaultScheme);
+      const url = incoming.method === "CONNECT" ? undefined : targetUrl(incoming.url, headers, scheme);
       const outcome: ReplayOutcome = url === undefined
         ? { kind: "miss", reason: "unkeyable" }
         : resolveReplay(index, {
@@ -309,71 +479,45 @@ export async function createReplayService(
           url,
           headers,
           body: body.body,
-        }, consumed);
-
-      switch (outcome.kind) {
-        case "hit": {
-          const responseBody = index.bodyOf(outcome.entry.requestKey);
-          consumed.requests += 1;
-          consumed.bytes += responseBody.byteLength;
-          counts.hits += 1;
-          sendResponse(outgoing, outcome.entry.response.status, responseHeaders(
-            outcome.entry.response.headers,
-            "hit",
-            responseBody.byteLength,
-          ), responseBody);
-          emit({ kind: "hit", requestKey: outcome.entry.requestKey, bytes: responseBody.byteLength });
-          return;
-        }
-        case "miss":
-          recordMiss(outgoing, outcome.reason);
-          return;
-        case "off-allowlist": {
-          const responseBody = new TextEncoder().encode('{"error":"origin is not reachable in this world"}');
-          consumed.requests += 1;
-          counts.offAllowlist += 1;
-          sendResponse(outgoing, 403, responseHeaders([], "off-allowlist", responseBody.byteLength), responseBody);
-          emit(outcome);
-          return;
-        }
-        case "budget-exhausted": {
-          const responseBody = new TextEncoder().encode('{"error":"request budget exhausted"}');
-          counts.budgetExhausted += 1;
-          sendResponse(outgoing, 429, responseHeaders(
-            [],
-            "budget-exhausted",
-            responseBody.byteLength,
-            [["x-jinn-replay-limit", outcome.limit]],
-          ), responseBody);
-          emit(outcome);
-          return;
-        }
-      }
+        }, admission.before);
+      answer({ kind: "server", value: outgoing }, admission, incoming.method, outcome);
     };
-    void serve().catch(() => recordMiss(outgoing, "unkeyable"));
+    void serve().catch(() => {
+      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+    }).finally(() => activeSockets.delete(incoming.socket));
   });
 
-  server.on("connect", (_incoming, socket) => {
-    counts.requests += 1;
-    recordSocketMiss(socket);
-  });
-  server.on("upgrade", (_incoming, socket) => {
-    counts.requests += 1;
-    recordSocketMiss(socket);
-  });
+  const socketEvent = (socket: SocketOutput & object, method: string | undefined): void => {
+    if (terminalSockets.has(socket)) return;
+    terminalSockets.add(socket);
+    const output: Output = { kind: "socket", value: socket };
+    const admission = begin(output, method);
+    if (admission !== undefined) answer(output, admission, method, { kind: "miss", reason: "unkeyable" });
+  };
+  server.on("connect", (_incoming, socket) => socketEvent(socket, "CONNECT"));
+  server.on("upgrade", (_incoming, socket) => socketEvent(socket, "GET"));
   server.on("checkContinue", (incoming, outgoing) => {
-    counts.requests += 1;
+    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
     incoming.resume();
-    recordMiss(outgoing, "unkeyable");
+    if (admission !== undefined) {
+      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+    }
   });
   server.on("checkExpectation", (incoming, outgoing) => {
-    counts.requests += 1;
+    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
     incoming.resume();
-    recordMiss(outgoing, "unkeyable");
+    if (admission !== undefined) {
+      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+    }
   });
   server.on("clientError", (_error, socket) => {
-    counts.requests += 1;
-    recordSocketMiss(socket);
+    const active = activeSockets.get(socket);
+    if (active !== undefined) {
+      activeSockets.delete(socket);
+      answer({ kind: "socket", value: socket }, active.admission, active.method, { kind: "miss", reason: "unkeyable" });
+      return;
+    }
+    socketEvent(socket, undefined);
   });
 
   const address = await new Promise<ListenAddress>((resolve, reject) => {
@@ -384,7 +528,7 @@ export async function createReplayService(
       const bound = server.address();
       if (bound === null || typeof bound === "string") {
         server.close();
-        reject(invalidListen("listen", "did not bind an IP socket"));
+        reject(invalidDocument("listen", "did not bind an IP socket"));
         return;
       }
       resolve(Object.freeze({ host: listen.host, port: bound.port }));

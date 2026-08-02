@@ -70,11 +70,12 @@ function entry(
   request: CanonicalRequestParts,
   body: { readonly digest: string; readonly sizeBytes: number },
   headers: [string, string][] = [["content-type", "application/json"]],
+  status = 200,
 ) {
   return {
     requestKey: canonicalRequestKeyFromParts(request, policy),
     request,
-    response: { status: 200, headers, body: { ...body, mediaType: "application/json" } },
+    response: { status, headers, body: { ...body, mediaType: "application/json" } },
   };
 }
 
@@ -176,6 +177,59 @@ async function connectRequest(service: ReplayService): Promise<Response> {
   });
 }
 
+function rawResponse(bytes: Uint8Array): Response {
+  const marker = utf8("\r\n\r\n");
+  let boundary = -1;
+  for (let index = 0; index <= bytes.byteLength - marker.byteLength; index += 1) {
+    if (marker.every((byte, offset) => bytes[index + offset] === byte)) {
+      boundary = index;
+      break;
+    }
+  }
+  if (boundary === -1) throw new Error("response had no HTTP header boundary");
+  const lines = decoder.decode(bytes.slice(0, boundary)).split("\r\n");
+  const status = Number(lines[0]?.split(" ")[1]);
+  const headers: Record<string, string | string[] | undefined> = {};
+  for (const line of lines.slice(1)) {
+    const separator = line.indexOf(":");
+    if (separator === -1) continue;
+    const name = line.slice(0, separator).toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    const previous = headers[name];
+    headers[name] = previous === undefined ? value : Array.isArray(previous) ? [...previous, value] : [previous, value];
+  }
+  return { status, headers, body: bytes.slice(boundary + marker.byteLength) };
+}
+
+async function rawRequest(service: ReplayService, wire: string): Promise<Response> {
+  const { connect } = await import("node:net");
+  return await new Promise<Response>((resolve, reject) => {
+    const socket = connect({
+      host: service.address.host,
+      port: service.address.port,
+      family: service.address.host.includes(":") ? 6 : 4,
+    });
+    const chunks: Uint8Array[] = [];
+    socket.on("data", (chunk: Uint8Array) => chunks.push(chunk));
+    socket.once("error", reject);
+    socket.once("end", () => {
+      const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      try {
+        resolve(rawResponse(bytes));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    socket.end(wire);
+  });
+}
+
 const services = new Set<ReplayService>();
 afterEach(async () => {
   await Promise.all([...services].map(async (service) => await service.close()));
@@ -224,7 +278,10 @@ describe("numeric loopback binding", () => {
         listen: { host, port: 0 },
       })).rejects.toBeInstanceOf(NonLoopbackBindError);
     }
-    expect([...LOOPBACK_HOSTS]).toEqual(["127.0.0.1", "::1", "localhost"]);
+    expect([...LOOPBACK_HOSTS]).toEqual(["127.0.0.1", "::1"]);
+    expect(Object.isFrozen(LOOPBACK_HOSTS)).toBe(true);
+    expect("add" in LOOPBACK_HOSTS).toBe(false);
+    expect([...LOOPBACK_HOSTS]).toEqual(["127.0.0.1", "::1"]);
   });
 });
 
@@ -303,6 +360,32 @@ describe("refusal boundaries", () => {
     }
   });
 
+  test("never lets a malformed Host or fragment alias a different captured path", async () => {
+    const aliasWorld = worldWith([
+      entry(parts("GET", apiOrigin, "/"), notice),
+      entry(parts("GET", apiOrigin, "/pools"), pools),
+    ]);
+    const service = await start(aliasWorld);
+    const smuggledHost = await request(service, {
+      target: "/pools",
+      headers: { host: "api.example.test#smuggled" },
+    });
+    const fragmentTarget = await request(service, {
+      target: "/pools#smuggled",
+      headers: { host: "api.example.test" },
+    });
+    const absoluteFragment = await request(service, {
+      target: "https://api.example.test/pools#smuggled",
+      headers: { host: "api.example.test" },
+    });
+
+    for (const response of [smuggledHost, fragmentTarget, absoluteFragment]) {
+      expect(response.status).toBe(404);
+      expect(response.headers["x-jinn-replay-reason"]).toBe("unkeyable");
+      expect(response.body).not.toEqual(bodies.get(notice.digest));
+    }
+  });
+
   test("refuses CONNECT as a declared miss instead of opening a tunnel", async () => {
     const service = await start();
     const response = await connectRequest(service);
@@ -361,7 +444,7 @@ describe("allowlist, budgets, and counters", () => {
     expect(second.status).toBe(429);
     expect(second.headers["x-jinn-replay-limit"]).toBe("bytes");
     expect(third.status).toBe(429);
-    expect(third.headers["x-jinn-replay-limit"]).toBe("bytes");
+    expect(third.headers["x-jinn-replay-limit"]).toBe("requests");
     expect(service.stats()).toMatchObject({ requests: 3, hits: 1, budgetExhausted: 2, bytes: pools.sizeBytes });
   });
 
@@ -376,6 +459,153 @@ describe("allowlist, budgets, and counters", () => {
     expect(exhausted.status).toBe(429);
     expect(exhausted.headers["x-jinn-replay-limit"]).toBe("requests");
     expect(service.stats()).toMatchObject({ requests: 2, misses: 1, budgetExhausted: 1, hits: 0 });
+  });
+
+  test("applies a zero request budget to all non-replay transport events", async () => {
+    const service = await start(world, { budget: { maxRequests: 0, maxResponseBytes: 1_000_000 } });
+    const options = await request(service, { method: "OPTIONS", target: "*", headers: { host: "api.example.test" } });
+    const connect = await connectRequest(service);
+    const upgrade = await rawRequest(service, [
+      "GET /pools HTTP/1.1",
+      "Host: api.example.test",
+      "Connection: Upgrade",
+      "Upgrade: websocket",
+      "",
+      "",
+    ].join("\r\n"));
+    const expectation = await rawRequest(service, [
+      "POST /pools HTTP/1.1",
+      "Host: api.example.test",
+      "Expect: 100-continue",
+      "Content-Length: 0",
+      "Connection: close",
+      "",
+      "",
+    ].join("\r\n"));
+    const parserError = await rawRequest(service, "GE(T / HTTP/1.1\r\nHost: api.example.test\r\n\r\n");
+
+    for (const response of [options, connect, upgrade, expectation, parserError]) {
+      expect(response.status).toBe(429);
+      expect(response.headers["x-jinn-replay"]).toBe("budget-exhausted");
+      expect(response.headers["x-jinn-replay-limit"]).toBe("requests");
+    }
+    expect(service.stats()).toEqual({
+      requests: 5,
+      hits: 0,
+      misses: 0,
+      offAllowlist: 0,
+      budgetExhausted: 5,
+      bytes: 0,
+    });
+  });
+
+  test("counts a malformed chunked request once", async () => {
+    const service = await start(world, { budget: { maxRequests: 1, maxResponseBytes: 1_000_000 } });
+    const response = await rawRequest(service, [
+      "POST /pools HTTP/1.1",
+      "Host: api.example.test",
+      "Transfer-Encoding: chunked",
+      "Connection: close",
+      "",
+      "Z",
+      "",
+    ].join("\r\n"));
+
+    expect(response.status).toBe(404);
+    expect(response.headers["x-jinn-replay"]).toBe("miss");
+    expect(service.stats()).toEqual({
+      requests: 1,
+      hits: 0,
+      misses: 1,
+      offAllowlist: 0,
+      budgetExhausted: 0,
+      bytes: 0,
+    });
+  });
+});
+
+describe("header preflight and framing", () => {
+  test("rejects Node-inexpressible hit and miss headers before opening a listener", async () => {
+    const badHit = worldWith([
+      entry(parts("GET", apiOrigin, "/pools"), pools, [["x-unserializable", "\u0100"]]),
+    ]);
+    const badMiss = parseInformationWorldRecord(sealInformationWorldRecord({
+      ...world,
+      missPolicy: {
+        ...world.missPolicy,
+        headers: [["x-unserializable", "bad\r\nheader"]],
+      },
+    }));
+
+    await expect(createReplayService(badHit, {
+      artifacts: reader,
+      listen: { host: "127.0.0.1", port: 0 },
+    })).rejects.toBeInstanceOf(InvalidDocumentError);
+    await expect(createReplayService(badMiss, {
+      artifacts: reader,
+      listen: { host: "127.0.0.1", port: 0 },
+    })).rejects.toBeInstanceOf(InvalidDocumentError);
+  });
+
+  test("filters static and Connection-nominated hop-by-hop headers", async () => {
+    const headerWorld = worldWith([
+      entry(parts("GET", apiOrigin, "/filtered"), pools, [
+        ["content-type", "application/json"],
+        ["connection", "x-remove, keep-alive"],
+        ["x-remove", "must-not-escape"],
+        ["keep-alive", "timeout=999"],
+        ["proxy-authenticate", "Basic"],
+        ["proxy-authorization", "Basic dGVzdA=="],
+        ["proxy-connection", "close"],
+        ["te", "trailers"],
+        ["trailer", "x-trailer"],
+        ["transfer-encoding", "chunked"],
+        ["upgrade", "websocket"],
+        ["content-length", "999"],
+      ]),
+    ]);
+    const service = await start(headerWorld);
+    const response = await request(service, { target: "/filtered", headers: { host: "api.example.test" } });
+
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("application/json");
+    expect(response.headers["content-length"]).toBe(String(pools.sizeBytes));
+    for (const name of [
+      "x-remove", "proxy-authenticate", "proxy-authorization",
+      "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade",
+    ]) expect(response.headers[name]).toBeUndefined();
+    expect(response.headers["connection"]).not.toBe("x-remove, keep-alive");
+    expect(response.headers["keep-alive"]).not.toBe("timeout=999");
+  });
+
+  test("uses HTTP framing that cannot attach a body to HEAD, 1xx, 204, or 304", async () => {
+    const framedWorld = worldWith([
+      entry(parts("HEAD", apiOrigin, "/head"), pools),
+      entry(parts("GET", apiOrigin, "/no-content"), pools, [["content-type", "application/json"]], 204),
+      entry(parts("GET", apiOrigin, "/not-modified"), pools, [["content-type", "application/json"]], 304),
+      entry(parts("GET", apiOrigin, "/switching"), pools, [["content-type", "application/json"]], 101),
+    ]);
+    const service = await start(framedWorld);
+    const head = await request(service, { method: "HEAD", target: "/head", headers: { host: "api.example.test" } });
+    const noContent = await request(service, { target: "/no-content", headers: { host: "api.example.test" } });
+    const notModified = await request(service, { target: "/not-modified", headers: { host: "api.example.test" } });
+    const switching = await rawRequest(service, [
+      "GET /switching HTTP/1.1",
+      "Host: api.example.test",
+      "Connection: close",
+      "",
+      "",
+    ].join("\r\n"));
+
+    expect(head.body).toEqual(new Uint8Array());
+    expect(head.headers["content-length"]).toBe(String(pools.sizeBytes));
+    expect(noContent.body).toEqual(new Uint8Array());
+    expect(noContent.headers["content-length"]).toBeUndefined();
+    expect(notModified.body).toEqual(new Uint8Array());
+    expect(notModified.headers["content-length"]).toBe(String(pools.sizeBytes));
+    expect(switching.body).toEqual(new Uint8Array());
+    expect(switching.headers["content-length"]).toBeUndefined();
+    expect(service.stats()).toMatchObject({ hits: 4, misses: 0, bytes: pools.sizeBytes * 4 });
   });
 });
 
