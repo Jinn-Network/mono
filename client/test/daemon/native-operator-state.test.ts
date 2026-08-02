@@ -5,6 +5,7 @@ import {
   NativeOperatorStateRepository,
 } from '../../src/daemon/native-operator-state.js';
 import { engagementId } from '../../src/daemon/native-operation-identity.js';
+import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
 const SOURCE = {
   cardId: 1,
@@ -132,5 +133,106 @@ describe('NativeOperatorStateRepository', () => {
     ]);
     expect(store.db.prepare(`SELECT acknowledged_at FROM native_discovery_cards WHERE id = 1`).get())
       .toEqual({ acknowledged_at: '2026-08-02T00:00:00.000Z' });
+  });
+
+  it('records retryable deferrals without acknowledging or creating an engagement', () => {
+    const store = storeWithCard();
+    const state = new NativeOperatorStateRepository(store, { now: () => new Date('2026-08-02T00:00:00Z') });
+    state.recordDeferral({ ...INPUT, reason: 'capacity-policy', detail: { active: 1 } });
+    state.recordDeferral({ ...INPUT, reason: 'capacity-policy', detail: { active: 1 } });
+    expect(store.db.prepare(`SELECT acknowledged_at FROM native_discovery_cards WHERE id = 1`).get())
+      .toEqual({ acknowledged_at: null });
+    expect(store.db.prepare(`SELECT reason, retry_count FROM native_source_deferrals WHERE card_id = 1`).get())
+      .toEqual({ reason: 'capacity-policy', retry_count: 2 });
+    expect(state.listEngagements()).toEqual([]);
+    expect(state.listOperations()).toEqual([]);
+
+    state.recordDecision({
+      ...INPUT,
+      decision: { ok: true, capability: { ok: true }, policy: { ok: true } },
+    });
+    expect(store.db.prepare(`SELECT COUNT(*) AS count FROM native_source_deferrals WHERE card_id = 1`).get())
+      .toEqual({ count: 0 });
+    expect(() => state.recordDeferral({ ...INPUT, reason: 'capacity-policy', detail: {} }))
+      .toThrow(NativeOperatorStateConflictError);
+  });
+
+  it('tracks claim intent, uncertain broadcast, replacement, safe observation, and finality under one operation id', () => {
+    const store = storeWithCard();
+    const state = new NativeOperatorStateRepository(store, { now: () => new Date('2026-08-02T00:00:00Z') });
+    const admitted = state.recordDecision({
+      ...INPUT,
+      decision: { ok: true, capability: { snapshot: 'real' }, policy: { profile: 'prediction' } },
+    });
+    if (admitted.kind !== 'admitted') throw new Error('expected admission');
+    const firstTx = `0x${'a'.repeat(64)}` as const;
+    const replacementTx = `0x${'b'.repeat(64)}` as const;
+    state.recordClaimBroadcast(admitted.claimOperationId, undefined, { uncertainty: 'wallet-return-lost' });
+    expect(state.getOperation(admitted.claimOperationId)).toMatchObject({ status: 'broadcast', txHash: null });
+    state.recordClaimBroadcast(admitted.claimOperationId, firstTx);
+    state.recordClaimReplacement(admitted.claimOperationId, firstTx, replacementTx);
+    state.recordClaimObservedSafe(admitted.claimOperationId, {
+      txHash: replacementTx,
+      blockHash: `0x${'c'.repeat(64)}`,
+      blockNumber: 101n,
+      attemptIndex: 3,
+      requestId: `0x${'d'.repeat(64)}`,
+    });
+    state.recordClaimFinalized(admitted.claimOperationId, {
+      txHash: replacementTx,
+      blockHash: `0x${'c'.repeat(64)}`,
+      blockNumber: 101n,
+      attemptIndex: 3,
+      requestId: `0x${'d'.repeat(64)}`,
+    });
+    expect(state.getOperation(admitted.claimOperationId)).toMatchObject({
+      status: 'finalized', txHash: replacementTx, priorTxHash: firstTx, blockNumber: 101n,
+    });
+    expect(state.getEngagement(admitted.engagementId)).toMatchObject({
+      state: 'claim-finalized',
+      attemptIndex: 3,
+      attemptUri: deriveMarketplaceAttemptUri({
+        chainId: INPUT.chainId,
+        coordinator: INPUT.coordinator,
+        taskId: INPUT.taskId,
+        attemptIndex: 3,
+      }),
+      requestId: `0x${'d'.repeat(64)}`,
+    });
+    expect(state.listNonterminalClaimOperations()).toEqual([]);
+  });
+
+  it('reopens the same logical claim after an orphan and fails closed on changed canonical facts', () => {
+    const store = storeWithCard();
+    const state = new NativeOperatorStateRepository(store, { now: () => new Date('2026-08-02T00:00:00Z') });
+    const admitted = state.recordDecision({
+      ...INPUT,
+      decision: { ok: true, capability: { ok: true }, policy: { ok: true } },
+    });
+    if (admitted.kind !== 'admitted') throw new Error('expected admission');
+    const tx = `0x${'a'.repeat(64)}` as const;
+    state.recordClaimBroadcast(admitted.claimOperationId, tx);
+    state.recordClaimOrphaned(admitted.claimOperationId, { txHash: tx, reason: 'safe-reorg' });
+    expect(state.getEngagement(admitted.engagementId)).toMatchObject({ state: 'eligible' });
+    state.prepareClaimRetry(admitted.claimOperationId);
+    expect(state.getOperation(admitted.claimOperationId)).toMatchObject({ status: 'intent', txHash: null });
+    state.recordClaimBroadcast(admitted.claimOperationId, tx);
+    state.recordClaimObservedSafe(admitted.claimOperationId, {
+      txHash: tx,
+      blockHash: `0x${'c'.repeat(64)}`,
+      blockNumber: 2n,
+      attemptIndex: 0,
+      requestId: `0x${'d'.repeat(64)}`,
+    });
+    expect(() => state.recordClaimFinalized(admitted.claimOperationId, {
+      txHash: tx,
+      blockHash: `0x${'e'.repeat(64)}`,
+      blockNumber: 2n,
+      attemptIndex: 0,
+      requestId: `0x${'d'.repeat(64)}`,
+    })).toThrow(NativeOperatorStateConflictError);
+    state.recordClaimLost(admitted.claimOperationId, { reason: 'race-lost' });
+    expect(state.getOperation(admitted.claimOperationId)).toMatchObject({ status: 'failed-terminal' });
+    expect(state.getEngagement(admitted.engagementId)).toMatchObject({ state: 'lost' });
   });
 });

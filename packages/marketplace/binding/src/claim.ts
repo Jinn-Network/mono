@@ -17,10 +17,14 @@ export interface ClaimPorts {
   readonly claimTask: (input: {
     taskId: bigint;
     priorityMech: Address;
+    /** Durable product operation identity. Native callers always provide this value. */
+    operationId?: string;
   }) => Promise<{
     attemptIndex: number;
     requestId?: Hex;
     txHash: Hex;
+    blockNumber?: bigint;
+    blockHash?: Hex;
   }>;
 }
 

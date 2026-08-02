@@ -103,6 +103,7 @@ export interface NativeDiscoveryProvenance {
 
 export interface NativeDiscoveryQueuedCard {
   readonly id: number;
+  readonly announcementId: string;
   readonly card: AnnouncedSubmissionCard;
 }
 
@@ -179,6 +180,7 @@ interface RawCheckpoint {
 
 interface RawQueuedCard {
   id: number;
+  announcement_id: string;
   card_json: string;
 }
 
@@ -429,10 +431,14 @@ export function createNativeDiscoveryConsumer(input: {
 
     takePending() {
       const rows = input.store.db.prepare(
-        `SELECT id, card_json FROM native_discovery_cards
+        `SELECT id, announcement_id, card_json FROM native_discovery_cards
           WHERE acknowledged_at IS NULL ORDER BY id ASC`,
       ).all() as RawQueuedCard[];
-      return rows.map((row) => ({ id: row.id, card: deserialize<AnnouncedSubmissionCard>(row.card_json) }));
+      return rows.map((row) => ({
+        id: row.id,
+        announcementId: row.announcement_id,
+        card: deserialize<AnnouncedSubmissionCard>(row.card_json),
+      }));
     },
 
     acknowledge(card) {

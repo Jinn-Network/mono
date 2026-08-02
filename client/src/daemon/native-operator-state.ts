@@ -5,6 +5,7 @@ import {
   engagementId,
   type NativeOperationId,
 } from './native-operation-identity.js';
+import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
 export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 1 as const;
 
@@ -103,6 +104,22 @@ CREATE TABLE IF NOT EXISTS native_source_processing (
   decision          TEXT NOT NULL,
   engagement_id     TEXT,
   processed_at      TEXT NOT NULL,
+  PRIMARY KEY (source_agent, source_name, sequence, entry_digest, announcement_id)
+);
+
+CREATE TABLE IF NOT EXISTS native_source_deferrals (
+  source_agent      TEXT NOT NULL,
+  source_name       TEXT NOT NULL,
+  sequence          TEXT NOT NULL,
+  entry_digest      TEXT NOT NULL,
+  announcement_id  TEXT NOT NULL,
+  card_id           INTEGER NOT NULL UNIQUE,
+  input_fingerprint TEXT NOT NULL,
+  reason            TEXT NOT NULL,
+  detail_json       TEXT NOT NULL,
+  retry_count       INTEGER NOT NULL,
+  first_deferred_at TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
   PRIMARY KEY (source_agent, source_name, sequence, entry_digest, announcement_id)
 );
 `;
@@ -206,6 +223,19 @@ export interface NativeAdmissionInput {
   readonly decision: NativeAdmissionDecision;
 }
 
+export interface NativeDeferralInput extends Omit<NativeAdmissionInput, 'decision'> {
+  readonly reason: string;
+  readonly detail: Readonly<Record<string, unknown>>;
+}
+
+export interface NativeClaimObservation {
+  readonly txHash: `0x${string}`;
+  readonly blockHash: `0x${string}`;
+  readonly blockNumber: bigint;
+  readonly attemptIndex: number;
+  readonly requestId?: `0x${string}`;
+}
+
 interface RawEngagement {
   engagement_id: NativeOperationId;
   chain_id: string;
@@ -304,6 +334,29 @@ function requireTtl(ttlMs: number): number {
   return ttlMs;
 }
 
+function inputFingerprint(input: Pick<NativeAdmissionInput, 'chainId' | 'coordinator' | 'taskId' | 'operatorAgent' | 'taskDigest' | 'submissionUri' | 'submissionDigest'>): `sha256:${string}` {
+  return documentDigest(serializeCanonicalJson({
+    engagementId: engagementId(input),
+    taskDigest: input.taskDigest,
+    submissionUri: input.submissionUri,
+    submissionDigest: input.submissionDigest,
+  }));
+}
+
+function requireHash(value: string, label: string): `0x${string}` {
+  if (!/^0x[0-9a-fA-F]{64}$/u.test(value)) throw new TypeError(`${label} must be a 32-byte hex value`);
+  return value as `0x${string}`;
+}
+
+function requireAttemptIndex(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0) throw new RangeError('attemptIndex must be a non-negative safe integer');
+  return value;
+}
+
+function detailJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => typeof item === 'bigint' ? item.toString(10) : item);
+}
+
 export class NativeOperatorStateRepository {
   private readonly now: () => Date;
 
@@ -345,12 +398,7 @@ export class NativeOperatorStateRepository {
     const engagement = engagementId(input);
     const claim = claimOperationId(engagement);
     const now = this.timestamp();
-    const fingerprint = documentDigest(serializeCanonicalJson({
-      engagementId: engagement,
-      taskDigest: input.taskDigest,
-      submissionUri: input.submissionUri,
-      submissionDigest: input.submissionDigest,
-    }));
+    const fingerprint = inputFingerprint(input);
 
     const outcome = this.store.db.transaction(() => {
       const queued = this.store.db.prepare(
@@ -394,6 +442,8 @@ export class NativeOperatorStateRepository {
         }
         throw new NativeOperatorStateConflictError('discovery card was already processed with different sealed inputs');
       }
+
+      this.store.db.prepare(`DELETE FROM native_source_deferrals WHERE card_id = ?`).run(input.source.cardId);
 
       if (!input.decision.ok) {
         this.insertSourceProcessing(input.source, fingerprint, `refused:${input.decision.reason}`, null, now);
@@ -467,6 +517,68 @@ export class NativeOperatorStateRepository {
     return outcome;
   }
 
+  recordDeferral(input: NativeDeferralInput): void {
+    if (input.reason.length === 0) throw new TypeError('deferral reason must not be empty');
+    const fingerprint = inputFingerprint(input);
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      this.verifyQueuedSource(input.source, true);
+      const existing = this.store.db.prepare(
+        `SELECT input_fingerprint FROM native_source_deferrals WHERE card_id = ?`,
+      ).get(input.source.cardId) as { input_fingerprint: string } | undefined;
+      if (existing !== undefined && existing.input_fingerprint !== fingerprint) {
+        throw new NativeOperatorStateConflictError('deferred discovery card was retried with different sealed inputs');
+      }
+      this.store.db.prepare(
+        `INSERT INTO native_source_deferrals
+          (source_agent, source_name, sequence, entry_digest, announcement_id, card_id, input_fingerprint,
+           reason, detail_json, retry_count, first_deferred_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+         ON CONFLICT(card_id) DO UPDATE SET
+           reason = excluded.reason,
+           detail_json = excluded.detail_json,
+           retry_count = native_source_deferrals.retry_count + 1,
+           updated_at = excluded.updated_at`,
+      ).run(
+        input.source.agent,
+        input.source.name,
+        input.source.sequence,
+        input.source.entryDigest,
+        input.source.announcementId,
+        input.source.cardId,
+        fingerprint,
+        input.reason,
+        detailJson(input.detail),
+        now,
+        now,
+      );
+      this.insertAudit(null, null, 'admission-deferred', { reason: input.reason, ...input.detail }, now);
+    })();
+  }
+
+  private verifyQueuedSource(source: NativeSourceProcessingInput, requireUnacknowledged: boolean): void {
+    const queued = this.store.db.prepare(
+      `SELECT source_agent, source_name, sequence, entry_digest, announcement_id, acknowledged_at
+         FROM native_discovery_cards WHERE id = ?`,
+    ).get(source.cardId) as {
+      source_agent: string;
+      source_name: string;
+      sequence: string;
+      entry_digest: string;
+      announcement_id: string;
+      acknowledged_at: string | null;
+    } | undefined;
+    if (
+      queued === undefined
+      || queued.source_agent !== source.agent
+      || queued.source_name !== source.name
+      || queued.sequence !== source.sequence
+      || queued.entry_digest !== source.entryDigest
+      || queued.announcement_id !== source.announcementId
+      || (requireUnacknowledged && queued.acknowledged_at !== null)
+    ) throw new NativeOperatorStateConflictError('queued discovery card provenance does not match admission input');
+  }
+
   private insertSourceProcessing(
     source: NativeSourceProcessingInput,
     inputFingerprint: `sha256:${string}`,
@@ -512,7 +624,238 @@ export class NativeOperatorStateRepository {
     this.store.db.prepare(
       `INSERT INTO native_audit_events
         (engagement_id, operation_id, kind, detail_json, created_at) VALUES (?, ?, ?, ?, ?)`,
-    ).run(engagement, operation, kind, JSON.stringify(detail), now);
+    ).run(engagement, operation, kind, detailJson(detail), now);
+  }
+
+  private requireClaimOperation(id: NativeOperationId): { readonly operation: RawOperation; readonly engagement: RawEngagement } {
+    const operation = this.store.db.prepare(`SELECT * FROM native_operations WHERE operation_id = ?`)
+      .get(id) as RawOperation | undefined;
+    if (operation === undefined || operation.kind !== 'claim') {
+      throw new NativeOperatorStateConflictError(`unknown native claim operation ${id}`);
+    }
+    const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+      .get(operation.engagement_id) as RawEngagement | undefined;
+    if (engagement === undefined) throw new NativeOperatorStateConflictError('claim operation has no engagement');
+    return { operation, engagement };
+  }
+
+  recordClaimBroadcast(
+    id: NativeOperationId,
+    txHash?: `0x${string}`,
+    detail: Readonly<Record<string, unknown>> = {},
+  ): void {
+    const hash = txHash === undefined ? null : requireHash(txHash, 'transaction hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (!['intent', 'broadcast'].includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`cannot broadcast claim from ${operation.status}`);
+      }
+      if (operation.tx_hash !== null && hash !== null && operation.tx_hash !== hash) {
+        throw new NativeOperatorStateConflictError('changed transaction hash requires an explicit replacement');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'broadcast', tx_hash = COALESCE(?, tx_hash), detail_json = ?, updated_at = ?
+          WHERE operation_id = ?`,
+      ).run(hash, detailJson(detail), now, id);
+      this.insertAudit(operation.engagement_id, id, hash === null ? 'claim-broadcast-uncertain' : 'claim-broadcast', {
+        ...detail,
+        ...(hash === null ? {} : { txHash: hash }),
+      }, now);
+    })();
+  }
+
+  recordClaimReplacement(id: NativeOperationId, priorTxHash: `0x${string}`, txHash: `0x${string}`): void {
+    const prior = requireHash(priorTxHash, 'prior transaction hash');
+    const replacement = requireHash(txHash, 'replacement transaction hash');
+    if (prior === replacement) throw new NativeOperatorStateConflictError('replacement transaction must have a new hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (!['broadcast', 'replaced'].includes(operation.status) || operation.tx_hash !== prior) {
+        throw new NativeOperatorStateConflictError('replacement does not extend the current claim transaction');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'replaced', prior_tx_hash = ?, tx_hash = ?, detail_json = ?, updated_at = ?
+          WHERE operation_id = ?`,
+      ).run(prior, replacement, detailJson({ priorTxHash: prior, txHash: replacement }), now, id);
+      this.insertAudit(operation.engagement_id, id, 'claim-transaction-replaced', { priorTxHash: prior, txHash: replacement }, now);
+    })();
+  }
+
+  private validateClaimObservation(
+    operation: RawOperation,
+    engagement: RawEngagement,
+    observation: NativeClaimObservation,
+  ): { readonly txHash: `0x${string}`; readonly blockHash: `0x${string}`; readonly attemptUri: string } {
+    const txHash = requireHash(observation.txHash, 'transaction hash');
+    const blockHash = requireHash(observation.blockHash, 'block hash');
+    if (observation.blockNumber < 0n) throw new RangeError('blockNumber must not be negative');
+    const attemptIndex = requireAttemptIndex(observation.attemptIndex);
+    if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
+      throw new NativeOperatorStateConflictError('canonical observation names a different transaction');
+    }
+    if (operation.block_hash !== null && operation.block_hash !== blockHash) {
+      throw new NativeOperatorStateConflictError('canonical observation changed block hash without an orphan transition');
+    }
+    if (operation.block_number !== null && operation.block_number !== observation.blockNumber.toString(10)) {
+      throw new NativeOperatorStateConflictError('canonical observation changed block number without an orphan transition');
+    }
+    if (engagement.attempt_index !== null && engagement.attempt_index !== attemptIndex) {
+      throw new NativeOperatorStateConflictError('canonical observation changed attempt identity');
+    }
+    if (engagement.request_id !== null && engagement.request_id !== (observation.requestId ?? null)) {
+      throw new NativeOperatorStateConflictError('canonical observation changed request identity');
+    }
+    const attemptUri = deriveMarketplaceAttemptUri({
+      chainId: Number(engagement.chain_id),
+      coordinator: engagement.coordinator as `0x${string}`,
+      taskId: BigInt(engagement.task_id),
+      attemptIndex,
+    });
+    if (engagement.attempt_uri !== null && engagement.attempt_uri !== attemptUri) {
+      throw new NativeOperatorStateConflictError('canonical observation changed derived Attempt URI');
+    }
+    return { txHash, blockHash, attemptUri };
+  }
+
+  private recordClaimCanonical(
+    id: NativeOperationId,
+    observation: NativeClaimObservation,
+    finalized: boolean,
+  ): void {
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation, engagement } = this.requireClaimOperation(id);
+      const allowed = finalized
+        ? ['intent', 'broadcast', 'replaced', 'observed-safe', 'finalized']
+        : ['broadcast', 'replaced', 'observed-safe'];
+      if (!allowed.includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`cannot record ${finalized ? 'finalized' : 'safe'} claim from ${operation.status}`);
+      }
+      const canonical = this.validateClaimObservation(operation, engagement, observation);
+      const status = finalized ? 'finalized' : 'observed-safe';
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = ?, tx_hash = ?, block_hash = ?, block_number = ?,
+           detail_json = ?, updated_at = ? WHERE operation_id = ?`,
+      ).run(
+        status,
+        canonical.txHash,
+        canonical.blockHash,
+        observation.blockNumber.toString(10),
+        detailJson(observation),
+        now,
+        id,
+      );
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = ?, attempt_index = ?, attempt_uri = ?, request_id = ?, updated_at = ?
+          WHERE engagement_id = ?`,
+      ).run(
+        finalized ? 'claim-finalized' : 'claim-pending',
+        observation.attemptIndex,
+        canonical.attemptUri,
+        observation.requestId ?? null,
+        now,
+        engagement.engagement_id,
+      );
+      this.insertAudit(
+        engagement.engagement_id,
+        id,
+        finalized ? 'claim-finalized' : 'claim-observed-safe',
+        { ...observation, attemptUri: canonical.attemptUri },
+        now,
+      );
+    })();
+  }
+
+  recordClaimObservedSafe(id: NativeOperationId, observation: NativeClaimObservation): void {
+    this.recordClaimCanonical(id, observation, false);
+  }
+
+  recordClaimFinalized(id: NativeOperationId, observation: NativeClaimObservation): void {
+    this.recordClaimCanonical(id, observation, true);
+  }
+
+  recordClaimOrphaned(
+    id: NativeOperationId,
+    input: { readonly txHash: `0x${string}`; readonly reason: string },
+  ): void {
+    const txHash = requireHash(input.txHash, 'orphaned transaction hash');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (operation.status === 'finalized' || operation.status === 'failed-terminal') {
+        throw new NativeOperatorStateConflictError(`cannot orphan claim from ${operation.status}`);
+      }
+      if (operation.tx_hash !== null && operation.tx_hash !== txHash) {
+        throw new NativeOperatorStateConflictError('orphan notice names a different transaction');
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'orphaned', tx_hash = ?, detail_json = ?, updated_at = ?
+          WHERE operation_id = ?`,
+      ).run(txHash, detailJson(input), now, id);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'eligible', attempt_index = NULL, attempt_uri = NULL,
+          request_id = NULL, updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, operation.engagement_id);
+      this.insertAudit(operation.engagement_id, id, 'claim-orphaned', input, now);
+    })();
+  }
+
+  prepareClaimRetry(id: NativeOperationId): void {
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (operation.status !== 'orphaned') throw new NativeOperatorStateConflictError('only an orphaned claim can be retried');
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'intent', tx_hash = NULL, prior_tx_hash = NULL,
+          block_hash = NULL, block_number = NULL, detail_json = '{}', updated_at = ? WHERE operation_id = ?`,
+      ).run(now, id);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'claim-pending', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, operation.engagement_id);
+      this.insertAudit(operation.engagement_id, id, 'claim-retry-intent', {}, now);
+    })();
+  }
+
+  recordClaimAbsent(id: NativeOperationId, input: { readonly checkedAtBlock: bigint }): void {
+    if (input.checkedAtBlock < 0n) throw new RangeError('checkedAtBlock must not be negative');
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (!['intent', 'broadcast', 'replaced'].includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`chain absence contradicts ${operation.status} claim state`);
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'intent', tx_hash = NULL, prior_tx_hash = NULL,
+          block_hash = NULL, block_number = NULL, detail_json = ?, updated_at = ? WHERE operation_id = ?`,
+      ).run(detailJson(input), now, id);
+      this.insertAudit(operation.engagement_id, id, 'claim-absence-confirmed', input, now);
+    })();
+  }
+
+  recordClaimLost(id: NativeOperationId, input: { readonly reason: string }): void {
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const { operation } = this.requireClaimOperation(id);
+      if (operation.status === 'finalized') throw new NativeOperatorStateConflictError('a finalized claim cannot become lost');
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'failed-terminal', detail_json = ?, updated_at = ? WHERE operation_id = ?`,
+      ).run(detailJson(input), now, id);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'lost', attempt_index = NULL, attempt_uri = NULL,
+          request_id = NULL, updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, operation.engagement_id);
+      this.insertAudit(operation.engagement_id, id, 'claim-lost', input, now);
+    })();
+  }
+
+  listNonterminalClaimOperations(): NativeOperationRow[] {
+    return (this.store.db.prepare(
+      `SELECT * FROM native_operations
+        WHERE kind = 'claim' AND status NOT IN ('finalized', 'failed-terminal')
+        ORDER BY created_at, operation_id`,
+    ).all() as RawOperation[]).map(operationRow);
   }
 
   getEngagement(id: NativeOperationId): NativeEngagementRow | undefined {
