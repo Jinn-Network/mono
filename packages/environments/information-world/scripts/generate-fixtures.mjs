@@ -127,13 +127,18 @@ const equivalenceB = () => {
   };
 };
 
-/** The portable request-key probes for ordering, URL, header, and body normalization. */
+/**
+ * The portable request-key probes for ordering, URL, header, and body normalization.
+ * expectedKey values were checked once against the reviewed implementation and are deliberately
+ * copied literals: do not call canonicalRequestKey here, or drift could regenerate its own pin.
+ */
 const requestKeyVectors = () => ({
   version: "irk1",
   note: "Each group's requests must produce one key under the group's policy, and no two groups may produce the same key.",
   groups: [
     {
       name: "header-order-and-ows",
+      expectedKey: "irk1:ea17d030f8ffee26d1609211cee09db01665915b821ce5986e66800dcb7a8905",
       policy: POLICY,
       requests: [
         { method: "GET", url: "https://api.example.test/pools", headers: [["accept", "application/json"], ["content-type", "application/json"]] },
@@ -143,6 +148,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "undeclared-header-noise",
+      expectedKey: "irk1:12203a3555e6f00bc88064a405fd138ba3bf09ff5b0ce1fc36a73de59cbfe85d",
       policy: POLICY,
       requests: [
         { method: "GET", url: "https://api.example.test/protocols" },
@@ -152,6 +158,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "query-order",
+      expectedKey: "irk1:fb6da8b0a3f56012f9c5320ed8ac47098a84439ca553bdd1f02ed58f55c85324",
       policy: POLICY,
       requests: [
         { method: "GET", url: "https://api.example.test/pools?chain=base&limit=50&sort=apy" },
@@ -161,6 +168,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "origin-normalization",
+      expectedKey: "irk1:48c5fbb2a14e1556638d23f86444686fbc3953fec3c75336f34c3039aefaccce",
       policy: POLICY,
       requests: [
         { method: "GET", url: "https://api.example.test/guide" },
@@ -171,6 +179,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "percent-encoding",
+      expectedKey: "irk1:a3caa1e1877df53c0e7d6ace6609d13cf4acb0ad16abb02ac6b10af7e26798f5",
       policy: POLICY,
       requests: [
         { method: "GET", url: "https://api.example.test/a~b" },
@@ -180,11 +189,13 @@ const requestKeyVectors = () => ({
     },
     {
       name: "reserved-delimiter-stays-encoded",
+      expectedKey: "irk1:66a1081e0e0c45017fb7a32cd0fd4ad7c99cc27942f72f306f31a58d33ea460e",
       policy: POLICY,
       requests: [{ method: "GET", url: "https://api.example.test/a%2Fb" }],
     },
     {
       name: "method-case-and-json-jcs-body",
+      expectedKey: "irk1:a930b1bd193549f7cd8fe045cbe7205bc1cff06debd1c2d3ad3d1e501ee70613",
       policy: POLICY,
       requests: [
         { method: "POST", url: "https://api.example.test/query", body: '{"a":1,"b":2}' },
@@ -194,6 +205,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "trailing-slash-strip",
+      expectedKey: "irk1:83f3b095b0779ab95379c1d5f6a956b07187b7f12839a1981844f48d92217876",
       policy: { ...POLICY, pathTrailingSlash: "strip" },
       requests: [
         { method: "GET", url: "https://api.example.test/pools/" },
@@ -202,6 +214,7 @@ const requestKeyVectors = () => ({
     },
     {
       name: "plus-as-space",
+      expectedKey: "irk1:2be112824955f27eb073a5b8eafb5f6e5298786393679143f1353f2d298dd66e",
       policy: { ...POLICY, plusInQuery: "space" },
       requests: [
         { method: "GET", url: "https://api.example.test/search?q=usd+coin" },

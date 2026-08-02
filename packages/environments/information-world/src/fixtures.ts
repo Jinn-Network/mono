@@ -47,6 +47,8 @@ export interface RequestKeyVectorRequest {
 
 export interface RequestKeyVectorGroup {
   readonly name: string;
+  /** Hand-pinned, reviewed key — never derived by the fixture generator. */
+  readonly expectedKey: string;
   readonly policy: RequestKeyPolicy;
   readonly requests: readonly RequestKeyVectorRequest[];
 }

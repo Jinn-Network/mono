@@ -78,6 +78,10 @@ describe("request-key vector corpus", () => {
       }, group.policy)));
       expect(keys.size, `${group.name}: ${[...keys].join(" ")}`).toBe(1);
       const only = [...keys][0] as string;
+      expect(group.expectedKey, `${group.name} has no literal expected key`)
+        .toMatch(/^irk1:[0-9a-f]{64}$/);
+      expect(only, `${group.name} diverged from its reviewed expected key`)
+        .toBe(group.expectedKey);
       expect(groupKeys.has(only), `${group.name} collides with another group`).toBe(false);
       groupKeys.add(only);
     }
