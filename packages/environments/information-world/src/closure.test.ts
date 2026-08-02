@@ -171,9 +171,93 @@ function ambientAuthorityUses(source: string): string[] {
   const forbidden = new Set([
     "process", "globalThis", "global", "window", "self", "Function", "eval", "require",
   ]);
-  return lexicalTokens(source)
+  const tokens = lexicalTokens(source);
+  return [
+    ...tokens
     .filter((token) => token.kind === "identifier" && forbidden.has(token.value))
-    .map((token) => token.value);
+    .map((token) => token.value),
+    ...evaluatorRecoveryUses(tokens),
+  ];
+}
+
+function staticStringAt(tokens: readonly LexicalToken[], start: number): { value: string; end: number } | undefined {
+  const first = tokens[start];
+  if (first?.kind !== "string" || first.value.includes("${")) return undefined;
+  let value = first.value;
+  let cursor = start + 1;
+  while (tokens[cursor]?.value === "+") {
+    const next = tokens[cursor + 1];
+    if (next?.kind !== "string" || next.value.includes("${")) return undefined;
+    value += next.value;
+    cursor += 2;
+  }
+  return { value, end: cursor };
+}
+
+function staticStringConstants(tokens: readonly LexicalToken[]): ReadonlyMap<string, string> {
+  const constants = new Map<string, string>();
+  for (let index = 0; index < tokens.length - 3; index += 1) {
+    if ((tokens[index]?.value !== "const" && tokens[index]?.value !== "let")
+      || tokens[index + 1]?.kind !== "identifier" || tokens[index + 2]?.value !== "=") continue;
+    const value = staticStringAt(tokens, index + 3);
+    if (value !== undefined && (tokens[value.end]?.value === ";" || value.end === tokens.length)) {
+      constants.set(tokens[index + 1]?.value as string, value.value);
+    }
+  }
+  return constants;
+}
+
+function memberName(
+  tokens: readonly LexicalToken[],
+  index: number,
+  constants: ReadonlyMap<string, string>,
+): { readonly name: string; readonly end: number; readonly base: LexicalToken | undefined } | undefined {
+  const base = tokens[index - 1];
+  if (tokens[index]?.value === "." && tokens[index + 1]?.kind === "identifier") {
+    return { name: tokens[index + 1]?.value as string, end: index + 2, base };
+  }
+  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
+    && tokens[index + 2]?.kind === "identifier") {
+    return { name: tokens[index + 2]?.value as string, end: index + 3, base };
+  }
+  const start = tokens[index]?.value === "[" ? index + 1
+    : tokens[index]?.value === "?" && tokens[index + 1]?.value === "." && tokens[index + 2]?.value === "["
+      ? index + 3 : undefined;
+  if (start === undefined) return undefined;
+  const literal = staticStringAt(tokens, start);
+  if (literal !== undefined && tokens[literal.end]?.value === "]") {
+    return { name: literal.value, end: literal.end + 1, base };
+  }
+  if (tokens[start]?.kind === "identifier" && tokens[start + 1]?.value === "]") {
+    const name = constants.get(tokens[start]?.value as string);
+    if (name !== undefined) return { name, end: start + 2, base };
+  }
+  return undefined;
+}
+
+// Function constructors are ambient evaluators. The package deliberately admits no evaluator,
+// no evaluator-capable property recovery, and no Reflect operation beyond `Reflect.ownKeys`, so
+// future code cannot recover `process` (or a client transport) through `createServer`.
+function evaluatorRecoveryUses(tokens: readonly LexicalToken[]): string[] {
+  const constants = staticStringConstants(tokens);
+  const findings = new Set<string>();
+  for (let index = 0; index < tokens.length; index += 1) {
+    const literal = staticStringAt(tokens, index);
+    if (literal?.value === "constructor") findings.add("constructor");
+
+    const member = memberName(tokens, index, constants);
+    if (member === undefined) continue;
+    if (member.name === "constructor" || member.name === "__proto__") {
+      findings.add(member.name);
+    }
+    if (member.name === "prototype" && member.base?.value !== "Object" && member.base?.value !== "Array") {
+      findings.add("prototype");
+    }
+    if (member.base?.value === "Reflect" && member.name !== "ownKeys") {
+      findings.add(`Reflect.${member.name}`);
+    }
+  }
+  return [...findings];
 }
 
 function hasDynamicModuleLoad(source: string): boolean {
@@ -251,6 +335,27 @@ describe("the replay service is structurally incapable of egress", () => {
     expect(ambientAuthorityUses(
       'const g = globalThis; const build = Function; const run = eval; const load = require;',
     )).toEqual(["globalThis", "Function", "eval", "require"]);
+    expect(ambientAuthorityUses(
+      'const p = createServer.constructor("return pro" + "cess")(); const m = p.getBuiltinModule("node:" + "http"); const { request: dial } = m; dial();',
+    )).toEqual(["constructor"]);
+    expect(ambientAuthorityUses(
+      'const key = "con" + "structor"; createServer[key]("return pro" + "cess")();',
+    )).toEqual(["constructor"]);
+    expect(ambientAuthorityUses(
+      'createServer["constructor"]("return pro" + "cess")();',
+    )).toEqual(["constructor"]);
+    expect(ambientAuthorityUses(
+      'const make = (() => {}).__proto__["con" + "structor"]; make("return pro" + "cess")();',
+    )).toEqual(["__proto__", "constructor"]);
+    expect(ambientAuthorityUses(
+      'const make = createServer.prototype.constructor; make("return pro" + "cess")();',
+    )).toEqual(["prototype", "constructor"]);
+    expect(ambientAuthorityUses(
+      'const make = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(createServer), "constructor")?.value; make("return pro" + "cess")();',
+    )).toEqual(["constructor"]);
+    expect(ambientAuthorityUses(
+      'const make = Reflect["g" + "et"](createServer, "constructor"); make("return pro" + "cess")();',
+    )).toEqual(["Reflect.get", "constructor"]);
   });
 
   test("imports no other node builtin or network client", () => {
