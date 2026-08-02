@@ -54,6 +54,11 @@ export type {
 
 export { mapAnnouncedSubmissionToFacts } from "./facts-mapper.js";
 export { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
+export {
+  validateRequirementsAgainstRunPinning,
+  verifyPreclaim,
+} from "./preclaim.js";
+export type { PreclaimNotClaimedReason, PreclaimResult } from "./preclaim.js";
 export type {
   AnnouncedSubmissionCard,
   FactsMapperOptions,
