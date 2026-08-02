@@ -1,6 +1,10 @@
 name: Marketplace CI
 
 on:
+  workflow_call:
+    secrets:
+      JINN_MARKETPLACE_FORK_RPC_URL:
+        required: false
   pull_request:
   push:
     branches: [next]

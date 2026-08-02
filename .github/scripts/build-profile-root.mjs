@@ -4,7 +4,11 @@ import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
-import { loadCatalogPackages } from './platform-catalog.mjs';
+import { catalogSha256 } from './build-prepublication-bundle.mjs';
+import {
+  PLATFORM_CATALOG_PATH,
+  loadCatalogPackages,
+} from './platform-catalog.mjs';
 
 const PUBLIC_DOCUMENT_KINDS = ['schemas', 'profiles', 'fixtures'];
 const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
@@ -73,10 +77,32 @@ function declaredIdentifier(servedPath, bytes, fixture) {
   return null;
 }
 
-export function buildProfileRoot({ repoRoot, outDir, commit, releaseGroup = 'platform-v1' }) {
+export function buildProfileRoot({
+  repoRoot,
+  outDir,
+  commit,
+  catalogDigest,
+  releaseGroup = 'platform-v1',
+  lane = 'canary',
+}) {
+  if (!/^[0-9a-f]{40}$/u.test(String(commit))) {
+    throw new Error('commit must be a 40-character lowercase commit SHA');
+  }
+  if (lane !== 'canary' && lane !== 'stable') {
+    throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
+  }
+  const actualCatalogDigest = catalogSha256(repoRoot);
+  const boundCatalogDigest = catalogDigest ?? actualCatalogDigest;
+  if (boundCatalogDigest !== actualCatalogDigest) {
+    throw new Error(
+      `catalog digest mismatch: expected ${boundCatalogDigest}, checked out catalog is ${actualCatalogDigest}`,
+    );
+  }
+  const packages = loadCatalogPackages(repoRoot, { releaseGroup });
+  if (packages.length === 0) throw new Error(`release group ${releaseGroup} contains no catalog packages`);
   const claims = new Map();
   const documents = [];
-  for (const pkg of loadCatalogPackages(repoRoot, { releaseGroup })) {
+  for (const pkg of packages) {
     const visitedSources = new Set();
     const declaredRoots = new Map(PUBLIC_DOCUMENT_KINDS.map((kind) => [
       kind,
@@ -136,6 +162,10 @@ export function buildProfileRoot({ repoRoot, outDir, commit, releaseGroup = 'pla
   const manifest = {
     version: 1,
     generatedFrom: { repository: 'Jinn-Network/mono', commit },
+    catalog: { path: PLATFORM_CATALOG_PATH, sha256: boundCatalogDigest },
+    releaseGroup,
+    lane,
+    packages: packages.map(({ name }) => name),
     documents,
   };
   mkdirSync(outDir, { recursive: true });
@@ -156,12 +186,27 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     const releaseGroup = args.includes('--release-group')
       ? args[args.indexOf('--release-group') + 1]
       : 'platform-v1';
+    const catalogDigest = args.includes('--catalog-digest')
+      ? args[args.indexOf('--catalog-digest') + 1]
+      : undefined;
+    const lane = args.includes('--lane') ? args[args.indexOf('--lane') + 1] : 'canary';
     if (!args.includes('--out') || !outDir) throw new Error('--out <directory> is required');
     if (!args.includes('--commit') || !/^[0-9a-f]{40}$/u.test(String(commit))) {
       throw new Error('--commit <40-character sha> is required');
     }
     if (!releaseGroup) throw new Error('--release-group <catalog release group> requires a value');
-    const manifest = buildProfileRoot({ repoRoot, outDir, commit, releaseGroup });
+    if (args.includes('--catalog-digest') && !catalogDigest) {
+      throw new Error('--catalog-digest <sha256> requires a value');
+    }
+    if (!lane) throw new Error('--lane <canary|stable> requires a value');
+    const manifest = buildProfileRoot({
+      repoRoot,
+      outDir,
+      commit,
+      catalogDigest,
+      releaseGroup,
+      lane,
+    });
     console.log(`wrote ${manifest.documents.length} profile documents and manifest.json to ${outDir}`);
   } catch (error) {
     console.error(error?.message ?? String(error));

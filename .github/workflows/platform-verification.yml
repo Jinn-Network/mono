@@ -1,0 +1,236 @@
+name: Platform Verification
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      lane:
+        required: true
+        type: string
+    secrets:
+      JINN_MARKETPLACE_FORK_RPC_URL:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    runs-on: ubuntu-latest
+    outputs:
+      catalog_digest: ${{ steps.catalog.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Bind and validate source catalog
+        id: catalog
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CALLER_SHA: ${{ github.sha }}
+        run: |
+          test "${SOURCE_SHA}" = "${CALLER_SHA}"
+          test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"
+          digest="$(node --input-type=module <<'NODE'
+          import { catalogSha256 } from './.github/scripts/build-prepublication-bundle.mjs';
+          import { loadPlatformCatalog } from './.github/scripts/platform-catalog.mjs';
+          loadPlatformCatalog(process.cwd());
+          process.stdout.write(catalogSha256(process.cwd()));
+          NODE
+          )"
+          test "${#digest}" -eq 64
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+
+  benchmarking:
+    needs: catalog
+    uses: ./.github/workflows/benchmarking-ci.yml
+
+  discovery:
+    needs: catalog
+    uses: ./.github/workflows/record-discovery-ci.yml
+
+  evidence:
+    needs: catalog
+    uses: ./.github/workflows/evidence-ci.yml
+
+  marketplace:
+    needs: catalog
+    uses: ./.github/workflows/marketplace-ci.yml
+    secrets:
+      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
+
+  task_execution:
+    needs: catalog
+    uses: ./.github/workflows/task-execution-ci.yml
+
+  trust:
+    needs: catalog
+    uses: ./.github/workflows/trust-ci.yml
+
+  artifacts:
+    needs: catalog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install npm 11.19.0
+        run: npm install -g npm@11.19.0
+      - name: Build public surface and profile artifacts
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
+          LANE: ${{ inputs.lane }}
+        run: |
+          mkdir -p .platform-verification
+          node .github/scripts/build-platform-public-surface.mjs \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane "${LANE}" \
+            --out .platform-verification/public-surface-manifest.json
+          node .github/scripts/build-profile-root.mjs \
+            --commit "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane "${LANE}" \
+            --out .platform-verification/profile-root
+      - name: Pack exact prepublication bundle
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
+          LANE: ${{ inputs.lane }}
+        run: |
+          node .github/scripts/build-prepublication-bundle.mjs \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane "${LANE}" \
+            --out .platform-verification/pack
+      - name: Attest tarballs and public artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            .platform-verification/pack/manifest.json
+            .platform-verification/pack/tarballs/*.tgz
+            .platform-verification/public-surface-manifest.json
+            .platform-verification/profile-root/**
+      - name: Upload prepublication artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  external_consumer:
+    needs: artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install npm 11.19.0
+        run: npm install -g npm@11.19.0
+      - name: Download prepublication artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+      - name: Clean external tarball consumer
+        run: >-
+          node .github/scripts/prepublication-external-consumer.mjs
+          --manifest .platform-verification/pack/manifest.json
+
+  verification_receipt:
+    needs:
+      - catalog
+      - benchmarking
+      - discovery
+      - evidence
+      - marketplace
+      - task_execution
+      - trust
+      - artifacts
+      - external_consumer
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Download prepublication artifacts
+        if: needs.artifacts.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+      - name: Require exact success and write immutable receipt
+        if: always()
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CATALOG_DIGEST: ${{ needs.catalog.outputs.catalog_digest }}
+          LANE: ${{ inputs.lane }}
+          CATALOG_RESULT: ${{ needs.catalog.result }}
+          BENCHMARKING_RESULT: ${{ needs.benchmarking.result }}
+          DISCOVERY_RESULT: ${{ needs.discovery.result }}
+          EVIDENCE_RESULT: ${{ needs.evidence.result }}
+          MARKETPLACE_RESULT: ${{ needs.marketplace.result }}
+          TASK_EXECUTION_RESULT: ${{ needs.task_execution.result }}
+          TRUST_RESULT: ${{ needs.trust.result }}
+          ARTIFACTS_RESULT: ${{ needs.artifacts.result }}
+          EXTERNAL_CONSUMER_RESULT: ${{ needs.external_consumer.result }}
+        run: |
+          node .github/scripts/platform-verification-receipt.mjs \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane "${LANE}" \
+            --pack-manifest .platform-verification/pack/manifest.json \
+            --public-manifest .platform-verification/public-surface-manifest.json \
+            --profile-manifest .platform-verification/profile-root/manifest.json \
+            --gate "catalog=${CATALOG_RESULT}" \
+            --gate "benchmarking=${BENCHMARKING_RESULT}" \
+            --gate "record-discovery=${DISCOVERY_RESULT}" \
+            --gate "evidence=${EVIDENCE_RESULT}" \
+            --gate "marketplace=${MARKETPLACE_RESULT}" \
+            --gate "task-execution=${TASK_EXECUTION_RESULT}" \
+            --gate "trust=${TRUST_RESULT}" \
+            --gate "artifacts=${ARTIFACTS_RESULT}" \
+            --gate "external-consumer=${EXTERNAL_CONSUMER_RESULT}" \
+            --out .platform-verification/verification-receipt.json
+      - name: Attest verification receipt
+        if: success()
+        uses: actions/attest@v4
+        with:
+          subject-path: .platform-verification/verification-receipt.json
+      - name: Upload verification receipt
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-verification-receipt
+          path: .platform-verification/verification-receipt.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90

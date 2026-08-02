@@ -85,6 +85,47 @@ test('each document carries its exact-byte digest, media type, and source packag
   }
 });
 
+test('the profile manifest binds catalog digest, release group, lane, and exact package set', () => {
+  const root = scratchRepo();
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
+  try {
+    const catalogDigest = createHash('sha256')
+      .update(readFileSync(join(root, 'architecture/platform-packages.v1.json')))
+      .digest('hex');
+    const manifest = buildProfileRoot({
+      repoRoot: root,
+      outDir,
+      commit: SHA,
+      catalogDigest,
+      releaseGroup: 'platform-v1',
+      lane: 'stable',
+    });
+    assert.deepEqual(manifest.catalog, {
+      path: 'architecture/platform-packages.v1.json',
+      sha256: catalogDigest,
+    });
+    assert.equal(manifest.releaseGroup, 'platform-v1');
+    assert.equal(manifest.lane, 'stable');
+    assert.equal(manifest.packages.length, 50);
+    assert.equal(new Set(manifest.packages).size, 50);
+    assert.ok(manifest.packages.includes('@jinn-network/evidence-protocol'));
+    assert.throws(
+      () => buildProfileRoot({
+        repoRoot: root,
+        outDir,
+        commit: SHA,
+        catalogDigest: '0'.repeat(64),
+        releaseGroup: 'platform-v1',
+        lane: 'stable',
+      }),
+      /catalog digest mismatch/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('a colliding served path across two packages is refused', () => {
   const root = scratchRepo([{
     directory: 'packages/trust/core',

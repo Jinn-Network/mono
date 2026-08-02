@@ -1,6 +1,7 @@
 name: Record Discovery CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [next]
