@@ -11,6 +11,38 @@ export const PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1 = {
 
 const PREDICTION_PROFILE_DIGEST = "sha256:e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937";
 const DECIMAL_PROBABILITY = /^(0(?:\.\d+)?|1(?:\.0+)?)$/u;
+const RFC3339_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u;
+const PREDICTION_PARSER_DIGEST = "sha256:fdf33b359e1d142a372b374abddab4e582fd4cbff5a32e53de9333a5515c2d1a";
+
+const PREDICTION_EVALUATOR_FAMILY_BLOCK = {
+  image: { name: "prediction-image", digest: { sha256: "c".repeat(64) }, accessClass: "public" },
+  platform: "linux/amd64",
+  workspace: {},
+  testMaterial: [],
+  parser: { id: "network.jinn.parser.prediction-market", version: "1.0.0", digest: PREDICTION_PARSER_DIGEST },
+  transitions: { failToPass: ["prediction-valid"], passToPass: [] },
+  timeout: 60,
+};
+
+const PREDICTION_MEASUREMENTS = [
+  { name: "integrity", type: "boolean", required: true },
+  { name: "resolved", type: "boolean", required: true },
+  { name: "outcomeYes", type: "boolean", required: false },
+  { name: "solverBrier", type: "string", direction: "lower-better", required: false },
+  { name: "consensusBrier", type: "string", required: false },
+  { name: "brierSpread", type: "string", direction: "lower-better", required: false },
+];
+
+const PREDICTION_VERDICT_RULE = {
+  all: [
+    { threshold: { measurement: "integrity", op: "eq", value: true } },
+    { inconclusiveWhen: { threshold: { measurement: "resolved", op: "eq", value: false } }, class: "market-unresolved" },
+  ],
+};
+
+function isExactlyCanonical(actual: unknown, expected: unknown): boolean {
+  return Buffer.compare(Buffer.from(canonicalJsonBytes(actual)), Buffer.from(canonicalJsonBytes(expected))) === 0;
+}
 
 export interface PredictionSnapshotAdmissionReceiptV1 {
   readonly schemaVersion: "https://jinn.network/records/prediction-snapshot-admission-receipt/1";
@@ -57,23 +89,49 @@ function parseExactDocument(bytes: Uint8Array, label: string): Record<string, un
 
 function exactEvaluationSpec(bytes: Uint8Array): { digest: `sha256:${string}` } {
   const specification = parseExactDocument(bytes, "prediction EvaluationSpec");
-  if (specification.protocol !== "https://jinn.network/profiles/evaluation-spec/1.0" || specification.family !== "deterministic-process") {
+  if (
+    specification.protocol !== "https://jinn.network/profiles/evaluation-spec/1.0"
+    || specification.semanticsVersion !== "4"
+    || specification.family !== "deterministic-process"
+    || Object.keys(specification).sort().join(",") !== "evidenceConventions,family,familyBlock,grader,measurements,protocol,semanticsVersion,unscorable,verdictRule"
+  ) {
     return refuse("invalid-candidate", "prediction admission requires a deterministic-process EvaluationSpec");
   }
-  const grader = specification.grader;
-  if (typeof grader !== "object" || grader === null || Array.isArray(grader) || (grader as Record<string, unknown>).access === "private") {
-    return refuse("invalid-candidate", "prediction admission requires a public single-grader EvaluationSpec");
+  const grader = specification.grader as Record<string, unknown> | undefined;
+  const block = specification.familyBlock as Record<string, unknown> | undefined;
+  if (
+    grader === undefined
+    || !isExactlyCanonical(grader, { name: "public-grader", digest: { sha256: "b".repeat(64) }, accessClass: "public" })
+    || block === undefined
+    || !isExactlyCanonical(block, PREDICTION_EVALUATOR_FAMILY_BLOCK)
+    || !isExactlyCanonical(specification.measurements, PREDICTION_MEASUREMENTS)
+    || !isExactlyCanonical(specification.verdictRule, PREDICTION_VERDICT_RULE)
+    || !isExactlyCanonical(specification.unscorable, [{ name: "market-unresolved", disposition: "recorded-inconclusive" }])
+    || !isExactlyCanonical(specification.evidenceConventions, { requiredRefs: [] })
+  ) {
+    return refuse("invalid-candidate", "prediction admission requires a compatible prediction evaluator");
   }
   return { digest: recordDigest(bytes) };
 }
 
-function forecastFromTask(task: Record<string, unknown>): PredictionSnapshotAdmissionReceiptV1["forecast"] {
+function forecastFromTask(task: Record<string, unknown>, evaluationSpecDigest: string): PredictionSnapshotAdmissionReceiptV1["forecast"] {
+  if (
+    task.protocol !== "https://jinn.network/profiles/task-execution/1.0"
+    || typeof task.instructions !== "string" || task.instructions.length === 0
+    || Object.keys(task).sort().join(",") !== "evaluation,instructions,outputs,payload,profile,protocol"
+  ) {
+    return refuse("invalid-candidate", "prediction Task does not satisfy the frozen native contract");
+  }
   const profile = task.profile as { uri?: unknown; digest?: { sha256?: unknown } } | undefined;
   if (
     profile?.uri !== "https://jinn.network/task-profiles/prediction-forecast/1.0"
     || profile.digest?.sha256 !== PREDICTION_PROFILE_DIGEST.slice("sha256:".length)
   ) {
     return refuse("invalid-candidate", "prediction Task does not name the sealed prediction-forecast/1.0 profile");
+  }
+  const evaluation = task.evaluation as { name?: unknown; digest?: { sha256?: unknown } } | undefined;
+  if (evaluation?.name !== "evaluation-spec.json" || evaluation.digest?.sha256 !== evaluationSpecDigest.slice("sha256:".length)) {
+    return refuse("invalid-candidate", "prediction Task must bind the exact supplied EvaluationSpec");
   }
   const outputs = task.outputs;
   if (
@@ -84,23 +142,35 @@ function forecastFromTask(task: Record<string, unknown>): PredictionSnapshotAdmi
     || (outputs[0] as Record<string, unknown>).name !== "prediction"
     || (outputs[0] as Record<string, unknown>).mediaType !== "application/json"
     || (outputs[0] as Record<string, unknown>).required !== true
+    || Buffer.compare(Buffer.from(canonicalJsonBytes((outputs[0] as Record<string, unknown>).schema)), Buffer.from(canonicalJsonBytes({
+      type: "object", additionalProperties: false,
+      properties: { probabilityYes: { type: "string", pattern: "^(0(\\.\\d+)?|1(\\.0+)?)$" }, submittedAt: { type: "string", format: "date-time" } },
+      required: ["probabilityYes", "submittedAt"],
+    }))) !== 0
   ) {
     return refuse("invalid-candidate", "prediction Task must declare exactly one prediction output");
   }
   const payload = task.payload;
-  const forecast = typeof payload === "object" && payload !== null
-    ? (payload as { forecast?: unknown }).forecast
-    : undefined;
+  if (
+    typeof payload !== "object" || payload === null || Array.isArray(payload)
+    || Object.keys(payload).sort().join(",") !== "forecast"
+  ) {
+    return refuse("invalid-candidate", "prediction Task payload must have only forecast");
+  }
+  const forecast = (payload as { forecast?: unknown }).forecast;
   if (typeof forecast !== "object" || forecast === null || Array.isArray(forecast)) {
     return refuse("invalid-candidate", "prediction Task payload must carry forecast");
   }
   const value = forecast as Record<string, unknown>;
-  const { marketId, consensusProbabilityYes, observedAt, resolvesAt } = value;
+  if (Object.keys(value).sort().join(",") !== "consensusProbabilityYes,marketId,observedAt,question,resolvesAt") {
+    return refuse("invalid-candidate", "prediction forecast must have closed payload properties");
+  }
+  const { marketId, question, consensusProbabilityYes, observedAt, resolvesAt } = value;
   if (
-    typeof marketId !== "string" || marketId.length === 0
+    typeof marketId !== "string" || marketId.length === 0 || typeof question !== "string" || question.length === 0
     || typeof consensusProbabilityYes !== "string" || !DECIMAL_PROBABILITY.test(consensusProbabilityYes)
-    || typeof observedAt !== "string" || Number.isNaN(Date.parse(observedAt))
-    || typeof resolvesAt !== "string" || Number.isNaN(Date.parse(resolvesAt))
+    || typeof observedAt !== "string" || !RFC3339_UTC.test(observedAt) || Number.isNaN(Date.parse(observedAt))
+    || typeof resolvesAt !== "string" || !RFC3339_UTC.test(resolvesAt) || Number.isNaN(Date.parse(resolvesAt))
     || Date.parse(resolvesAt) <= Date.parse(observedAt)
   ) {
     return refuse("invalid-candidate", "prediction forecast has invalid market identity, consensusProbabilityYes, or time bounds");
@@ -124,7 +194,7 @@ export function admitPredictionSnapshot(input: PredictionSnapshotAdmissionInput)
       documentDigest: recordDigest(input.taskBytes),
       evaluationSpecDigest: specification.digest,
     },
-    forecast: forecastFromTask(task),
+    forecast: forecastFromTask(task, specification.digest),
   };
 }
 

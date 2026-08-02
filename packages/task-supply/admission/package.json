@@ -37,6 +37,8 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "fixtures:generate": "yarn build && node scripts/generate-prediction-snapshot-fixture.mjs",
+    "fixtures:check": "yarn build && node scripts/generate-prediction-snapshot-fixture.mjs --check",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

@@ -48,10 +48,7 @@ describe("v1 launchers", () => {
     expect(interpretResult(plan, { exitCode: 0 }).outcome).toBe("fulfilled");
   });
 
-  // E42: daemon-harness e2e posts probabilityYes as a decimal string ('0.75'), matching
-  // PredictionV1TaskSchema / the in-process PredictionV1BaselineImpl. Requiring typeof ===
-  // 'number' made the launcher exit 2 → backend-terminal → delivery-wait-failed.
-  it("prediction-v1-baseline accepts string probabilityYes from a legacy SignedTaskV1 input", () => {
+  it("prediction-v1-baseline refuses a legacy SignedTaskV1 input", () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-pred-baseline-"));
     scratchRoots.push(root);
     const inputDir = join(root, "input");
@@ -81,9 +78,60 @@ describe("v1 launchers", () => {
       env: { ...process.env, ...plan.env },
       encoding: "utf8",
     });
-    expect(result.status, result.stderr).toBe(0);
-    const solution = JSON.parse(readFileSync(join(outDir, "prediction-v1-solution.json"), "utf8"));
-    expect(solution.probabilityYes).toBe("0.75");
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("expected exactly one native prediction-forecast Task");
+  });
+
+  it("executes the native golden forecast and emits only its closed prediction output deterministically", () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-native-prediction-"));
+    scratchRoots.push(root);
+    const inputDir = join(root, "input");
+    const outDir = join(root, "out");
+    const workDir = join(root, "work");
+    mkdirSync(inputDir, { recursive: true });
+    mkdirSync(outDir, { recursive: true });
+    mkdirSync(workDir, { recursive: true });
+    const golden = readFileSync(join(
+      process.cwd(), "../../../task-supply/admission/fixtures/prediction-snapshot-v1/task.json",
+    ));
+    writeFileSync(join(inputDir, "task.json"), golden);
+
+    const plan = predictionV1BaselineLauncher.plan(
+      view,
+      { ...paths, input: inputDir, out: outDir, work: workDir, root },
+      attempt,
+    );
+    const first = spawnSync(plan.argv[0]!, plan.argv.slice(1), { cwd: plan.cwd, env: { ...process.env, ...plan.env }, encoding: "utf8" });
+    expect(first.status, first.stderr).toBe(0);
+    const prediction = JSON.parse(readFileSync(join(outDir, "prediction.json"), "utf8"));
+    expect(prediction).toStrictEqual({ probabilityYes: "0.750000", submittedAt: "2026-08-02T00:00:00Z" });
+  });
+
+  it("refuses an ambiguous native Task when an extra valid-looking JSON document is present", () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-ambiguous-prediction-"));
+    scratchRoots.push(root);
+    const inputDir = join(root, "input");
+    const outDir = join(root, "out");
+    const workDir = join(root, "work");
+    mkdirSync(inputDir, { recursive: true });
+    mkdirSync(outDir, { recursive: true });
+    mkdirSync(workDir, { recursive: true });
+    const golden = JSON.parse(readFileSync(join(
+      process.cwd(), "../../../task-supply/admission/fixtures/prediction-snapshot-v1/task.json",
+    ), "utf8"));
+    writeFileSync(join(inputDir, "task.json"), JSON.stringify(golden));
+    writeFileSync(join(inputDir, "shadow.json"), JSON.stringify({
+      ...golden,
+      payload: { forecast: { ...golden.payload.forecast, consensusProbabilityYes: "0.250000" } },
+    }));
+    const plan = predictionV1BaselineLauncher.plan(
+      view,
+      { ...paths, input: inputDir, out: outDir, work: workDir, root },
+      attempt,
+    );
+    const result = spawnSync(plan.argv[0]!, plan.argv.slice(1), { cwd: plan.cwd, env: { ...process.env, ...plan.env }, encoding: "utf8" });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("expected exactly one native prediction-forecast Task");
   });
 
   it("does not treat an unspecified blame-rule signal as matching every exit", () => {
