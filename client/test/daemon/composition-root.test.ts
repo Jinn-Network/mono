@@ -27,6 +27,7 @@ import {
   type RoleIdentitySet,
 } from '../../src/daemon/role-identities.js';
 import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
+import { NativeSolutionCoordinator } from '../../src/daemon/native-solution-coordinator.js';
 
 const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() => ({
   createBaseVenueMock: vi.fn(),
@@ -211,7 +212,11 @@ function nativeRoleIdentities(): RoleIdentitySet {
       }] as const;
     }),
   );
-  return { agent: 'urn:jinn:operator:test', get: (role) => roles.get(role)! } as unknown as RoleIdentitySet;
+  return {
+    agent: 'urn:jinn:operator:test',
+    get: (role) => roles.get(role)!,
+    resolveEffective: async () => ({ ok: true as const, bindingDigest: `sha256:${'9'.repeat(64)}` }),
+  } as unknown as RoleIdentitySet;
 }
 
 function nativeClaimRuntime(
@@ -234,6 +239,12 @@ function nativeClaimRuntime(
     canonicalFinalized: async () => true,
     activeEngagements: () => 0,
     worker: { ownerId: 'composition-test-worker', ttlMs: 60_000 },
+    solution: {
+      publisherRootDir: mkdtempSync(join(tmpdir(), 'jinn-native-solution-publisher-')),
+      publicBaseUrl: 'https://operator.example/solver',
+      exactDocuments: async () => { throw new Error('solution documents not exercised'); },
+      resolveEvaluationSpec: async () => undefined,
+    },
   };
 }
 
@@ -400,6 +411,11 @@ describe('buildOperatorComposition', () => {
 
     expect(composition.identities).toBe(identities);
     expect(createBaseVenueMock).toHaveBeenCalledTimes(1);
+    expect(composition.nativeSolutionCoordinator).toBeInstanceOf(NativeSolutionCoordinator);
+    expect(composition.nativeSolutionPublisher?.sourceId).toBe(
+      'urn:jinn:operator:test/solver-records',
+    );
+    expect(composition.nativeSolutionPublisher?.sourceId).not.toContain('operator-projector');
 
     // (a) the composition returns its own broadcaster (finding E16 / the C2 ruling: no
     // process-global install — the host threads `composition.broadcaster` explicitly).

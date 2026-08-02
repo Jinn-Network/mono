@@ -184,7 +184,14 @@ import {
   NativeClaimCoordinator,
   type NativeClaimCanonicalReader,
 } from './native-claim-coordinator.js';
-import type { NativeOperatorStateRepository } from './native-operator-state.js';
+import type { NativeEngagementRow, NativeOperatorStateRepository } from './native-operator-state.js';
+import { NativeSolutionCoordinator } from './native-solution-coordinator.js';
+import {
+  openNativeSolutionPublisher,
+  type NativeSolutionPublisher,
+} from './native-solution-publisher.js';
+import { buildNativeSolutionVerification } from './native-solution-verification.js';
+import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
 import {
   createNativeRequesterSubmissionResolver,
   type NativeRequesterSubmissionLookup,
@@ -250,6 +257,10 @@ export interface OperatorComposition {
   readonly archive?: ArchiveSubscription;
   /** Present only in native mode. Owns B5 admission/claim/reconciliation; never executes work. */
   readonly nativeClaimCoordinator?: NativeClaimCoordinator;
+  /** Present only in native mode; resumes execution/publication/solution settlement at startup. */
+  readonly nativeSolutionCoordinator?: NativeSolutionCoordinator;
+  /** Dedicated `solver-records` source; never shares the ProjectorLoop source tuple or root. */
+  readonly nativeSolutionPublisher?: NativeSolutionPublisher;
   readonly nativeOperatorState?: NativeOperatorStateRepository;
   readonly nativeLauncherInspector?: NativeLauncherCapabilityPort;
   close(): Promise<void>;
@@ -266,6 +277,15 @@ export interface NativeClaimRuntimeInput {
   readonly activeEngagements: () => number;
   readonly worker: { readonly ownerId: string; readonly ttlMs: number };
   readonly now?: () => Date;
+  readonly solution: {
+    /** Dedicated lifecycle-owned directory, distinct from the projector archive root. */
+    readonly publisherRootDir: string;
+    readonly publicBaseUrl: string;
+    /** Re-resolves original exact requester bytes during startup recovery. */
+    readonly exactDocuments: (engagement: NativeEngagementRow) => Promise<SealedDocuments>;
+    /** Resolves the Task's advertised public EvaluationSpec by exact digest. */
+    readonly resolveEvaluationSpec: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+  };
 }
 
 /**
@@ -884,6 +904,9 @@ function buildProjector(input: {
    *  port's async, loosely-typed `ProtocolObservation[]`) — `buildArchiveSubscription` (finding
    *  E36) reads this directly rather than opening a second `ProjectorCursorStore`. */
   readonly readObservations: () => readonly import('@jinn-network/marketplace-projector').MarketplaceProtocolObservation[];
+  /** Canonical settlement/evaluation readers consume the same projector-owned checkpoint. */
+  readonly readFinalizedBlockNumber: () => bigint;
+  readonly readCanonicalBlockHash: (blockNumber: bigint) => Promise<Hex | undefined>;
 } {
   const cursorKey = `${input.chain.chainId}:${input.chain.taskCoordinator.toLowerCase()}`;
   const cursorStore = new ProjectorCursorStore(input.store, cursorKey);
@@ -933,6 +956,7 @@ function buildProjector(input: {
     writePageCount: (count) => input.store.setConfigValue(pageCountKey, String(count)),
   };
 
+  const readCanonicalBlockHash = createCanonicalBlockHashReader(input.publicClient);
   const projector = new ProjectorLoop({
     chain: input.chain,
     logSource: input.logSource,
@@ -943,7 +967,7 @@ function buildProjector(input: {
     store: input.store,
     isAuthorizedMechOrigin,
     readFinalizedBlockNumber: createFinalizedHeadReader(input.publicClient),
-    readCanonicalBlockHash: createCanonicalBlockHashReader(input.publicClient),
+    readCanonicalBlockHash,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
@@ -958,6 +982,8 @@ function buildProjector(input: {
     claimGate,
     observations: async () => cursorStore.readObservations(),
     readObservations: () => cursorStore.readObservations(),
+    readFinalizedBlockNumber: () => cursorStore.read()?.finalizedBlockNumber ?? 0n,
+    readCanonicalBlockHash,
   };
 }
 
@@ -1113,7 +1139,13 @@ export async function buildOperatorComposition(
     } : {}),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
-  const { projector, claimGate, readObservations } = projectorParts;
+  const {
+    projector,
+    claimGate,
+    readObservations,
+    readFinalizedBlockNumber,
+    readCanonicalBlockHash,
+  } = projectorParts;
 
   // Contract 1 (finding E16 / C2 ruling: per-daemon state, not a process-global install). Built
   // once per composition and returned on `OperatorComposition.broadcaster` — the host threads
@@ -1273,6 +1305,41 @@ export async function buildOperatorComposition(
       })
     : undefined;
 
+  const nativeSolutionPublisher = input.mode === 'native'
+    ? await openNativeSolutionPublisher({
+        rootDir: input.nativeClaimRuntime!.solution.publisherRootDir,
+        publicBaseUrl: input.nativeClaimRuntime!.solution.publicBaseUrl,
+        source: { agent: identities!.agent, name: 'solver-records' },
+        signer: identities!.get('solver-discovery'),
+      })
+    : undefined;
+  const nativeSolutionCoordinator = input.mode === 'native'
+    ? new NativeSolutionCoordinator({
+        state: input.nativeClaimRuntime!.state,
+        backend,
+        documents: { resolve: input.nativeClaimRuntime!.solution.exactDocuments },
+        deliverySignature: { get: (digest) => backend.getDeliverySignature(digest) },
+        evidence: {
+          awaitIndexed: evidence.ports.awaitIndexed,
+          getRecord: (reference) => evidence.ports.repository.getRecord(reference),
+        },
+        verification: buildNativeSolutionVerification({
+          identities: identities!,
+          resolveEvaluationSpec: input.nativeClaimRuntime!.solution.resolveEvaluationSpec,
+        }),
+        publisher: nativeSolutionPublisher!,
+        settlement: buildNativeSolutionSettlementPort({
+          chain: input.chain,
+          mechAddress: input.mechAddress,
+          deliveryBroadcaster,
+          settlement: venue.settlement,
+          readObservations,
+          readFinalizedBlockNumber,
+          readCanonicalBlockHash,
+        }),
+      })
+    : undefined;
+
   // Finding E36 (ruled "build it"): the `ArchiveSubscription` `work-loop.ts`'s `WorkLoopConfig`
   // needs, fed from this SAME `readObservations` accessor `venue`'s `observations` port above
   // already reads (one `ProjectorCursorStore`, two consumers) — see `./archive-subscription.js`.
@@ -1307,14 +1374,20 @@ export async function buildOperatorComposition(
     ...(archive === undefined ? {} : { archive }),
     ...(nativeClaimCoordinator === undefined ? {} : {
       nativeClaimCoordinator,
+      nativeSolutionCoordinator: nativeSolutionCoordinator!,
+      nativeSolutionPublisher: nativeSolutionPublisher!,
       nativeOperatorState: input.nativeClaimRuntime!.state,
       nativeLauncherInspector: nativeLauncherInspector!,
     }),
     async close(): Promise<void> {
       try {
-        await evidence.close();
+        await nativeSolutionPublisher?.close();
       } finally {
-        venue.close();
+        try {
+          await evidence.close();
+        } finally {
+          venue.close();
+        }
       }
     },
   };

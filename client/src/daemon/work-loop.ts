@@ -78,6 +78,7 @@ import type {
   NativeClaimCoordinator,
   NativeClaimCoordinatorResult,
 } from './native-claim-coordinator.js';
+import type { NativeSolutionCoordinator } from './native-solution-coordinator.js';
 import { runLoop } from './loop-heartbeat.js';
 import { gateClaimByAiUnits } from './ai-units-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
@@ -120,6 +121,7 @@ export interface WorkLoopConfig {
   /** Verified, checkpointed native source consumer. Mutually exclusive with native archive use. */
   readonly nativeDiscovery?: NativeDiscoveryConsumer;
   readonly nativeClaimCoordinator?: Pick<NativeClaimCoordinator, 'startWorker' | 'renewWorker' | 'reconcileStartup' | 'process'>;
+  readonly nativeSolutionCoordinator?: Pick<NativeSolutionCoordinator, 'reconcileStartup' | 'reconcileEngagement'>;
   readonly ledger: EngagementLedger;
   readonly claimGate: ClaimGate;
   readonly store: Store;
@@ -232,11 +234,19 @@ export class WorkLoop {
       if (config.acceptLegacyCards || config.archive !== undefined) {
         throw new Error('native work loop requires acceptLegacyCards=false and no legacy archive');
       }
-      if (config.nativeDiscovery === undefined || config.nativeClaimCoordinator === undefined) {
-        throw new Error('native work loop requires verified discovery and durable claim coordinator');
+      if (
+        config.nativeDiscovery === undefined
+        || config.nativeClaimCoordinator === undefined
+        || config.nativeSolutionCoordinator === undefined
+      ) {
+        throw new Error('native work loop requires verified discovery and durable claim/solution coordinators');
       }
-    } else if (config.nativeDiscovery !== undefined || config.nativeClaimCoordinator !== undefined) {
-      throw new Error('legacy work loop cannot receive native discovery or claim coordinator');
+    } else if (
+      config.nativeDiscovery !== undefined
+      || config.nativeClaimCoordinator !== undefined
+      || config.nativeSolutionCoordinator !== undefined
+    ) {
+      throw new Error('legacy work loop cannot receive native discovery, claim, or solution coordinator');
     }
   }
 
@@ -245,6 +255,7 @@ export class WorkLoop {
     if (this.config.composition.mode !== 'native') return;
     this.config.nativeClaimCoordinator!.startWorker();
     await this.config.nativeClaimCoordinator!.reconcileStartup();
+    await this.config.nativeSolutionCoordinator!.reconcileStartup();
     await this.config.nativeDiscovery!.sync();
     this.nativeInitialized = true;
   }
@@ -275,6 +286,9 @@ export class WorkLoop {
     if (!this.config.claimGate.isOpen()) return { kind: 'skipped', reason: 'gate-closed' };
     const documents = await this.config.readSealedDocuments(queued.card);
     const result = await this.config.nativeClaimCoordinator!.process(queued, documents);
+    if (result.kind === 'claim-finalized') {
+      await this.config.nativeSolutionCoordinator!.reconcileEngagement(result.engagementId);
+    }
     return { kind: 'native-claim', result };
   }
 

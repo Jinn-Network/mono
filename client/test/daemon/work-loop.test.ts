@@ -352,6 +352,10 @@ describe('work loop', () => {
       reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
       process: vi.fn(),
     };
+    const solutionCoordinator = {
+      reconcileStartup: vi.fn(async () => []),
+      reconcileEngagement: vi.fn(),
+    };
     const { loop } = build({
       composition: { ...composition(), mode: 'native' },
       archive: undefined,
@@ -363,6 +367,7 @@ describe('work loop', () => {
         resumeSse: () => ({ close: () => undefined }),
       },
       nativeClaimCoordinator: coordinator,
+      nativeSolutionCoordinator: solutionCoordinator,
       acceptLegacyCards: false,
     });
 
@@ -371,6 +376,7 @@ describe('work loop', () => {
     expect(sync).toHaveBeenCalledTimes(2);
     expect(takePending).toHaveBeenCalledOnce();
     expect(coordinator.renewWorker).toHaveBeenCalledOnce();
+    expect(solutionCoordinator.reconcileStartup).toHaveBeenCalledOnce();
     expect(archiveSince).not.toHaveBeenCalled();
   });
 
@@ -393,11 +399,15 @@ describe('work loop', () => {
         reconcileStartup: async () => { order.push('reconcile'); return { reconciled: 0, finalized: 0 }; },
         process: vi.fn(),
       },
+      nativeSolutionCoordinator: {
+        reconcileStartup: async () => { order.push('solution-reconcile'); return []; },
+        reconcileEngagement: vi.fn(),
+      },
     });
     await loop.initialize();
-    expect(order).toEqual(['lease', 'reconcile', 'sync']);
+    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync']);
     await loop.tick();
-    expect(order).toEqual(['lease', 'reconcile', 'sync', 'renew', 'sync']);
+    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync', 'renew', 'sync']);
   });
 
   it('fails an idle native tick before source sync when lease renewal fails', async () => {
@@ -418,6 +428,10 @@ describe('work loop', () => {
         renewWorker: () => { throw new Error('lease expired'); },
         reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
         process: vi.fn(),
+      },
+      nativeSolutionCoordinator: {
+        reconcileStartup: vi.fn(async () => []),
+        reconcileEngagement: vi.fn(),
       },
     });
     await loop.initialize();
@@ -453,6 +467,7 @@ describe('work loop', () => {
       taskBytes: goldenTask(),
       submissionBytes: goldenSubmission(),
     }));
+    const reconcileEngagement = vi.fn(async () => ({ kind: 'solution-settled' as const, operationId: `sha256:${'d'.repeat(64)}` as const }));
     const { loop } = build({
       composition: { ...composition(), mode: 'native' },
       archive: undefined,
@@ -470,6 +485,10 @@ describe('work loop', () => {
         reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
         process,
       },
+      nativeSolutionCoordinator: {
+        reconcileStartup: vi.fn(async () => []),
+        reconcileEngagement,
+      },
       readSealedDocuments,
     });
 
@@ -480,6 +499,7 @@ describe('work loop', () => {
     }]);
     expect(readSealedDocuments).toHaveBeenCalledWith(nativeCard);
     expect(process).toHaveBeenCalledWith(queued, await readSealedDocuments.mock.results[0]!.value);
+    expect(reconcileEngagement).toHaveBeenCalledWith(`sha256:${'c'.repeat(64)}`);
     expect(acknowledge).not.toHaveBeenCalled();
   });
 

@@ -290,6 +290,10 @@ describe('Daemon — C8 loop startup', () => {
           reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
           process: vi.fn(),
         },
+        nativeSolutionCoordinator: {
+          reconcileStartup: vi.fn(async () => []),
+          reconcileEngagement: vi.fn(),
+        },
         ledger: {} as never,
         claimGate: composition.claimGate,
         estimateAiUnits: () => 0,
