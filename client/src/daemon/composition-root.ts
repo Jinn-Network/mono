@@ -89,8 +89,8 @@
  * receives or derives an EOA-based Ed25519 key.
  */
 import { createHash, type KeyObject } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { constants, existsSync, readFileSync } from 'node:fs';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import {
@@ -176,6 +176,16 @@ import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
 import type { RoleIdentitySet } from './role-identities.js';
 import {
+  evaluateNativeClaim,
+  type NativeLauncherCapabilityPort,
+  type NativeTier4ClaimPolicy,
+} from './native-claim-policy.js';
+import {
+  NativeClaimCoordinator,
+  type NativeClaimCanonicalReader,
+} from './native-claim-coordinator.js';
+import type { NativeOperatorStateRepository } from './native-operator-state.js';
+import {
   createNativeRequesterSubmissionResolver,
   type NativeRequesterSubmissionLookup,
   type NativeRequesterSubmissionVerifier,
@@ -237,8 +247,25 @@ export interface OperatorComposition {
    * header's gap (a), always legacy-derived — reuses `bridge-legacy-delivery.ts`'s
    * `synthesizeLegacyFactsCard` rather than re-deriving that shape).
    */
-  readonly archive: ArchiveSubscription;
+  readonly archive?: ArchiveSubscription;
+  /** Present only in native mode. Owns B5 admission/claim/reconciliation; never executes work. */
+  readonly nativeClaimCoordinator?: NativeClaimCoordinator;
+  readonly nativeOperatorState?: NativeOperatorStateRepository;
+  readonly nativeLauncherInspector?: NativeLauncherCapabilityPort;
   close(): Promise<void>;
+}
+
+export interface NativeClaimRuntimeInput {
+  /** Exact agent IRI used when B2 resolved every role binding. */
+  readonly operatorAgent: string;
+  readonly state: NativeOperatorStateRepository;
+  readonly exactDocuments: (card: AnnouncedSubmissionCard) => Promise<SealedDocuments>;
+  readonly canonical: NativeClaimCanonicalReader;
+  readonly policy: NativeTier4ClaimPolicy;
+  readonly canonicalFinalized: (card: AnnouncedSubmissionCard) => Promise<boolean>;
+  readonly activeEngagements: () => number;
+  readonly worker: { readonly ownerId: string; readonly ttlMs: number };
+  readonly now?: () => Date;
 }
 
 /**
@@ -289,6 +316,8 @@ export interface CompositionRootInput {
    * callers get a deliberate native boot refusal rather than an accidental fallback.
    */
   readonly nativeRoleIdentities?: RoleIdentitySet;
+  /** Required native B5 product-owned state/chain/document ports. Legacy mode must omit it. */
+  readonly nativeClaimRuntime?: NativeClaimRuntimeInput;
   /**
    * Durable requester association directory for native projection. Omitted uses the operator
    * state root's `native-requester` child; it is read-only from projector composition.
@@ -397,7 +426,7 @@ interface VerifiedExecutable {
  * `@jinn-network/task-execution-backend-local`'s public `index.ts`). Kept structurally
  * identical so `LocalTaskExecutionBackendConfig.launcherDeployments` type-checks by shape.
  */
-interface LauncherDeployment {
+export interface LauncherDeployment {
   readonly executable: VerifiedExecutable;
   probe(): Promise<{ readonly ready: boolean; readonly executable: VerifiedExecutable }>;
 }
@@ -422,7 +451,7 @@ function buildLaunchers(wiring: readonly ExecutionWiringEntry[]): readonly Launc
   return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
 }
 
-function buildLauncherDeployments(
+export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
 ): Readonly<Record<string, LauncherDeployment>> {
@@ -433,10 +462,64 @@ function buildLauncherDeployments(
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
       executable,
-      probe: async () => ({ ready: true, executable }),
+      probe: async () => {
+        try {
+          await access(executable.path, constants.X_OK);
+          const currentDigest = createHash('sha256').update(await readFile(executable.path)).digest('hex');
+          if (executable.digest === 'unresolved' || currentDigest !== executable.digest) {
+            return { ready: false, executable };
+          }
+          return { ready: true, executable };
+        } catch {
+          return { ready: false, executable };
+        }
+      },
     };
   }
   return deployments;
+}
+
+export function buildNativeLauncherCapabilityPort(
+  launchers: readonly LauncherContract[],
+  deployments: Readonly<Record<string, LauncherDeployment>>,
+): NativeLauncherCapabilityPort {
+  return {
+    async inspect({ profileUri, requirements }) {
+      const harness = requirements['harness'];
+      const requestedId = typeof harness === 'string'
+        ? harness
+        : typeof harness === 'object' && harness !== null && typeof (harness as { id?: unknown }).id === 'string'
+          ? (harness as { id: string }).id
+          : undefined;
+      const launcher = launchers.find((candidate) =>
+        (requestedId === undefined || candidate.id === requestedId)
+        && candidate.capabilities().taskProfiles.includes(profileUri));
+      if (launcher === undefined) throw new Error(`no launcher advertises ${profileUri}`);
+      const deployment = deployments[launcher.id];
+      if (deployment === undefined) throw new Error(`launcher ${launcher.id} has no configured executable deployment`);
+      const [deploymentProbe, launcherProbe] = await Promise.all([
+        deployment.probe(),
+        launcher.probe === undefined
+          ? Promise.resolve({ ready: false, detail: 'launcher has no readiness probe' })
+          : launcher.probe().catch((error) => ({
+              ready: false,
+              detail: error instanceof Error ? error.message : String(error),
+            })),
+      ]);
+      return {
+        launcherId: launcher.id,
+        taskProfiles: launcher.capabilities().taskProfiles,
+        executable: deployment.executable,
+        probe: {
+          ready: deploymentProbe.ready && launcherProbe.ready,
+          ...(!deploymentProbe.ready
+            ? { detail: 'deployment executable is missing, non-executable, or changed since boot' }
+            : launcherProbe.detail === undefined ? {} : { detail: launcherProbe.detail }),
+          executable: deploymentProbe.executable,
+        },
+      };
+    },
+  };
 }
 
 // ── Workspace provisioner ────────────────────────────────────────────────────
@@ -903,12 +986,29 @@ export async function buildOperatorComposition(
   if (input.mode === 'legacy' && identities !== undefined) {
     throw new Error('legacy operator composition must not receive native role identities');
   }
+  if (input.mode === 'legacy' && input.nativeClaimRuntime !== undefined) {
+    throw new Error('legacy operator composition must not receive native claim runtime ports');
+  }
   if (input.mode === 'native' && input.legacyBridgeSigner !== undefined) {
     throw new Error('native operator composition must not receive a legacy bridge signer');
   }
   if (input.mode === 'native' && input.legacyDeliverySigningKey !== undefined) {
     throw new Error('native operator composition must not receive a legacy delivery signing key');
   }
+  if (input.mode === 'native' && input.nativeClaimRuntime === undefined) {
+    throw new Error('native operator boot requires durable claim state, exact-document, canonical-reader, policy, and lease ports');
+  }
+  if (input.mode === 'native' && identities!.agent !== input.nativeClaimRuntime!.operatorAgent) {
+    throw new Error('native claim operator agent must equal the agent used for role trust bindings');
+  }
+  if (
+    input.mode === 'native'
+    && (
+      input.nativeClaimRuntime!.policy.chainId !== input.chain.chainId
+      || input.nativeClaimRuntime!.policy.coordinator.toLowerCase() !== input.chain.taskCoordinator.toLowerCase()
+      || input.nativeClaimRuntime!.policy.generation !== input.chain.generation
+    )
+  ) throw new Error('native claim policy network identity must equal the composed venue identity');
   const solverDeliveryIdentity = input.mode === 'native'
     ? identities!.get('solver-delivery')
     : undefined;
@@ -1096,7 +1196,7 @@ export async function buildOperatorComposition(
   };
 
   const fetchIpfsBytes = buildFetchIpfsBytes(config.ipfsGatewayUrl);
-  const readSealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
+  const readLegacySealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
     const taskDigest = card.facts['taskDigest'];
     if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {
       throw new Error(`readSealedDocuments: card carries no valid taskDigest fact (${card.chain.submission})`);
@@ -1133,26 +1233,57 @@ export async function buildOperatorComposition(
         profile: { uri: REPOSITORY_WORK_PROFILE_URI, digest: sealedRepoProfile.digest },
       });
     }
-
-    const [taskBytes, submissionBytes] = await Promise.all([
-      fetchIpfsBytes(taskDigest as `sha256:${string}`),
-      fetchIpfsBytes(card.record.digest),
-    ]);
-    if (taskBytes === undefined || submissionBytes === undefined) {
-      throw new Error(`readSealedDocuments: could not resolve sealed documents for ${card.chain.submission}`);
-    }
-    return { taskBytes, submissionBytes };
+    throw new Error('legacy composition refuses a native card; use the required native exact-document resolver');
   };
+  const readSealedDocuments = input.mode === 'native'
+    ? input.nativeClaimRuntime!.exactDocuments
+    : readLegacySealedDocuments;
+
+  const nativeLauncherInspector = input.mode === 'native'
+    ? buildNativeLauncherCapabilityPort(launchers, launcherDeployments)
+    : undefined;
+  const nativeClaimCoordinator = input.mode === 'native'
+    ? new NativeClaimCoordinator({
+        state: input.nativeClaimRuntime!.state,
+        chain: input.chain,
+        operatorAgent: input.nativeClaimRuntime!.operatorAgent,
+        admission: {
+          evaluate: async (queued, documents) => evaluateNativeClaim({
+            card: queued.card,
+            taskBytes: documents.taskBytes,
+            submissionBytes: documents.submissionBytes,
+            backend,
+            launcher: nativeLauncherInspector!,
+            policy: input.nativeClaimRuntime!.policy,
+            activeEngagements: input.nativeClaimRuntime!.activeEngagements(),
+            canonicalFinalized: await input.nativeClaimRuntime!.canonicalFinalized(queued.card),
+            now: input.nativeClaimRuntime!.now?.() ?? new Date(),
+          }),
+        },
+        claim: {
+          priorityMech: venue.claim.priorityMech,
+          broadcast: (claim) => venue.claim.claimTask({
+            taskId: claim.taskId,
+            priorityMech: claim.priorityMech,
+            operationId: claim.operationId,
+          }),
+        },
+        canonical: input.nativeClaimRuntime!.canonical,
+        worker: input.nativeClaimRuntime!.worker,
+      })
+    : undefined;
 
   // Finding E36 (ruled "build it"): the `ArchiveSubscription` `work-loop.ts`'s `WorkLoopConfig`
   // needs, fed from this SAME `readObservations` accessor `venue`'s `observations` port above
   // already reads (one `ProjectorCursorStore`, two consumers) — see `./archive-subscription.js`.
-  const archive = buildArchiveSubscription({
-    readObservations,
-    publicClient: input.publicClient,
-    fetchIpfsBytes,
-    ...(input.logger === undefined ? {} : { logger: input.logger }),
-  });
+  const archive = input.mode === 'legacy'
+    ? buildArchiveSubscription({
+        readObservations,
+        publicClient: input.publicClient,
+        fetchIpfsBytes,
+        ...(input.logger === undefined ? {} : { logger: input.logger }),
+      })
+    : undefined;
 
   return {
     mode: input.mode,
@@ -1173,7 +1304,12 @@ export async function buildOperatorComposition(
     claimGate,
     engagementLedger,
     readSealedDocuments,
-    archive,
+    ...(archive === undefined ? {} : { archive }),
+    ...(nativeClaimCoordinator === undefined ? {} : {
+      nativeClaimCoordinator,
+      nativeOperatorState: input.nativeClaimRuntime!.state,
+      nativeLauncherInspector: nativeLauncherInspector!,
+    }),
     async close(): Promise<void> {
       try {
         await evidence.close();

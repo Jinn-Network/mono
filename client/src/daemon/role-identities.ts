@@ -336,7 +336,10 @@ export class IdentityStore {
  * supplied effective time; callers receive no partially trusted or fallback identity.
  */
 export class RoleIdentitySet {
-  private constructor(private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>) {}
+  private constructor(
+    readonly agent: string,
+    private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
+  ) {}
 
   static async open(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
     if (input.agent.length === 0) throw new IdentityStoreError('native role identity agent is required');
@@ -384,7 +387,7 @@ export class RoleIdentitySet {
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
       });
     }
-    return new RoleIdentitySet(byRole);
+    return new RoleIdentitySet(input.agent, byRole);
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {

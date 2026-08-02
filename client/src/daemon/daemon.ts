@@ -431,8 +431,12 @@ export class Daemon {
       this.ownsApiServer = true;
     }
 
-    // Only after the port is bound do we declare ourselves "running" in the
-    // store and emit the startup lifecycle event. Order matters: see #649.
+    // Native lifecycle ownership is established only after the API bind mutex. Recovery must
+    // finish and the signed source head must verify before any work loop can process a card.
+    await this.workLoop?.initialize();
+
+    // Only after API bind AND native fail-closed initialization do we report running. A lease,
+    // recovery, or source-trust refusal must never leave a false startup-ok marker behind.
     this.store.setShutdownState('running');
     this.store.setDaemonStartedAt(new Date().toISOString());
     this.cachedShutdownState = 'running';

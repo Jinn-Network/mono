@@ -96,6 +96,10 @@ export class NativeClaimCoordinator {
     });
   }
 
+  renewWorker(): void {
+    this.requireLiveWorker();
+  }
+
   async process(
     queued: NativeDiscoveryQueuedCard,
     documents: NativeSealedClaimDocuments,
@@ -230,6 +234,7 @@ export class NativeClaimCoordinator {
     }
     let receipt;
     try {
+      this.requireLiveWorker();
       receipt = await this.input.claim.broadcast({
         operationId: id,
         taskId: current.engagement.taskId,

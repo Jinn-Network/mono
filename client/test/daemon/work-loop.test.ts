@@ -275,6 +275,7 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
   };
 
   return {
+    mode: 'legacy',
     backend,
     pipelineConfig: {
       chain: BASE_SEPOLIA_TODAY,
@@ -345,8 +346,15 @@ describe('work loop', () => {
     const archiveSince = vi.fn(async () => [card()]);
     const sync = vi.fn(async () => ({ accepted: 0, verifiedSources: 1 }));
     const takePending = vi.fn(() => []);
+    const coordinator = {
+      startWorker: vi.fn(),
+      renewWorker: vi.fn(),
+      reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+      process: vi.fn(),
+    };
     const { loop } = build({
-      archive: { since: archiveSince },
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
       nativeDiscovery: {
         sync,
         takePending,
@@ -354,12 +362,125 @@ describe('work loop', () => {
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
+      nativeClaimCoordinator: coordinator,
+      acceptLegacyCards: false,
     });
 
+    await loop.initialize();
     await expect(loop.tick()).resolves.toEqual([]);
-    expect(sync).toHaveBeenCalledOnce();
+    expect(sync).toHaveBeenCalledTimes(2);
     expect(takePending).toHaveBeenCalledOnce();
+    expect(coordinator.renewWorker).toHaveBeenCalledOnce();
     expect(archiveSince).not.toHaveBeenCalled();
+  });
+
+  it('initializes native ownership, reconciliation, and verified source sync in that order', async () => {
+    const order: string[] = [];
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync: vi.fn(async () => { order.push('sync'); return { accepted: 0, verifiedSources: 1 }; }),
+        takePending: () => [],
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: () => { order.push('lease'); },
+        renewWorker: () => { order.push('renew'); },
+        reconcileStartup: async () => { order.push('reconcile'); return { reconciled: 0, finalized: 0 }; },
+        process: vi.fn(),
+      },
+    });
+    await loop.initialize();
+    expect(order).toEqual(['lease', 'reconcile', 'sync']);
+    await loop.tick();
+    expect(order).toEqual(['lease', 'reconcile', 'sync', 'renew', 'sync']);
+  });
+
+  it('fails an idle native tick before source sync when lease renewal fails', async () => {
+    const sync = vi.fn();
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync,
+        takePending: () => [],
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: vi.fn(),
+        renewWorker: () => { throw new Error('lease expired'); },
+        reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+        process: vi.fn(),
+      },
+    });
+    await loop.initialize();
+    sync.mockClear();
+    await expect(loop.tick()).rejects.toThrow('lease expired');
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('routes a verified native card only through the durable claim coordinator and never acknowledges separately', async () => {
+    const nativeCard: AnnouncedSubmissionCard = {
+      ...card(),
+      discovery: {
+        source: { agent: 'urn:jinn:requester:one', name: 'requester' },
+        sequence: '0000000000000001',
+        entryDigest: `sha256:${'a'.repeat(64)}`,
+        signedHighWater: {
+          sequence: '0000000000000001',
+          entry: `sha256:${'a'.repeat(64)}`,
+          issuedAt: '2026-08-02T00:00:00.000Z',
+          refreshBy: '2026-08-03T00:00:00.000Z',
+          signature: {},
+        },
+      },
+    };
+    const queued = { id: 1, announcementId: 'announcement-1', card: nativeCard };
+    const acknowledge = vi.fn();
+    const process = vi.fn(async () => ({
+      kind: 'claim-finalized' as const,
+      operationId: `sha256:${'b'.repeat(64)}` as const,
+      engagementId: `sha256:${'c'.repeat(64)}` as const,
+    }));
+    const readSealedDocuments = vi.fn(async () => ({
+      taskBytes: goldenTask(),
+      submissionBytes: goldenSubmission(),
+    }));
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync: async () => ({ accepted: 0, verifiedSources: 1 }),
+        takePending: () => [queued],
+        acknowledge,
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: vi.fn(),
+        renewWorker: vi.fn(),
+        reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+        process,
+      },
+      readSealedDocuments,
+    });
+
+    await loop.initialize();
+    await expect(loop.tick()).resolves.toEqual([{
+      card: SUBMISSION_URI,
+      outcome: { kind: 'native-claim', result: expect.objectContaining({ kind: 'claim-finalized' }) },
+    }]);
+    expect(readSealedDocuments).toHaveBeenCalledWith(nativeCard);
+    expect(process).toHaveBeenCalledWith(queued, await readSealedDocuments.mock.results[0]!.value);
+    expect(acknowledge).not.toHaveBeenCalled();
   });
 
   it('refuses to claim before the projector catch-up gate opens', async () => {

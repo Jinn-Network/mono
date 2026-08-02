@@ -261,6 +261,55 @@ describe('Daemon — C8 loop startup', () => {
     await daemon.stop();
     store.close();
   });
+
+  it('never records running/startup-ok when native lease initialization fails after API bind', async () => {
+    const { composition: legacyShape } = fakeComposition();
+    const composition = { ...legacyShape, mode: 'native' as const };
+    const store = new Store(':memory:');
+    const sync = vi.fn();
+    const daemon = new Daemon({
+      adapter: new LocalAdapter(),
+      runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
+      taskSources: [],
+      dbPath: ':memory:',
+      store,
+      apiPort: 0,
+      restorationEngine: minimalEngineConfig(),
+      composition,
+      work: {
+        nativeDiscovery: {
+          sync,
+          takePending: () => [],
+          acknowledge: vi.fn(),
+          checkpoint: () => undefined,
+          resumeSse: () => ({ close: () => undefined }),
+        },
+        nativeClaimCoordinator: {
+          startWorker: () => { throw new Error('lease already owned'); },
+          renewWorker: vi.fn(),
+          reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+          process: vi.fn(),
+        },
+        ledger: {} as never,
+        claimGate: composition.claimGate,
+        estimateAiUnits: () => 0,
+        readSealedDocuments: composition.readSealedDocuments,
+        pollIntervalMs: 20,
+        acceptLegacyCards: false,
+      },
+      shutdownTimeoutMs: 50,
+    });
+
+    await expect(daemon.start()).rejects.toThrow('lease already owned');
+    expect(daemon.getShutdownState()).toBeNull();
+    expect(store.getShutdownState()).toBeNull();
+    expect(store.db.prepare(`SELECT COUNT(*) AS count FROM activity_events WHERE kind = 'startup'`).get())
+      .toEqual({ count: 0 });
+    expect(sync).not.toHaveBeenCalled();
+
+    await daemon.stop();
+    store.close();
+  });
 });
 
 async function waitForTaskRunRow(

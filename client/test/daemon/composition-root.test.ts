@@ -14,6 +14,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
 import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
 import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
+import {
+  claudeCodeLauncher,
+  predictionV1BaselineLauncher,
+} from '@jinn-network/task-execution-launchers';
 import { Store } from '../../src/store/store.js';
 import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
@@ -22,6 +26,7 @@ import {
   NATIVE_ROLE_IDENTITY_ROLES,
   type RoleIdentitySet,
 } from '../../src/daemon/role-identities.js';
+import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
 
 const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() => ({
   createBaseVenueMock: vi.fn(),
@@ -143,6 +148,41 @@ describe('operator caps assembly (coordinator amendment 1)', () => {
   });
 });
 
+describe('native launcher executable inspection', () => {
+  it('combines an executable X_OK/digest recheck with the launcher probe and fails missing binaries', async () => {
+    const {
+      buildLauncherDeployments,
+      buildNativeLauncherCapabilityPort,
+    } = await import('../../src/daemon/composition-root.js');
+    const predictionDeployments = buildLauncherDeployments(
+      [predictionV1BaselineLauncher],
+      {} as never,
+    );
+    const prediction = buildNativeLauncherCapabilityPort(
+      [predictionV1BaselineLauncher],
+      predictionDeployments,
+    );
+    await expect(prediction.inspect({
+      profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      requirements: { harness: { id: 'prediction-v1-baseline' } },
+    })).resolves.toMatchObject({
+      launcherId: 'prediction-v1-baseline',
+      executable: { path: process.execPath, digest: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      probe: { ready: true, executable: { path: process.execPath } },
+    });
+
+    const missingDeployments = buildLauncherDeployments(
+      [claudeCodeLauncher],
+      { claudePath: '/definitely/missing/jinn-claude' } as never,
+    );
+    const missing = buildNativeLauncherCapabilityPort([claudeCodeLauncher], missingDeployments);
+    await expect(missing.inspect({
+      profileUri: 'https://jinn.network/task-profiles/repository-work/1.0',
+      requirements: { harness: { id: 'claude-code' } },
+    })).resolves.toMatchObject({ probe: { ready: false } });
+  });
+});
+
 function stubVenue() {
   return {
     claim: { taskDigest: 'stub' },
@@ -171,7 +211,30 @@ function nativeRoleIdentities(): RoleIdentitySet {
       }] as const;
     }),
   );
-  return { get: (role) => roles.get(role)! } as unknown as RoleIdentitySet;
+  return { agent: 'urn:jinn:operator:test', get: (role) => roles.get(role)! } as unknown as RoleIdentitySet;
+}
+
+function nativeClaimRuntime(
+  store: Store,
+  coordinator = '0x3333333333333333333333333333333333333333',
+) {
+  return {
+    operatorAgent: 'urn:jinn:operator:test',
+    state: new NativeOperatorStateRepository(store),
+    exactDocuments: async () => { throw new Error('exact documents not exercised'); },
+    canonical: { read: async () => ({ kind: 'absent' as const, checkedAtBlock: 0n }) },
+    policy: {
+      chainId: 84532,
+      coordinator,
+      generation: 'today' as const,
+      maxSpendWei: 10n,
+      minDeadlineLeadMs: 0,
+      maxConcurrent: 1,
+    },
+    canonicalFinalized: async () => true,
+    activeEngagements: () => 0,
+    worker: { ownerId: 'composition-test-worker', ttlMs: 60_000 },
+  };
 }
 
 describe('buildOperatorComposition', () => {
@@ -195,6 +258,24 @@ describe('buildOperatorComposition', () => {
       nativeRoleIdentities: nativeRoleIdentities(),
       legacyBridgeSigner: () => `0x${'0'.repeat(130)}` as const,
     } as never)).rejects.toThrow(/must not receive a legacy bridge signer/i);
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses native boot when the product omits durable claim runtime ports or changes the bound agent IRI', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      nativeRoleIdentities: nativeRoleIdentities(),
+    } as never)).rejects.toThrow(/durable claim state.*exact-document.*canonical-reader.*lease/i);
+
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: { operatorAgent: 'urn:jinn:operator:safe-derived' },
+    } as never)).rejects.toThrow(/must equal the agent used for role trust bindings/i);
     expect(createBaseVenueMock).not.toHaveBeenCalled();
   });
 
@@ -314,6 +395,7 @@ describe('buildOperatorComposition', () => {
       profileStore: { get: () => undefined },
       store,
       nativeRoleIdentities: identities,
+      nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
     });
 
     expect(composition.identities).toBe(identities);
@@ -481,6 +563,7 @@ describe('buildOperatorComposition', () => {
       profileStore: { get: () => undefined },
       store,
       nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: nativeClaimRuntime(store),
     });
 
     const capabilities = await composition.backend.capabilities();
@@ -541,6 +624,7 @@ describe('buildOperatorComposition', () => {
       profileStore: { get: () => undefined },
       store,
       nativeRoleIdentities: identities,
+      nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
     });
 
     // Ending the lie: with a real key supplied, `signedDeliveries` reports `true`.
@@ -877,7 +961,7 @@ describe('readSealedDocuments legacy bridge (E41)', () => {
     };
 
     const composition = await buildOperatorComposition({
-      mode: 'native',
+      mode: 'legacy',
       config: {
         ipfsGatewayUrl: 'http://fixture-ipfs',
         ipfsRegistryUrl: 'http://fixture-registry',
@@ -896,7 +980,6 @@ describe('readSealedDocuments legacy bridge (E41)', () => {
       venueStateDbPath: join(stateRoot, 'venue.db'),
       profileStore: { get: (digest) => profilesByDigest.get(digest) },
       store,
-      nativeRoleIdentities: nativeRoleIdentities(),
     });
 
     const originalFetch = globalThis.fetch;
