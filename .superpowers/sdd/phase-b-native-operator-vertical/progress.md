@@ -1,0 +1,21 @@
+# SDD ledger — plan: /Users/adrianobradley/life's-work/jinn-mono_worktrees/phase-b-native-operator/.superpowers/plans/phase-b-native-operator-vertical.md
+
+- Base: `907941b15c34a2056b9f257e42d4ad8820654029`
+- Branch: `codex/phase-b-native-operator`
+- Task 1 / B0: fix round 1/5 (2 addressed, 1 open — clean packed closure compilation/order; commits 0b0eb5d..9691a68)
+- Task 1 / B0: fix round 2/5 (1 addressed, 0 open — clean packed closure compilation/order; commits 9691a68..8a1bcec)
+- Task 1: complete (commits 907941b..8a1bcec, review clean)
+- Task 2 / B0.5: fix round 1/5 (5 addressed, 1 open — canonical replay identity validation; commits 6b14968..0fbbf16)
+- Task 2 / B0.5: fix round 2/5 (1 addressed, 0 open — canonical replay identity validation; commits 0fbbf16..7e1279c)
+- Task 2: complete (commits 8a1bcec..7e1279c, review clean)
+- Review policy: user-approved domain/final batching from Task 3 onward; retain task tests/commits/reports, defer independent review to consolidated branch/domain review.
+- Task 3 / B1: implementation complete (commits 7e1279c..631a28a, tests green; consolidated review deferred)
+- Task 4 / B2: implementation complete (commits 631a28a..52d9da2, tests green; consolidated security review deferred)
+- Task 5 / B3: implementation complete (commits 52d9da2..f39388f, full client/pack/hermetic tests green; consolidated review deferred)
+- Task 6 / B4: implementation complete (commits `c1f9fe77d`..`16aef09ad`; discovery/reorg tests green; consolidated review deferred)
+- Task 7 / B5: implementation complete (commits `1492a62c6`..`9cf540cf4`; full client/marketplace tests green; consolidated review deferred)
+- Task 8 / B6: implementation complete (commits `27c74fa4e`..`bb3ecc129`; full client/marketplace/backend tests green; consolidated review deferred)
+- Task 9 / B7: implementation complete (commits `b74ae8382`..`af6bc2849`; pinned client/domain/pack tests green; consolidated security review deferred)
+- Task 10 / B8: implementation complete (commits `59b3175a8`..`33d30c62b`; 8-seed recovery matrix and full serialized daemon domain green; consolidated review deferred)
+- Task 11 / B9: implementation complete (commits `f82c3146a`..`e4e40cc7d`; independent public graph and exact-head 50+32 catalog-tarball acceptance green; consolidated review deferred)
+- Task 12 / B10: pending
