@@ -1,0 +1,9 @@
+{
+  "name": "@jinn-network/chain-only-gate-harness",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "gate": "node --preserve-symlinks run.mjs"
+  }
+}

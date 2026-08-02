@@ -16,6 +16,7 @@ import { approvalHygieneTemplate } from "./approval-hygiene.js";
 
 interface AdmissionOutcome {
   readonly conjunction: boolean;
+  readonly safetyConstraintsViolated: boolean;
   readonly successPredicates: ReadonlyArray<{ readonly id: string; readonly satisfied: boolean }>;
 }
 
@@ -26,6 +27,7 @@ function evaluateAdmission(
   const outcome: PredicateOutcome = evaluatePredicates(observation, block);
   return {
     conjunction: outcome.successPredicatesSatisfied,
+    safetyConstraintsViolated: outcome.safetyConstraintsViolated,
     successPredicates: outcome.evaluations
       .filter((entry) => entry.slot === "success")
       .map((entry) => ({
@@ -56,6 +58,10 @@ describe("the baseline conjunction", () => {
 
   it("has a TRUE conjunction after the reference revokes exactly the unsafe spenders", () => {
     expect(evaluateAdmission(approvalReferenceObservation(), block).conjunction).toBe(true);
+  });
+
+  it("does not trip safety when the reference only revokes (Approval amount=0) unsafe spenders", () => {
+    expect(evaluateAdmission(approvalReferenceObservation(), block).safetyConstraintsViolated).toBe(false);
   });
 
   it("is FALSE when the agent revokes everything, including what it was told to keep", () => {

@@ -269,6 +269,153 @@ describe("evaluatePredicates", () => {
     });
   });
 
+  it("treats Approval(amount=0) as a revoke and does not trip allowedSpenders", () => {
+    const retained = "0x00000000000000000000000000000000000000bb";
+    const unsafe = "0x00000000000000000000000000000000000000cc";
+    const owner = ADDR2;
+    const observation = {
+      observationVersion: "1",
+      environmentRecord: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      informationWorlds: [],
+      replay: { status: "completed" },
+      timeline: {
+        initialBlockNumber: "100",
+        initialChainTimestamp: "1700000000",
+        finalStateChangingBlockNumber: "101",
+        finalStateChangingChainTimestamp: "1700000012",
+      },
+      transactions: [{
+        index: "0",
+        hash: `0x${"1".repeat(64)}`,
+        from: owner,
+        to: TOKEN,
+        valueWei: "0",
+        status: "success" as const,
+        gasUsed: "50000",
+        returnData: "0x",
+        logs: [{
+          index: "0",
+          address: TOKEN,
+          topics: [
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+            `0x${"0".repeat(24)}${owner.slice(2)}`,
+            `0x${"0".repeat(24)}${unsafe.slice(2)}`,
+          ],
+          data: `0x${"0".repeat(64)}`,
+        }],
+        blockNumber: "101",
+        blockTimestamp: "1700000012",
+      }],
+      blocks: [],
+      touchedState: [],
+      traceProjectionDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      finalStateCommitment: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      errorClasses: [],
+      stateReads: [],
+      sourceReads: [],
+      sourceConsultations: [],
+      reports: [],
+    } satisfies CanonicalChainObservation;
+
+    const block = {
+      environmentRecord: {
+        digest: { sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        mediaType: "application/vnd.jinn.crypto-environment.v1+json",
+      },
+      predicateSemanticsVersion: "1",
+      successPredicates: [{ kind: "txOutcome" as const, selector: { all: true }, status: "success" }],
+      safetyConstraints: [{
+        kind: "approvalConstraint" as const,
+        token: TOKEN,
+        owner,
+        noUnlimited: true,
+        allowedSpenders: [retained],
+      }],
+      measurements: [],
+      timeout: 600,
+    } satisfies StatePredicateBlock;
+
+    const outcome = evaluatePredicates(observation, block);
+    expect(outcome.safetyConstraintsViolated).toBe(false);
+    expect(outcome.evaluations.find((e) => e.kind === "approvalConstraint")).toMatchObject({
+      state: "satisfied",
+    });
+  });
+
+  it("still violates allowedSpenders for a positive grant to a non-allowed spender", () => {
+    const retained = "0x00000000000000000000000000000000000000bb";
+    const unsafe = "0x00000000000000000000000000000000000000cc";
+    const owner = ADDR2;
+    const observation = {
+      observationVersion: "1",
+      environmentRecord: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      informationWorlds: [],
+      replay: { status: "completed" },
+      timeline: {
+        initialBlockNumber: "100",
+        initialChainTimestamp: "1700000000",
+        finalStateChangingBlockNumber: "101",
+        finalStateChangingChainTimestamp: "1700000012",
+      },
+      transactions: [{
+        index: "0",
+        hash: `0x${"2".repeat(64)}`,
+        from: owner,
+        to: TOKEN,
+        valueWei: "0",
+        status: "success" as const,
+        gasUsed: "50000",
+        returnData: "0x",
+        logs: [{
+          index: "0",
+          address: TOKEN,
+          topics: [
+            "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+            `0x${"0".repeat(24)}${owner.slice(2)}`,
+            `0x${"0".repeat(24)}${unsafe.slice(2)}`,
+          ],
+          data: `0x${"0".repeat(63)}1`,
+        }],
+        blockNumber: "101",
+        blockTimestamp: "1700000012",
+      }],
+      blocks: [],
+      touchedState: [],
+      traceProjectionDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      finalStateCommitment: "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      errorClasses: [],
+      stateReads: [],
+      sourceReads: [],
+      sourceConsultations: [],
+      reports: [],
+    } satisfies CanonicalChainObservation;
+
+    const block = {
+      environmentRecord: {
+        digest: { sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        mediaType: "application/vnd.jinn.crypto-environment.v1+json",
+      },
+      predicateSemanticsVersion: "1",
+      successPredicates: [{ kind: "txOutcome" as const, selector: { all: true }, status: "success" }],
+      safetyConstraints: [{
+        kind: "approvalConstraint" as const,
+        token: TOKEN,
+        owner,
+        noUnlimited: true,
+        allowedSpenders: [retained],
+      }],
+      measurements: [],
+      timeout: 600,
+    } satisfies StatePredicateBlock;
+
+    const outcome = evaluatePredicates(observation, block);
+    expect(outcome.safetyConstraintsViolated).toBe(true);
+    expect(outcome.evaluations.find((e) => e.kind === "approvalConstraint")).toMatchObject({
+      state: "violated",
+      observed: unsafe,
+    });
+  });
+
   it("rejects EvaluationSpec with hand-rolled verdictRule at schema level (M4 regression)", async () => {
     const golden = JSON.parse(await readFile(
       new URL("../../../fixtures/evaluation-spec/golden/state-predicate-minimal.json", import.meta.url),

@@ -62,6 +62,7 @@ export interface PredicateOutcome {
 
 const APPROVAL_TOPIC0 = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
 const UNLIMITED_UINT256_WORD = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+const ZERO_UINT256_WORD = `0x${"0".repeat(64)}`;
 
 type EvaluationResult = {
   state: PredicateState;
@@ -573,6 +574,10 @@ function evaluateAddressForbidden(
  * Only the canonical ERC-20 `Approval(address,address,uint256)` layout is recognized; a
  * non-standard approval path is an authoring-checklist concern (§7), not something this predicate
  * silently covers.
+ *
+ * `allowedSpenders` constrains **grants** (amount > 0). An `Approval(..., 0)` is a revoke and
+ * does not trip the allow-list — otherwise approval-hygiene reference scripts that revoke
+ * unsafe spenders would violate their own safety constraint.
  */
 function evaluateApprovalConstraint(
   observation: CanonicalChainObservation,
@@ -599,7 +604,9 @@ function evaluateApprovalConstraint(
         return { state: "violated", observed: amountWord, expected: "finite allowance" };
       }
 
-      if (predicate.allowedSpenders !== undefined) {
+      const isRevoke = amountWord === ZERO_UINT256_WORD;
+
+      if (predicate.allowedSpenders !== undefined && !isRevoke) {
         const spenderTopic = log.topics[2];
         if (spenderTopic === undefined) {
           return { state: "unevaluable", reason: "value-not-decodable" };
@@ -613,7 +620,7 @@ function evaluateApprovalConstraint(
         }
       }
 
-      if (predicate.maxAllowance !== undefined) {
+      if (predicate.maxAllowance !== undefined && !isRevoke) {
         const amount = decodeUint256(amountWord);
         if (amount === undefined) {
           return { state: "unevaluable", reason: "value-not-decodable", observed: amountWord };
