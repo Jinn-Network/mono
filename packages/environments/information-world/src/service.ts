@@ -62,10 +62,20 @@ type ActiveAttempt = {
   readonly admission: Extract<Admission, { kind: "admitted" }>;
   readonly method: string | undefined;
   readonly output: Output;
+  readonly parserIncomplete: () => boolean;
 };
+type DeferredSocketRefusal =
+  | {
+    readonly kind: "admitted";
+    readonly admission: Extract<Admission, { kind: "admitted" }>;
+    readonly output: Output;
+    readonly method: string | undefined;
+  }
+  | { readonly kind: "budget-exhausted"; readonly output: Output; readonly method: string | undefined };
 type SocketAttempts = {
   readonly attempts: ActiveAttempt[];
   terminal: boolean;
+  deferred: DeferredSocketRefusal | undefined;
 };
 
 const LOOPBACK_VALUES = Object.freeze(["127.0.0.1", "::1"] as const);
@@ -224,6 +234,19 @@ function requestHeaders(rawHeaders: readonly string[]): HeaderPair[] {
     if (name !== undefined && value !== undefined) headers.push([name, value]);
   }
   return headers;
+}
+
+/** A message without a declared body is parser-complete as soon as its request event fires. */
+function requestCanCarryBody(rawHeaders: readonly string[]): boolean {
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    const name = rawHeaders[index];
+    const value = rawHeaders[index + 1];
+    if (name === undefined || value === undefined) continue;
+    const normalized = asciiLowercase(name);
+    if (normalized === "transfer-encoding") return true;
+    if (normalized === "content-length" && !/^0+$/.test(value)) return true;
+  }
+  return false;
 }
 
 function nodeHeaderValue(value: string): boolean {
@@ -463,9 +486,19 @@ export async function createReplayService(
   const socketAttempts = (socket: object): SocketAttempts => {
     const existing = attemptsBySocket.get(socket);
     if (existing !== undefined) return existing;
-    const state: SocketAttempts = { attempts: [], terminal: false };
+    const state: SocketAttempts = { attempts: [], terminal: false, deferred: undefined };
     attemptsBySocket.set(socket, state);
     return state;
+  };
+  const flushDeferredSocketRefusal = (state: SocketAttempts): void => {
+    if (state.attempts.length !== 0 || state.deferred === undefined) return;
+    const deferred = state.deferred;
+    state.deferred = undefined;
+    if (deferred.kind === "admitted") {
+      answer(deferred.output, deferred.admission, deferred.method, { kind: "miss", reason: "unkeyable" });
+      return;
+    }
+    answerBudget(deferred.output, deferred.method);
   };
   const releaseAttempt = (socket: object, attempt: ActiveAttempt, terminal = false): void => {
     const state = attemptsBySocket.get(socket);
@@ -473,13 +506,15 @@ export async function createReplayService(
     const position = state.attempts.indexOf(attempt);
     if (position !== -1) state.attempts.splice(position, 1);
     if (terminal) state.terminal = true;
-    if (state.attempts.length === 0 && !state.terminal) attemptsBySocket.delete(socket);
+    flushDeferredSocketRefusal(state);
+    if (state.attempts.length === 0 && !state.terminal && state.deferred === undefined) attemptsBySocket.delete(socket);
   };
   const startAttempt = (
     socket: object,
     output: Output,
     method: string | undefined,
     terminal = false,
+    parserIncomplete: () => boolean = () => false,
   ): ActiveAttempt | undefined => {
     const state = socketAttempts(socket);
     if (!terminal && state.terminal && state.attempts.length === 0) state.terminal = false;
@@ -488,7 +523,7 @@ export async function createReplayService(
       if (terminal) state.terminal = true;
       return undefined;
     }
-    const attempt: ActiveAttempt = { admission, method, output };
+    const attempt: ActiveAttempt = { admission, method, output, parserIncomplete };
     state.attempts.push(attempt);
     if (terminal) state.terminal = true;
     return attempt;
@@ -510,11 +545,22 @@ export async function createReplayService(
 
   const server = createServer({ maxHeaderSize: MAX_REQUEST_HEADER_BYTES }, (incoming, outgoing) => {
     const output: Output = { kind: "server", value: outgoing };
-    const attempt = startAttempt(incoming.socket, output, incoming.method);
+    const lifecycle = { complete: incoming.complete || !requestCanCarryBody(incoming.rawHeaders) };
+    incoming.once("end", () => { lifecycle.complete = true; });
+    const attempt = startAttempt(
+      incoming.socket,
+      output,
+      incoming.method,
+      false,
+      () => !lifecycle.complete && !incoming.complete,
+    );
     if (attempt === undefined) {
       incoming.resume();
       return;
     }
+    const release = (): void => releaseAttempt(incoming.socket, attempt);
+    outgoing.once("finish", release);
+    outgoing.once("close", release);
     const serve = async (): Promise<void> => {
       const body = await requestBody(incoming);
       if (attempt.admission.responded) return;
@@ -531,18 +577,19 @@ export async function createReplayService(
     };
     void serve().catch(() => {
       answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
-    }).finally(() => releaseAttempt(incoming.socket, attempt));
+    });
   });
 
   const socketEvent = (socket: SocketOutput & object, method: string | undefined): void => {
     const output: Output = { kind: "socket", value: socket };
     const state = socketAttempts(socket);
     if (state.terminal) return;
-    const attempt = startAttempt(socket, output, method, true);
-    if (attempt !== undefined) {
-      answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
-      releaseAttempt(socket, attempt, true);
-    }
+    state.terminal = true;
+    const admission = admit();
+    state.deferred = admission.kind === "admitted"
+      ? { kind: "admitted", admission, output, method }
+      : { kind: "budget-exhausted", output, method };
+    flushDeferredSocketRefusal(state);
   };
   server.on("connect", (_incoming, socket) => socketEvent(socket, "CONNECT"));
   server.on("upgrade", (_incoming, socket) => socketEvent(socket, "GET"));
@@ -566,7 +613,7 @@ export async function createReplayService(
   });
   server.on("clientError", (_error, socket) => {
     const state = attemptsBySocket.get(socket);
-    const attempt = state?.attempts.at(-1);
+    const attempt = [...(state?.attempts ?? [])].reverse().find((candidate) => candidate.parserIncomplete());
     if (attempt !== undefined) {
       answer(attempt.output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
       releaseAttempt(socket, attempt);

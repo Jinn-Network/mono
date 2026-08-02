@@ -646,6 +646,35 @@ describe("allowlist, budgets, and counters", () => {
     });
   });
 
+  test("admits a malformed request after completed pipeline hits without stealing either hit", async () => {
+    const service = await start();
+    const connection = await openRawConnection(service);
+    connection.end([
+      "GET /pools HTTP/1.1",
+      "Host: api.example.test",
+      "",
+      "GET /pools HTTP/1.1",
+      "Host: api.example.test",
+      "",
+      "GE(T / HTTP/1.1",
+      "Host: api.example.test",
+      "",
+      "",
+    ].join("\r\n"));
+    const responses = [...decoder.decode(await connection.response).matchAll(/HTTP\/1\.1 (\d{3})/g)]
+      .map((match) => Number(match[1]));
+
+    expect(responses).toEqual([200, 200, 404]);
+    expect(service.stats()).toEqual({
+      requests: 3,
+      hits: 2,
+      misses: 1,
+      offAllowlist: 0,
+      budgetExhausted: 0,
+      bytes: pools.sizeBytes * 2,
+    });
+  });
+
   test("does not admit a parser error after an expectation has already been terminalized", async () => {
     const service = await start();
     const connection = await openRawConnection(service);
