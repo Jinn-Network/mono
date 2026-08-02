@@ -38,13 +38,15 @@ layers and one hard boundary between them:
    family (design §4.4, "the request key is the practical failure mode"), so it carries the
    most test surface in this plan: a pure function, a published vector corpus, and a
    permutation-equivalence probe in the kit.
-3. **The service layer is the only impure layer, and it is structurally incapable of egress** —
+3. **The service layer is the only impure layer and has a closed execution profile** —
    `src/service.ts` is the one file in this package permitted to import a transport module, it
    may import exactly `node:http`'s `createServer`, it binds only a loopback address supplied
-   by the caller, and it holds no client of any kind. A source-scan test in this package and
-   the tree's own boundary guard both assert that. A miss is answered from the record's own
-   declared miss response; there is no code path from a miss to the network, because there is
-   no code in the package that can reach the network at all.
+   by the caller, and it holds no client of any kind. Independently implemented syntax-aware
+   source policies reject undeclared transport/evaluator capabilities as maintainability gates.
+   The actual egress proof runs replay under a network-denied runtime boundary, where loopback
+   succeeds and external TCP/DNS cannot. A miss is answered from the record's own declared miss
+   response. This does not claim arbitrary JavaScript source is intrinsically incapable of
+   egress.
 
 The record is sealed but **unsigned**: attribution and assessment arrive through separately
 published attestations that bind to it by digest. Nothing here asserts that a
@@ -145,13 +147,13 @@ All paths under `packages/environments/information-world/` unless stated otherwi
 | `src/fixtures.ts` | fixture loaders (the only `node:fs/promises` user) |
 | `src/index.ts` | public surface |
 | `src/testing.ts` | `describeInformationWorldRecordConformance`, `describeRequestKeyConformance`, `describeReplayServiceConformance` (the kit) |
-| `src/closure.test.ts` | the source scan that proves no egress path exists |
+| `src/closure.test.ts` | syntax-aware source capability policy (maintainability gate) |
 | `fixtures/world/*` | golden `synthetic`/`captured`/`extension` records + `.sha256` pins + corpus bodies |
 | `fixtures/equivalence/*` | key-permuted twins + expected digest |
 | `fixtures/request-key-v1/vectors.json` | the published request-key equivalence corpus |
 | `fixtures/adversarial-v1/*` | adversarial corpus + `manifest.json` |
 | `schemas/information-world.schema.json` | published JSON Schema (generated) |
-| `scripts/build.mjs`, `generate-fixtures.mjs`, `generate-schemas.mjs`, `pack-smoke.mjs` | build, fixture/schema generation + drift check, tarball smoke |
+| `scripts/build.mjs`, `generate-fixtures.mjs`, `generate-schemas.mjs`, `pack-smoke.mjs`, `check-network-denied.mjs` | build, fixture/schema generation + drift check, tarball smoke, and fail-closed network-denied replay proof |
 
 Repo files this plan creates or edits:
 
@@ -6198,7 +6200,6 @@ grep -n "TODO\|FIXME\|TBD\|XXX\|placeholder\|fill in" \
 ```
 
 Expected: only this section's own mentions.
-
 
 
 
