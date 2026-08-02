@@ -80,6 +80,20 @@ describe('native persistent role identities', () => {
     expect(new Set(firstIds).size).toBe(NATIVE_ROLE_IDENTITY_ROLES.length);
   });
 
+  it('verifies signed discovery material with the persisted public key', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-verify-'));
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+    };
+    const identities = await openAt(root, resolver);
+    const identity = identities.get('solver-discovery');
+    const payload = new TextEncoder().encode('durable source append');
+    const signature = identity.sign(payload);
+
+    expect(identity.verify(payload, signature)).toBe(true);
+    expect(identity.verify(new TextEncoder().encode('different append'), signature)).toBe(false);
+  });
+
   it('stores encrypted key material with owner-only directory and file permissions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-permissions-'));
     const resolver: BindingResolver = {

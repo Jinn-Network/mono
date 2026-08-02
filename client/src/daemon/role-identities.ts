@@ -13,6 +13,7 @@ import {
   randomBytes,
   scryptSync,
   sign as cryptoSign,
+  verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
 import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:fs/promises';
@@ -59,6 +60,7 @@ export interface NativeRoleIdentity {
   readonly keyId: string;
   readonly publicKey: KeyObject;
   sign(payload: Uint8Array): Uint8Array;
+  verify(payload: Uint8Array, signature: Uint8Array): boolean;
 }
 
 export interface NativeRoleIdentitySetInput {
@@ -400,6 +402,7 @@ export class RoleIdentitySet {
         keyId: stored.keyId,
         publicKey,
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
+        verify: (payload, signature) => cryptoVerify(null, payload, publicKey, signature),
       });
       if (role === 'evaluator-verdict') {
         hostSecretKeys.set(role, privateKey);

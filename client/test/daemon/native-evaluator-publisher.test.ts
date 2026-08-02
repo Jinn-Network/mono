@@ -23,6 +23,8 @@ async function temporaryRoot() {
 const signer = {
   keyId: "did:key:evaluator-discovery",
   sign: () => new Uint8Array([1, 2, 3]),
+  verify: (_payload: Uint8Array, signature: Uint8Array) =>
+    signature.length === 3 && signature[0] === 1 && signature[1] === 2 && signature[2] === 3,
 };
 
 function value(bytes: Uint8Array, sequence: number) {
@@ -112,6 +114,39 @@ describe("native evaluator public source", () => {
       signer,
     });
     closers.push(() => reopened.close());
+    await expect(reopened.publish(value(new TextEncoder().encode('{"verdict":2}'), 2)))
+      .resolves.toMatchObject({ sequence: "0000000000000002" });
+  });
+
+  it("finishes an authenticated journal after archive and head advance before source state", async () => {
+    const rootDir = await temporaryRoot();
+    let failed = false;
+    const first = await openNativeEvaluatorPublisher({
+      rootDir,
+      publicBaseUrl: "https://evaluator.example/native",
+      source: { agent: "urn:jinn:evaluator:golden", name: "evaluator-records" },
+      signer,
+      faults: {
+        afterHeadBeforeState: () => {
+          if (!failed) {
+            failed = true;
+            throw new Error("injected crash after signed head");
+          }
+        },
+      },
+    });
+    const firstValue = value(new TextEncoder().encode('{"verdict":1}'), 1);
+    await expect(first.publish(firstValue)).rejects.toThrow(/injected crash/u);
+    await first.close();
+
+    const reopened = await openNativeEvaluatorPublisher({
+      rootDir,
+      publicBaseUrl: "https://evaluator.example/native",
+      source: { agent: "urn:jinn:evaluator:golden", name: "evaluator-records" },
+      signer,
+    });
+    closers.push(() => reopened.close());
+    await expect(reopened.publish(firstValue)).resolves.toMatchObject({ sequence: "0000000000000001" });
     await expect(reopened.publish(value(new TextEncoder().encode('{"verdict":2}'), 2)))
       .resolves.toMatchObject({ sequence: "0000000000000002" });
   });
