@@ -86,6 +86,8 @@ export type { MechDeliverInput } from "./deliver-leg.js";
 export { createVerdictPorts } from "./verdict.js";
 export type {
   CanonicalVerdictAttempt,
+  CanonicalVerdictDelivery,
+  CanonicalVerdictSettlement,
   VerdictPortDeps,
   VerdictPorts,
   VerdictTransactionIdentity,

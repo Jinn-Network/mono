@@ -4,6 +4,8 @@
 // persistence and passes its stable identity into every write; this port never invents it.
 import {
   JINN_ROUTER_V3_ABI,
+  MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
   SafeInnerRevertError,
   formatKnownRevertDetail,
   type VerdictCode,
@@ -19,17 +21,6 @@ import {
 import { flattenError } from "./broadcast/classify.js";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "./broadcast/safe-broadcaster.js";
 
-const MECH_DELIVER_TO_MARKETPLACE_ABI = [{
-  name: "deliverToMarketplace",
-  type: "function",
-  stateMutability: "nonpayable",
-  inputs: [
-    { name: "requestIds", type: "bytes32[]" },
-    { name: "datas", type: "bytes[]" },
-  ],
-  outputs: [],
-}] as const;
-
 const ALREADY_SETTLED_INNER = new Set(["RouterAlreadyClaimed", "TCVerdictAlreadyDelivered"]);
 
 export interface VerdictTransactionIdentity {
@@ -44,6 +35,22 @@ export interface CanonicalVerdictAttempt {
   readonly verdictIndex: number;
   readonly requestId: Hex;
   readonly evaluator: Address;
+  readonly transaction: VerdictTransactionIdentity & { readonly logIndex: number };
+}
+
+export interface CanonicalVerdictSettlement {
+  readonly requestId: Hex;
+  readonly taskId: bigint;
+  readonly attemptIndex: number;
+  readonly verdictIndex: number;
+  readonly evaluator: Address;
+  readonly verdictCode: VerdictCode;
+  readonly transaction: VerdictTransactionIdentity & { readonly logIndex: number };
+}
+
+export interface CanonicalVerdictDelivery {
+  readonly requestId: Hex;
+  readonly deliveryDigest: Hex;
   readonly transaction: VerdictTransactionIdentity & { readonly logIndex: number };
 }
 
@@ -72,17 +79,24 @@ export interface VerdictPorts {
     readonly operationId: string;
     readonly requestId: Hex;
     readonly deliveryDigest: Hex;
+    /** Required only when the receipt cannot itself establish the delivery transaction. */
+    readonly reconciliationFromBlock?: bigint;
   }) => Promise<{ readonly operationId: string; readonly transaction: VerdictTransactionIdentity }>;
   readonly claimVerdictDelivery: (input: {
     readonly operationId: string;
     readonly requestId: Hex;
     readonly verdictDigest: Hex;
     readonly verdictCode: VerdictCode;
-  }) => Promise<{
-    readonly operationId: string;
-    readonly status: "settled" | "already-settled" | "rejected";
-    readonly transaction?: VerdictTransactionIdentity;
-  }>;
+    /** Required when recovering a prior settled operation. */
+    readonly reconciliationFromBlock?: bigint;
+  }) => Promise<
+    | { readonly operationId: string; readonly status: "rejected" }
+    | {
+        readonly operationId: string;
+        readonly status: "settled" | "already-settled";
+        readonly transaction: VerdictTransactionIdentity;
+      }
+  >;
   /** Current canonical RPC view for recovering an already-broadcast evaluation claim. */
   readonly readCanonicalVerdictAttempt: (input: {
     readonly taskId: bigint;
@@ -91,8 +105,17 @@ export interface VerdictPorts {
     readonly fromBlock: bigint;
     readonly evaluator?: Address;
   }) => Promise<CanonicalVerdictAttempt | undefined>;
-  /** Current router settlement state for a known verdict request. */
-  readonly readVerdictSettlement: (input: { readonly requestId: Hex }) => Promise<{ readonly settled: boolean }>;
+  /** Current canonical router settlement identity for a known verdict request. */
+  readonly readVerdictSettlement: (input: {
+    readonly requestId: Hex;
+    readonly fromBlock: bigint;
+  }) => Promise<CanonicalVerdictSettlement | undefined>;
+  /** Current canonical Mech delivery identity for a known verdict request and digest. */
+  readonly readCanonicalVerdictDelivery: (input: {
+    readonly requestId: Hex;
+    readonly deliveryDigest: Hex;
+    readonly fromBlock: bigint;
+  }) => Promise<CanonicalVerdictDelivery | undefined>;
 }
 
 export interface VerdictPortDeps {
@@ -103,11 +126,28 @@ export interface VerdictPortDeps {
   readonly mechAddress: Address;
 }
 
-function transactionIdentity(receipt: SafeBroadcastReceipt): VerdictTransactionIdentity {
+function transactionIdentity(receipt: SafeBroadcastReceipt, operationId: string): VerdictTransactionIdentity {
+  if (
+    !/^0x[0-9a-f]{64}$/iu.test(receipt.txHash)
+    || !/^0x[0-9a-f]{64}$/iu.test(receipt.blockHash)
+    || receipt.blockNumber <= 0n
+  ) {
+    throw new Error(`${operationId} has no real canonical transaction identity`);
+  }
   return {
     hash: receipt.txHash,
     blockNumber: receipt.blockNumber,
     blockHash: receipt.blockHash,
+  };
+}
+
+function transactionIdentityFromCanonical(
+  transaction: VerdictTransactionIdentity & { readonly logIndex: number },
+): VerdictTransactionIdentity {
+  return {
+    hash: transaction.hash,
+    blockNumber: transaction.blockNumber,
+    blockHash: transaction.blockHash,
   };
 }
 
@@ -148,14 +188,13 @@ function classifyVerdictClaimRevert(error: unknown): "already-settled" | "reject
 }
 
 export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
-  const readVerdictSettlement: VerdictPorts["readVerdictSettlement"] = async ({ requestId }) => ({
-    settled: Boolean(await deps.publicClient.readContract({
+  const isVerdictSettled = async (requestId: Hex): Promise<boolean> =>
+    Boolean(await deps.publicClient.readContract({
       address: deps.routerAddress,
       abi: JINN_ROUTER_V3_ABI,
       functionName: "claimed",
       args: [requestId],
-    })),
-  });
+    }));
 
   const readCanonicalVerdictAttempt: VerdictPorts["readCanonicalVerdictAttempt"] = async (input) => {
     const events = await deps.publicClient.getContractEvents({
@@ -217,9 +256,146 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
     };
   };
 
+  const readVerdictSettlement: VerdictPorts["readVerdictSettlement"] = async (input) => {
+    if (!await isVerdictSettled(input.requestId)) return undefined;
+    const events = await deps.publicClient.getContractEvents({
+      address: deps.routerAddress,
+      abi: JINN_ROUTER_V3_ABI,
+      eventName: "VerdictDeliveryClaimed",
+      args: { requestId: input.requestId },
+      fromBlock: input.fromBlock,
+      toBlock: "latest",
+    } as never) as readonly unknown[];
+    const event = events
+      .map((raw) => raw as {
+        readonly args?: {
+          readonly evaluator?: Address;
+          readonly requestId?: Hex;
+          readonly taskId?: bigint;
+          readonly attemptIndex?: number | bigint;
+          readonly verdictIndex?: number | bigint;
+          readonly verdictCode?: VerdictCode | number | bigint;
+        };
+        readonly transactionHash?: Hex;
+        readonly blockNumber?: bigint;
+        readonly blockHash?: Hex;
+        readonly logIndex?: number;
+      })
+      .filter((candidate) => candidate.args?.requestId === input.requestId)
+      .at(-1);
+    const args = event?.args;
+    if (
+      event === undefined
+      || args?.evaluator === undefined
+      || args.taskId === undefined
+      || args.attemptIndex === undefined
+      || args.verdictIndex === undefined
+      || args.verdictCode === undefined
+      || event.transactionHash === undefined
+      || event.blockNumber === undefined
+      || event.blockHash === undefined
+      || event.logIndex === undefined
+    ) {
+      throw new Error(`settled verdict ${input.requestId} has no canonical transaction identity`);
+    }
+    return {
+      requestId: input.requestId,
+      taskId: args.taskId,
+      attemptIndex: Number(args.attemptIndex),
+      verdictIndex: Number(args.verdictIndex),
+      evaluator: args.evaluator,
+      verdictCode: Number(args.verdictCode) as VerdictCode,
+      transaction: {
+        hash: event.transactionHash,
+        blockNumber: event.blockNumber,
+        blockHash: event.blockHash,
+        logIndex: event.logIndex,
+      },
+    };
+  };
+
+  const readCanonicalVerdictDelivery: VerdictPorts["readCanonicalVerdictDelivery"] = async (input) => {
+    const events = await deps.publicClient.getContractEvents({
+      address: deps.mechAddress,
+      abi: MECH_ABI,
+      eventName: "Deliver",
+      fromBlock: input.fromBlock,
+      toBlock: "latest",
+    } as never) as readonly unknown[];
+    const event = events
+      .map((raw) => raw as {
+        readonly args?: { readonly requestId?: Hex; readonly data?: Hex };
+        readonly transactionHash?: Hex;
+        readonly blockNumber?: bigint;
+        readonly blockHash?: Hex;
+        readonly logIndex?: number;
+      })
+      .filter((candidate) =>
+        candidate.args?.requestId === input.requestId
+        && candidate.args.data?.toLowerCase() === input.deliveryDigest.toLowerCase(),
+      )
+      .at(-1);
+    const args = event?.args;
+    if (
+      event === undefined
+      || args?.data === undefined
+      || event.transactionHash === undefined
+      || event.blockNumber === undefined
+      || event.blockHash === undefined
+      || event.logIndex === undefined
+    ) return undefined;
+    return {
+      requestId: input.requestId,
+      deliveryDigest: args.data,
+      transaction: {
+        hash: event.transactionHash,
+        blockNumber: event.blockNumber,
+        blockHash: event.blockHash,
+        logIndex: event.logIndex,
+      },
+    };
+  };
+
+  async function requireVerdictSettlementIdentity(input: {
+    readonly requestId: Hex;
+    readonly reconciliationFromBlock?: bigint;
+  }): Promise<CanonicalVerdictSettlement> {
+    if (input.reconciliationFromBlock === undefined) {
+      throw new Error(`claimVerdictDelivery requires reconciliationFromBlock for ${input.requestId}`);
+    }
+    const settlement = await readVerdictSettlement({
+      requestId: input.requestId,
+      fromBlock: input.reconciliationFromBlock,
+    });
+    if (settlement === undefined) {
+      throw new Error(`claimVerdictDelivery has no canonical settled verdict for ${input.requestId}`);
+    }
+    return settlement;
+  }
+
+  async function requireVerdictDeliveryIdentity(input: {
+    readonly requestId: Hex;
+    readonly deliveryDigest: Hex;
+    readonly reconciliationFromBlock?: bigint;
+  }): Promise<CanonicalVerdictDelivery> {
+    if (input.reconciliationFromBlock === undefined) {
+      throw new Error(`deliverVerdictToMarketplace requires reconciliationFromBlock for ${input.requestId}`);
+    }
+    const delivery = await readCanonicalVerdictDelivery({
+      requestId: input.requestId,
+      deliveryDigest: input.deliveryDigest,
+      fromBlock: input.reconciliationFromBlock,
+    });
+    if (delivery === undefined) {
+      throw new Error(`deliverVerdictToMarketplace has no canonical delivery for ${input.requestId}`);
+    }
+    return delivery;
+  }
+
   return Object.freeze({
     readVerdictSettlement,
     readCanonicalVerdictAttempt,
+    readCanonicalVerdictDelivery,
 
     async canOpenVerdictAttempt(input: { readonly taskId: bigint; readonly attemptIndex: number }) {
       try {
@@ -287,7 +463,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         operationId: input.operationId,
         requestId: claimed.requestId,
         verdictIndex: claimed.verdictIndex,
-        transaction: reconciled === undefined ? transactionIdentity(receipt) : reconciled.transaction,
+        transaction: reconciled === undefined ? transactionIdentity(receipt, input.operationId) : reconciled.transaction,
       };
     },
 
@@ -295,6 +471,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       readonly operationId: string;
       readonly requestId: Hex;
       readonly deliveryDigest: Hex;
+      readonly reconciliationFromBlock?: bigint;
     }) {
       requireOperationId(input.operationId);
       const data = encodeFunctionData({
@@ -308,7 +485,14 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         data,
         logicalTx: input.operationId,
       });
-      return { operationId: input.operationId, transaction: transactionIdentity(receipt) };
+      if (receipt.alreadySettled) {
+        const delivery = await requireVerdictDeliveryIdentity(input);
+        return {
+          operationId: input.operationId,
+          transaction: transactionIdentityFromCanonical(delivery.transaction),
+        };
+      }
+      return { operationId: input.operationId, transaction: transactionIdentity(receipt, input.operationId) };
     },
 
     async claimVerdictDelivery(input: {
@@ -316,13 +500,19 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       readonly requestId: Hex;
       readonly verdictDigest: Hex;
       readonly verdictCode: VerdictCode;
+      readonly reconciliationFromBlock?: bigint;
     }) {
       requireOperationId(input.operationId);
       if (input.verdictCode === undefined) {
         throw new Error(`claimVerdictDelivery is refusing to default a verdict code for ${input.requestId}`);
       }
-      if ((await readVerdictSettlement({ requestId: input.requestId })).settled) {
-        return { operationId: input.operationId, status: "already-settled" as const };
+      if (await isVerdictSettled(input.requestId)) {
+        const settlement = await requireVerdictSettlementIdentity(input);
+        return {
+          operationId: input.operationId,
+          status: "already-settled" as const,
+          transaction: transactionIdentityFromCanonical(settlement.transaction),
+        };
       }
       const data = encodeFunctionData({
         abi: JINN_ROUTER_V3_ABI,
@@ -336,18 +526,38 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
           data,
           logicalTx: input.operationId,
         });
-        if (receipt.alreadySettled) return { operationId: input.operationId, status: "already-settled" as const };
+        if (receipt.alreadySettled) {
+          const settlement = await requireVerdictSettlementIdentity(input);
+          return {
+            operationId: input.operationId,
+            status: "already-settled" as const,
+            transaction: transactionIdentityFromCanonical(settlement.transaction),
+          };
+        }
         return {
           operationId: input.operationId,
           status: "settled" as const,
-          transaction: transactionIdentity(receipt),
+          transaction: transactionIdentity(receipt, input.operationId),
         };
       } catch (error) {
-        if ((await readVerdictSettlement({ requestId: input.requestId })).settled) {
-          return { operationId: input.operationId, status: "already-settled" as const };
+        if (await isVerdictSettled(input.requestId)) {
+          const settlement = await requireVerdictSettlementIdentity(input);
+          return {
+            operationId: input.operationId,
+            status: "already-settled" as const,
+            transaction: transactionIdentityFromCanonical(settlement.transaction),
+          };
         }
         const status = classifyVerdictClaimRevert(error);
         if (status === undefined) throw error;
+        if (status === "already-settled") {
+          const settlement = await requireVerdictSettlementIdentity(input);
+          return {
+            operationId: input.operationId,
+            status,
+            transaction: transactionIdentityFromCanonical(settlement.transaction),
+          };
+        }
         return { operationId: input.operationId, status };
       }
     },

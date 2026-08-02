@@ -3,6 +3,7 @@
 import { randomBytes } from "node:crypto";
 import {
   JINN_ROUTER_V3_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
   VerdictCode,
   executeSafeTransaction,
   keccakEvidenceHash,
@@ -23,17 +24,6 @@ import { createBaseVenue } from "../src/create-base-venue.js";
 import { anvilAvailable, withForkVenue, type ForkVenueDeployment } from "../../testing/src/venue-fork.js";
 
 const DEV_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
-const MOCK_MECH_DELIVER_ABI = [{
-  type: "function",
-  name: "deliverToMarketplace",
-  stateMutability: "nonpayable",
-  inputs: [
-    { name: "requestIds", type: "bytes32[]" },
-    { name: "datas", type: "bytes[]" },
-  ],
-  outputs: [{ name: "deliveredRequests", type: "bool[]" }],
-}] as const;
-
 const hasAnvil = await anvilAvailable();
 
 function randomDigest(): Hex {
@@ -78,7 +68,7 @@ async function deliverSolutionFixture(deployment: ForkVenueDeployment, requestId
     to: deployment.mech,
     value: 0n,
     data: encodeFunctionData({
-      abi: MOCK_MECH_DELIVER_ABI,
+      abi: MECH_DELIVER_TO_MARKETPLACE_ABI,
       functionName: "deliverToMarketplace",
       args: [[requestId], [toHex(deliveryBytes)]],
     }),
@@ -107,6 +97,8 @@ describe.runIf(hasAnvil)("verdict ports against a forked chain", () => {
           observations: async () => [],
         });
         try {
+          const verdict = venue.verdict;
+          if (verdict === undefined) throw new Error("today venue unexpectedly has no V3 verdict ports");
           const taskId = await postFixtureTask(deployment);
           const claim = await venue.claim.claimTask({ taskId, priorityMech: deployment.mech });
           const solutionBytes = await deliverSolutionFixture(deployment, claim.requestId!);
@@ -115,28 +107,37 @@ describe.runIf(hasAnvil)("verdict ports against a forked chain", () => {
             solutionDigest: keccakEvidenceHash(solutionBytes) as Hex,
           });
 
-          const opened = await venue.verdict.openVerdictAttempt({
+          const opened = await verdict.openVerdictAttempt({
             operationId: "anvil:open",
             taskId,
             attemptIndex: claim.attemptIndex,
             evaluationTaskCidDigest: randomDigest(),
           });
-          await venue.verdict.deliverVerdictToMarketplace({
+          const verdictDeliveryDigest = randomDigest();
+          const delivered = await verdict.deliverVerdictToMarketplace({
             operationId: "anvil:deliver",
             requestId: opened.requestId,
-            deliveryDigest: randomDigest(),
+            deliveryDigest: verdictDeliveryDigest,
           });
-          const settled = await venue.verdict.claimVerdictDelivery({
+          const settled = await verdict.claimVerdictDelivery({
             operationId: "anvil:settle",
             requestId: opened.requestId,
-            verdictDigest: randomDigest(),
+            verdictDigest: verdictDeliveryDigest,
             verdictCode: VerdictCode.Fail,
           });
 
           expect(settled.status).toBe("settled");
-          expect(await venue.verdict.readVerdictSettlement({ requestId: opened.requestId }))
-            .toEqual({ settled: true });
-          await expect(venue.verdict.readCanonicalVerdictAttempt({
+          if (settled.status === "rejected") throw new Error("verdict settlement was unexpectedly rejected");
+          await expect(verdict.readVerdictSettlement({
+            requestId: opened.requestId,
+            fromBlock: opened.transaction.blockNumber,
+          }))
+            .resolves.toMatchObject({
+              requestId: opened.requestId,
+              transaction: settled.transaction,
+            });
+          expect(delivered.transaction.blockNumber).toBeGreaterThanOrEqual(opened.transaction.blockNumber);
+          await expect(verdict.readCanonicalVerdictAttempt({
             taskId,
             attemptIndex: claim.attemptIndex,
             fromBlock: opened.transaction.blockNumber,
