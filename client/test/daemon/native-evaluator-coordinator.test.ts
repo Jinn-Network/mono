@@ -237,7 +237,59 @@ describe("NativeEvaluatorCoordinator", () => {
     ]);
   });
 
-  it("never opens an evaluation claim when subject authority has not been verified", async () => {
+  it("bounds durable evaluator dependency retries by next-at, attempt budget, and deadline", async () => {
+    const { store, state, id } = setup();
+    store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
+    const opened = vi.fn();
+    const authority = vi.fn(async () => { throw new Error("trusted authority unavailable"); });
+    let nowMs = Date.parse("2026-08-02T12:00:00Z");
+    const coordinator = new NativeEvaluatorCoordinator({
+      state,
+      backend: {} as never,
+      authority: {
+        claim: authority,
+        dependencies: {} as never,
+      },
+      deadline: () => "2026-08-03T00:00:00Z",
+      evaluatorAddress,
+      verdictPorts: { openVerdictAttempt: opened } as never,
+      chain: {} as never,
+      deliverySignature: {} as never,
+      evidence: {} as never,
+      publisher: {} as never,
+      verification: {} as never,
+      retry: {
+        now: () => new Date(nowMs),
+        delayMs: 1_000,
+        maxAttempts: 2,
+      },
+    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "paused",
+      reason: "evaluator-dependency-failed",
+    });
+    expect(authority).toHaveBeenCalledOnce();
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "paused",
+      reason: "retry-not-due",
+    });
+    expect(authority).toHaveBeenCalledOnce();
+    nowMs += 1_001;
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "paused",
+      reason: "evaluator-dependency-failed",
+    });
+    nowMs += 1_001;
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
+      kind: "failed",
+      reason: "evaluator-retry-exhausted",
+    });
+    expect(authority).toHaveBeenCalledTimes(3);
+    expect(state.getEvaluation(id)).toMatchObject({ state: "failed" });
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it("never opens an evaluation claim without persisted verified subject authority", async () => {
     const { store, state, id } = setup();
     store.db.prepare("DELETE FROM native_evaluation_authority WHERE evaluation_id = ?").run(id);
     const opened = vi.fn();
@@ -256,11 +308,9 @@ describe("NativeEvaluatorCoordinator", () => {
       evidence: {} as never,
       publisher: {} as never,
       verification: {} as never,
+      retry: { now: () => new Date("2026-08-02T12:00:00Z") },
     });
-    await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({
-      kind: "paused",
-      reason: "evaluator-dependency-failed",
-    });
+    await expect(coordinator.reconcileEvaluation(id)).resolves.toMatchObject({ kind: "paused" });
     expect(opened).not.toHaveBeenCalled();
   });
 });

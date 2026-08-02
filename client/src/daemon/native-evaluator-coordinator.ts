@@ -25,6 +25,7 @@ import type { ExactSubjectArtifact, SubjectMaterial } from "../evaluator/subject
 import type { NativeOperationId } from "./native-operation-identity.js";
 import {
   NativeEvaluatorStateRepository,
+  NativeEvaluatorStateConflictError,
   type NativeEvaluationAuthority,
   type NativeEvaluationArtifactRow,
   type NativeEvaluationOperationRow,
@@ -150,6 +151,11 @@ export class NativeEvaluatorCoordinator {
     };
     readonly publisher: NativeEvaluatorPublisherPort;
     readonly verification: NativeEvaluatorVerdictVerificationPort;
+    readonly retry?: {
+      readonly now?: () => Date;
+      readonly delayMs?: number;
+      readonly maxAttempts?: number;
+    };
   }) {}
 
   async reconcileStartup(): Promise<readonly NativeEvaluatorCoordinatorResult[]> {
@@ -163,17 +169,36 @@ export class NativeEvaluatorCoordinator {
 
   async reconcileEvaluation(id: NativeOperationId): Promise<NativeEvaluatorCoordinatorResult> {
     try {
+      const current = this.input.state.getEvaluation(id);
+      if (current?.state === "paused") {
+        const now = this.input.retry?.now?.() ?? new Date();
+        const resumed = this.input.state.resumeEvaluationRetry(id, now.toISOString());
+        if (resumed === "waiting") return { kind: "paused", reason: "retry-not-due" };
+        if (resumed === "failed") return { kind: "failed", reason: "evaluator-retry-deadline" };
+      }
       return await this.drive(id);
     } catch (cause) {
       const reason = cause instanceof EvaluatorCoordinatorFailure
         ? cause.reason
         : "evaluator-dependency-failed";
-      if (cause instanceof EvaluatorCoordinatorFailure && !cause.retryable) {
+      if ((cause instanceof EvaluatorCoordinatorFailure && !cause.retryable)
+        || cause instanceof NativeEvaluatorStateConflictError
+        || cause instanceof TypeError) {
         this.input.state.recordEvaluationFailed(id, reason);
         return { kind: "failed", reason };
       }
-      this.input.state.recordEvaluationPaused(id, reason);
-      return { kind: "paused", reason };
+      const evaluation = this.input.state.getEvaluation(id);
+      if (evaluation === undefined) return { kind: "failed", reason };
+      const now = this.input.retry?.now?.() ?? new Date();
+      const scheduled = this.input.state.recordEvaluationPaused(id, {
+        reason,
+        nextAttemptAt: new Date(now.getTime() + (this.input.retry?.delayMs ?? 1_000)).toISOString(),
+        deadline: this.input.deadline(evaluation),
+        maxAttempts: this.input.retry?.maxAttempts ?? 5,
+      });
+      return scheduled === "paused"
+        ? { kind: "paused", reason }
+        : { kind: "failed", reason: "evaluator-retry-exhausted" };
     }
   }
 

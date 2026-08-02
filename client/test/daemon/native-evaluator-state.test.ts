@@ -55,8 +55,8 @@ const opportunity = {
 };
 
 describe("NativeEvaluatorStateRepository", () => {
-  it("migrates an on-disk v2 operator DB to v3 without changing solver state", () => {
-    const root = mkdtempSync(join(tmpdir(), "native-evaluator-v2-v3-"));
+  it.each([1, 2, 3])("migrates an on-disk v%s operator DB to v4 without changing solver state", (version) => {
+    const root = mkdtempSync(join(tmpdir(), `native-evaluator-v${version}-v4-`));
     const path = join(root, "operator.sqlite");
     try {
       const before = new Store(path);
@@ -74,17 +74,50 @@ describe("NativeEvaluatorStateRepository", () => {
         "urn:uuid:40000000-0000-4000-8000-000000000004",
         `sha256:${"4".repeat(64)}`,
       );
-      before.db.prepare("UPDATE native_operator_state_metadata SET schema_version = 2 WHERE singleton = 1").run();
+      before.db.prepare("UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1").run(version);
       const preserved = before.db.prepare("SELECT * FROM native_engagements").get();
       before.close();
 
       const after = new Store(path);
       const evaluator = new NativeEvaluatorStateRepository(after);
-      expect(evaluator.schemaVersion()).toBe(3);
+      expect(evaluator.schemaVersion()).toBe(4);
       expect(after.db.prepare("SELECT * FROM native_engagements").get()).toEqual(preserved);
       expect(after.db.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'native_evaluations'",
       ).get()).toEqual({ name: "native_evaluations" });
+      after.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reconstructs a v3 paused evaluation retry stage from durable operations", () => {
+    const root = mkdtempSync(join(tmpdir(), "native-evaluator-v3-paused-"));
+    const path = join(root, "operator.sqlite");
+    try {
+      const before = new Store(path);
+      const state = new NativeEvaluatorStateRepository(before, {
+        now: () => new Date("2026-08-02T00:00:00.000Z"),
+      });
+      const admitted = state.admitOpportunity({
+        opportunity,
+        evaluatorAgent: "urn:jinn:evaluator:golden",
+        coordinator: `0x${"f".repeat(40)}`,
+        material,
+      });
+      before.db.prepare("UPDATE native_evaluations SET state = 'paused' WHERE evaluation_id = ?")
+        .run(admitted.evaluationId);
+      before.db.exec("DROP TABLE native_evaluation_retries");
+      before.db.prepare("UPDATE native_operator_state_metadata SET schema_version = 3 WHERE singleton = 1").run();
+      before.close();
+
+      const after = new Store(path);
+      const migrated = new NativeEvaluatorStateRepository(after, {
+        now: () => new Date("2026-08-02T00:00:01.000Z"),
+      });
+      expect(migrated.resumeEvaluationRetry(admitted.evaluationId, "2026-08-02T00:00:01.000Z"))
+        .toBe("resumed");
+      expect(migrated.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "evaluation-pending" });
       after.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

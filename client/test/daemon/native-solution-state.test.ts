@@ -86,19 +86,23 @@ function finalizedClaim(dbPath = ':memory:') {
 }
 
 describe('native solution state', () => {
-  it('opens a real on-disk v1 database additively and leaves claim rows intact', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'jinn-native-state-v1-'));
+  it.each([1, 2, 3])('opens a real on-disk v%s database additively and leaves claim rows intact', async (version) => {
+    const root = await mkdtemp(join(tmpdir(), `jinn-native-state-v${version}-`));
     const dbPath = join(root, 'operator.sqlite');
     let openStore: Store | undefined;
     try {
       const subject = finalizedClaim(dbPath);
       const engagementId = subject.engagement.engagementId;
       const attemptUri = subject.engagement.attemptUri;
-      subject.store.db.exec(`
-        DROP TABLE native_solution_artifacts;
-        DROP TABLE native_solution_executions;
-        UPDATE native_operator_state_metadata SET schema_version = 1 WHERE singleton = 1;
-      `);
+      if (version === 1) subject.store.db.exec(`
+          DROP TABLE native_solution_retries;
+          DROP TABLE native_solution_artifacts;
+          DROP TABLE native_solution_executions;
+        `);
+      else subject.store.db.exec('DROP TABLE native_solution_retries;');
+      subject.store.db.prepare(
+        'UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1',
+      ).run(version);
       subject.store.close();
 
       openStore = new Store(dbPath);

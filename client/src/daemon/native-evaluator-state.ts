@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS native_evaluation_authority (
   verification_digest TEXT NOT NULL,
   verified_at         TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS native_evaluation_retries (
+  evaluation_id   TEXT PRIMARY KEY REFERENCES native_evaluations(evaluation_id),
+  resume_state    TEXT NOT NULL,
+  reason          TEXT NOT NULL,
+  retry_count     INTEGER NOT NULL,
+  next_attempt_at TEXT NOT NULL,
+  retry_deadline  TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
 `;
 
 export class NativeEvaluatorStateConflictError extends Error {
@@ -334,17 +344,20 @@ export class NativeEvaluatorStateRepository {
     const metadata = this.store.db.prepare(
       "SELECT schema_version FROM native_operator_state_metadata WHERE singleton = 1",
     ).get() as { schema_version: number } | undefined;
+    let migratedFrom: number | undefined;
     if (metadata === undefined) {
       this.store.db.prepare(
         "INSERT INTO native_operator_state_metadata (singleton, schema_version, created_at) VALUES (1, ?, ?)",
       ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, this.timestamp());
-    } else if (metadata.schema_version === 2) {
+    } else if ([1, 2, 3].includes(metadata.schema_version)) {
+      migratedFrom = metadata.schema_version;
       this.store.db.prepare(
-        "UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = 2",
-      ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION);
+        "UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = ?",
+      ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, metadata.schema_version);
     } else if (metadata.schema_version !== NATIVE_OPERATOR_STATE_SCHEMA_VERSION) {
       throw new Error(`unsupported native operator state schema version ${metadata.schema_version}`);
     }
+    if (migratedFrom !== undefined && migratedFrom <= 3) this.reconcileLegacyPausedRows();
   }
 
   private timestamp(): string {
@@ -357,6 +370,57 @@ export class NativeEvaluatorStateRepository {
     return (this.store.db.prepare(
       "SELECT schema_version FROM native_operator_state_metadata WHERE singleton = 1",
     ).get() as { schema_version: number }).schema_version;
+  }
+
+  private reconcileLegacyPausedRows(): void {
+    const now = this.timestamp();
+    const paused = this.store.db.prepare(
+      `SELECT evaluation_id, updated_at FROM native_evaluations WHERE state = 'paused'
+       AND evaluation_id NOT IN (SELECT evaluation_id FROM native_evaluation_retries)`,
+    ).all() as Array<{ evaluation_id: NativeOperationId; updated_at: string }>;
+    for (const row of paused) {
+      const operations = this.listEvaluationOperations(row.evaluation_id);
+      const claim = operations.find(({ kind }) => kind === "evaluation-claim");
+      const backend = operations.find(({ kind }) => kind === "evaluation-backend-submit");
+      const delivery = operations.find(({ kind }) => kind === "evaluation-marketplace-delivery");
+      const settlement = operations.find(({ kind }) => kind === "verdict-settlement");
+      const artifacts = this.listEvaluationArtifacts(row.evaluation_id);
+      const pendingPublications = this.listPendingEvaluationPublications()
+        .some(({ evaluationId }) => evaluationId === row.evaluation_id);
+      let resumeState: NativeEvaluationState;
+      if (settlement?.status === "finalized") resumeState = "complete";
+      else if (delivery?.status === "finalized" || settlement !== undefined) resumeState = "verdict-settlement-pending";
+      else if (artifacts.length > 0 && !pendingPublications) resumeState = "verdict-published";
+      else if (artifacts.length > 0) resumeState = "verdict-ready";
+      else if (backend !== undefined || claim?.status === "finalized") resumeState = "evaluating";
+      else if (claim !== undefined) resumeState = "evaluation-claim-pending";
+      else resumeState = "evaluation-pending";
+      if (resumeState === "complete") {
+        this.store.db.prepare("UPDATE native_evaluations SET state = 'complete', updated_at = ? WHERE evaluation_id = ?")
+          .run(now, row.evaluation_id);
+        continue;
+      }
+      const execution = this.store.db.prepare(
+        "SELECT submission_bytes FROM native_evaluation_executions WHERE evaluation_id = ?",
+      ).get(row.evaluation_id) as { submission_bytes: Uint8Array } | undefined;
+      let deadline = new Date(Date.parse(now) + 24 * 60 * 60 * 1000).toISOString();
+      if (execution !== undefined) {
+        try {
+          const submission = SubmissionRecordSchema.parse(JSON.parse(new TextDecoder().decode(execution.submission_bytes)));
+          deadline = new Date(submission.deadline).toISOString();
+        } catch {
+          throw new NativeEvaluatorStateConflictError(
+            `legacy paused evaluation ${row.evaluation_id} has contradictory sealed Submission bytes`,
+          );
+        }
+      }
+      this.store.db.prepare(
+        `INSERT INTO native_evaluation_retries
+          (evaluation_id, resume_state, reason, retry_count, next_attempt_at, retry_deadline, updated_at)
+         VALUES (?, ?, 'v3-paused-migration', 0, ?, ?, ?)`,
+      ).run(row.evaluation_id, resumeState, now, deadline, now);
+      this.audit(row.evaluation_id, "evaluation-retry-migrated", { resumeState, fromVersion: 3 }, now);
+    }
   }
 
   admitOpportunity(input: {
@@ -1097,13 +1161,85 @@ export class NativeEvaluatorStateRepository {
     })();
   }
 
-  recordEvaluationPaused(evaluation: NativeOperationId, reason: string): void {
-    if (this.getEvaluation(evaluation) === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
+  recordEvaluationPaused(evaluation: NativeOperationId, input: {
+    readonly reason: string;
+    readonly nextAttemptAt: string;
+    readonly deadline: string;
+    readonly maxAttempts: number;
+  }): "paused" | "failed" {
+    const current = this.getEvaluation(evaluation);
+    if (current === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
+    const next = Date.parse(input.nextAttemptAt);
+    const deadline = Date.parse(input.deadline);
+    if (!Number.isFinite(next) || !Number.isFinite(deadline) || next > deadline) {
+      this.recordEvaluationFailed(evaluation, "evaluator-retry-deadline");
+      return "failed";
+    }
+    if (!Number.isSafeInteger(input.maxAttempts) || input.maxAttempts <= 0) {
+      throw new RangeError("evaluator retry maxAttempts must be positive");
+    }
     const now = this.timestamp();
-    this.store.db.prepare(
-      "UPDATE native_evaluations SET state = 'paused', updated_at = ? WHERE evaluation_id = ?",
-    ).run(now, evaluation);
-    this.audit(evaluation, "evaluation-paused", { reason }, now);
+    return this.store.db.transaction(() => {
+      const existing = this.store.db.prepare(
+        "SELECT resume_state, retry_count FROM native_evaluation_retries WHERE evaluation_id = ?",
+      ).get(evaluation) as { resume_state: NativeEvaluationState; retry_count: number } | undefined;
+      const retryCount = (existing?.retry_count ?? 0) + 1;
+      if (retryCount > input.maxAttempts) {
+        this.store.db.prepare("UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?")
+          .run(now, evaluation);
+        this.audit(evaluation, "evaluation-retry-exhausted", {
+          reason: input.reason,
+          retryCount,
+          maxAttempts: input.maxAttempts,
+        }, now);
+        return "failed" as const;
+      }
+      const resumeState = existing?.resume_state ?? current.state;
+      this.store.db.prepare(
+        `INSERT INTO native_evaluation_retries
+          (evaluation_id, resume_state, reason, retry_count, next_attempt_at, retry_deadline, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (evaluation_id) DO UPDATE SET
+           reason = excluded.reason, retry_count = excluded.retry_count,
+           next_attempt_at = excluded.next_attempt_at, retry_deadline = excluded.retry_deadline,
+           updated_at = excluded.updated_at`,
+      ).run(evaluation, resumeState, input.reason, retryCount, input.nextAttemptAt, input.deadline, now);
+      this.store.db.prepare(
+        "UPDATE native_evaluations SET state = 'paused', updated_at = ? WHERE evaluation_id = ?",
+      ).run(now, evaluation);
+      this.audit(evaluation, "evaluation-paused", {
+        reason: input.reason,
+        retryCount,
+        nextAttemptAt: input.nextAttemptAt,
+        deadline: input.deadline,
+      }, now);
+      return "paused" as const;
+    })();
+  }
+
+  resumeEvaluationRetry(evaluation: NativeOperationId, at: string): "waiting" | "resumed" | "failed" {
+    const effective = Date.parse(at);
+    if (!Number.isFinite(effective)) throw new TypeError("evaluator retry time is invalid");
+    const retry = this.store.db.prepare(
+      "SELECT resume_state, next_attempt_at, retry_deadline FROM native_evaluation_retries WHERE evaluation_id = ?",
+    ).get(evaluation) as {
+      resume_state: NativeEvaluationState;
+      next_attempt_at: string;
+      retry_deadline: string;
+    } | undefined;
+    if (retry === undefined) throw new NativeEvaluatorStateConflictError("paused evaluation has no retry schedule");
+    const now = this.timestamp();
+    if (effective > Date.parse(retry.retry_deadline)) {
+      this.store.db.prepare("UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?")
+        .run(now, evaluation);
+      this.audit(evaluation, "evaluation-retry-deadline-exhausted", {}, now);
+      return "failed";
+    }
+    if (effective < Date.parse(retry.next_attempt_at)) return "waiting";
+    this.store.db.prepare("UPDATE native_evaluations SET state = ?, updated_at = ? WHERE evaluation_id = ?")
+      .run(retry.resume_state, now, evaluation);
+    this.audit(evaluation, "evaluation-retry-resumed", { resumeState: retry.resume_state }, now);
+    return "resumed";
   }
 
   recordEvaluationFailed(evaluation: NativeOperationId, reason: string): void {
