@@ -52,6 +52,8 @@ export class NativeEvaluatorPublisherOwnershipError extends Error {
 
 function kind(role: string): string {
   switch (role) {
+    case "evaluation-task": return RECORD_KINDS.task;
+    case "evaluation-submission": return RECORD_KINDS.submission;
     case "verdict": return RECORD_KINDS.resultEvaluation;
     case "evaluation-delivery": return RECORD_KINDS.delivery;
     case "evaluation-evidence": return RECORD_KINDS.executionEvidence;

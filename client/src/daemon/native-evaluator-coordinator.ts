@@ -358,6 +358,16 @@ export class NativeEvaluatorCoordinator {
     if (envelopeBytes === undefined) throw new EvaluatorCoordinatorFailure("evaluation-delivery-envelope-missing", undefined, true);
     const artifacts: Array<{ role: string; name: string; mediaType: string; digest: `sha256:${string}`; bytes: Uint8Array }> = [
       {
+        role: "evaluation-task", name: "evaluation-task",
+        mediaType: "application/vnd.jinn.task-execution.task.v1+json",
+        digest: derived.taskDigest, bytes: derived.taskBytes,
+      },
+      {
+        role: "evaluation-submission", name: "evaluation-submission",
+        mediaType: "application/vnd.jinn.task-execution.submission.v1+json",
+        digest: derived.submissionDigest, bytes: derived.submissionBytes,
+      },
+      {
         role: "verdict", name: "verdict",
         mediaType: verdictDescriptor.mediaType ?? "application/vnd.in-toto+json",
         digest: verdictDigest, bytes: verdictBytes,

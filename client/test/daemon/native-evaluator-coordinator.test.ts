@@ -108,13 +108,18 @@ describe("NativeEvaluatorCoordinator", () => {
     const verdictBytes = new TextEncoder().encode("signed-verdict-envelope");
     const evidenceBytes = new TextEncoder().encode("evaluation-evidence");
     let actualDelivery = new Uint8Array();
+    let submittedTask = new Uint8Array();
+    let submittedSubmission = new Uint8Array();
+    const published = new Map<string, Uint8Array>();
 
     const coordinator = new NativeEvaluatorCoordinator({
       state,
       backend: {
         recover: async () => ({ classification: "absent" }),
-        submit: async (_task, _submission, engagement) => {
+        submit: async (task, submission, engagement) => {
           calls.push("backend-submit");
+          submittedTask = Uint8Array.from(task);
+          submittedSubmission = Uint8Array.from(submission);
           const persistedDispatch = state.getDerivedEvaluation(id)!;
           expect(persistedDispatch.dispatchContextBytes).not.toBeNull();
           expect(documentDigest(persistedDispatch.dispatchContextBytes!))
@@ -191,6 +196,7 @@ describe("NativeEvaluatorCoordinator", () => {
         sourceId: "urn:jinn:source:evaluator-records",
         publish: async ({ artifact }) => {
           calls.push(`publish:${artifact.role}`);
+          published.set(artifact.role, Uint8Array.from(artifact.bytes));
           return { location: `https://evaluator.example/${artifact.digest}`, sequence: "1", entryDigest: artifact.digest };
         },
       },
@@ -205,10 +211,14 @@ describe("NativeEvaluatorCoordinator", () => {
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "verdict-settlement-pending" });
     await expect(coordinator.reconcileEvaluation(id)).resolves.toEqual({ kind: "complete" });
     expect(state.getEvaluation(id)).toMatchObject({ state: "complete", verdictCode: 1 });
+    expect(published.get("evaluation-task")).toEqual(submittedTask);
+    expect(published.get("evaluation-submission")).toEqual(submittedSubmission);
     expect(calls).toEqual([
       "evaluation-claim",
       "backend-submit",
       "verdict-gate",
+      "publish:evaluation-task",
+      "publish:evaluation-submission",
       "publish:verdict",
       "publish:evaluation-delivery",
       "publish:evaluation-delivery-envelope",

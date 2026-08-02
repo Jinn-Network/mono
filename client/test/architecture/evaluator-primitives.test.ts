@@ -8,6 +8,13 @@ const harvestedModules = [
   ["subject-material", new URL("../../src/evaluator/subject-material.ts", import.meta.url)],
   ["verdict-gate", new URL("../../src/evaluator/verdict-gate.ts", import.meta.url)],
   ["client deployment", new URL("../../src/evaluator/deployment.ts", import.meta.url)],
+  ["native subject authority", new URL("../../src/evaluator/native-subject-authority.ts", import.meta.url)],
+  ["native verdict verification", new URL("../../src/evaluator/native-verdict-verification.ts", import.meta.url)],
+  ["native evaluation derivation", new URL("../../src/evaluator/native-evaluation-derivation.ts", import.meta.url)],
+  ["native evaluator state", new URL("../../src/daemon/native-evaluator-state.ts", import.meta.url)],
+  ["native evaluator coordinator", new URL("../../src/daemon/native-evaluator-coordinator.ts", import.meta.url)],
+  ["native evaluator publisher", new URL("../../src/daemon/native-evaluator-publisher.ts", import.meta.url)],
+  ["native evaluator composition", new URL("../../src/daemon/native-evaluator-composition.ts", import.meta.url)],
   ["venue verdict", new URL("../../../packages/marketplace/venue-base/src/verdict.ts", import.meta.url)],
   [
     "evaluator-adapters deployment",
@@ -17,7 +24,7 @@ const harvestedModules = [
 const forbiddenImports: ReadonlyArray<[string, RegExp]> = [
   ["bridge", /from\s+["'][^"']*bridge[^"']*["']/iu],
   ["legacy runtime", /from\s+["'][^"']*(?:legacy-task|task-engine|watcher)[^"']*["']/iu],
-  ["self-signer grant", /(?:signer-resolver|capabilityGrant|capability-grant)/iu],
+  ["self-signer grant", /(?:signer-resolver|capability-grant(?:-signer)?-resolver|resolveCapabilityGrant)/iu],
   ["ephemeral key", /(?:ephemeral[-_ ]?key|randomUUID|generateKeyPair)/iu],
   ["in-memory intent", /(?:createInMemory|in-memory.*intent)/iu],
   ["no-op runtime", /(?:no[-_ ]?op(?:[-_ ]?runtime)?|noop|createNoop|disabled[-_ ]?runtime)/iu],
@@ -45,7 +52,7 @@ describe("harvested evaluator primitive architecture", () => {
     expect(findForbiddenNativeDependencies([
       "import value from './bridge/legacy-task.js';",
       "import value from './legacy-task-engine.js';",
-      "const key = capabilityGrant;",
+      "const key = resolveCapabilityGrantSigner;",
       "const key = generateKeyPair();",
       "const intents = createInMemoryIntentStore();",
       "const runtime = createNoopRuntime();",

@@ -546,6 +546,45 @@ export class NativeEvaluatorStateRepository {
     return value === undefined ? undefined : { sequence: value.sequence, entryDigest: value.entry_digest };
   }
 
+  /**
+   * Commits a signed-source entry which intentionally created no evaluation aggregate (for
+   * example, a self-evaluation refusal). Without this durable advance, every restart would
+   * repeatedly re-read the same refused entry from the verified source.
+   */
+  advanceSourceCheckpoint(input: {
+    readonly source: string;
+    readonly sequence: string;
+    readonly entryDigest: `sha256:${string}`;
+    readonly reason: string;
+  }): void {
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const checkpoint = this.sourceCheckpoint(input.source);
+      if (checkpoint !== undefined) {
+        const next = BigInt(input.sequence);
+        const current = BigInt(checkpoint.sequence);
+        if (next < current) {
+          throw new NativeEvaluatorStateConflictError("evaluation source sequence moved backwards");
+        }
+        if (next === current) {
+          if (checkpoint.entryDigest !== input.entryDigest) {
+            throw new NativeEvaluatorStateConflictError("evaluation source sequence changed digest");
+          }
+          return;
+        }
+      }
+      this.upsertCheckpoint(input.source, input.sequence, input.entryDigest, now);
+      this.store.db.prepare(
+        "INSERT INTO native_evaluation_audit (evaluation_id, kind, detail_json, created_at) VALUES (NULL, ?, ?, ?)",
+      ).run("evaluation-source-entry-skipped", JSON.stringify({
+        source: input.source,
+        sequence: input.sequence,
+        entryDigest: input.entryDigest,
+        reason: input.reason,
+      }), now);
+    })();
+  }
+
   private upsertCheckpoint(source: string, sequence: string, entryDigest: `sha256:${string}`, now: string): void {
     this.store.db.prepare(
       `INSERT INTO native_evaluation_source_checkpoints (source, sequence, entry_digest, updated_at)
@@ -872,9 +911,15 @@ export class NativeEvaluatorStateRepository {
     if (current?.state !== "evaluating" && current?.state !== "verdict-ready") {
       throw new NativeEvaluatorStateConflictError("verdict artifacts require evaluating state");
     }
-    if (!input.artifacts.some(({ role }) => role === "verdict")
-      || !input.artifacts.some(({ role }) => role === "evaluation-delivery")) {
-      throw new NativeEvaluatorStateConflictError("verdict graph requires exact verdict and evaluation Delivery");
+    const requiredRoles = [
+      "evaluation-task",
+      "evaluation-submission",
+      "verdict",
+      "evaluation-delivery",
+      "evaluation-delivery-envelope",
+    ];
+    if (requiredRoles.some((role) => !input.artifacts.some((artifact) => artifact.role === role))) {
+      throw new NativeEvaluatorStateConflictError("verdict graph requires the exact evaluation pair, verdict, Delivery, and Delivery envelope");
     }
     const now = this.timestamp();
     this.store.db.transaction(() => {

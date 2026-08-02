@@ -138,6 +138,27 @@ describe("NativeEvaluatorStateRepository", () => {
     })).toThrow(NativeEvaluatorStateConflictError);
   });
 
+  it("durably advances refused source entries without manufacturing an evaluation", () => {
+    const state = new NativeEvaluatorStateRepository(new Store(":memory:"));
+    state.advanceSourceCheckpoint({
+      source: opportunity.source,
+      sequence: opportunity.sourceSequence,
+      entryDigest: opportunity.sourceEntryDigest,
+      reason: "own-solution-safe",
+    });
+    expect(state.sourceCheckpoint(opportunity.source)).toEqual({
+      sequence: opportunity.sourceSequence,
+      entryDigest: opportunity.sourceEntryDigest,
+    });
+    expect(state.listEvaluations()).toEqual([]);
+    expect(() => state.advanceSourceCheckpoint({
+      source: opportunity.source,
+      sequence: opportunity.sourceSequence,
+      entryDigest: `sha256:${"f".repeat(64)}`,
+      reason: "changed-entry",
+    })).toThrow(/changed digest/);
+  });
+
   it("appends a canonical retraction and withdraws work before evaluation claim finality", () => {
     const state = new NativeEvaluatorStateRepository(new Store(":memory:"));
     const admitted = state.admitOpportunity({
@@ -271,15 +292,19 @@ describe("NativeEvaluatorStateRepository", () => {
 
     const verdict = artifact("verdict", "verdict-envelope");
     const delivery = artifact("evaluation-delivery", "evaluation-delivery");
+    const deliveryEnvelope = artifact("evaluation-delivery-envelope", "evaluation-delivery-envelope");
     state.recordVerdictReady(admitted.evaluationId, {
       sourceId: "urn:jinn:source:evaluator-records",
       verdictCode: 1,
       artifacts: [
+        { role: "evaluation-task", mediaType: "application/json", name: "evaluation-task", digest: digest(taskBytes), bytes: taskBytes },
+        { role: "evaluation-submission", mediaType: "application/json", name: "evaluation-submission", digest: digest(submissionBytes), bytes: submissionBytes },
         { role: "verdict", mediaType: "application/vnd.in-toto+json", ...verdict },
         { role: "evaluation-delivery", mediaType: "application/json", ...delivery },
+        { role: "evaluation-delivery-envelope", mediaType: "application/vnd.dsse.envelope.v1+json", ...deliveryEnvelope },
       ],
     });
-    expect(state.listPendingEvaluationPublications()).toHaveLength(2);
+    expect(state.listPendingEvaluationPublications()).toHaveLength(5);
     for (const publication of state.listPendingEvaluationPublications()) {
       state.recordEvaluationPublicationPublished(publication.publicationKey, { sequence: "1" });
     }
