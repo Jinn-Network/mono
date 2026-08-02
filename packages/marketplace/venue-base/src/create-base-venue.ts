@@ -33,8 +33,8 @@ export interface BaseVenue {
   readonly safe: BaseVenueSafeBroadcaster;
   readonly logSource: ChainLogSource;
   readonly intents: PostingIntentStore;
-  /** Feature-disabled today-mode evaluator settlement primitives. */
-  readonly verdict: VerdictPorts;
+  /** Feature-disabled V3 evaluator primitives; absent for revised V4 venues. */
+  readonly verdict?: VerdictPorts;
   close(): void;
 }
 
@@ -111,13 +111,15 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     safe,
     logSource,
     intents: createSqlitePostingIntentStore(state),
-    verdict: createVerdictPorts({
-      publicClient: config.publicClient,
-      broadcaster: safe,
-      safeAddress: config.safeAddress,
-      routerAddress: config.chain.jinnRouter,
-      mechAddress: config.priorityMech,
-    }),
+    ...(config.chain.generation === "today" ? {
+      verdict: createVerdictPorts({
+        publicClient: config.publicClient,
+        broadcaster: safe,
+        safeAddress: config.safeAddress,
+        routerAddress: config.chain.jinnRouter,
+        mechAddress: config.priorityMech,
+      }),
+    } : {}),
     close() {
       logSource.close();
       state.close();

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 
-import { MECH_ABI, computeRawCodecCid } from "@jinn-network/marketplace-binding";
+import {
+  MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
+  computeRawCodecCid,
+} from "@jinn-network/marketplace-binding";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -19,20 +23,6 @@ const REQUEST = `0x${"d".repeat(64)}` as Hex;
 const OTHER_REQUEST = `0x${"f".repeat(64)}` as Hex;
 const TX_HASH = `0x${"e".repeat(64)}` as Hex;
 const BYTES = new TextEncoder().encode('{"protocol":"https://jinn.network/profiles/task-execution/1.0"}');
-
-/** Mirrors the ABI slice `deliver-leg.ts` defines locally (binding's `MECH_ABI` has no function). */
-const MECH_DELIVER_TO_MARKETPLACE_ABI = [
-  {
-    name: "deliverToMarketplace",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "requestIds", type: "bytes32[]" },
-      { name: "datas", type: "bytes[]" },
-    ],
-    outputs: [],
-  },
-] as const;
 
 function successReceipt(logs: readonly Log[]): SafeBroadcastReceipt {
   return { txHash: TX_HASH, blockNumber: 1n, blockHash: `0x${"c".repeat(64)}` as Hex, logs, alreadySettled: false };

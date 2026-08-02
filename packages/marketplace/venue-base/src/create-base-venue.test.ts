@@ -203,6 +203,18 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
     }
   });
 
+  test("today-only V3 verdict ports are unavailable on revised-generation venues", () => {
+    const today = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, buildScriptedChain()));
+    const revised = createBaseVenue(baseConfig(REVISED, buildScriptedChain(), { stateDbPath: join(root, "revised-verdict.db") }));
+    try {
+      expect(today.verdict).toBeDefined();
+      expect(revised.verdict).toBeUndefined();
+    } finally {
+      today.close();
+      revised.close();
+    }
+  });
+
   test("lifecycle.closeTask / lifecycle.releaseAttempt follow the same generation conditionality", () => {
     const today = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, buildScriptedChain()));
     const revised = createBaseVenue(baseConfig(REVISED, buildScriptedChain(), { stateDbPath: join(root, "revised2.db") }));

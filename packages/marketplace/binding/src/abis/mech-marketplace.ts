@@ -59,3 +59,17 @@ export const MECH_ABI = [
     ],
   },
 ] as const;
+
+/** Authoritative AgentMech write slice shared by every today-mode delivery path. */
+export const MECH_DELIVER_TO_MARKETPLACE_ABI = [
+  {
+    type: "function",
+    name: "deliverToMarketplace",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "requestIds", type: "bytes32[]" },
+      { name: "datas", type: "bytes[]" },
+    ],
+    outputs: [{ name: "deliveredRequests", type: "bool[]" }],
+  },
+] as const;

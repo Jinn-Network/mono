@@ -7,29 +7,13 @@
 // unless that event already carries the Delivery's raw-CID sha256 digest -- nothing else in the
 // merged stack sends this transaction, so the host emits it here, funneled through the single
 // venue Safe broadcaster (contract 1).
-import { MECH_ABI, computeRawCodecCid } from "@jinn-network/marketplace-binding";
+import {
+  MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
+  computeRawCodecCid,
+} from "@jinn-network/marketplace-binding";
 import { decodeEventLog, encodeFunctionData, type Address, type Hex } from "viem";
 import type { BaseVenueSafeBroadcaster } from "./broadcast/safe-broadcaster.js";
-
-/**
- * `AgentMech.deliverToMarketplace` -- confirmed real and fork-exercised in this repo
- * (`packages/marketplace/testing/src/escrow-lifecycle.test.ts`; `writers/settlement.ts` already
- * carries its own copy as `MECH_DELIVER_TO_MARKETPLACE_ABI` for the same reason). Not part of
- * the binding's exported `MECH_ABI`, which keeps only the `Deliver` event this module decodes
- * below -- so the function signature is defined locally rather than assumed present there.
- */
-const MECH_DELIVER_TO_MARKETPLACE_ABI = [
-  {
-    name: "deliverToMarketplace",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "requestIds", type: "bytes32[]" },
-      { name: "datas", type: "bytes[]" },
-    ],
-    outputs: [],
-  },
-] as const;
 
 export interface MechDeliverInput {
   readonly mechAddress: Address;

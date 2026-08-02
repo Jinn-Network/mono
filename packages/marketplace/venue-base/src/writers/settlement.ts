@@ -10,6 +10,7 @@ import {
   JINN_ROUTER_V3_ABI,
   JINN_ROUTER_V4_ABI,
   MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
   SafeInnerRevertError,
   decodeRawCodecCidDigestHex,
   encodeRevisedSolutionRequestData,
@@ -124,22 +125,6 @@ const MECH_MARKETPLACE_REQUEST_ID_VIEW_ABI = [{
     { name: "nonce", type: "uint256" },
   ],
   outputs: [{ name: "requestId", type: "bytes32" }],
-}] as const;
-
-/**
- * The mech's own delivery-broadcast entry point, confirmed real and fork-exercised in this repo
- * (`packages/marketplace/testing/src/escrow-lifecycle.test.ts`: `mech.deliverToMarketplace([requestId],
- * [data])`). Reused here, unverified against the real OLAS `OlasMech`/`MechMarketplace` "deliver with
- * signature" surface, as the best-evidenced analog available for the revised-generation middle leg
- * (see task report: this is the single largest open assumption in this file).
- */
-const MECH_DELIVER_TO_MARKETPLACE_ABI = [{
-  name: "deliverToMarketplace", type: "function", stateMutability: "nonpayable",
-  inputs: [
-    { name: "requestIds", type: "bytes32[]" },
-    { name: "datas", type: "bytes[]" },
-  ],
-  outputs: [],
 }] as const;
 
 /** Gnosis Safe `MultiSend` v1.3.0 canonical singleton (identical address across EVM chains). */
