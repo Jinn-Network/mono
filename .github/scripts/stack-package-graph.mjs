@@ -13,8 +13,8 @@ export const DEPENDENCY_SECTIONS = [
   'peerDependencies',
 ];
 
-export function discoverStackPackages(repoRoot) {
-  return loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' }).map(({
+export function discoverStackPackages(repoRoot, { releaseGroup = 'platform-v1' } = {}) {
+  return loadCatalogPackages(repoRoot, { releaseGroup }).map(({
     directory,
     name,
     manifest,

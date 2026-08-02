@@ -47,18 +47,24 @@ function successfulConclusions() {
   );
 }
 
-function publicationFixture() {
-  const repoRoot = fixtureRepo();
+function publicationFixture({ platformPackageNames } = {}) {
+  const catalog = fixtureCatalog();
+  if (platformPackageNames) {
+    const selected = new Set(platformPackageNames);
+    catalog.packages = catalog.packages.filter(({ name, releaseGroup }) => (
+      releaseGroup !== 'platform-v1' || selected.has(name)
+    ));
+    catalog.releaseGroups['platform-v1'].expectedPackageCount = selected.size;
+  }
+  const profilePackage = catalog.packages.find(({ name }) => name === '@jinn-network/fixture-protocol');
+  profilePackage.publicSurface.schemas = ['schemas'];
+  const repoRoot = fixtureRepo({ catalog });
   const root = mkdtempSync(join(tmpdir(), 'jinn-verified-publication-'));
   const verificationRoot = join(root, '.platform-verification');
   const packRoot = join(verificationRoot, 'pack');
   mkdirSync(join(packRoot, 'tarballs'), { recursive: true });
 
   const catalogPath = join(repoRoot, 'architecture/platform-packages.v1.json');
-  const catalog = fixtureCatalog();
-  const profilePackage = catalog.packages.find(({ name }) => name === '@jinn-network/fixture-protocol');
-  profilePackage.publicSurface.schemas = ['schemas'];
-  writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf8');
   const sourceProfileRoot = join(repoRoot, profilePackage.path, 'schemas');
   mkdirSync(sourceProfileRoot, { recursive: true });
   writeFileSync(join(sourceProfileRoot, 'profile.schema.json'), `${JSON.stringify({
@@ -284,7 +290,7 @@ function rewriteReceipt(fixture, mutate) {
   writeFileSync(fixture.receiptPath, canonicalJsonBytes(receipt), 'utf8');
 }
 
-test('verifies every subject before npm, publishes all 50 receipt tarballs in wave order, and writes the final receipt', async () => {
+test('verifies every subject before npm, publishes the catalog receipt in wave order, and writes the final receipt', async () => {
   const fixture = publicationFixture();
   const fake = registryExec(fixture);
   try {
@@ -333,12 +339,30 @@ test('verifies every subject before npm, publishes all 50 receipt tarballs in wa
     assert.equal(receipt.packageVersion, fixture.packageVersion);
     assert.equal(receipt.distTag, 'canary');
     assert.deepEqual(receipt.npm, { registry: NPM_REGISTRY });
-    assert.equal(receipt.trustedPublishers.registrationCount, 50);
+    assert.equal(receipt.trustedPublishers.registrationCount, fixture.receipt.packageOrder.length);
     assert.equal(receipt.trustedPublishers.jsonSha256, sha256(readFileSync(fixture.trustedPublishersJsonPath)));
     assert.equal(receipt.trustedPublishers.markdownSha256, sha256(readFileSync(fixture.trustedPublishersMarkdownPath)));
-    assert.equal(receipt.observedRegistry.length, 50);
+    assert.equal(receipt.observedRegistry.length, fixture.receipt.packageOrder.length);
     assert.deepEqual(receipt.observedRegistry.map(({ name }) => name), fixture.receipt.packageOrder);
     assert.equal(readFileSync(fixture.outputPath, 'utf8'), canonicalJsonBytes(receipt));
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('publishes a differently sized receipt only when registrations and tarballs match the catalog-derived set', async () => {
+  const selected = [
+    '@jinn-network/fixture-protocol',
+    '@jinn-network/fixture-application',
+    '@jinn-network/fixture-core-01',
+  ];
+  const fixture = publicationFixture({ platformPackageNames: selected });
+  const fake = registryExec(fixture);
+  try {
+    const receipt = await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
+    assert.deepEqual(new Set(receipt.packageOrder), new Set(selected));
+    assert.equal(receipt.trustedPublishers.registrationCount, selected.length);
+    assert.equal(receipt.observedRegistry.length, selected.length);
   } finally {
     cleanup(fixture);
   }
@@ -348,13 +372,13 @@ function tarballByName(fixture, path) {
   return fixture.receipt.tarballs.find(({ filename }) => join(fixture.packRoot, filename) === path)?.name;
 }
 
-test('an exact-integrity existing 50-package publication is an idempotent no-op', async () => {
+test('an exact-integrity existing catalog publication is an idempotent no-op', async () => {
   const fixture = publicationFixture();
   const fake = registryExec(fixture, { missingByDefault: false });
   try {
     const receipt = await publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec }));
     assert.deepEqual(publishCalls(fake.calls), []);
-    assert.equal(receipt.observedRegistry.length, 50);
+    assert.equal(receipt.observedRegistry.length, fixture.receipt.packageOrder.length);
     assert.ok(receipt.observedRegistry.every(({ version, distTag }) => (
       version === fixture.packageVersion && distTag === 'canary'
     )));
@@ -644,7 +668,7 @@ test('post-publish version and tag propagation use bounded injected retries', as
         registryRetryDelayMs: 1,
         sleep: (ms) => sleeps.push(ms),
       }));
-      assert.equal(receipt.observedRegistry.length, 50);
+      assert.equal(receipt.observedRegistry.length, fixture.receipt.packageOrder.length);
       assert.equal(returnedTransient, true);
       assert.deepEqual(sleeps, [1]);
     } finally {

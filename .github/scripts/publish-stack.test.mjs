@@ -17,6 +17,7 @@ import {
   parsePublishArgs,
 } from './publish-stack.mjs';
 import { fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const script = resolve(import.meta.dirname, 'publish-stack.mjs');
@@ -24,10 +25,10 @@ const SHA = 'b'.repeat(40);
 
 test('argument parsing accepts the canary and stable forms', () => {
   assert.deepEqual(parsePublishArgs(['--mode', 'canary', '--sha', SHA, '--dry-run']), {
-    mode: 'canary', sha: SHA, releaseTag: undefined, dryRun: true, repoRoot: process.cwd(),
+    mode: 'canary', sha: SHA, releaseTag: undefined, dryRun: true, repoRoot: process.cwd(), releaseGroup: 'platform-v1',
   });
-  assert.deepEqual(parsePublishArgs(['--mode', 'stable', '--release-tag', 'stack-v0.1.0', '--root', '/tmp/x']), {
-    mode: 'stable', sha: undefined, releaseTag: 'stack-v0.1.0', dryRun: false, repoRoot: '/tmp/x',
+  assert.deepEqual(parsePublishArgs(['--mode', 'stable', '--release-tag', 'stack-v0.1.0', '--root', '/tmp/x', '--release-group', 'other']), {
+    mode: 'stable', sha: undefined, releaseTag: 'stack-v0.1.0', dryRun: false, repoRoot: '/tmp/x', releaseGroup: 'other',
   });
 });
 
@@ -41,14 +42,11 @@ test('the plan covers every package exactly once, in wave order', () => {
   assert.equal(plan.distTag, 'canary');
   assert.match(plan.version, new RegExp(`^0\\.1\\.0-canary\\.sha\\.${SHA}$`));
   const flattened = plan.waves.flat();
-  assert.equal(flattened.length, 50);
+  const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+    .map(({ name }) => name);
+  assert.deepEqual(new Set(flattened.map(({ name }) => name)), new Set(expectedNames));
   assert.equal(new Set(flattened.map((entry) => entry.name)).size, flattened.length);
   for (const entry of flattened) assert.equal(entry.spec, `${entry.name}@${plan.version}`);
-  assert.deepEqual(plan.waves[0].map((entry) => entry.name), [
-    '@jinn-network/evidence-protocol',
-    '@jinn-network/task-execution-protocol',
-    '@jinn-network/trust-core',
-  ]);
 });
 
 test('the plan refuses a package set whose versions disagree', () => {

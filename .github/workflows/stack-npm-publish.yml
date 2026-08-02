@@ -1,6 +1,6 @@
 name: Stack npm Publish
 
-# The 50 platform-v1 packages publish as one receipt-bound coherent set. Canary
+# The catalog-selected platform-v1 packages publish as one receipt-bound coherent set. Canary
 # publication consumes only the exact tarballs and immutable receipt produced by
 # the same run's reusable platform verification workflow.
 on:

@@ -66,9 +66,9 @@ function bundleFixture(root) {
   return { bundle, manifest, manifestPath };
 }
 
-test('installs all 50 tarballs as direct file roots with unreachable scoped fallback', async () => {
+test('installs every catalog tarball as a direct file root with unreachable scoped fallback', async () => {
   const root = fixtureRepo();
-  const { bundle, manifestPath } = bundleFixture(root);
+  const { bundle, manifest, manifestPath } = bundleFixture(root);
   const calls = [];
   let installedManifest;
   let npmrc;
@@ -88,8 +88,8 @@ test('installs all 50 tarballs as direct file roots with unreachable scoped fall
       },
     });
 
-    assert.equal(result.packageCount, 50);
-    assert.equal(Object.keys(installedManifest.dependencies).length, 50);
+    assert.equal(result.packageCount, manifest.packageOrder.length);
+    assert.equal(Object.keys(installedManifest.dependencies).length, manifest.packageOrder.length);
     for (const specifier of Object.values(installedManifest.dependencies)) {
       assert.match(specifier, /^file:\/.+\.tgz$/u);
     }
@@ -143,7 +143,7 @@ test('package-set drift fails before npm or the probe can run', async () => {
         calls.push(args);
         return { status: 0, stdout: '', stderr: '' };
       } }),
-      /bundle package set does not match the 50-package platform-v1 catalog/u,
+      /bundle package set does not match the platform-v1 catalog release group/u,
     );
     assert.deepEqual(calls, []);
   } finally {

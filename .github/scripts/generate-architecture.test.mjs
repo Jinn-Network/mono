@@ -12,7 +12,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { validateArchitectureControl } from './architecture-control.mjs';
-import { loadCatalogPackages } from './platform-catalog.mjs';
+import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
 
 const implementation = import('./generate-architecture.mjs');
@@ -21,16 +21,22 @@ const repoRoot = resolve(import.meta.dirname, '../..');
 test('machine view covers the exact catalog split and manifest-owned dependency kinds', async () => {
   const { buildArchitectureReport } = await implementation;
   const report = buildArchitectureReport(repoRoot);
+  const catalog = loadPlatformCatalog(repoRoot);
+  const packagesRootEntries = catalog.packages.filter(({ path }) => path.startsWith('packages/')).length;
+  const platformV1 = catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'platform-v1').length;
+  const experimentalEnvironmentSupply = catalog.packages.filter(
+    ({ releaseGroup }) => releaseGroup === 'experimental-environment-supply',
+  ).length;
 
   assert.deepEqual(report.counts, {
-    adjacentEntries: 4,
-    experimentalEnvironmentSupply: 7,
-    inventory: 69,
-    otherPackagesRootEntries: 8,
-    packagesRootEntries: 65,
-    platformV1: 50,
+    adjacentEntries: catalog.packages.length - packagesRootEntries,
+    experimentalEnvironmentSupply,
+    inventory: catalog.packages.length,
+    otherPackagesRootEntries: packagesRootEntries - platformV1 - experimentalEnvironmentSupply,
+    packagesRootEntries,
+    platformV1,
   });
-  assert.equal(report.packages.length, 69);
+  assert.equal(report.packages.length, catalog.packages.length);
   assert.deepEqual(
     report.packages.map(({ path }) => path),
     [...report.packages.map(({ path }) => path)].sort(),
@@ -62,46 +68,11 @@ test('runtime graph preserves dependency kinds, excludes dev-only edges, and rec
     from === '@jinn-network/benchmarking-run'
       && to === '@jinn-network/evidence-protocol'
   )), false, 'a dev-only dependency must not enter generated architecture order');
-  assert.deepEqual(report.graph.platformV1.waves, [
-    ['@jinn-network/evidence-protocol', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'],
-    [
-      '@jinn-network/benchmarking-records', '@jinn-network/evidence-derivation',
-      '@jinn-network/evidence-repository', '@jinn-network/evidence-trajectory',
-      '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-profiles', '@jinn-network/trust-resolve',
-    ],
-    [
-      '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
-      '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-run',
-      '@jinn-network/benchmarking-testing', '@jinn-network/evidence-discovery',
-      '@jinn-network/evidence-publication', '@jinn-network/evidence-repository-ipfs',
-      '@jinn-network/evidence-repository-oci', '@jinn-network/evidence-trace-decode',
-      '@jinn-network/execution-recorder', '@jinn-network/marketplace-binding',
-      '@jinn-network/record-discovery-client', '@jinn-network/record-discovery-facts-benchmarking',
-      '@jinn-network/record-discovery-facts-task-execution', '@jinn-network/record-discovery-facts-trust',
-      '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-testing',
-      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-testing',
-    ],
-    [
-      '@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-contribution',
-      '@jinn-network/evidence-retrieval', '@jinn-network/execution-recorder-bridge',
-      '@jinn-network/marketplace-projector', '@jinn-network/record-discovery-facts-evidence',
-      '@jinn-network/record-discovery-source-evidence-journal',
-      '@jinn-network/record-discovery-transport-http', '@jinn-network/task-execution-launchers',
-    ],
-    [
-      '@jinn-network/benchmarking-marketplace', '@jinn-network/evidence-local-runtime',
-      '@jinn-network/marketplace-venue-base', '@jinn-network/task-execution-backend-local',
-      '@jinn-network/task-execution-evaluation-harness',
-    ],
-    [
-      '@jinn-network/marketplace-pipeline', '@jinn-network/task-execution-evaluator-adapters',
-      '@jinn-network/task-execution-testing',
-    ],
-    ['@jinn-network/marketplace-testing'],
-  ]);
-  assert.equal(Object.keys(report.graph.platformV1.closure).length, 50);
+  for (const wave of report.graph.platformV1.waves) assert.deepEqual(wave, [...wave].sort());
+  assert.equal(
+    Object.keys(report.graph.platformV1.closure).length,
+    report.release.platformV1.packages.length,
+  );
   assert.deepEqual(
     report.graph.platformV1.closure['@jinn-network/evidence-protocol'],
     [],
@@ -110,6 +81,14 @@ test('runtime graph preserves dependency kinds, excludes dev-only edges, and rec
     new Set(report.graph.platformV1.waves.flat()),
     new Set(report.release.platformV1.packages),
   );
+  const waveByPackage = new Map(report.graph.platformV1.waves.flatMap(
+    (wave, index) => wave.map((name) => [name, index]),
+  ));
+  for (const [name, dependencies] of Object.entries(report.graph.platformV1.closure)) {
+    for (const dependency of dependencies) {
+      assert.ok(waveByPackage.get(dependency) < waveByPackage.get(name), `${dependency} must precede ${name}`);
+    }
+  }
 });
 
 test('release, public-surface, ownership, and transition views reuse their canonical authorities', async () => {
@@ -131,7 +110,10 @@ test('release, public-surface, ownership, and transition views reuse their canon
     stableBlocker: 'live https://jinn.network profile hosting verification',
     stackPublished: true,
   });
-  assert.equal(report.release.experimentalEnvironmentSupply.packages.length, 7);
+  assert.equal(
+    report.release.experimentalEnvironmentSupply.packages.length,
+    loadCatalogPackages(repoRoot, { releaseGroup: 'experimental-environment-supply' }).length,
+  );
   assert.deepEqual(report.release.experimentalEnvironmentSupply.publishPolicies, ['disabled']);
   assert.ok(report.publicSurfaces.packages.some(({ name, schemas }) => (
     name === '@jinn-network/evidence-trajectory' && schemas.includes('schemas')
@@ -186,7 +168,7 @@ test('release, public-surface, ownership, and transition views reuse their canon
     },
   );
   assert.deepEqual(report.ownership, validateArchitectureControl({ repoRoot }));
-  assert.equal(report.transitions.length, 8);
+  assert.equal(report.transitions.length, loadPlatformCatalog(repoRoot).packages.filter(({ transition }) => transition).length);
   assert.ok(report.transitions.every(({ transition }) => (
     transition.reason && transition.status && transition.sunsetCondition
   )));

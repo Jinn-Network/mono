@@ -59,8 +59,8 @@ function requireIdentity({ repoRoot, sourceSha, catalogDigest, releaseGroup, lan
   if (!LANES.has(lane)) throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
 }
 
-function stableReleaseTag(repoRoot) {
-  const versions = new Set(loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+function stableReleaseTag(repoRoot, releaseGroup) {
+  const versions = new Set(loadCatalogPackages(repoRoot, { releaseGroup })
     .map(({ manifest }) => manifest.version));
   if (versions.size !== 1) return undefined;
   return `stack-v${[...versions][0]}`;
@@ -102,17 +102,17 @@ export async function buildPrepublicationBundle({
     repoRoot: root,
     mode: lane,
     sha: sourceSha,
-    ...(lane === 'stable' ? { releaseTag: stableReleaseTag(root) } : {}),
+    releaseGroup,
+    ...(lane === 'stable' ? { releaseTag: stableReleaseTag(root, releaseGroup) } : {}),
   });
   const packageOrder = plan.waves.flat().map(({ name }) => name);
-  if (packageOrder.length !== 50 || new Set(packageOrder).size !== 50) {
-    throw new Error(`platform-v1 prepublication requires exactly 50 unique packages, found ${packageOrder.length}`);
-  }
-
   const catalogNames = loadCatalogPackages(root, { releaseGroup }).map(({ name }) => name).sort();
+  if (new Set(packageOrder).size !== packageOrder.length) {
+    throw new Error(`${releaseGroup} prepublication plan contains duplicate packages`);
+  }
   const plannedNames = [...packageOrder].sort();
   if (JSON.stringify(catalogNames) !== JSON.stringify(plannedNames)) {
-    throw new Error('publish plan package set does not match the platform-v1 catalog release group');
+    throw new Error(`publish plan package set does not match catalog release group ${releaseGroup}`);
   }
 
   const tarballsDir = ensureFreshOutput(output);
@@ -127,8 +127,11 @@ export async function buildPrepublicationBundle({
       ...(exec ? { exec } : {}),
     }));
   }
-  if (artifacts.length !== 50) {
-    throw new Error(`prepublication packed ${artifacts.length} tarballs, expected 50`);
+  if (artifacts.length !== catalogNames.length
+    || JSON.stringify(artifacts.map(({ name }) => name).sort()) !== JSON.stringify(catalogNames)) {
+    throw new Error(
+      `prepublication tarball set does not match catalog release group ${releaseGroup}`,
+    );
   }
 
   const manifest = {

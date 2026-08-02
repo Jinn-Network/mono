@@ -160,7 +160,7 @@ test('writes a canonical receipt binding source, catalog, gates, package order, 
     assert.deepEqual(receipt.waves, fixture.pack.waves);
     assert.deepEqual(receipt.tarballs, fixture.pack.tarballs);
     assert.deepEqual(receipt.conclusions, successfulConclusions());
-    assert.equal(receipt.surfaces.public.packageCount, 50);
+    assert.equal(receipt.surfaces.public.packageCount, fixture.publicSurface.packages.length);
     assert.equal(receipt.surfaces.profile.documentCount, 1);
     assert.deepEqual(receipt.surfaces.profile.documents, [{
       path: 'fixture/profile.schema.json',

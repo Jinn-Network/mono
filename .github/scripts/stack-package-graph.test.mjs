@@ -15,8 +15,9 @@ test('the compatibility entry point selects only the controlled catalog platform
   const root = fixtureRepo();
   try {
     const found = discoverStackPackages(root);
-    assert.equal(found.length, 50);
-    assert.deepEqual(found.map((pkg) => pkg.name), loadCatalogPackages(root, { releaseGroup: 'platform-v1' }).map((pkg) => pkg.name));
+    const expected = loadCatalogPackages(root, { releaseGroup: 'platform-v1' });
+    assert.equal(found.length, expected.length);
+    assert.deepEqual(found.map((pkg) => pkg.name), expected.map((pkg) => pkg.name));
     assert.deepEqual(Object.keys(found[0]).sort(), ['directory', 'manifest', 'manifestPath', 'name']);
     assert.equal(found.some((pkg) => pkg.name === '@jinn-network/record-discovery-facts-environments'), false);
     assert.equal(found.some((pkg) => pkg.name === '@jinn-network/core'), false);
@@ -29,12 +30,12 @@ test('the compatibility module exports no physical-root membership authority', (
   assert.equal('STACK_ROOTS' in stackPackageGraph, false);
 });
 
-test('the real repository set is exactly the canonical 50-package platform-v1 group', () => {
+test('the real repository set is exactly the catalog-selected platform-v1 group', () => {
   const found = discoverStackPackages(repoRoot);
   const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
-  assert.equal(found.length, 50);
+  assert.equal(found.length, catalogPackages.length);
   assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
-  assert.equal(new Set(found.map((pkg) => pkg.name)).size, 50, 'package names must be unique');
+  assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
   assert.equal(found.some((pkg) => pkg.name === '@jinn-network/record-discovery-facts-environments'), false);
 });
 
@@ -116,72 +117,17 @@ test('the real repository graph is runtime-closed and has deterministic topologi
   }
   assert.deepEqual(missingRuntimeDependencies, []);
 
-  const waves = topologicalWaves(buildDependencyGraph(discoverStackPackages(repoRoot)));
-  assert.deepEqual(waves, [
-    [
-      '@jinn-network/evidence-protocol',
-      '@jinn-network/task-execution-protocol',
-      '@jinn-network/trust-core',
-    ],
-    [
-      '@jinn-network/benchmarking-records',
-      '@jinn-network/evidence-derivation',
-      '@jinn-network/evidence-repository',
-      '@jinn-network/evidence-trajectory',
-      '@jinn-network/record-discovery-protocol',
-      '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/trust-resolve',
-    ],
-    [
-      '@jinn-network/attestation-issuer',
-      '@jinn-network/benchmarking-aggregate',
-      '@jinn-network/benchmarking-interop',
-      '@jinn-network/benchmarking-run',
-      '@jinn-network/benchmarking-testing',
-      '@jinn-network/evidence-discovery',
-      '@jinn-network/evidence-publication',
-      '@jinn-network/evidence-repository-ipfs',
-      '@jinn-network/evidence-repository-oci',
-      '@jinn-network/evidence-trace-decode',
-      '@jinn-network/execution-recorder',
-      '@jinn-network/marketplace-binding',
-      '@jinn-network/record-discovery-client',
-      '@jinn-network/record-discovery-facts-benchmarking',
-      '@jinn-network/record-discovery-facts-task-execution',
-      '@jinn-network/record-discovery-facts-trust',
-      '@jinn-network/record-discovery-serve',
-      '@jinn-network/record-discovery-testing',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-testing',
-    ],
-    [
-      '@jinn-network/evidence-catalog-sqlite',
-      '@jinn-network/evidence-contribution',
-      '@jinn-network/evidence-retrieval',
-      '@jinn-network/execution-recorder-bridge',
-      '@jinn-network/marketplace-projector',
-      '@jinn-network/record-discovery-facts-evidence',
-      '@jinn-network/record-discovery-source-evidence-journal',
-      '@jinn-network/record-discovery-transport-http',
-      '@jinn-network/task-execution-launchers',
-    ],
-    [
-      '@jinn-network/benchmarking-marketplace',
-      '@jinn-network/evidence-local-runtime',
-      '@jinn-network/marketplace-venue-base',
-      '@jinn-network/task-execution-backend-local',
-      '@jinn-network/task-execution-evaluation-harness',
-    ],
-    [
-      '@jinn-network/marketplace-pipeline',
-      '@jinn-network/task-execution-evaluator-adapters',
-      '@jinn-network/task-execution-testing',
-    ],
-    ['@jinn-network/marketplace-testing'],
-  ]);
+  const graph = buildDependencyGraph(packages);
+  const waves = topologicalWaves(graph);
+  assert.deepEqual(waves, topologicalWaves(buildDependencyGraph(discoverStackPackages(repoRoot))));
+  for (const wave of waves) assert.deepEqual(wave, [...wave].sort());
   const flattened = waves.flat();
   assert.equal(new Set(flattened).size, flattened.length, 'a package must appear in exactly one wave');
-  assert.equal(flattened.length, 50);
+  assert.deepEqual(new Set(flattened), names);
+  const waveByPackage = new Map(waves.flatMap((wave, index) => wave.map((name) => [name, index])));
+  for (const [name, dependencies] of graph) {
+    for (const dependency of dependencies) {
+      assert.ok(waveByPackage.get(dependency) < waveByPackage.get(name), `${dependency} must precede ${name}`);
+    }
+  }
 });

@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { loadPlatformCatalog } from './platform-catalog.mjs';
 
 const implementation = import('./architecture-control.mjs');
 const repoRoot = resolve(import.meta.dirname, '../..');
@@ -264,7 +265,7 @@ test('new scoped manifest and new public/testing surface cannot arrive uncovered
     const root = completeFixture();
     try {
       write(join(root, 'packages/fixture/new/package.json'), '{"name":"@jinn-network/new","version":"0.1.0"}\n');
-      assert.throws(() => validateArchitectureControl({ repoRoot: root }), /uncataloged manifests.*packages\/fixture\/new/u);
+      assert.throws(() => validateArchitectureControl({ repoRoot: root }), /uncataloged first-party manifests.*packages\/fixture\/new/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -308,7 +309,7 @@ test('repository coverage enumerates every manifest and all control-path categor
   const first = validateArchitectureControl({ repoRoot });
   const second = validateArchitectureControl({ repoRoot });
   assert.deepEqual(first, second);
-  assert.equal(first.counts.catalogManifests, 69);
+  assert.equal(first.counts.catalogManifests, loadPlatformCatalog(repoRoot).packages.length);
   for (const category of [
     'authorityDocuments', 'decisionRecords', 'boundaryPolicies', 'requiredGates',
     'catalogPublicSurfaces', 'discoveredFirstPartySurfaces', 'generatorSources',

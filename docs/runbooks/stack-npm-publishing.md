@@ -8,10 +8,10 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
 
 ## Current release policy
 
-- The **50 core candidates** in `platform-v1` are eligible only for receipt-gated canary
+- The catalog-selected core candidates in `platform-v1` are eligible only for receipt-gated canary
   publication. A push to `integration/evidence-v1` or `next` uses the `canary` dist-tag and the
   `npm-publish` GitHub environment.
-- The **7 disabled experiments** in `experimental-environment-supply` are not part of the core
+- The catalog-selected disabled experiments in `experimental-environment-supply` are not part of the core
   set and cannot publish through the stack workflow.
 - Stable publication is mechanically disabled. A stable event may run read-only tag resolution
   and same-run verification, but `stable-hosting-blocker` fails before any publisher job exists.
@@ -20,7 +20,7 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
   their catalog policies and existing workflows. This runbook does not change the layer, SDK,
   client, plugin, or other independent publication paths.
 
-The generated topology is authoritative if these narrative counts ever drift.
+The generated topology is authoritative for current membership and counts.
 
 ## Canary verification and publication
 

@@ -129,12 +129,11 @@ function validateBundle(repoRoot, manifestPath) {
     ? manifest.tarballs.map(({ name }) => name)
     : [];
   if (!Array.isArray(order)
-    || order.length !== 50
-    || new Set(order).size !== 50
+    || new Set(order).size !== order.length
     || !sameNames(order, catalogNames)
     || JSON.stringify(order) !== JSON.stringify(waveOrder)
     || JSON.stringify(order) !== JSON.stringify(tarballNames)) {
-    throw new Error('bundle package set does not match the 50-package platform-v1 catalog');
+    throw new Error('bundle package set does not match the platform-v1 catalog release group');
   }
 
   const bundleRoot = dirname(resolve(manifestPath));

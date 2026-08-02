@@ -20,6 +20,7 @@ import {
   catalogSha256,
 } from './build-prepublication-bundle.mjs';
 import { createVerificationReceipt } from './platform-verification-receipt.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
 import { renderRegistrationMarkdown } from './stack-trusted-publishers.mjs';
 
 export const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -194,7 +195,7 @@ function provenanceSubjects({
   return subjects;
 }
 
-function validateTrustedPublishers(verificationRoot, receipt) {
+function validateTrustedPublishers(verificationRoot, receipt, catalogNames) {
   const trustedPublishersJsonPath = join(
     verificationRoot,
     'trusted-publishers/trusted-publishers.json',
@@ -204,13 +205,14 @@ function validateTrustedPublishers(verificationRoot, receipt) {
     'trusted-publishers/trusted-publishers.md',
   );
   const registrations = readJson(trustedPublishersJsonPath, 'trusted-publisher registration JSON');
-  if (!Array.isArray(registrations) || registrations.length !== 50) {
-    throw new Error('trusted-publisher registration JSON must contain exactly 50 entries');
+  if (!Array.isArray(registrations)) {
+    throw new Error('trusted-publisher registration JSON must be an array');
   }
   const names = registrations.map((registration) => registration?.package);
   if (new Set(names).size !== names.length
+    || JSON.stringify([...names].sort()) !== JSON.stringify([...catalogNames].sort())
     || JSON.stringify([...names].sort()) !== JSON.stringify([...receipt.packageOrder].sort())) {
-    throw new Error('trusted-publisher package set does not exactly match the verification receipt');
+    throw new Error('trusted-publisher package set does not exactly match the catalog and verification receipt');
   }
   for (const registration of registrations) {
     if (JSON.stringify(Object.keys(registration).sort()) !== JSON.stringify(REGISTRATION_KEYS)) {
@@ -469,10 +471,12 @@ export async function publishVerifiedPlatform(options) {
     lane,
   });
   const { receipt } = validated;
-  if (receipt.packageOrder.length !== 50 || receipt.tarballs.length !== 50) {
-    throw new Error('verified canary publication requires exactly 50 packages and tarballs');
+  const catalogNames = loadCatalogPackages(root, { releaseGroup }).map(({ name }) => name);
+  if (receipt.packageOrder.length !== receipt.tarballs.length
+    || JSON.stringify([...receipt.packageOrder].sort()) !== JSON.stringify([...catalogNames].sort())) {
+    throw new Error('verified canary publication package and tarball sets must match the catalog');
   }
-  const trustedPublishers = validateTrustedPublishers(artifactRoot, receipt);
+  const trustedPublishers = validateTrustedPublishers(artifactRoot, receipt, catalogNames);
   verifyProvenance(provenanceSubjects({
     ...validated,
     ...trustedPublishers,

@@ -74,77 +74,6 @@ const MANIFEST_EXCLUSION_CLASSIFICATIONS = new Set([
   'external',
   'transitional',
 ]);
-const INITIAL_EXPERIMENTAL_PACKAGES = [
-  '@jinn-network/record-discovery-facts-environments',
-  '@jinn-network/environment-record',
-  '@jinn-network/environment-verification',
-  '@jinn-network/task-admission',
-  '@jinn-network/task-curation',
-  '@jinn-network/task-derivation',
-  '@jinn-network/task-posting',
-];
-const INITIAL_ADJACENT_PATHS = [
-  'apps/broadcast-bot',
-  'client',
-  'client/src/dashboard/spa',
-  'plugin/runtime',
-];
-const INITIAL_RELEASE_GROUPS = {
-  'platform-v1': {
-    expectedPackageCount: 50,
-    publishPolicies: ['canary-only'],
-    stackPublished: true,
-    canary: true,
-    stable: false,
-  },
-  'experimental-environment-supply': {
-    expectedPackageCount: 7,
-    publishPolicies: ['disabled'],
-    stackPublished: false,
-    canary: false,
-    stable: false,
-  },
-  'legacy-product-lines': {
-    expectedPackageCount: 5,
-    publishPolicies: ['independent'],
-    stackPublished: false,
-    canary: false,
-    stable: false,
-  },
-  'transitional-or-private': {
-    expectedPackageCount: 7,
-    publishPolicies: ['private', 'never'],
-    stackPublished: false,
-    canary: false,
-    stable: false,
-  },
-};
-const ALLOWED_RELEASE_GROUP_DEPENDENCIES = {
-  'platform-v1': new Set(['platform-v1']),
-  'experimental-environment-supply': new Set([
-    'experimental-environment-supply',
-    'platform-v1',
-  ]),
-  'legacy-product-lines': new Set(['legacy-product-lines', 'platform-v1']),
-  'transitional-or-private': new Set([
-    'experimental-environment-supply',
-    'legacy-product-lines',
-    'platform-v1',
-    'transitional-or-private',
-  ]),
-};
-const INITIAL_RELEASE_GROUP_CLASSIFICATIONS = {
-  'platform-v1': new Set(['platform', 'platform-support']),
-  'experimental-environment-supply': new Set(['platform']),
-  'legacy-product-lines': new Set(['legacy', 'product']),
-  'transitional-or-private': new Set([
-    'product',
-    'product-support',
-    'repository-tooling',
-    'transitional',
-  ]),
-};
-
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -480,6 +409,12 @@ function validateDefinitions(catalog, repoRoot) {
     }
     requireStringArray(group.publishPolicies, `releaseGroups.${groupId}.publishPolicies`, { nonEmpty: true });
     requireStringArray(group.requiredGateIds, `releaseGroups.${groupId}.requiredGateIds`, { nonEmpty: true });
+    requireStringArray(group.allowedClassifications, `releaseGroups.${groupId}.allowedClassifications`, { nonEmpty: true });
+    requireStringArray(
+      group.allowedDependencyReleaseGroups,
+      `releaseGroups.${groupId}.allowedDependencyReleaseGroups`,
+      { nonEmpty: true },
+    );
     for (const gateId of group.requiredGateIds) {
       if (!Object.hasOwn(catalog.gateDefinitions, gateId)) {
         throw new Error(`releaseGroups.${groupId}: unknown gate ${gateId}`);
@@ -488,8 +423,27 @@ function validateDefinitions(catalog, repoRoot) {
     for (const policy of group.publishPolicies) {
       if (!PUBLISH_POLICIES.has(policy)) throw new Error(`releaseGroups.${groupId} has unknown publish policy ${policy}`);
     }
+    for (const classification of group.allowedClassifications) {
+      if (!CLASSIFICATIONS.has(classification)) {
+        throw new Error(`releaseGroups.${groupId} has unknown classification ${classification}`);
+      }
+    }
+    for (const dependencyGroup of group.allowedDependencyReleaseGroups) {
+      if (!Object.hasOwn(catalog.releaseGroups, dependencyGroup)) {
+        throw new Error(`releaseGroups.${groupId} allows unknown dependency release group ${dependencyGroup}`);
+      }
+    }
     for (const flag of ['stackPublished', 'canary', 'stable']) {
       if (typeof group[flag] !== 'boolean') throw new Error(`releaseGroups.${groupId}.${flag} must be boolean`);
+    }
+    const canaryPolicy = group.publishPolicies.some((policy) => (
+      policy === 'canary-only' || policy === 'canary-and-stable'
+    ));
+    const stablePolicy = group.publishPolicies.includes('canary-and-stable');
+    if (group.stackPublished !== canaryPolicy || group.canary !== canaryPolicy || group.stable !== stablePolicy) {
+      throw new Error(
+        `releaseGroups.${groupId} publication flags must agree with publishPolicies`,
+      );
     }
   }
   for (const tier of TIERS) {
@@ -587,25 +541,10 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
 }
 
 function validateReleaseGroups(catalog) {
-  const actualGroupIds = Object.keys(catalog.releaseGroups).sort();
-  const requiredGroupIds = Object.keys(INITIAL_RELEASE_GROUPS).sort();
-  if (!schemaValueEquals(actualGroupIds, requiredGroupIds)) {
-    throw new Error(`required release groups must be exactly: ${requiredGroupIds.join(', ')}`);
-  }
-  for (const [groupId, expected] of Object.entries(INITIAL_RELEASE_GROUPS)) {
-    const actual = catalog.releaseGroups[groupId];
-    for (const field of ['expectedPackageCount', 'stackPublished', 'canary', 'stable']) {
-      if (actual[field] !== expected[field]) {
-        throw new Error(`${groupId}.${field} must be ${expected[field]}`);
-      }
-    }
-    if (!schemaValueEquals(actual.publishPolicies, expected.publishPolicies)) {
-      throw new Error(`${groupId}.publishPolicies must be exactly ${expected.publishPolicies.join(', ')}`);
-    }
-  }
   const grouped = new Map();
   for (const pkg of catalog.packages) {
-    if (!INITIAL_RELEASE_GROUP_CLASSIFICATIONS[pkg.releaseGroup].has(pkg.classification)) {
+    const definition = catalog.releaseGroups[pkg.releaseGroup];
+    if (!definition.allowedClassifications.includes(pkg.classification)) {
       throw new Error(
         `${pkg.releaseGroup} package ${pkg.name} cannot have classification ${pkg.classification}`,
       );
@@ -627,27 +566,6 @@ function validateReleaseGroups(catalog) {
         + `declared ${groupGates.join(', ') || '<none>'}, members require ${memberGateUnion.join(', ') || '<none>'}`,
       );
     }
-  }
-  const core = grouped.get('platform-v1') ?? [];
-  if (core.length !== 50) throw new Error(`platform-v1 must contain exactly 50 packages, found ${core.length}`);
-  if (catalog.releaseGroups['platform-v1'].stable !== false) throw new Error('platform-v1 stable publication must be false');
-  if (core.some((pkg) => pkg.publishPolicy !== 'canary-only')) throw new Error('every platform-v1 package must be canary-only');
-  const experiments = (grouped.get('experimental-environment-supply') ?? []).map((pkg) => pkg.name).sort();
-  if (JSON.stringify(experiments) !== JSON.stringify([...INITIAL_EXPERIMENTAL_PACKAGES].sort())) {
-    throw new Error(`experimental-environment-supply must contain exactly: ${INITIAL_EXPERIMENTAL_PACKAGES.join(', ')}`);
-  }
-  if (experiments.some((name) => catalog.packages.find((pkg) => pkg.name === name).publishPolicy !== 'disabled')) {
-    throw new Error('every experimental-environment-supply package must be disabled');
-  }
-  if (catalog.packages.length !== 69) throw new Error(`initial platform catalog must contain 69 packages, found ${catalog.packages.length}`);
-  const belowPackages = catalog.packages.filter((pkg) => pkg.path.startsWith('packages/'));
-  const otherBelowPackages = belowPackages.filter((pkg) => !['platform-v1', 'experimental-environment-supply'].includes(pkg.releaseGroup));
-  if (belowPackages.length !== 65 || otherBelowPackages.length !== 8) {
-    throw new Error(`initial platform catalog must contain 65 packages-root entries (50 core, 7 experimental, 8 other)`);
-  }
-  const adjacent = catalog.packages.filter((pkg) => !pkg.path.startsWith('packages/')).map((pkg) => pkg.path).sort();
-  if (JSON.stringify(adjacent) !== JSON.stringify([...INITIAL_ADJACENT_PATHS].sort())) {
-    throw new Error(`initial adjacent package paths must be exactly: ${INITIAL_ADJACENT_PATHS.join(', ')}`);
   }
 }
 
@@ -746,7 +664,9 @@ function validateDependencies(catalog, manifests, repoRoot) {
   const allowedDependencies = catalog.tierRules.allowedDependencies;
   for (const source of manifests.values()) {
     const sourceGroupId = source.catalog.releaseGroup;
-    const allowedReleaseGroups = ALLOWED_RELEASE_GROUP_DEPENDENCIES[sourceGroupId];
+    const allowedReleaseGroups = new Set(
+      catalog.releaseGroups[sourceGroupId].allowedDependencyReleaseGroups,
+    );
     for (const section of RUNTIME_DEPENDENCY_SECTIONS) {
       for (const [dependency, specifier] of Object.entries(source.manifest[section] ?? {})) {
         if (!dependency.startsWith('@jinn-network/') || dependency === source.catalog.name) continue;

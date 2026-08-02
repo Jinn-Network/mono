@@ -47,9 +47,6 @@ export function buildPlatformPublicSurface({
     path: directory,
     publicSurface: catalog.publicSurface,
   }));
-  if (packages.length !== 50) {
-    throw new Error(`public surface artifact requires 50 platform-v1 packages, found ${packages.length}`);
-  }
   const manifest = {
     schemaVersion: 1,
     sourceSha,

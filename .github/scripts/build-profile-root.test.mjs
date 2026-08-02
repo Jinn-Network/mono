@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { buildProfileRoot, manifestBytes } from './build-profile-root.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
 import {
   fixtureCatalog,
   fixtureRepo,
@@ -164,8 +165,10 @@ test('the profile manifest binds catalog digest, release group, lane, and exact 
     });
     assert.equal(manifest.releaseGroup, 'platform-v1');
     assert.equal(manifest.lane, 'stable');
-    assert.equal(manifest.packages.length, 50);
-    assert.equal(new Set(manifest.packages).size, 50);
+    const expectedPackages = loadCatalogPackages(root, { releaseGroup: 'platform-v1' })
+      .map(({ name }) => name);
+    assert.deepEqual(manifest.packages, expectedPackages);
+    assert.equal(new Set(manifest.packages).size, expectedPackages.length);
     assert.ok(manifest.packages.includes('@jinn-network/evidence-protocol'));
     assert.throws(
       () => buildProfileRoot({

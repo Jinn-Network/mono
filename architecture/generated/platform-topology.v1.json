@@ -43604,6 +43604,13 @@
   },
   "release": {
     "experimentalEnvironmentSupply": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "platform-v1"
+      ],
       "canary": false,
       "expectedPackageCount": 7,
       "packages": [
@@ -44244,6 +44251,13 @@
   },
   "releaseGroups": {
     "experimental-environment-supply": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "platform-v1"
+      ],
       "canary": false,
       "expectedPackageCount": 7,
       "packages": [
@@ -44267,6 +44281,14 @@
       "stackPublished": false
     },
     "legacy-product-lines": {
+      "allowedClassifications": [
+        "legacy",
+        "product"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "legacy-product-lines",
+        "platform-v1"
+      ],
       "canary": false,
       "expectedPackageCount": 5,
       "packages": [
@@ -44290,6 +44312,13 @@
       "stackPublished": false
     },
     "platform-v1": {
+      "allowedClassifications": [
+        "platform",
+        "platform-support"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "platform-v1"
+      ],
       "canary": true,
       "expectedPackageCount": 50,
       "packages": [
@@ -44359,6 +44388,18 @@
       "stackPublished": true
     },
     "transitional-or-private": {
+      "allowedClassifications": [
+        "product",
+        "product-support",
+        "repository-tooling",
+        "transitional"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "legacy-product-lines",
+        "platform-v1",
+        "transitional-or-private"
+      ],
       "canary": false,
       "expectedPackageCount": 7,
       "packages": [

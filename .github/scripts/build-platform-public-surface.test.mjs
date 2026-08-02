@@ -14,6 +14,7 @@ import {
   fixtureRepo,
   packageEntry,
 } from './platform-catalog-test-fixture.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
 
 const SHA = 'e'.repeat(40);
 const repoRoot = resolve(import.meta.dirname, '../..');
@@ -45,8 +46,10 @@ test('writes a canonical public-surface manifest for the exact platform-v1 set',
     });
     assert.equal(manifest.releaseGroup, 'platform-v1');
     assert.equal(manifest.lane, 'canary');
-    assert.equal(manifest.packages.length, 50);
-    assert.equal(new Set(manifest.packages.map(({ name }) => name)).size, 50);
+    const expectedNames = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+      .map(({ name }) => name);
+    assert.deepEqual(manifest.packages.map(({ name }) => name), expectedNames);
+    assert.equal(new Set(manifest.packages.map(({ name }) => name)).size, expectedNames.length);
     assert.ok(manifest.packages.some(({ name, publicSurface }) => (
       name === '@jinn-network/evidence-protocol'
         && publicSurface.schemas.includes('profiles/execution-evidence/1.0/schemas')

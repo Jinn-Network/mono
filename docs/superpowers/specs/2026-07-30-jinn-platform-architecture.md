@@ -181,7 +181,7 @@ broader intent that no first-party product's behavior is ever treated as normati
 
 The test describes a line the repository has already mostly drawn. The current generated
 [`platform-v1` view](../../../architecture/generated/platform-topology.md#release-and-trusted-publishers)
-contains 50 core candidates with guards and kits; receipt-gated canary publication is implemented,
+contains the catalog-selected core candidates with guards and kits; receipt-gated canary publication is implemented,
 while stable publication remains blocked on live `jinn.network` hosting verification. The catalog's
 legacy/product and transition entries remain outside that release set. Two honesty notes:
 the "third party could verify" property has a first-party proxy today — kits passing in Jinn's
@@ -230,7 +230,7 @@ builder would, so its departure changes nothing about how it builds. **What it c
 that the component *should* leave — that remains a decision (audience, release cadence,
 maintenance), recorded per-tree in §7.
 
-**The gate's enabling precondition is the stack publish path.** It now derives the exact 50-package
+**The gate's enabling precondition is the stack publish path.** It now derives the exact catalog-selected
 `platform-v1` set and runtime waves from the catalog and manifests, runs same-run verification,
 and publishes only those exact receipt-bound tarballs in the canary lane. Stable publication is
 still mechanically disabled pending verified live `jinn.network` profile hosting, so stable npm
@@ -357,7 +357,7 @@ triggers wait on their triggers.
 Follow-ups (recorded once; none block this specification):
 
 1. **Stack publish path** — implemented for same-run verified canaries over the catalog-derived
-   50-package `platform-v1` set. Stable publication remains intentionally disabled until live
+   `platform-v1` set. Stable publication remains intentionally disabled until live
    `jinn.network` profile hosting verification exists. Current package order, trusted-publisher
    registrations, and policy are generated in the
    [release view](../../../architecture/generated/platform-topology.md#release-and-trusted-publishers).

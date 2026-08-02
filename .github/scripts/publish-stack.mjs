@@ -9,7 +9,7 @@ import {
 } from './stack-package-graph.mjs';
 import { resolvePublishVersion } from './stack-publish-manifest.mjs';
 
-const FLAGS_WITH_VALUES = new Set(['--mode', '--sha', '--release-tag', '--root']);
+const FLAGS_WITH_VALUES = new Set(['--mode', '--sha', '--release-tag', '--root', '--release-group']);
 
 export function parsePublishArgs(argv) {
   const parsed = {
@@ -18,6 +18,7 @@ export function parsePublishArgs(argv) {
     releaseTag: undefined,
     dryRun: false,
     repoRoot: process.cwd(),
+    releaseGroup: 'platform-v1',
   };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -33,6 +34,7 @@ export function parsePublishArgs(argv) {
     if (flag === '--sha') parsed.sha = value;
     if (flag === '--release-tag') parsed.releaseTag = value;
     if (flag === '--root') parsed.repoRoot = value;
+    if (flag === '--release-group') parsed.releaseGroup = value;
   }
   if (!parsed.mode) throw new Error('--mode is required (canary or stable)');
   return parsed;
@@ -46,10 +48,10 @@ export const EMPTY_PACKAGE_SET_EXIT_CODE = 3;
 
 export class EmptyPackageSetError extends Error {}
 
-export function buildPublishPlan({ repoRoot, mode, sha, releaseTag }) {
-  const packages = discoverStackPackages(repoRoot);
+export function buildPublishPlan({ repoRoot, mode, sha, releaseTag, releaseGroup = 'platform-v1' }) {
+  const packages = discoverStackPackages(repoRoot, { releaseGroup });
   if (packages.length === 0) {
-    throw new EmptyPackageSetError('no platform packages found under the six stack roots');
+    throw new EmptyPackageSetError(`no packages found in catalog release group ${releaseGroup}`);
   }
   const baseVersions = new Set(packages.map((pkg) => pkg.manifest.version));
   if (baseVersions.size !== 1) {

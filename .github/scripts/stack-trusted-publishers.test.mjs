@@ -30,7 +30,7 @@ test('every canonical platform-v1 package gets one registration bound to this re
     .map((pkg) => pkg.name)
     .sort();
   assert.deepEqual(registrations.map((registration) => registration.package), expectedPackages);
-  assert.equal(registrations.length, 50);
+  assert.equal(registrations.length, expectedPackages.length);
   assert.equal(new Set(registrations.map((r) => r.package)).size, registrations.length);
   for (const registration of registrations) {
     assert.equal(registration.provider, 'GitHub Actions');
@@ -73,7 +73,7 @@ test('the CLI writes both artifact files', () => {
     const result = spawnSync(process.execPath, [script, '--out', out, '--root', repoRoot], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const json = JSON.parse(readFileSync(join(out, 'trusted-publishers.json'), 'utf8'));
-    assert.equal(json.length, 50);
+    assert.equal(json.length, loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' }).length);
     assert.ok(json.every((entry) => entry.environment === 'npm-publish'));
     assert.ok(json.every((entry) => JSON.stringify(entry.allowedActions) === '["npm publish"]'));
     assert.match(

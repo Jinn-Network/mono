@@ -9,7 +9,8 @@ import {
   buildPrepublicationBundle,
   canonicalJsonBytes,
 } from './build-prepublication-bundle.mjs';
-import { fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
 
 const SHA = 'a'.repeat(40);
 const repoRoot = resolve(import.meta.dirname, '../..');
@@ -73,12 +74,13 @@ test('packs the exact platform-v1 graph in runtime waves without publishing', as
     assert.equal(manifest.packageVersion, `0.1.0-canary.sha.${SHA}`);
     assert.equal(manifest.distTag, 'canary');
     assert.equal(manifest.waves.length, 2);
-    assert.equal(manifest.waves[0].length, 49);
     assert.ok(manifest.waves[0].includes('@jinn-network/fixture-protocol'));
     assert.deepEqual(manifest.waves[1], ['@jinn-network/fixture-application']);
     assert.deepEqual(manifest.packageOrder, manifest.waves.flat());
-    assert.equal(manifest.packageOrder.length, 50);
-    assert.equal(manifest.tarballs.length, 50);
+    const expectedNames = loadCatalogPackages(root, { releaseGroup: 'platform-v1' })
+      .map(({ name }) => name);
+    assert.deepEqual(new Set(manifest.packageOrder), new Set(expectedNames));
+    assert.equal(manifest.tarballs.length, expectedNames.length);
     assert.deepEqual(manifest.tarballs.map(({ name }) => name), manifest.packageOrder);
     for (const tarball of manifest.tarballs) {
       assert.match(tarball.filename, /^tarballs\/.+\.tgz$/u);
@@ -89,12 +91,45 @@ test('packs the exact platform-v1 graph in runtime waves without publishing', as
       );
     }
 
-    assert.equal(calls.filter(({ command, args }) => command === 'yarn' && args[0] === 'install').length, 50);
-    assert.equal(calls.filter(({ command, args }) => command === 'yarn' && args[0] === 'build').length, 50);
-    assert.equal(calls.filter(({ command, args }) => command === 'npm' && args[0] === 'pack').length, 50);
+    assert.equal(calls.filter(({ command, args }) => command === 'yarn' && args[0] === 'install').length, expectedNames.length);
+    assert.equal(calls.filter(({ command, args }) => command === 'yarn' && args[0] === 'build').length, expectedNames.length);
+    assert.equal(calls.filter(({ command, args }) => command === 'npm' && args[0] === 'pack').length, expectedNames.length);
     assert.equal(calls.some(({ args }) => args[0] === 'publish'), false);
     assert.equal(calls.some(({ cwd }) => cwd.startsWith(repoRoot)), false);
     assert.equal(readFileSync(join(outDir, 'manifest.json'), 'utf8'), canonicalJsonBytes(manifest));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('packs a differently sized release group using only its catalog-derived membership', async () => {
+  const catalog = fixtureCatalog();
+  const selected = new Set([
+    '@jinn-network/fixture-protocol',
+    '@jinn-network/fixture-application',
+    '@jinn-network/fixture-core-01',
+  ]);
+  catalog.packages = catalog.packages.filter(({ name, releaseGroup }) => (
+    releaseGroup !== 'platform-v1' || selected.has(name)
+  ));
+  catalog.releaseGroups['platform-v1'].expectedPackageCount = selected.size;
+  const root = fixtureRepo({ catalog });
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-prepublication-dynamic-out-'));
+  const calls = [];
+  try {
+    const manifest = await buildPrepublicationBundle({
+      repoRoot: root,
+      outDir,
+      sourceSha: SHA,
+      catalogDigest: digestCatalog(root),
+      releaseGroup: 'platform-v1',
+      lane: 'canary',
+      exec: fakePackExec(calls),
+    });
+    assert.deepEqual(new Set(manifest.packageOrder), selected);
+    assert.equal(manifest.tarballs.length, selected.size);
+    assert.equal(calls.filter(({ command, args }) => command === 'npm' && args[0] === 'pack').length, selected.size);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });

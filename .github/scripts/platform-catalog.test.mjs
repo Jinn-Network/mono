@@ -13,6 +13,7 @@ import {
   catalogSchema,
   fixtureCatalog,
   fixtureRepo,
+  packageEntry,
 } from './platform-catalog-test-fixture.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -32,9 +33,8 @@ test('loads a controlled catalog and hydrates package metadata only from manifes
   const root = fixtureRepo();
   try {
     const catalog = loadPlatformCatalog(root);
-    assert.equal(catalog.packages.length, 69);
     const packages = loadCatalogPackages(root, { releaseGroup: 'platform-v1' });
-    assert.equal(packages.length, 50);
+    assert.equal(packages.length, catalog.releaseGroups['platform-v1'].expectedPackageCount);
     const application = packages.find((pkg) => pkg.name === '@jinn-network/fixture-application');
     assert.equal(application.manifest.version, '0.1.0');
     assert.equal('version' in application.catalog, false, 'npm metadata stays out of the catalog');
@@ -45,10 +45,29 @@ test('loads a controlled catalog and hydrates package metadata only from manifes
 
 test('release groups declare a required unique gate set in the closed schema', () => {
   const releaseGroup = catalogSchema.properties.releaseGroups.additionalProperties;
-  assert.ok(releaseGroup.required.includes('requiredGateIds'));
+  for (const field of [
+    'requiredGateIds',
+    'allowedClassifications',
+    'allowedDependencyReleaseGroups',
+  ]) assert.ok(releaseGroup.required.includes(field));
   assert.deepEqual(releaseGroup.properties.requiredGateIds, {
     $ref: '#/$defs/nonEmptyStringList',
   });
+});
+
+test('accepts an atomic platform membership change using only catalog data', () => {
+  const catalog = fixtureCatalog();
+  catalog.packages.push(packageEntry(
+    '@jinn-network/fixture-new-platform-package',
+    'packages/fixture/new-platform-package',
+  ));
+  catalog.releaseGroups['platform-v1'].expectedPackageCount += 1;
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('rejects a scoped manifest that the catalog omits', () => {
@@ -448,48 +467,37 @@ test('rejects reference paths that name directories instead of files', async (t)
   }
 });
 
-test('rejects renamed or weakened initial release groups', async (t) => {
+test('release-group policy is catalog-authored and internally consistent', async (t) => {
   const cases = [
     {
-      name: 'renamed platform group',
-      mutate(catalog) {
-        catalog.releaseGroups.renamed = catalog.releaseGroups['platform-v1'];
-        delete catalog.releaseGroups['platform-v1'];
-        for (const pkg of catalog.packages.filter((entry) => entry.releaseGroup === 'platform-v1')) {
-          pkg.releaseGroup = 'renamed';
-        }
-      },
-      pattern: /required release groups must be exactly/u,
+      name: 'unknown dependency release group',
+      mutate(catalog) { catalog.releaseGroups['platform-v1'].allowedDependencyReleaseGroups = ['missing']; },
+      pattern: /allows unknown dependency release group missing/u,
     },
     {
-      name: 'platform stack publication disabled',
+      name: 'stack publication flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].stackPublished = false; },
-      pattern: /platform-v1\.stackPublished must be true/u,
+      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
     },
     {
-      name: 'platform canary disabled',
+      name: 'canary flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].canary = false; },
-      pattern: /platform-v1\.canary must be true/u,
+      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
     },
     {
-      name: 'platform stable enabled',
+      name: 'stable flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].stable = true; },
-      pattern: /platform-v1\.stable must be false/u,
+      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
     },
     {
-      name: 'experimental stack publication enabled',
-      mutate(catalog) { catalog.releaseGroups['experimental-environment-supply'].stackPublished = true; },
-      pattern: /experimental-environment-supply\.stackPublished must be false/u,
+      name: 'member classification outside group policy',
+      mutate(catalog) { catalog.releaseGroups['platform-v1'].allowedClassifications = ['platform-support']; },
+      pattern: /platform-v1 package .* cannot have classification platform/u,
     },
     {
-      name: 'experimental canary enabled',
-      mutate(catalog) { catalog.releaseGroups['experimental-environment-supply'].canary = true; },
-      pattern: /experimental-environment-supply\.canary must be false/u,
-    },
-    {
-      name: 'experimental stable enabled',
-      mutate(catalog) { catalog.releaseGroups['experimental-environment-supply'].stable = true; },
-      pattern: /experimental-environment-supply\.stable must be false/u,
+      name: 'declared count outside membership',
+      mutate(catalog) { catalog.releaseGroups['platform-v1'].expectedPackageCount += 1; },
+      pattern: /release group platform-v1 expects .* packages, found/u,
     },
   ];
   for (const entry of cases) {
@@ -503,6 +511,26 @@ test('rejects renamed or weakened initial release groups', async (t) => {
         rmSync(root, { recursive: true, force: true });
       }
     });
+  }
+});
+
+test('an atomic release-group rename is accepted without JavaScript membership edits', () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-candidate'] = catalog.releaseGroups['platform-v1'];
+  delete catalog.releaseGroups['platform-v1'];
+  for (const group of Object.values(catalog.releaseGroups)) {
+    group.allowedDependencyReleaseGroups = group.allowedDependencyReleaseGroups.map((groupId) => (
+      groupId === 'platform-v1' ? 'platform-candidate' : groupId
+    ));
+  }
+  for (const pkg of catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'platform-v1')) {
+    pkg.releaseGroup = 'platform-candidate';
+  }
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -678,7 +706,7 @@ test('ignores devDependencies when validating release closure and tier direction
 test('records authority status per governing document', () => {
   const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
   const benchmarking = catalog.packages.filter((pkg) => pkg.domain === 'benchmarking');
-  assert.equal(benchmarking.length, 6);
+  assert.ok(benchmarking.length > 0);
   for (const pkg of benchmarking) {
     assert.deepEqual(pkg.authority.documents, [
       {
@@ -701,70 +729,22 @@ test('records authority status per governing document', () => {
   assert.equal(catalog.releaseGroups['platform-v1'].stable, false);
 });
 
-test('the canonical repository catalog validates the exact initial topology', () => {
+test('the canonical repository catalog validates its topology without a second membership authority', () => {
   const catalog = loadPlatformCatalog(repoRoot);
-  assert.equal(catalog.packages.length, 69);
-  assert.equal(catalog.packages.filter((pkg) => pkg.releaseGroup === 'platform-v1').length, 50);
-  assert.equal(catalog.packages.filter((pkg) => pkg.releaseGroup === 'experimental-environment-supply').length, 7);
-  assert.equal(catalog.packages.filter((pkg) => pkg.path.startsWith('packages/')).length, 65);
-  assert.equal(catalog.packages.filter((pkg) => !pkg.path.startsWith('packages/')).length, 4);
   assert.deepEqual(catalog.ownerGroups['architecture-control'], ['@oaksprout', '@ritsukai']);
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(catalog.releaseGroups).map(([group, definition]) => (
-      [group, definition.requiredGateIds]
-    ))),
-    {
-      'platform-v1': [
-        'benchmarking-ci',
-        'evidence-ci',
-        'marketplace-ci',
-        'record-discovery-ci',
-        'task-execution-ci',
-        'trust-ci',
-      ],
-      'experimental-environment-supply': [
-        'environments-ci',
-        'record-discovery-ci',
-        'task-supply-ci',
-      ],
-      'legacy-product-lines': ['client-ci', 'core-ci', 'layer-ci', 'plugin-ci', 'sdk-ci'],
-      'transitional-or-private': [
-        'autopilot-ci',
-        'broadcast-bot-ci',
-        'client-ci',
-        'indexer-ci',
-        'indexer-enrichment-ci',
-        'plugin-tree-ci',
-      ],
-    },
-  );
-  assert.deepEqual(
+  for (const [releaseGroup, definition] of Object.entries(catalog.releaseGroups)) {
+    const members = catalog.packages.filter((pkg) => pkg.releaseGroup === releaseGroup);
+    assert.equal(members.length, definition.expectedPackageCount, releaseGroup);
+    assert.ok(members.every((pkg) => definition.publishPolicies.includes(pkg.publishPolicy)));
+    assert.ok(members.every((pkg) => definition.allowedClassifications.includes(pkg.classification)));
+    assert.ok(definition.requiredGateIds.every((gateId) => gateId in catalog.gateDefinitions));
+  }
+  assert.ok(catalog.packages.some((pkg) => pkg.path.startsWith('packages/')));
+  assert.ok(catalog.packages.some((pkg) => !pkg.path.startsWith('packages/')));
+  assert.ok(
     catalog.packages
       .filter((pkg) => pkg.releaseGroup === 'experimental-environment-supply')
-      .map((pkg) => pkg.name)
-      .sort(),
-    [
-      '@jinn-network/environment-record',
-      '@jinn-network/environment-verification',
-      '@jinn-network/record-discovery-facts-environments',
-      '@jinn-network/task-admission',
-      '@jinn-network/task-curation',
-      '@jinn-network/task-derivation',
-      '@jinn-network/task-posting',
-    ],
-  );
-  assert.deepEqual(
-    catalog.packages
-      .filter((pkg) => pkg.releaseGroup === 'legacy-product-lines')
-      .map((pkg) => pkg.name)
-      .sort(),
-    [
-      '@jinn-network/client',
-      '@jinn-network/core',
-      '@jinn-network/jinn-layer',
-      '@jinn-network/plugin',
-      '@jinn-network/sdk',
-    ],
+      .every((pkg) => pkg.publishPolicy === 'disabled'),
   );
   assert.ok(
     catalog.packages

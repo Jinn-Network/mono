@@ -285,7 +285,6 @@ export function createVerificationReceipt({
   );
   const catalogPackages = loadCatalogPackages(root, { releaseGroup });
   const catalogNames = catalogPackages.map(({ name }) => name);
-  if (catalogNames.length !== 50) throw new Error(`receipt requires exactly 50 ${releaseGroup} packages`);
   const context = {
     repoRoot: root,
     sourceSha,
