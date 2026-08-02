@@ -191,6 +191,26 @@ describe("NativeEvaluatorStateRepository", () => {
       submissionDigest: digest(submissionBytes),
       submissionUri: attemptUri,
     });
+    expect(() => state.beginEvaluationClaim(admitted.evaluationId, `0x${"1".repeat(64)}`))
+      .toThrow(/verified subject authority/);
+    state.recordAdmissionVerified(admitted.evaluationId, {
+      requester: { signerKey: "did:key:requester", sealingTime: "2026-08-01T00:00:00Z" },
+      admission: { signerKey: "did:key:admission", effectiveTime: "2026-08-01T00:00:00Z" },
+      executor: {
+        signerKey: "did:key:executor",
+        agent: "urn:jinn:solver:one",
+        declarationKey: "did:key:solver-declaration",
+        effectiveTime: "2026-08-02T00:00:00Z",
+        address: opportunity.operatorAddress,
+      },
+      evaluator: {
+        signerKey: "did:key:evaluator",
+        agent: "urn:jinn:evaluator:golden",
+        declarationKey: "did:key:evaluator-declaration",
+        address: `0x${"6".repeat(40)}`,
+      },
+      verificationDigest: `sha256:${"7".repeat(64)}`,
+    });
     const claim = state.beginEvaluationClaim(admitted.evaluationId, `0x${"1".repeat(64)}`);
     state.recordOperationBroadcast(claim.operationId, `0x${"2".repeat(64)}`);
     state.recordOperationReplacement(

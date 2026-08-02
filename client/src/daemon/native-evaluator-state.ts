@@ -119,6 +119,13 @@ CREATE TABLE IF NOT EXISTS native_evaluation_publication_outbox (
   updated_at      TEXT NOT NULL,
   UNIQUE (source_id, role, record_digest)
 );
+
+CREATE TABLE IF NOT EXISTS native_evaluation_authority (
+  evaluation_id       TEXT PRIMARY KEY REFERENCES native_evaluations(evaluation_id),
+  authority_json      TEXT NOT NULL,
+  verification_digest TEXT NOT NULL,
+  verified_at         TEXT NOT NULL
+);
 `;
 
 export class NativeEvaluatorStateConflictError extends Error {
@@ -196,6 +203,25 @@ export interface NativeEvaluationPublicationRow {
   readonly status: "intent" | "published";
   readonly detail: unknown;
   readonly createdAt: string;
+}
+
+export interface NativeEvaluationAuthority {
+  readonly requester: { readonly signerKey: string; readonly sealingTime: string };
+  readonly admission: { readonly signerKey: string; readonly effectiveTime: string };
+  readonly executor: {
+    readonly signerKey: string;
+    readonly agent: string;
+    readonly declarationKey: string;
+    readonly effectiveTime: string;
+    readonly address: string;
+  };
+  readonly evaluator: {
+    readonly signerKey: string;
+    readonly agent: string;
+    readonly declarationKey: string;
+    readonly address: string;
+  };
+  readonly verificationDigest: `sha256:${string}`;
 }
 
 interface RawEvaluation {
@@ -625,6 +651,9 @@ export class NativeEvaluatorStateRepository {
     if (current === undefined || this.getDerivedEvaluation(evaluation) === undefined) {
       throw new NativeEvaluatorStateConflictError("evaluation claim requires a sealed pair");
     }
+    if (this.getAdmissionAuthority(evaluation) === undefined) {
+      throw new NativeEvaluatorStateConflictError("evaluation claim requires verified subject authority");
+    }
     const result = this.createOperation(
       evaluation,
       evaluationClaimOperationId(evaluation),
@@ -636,6 +665,42 @@ export class NativeEvaluatorStateRepository {
       "UPDATE native_evaluations SET state = 'evaluation-claim-pending', updated_at = ? WHERE evaluation_id = ? AND state = 'evaluation-pending'",
     ).run(now, evaluation);
     return result;
+  }
+
+  recordAdmissionVerified(evaluation: NativeOperationId, authority: NativeEvaluationAuthority): void {
+    if (this.getEvaluation(evaluation) === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
+    if (!/^sha256:[0-9a-f]{64}$/u.test(authority.verificationDigest)) {
+      throw new NativeEvaluatorStateConflictError("subject authority verification digest is invalid");
+    }
+    if (authority.executor.agent === authority.evaluator.agent
+      || authority.executor.address.toLowerCase() === authority.evaluator.address.toLowerCase()) {
+      throw new NativeEvaluatorStateConflictError("solver and evaluator authority are not distinct");
+    }
+    const now = this.timestamp();
+    const json = JSON.stringify(authority);
+    const existing = this.store.db.prepare(
+      "SELECT authority_json, verification_digest FROM native_evaluation_authority WHERE evaluation_id = ?",
+    ).get(evaluation) as { authority_json: string; verification_digest: string } | undefined;
+    if (existing !== undefined) {
+      if (existing.authority_json !== json || existing.verification_digest !== authority.verificationDigest) {
+        throw new NativeEvaluatorStateConflictError("verified subject authority changed after persistence");
+      }
+      return;
+    }
+    this.store.db.prepare(
+      `INSERT INTO native_evaluation_authority
+        (evaluation_id, authority_json, verification_digest, verified_at) VALUES (?, ?, ?, ?)`,
+    ).run(evaluation, json, authority.verificationDigest, now);
+    this.audit(evaluation, "evaluation-subject-authority-verified", {
+      verificationDigest: authority.verificationDigest,
+    }, now);
+  }
+
+  getAdmissionAuthority(evaluation: NativeOperationId): NativeEvaluationAuthority | undefined {
+    const value = this.store.db.prepare(
+      "SELECT authority_json FROM native_evaluation_authority WHERE evaluation_id = ?",
+    ).get(evaluation) as { authority_json: string } | undefined;
+    return value === undefined ? undefined : JSON.parse(value.authority_json) as NativeEvaluationAuthority;
   }
 
   recordOperationBroadcast(operationId: NativeOperationId, txHash?: `0x${string}`): void {
