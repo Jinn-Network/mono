@@ -126,29 +126,37 @@ export interface VerdictPortDeps {
   readonly mechAddress: Address;
 }
 
-function transactionIdentity(receipt: SafeBroadcastReceipt, operationId: string): VerdictTransactionIdentity {
+function requireTransactionIdentity(
+  identity: VerdictTransactionIdentity,
+  operationId: string,
+): VerdictTransactionIdentity {
   if (
-    !/^0x[0-9a-f]{64}$/iu.test(receipt.txHash)
-    || !/^0x[0-9a-f]{64}$/iu.test(receipt.blockHash)
-    || receipt.blockNumber <= 0n
+    !/^0x[0-9a-f]{64}$/iu.test(identity.hash)
+    || !/^0x[0-9a-f]{64}$/iu.test(identity.blockHash)
+    || identity.blockNumber <= 0n
   ) {
     throw new Error(`${operationId} has no real canonical transaction identity`);
   }
-  return {
+  return identity;
+}
+
+function transactionIdentity(receipt: SafeBroadcastReceipt, operationId: string): VerdictTransactionIdentity {
+  return requireTransactionIdentity({
     hash: receipt.txHash,
     blockNumber: receipt.blockNumber,
     blockHash: receipt.blockHash,
-  };
+  }, operationId);
 }
 
 function transactionIdentityFromCanonical(
   transaction: VerdictTransactionIdentity & { readonly logIndex: number },
+  operationId: string,
 ): VerdictTransactionIdentity {
-  return {
+  return requireTransactionIdentity({
     hash: transaction.hash,
     blockNumber: transaction.blockNumber,
     blockHash: transaction.blockHash,
-  };
+  }, operationId);
 }
 
 function requireOperationId(operationId: string): void {
@@ -489,7 +497,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         const delivery = await requireVerdictDeliveryIdentity(input);
         return {
           operationId: input.operationId,
-          transaction: transactionIdentityFromCanonical(delivery.transaction),
+          transaction: transactionIdentityFromCanonical(delivery.transaction, input.operationId),
         };
       }
       return { operationId: input.operationId, transaction: transactionIdentity(receipt, input.operationId) };
@@ -511,7 +519,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         return {
           operationId: input.operationId,
           status: "already-settled" as const,
-          transaction: transactionIdentityFromCanonical(settlement.transaction),
+          transaction: transactionIdentityFromCanonical(settlement.transaction, input.operationId),
         };
       }
       const data = encodeFunctionData({
@@ -531,7 +539,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
           return {
             operationId: input.operationId,
             status: "already-settled" as const,
-            transaction: transactionIdentityFromCanonical(settlement.transaction),
+            transaction: transactionIdentityFromCanonical(settlement.transaction, input.operationId),
           };
         }
         return {
@@ -545,7 +553,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
           return {
             operationId: input.operationId,
             status: "already-settled" as const,
-            transaction: transactionIdentityFromCanonical(settlement.transaction),
+            transaction: transactionIdentityFromCanonical(settlement.transaction, input.operationId),
           };
         }
         const status = classifyVerdictClaimRevert(error);
@@ -555,7 +563,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
           return {
             operationId: input.operationId,
             status,
-            transaction: transactionIdentityFromCanonical(settlement.transaction),
+            transaction: transactionIdentityFromCanonical(settlement.transaction, input.operationId),
           };
         }
         return { operationId: input.operationId, status };

@@ -164,6 +164,31 @@ describe("verdict ports", () => {
     });
   });
 
+  test("fails closed when a canonical delivery replay event has malformed transaction fields", async () => {
+    const d = deps({
+      broadcaster: mockBroadcaster(async () => ({
+        txHash: "0x" as Hex,
+        blockNumber: 0n,
+        blockHash: "0x" as Hex,
+        logs: [],
+        alreadySettled: true,
+      })),
+    });
+    (d.publicClient.getContractEvents as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      ...canonicalVerdictDeliveryEvent(),
+      transactionHash: "0x" as Hex,
+      blockNumber: 0n,
+      blockHash: "0x" as Hex,
+    }]);
+
+    await expect(createVerdictPorts(d).deliverVerdictToMarketplace({
+      operationId: OPERATION_ID,
+      requestId: REQUEST_ID,
+      deliveryDigest: DELIVERY_DIGEST,
+      reconciliationFromBlock: 7n,
+    })).rejects.toThrow(/no real canonical transaction identity/u);
+  });
+
   test("every write uses the caller-owned stable operation id and returns a transaction identity", async () => {
     const d = deps();
     const ports = createVerdictPorts(d);
@@ -287,6 +312,25 @@ describe("verdict ports", () => {
       status: "already-settled",
       transaction: { hash: CANONICAL_TX_HASH, blockNumber: 9n },
     });
+  });
+
+  test("fails closed when a canonical settlement replay event has malformed transaction fields", async () => {
+    const d = deps();
+    (d.publicClient.readContract as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (d.publicClient.getContractEvents as ReturnType<typeof vi.fn>).mockResolvedValue([{
+      ...canonicalVerdictSettlementEvent(),
+      transactionHash: "0x" as Hex,
+      blockNumber: 0n,
+      blockHash: "0x" as Hex,
+    }]);
+
+    await expect(createVerdictPorts(d).claimVerdictDelivery({
+      operationId: OPERATION_ID,
+      requestId: REQUEST_ID,
+      verdictDigest: DELIVERY_DIGEST,
+      verdictCode: VerdictCode.Fail,
+      reconciliationFromBlock: 7n,
+    })).rejects.toThrow(/no real canonical transaction identity/u);
   });
 
   test("refuses an already-settled reconciliation without a caller-owned event range", async () => {
