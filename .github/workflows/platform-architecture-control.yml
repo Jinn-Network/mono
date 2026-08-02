@@ -1,0 +1,64 @@
+name: Platform Architecture Control
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Pull requests from forks receive a restricted token. The reusable verifier's
+# artifact attestations need id-token/attestations write, so fork runs can stop
+# at that permission boundary and must be rerun by a maintainer in the trusted
+# repository context. This workflow never uses pull_request_target.
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  platform-architecture-control:
+    name: platform-architecture-control
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Validate catalog and architecture ownership
+        run: |
+          mkdir -p .architecture-control
+          node --test \
+            .github/scripts/platform-catalog.test.mjs \
+            .github/scripts/architecture-control.test.mjs \
+            .github/scripts/branch-protection-audit.test.mjs \
+            .github/scripts/architecture-control-workflow.test.mjs
+          node .github/scripts/architecture-control.mjs \
+            --out .architecture-control/coverage.json
+      - name: Upload deterministic ownership coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-architecture-control-coverage
+          path: .architecture-control/coverage.json
+          if-no-files-found: error
+          retention-days: 30
+
+  platform-verification-reusable:
+    name: platform-verification-reusable
+    uses: ./.github/workflows/platform-verification.yml
+    with:
+      source_sha: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      lane: canary
+    secrets:
+      JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
+
+  platform-verification:
+    name: platform-verification
+    needs: platform-verification-reusable
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require exact reusable-verification success
+        env:
+          VERIFICATION_RESULT: ${{ needs.platform-verification-reusable.result }}
+        run: test "${VERIFICATION_RESULT}" = success
