@@ -53,6 +53,8 @@ export interface VerdictPorts {
     readonly taskId: bigint;
     readonly attemptIndex: number;
     readonly evaluationTaskCidDigest: Hex;
+    /** Required only when recovering an already-settled operation receipt. */
+    readonly reconciliationFromBlock?: bigint;
   }) => Promise<{
     readonly operationId: string;
     readonly requestId: Hex;
@@ -85,6 +87,8 @@ export interface VerdictPorts {
   readonly readCanonicalVerdictAttempt: (input: {
     readonly taskId: bigint;
     readonly attemptIndex: number;
+    /** Caller-owned lower bound from the durable operation or canonical Task observation. */
+    readonly fromBlock: bigint;
     readonly evaluator?: Address;
   }) => Promise<CanonicalVerdictAttempt | undefined>;
   /** Current router settlement state for a known verdict request. */
@@ -159,7 +163,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       abi: JINN_ROUTER_V3_ABI,
       eventName: "EvaluationAttemptCreated",
       args: { taskId: input.taskId, attemptIndex: input.attemptIndex },
-      fromBlock: 0n,
+      fromBlock: input.fromBlock,
       toBlock: "latest",
     } as never) as readonly unknown[];
     const event = events
@@ -247,6 +251,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       readonly taskId: bigint;
       readonly attemptIndex: number;
       readonly evaluationTaskCidDigest: Hex;
+      readonly reconciliationFromBlock?: bigint;
     }) {
       requireOperationId(input.operationId);
       const data = encodeFunctionData({
@@ -260,13 +265,20 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
         data,
         logicalTx: input.operationId,
       });
-      const reconciled = receipt.alreadySettled
-        ? await readCanonicalVerdictAttempt({
+      let reconciled: CanonicalVerdictAttempt | undefined;
+      if (receipt.alreadySettled) {
+        if (input.reconciliationFromBlock === undefined) {
+          throw new Error(
+            `openVerdictAttempt requires reconciliationFromBlock for already-settled ${input.operationId}`,
+          );
+        }
+        reconciled = await readCanonicalVerdictAttempt({
           taskId: input.taskId,
           attemptIndex: input.attemptIndex,
+          fromBlock: input.reconciliationFromBlock,
           evaluator: deps.safeAddress,
-        })
-        : undefined;
+        });
+      }
       const claimed = reconciled ?? decodeEvaluationAttemptFromLogs(receipt.logs);
       if (claimed === undefined) {
         throw new Error(`openVerdictAttempt has no canonical EvaluationAttemptCreated for ${input.operationId}`);

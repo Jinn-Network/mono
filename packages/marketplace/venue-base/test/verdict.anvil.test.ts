@@ -136,7 +136,11 @@ describe.runIf(hasAnvil)("verdict ports against a forked chain", () => {
           expect(settled.status).toBe("settled");
           expect(await venue.verdict.readVerdictSettlement({ requestId: opened.requestId }))
             .toEqual({ settled: true });
-          await expect(venue.verdict.readCanonicalVerdictAttempt({ taskId, attemptIndex: claim.attemptIndex }))
+          await expect(venue.verdict.readCanonicalVerdictAttempt({
+            taskId,
+            attemptIndex: claim.attemptIndex,
+            fromBlock: opened.transaction.blockNumber,
+          }))
             .resolves.toMatchObject({ requestId: opened.requestId, verdictIndex: 0 });
         } finally {
           venue.close();

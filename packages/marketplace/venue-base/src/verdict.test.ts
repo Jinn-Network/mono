@@ -101,6 +101,20 @@ describe("verdict ports", () => {
     });
   });
 
+  test("refuses an already-settled reconciliation without a caller-owned event range", async () => {
+    const d = deps({
+      broadcaster: mockBroadcaster(async () => ({ ...successReceipt(), alreadySettled: true })),
+    });
+
+    await expect(createVerdictPorts(d).openVerdictAttempt({
+      operationId: OPERATION_ID,
+      taskId: 7n,
+      attemptIndex: 2,
+      evaluationTaskCidDigest: `0x${"44".repeat(32)}`,
+    })).rejects.toThrow(/reconciliationFromBlock/u);
+    expect(d.publicClient.getContractEvents).not.toHaveBeenCalled();
+  });
+
   test("reads the canonical verdict attempt for reconciliation instead of inventing request identity", async () => {
     const d = deps();
     (d.publicClient.getContractEvents as ReturnType<typeof vi.fn>).mockResolvedValue([{
@@ -117,7 +131,11 @@ describe("verdict ports", () => {
       logIndex: 4,
     }]);
 
-    await expect(createVerdictPorts(d).readCanonicalVerdictAttempt({ taskId: 7n, attemptIndex: 2 }))
+    await expect(createVerdictPorts(d).readCanonicalVerdictAttempt({
+      taskId: 7n,
+      attemptIndex: 2,
+      fromBlock: 75n,
+    }))
       .resolves.toEqual({
         taskId: 7n,
         attemptIndex: 2,
@@ -131,5 +149,8 @@ describe("verdict ports", () => {
           logIndex: 4,
         },
       });
+    expect(d.publicClient.getContractEvents).toHaveBeenCalledWith(expect.objectContaining({
+      fromBlock: 75n,
+    }));
   });
 });
