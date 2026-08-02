@@ -11,8 +11,6 @@ import {
 } from './platform-catalog.mjs';
 import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
-const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
-
 const MEDIA_TYPES = new Map([
   ['.schema.json', 'application/schema+json'],
   ['.json', 'application/json'],
@@ -25,38 +23,6 @@ function mediaTypeFor(path) {
     if (path.endsWith(suffix)) return mediaType;
   }
   return 'application/octet-stream';
-}
-
-// A document under fixtures/ is test data, not self-identity: fixture bodies legitimately
-// reuse `$id`/`profile`-shaped string values as inputs under test (e.g. a fixture that
-// exercises task-profile resolution literally contains `"profile": "https://jinn.network/..."`
-// as its payload), so fixtures are never eligible for declared-identifier remapping — they
-// are always served at their directory-derived path.
-function isFixturePath(servedPath) {
-  return servedPath.split('/').includes('fixtures');
-}
-
-// A JSON Schema document self-identifies with `$id`; a record-discovery facts-projection
-// profile document (packages/discovery/facts/*) self-identifies with a top-level `profile`
-// field naming itself (design §8.4's "published profile URIs resolve" gate covers both). A
-// document that declares neither has no claimed identity to violate, and is served at its
-// directory-derived path unchanged.
-function declaredIdentifier(servedPath, bytes, fixture) {
-  if (fixture || isFixturePath(servedPath)) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(bytes.toString('utf8'));
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== 'object') return null;
-  for (const field of ['$id', 'profile']) {
-    const value = parsed[field];
-    if (typeof value === 'string' && value.startsWith(JINN_NETWORK_ORIGIN)) {
-      return value.slice(JINN_NETWORK_ORIGIN.length);
-    }
-  }
-  return null;
 }
 
 export function buildProfileRoot({
@@ -97,7 +63,7 @@ export function buildProfileRoot({
       // A `.sha256` sidecar (e.g. profile.sha256 next to profile.json) is not itself
       // a self-identifying document -- it names no $id/profile of its own. Its sibling
       // document can be served at a declared-identifier path that differs from its
-      // on-disk directory (see declaredIdentifier below), which would otherwise strand
+      // on-disk directory, which would otherwise strand
       // the sidecar under the old directory-derived path while the document it digests
       // moves elsewhere -- a verifier resolving the document and reaching for the
       // conventional adjacent .sha256 would 404. manifest.json's per-document sha256
@@ -109,7 +75,7 @@ export function buildProfileRoot({
       const fallbackPath = fixture
         ? `${pkg.name}/${asset.relativeSource}`
         : asset.relativeSource;
-      const servedPath = declaredIdentifier(asset.relativeSource, bytes, fixture) ?? fallbackPath;
+      const servedPath = asset.claim?.servedPath ?? fallbackPath;
       const claimed = claims.get(servedPath);
       if (claimed) {
         if (claimed !== pkg.name) {

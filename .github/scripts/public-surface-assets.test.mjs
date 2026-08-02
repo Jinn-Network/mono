@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
@@ -49,7 +50,7 @@ test('enumerates non-identity schemas, fixtures, and conformance source/targets 
     writeFileSync(join(root, PACKAGE_PATH, 'schemas/plain.schema.json'), '{"type":"object"}\n');
     writeFileSync(
       join(root, PACKAGE_PATH, 'fixtures/case.json'),
-      '{"profile":"https://jinn.network/fixtures/not-a-claim"}\n',
+      '{"$id":"https://jinn.network/fixtures/not-an-id","profile":"https://jinn.network/fixtures/not-a-claim"}\n',
     );
     writeFileSync(join(root, PACKAGE_PATH, 'src/testing.ts'), 'export {};\n');
 
@@ -82,6 +83,80 @@ test('enumerates non-identity schemas, fixtures, and conformance source/targets 
         relativeSource: 'src/testing.ts',
       },
     ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Git candidate inventory excludes ignored public-root files and includes unignored untracked assets', async () => {
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(join(root, '.gitignore'), '**/.DS_Store\n');
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/tracked.schema.json'),
+      '{"type":"object"}\n',
+    );
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+
+    const baseline = enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] });
+    writeFileSync(join(root, PACKAGE_PATH, 'schemas/.DS_Store'), 'machine-local\n');
+    assert.deepEqual(
+      enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      baseline,
+      'an ignored machine file must not alter public asset bytes or counts',
+    );
+
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/untracked.schema.json'),
+      '{"type":"string"}\n',
+    );
+    const withUntracked = enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] });
+    assert.equal(withUntracked.length, baseline.length + 1);
+    assert.ok(withUntracked.some(({ relativeSource }) => (
+      relativeSource === 'schemas/untracked.schema.json'
+    )));
+    assert.equal(withUntracked.some(({ relativeSource }) => relativeSource.endsWith('.DS_Store')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects multiple top-level Jinn identity fields before collision selection', async () => {
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/dual.schema.json'),
+      JSON.stringify({
+        $id: 'https://jinn.network/schemas/alpha',
+        profile: 'https://jinn.network/profiles/beta',
+      }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /dual\.schema\.json declares multiple public self-identifying claims: \$id=https:\/\/jinn\.network\/schemas\/alpha, profile=https:\/\/jinn\.network\/profiles\/beta/u,
+      'one document must not silently choose its first qualifying identity field',
+    );
+
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/beta.schema.json'),
+      JSON.stringify({ profile: 'https://jinn.network/profiles/beta' }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /dual\.schema\.json declares multiple public self-identifying claims/u,
+      'a second beta claimant must not hide the ambiguous document',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

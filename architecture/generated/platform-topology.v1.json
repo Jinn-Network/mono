@@ -1410,7 +1410,7 @@
       "decisionRecords": 2,
       "discoveredFirstPartySurfaces": 2403,
       "generatedOutputSources": 997,
-      "generatorSources": 502,
+      "generatorSources": 503,
       "marketplaceControl": 2,
       "requiredGates": 18,
       "staticControl": 6
@@ -2142,6 +2142,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/repository-candidates.mjs"
       },
       {
         "categories": [

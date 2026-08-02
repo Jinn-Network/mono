@@ -14,6 +14,8 @@ import {
   win32,
 } from 'node:path';
 
+import { repositoryCandidateInventory } from './repository-candidates.mjs';
+
 const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
 const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
 
@@ -84,10 +86,20 @@ function safePackageRoot(repoRoot, pkg) {
   return { absolute, packageReal, rootReal };
 }
 
-function walkRealFiles({ directory, label, packageReal, rootReal, relativePrefix }, found) {
+function walkRealFiles({
+  directory,
+  inventory,
+  label,
+  packageDirectory,
+  packageReal,
+  rootReal,
+  relativePrefix,
+}, found) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const absolute = join(directory, entry.name);
     const relativeSource = `${relativePrefix}/${entry.name}`;
+    const repositoryPath = `${packageDirectory}/${toPosix(relativeSource)}`;
+    if (!inventory.fileSet.has(repositoryPath) && !inventory.directories.has(repositoryPath)) continue;
     const stat = lstatSync(absolute);
     if (stat.isSymbolicLink()) {
       throw new Error(`${label} path ${relativeSource} contains a symlink`);
@@ -99,7 +111,9 @@ function walkRealFiles({ directory, label, packageReal, rootReal, relativePrefix
     if (stat.isDirectory()) {
       walkRealFiles({
         directory: absolute,
+        inventory,
         label,
+        packageDirectory,
         packageReal,
         rootReal,
         relativePrefix: relativeSource,
@@ -114,7 +128,9 @@ function walkRealFiles({ directory, label, packageReal, rootReal, relativePrefix
 }
 
 function declaredClaim(asset, bytes) {
-  if (asset.kind === 'fixtures' || !asset.relativeSource.endsWith('.json')) return null;
+  if (asset.kind === 'fixtures'
+    || asset.relativeSource.split('/').includes('fixtures')
+    || !asset.relativeSource.endsWith('.json')) return null;
   let document;
   try {
     document = JSON.parse(bytes.toString('utf8'));
@@ -124,17 +140,23 @@ function declaredClaim(asset, bytes) {
     );
   }
   if (!document || typeof document !== 'object' || Array.isArray(document)) return null;
+  const claims = [];
   for (const field of ['$id', 'profile']) {
     const identifier = document[field];
     if (typeof identifier === 'string' && identifier.startsWith(JINN_NETWORK_ORIGIN)) {
-      return {
+      claims.push({
         field,
         identifier,
         servedPath: identifier.slice(JINN_NETWORK_ORIGIN.length),
-      };
+      });
     }
   }
-  return null;
+  if (claims.length > 1) {
+    throw new Error(
+      `${asset.package}: ${asset.relativeSource} declares multiple public self-identifying claims: ${claims.map(({ field, identifier }) => `${field}=${identifier}`).join(', ')}`,
+    );
+  }
+  return claims[0] ?? null;
 }
 
 function exportTargets(value) {
@@ -154,7 +176,7 @@ function sourceCandidates(target) {
   ];
 }
 
-function conformanceAssets(repoRoot, pkg, exportKey) {
+function conformanceAssets(repoRoot, pkg, exportKey, inventory) {
   const definition = pkg.manifest.exports?.[exportKey];
   if (definition === undefined) {
     throw new Error(`${pkg.name}: conformance export ${exportKey} is not declared in package.json exports`);
@@ -172,6 +194,7 @@ function conformanceAssets(repoRoot, pkg, exportKey) {
         candidate,
         `${pkg.name}: conformance source for ${target}`,
       );
+      if (!inventory.fileSet.has(`${pkg.directory}/${relativeSource}`)) return false;
       const absolute = resolve(packageRoot, ...relativeSource.split('/'));
       if (!existsSync(absolute)) return false;
       assertNoSymlinkPath(packageRoot, relativeSource, `${pkg.name}: conformance source`);
@@ -201,18 +224,19 @@ function conformanceAssets(repoRoot, pkg, exportKey) {
 }
 
 export function resolveConformanceSources(repoRoot, pkg, manifest, exportKey) {
+  const inventory = repositoryCandidateInventory(repoRoot);
   const assets = conformanceAssets(repoRoot, {
     name: pkg.name,
     directory: pkg.directory ?? pkg.path,
     manifest,
-  }, exportKey);
+  }, exportKey, inventory);
   return {
     packedTargets: [...new Set(assets.flatMap(({ packedTargets }) => packedTargets))].sort(),
     sources: assets.map(({ relativeSource }) => `./${relativeSource}`).sort(),
   };
 }
 
-function staticAssets(repoRoot, pkg) {
+function staticAssets(repoRoot, pkg, inventory) {
   const { absolute: packageRoot, packageReal, rootReal: repositoryReal } = safePackageRoot(repoRoot, pkg);
   const byPath = new Map();
   for (const kind of PUBLIC_DOCUMENT_KIND_PRECEDENCE) {
@@ -230,7 +254,9 @@ function staticAssets(repoRoot, pkg) {
       }
       for (const file of walkRealFiles({
         directory: absoluteRoot,
+        inventory,
         label: `${pkg.name} publicSurface.${kind}`,
+        packageDirectory: pkg.directory,
         packageReal,
         rootReal: repositoryReal,
         relativePrefix: root,
@@ -253,11 +279,17 @@ function staticAssets(repoRoot, pkg) {
   return [...byPath.values()];
 }
 
-export function enumeratePublicSurfaceAssets({ repoRoot, packages, validateUniqueClaims = true }) {
+export function enumeratePublicSurfaceAssets({
+  repoRoot,
+  packages,
+  validateUniqueClaims = true,
+  candidateFiles,
+}) {
+  const inventory = repositoryCandidateInventory(repoRoot, { candidateFiles });
   const assets = [];
   const claims = new Map();
   for (const pkg of packages) {
-    for (const asset of staticAssets(repoRoot, pkg)) {
+    for (const asset of staticAssets(repoRoot, pkg, inventory)) {
       if (validateUniqueClaims && asset.claim) {
         const existing = claims.get(asset.claim.identifier);
         if (existing) {
@@ -270,7 +302,7 @@ export function enumeratePublicSurfaceAssets({ repoRoot, packages, validateUniqu
       assets.push(asset);
     }
     for (const exportKey of pkg.catalog.publicSurface.conformance) {
-      assets.push(...conformanceAssets(repoRoot, pkg, exportKey));
+      assets.push(...conformanceAssets(repoRoot, pkg, exportKey, inventory));
     }
   }
   return assets.sort((left, right) => (

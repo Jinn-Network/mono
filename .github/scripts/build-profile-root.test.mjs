@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -82,6 +83,36 @@ test('each document carries its exact-byte digest, media type, and source packag
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('ignored public-root files do not alter profile bytes or counts while unignored untracked files do', () => {
+  const root = scratchRepo();
+  const baselineOut = mkdtempSync(join(tmpdir(), 'jinn-profile-baseline-out-'));
+  const ignoredOut = mkdtempSync(join(tmpdir(), 'jinn-profile-ignored-out-'));
+  const untrackedOut = mkdtempSync(join(tmpdir(), 'jinn-profile-untracked-out-'));
+  try {
+    writeFileSync(join(root, '.gitignore'), '**/.DS_Store\n');
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+    const baseline = buildProfileRoot({ repoRoot: root, outDir: baselineOut, commit: SHA });
+
+    const profileRoot = join(root, 'packages/evidence/protocol/profiles');
+    writeFileSync(join(profileRoot, '.DS_Store'), 'machine-local\n');
+    const ignored = buildProfileRoot({ repoRoot: root, outDir: ignoredOut, commit: SHA });
+    assert.equal(ignored.documents.length, baseline.documents.length);
+    assert.equal(manifestBytes(ignored), manifestBytes(baseline));
+    assert.equal(existsSync(join(ignoredOut, 'profiles/.DS_Store')), false);
+
+    writeFileSync(join(profileRoot, 'untracked.json'), '{"type":"string"}\n');
+    const untracked = buildProfileRoot({ repoRoot: root, outDir: untrackedOut, commit: SHA });
+    assert.equal(untracked.documents.length, baseline.documents.length + 1);
+    assert.ok(untracked.documents.some(({ path }) => path === 'profiles/untracked.json'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(baselineOut, { recursive: true, force: true });
+    rmSync(ignoredOut, { recursive: true, force: true });
+    rmSync(untrackedOut, { recursive: true, force: true });
   }
 });
 
@@ -250,7 +281,10 @@ test('a fixture that reuses a "profile" value as test data is never treated as s
   mkdirSync(join(packageDir, 'profiles/fixtures/task-profile/golden'), { recursive: true });
   writeFileSync(
     join(packageDir, 'profiles/fixtures/task-profile/golden/minimal-profile.json'),
-    JSON.stringify({ profile: 'https://jinn.network/task-profiles/example-domain/1.0' }),
+    JSON.stringify({
+      $id: 'https://jinn.network/fixtures/example-domain/schema',
+      profile: 'https://jinn.network/task-profiles/example-domain/1.0',
+    }),
     'utf8',
   );
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));

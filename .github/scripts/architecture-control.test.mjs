@@ -109,27 +109,39 @@ test('enumerates an unreferenced catalog gate definition independently', async (
 
 test('Git candidate inventory excludes ignored machine files and includes intended untracked controls', async () => {
   const { repositoryCandidateFiles, validateArchitectureControl } = await implementation;
-  const root = completeFixture();
+  const catalog = fixtureCatalog();
+  catalog.packages[0].publicSurface.schemas = ['schemas'];
+  const root = completeFixture(catalog);
   try {
+    write(join(root, 'packages/fixture/protocol/schemas/tracked.schema.json'), '{"type":"object"}\n');
     write(join(root, '.gitignore'), '**/.DS_Store\n');
     execFileSync('git', ['init', '--quiet'], { cwd: root });
     execFileSync('git', ['add', '.'], { cwd: root });
 
     const baseline = validateArchitectureControl({ repoRoot: root });
     write(join(root, '.github/scripts/.DS_Store'), 'machine-local\n');
+    write(join(root, 'packages/fixture/protocol/schemas/.DS_Store'), 'machine-local\n');
     write(join(root, '.github/scripts/review-fixture-tool.mjs'), 'export {};\n');
+    write(join(root, 'packages/fixture/protocol/schemas/untracked.schema.json'), '{"type":"string"}\n');
 
     const candidates = repositoryCandidateFiles(root);
     assert.equal(candidates.includes('.github/scripts/.DS_Store'), false);
+    assert.equal(candidates.includes('packages/fixture/protocol/schemas/.DS_Store'), false);
     assert.equal(candidates.includes('.github/scripts/review-fixture-tool.mjs'), true);
+    assert.equal(candidates.includes('packages/fixture/protocol/schemas/untracked.schema.json'), true);
 
     rmSync(join(root, '.github/scripts/review-fixture-tool.mjs'));
+    rmSync(join(root, 'packages/fixture/protocol/schemas/untracked.schema.json'));
     assert.deepEqual(validateArchitectureControl({ repoRoot: root }), baseline);
 
     write(join(root, '.github/scripts/review-fixture-tool.mjs'), 'export {};\n');
+    write(join(root, 'packages/fixture/protocol/schemas/untracked.schema.json'), '{"type":"string"}\n');
     const withUntracked = validateArchitectureControl({ repoRoot: root });
     assert.ok(withUntracked.paths.some(({ path }) => (
       path === '.github/scripts/review-fixture-tool.mjs'
+    )));
+    assert.ok(withUntracked.paths.some(({ path }) => (
+      path === 'packages/fixture/protocol/schemas/untracked.schema.json'
     )));
     const codeownersPath = join(root, '.github/CODEOWNERS');
     write(
@@ -139,6 +151,28 @@ test('Git candidate inventory excludes ignored machine files and includes intend
     assert.throws(
       () => validateArchitectureControl({ repoRoot: root }),
       /review-fixture-tool\.mjs: effective owners must be exactly/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('candidate inventory fails closed in Git checkouts and falls back only for non-Git fixtures', async () => {
+  const { repositoryCandidateFiles } = await implementation;
+  const root = completeFixture();
+  const gitFailure = () => {
+    throw new Error('simulated Git failure');
+  };
+  try {
+    const fallback = repositoryCandidateFiles(root, { runGit: gitFailure });
+    assert.deepEqual(fallback, [...fallback].sort());
+    assert.ok(fallback.includes('architecture/platform-packages.v1.json'));
+    assert.equal(fallback.some((path) => path.startsWith('.git/')), false);
+
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    assert.throws(
+      () => repositoryCandidateFiles(root, { runGit: gitFailure }),
+      /cannot enumerate repository candidates with git: simulated Git failure/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

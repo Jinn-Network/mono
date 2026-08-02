@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadPlatformCatalog } from './platform-catalog.mjs';
 import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
+import {
+  repositoryCandidateFiles,
+  repositoryCandidateInventory,
+} from './repository-candidates.mjs';
 
 export { resolveConformanceSources } from './public-surface-assets.mjs';
+export { repositoryCandidateFiles } from './repository-candidates.mjs';
 
 export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai'];
 const USERNAME = /^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u;
@@ -132,54 +136,6 @@ function addPath(paths, repositoryPath, category, repoRoot, { mustExist = true }
   paths.set(normalized, categories);
 }
 
-function fallbackCandidateFiles(repoRoot, current = repoRoot, prefix = '') {
-  const files = [];
-  for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => (
-    left.name.localeCompare(right.name)
-  ))) {
-    if (entry.name === '.git') continue;
-    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    const absolute = resolve(current, entry.name);
-    if (entry.isDirectory()) files.push(...fallbackCandidateFiles(repoRoot, absolute, relativePath));
-    else if (entry.isFile()) files.push(relativePath);
-  }
-  return files;
-}
-
-export function repositoryCandidateFiles(repoRoot, { runGit } = {}) {
-  const root = resolve(repoRoot);
-  const invokeGit = runGit ?? ((args) => execFileSync('git', args, {
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }));
-  let files;
-  try {
-    const output = invokeGit([
-      '-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z',
-    ]);
-    files = String(output).split('\0').filter(Boolean);
-  } catch (error) {
-    if (existsSync(resolve(root, '.git'))) {
-      throw new Error(`cannot enumerate repository candidates with git: ${error.message}`);
-    }
-    files = fallbackCandidateFiles(root);
-  }
-  return [...new Set(files.map((path) => path.split('\\').join('/')))].sort();
-}
-
-function candidateInventory(files) {
-  const candidates = [...files].sort();
-  const directories = new Set();
-  for (const path of candidates) {
-    const parts = path.split('/');
-    for (let index = 1; index < parts.length; index += 1) {
-      directories.add(parts.slice(0, index).join('/'));
-    }
-  }
-  return { files: candidates, directories: [...directories].sort() };
-}
-
 function hasExcludedComponent(path, root) {
   const relativePath = path === root ? '' : path.slice(root.length + 1);
   return relativePath.split('/').some((component) => EXCLUDED_DIRECTORIES.has(component));
@@ -244,7 +200,7 @@ function discoverGeneratorSources(repoRoot, pkg, paths, inventory) {
 }
 
 export function enumerateArchitectureControlPaths(repoRoot, catalog, { candidateFiles } = {}) {
-  const inventory = candidateInventory(candidateFiles ?? repositoryCandidateFiles(repoRoot));
+  const inventory = repositoryCandidateInventory(repoRoot, { candidateFiles });
   const paths = new Map();
   for (const [path, category] of STATIC_CONTROL) addPath(paths, path, category, repoRoot);
   for (const gate of Object.values(catalog.gateDefinitions)) {
@@ -256,7 +212,11 @@ export function enumerateArchitectureControlPaths(repoRoot, catalog, { candidate
     catalog: pkg,
     manifest: JSON.parse(readFileSync(resolve(repoRoot, ...pkg.path.split('/'), 'package.json'), 'utf8')),
   }));
-  const publicAssets = enumeratePublicSurfaceAssets({ repoRoot, packages });
+  const publicAssets = enumeratePublicSurfaceAssets({
+    repoRoot,
+    packages,
+    candidateFiles: inventory.files,
+  });
   for (const hydrated of packages) {
     const { catalog: pkg } = hydrated;
     addPath(paths, `${pkg.path}/package.json`, 'catalogManifests', repoRoot);
