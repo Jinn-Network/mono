@@ -15,21 +15,63 @@ function productionFiles(directory: string): string[] {
 }
 
 function executableSource(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
+  return withoutComments(source)
     .replace(/"(?:[^"\\\n]|\\.)*"/g, '\"\"')
     .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
     .replace(/`(?:[^`\\]|\\.)*`/g, "``");
 }
 
+function withoutComments(source: string): string {
+  let result = "";
+  let quote: "'" | '"' | "`" | undefined;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source.charAt(index);
+    const next = source.charAt(index + 1);
+    if (quote !== undefined) {
+      result += character;
+      if (character === "\\") {
+        result += next;
+        index += 1;
+      } else if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"' || character === "`") {
+      quote = character;
+      result += character;
+      continue;
+    }
+    if (character === "/" && next === "/") {
+      while (index < source.length && source.charAt(index) !== "\n") {
+        result += " ";
+        index += 1;
+      }
+      result += "\n";
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      result += "  ";
+      index += 2;
+      while (index < source.length && !(source.charAt(index) === "*" && source.charAt(index + 1) === "/")) {
+        result += source.charAt(index) === "\n" ? "\n" : " ";
+        index += 1;
+      }
+      result += " ";
+      index += 1;
+      continue;
+    }
+    result += character;
+  }
+  return result;
+}
+
 function specifiers(source: string): string[] {
+  const executable = withoutComments(source);
   return [
-    ...source.matchAll(/\bfrom\s*["']([^"']+)["']/g),
-    ...source.matchAll(/\bimport\s*["']([^"']+)["']/g),
-    ...source.matchAll(/\bimport\s*\(\s*["']([^"']+)["']\s*\)/g),
-    ...source.matchAll(/\brequire\s*\(\s*["']([^"']+)["']\s*\)/g),
-  ].map((match) => match[1] as string);
+    ...executable.matchAll(/\b(?:import|export)\s+(?:[^\n;]*?\s+from\s+)?["']([^"'\r\n]+)["']/g),
+    ...executable.matchAll(/\b(?:import|require)\s*\(\s*(?:["']([^"'\r\n]+)["']|`([^`]*)`)\s*\)/g),
+  ].map((match) => (match[1] ?? match[2]) as string);
 }
 
 const files = productionFiles(sourceRoot);
@@ -41,15 +83,40 @@ describe("the replay service is structurally incapable of egress", () => {
   });
 
   test("allows node:http only in service.ts and only as createServer", () => {
-    const importers = [...sources.entries()]
-      .filter(([, source]) => specifiers(source).includes("node:http"))
-      .map(([file]) => file.slice(file.lastIndexOf("/") + 1));
-    expect(importers).toEqual(["service.ts"]);
+    const nodeSpecifiers = [...sources.entries()].flatMap(([file, source]) =>
+      specifiers(source).filter((specifier) => specifier.startsWith("node:")).map((specifier) => ({ file, specifier })));
+    expect(nodeSpecifiers.map(({ specifier }) => specifier)).toEqual(["node:http"]);
+    expect(nodeSpecifiers.map(({ file }) => file.slice(file.lastIndexOf("/") + 1))).toEqual(["service.ts"]);
 
     const service = sources.get(join(sourceRoot, "service.ts"));
     const statement = service?.match(/import\s*\{([^}]*)\}\s*from\s*["']node:http["']/);
     expect(statement?.[1]?.split(",").map((name) => name.trim()).filter(Boolean).sort())
       .toEqual(["createServer"]);
+  });
+
+  test("scanner canaries cover comments, every import form, and template interpolation", () => {
+    const source = [
+      '// import "node:tls" must stay a comment',
+      'import { createServer } from "node:http";',
+      'import * as socket from "node:net";',
+      'import client from "node:https";',
+      'import "node:dns";',
+      'export { lookup } from "node:dns/promises";',
+      'await import("node:http2");',
+      'require("node:dgram");',
+      'await import(`node:${"worker_threads"}`);',
+    ].join("\n");
+
+    expect(specifiers(source)).toEqual([
+      "node:http",
+      "node:net",
+      "node:https",
+      "node:dns",
+      "node:dns/promises",
+      "node:http2",
+      "node:dgram",
+      'node:${"worker_threads"}',
+    ]);
   });
 
   test("imports no other node builtin or network client", () => {
