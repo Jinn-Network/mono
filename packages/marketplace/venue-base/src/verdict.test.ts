@@ -3,11 +3,12 @@
 import {
   JINN_ROUTER_V3_ABI,
   MECH_DELIVER_TO_MARKETPLACE_ABI,
+  SAFE_ABI,
   SafeInnerRevertError,
   VerdictCode,
 } from "@jinn-network/marketplace-binding";
 import { describe, expect, test, vi } from "vitest";
-import { decodeFunctionData, type Address, type Hex } from "viem";
+import { decodeFunctionData, encodeFunctionData, type Address, type Hex } from "viem";
 import type { BaseVenueSafeBroadcaster, SafeBroadcastReceipt } from "./broadcast/safe-broadcaster.js";
 import { createVerdictPorts } from "./verdict.js";
 
@@ -75,6 +76,28 @@ function deps(overrides: Partial<Parameters<typeof createVerdictPorts>[0]> = {})
       simulateContract: vi.fn().mockResolvedValue({}),
       readContract: vi.fn().mockResolvedValue(false),
       getContractEvents: vi.fn().mockResolvedValue([]),
+      getTransaction: vi.fn().mockResolvedValue({
+        input: encodeFunctionData({
+          abi: SAFE_ABI,
+          functionName: "execTransaction",
+          args: [
+            ROUTER,
+            0n,
+            encodeFunctionData({
+              abi: JINN_ROUTER_V3_ABI,
+              functionName: "claimVerdictDelivery",
+              args: [REQUEST_ID, DELIVERY_DIGEST, VerdictCode.Fail],
+            }),
+            0,
+            0n,
+            0n,
+            0n,
+            "0x0000000000000000000000000000000000000000",
+            "0x0000000000000000000000000000000000000000",
+            "0x",
+          ],
+        }),
+      }),
     },
     broadcaster: mockBroadcaster(async () => successReceipt()),
     safeAddress: SAFE,
@@ -107,7 +130,7 @@ describe("verdict ports", () => {
     const result = await ports.claimVerdictDelivery({
       operationId: OPERATION_ID,
       requestId: REQUEST_ID,
-      verdictDigest: `0x${"22".repeat(32)}`,
+      verdictDigest: DELIVERY_DIGEST,
       verdictCode: VerdictCode.Fail,
       reconciliationFromBlock: 7n,
     });
@@ -123,13 +146,29 @@ describe("verdict ports", () => {
     expect(d.broadcaster.execute).not.toHaveBeenCalled();
   });
 
+  test("recovers the exact verdict digest only from the canonical Safe-wrapped router call", async () => {
+    const d = deps();
+    (d.publicClient.readContract as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (d.publicClient.getContractEvents as ReturnType<typeof vi.fn>).mockResolvedValue([
+      canonicalVerdictSettlementEvent(),
+    ]);
+    await expect(createVerdictPorts(d).readVerdictSettlement({
+      requestId: REQUEST_ID,
+      fromBlock: 7n,
+    })).resolves.toMatchObject({
+      requestId: REQUEST_ID,
+      verdictDigest: DELIVERY_DIGEST,
+      verdictCode: VerdictCode.Fail,
+    });
+  });
+
   test("fails closed when a settled replay has no caller range or canonical transaction identity", async () => {
     const d = deps();
     (d.publicClient.readContract as ReturnType<typeof vi.fn>).mockResolvedValue(true);
     await expect(createVerdictPorts(d).claimVerdictDelivery({
       operationId: OPERATION_ID,
       requestId: REQUEST_ID,
-      verdictDigest: `0x${"22".repeat(32)}`,
+      verdictDigest: DELIVERY_DIGEST,
       verdictCode: VerdictCode.Fail,
     })).rejects.toThrow(/reconciliationFromBlock/u);
     expect(d.broadcaster.execute).not.toHaveBeenCalled();

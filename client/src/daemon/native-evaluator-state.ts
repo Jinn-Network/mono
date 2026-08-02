@@ -1,4 +1,9 @@
-import { documentDigest, serializeCanonicalJson } from "@jinn-network/task-execution-protocol";
+import {
+  DispatchContextSchema,
+  SubmissionRecordSchema,
+  documentDigest,
+  serializeCanonicalJson,
+} from "@jinn-network/task-execution-protocol";
 import { deriveMarketplaceAttemptUri } from "@jinn-network/marketplace-binding";
 import type { EvaluationOpportunity } from "../evaluator/opportunities.js";
 import type { ExactSubjectArtifact, SubjectMaterial } from "../evaluator/subject-material.js";
@@ -77,6 +82,8 @@ CREATE TABLE IF NOT EXISTS native_evaluation_executions (
   submission_digest  TEXT NOT NULL,
   submission_uri     TEXT NOT NULL,
   attempt_uri        TEXT,
+  dispatch_context_digest TEXT,
+  dispatch_context_bytes  BLOB,
   task_bytes         BLOB NOT NULL,
   submission_bytes   BLOB NOT NULL,
   created_at         TEXT NOT NULL,
@@ -611,6 +618,8 @@ export class NativeEvaluatorStateRepository {
     readonly submissionDigest: `sha256:${string}`;
     readonly submissionUri: `urn:uuid:${string}`;
     readonly attemptUri: `urn:uuid:${string}` | null;
+    readonly dispatchContextDigest: `sha256:${string}` | null;
+    readonly dispatchContextBytes: Uint8Array | null;
   } | undefined {
     const value = this.store.db.prepare(
       "SELECT * FROM native_evaluation_executions WHERE evaluation_id = ?",
@@ -618,6 +627,7 @@ export class NativeEvaluatorStateRepository {
       task_digest: `sha256:${string}`; submission_digest: `sha256:${string}`;
       submission_uri: `urn:uuid:${string}`; attempt_uri: `urn:uuid:${string}` | null;
       task_bytes: Uint8Array; submission_bytes: Uint8Array;
+      dispatch_context_digest: `sha256:${string}` | null; dispatch_context_bytes: Uint8Array | null;
     } | undefined;
     return value === undefined ? undefined : {
       taskBytes: new Uint8Array(value.task_bytes),
@@ -626,7 +636,45 @@ export class NativeEvaluatorStateRepository {
       submissionDigest: value.submission_digest,
       submissionUri: value.submission_uri,
       attemptUri: value.attempt_uri,
+      dispatchContextDigest: value.dispatch_context_digest,
+      dispatchContextBytes: value.dispatch_context_bytes === null ? null : new Uint8Array(value.dispatch_context_bytes),
     };
+  }
+
+  recordEvaluationDispatchContext(evaluation: NativeOperationId, bytes: Uint8Array): `sha256:${string}` {
+    const derived = this.getDerivedEvaluation(evaluation);
+    if (derived?.attemptUri === null || derived === undefined) {
+      throw new NativeEvaluatorStateConflictError("evaluation DispatchContext requires finalized Attempt identity");
+    }
+    const digest = documentDigest(bytes);
+    const parsed = DispatchContextSchema.parse(JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    ));
+    if (!Buffer.from(serializeCanonicalJson(parsed as Parameters<typeof serializeCanonicalJson>[0]))
+      .equals(Buffer.from(bytes))) {
+      throw new NativeEvaluatorStateConflictError("evaluation DispatchContext bytes are not canonical");
+    }
+    const submission = SubmissionRecordSchema.parse(JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(derived.submissionBytes),
+    ));
+    if (parsed.taskDigest !== derived.taskDigest
+      || parsed.submission !== derived.submissionUri
+      || parsed.attempt !== derived.attemptUri
+      || parsed.nonce !== submission.nonce) {
+      throw new NativeEvaluatorStateConflictError("evaluation DispatchContext does not bind the sealed pair and Attempt");
+    }
+    if (derived.dispatchContextDigest !== null) {
+      if (derived.dispatchContextDigest !== digest
+        || !Buffer.from(derived.dispatchContextBytes!).equals(Buffer.from(bytes))) {
+        throw new NativeEvaluatorStateConflictError("evaluation DispatchContext changed after persistence");
+      }
+      return digest;
+    }
+    this.store.db.prepare(
+      `UPDATE native_evaluation_executions SET dispatch_context_digest = ?, dispatch_context_bytes = ?,
+       updated_at = ? WHERE evaluation_id = ?`,
+    ).run(digest, Buffer.from(bytes), this.timestamp(), evaluation);
+    return digest;
   }
 
   private createOperation(
@@ -1006,6 +1054,15 @@ export class NativeEvaluatorStateRepository {
       "UPDATE native_evaluations SET state = 'paused', updated_at = ? WHERE evaluation_id = ?",
     ).run(now, evaluation);
     this.audit(evaluation, "evaluation-paused", { reason }, now);
+  }
+
+  recordEvaluationFailed(evaluation: NativeOperationId, reason: string): void {
+    if (this.getEvaluation(evaluation) === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
+    const now = this.timestamp();
+    this.store.db.prepare(
+      "UPDATE native_evaluations SET state = 'failed', updated_at = ? WHERE evaluation_id = ?",
+    ).run(now, evaluation);
+    this.audit(evaluation, "evaluation-failed-terminal", { reason }, now);
   }
 
   private finalizeOperation(

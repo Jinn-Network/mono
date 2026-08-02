@@ -12,6 +12,7 @@ import {
   DeliveryRecordSchema,
   SubmissionRecordSchema,
   documentDigest,
+  serializeCanonicalJson,
   type DeliveryRecord,
 } from "@jinn-network/task-execution-protocol";
 import { deriveNativeEvaluation } from "../evaluator/native-evaluation-derivation.js";
@@ -24,6 +25,7 @@ import type { ExactSubjectArtifact, SubjectMaterial } from "../evaluator/subject
 import type { NativeOperationId } from "./native-operation-identity.js";
 import {
   NativeEvaluatorStateRepository,
+  type NativeEvaluationAuthority,
   type NativeEvaluationArtifactRow,
   type NativeEvaluationOperationRow,
   type NativeEvaluationPublicationRow,
@@ -40,6 +42,7 @@ export interface NativeEvaluatorPublisherPort {
 
 export interface NativeEvaluatorVerdictVerificationInput {
   readonly evaluation: NativeEvaluationRow;
+  readonly evaluationAuthority: NativeEvaluationAuthority;
   readonly subject: SubjectMaterial;
   readonly derived: NonNullable<ReturnType<NativeEvaluatorStateRepository["getDerivedEvaluation"]>>;
   readonly artifacts: readonly NativeEvaluationArtifactRow[];
@@ -70,10 +73,11 @@ export type NativeEvaluatorCoordinatorResult =
   | { readonly kind: "verdict-published" }
   | { readonly kind: "verdict-settlement-pending" }
   | { readonly kind: "complete" }
+  | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "paused"; readonly reason: string };
 
 class EvaluatorCoordinatorFailure extends Error {
-  constructor(readonly reason: string, detail?: string) {
+  constructor(readonly reason: string, detail?: string, readonly retryable = false) {
     super(detail === undefined ? reason : `${reason}: ${detail}`);
   }
 }
@@ -164,6 +168,10 @@ export class NativeEvaluatorCoordinator {
       const reason = cause instanceof EvaluatorCoordinatorFailure
         ? cause.reason
         : "evaluator-dependency-failed";
+      if (cause instanceof EvaluatorCoordinatorFailure && !cause.retryable) {
+        this.input.state.recordEvaluationFailed(id, reason);
+        return { kind: "failed", reason };
+      }
       this.input.state.recordEvaluationPaused(id, reason);
       return { kind: "paused", reason };
     }
@@ -287,12 +295,21 @@ export class NativeEvaluatorCoordinator {
     }
     const operation = this.input.state.beginEvaluationExecution(evaluation.evaluationId);
     const submission = SubmissionRecordSchema.parse(parseJson(derived.submissionBytes, "evaluation Submission"));
-    const dispatchContext = {
-      taskDigest: derived.taskDigest,
-      submission: derived.submissionUri,
-      nonce: submission.nonce,
-      attempt: derived.attemptUri,
-    };
+    if (derived.dispatchContextBytes === null) {
+      const sealedDispatch = serializeCanonicalJson({
+        taskDigest: derived.taskDigest,
+        submission: derived.submissionUri,
+        nonce: submission.nonce,
+        attempt: derived.attemptUri,
+      });
+      this.input.state.recordEvaluationDispatchContext(evaluation.evaluationId, sealedDispatch);
+    }
+    const recovered = this.input.state.getDerivedEvaluation(evaluation.evaluationId)!;
+    if (recovered.dispatchContextBytes === null
+      || documentDigest(recovered.dispatchContextBytes) !== recovered.dispatchContextDigest) {
+      throw new EvaluatorCoordinatorFailure("evaluation-dispatch-context-missing");
+    }
+    const dispatchContext = parseJson(recovered.dispatchContextBytes, "evaluation DispatchContext") as TwoPartyEngagement["dispatchContext"];
     const engagement: TwoPartyEngagement = { attemptUri: derived.attemptUri, dispatchContext };
     const recovery = await this.input.backend.recover(derived.attemptUri);
     if (recovery.classification === "contradictory") {
@@ -338,7 +355,7 @@ export class NativeEvaluatorCoordinator {
       throw new EvaluatorCoordinatorFailure("verdict-digest-mismatch");
     }
     const envelopeBytes = this.input.deliverySignature.get(reference.digest);
-    if (envelopeBytes === undefined) throw new EvaluatorCoordinatorFailure("evaluation-delivery-envelope-missing");
+    if (envelopeBytes === undefined) throw new EvaluatorCoordinatorFailure("evaluation-delivery-envelope-missing", undefined, true);
     const artifacts: Array<{ role: string; name: string; digest: `sha256:${string}`; bytes: Uint8Array }> = [
       { role: "verdict", name: "verdict", digest: verdictDigest, bytes: verdictBytes },
       { role: "evaluation-delivery", name: "evaluation-delivery", digest: reference.digest, bytes: deliveryBytes },
@@ -352,10 +369,11 @@ export class NativeEvaluatorCoordinator {
     for (const evidenceReference of record.evidenceRecords ?? []) {
       const typed = evidenceReference as EvidenceRecordReference;
       if ((await this.input.evidence.awaitIndexed(typed)).status !== "indexed") {
-        throw new EvaluatorCoordinatorFailure("evaluation-evidence-not-indexed");
+        throw new EvaluatorCoordinatorFailure("evaluation-evidence-not-indexed", undefined, true);
       }
       const bytes = await this.input.evidence.getRecord(typed);
       if (bytes === null || documentDigest(bytes) !== typed.digest) {
+        if (bytes === null) throw new EvaluatorCoordinatorFailure("evaluation-evidence-unavailable", undefined, true);
         throw new EvaluatorCoordinatorFailure("evaluation-evidence-digest-mismatch");
       }
       artifacts.push({
@@ -372,6 +390,7 @@ export class NativeEvaluatorCoordinator {
     }));
     const verified = await this.input.verification.verify({
       evaluation,
+      evaluationAuthority: this.input.state.getAdmissionAuthority(id)!,
       subject: materialFromState(this.input.state, id),
       derived,
       artifacts: transient,
@@ -400,6 +419,7 @@ export class NativeEvaluatorCoordinator {
   private async ensureDecisionGrade(id: NativeOperationId, canonical?: CanonicalVerdictSettlement): Promise<VerdictCode> {
     const verified = await this.input.verification.verify({
       evaluation: this.evaluation(id),
+      evaluationAuthority: this.input.state.getAdmissionAuthority(id)!,
       subject: materialFromState(this.input.state, id),
       derived: this.input.state.getDerivedEvaluation(id)!,
       artifacts: this.input.state.listEvaluationArtifacts(id),
@@ -490,7 +510,8 @@ export class NativeEvaluatorCoordinator {
     if (canonical.evaluator.toLowerCase() !== this.input.evaluatorAddress.toLowerCase()
       || canonical.taskId !== evaluation.taskId
       || canonical.attemptIndex !== evaluation.solutionAttemptIndex
-      || canonical.verdictCode !== evaluation.verdictCode) {
+      || canonical.verdictCode !== evaluation.verdictCode
+      || canonical.verdictDigest.toLowerCase() !== sha256Bytes32(verdictArtifact.digest).toLowerCase()) {
       throw new EvaluatorCoordinatorFailure("canonical-verdict-correspondence-mismatch");
     }
     await this.alignOperation(operation, canonical.transaction.hash);

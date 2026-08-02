@@ -6,12 +6,14 @@ import {
   JINN_ROUTER_V3_ABI,
   MECH_ABI,
   MECH_DELIVER_TO_MARKETPLACE_ABI,
+  SAFE_ABI,
   SafeInnerRevertError,
   formatKnownRevertDetail,
   type VerdictCode,
 } from "@jinn-network/marketplace-binding";
 import {
   decodeEventLog,
+  decodeFunctionData,
   encodeFunctionData,
   type Address,
   type Hex,
@@ -45,6 +47,8 @@ export interface CanonicalVerdictSettlement {
   readonly verdictIndex: number;
   readonly evaluator: Address;
   readonly verdictCode: VerdictCode;
+  /** Exact digest argument carried by the canonical claimVerdictDelivery transaction. */
+  readonly verdictDigest: Hex;
   readonly transaction: VerdictTransactionIdentity & { readonly logIndex: number };
 }
 
@@ -306,6 +310,32 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
     ) {
       throw new Error(`settled verdict ${input.requestId} has no canonical transaction identity`);
     }
+    const transaction = await deps.publicClient.getTransaction({ hash: event.transactionHash });
+    let verdictDigest: Hex;
+    try {
+      const outer = decodeFunctionData({ abi: SAFE_ABI, data: transaction.input });
+      if (outer.functionName !== "execTransaction") {
+        throw new Error("canonical verdict transaction is not a Safe execTransaction");
+      }
+      const outerArgs = outer.args as readonly [Address, bigint, Hex, number, ...unknown[]];
+      if (outerArgs[0].toLowerCase() !== deps.routerAddress.toLowerCase()
+        || outerArgs[1] !== 0n
+        || Number(outerArgs[3]) !== 0) {
+        throw new Error("canonical Safe transaction does not call the router directly");
+      }
+      const decoded = decodeFunctionData({ abi: JINN_ROUTER_V3_ABI, data: outerArgs[2] });
+      if (decoded.functionName !== "claimVerdictDelivery") {
+        throw new Error("canonical Safe inner transaction did not call claimVerdictDelivery");
+      }
+      const decodedArgs = decoded.args as readonly [Hex, Hex, VerdictCode];
+      if (decodedArgs[0].toLowerCase() !== input.requestId.toLowerCase()
+        || Number(decodedArgs[2]) !== Number(args.verdictCode)) {
+        throw new Error("canonical verdict transaction arguments contradict the emitted event");
+      }
+      verdictDigest = decodedArgs[1];
+    } catch (cause) {
+      throw new Error(`settled verdict ${input.requestId} has no exact canonical verdict digest: ${String(cause)}`);
+    }
     return {
       requestId: input.requestId,
       taskId: args.taskId,
@@ -313,6 +343,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
       verdictIndex: Number(args.verdictIndex),
       evaluator: args.evaluator,
       verdictCode: Number(args.verdictCode) as VerdictCode,
+      verdictDigest,
       transaction: {
         hash: event.transactionHash,
         blockNumber: event.blockNumber,
@@ -366,6 +397,7 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
 
   async function requireVerdictSettlementIdentity(input: {
     readonly requestId: Hex;
+    readonly verdictDigest: Hex;
     readonly reconciliationFromBlock?: bigint;
   }): Promise<CanonicalVerdictSettlement> {
     if (input.reconciliationFromBlock === undefined) {
@@ -377,6 +409,9 @@ export function createVerdictPorts(deps: VerdictPortDeps): VerdictPorts {
     });
     if (settlement === undefined) {
       throw new Error(`claimVerdictDelivery has no canonical settled verdict for ${input.requestId}`);
+    }
+    if (settlement.verdictDigest.toLowerCase() !== input.verdictDigest.toLowerCase()) {
+      throw new Error(`claimVerdictDelivery canonical verdict digest contradicts ${input.verdictDigest}`);
     }
     return settlement;
   }

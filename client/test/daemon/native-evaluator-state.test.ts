@@ -10,6 +10,11 @@ import {
   NativeEvaluatorStateRepository,
 } from "../../src/daemon/native-evaluator-state.js";
 import { evaluationId } from "../../src/daemon/native-operation-identity.js";
+import {
+  TASK_EXECUTION_PROTOCOL_URI,
+  sealSubmission,
+  serializeCanonicalJson,
+} from "@jinn-network/task-execution-protocol";
 
 const digest = (bytes: Uint8Array) =>
   `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
@@ -183,8 +188,16 @@ describe("NativeEvaluatorStateRepository", () => {
       material,
     });
     const taskBytes = new TextEncoder().encode("evaluation-task");
-    const submissionBytes = new TextEncoder().encode("evaluation-submission");
     const attemptUri = "urn:uuid:30000000-0000-4000-8000-000000000003" as const;
+    const submissionBytes = sealSubmission({
+      protocol: TASK_EXECUTION_PROTOCOL_URI,
+      submission: attemptUri,
+      task: { digest: { sha256: digest(taskBytes).slice(7) } },
+      requester: "urn:jinn:evaluator:golden",
+      idempotencyKey: "evaluation-state-test",
+      nonce: "evaluation-state-nonce",
+      deadline: "2026-08-03T00:00:00Z",
+    });
     state.recordDerivedEvaluation(admitted.evaluationId, {
       taskBytes,
       taskDigest: digest(taskBytes),
@@ -228,6 +241,29 @@ describe("NativeEvaluatorStateRepository", () => {
       evaluatorAddress: `0x${"6".repeat(40)}`,
     });
     expect(state.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "evaluation-finalized" });
+    const finalizedAttempt = state.getDerivedEvaluation(admitted.evaluationId)!.attemptUri!;
+    expect(() => state.recordEvaluationDispatchContext(admitted.evaluationId, serializeCanonicalJson({
+      taskDigest: digest(taskBytes),
+      submission: attemptUri,
+      nonce: "changed-nonce",
+      attempt: finalizedAttempt,
+    }))).toThrow(/does not bind/);
+    const dispatch = {
+      taskDigest: digest(taskBytes),
+      submission: attemptUri,
+      nonce: "evaluation-state-nonce",
+      attempt: finalizedAttempt,
+    };
+    expect(() => state.recordEvaluationDispatchContext(
+      admitted.evaluationId,
+      new TextEncoder().encode(JSON.stringify(dispatch, null, 2)),
+    )).toThrow(/not canonical/);
+    const dispatchBytes = serializeCanonicalJson(dispatch);
+    expect(state.recordEvaluationDispatchContext(admitted.evaluationId, dispatchBytes)).toBe(digest(dispatchBytes));
+    expect(state.getDerivedEvaluation(admitted.evaluationId)).toMatchObject({
+      dispatchContextDigest: digest(dispatchBytes),
+      dispatchContextBytes: dispatchBytes,
+    });
 
     const backend = state.beginEvaluationExecution(admitted.evaluationId);
     state.recordEvaluationBackendAccepted(backend.operationId);

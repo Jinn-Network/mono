@@ -115,6 +115,12 @@ describe("NativeEvaluatorCoordinator", () => {
         recover: async () => ({ classification: "absent" }),
         submit: async (_task, _submission, engagement) => {
           calls.push("backend-submit");
+          const persistedDispatch = state.getDerivedEvaluation(id)!;
+          expect(persistedDispatch.dispatchContextBytes).not.toBeNull();
+          expect(documentDigest(persistedDispatch.dispatchContextBytes!))
+            .toBe(persistedDispatch.dispatchContextDigest);
+          expect(JSON.parse(new TextDecoder().decode(persistedDispatch.dispatchContextBytes!)))
+            .toEqual(engagement!.dispatchContext);
           const parsed = DeliveryRecordForAttempt(engagement!.attemptUri, taskDigest, verdictBytes, evidenceBytes);
           actualDelivery = parsed;
           return { accepted: true } as never;
@@ -168,6 +174,7 @@ describe("NativeEvaluatorCoordinator", () => {
           verdictIndex: 0,
           evaluator: evaluatorAddress,
           verdictCode: 1,
+          verdictDigest: `0x${documentDigest(verdictBytes).slice(7)}`,
           transaction: { ...settleTx, logIndex: 3 },
         }) : undefined,
       },
