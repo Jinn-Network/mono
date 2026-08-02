@@ -1,7 +1,7 @@
 import type { z } from "zod";
 
 import { serializeCanonicalJson } from "./canonical.js";
-import { assertIJsonStrings, type JsonValue } from "./json.js";
+import { assertIJsonString, type JsonValue } from "./json.js";
 
 export interface ValidationIssue {
   path: string;
@@ -33,28 +33,168 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
-/**
- * `JSON.parse` gives `__proto__` as an ordinary own member, but zod's object copy assigns
- * through the prototype setter and the member never reaches the output. Validation would
- * therefore succeed and the sealed bytes would quietly lack content the producer handed in.
- * A seal that drops a member is worse than one that refuses the document, so this refuses.
- */
-function assertNoPrototypeMember(value: unknown, path: string): void {
-  if (Array.isArray(value)) {
-    value.forEach((element, index) => assertNoPrototypeMember(element, `${path}${path ? "." : ""}${index}`));
-    return;
+function invalidInput(path: string, message: string): never {
+  throw new InvalidDocumentError([{ path, message }]);
+}
+
+function childPath(path: string, child: string): string {
+  return path === "" ? child : `${path}.${child}`;
+}
+
+function keyPath(path: string, key: PropertyKey): string {
+  return typeof key === "string"
+    ? childPath(path, key)
+    : childPath(path, `[${String(key)}]`);
+}
+
+function ownKeys(value: object, path: string): PropertyKey[] {
+  try {
+    return Reflect.ownKeys(value);
+  } catch {
+    return invalidInput(path, "must expose a stable own-property graph");
   }
-  if (value === null || typeof value !== "object") return;
-  for (const [key, member] of Object.entries(value)) {
-    const memberPath = `${path}${path ? "." : ""}${key}`;
-    if (key === "__proto__") {
-      throw new InvalidDocumentError([{
-        path: memberPath,
-        message: 'a "__proto__" member cannot survive sealing and is refused, never dropped',
-      }]);
+}
+
+function ownDescriptor(value: object, key: PropertyKey, path: string): PropertyDescriptor {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined) {
+      return invalidInput(path, "must expose a stable own-property graph");
     }
-    assertNoPrototypeMember(member, memberPath);
+    return descriptor;
+  } catch {
+    return invalidInput(path, "must expose a stable own-property graph");
   }
+}
+
+function prototypeOf(value: object, path: string): object | null {
+  try {
+    return Object.getPrototypeOf(value);
+  } catch {
+    return invalidInput(path, "must have an ordinary object prototype");
+  }
+}
+
+function enumerableDataDescriptor(
+  value: object,
+  key: PropertyKey,
+  path: string,
+): PropertyDescriptor & { value: unknown } {
+  const descriptor = ownDescriptor(value, key, path);
+  if (!descriptor.enumerable || !("value" in descriptor)) {
+    return invalidInput(path, "must be an enumerable data property");
+  }
+  return descriptor as PropertyDescriptor & { value: unknown };
+}
+
+/**
+ * Copy only the supported I-JSON-integer graph before Zod reads it. Zod's loose-object path
+ * can preserve values that the canonical serializer would omit or coerce, particularly inside
+ * namespaced extensions; sealing must reject those inputs instead of changing their bytes.
+ */
+function cloneIJsonValue(value: unknown, path: string, ancestors: WeakSet<object>): JsonValue {
+  if (value === null) return null;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    try {
+      assertIJsonString(value);
+    } catch {
+      return invalidInput(path, "must be an I-JSON scalar string");
+    }
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || Object.is(value, -0)) {
+      return invalidInput(path, "must be an exact I-JSON integer");
+    }
+    return value;
+  }
+  if (typeof value !== "object") {
+    return invalidInput(path, `must be an I-JSON value, not ${typeof value}`);
+  }
+
+  if (ancestors.has(value)) {
+    return invalidInput(path, "must not contain a cycle");
+  }
+  ancestors.add(value);
+  try {
+    return Array.isArray(value)
+      ? cloneIJsonArray(value, path, ancestors)
+      : cloneIJsonObject(value, path, ancestors);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function cloneIJsonArray(value: unknown[], path: string, ancestors: WeakSet<object>): JsonValue[] {
+  if (prototypeOf(value, path) !== Array.prototype) {
+    return invalidInput(path, "must be an ordinary array");
+  }
+  const lengthDescriptor = ownDescriptor(value, "length", path);
+  if (!("value" in lengthDescriptor) || typeof lengthDescriptor.value !== "number") {
+    return invalidInput(path, "must have an ordinary array length");
+  }
+  const length = lengthDescriptor.value;
+  const present = new Set<number>();
+  for (const key of ownKeys(value, path)) {
+    if (key === "length") continue;
+    const memberPath = keyPath(path, key);
+    if (typeof key !== "string") {
+      return invalidInput(memberPath, "array members must use numeric string indexes");
+    }
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || index >= length || String(index) !== key) {
+      return invalidInput(memberPath, "array must not contain unexpected properties");
+    }
+    enumerableDataDescriptor(value, key, memberPath);
+    present.add(index);
+  }
+
+  const copied: JsonValue[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const memberPath = childPath(path, String(index));
+    if (!present.has(index)) {
+      return invalidInput(memberPath, "array must not contain holes");
+    }
+    copied.push(cloneIJsonValue(
+      enumerableDataDescriptor(value, String(index), memberPath).value,
+      memberPath,
+      ancestors,
+    ));
+  }
+  return copied;
+}
+
+function cloneIJsonObject(
+  value: object,
+  path: string,
+  ancestors: WeakSet<object>,
+): { [key: string]: JsonValue } {
+  const prototype = prototypeOf(value, path);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return invalidInput(path, "must be a plain object with no custom prototype");
+  }
+  const copied: { [key: string]: JsonValue } = Object.create(null);
+  for (const key of ownKeys(value, path)) {
+    const memberPath = keyPath(path, key);
+    if (typeof key !== "string") {
+      return invalidInput(memberPath, "object members must use string keys");
+    }
+    if (key === "__proto__") {
+      return invalidInput(memberPath, 'a "__proto__" member cannot survive sealing and is refused');
+    }
+    try {
+      assertIJsonString(key);
+    } catch {
+      return invalidInput(memberPath, "object member names must be I-JSON scalar strings");
+    }
+    copied[key] = cloneIJsonValue(
+      enumerableDataDescriptor(value, key, memberPath).value,
+      memberPath,
+      ancestors,
+    );
+  }
+  return copied;
 }
 
 /**
@@ -62,8 +202,8 @@ function assertNoPrototypeMember(value: unknown, path: string): void {
  * forever; its identity is `informationWorldRecordDigest` over them.
  */
 export function sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): Uint8Array {
-  assertNoPrototypeMember(document, "");
-  const parsed = schema.safeParse(document);
+  const input = cloneIJsonValue(document, "", new WeakSet());
+  const parsed = schema.safeParse(input);
   if (!parsed.success) throw new InvalidDocumentError(validationIssues(parsed.error));
   return serializeCanonicalJson(parsed.data as JsonValue);
 }
@@ -74,13 +214,13 @@ export function sealWithSchema<T>(schema: z.ZodType<T>, document: unknown): Uint
  * two distinct byte strings present as the same record.
  */
 export function parseExactWithSchema<T>(schema: z.ZodType<T>, bytes: Uint8Array): T {
-  let json: unknown;
+  let decoded: unknown;
   try {
-    json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     throw new InvalidDocumentError([{ path: "", message: "bytes are not valid UTF-8 JSON" }]);
   }
-  assertIJsonStrings(json);
+  const json = cloneIJsonValue(decoded, "", new WeakSet());
 
   const parsed = schema.safeParse(json);
   if (!parsed.success) throw new InvalidDocumentError(validationIssues(parsed.error));

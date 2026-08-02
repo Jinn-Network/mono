@@ -66,6 +66,17 @@ const world = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+function expectInvalidPath(action: () => void, expectedPath: string): void {
+  try {
+    action();
+  } catch (error) {
+    expect(error).toBeInstanceOf(InvalidDocumentError);
+    expect((error as InvalidDocumentError).errors.some(({ path }) => path === expectedPath)).toBe(true);
+    return;
+  }
+  throw new Error(`expected InvalidDocumentError at ${expectedPath}`);
+}
+
 describe("InformationWorldRecordSchema", () => {
   test("accepts a well-formed synthetic world", () => {
     expect(InformationWorldRecordSchema.safeParse(world()).success).toBe(true);
@@ -87,6 +98,74 @@ describe("InformationWorldRecordSchema", () => {
       expect(InformationWorldRecordSchema.safeParse(world({ [key]: 1 })).success, key).toBe(false);
     }
   });
+
+  test("round-trips a valid namespaced I-JSON extension graph exactly", () => {
+    const extension = {
+      nullValue: null,
+      boolean: true,
+      integer: 7,
+      text: "fixture",
+      list: ["one", { two: 2 }],
+    };
+    const parsed = parseInformationWorldRecord(sealInformationWorldRecord(world({
+      "network.jinn.extension": extension,
+    }))) as Record<string, unknown>;
+    expect(parsed["network.jinn.extension"]).toEqual(extension);
+  });
+
+  test.each<readonly [string, () => unknown, string]>([
+    ["an undefined primitive", () => ({ value: undefined }), "network.jinn.extension.value"],
+    ["a bigint primitive", () => ({ value: 1n }), "network.jinn.extension.value"],
+    ["a symbol primitive", () => ({ value: Symbol("value") }), "network.jinn.extension.value"],
+    ["a function primitive", () => ({ value: () => true }), "network.jinn.extension.value"],
+    ["a fractional number", () => ({ value: 1.5 }), "network.jinn.extension.value"],
+    ["negative zero", () => ({ value: -0 }), "network.jinn.extension.value"],
+    ["an unpaired surrogate", () => ({ value: "\ud800" }), "network.jinn.extension.value"],
+    ["a sparse array", () => new Array<unknown>(1), "network.jinn.extension.0"],
+    ["an array with an unexpected property", () => {
+      const value = [true] as unknown as Record<string, unknown>;
+      value.extra = true;
+      return value;
+    }, "network.jinn.extension.extra"],
+    ["an array with a symbol property", () => {
+      const value = [true] as unknown as Record<symbol, unknown>;
+      value[Symbol("hidden")] = true;
+      return value;
+    }, "network.jinn.extension.[Symbol(hidden)]"],
+    ["an array with a non-enumerable property", () => {
+      const value = [true];
+      Object.defineProperty(value, "hidden", { value: true });
+      return value;
+    }, "network.jinn.extension.hidden"],
+    ["an array with a custom prototype", () => {
+      const value = [true];
+      Object.setPrototypeOf(value, { inherited: true });
+      return value;
+    }, "network.jinn.extension"],
+    ["an object with a symbol property", () => {
+      const value: Record<symbol, unknown> = {};
+      value[Symbol("hidden")] = true;
+      return value;
+    }, "network.jinn.extension.[Symbol(hidden)]"],
+    ["an object with a non-enumerable property", () => {
+      const value: Record<string, unknown> = {};
+      Object.defineProperty(value, "hidden", { value: true });
+      return value;
+    }, "network.jinn.extension.hidden"],
+    ["an object with an accessor", () => {
+      const value: Record<string, unknown> = {};
+      Object.defineProperty(value, "computed", { enumerable: true, get: () => true });
+      return value;
+    }, "network.jinn.extension.computed"],
+    ["an object with a custom prototype", () => Object.create({ inherited: true }),
+      "network.jinn.extension"],
+    ["a nested __proto__ member", () => JSON.parse('{"nested":{"__proto__":{"x":1}}}'),
+      "network.jinn.extension.nested.__proto__"],
+  ])("refuses extension graphs containing %s before Zod or canonicalization", (_label, makeValue, path) => {
+    expectInvalidPath(() => {
+      sealInformationWorldRecord(world({ "network.jinn.extension": makeValue() }));
+    }, path);
+  });
 });
 
 describe("the miss policy is required and fail-closed", () => {
@@ -98,10 +177,10 @@ describe("the miss policy is required and fail-closed", () => {
 
   test("a 3xx miss status is refused (finding CF6-7)", () => {
     const record = world();
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       missPolicy: { ...record.missPolicy, status: 302 },
-    })).toThrow(InvalidDocumentError);
+    }), "missPolicy.status");
   });
 
   test("the inline miss body accepts exactly 4096 UTF-8 bytes and rejects the next character", () => {
@@ -114,13 +193,13 @@ describe("the miss policy is required and fail-closed", () => {
         body: { inlineUtf8: "é".repeat(2048), mediaType: "text/plain" },
       },
     })).not.toThrow();
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       missPolicy: {
         ...record.missPolicy,
         body: { inlineUtf8: "é".repeat(2049), mediaType: "text/plain" },
       },
-    })).toThrow(InvalidDocumentError);
+    }), "missPolicy.body.inlineUtf8");
   });
 });
 
@@ -129,10 +208,10 @@ describe("corpus integrity", () => {
     const record = world();
     const entries = [...record.corpus.entries];
     entries[0] = { ...entries[0]!, requestKey: `irk1:${"0".repeat(64)}` };
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       corpus: { ...record.corpus, entries: sortEntries(entries) },
-    })).toThrow(InvalidDocumentError);
+    }), "corpus.entries.0.requestKey");
   });
 
   test("rejects malformed stored request parts before deriving their declared key", () => {
@@ -142,10 +221,10 @@ describe("corpus integrity", () => {
       ...malformed.request,
       path: "/%7Epool",
     };
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       corpus: { ...record.corpus, entries: [malformed] },
-    })).toThrow(InvalidDocumentError);
+    }), "corpus.entries.0.request");
   });
 
   test("rejects two entries colliding on a request key at seal time", () => {
@@ -174,13 +253,13 @@ describe("corpus integrity", () => {
       ...record,
       corpus: { ...record.corpus, entries: [foreign] },
     })).toThrow(InvalidDocumentError);
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       corpus: {
         ...record.corpus,
         origins: ["https://api.example.test", "https://api.example.test"],
       },
-    })).toThrow(InvalidDocumentError);
+    }), "corpus.origins.1");
     const wide = entry("/pools", "e");
     wide.request = {
       ...wide.request,
@@ -194,10 +273,10 @@ describe("corpus integrity", () => {
 
   test("validates the sealed request-key policy, including CF6-1 credentials", () => {
     const record = world();
-    expect(() => sealInformationWorldRecord({
+    expectInvalidPath(() => sealInformationWorldRecord({
       ...record,
       requestKeyPolicy: { ...policy, headerSubset: ["authorization"] },
-    })).toThrow(InvalidDocumentError);
+    }), "requestKeyPolicy");
   });
 });
 
@@ -218,14 +297,13 @@ describe("fidelity is a declaration with one exclusive provenance branch (findin
       .toBe(true);
     const { capturer, ...withoutCapturer } = capturedCapture;
     void capturer;
-    expect(() => sealInformationWorldRecord(world({ capture: withoutCapturer })))
-      .toThrow(InvalidDocumentError);
+    expectInvalidPath(() => sealInformationWorldRecord(world({ capture: withoutCapturer })), "capture");
   });
 
   test("forbids capture provenance on synthetic worlds and fixes the declaration class", () => {
-    expect(() => sealInformationWorldRecord(world({
+    expectInvalidPath(() => sealInformationWorldRecord(world({
       capture: { ...capturedCapture, fidelity: "synthetic" },
-    }))).toThrow(InvalidDocumentError);
+    })), "capture");
     expect(InformationWorldRecordSchema.safeParse(world({
       capture: { ...capturedCapture, provenanceClass: "proven" },
     })).success).toBe(false);
