@@ -1,0 +1,37 @@
+{
+  "protocol": "https://jinn.network/tests/native-recovery-matrix/1.0",
+  "seeds": [
+    {
+      "seed": "B800", "boundary": "posting-wallet-return-uncertain", "rail": "requester",
+      "expected": { "finalState": "published", "operationCount": 1, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "post": [1], "recover": [1] }, "effects": { "posting": 1, "signedSourceEntries": 1 } }
+    },
+    {
+      "seed": "B801", "boundary": "claim-wallet-return-uncertain", "rail": "solver",
+      "expected": { "finalState": "claim-finalized", "operationCount": 1, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "claim": [1] }, "effects": { "claims": 1 } }
+    },
+    {
+      "seed": "B802", "boundary": "backend-submit-evidence-outage", "rail": "solver",
+      "expected": { "finalState": "solution-settled", "operationCount": 3, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "backendRecover": [2], "backendSubmit": [1], "evidenceRead": [2], "publish": [4], "settlement": [1] }, "effects": { "backendSubmissions": 1, "publishedRecords": 4, "settlements": 1 } }
+    },
+    {
+      "seed": "B803", "boundary": "source-head-before-state", "rail": "solver",
+      "expected": { "finalState": "published", "operationCount": 1, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "publish": [2] }, "effects": { "signedSourceEntries": 1 } }
+    },
+    {
+      "seed": "B804", "boundary": "evaluation-dependency-retry", "rail": "evaluator",
+      "expected": { "finalState": "evaluating", "operationCount": 2, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "backendRecover": [2], "backendSubmit": [1] }, "effects": { "backendSubmissions": 1 } }
+    },
+    {
+      "seed": "B805", "boundary": "verdict-deliver-and-settlement-replacement-orphan", "rail": "evaluator",
+      "expected": { "finalState": "complete", "operationCount": 4, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "transactionStatus": [4], "marketplaceDeliver": [2], "verdictClaim": [2] }, "effects": { "replacements": 2, "orphanRetractions": 2, "canonicalMarketplaceDeliveries": 1, "canonicalVerdictSettlements": 1 } }
+    },
+    {
+      "seed": "B806", "boundary": "signed-safe-reorg-and-finalized-contradiction", "rail": "canonical-projection",
+      "expected": { "finalState": "evaluation-pending/solution-settled", "operationCount": 3, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "backendRecover": [2], "backendSubmit": [1], "evidenceRead": [2], "publish": [4], "settlement": [1], "consumerRetractions": [1], "replacementAdmissions": [1], "correctionSignatures": [3] }, "effects": { "backendSubmissions": 1, "publishedRecords": 4, "settlements": 1, "consumerRetractions": 1, "signedWithdrawals": 1, "appendOnlyCorrectionPages": 1, "canonicalReopens": 1, "blockedFinalizedContradictions": 1 } }
+    },
+    {
+      "seed": "B807", "boundary": "worker-lease-contention-across-processes", "rail": "solver",
+      "expected": { "finalState": "one-worker", "operationCount": 0, "root": "single-process-owner", "permittedInvocations": { "workerProcesses": [2] }, "effects": { "activeWorkers": 1, "loserDiscoveryReads": 0, "loserOperations": 0 } }
+    }
+  ]
+}

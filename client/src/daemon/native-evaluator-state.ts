@@ -795,11 +795,35 @@ export class NativeEvaluatorStateRepository {
         (operation_id, evaluation_id, kind, status, detail_json, created_at, updated_at)
        VALUES (?, ?, ?, 'intent', ?, ?, ?)`,
     ).run(operationId, evaluation, kind, JSON.stringify(detail), now, now);
+    const expectedDetail = JSON.stringify(detail);
     const existing = this.store.db.prepare(
-      "SELECT operation_id, kind FROM native_evaluation_operations WHERE evaluation_id = ? AND kind = ?",
-    ).get(evaluation, kind) as { operation_id: string; kind: string };
+      `SELECT operation_id, kind, status, tx_hash, detail_json
+         FROM native_evaluation_operations WHERE evaluation_id = ? AND kind = ?`,
+    ).get(evaluation, kind) as {
+      operation_id: string;
+      kind: string;
+      status: NativeEvaluationOperationStatus;
+      tx_hash: string | null;
+      detail_json: string;
+    };
     if (existing.operation_id !== operationId) {
       throw new NativeEvaluatorStateConflictError(`${kind} operation identity changed`);
+    }
+    if (existing.status === "finalized") return { operationId };
+    if (existing.detail_json !== expectedDetail) {
+      throw new NativeEvaluatorStateConflictError(`${kind} operation identity changed`);
+    }
+    if (existing.status === "orphaned") {
+      this.store.db.prepare(
+        `UPDATE native_evaluation_operations SET status = 'intent', prior_tx_hash = tx_hash,
+           tx_hash = NULL, block_hash = NULL, block_number = NULL, detail_json = ?, updated_at = ?
+         WHERE operation_id = ?`,
+      ).run(expectedDetail, now, operationId);
+      this.audit(evaluation, "evaluation-operation-reopened", {
+        operationId,
+        kind,
+        priorTxHash: existing.tx_hash,
+      }, now);
     }
     return { operationId };
   }
@@ -1146,8 +1170,8 @@ export class NativeEvaluatorStateRepository {
       : "verdict-published";
     this.store.db.transaction(() => {
       this.store.db.prepare(
-        "UPDATE native_evaluation_operations SET status = 'orphaned', detail_json = ?, updated_at = ? WHERE operation_id = ?",
-      ).run(JSON.stringify({ reason }), now, operationId);
+        "UPDATE native_evaluation_operations SET status = 'orphaned', updated_at = ? WHERE operation_id = ?",
+      ).run(now, operationId);
       this.store.db.prepare(
         `UPDATE native_evaluations SET state = ?,
            evaluation_attempt_uri = CASE WHEN ? = 'evaluation-claim' THEN NULL ELSE evaluation_attempt_uri END,

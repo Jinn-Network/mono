@@ -233,6 +233,78 @@ describe("NativeEvaluatorStateRepository", () => {
     });
   });
 
+  it("reopens only the same orphaned operation identity and never resets a finalized operation", () => {
+    const state = new NativeEvaluatorStateRepository(new Store(":memory:"));
+    const admitted = state.admitOpportunity({
+      opportunity,
+      evaluatorAgent: "urn:jinn:evaluator:golden",
+      coordinator: `0x${"f".repeat(40)}`,
+      material,
+    });
+    const taskBytes = new TextEncoder().encode("orphan-reopen-task");
+    const submissionUri = "urn:uuid:30000000-0000-4000-8000-000000000003" as const;
+    const submissionBytes = sealSubmission({
+      protocol: TASK_EXECUTION_PROTOCOL_URI,
+      submission: submissionUri,
+      task: { digest: { sha256: digest(taskBytes).slice(7) } },
+      requester: "urn:jinn:evaluator:golden",
+      idempotencyKey: "orphan-reopen",
+      nonce: "orphan-reopen",
+      deadline: "2026-08-03T00:00:00Z",
+    });
+    state.recordDerivedEvaluation(admitted.evaluationId, {
+      taskBytes,
+      taskDigest: digest(taskBytes),
+      submissionBytes,
+      submissionDigest: digest(submissionBytes),
+      submissionUri,
+    });
+    state.recordAdmissionVerified(admitted.evaluationId, {
+      requester: { signerKey: "did:key:requester", sealingTime: "2026-08-01T00:00:00Z" },
+      admission: { signerKey: "did:key:admission", effectiveTime: "2026-08-01T00:00:00Z" },
+      executor: {
+        signerKey: "did:key:executor", agent: "urn:jinn:solver:one",
+        declarationKey: "did:key:solver-declaration", effectiveTime: "2026-08-02T00:00:00Z",
+        address: opportunity.operatorAddress,
+      },
+      evaluator: {
+        signerKey: "did:key:evaluator", agent: "urn:jinn:evaluator:golden",
+        declarationKey: "did:key:evaluator-declaration", address: `0x${"6".repeat(40)}`,
+      },
+      verificationDigest: `sha256:${"7".repeat(64)}`,
+    });
+    const taskCidDigest = `0x${"1".repeat(64)}` as const;
+    const claim = state.beginEvaluationClaim(admitted.evaluationId, taskCidDigest);
+    const originalTx = `0x${"2".repeat(64)}` as const;
+    state.recordOperationBroadcast(claim.operationId, originalTx);
+    state.recordEvaluationOperationOrphaned(claim.operationId, "safe-chain-reorg");
+
+    expect(() => state.beginEvaluationClaim(admitted.evaluationId, `0x${"3".repeat(64)}`))
+      .toThrow(/operation identity changed/);
+    expect(state.beginEvaluationClaim(admitted.evaluationId, taskCidDigest)).toEqual(claim);
+    expect(state.getEvaluationOperation(claim.operationId)).toMatchObject({
+      status: "intent",
+      txHash: null,
+      priorTxHash: originalTx,
+    });
+
+    const finalTx = `0x${"4".repeat(64)}` as const;
+    state.recordOperationBroadcast(claim.operationId, finalTx);
+    state.recordEvaluationClaimFinalized(claim.operationId, {
+      txHash: finalTx,
+      blockHash: `0x${"5".repeat(64)}`,
+      blockNumber: 100n,
+      requestId: `0x${"6".repeat(64)}`,
+      verdictIndex: 0,
+      evaluatorAddress: `0x${"6".repeat(40)}`,
+    });
+    state.beginEvaluationClaim(admitted.evaluationId, taskCidDigest);
+    expect(state.getEvaluationOperation(claim.operationId)).toMatchObject({
+      status: "finalized",
+      txHash: finalTx,
+    });
+  });
+
   it("persists distinct evaluation claim, backend, publication, Deliver, and verdict settlement operations", () => {
     const state = new NativeEvaluatorStateRepository(new Store(":memory:"));
     const admitted = state.admitOpportunity({
