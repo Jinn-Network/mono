@@ -201,33 +201,102 @@ function rawResponse(bytes: Uint8Array): Response {
   return { status, headers, body: bytes.slice(boundary + marker.byteLength) };
 }
 
-async function rawRequest(service: ReplayService, wire: string): Promise<Response> {
+function joinedBytes(chunks: readonly Uint8Array[]): Uint8Array {
+  const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+interface RawConnection {
+  write(chunk: string | Uint8Array): void;
+  end(chunk?: string | Uint8Array): void;
+  waitFor(needle: string): Promise<void>;
+  readonly response: Promise<Uint8Array>;
+}
+
+async function openRawConnection(service: ReplayService): Promise<RawConnection> {
   const { connect } = await import("node:net");
-  return await new Promise<Response>((resolve, reject) => {
+  return await new Promise<RawConnection>((resolve, reject) => {
     const socket = connect({
       host: service.address.host,
       port: service.address.port,
       family: service.address.host.includes(":") ? 6 : 4,
     });
     const chunks: Uint8Array[] = [];
-    socket.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    socket.once("error", reject);
-    socket.once("end", () => {
-      const size = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
-      const bytes = new Uint8Array(size);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      try {
-        resolve(rawResponse(bytes));
-      } catch (error) {
-        reject(error);
-      }
+    const response = new Promise<Uint8Array>((resolveResponse, rejectResponse) => {
+      socket.on("data", (chunk: Uint8Array) => chunks.push(chunk));
+      socket.once("error", rejectResponse);
+      socket.once("end", () => resolveResponse(joinedBytes(chunks)));
     });
-    socket.end(wire);
+    socket.once("error", reject);
+    socket.once("connect", () => {
+      const waitFor = async (needle: string): Promise<void> => await new Promise<void>((resolveMatch, rejectMatch) => {
+        const matches = (): boolean => decoder.decode(joinedBytes(chunks)).includes(needle);
+        if (matches()) {
+          resolveMatch();
+          return;
+        }
+        const onData = (): void => {
+          if (!matches()) return;
+          cleanUp();
+          resolveMatch();
+        };
+        const onEnd = (): void => {
+          cleanUp();
+          rejectMatch(new Error(`connection ended before ${needle}`));
+        };
+        const onError = (error: Error): void => {
+          cleanUp();
+          rejectMatch(error);
+        };
+        const cleanUp = (): void => {
+          socket.off("data", onData);
+          socket.off("end", onEnd);
+          socket.off("error", onError);
+        };
+        socket.on("data", onData);
+        socket.once("end", onEnd);
+        socket.once("error", onError);
+      });
+      resolve({
+        write: (chunk) => { socket.write(chunk); },
+        end: (chunk) => {
+          if (chunk === undefined) socket.end();
+          else socket.end(chunk);
+        },
+        waitFor,
+        response,
+      });
+    });
   });
+}
+
+async function rawRequest(service: ReplayService, wire: string): Promise<Response> {
+  const connection = await openRawConnection(service);
+  connection.end(wire);
+  return rawResponse(await connection.response);
+}
+
+async function pendingPost(service: ReplayService): Promise<{ readonly release: () => void; readonly response: Promise<Response> }> {
+  const connection = await openRawConnection(service);
+  connection.write([
+    "POST /prices HTTP/1.1",
+    "Host: api.example.test",
+    "Content-Type: application/json",
+    `Content-Length: ${postBody.byteLength}`,
+    "Connection: close",
+    "",
+    "",
+  ].join("\r\n"));
+  return {
+    release: () => connection.end(postBody),
+    response: connection.response.then(rawResponse),
+  };
 }
 
 const services = new Set<ReplayService>();
@@ -448,6 +517,28 @@ describe("allowlist, budgets, and counters", () => {
     expect(service.stats()).toMatchObject({ requests: 3, hits: 1, budgetExhausted: 2, bytes: pools.sizeBytes });
   });
 
+  test("reserves response bytes atomically after a barrier releases concurrent hits", async () => {
+    const service = await start(world, {
+      budget: { maxRequests: 2, maxResponseBytes: postResponse.sizeBytes },
+    });
+    const [first, second] = await Promise.all([pendingPost(service), pendingPost(service)]);
+
+    await expect.poll(() => service.stats().requests).toBe(2);
+    first.release();
+    second.release();
+    const responses = await Promise.all([first.response, second.response]);
+
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 429]);
+    expect(service.stats()).toEqual({
+      requests: 2,
+      hits: 1,
+      misses: 0,
+      offAllowlist: 0,
+      budgetExhausted: 1,
+      bytes: postResponse.sizeBytes,
+    });
+  });
+
   test("the request budget consumes misses so a malformed request cannot bypass it", async () => {
     const service = await start(world, {
       budget: { maxRequests: 1, maxResponseBytes: 1_000_000 },
@@ -513,6 +604,66 @@ describe("allowlist, budgets, and counters", () => {
 
     expect(response.status).toBe(404);
     expect(response.headers["x-jinn-replay"]).toBe("miss");
+    expect(service.stats()).toEqual({
+      requests: 1,
+      hits: 0,
+      misses: 1,
+      offAllowlist: 0,
+      budgetExhausted: 0,
+      bytes: 0,
+    });
+  });
+
+  test("keeps the active pipelined attempt owned when its parser fails", async () => {
+    const service = await start();
+    const connection = await openRawConnection(service);
+    connection.write([
+      "GET /pools HTTP/1.1",
+      "Host: api.example.test",
+      "",
+      "POST /prices HTTP/1.1",
+      "Host: api.example.test",
+      "Transfer-Encoding: chunked",
+      "Connection: close",
+      "",
+      "",
+    ].join("\r\n"));
+
+    await expect.poll(() => service.stats().requests).toBe(2);
+    await connection.waitFor("HTTP/1.1 200");
+    connection.end("Z\r\n\r\n");
+    const responses = [...decoder.decode(await connection.response).matchAll(/HTTP\/1\.1 (\d{3})/g)]
+      .map((match) => Number(match[1]));
+
+    expect(responses).toEqual([200, 404]);
+    expect(service.stats()).toEqual({
+      requests: 2,
+      hits: 1,
+      misses: 1,
+      offAllowlist: 0,
+      budgetExhausted: 0,
+      bytes: pools.sizeBytes,
+    });
+  });
+
+  test("does not admit a parser error after an expectation has already been terminalized", async () => {
+    const service = await start();
+    const connection = await openRawConnection(service);
+    connection.end([
+      "POST /pools HTTP/1.1",
+      "Host: api.example.test",
+      "Expect: no-replay",
+      "Content-Length: 0",
+      "",
+      "GE(T / HTTP/1.1",
+      "Host: api.example.test",
+      "",
+      "",
+    ].join("\r\n"));
+    const responses = [...decoder.decode(await connection.response).matchAll(/HTTP\/1\.1 (\d{3})/g)]
+      .map((match) => Number(match[1]));
+
+    expect(responses).toEqual([404]);
     expect(service.stats()).toEqual({
       requests: 1,
       hits: 0,
