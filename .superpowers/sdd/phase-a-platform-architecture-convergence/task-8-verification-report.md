@@ -2,11 +2,13 @@
 
 ## Verdict
 
-Phase A verification passed at source commit
+The initial Phase A verification passed at source commit
 `d3024785349edd74bd25506990776b2823ad4593` on branch
 `codex/platform-architecture-convergence`. The worktree was clean before verification and the
 tracked tree remained clean after real builds, packing, deterministic regeneration, and all test
-groups. No production-code fix was required.
+groups. An independent audit subsequently found one direct legacy publisher bypass and one evidence
+overstatement; both were closed in fix round 1 at
+`1cbfbe3efd6da5182b5b6040f068e170b29d8166`.
 
 All commands used Node `v22.22.2` from
 `/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin`. Tests that build packages, temporarily
@@ -85,8 +87,9 @@ tracked report.
 The real dry-run path ends after `yarn pack` and external-consumer installation; it contains no
 publish operation. Publisher behavior was exercised only through the injected fake executor in
 `publish-verified-platform.test.mjs`. The success case verified the receipt and on-disk subjects,
-then observed 50 fake canary publish calls in seven-wave order. Every negative case observed zero
-publish calls, including:
+then observed 50 fake canary publish calls in seven-wave order. All preflight receipt, gate,
+identity, integrity, provenance, and destination negative cases observed zero publish calls,
+including:
 
 - a deliberately failed or missing domain conclusion;
 - source, catalog, release-group, lane, package set/order/wave, version, dist-tag, or public-surface
@@ -94,14 +97,21 @@ publish calls, including:
 - tarball, public-manifest, profile-manifest, fixture/inventory, or receipt-integrity drift;
 - noncanonical repository or destination;
 - failed trusted-publisher/provenance preflight; and
-- final subject mismatch, which also prevented receipt production.
+- existing registry integrity, canary-tag, malformed-response, or unreachable-state mismatch.
+
+Post-publish observation failures necessarily occur after one or more injected fake publish calls.
+A corrupt first observation stops before the second package, bounded propagation failures stop the
+affected wave, and final registry drift prevents the final publication receipt. No test or dry-run
+made a real npm publish or registry-mutation call.
 
 The production publisher rejects every lane other than `canary` and every release group other than
 `platform-v1`. The stable workflow terminates at the explicit `stable-hosting-blocker`; the seven
-experimental packages have disabled release flags. Searches of executable release tooling found no
-old `STACK_ROOTS`, hard-coded six-root discovery, workflow-run polling, skipped/neutral/cancelled
-gate acceptance, `continue-on-error: true`, or reachable stable/experimental publication command.
-Historical prose snapshots were not treated as executable findings.
+experimental packages have disabled release flags. The initial textual scan correctly found no old
+`STACK_ROOTS`, hard-coded six-root discovery, workflow-run polling, skipped/neutral/cancelled gate
+acceptance, or `continue-on-error: true`, but missed the direct non-dry `publish-stack.mjs` module
+route. Fix round 1 removes that route and adds an executable module/export audit proving that the
+receipt-gated verified publisher is the only platform-v1 module containing npm publish logic.
+Historical prose snapshots are not treated as executable findings.
 
 Local verification cannot create the GitHub-hosted OIDC/npm provenance attestation. Its workflow,
 permissions, exact-subject, and fail-closed provenance contract passed structural tests and
@@ -124,6 +134,59 @@ There were no binary entries, unexpected build/cache/tarball residue, credential
 private-key/token signatures, credential assignments, or out-of-scope paths. All changed paths are
 within the planned catalog, architecture, workflows, scripts, generated artifacts, documentation,
 public fixtures/manifests, and launcher-test convergence.
+
+## Independent-audit fix round 1
+
+Reviewed base: `197b5945172a865b3cdc3ae88822fafa1df0f15a`. Code fix:
+`1cbfbe3efd6da5182b5b6040f068e170b29d8166`.
+
+### RED evidence
+
+The Node 22 focused regression matrix reported 5 passed and 6 failed before implementation.
+
+- Non-dry canary reached the injected fake command as
+  `npm publish @jinn-network/fixture-core-01@0.1.0-canary...`.
+- Non-dry stable with an explicit SHA reached the injected fake command as
+  `npm publish @jinn-network/fixture-core-01@0.1.0`.
+- The source audit found the dynamic `runPublish` import, eight legacy run-module exports instead
+  of only `packWave`, and executable npm publish logic in both `publish-stack-run.mjs` and the
+  receipt-gated publisher.
+- Argument parsing still exposed the legacy `npmCommand` override.
+
+All commands in the reproducer were injected local fakes. The fake publisher deliberately exited
+on its first publish observation; no registry or other external service was contacted.
+
+### Fix
+
+- `publish-stack.mjs` now refuses every non-dry invocation before catalog discovery or any package
+  command and directs callers to `publish-verified-platform.mjs`. Canary and stable dry-run planning
+  remain available, including stable version and `latest` dist-tag verification.
+- The dynamic import and `--npm` override were removed.
+- `publish-stack-run.mjs` now exports only `packWave`; registry mutation/verification, retry/sleep,
+  wave publication, coherent-set verification, and `runPublish` were deleted. Its tests now cover
+  pack/build/mutation-restore/local-specifier/tarball-identity safety only.
+- `platform-publisher-surface.test.mjs` audits the CLI source, module exports, bundle-builder import,
+  and complete platform-v1 executable publisher set. Only the receipt-gated publisher may contain
+  executable npm publish logic.
+- Deterministic regeneration records 3,025 owned paths and 504 generator sources after adding the
+  audit file.
+
+### GREEN verification
+
+- Focused legacy CLI, pack-only module, and publisher-surface audit: 15 passed, 0 failed.
+- Publisher, workflow, receipt, bundle, and trusted-publisher matrix: 69 passed, 0 failed.
+- Updated full release selection: 117 passed, 0 failed. The prior 121 count changed because nine
+  obsolete legacy-publisher tests were retired while two CLI refusal tests and three surface-audit
+  tests were added; no test count was backfilled.
+- Historical architecture/guard baseline: 151 passed, 0 failed.
+- Generator plus focused regression matrix: 30 passed, 0 failed; write followed by `--check`
+  byte-compared both generated files.
+- Real committed-code dry run: immutable install/build/pack produced 50 tarballs in seven waves at
+  `0.1.0-canary.sha.1cbfbe3efd6da5182b5b6040f068e170b29d8166`; manifest SHA-256
+  `66c63d242ac2f127f229cfcfd4fe5f03e721480718edd9a90f84e250645647a3`.
+- Canary and stable CLI dry-run plans both passed. Syntax checks for all five changed modules,
+  `actionlint` over all 10 Phase A workflows, generator check, and `git diff --check` passed.
+- No real npm publish, push, tag, deploy, pull request, live API call, or settings change occurred.
 
 ## Remaining external blockers
 
