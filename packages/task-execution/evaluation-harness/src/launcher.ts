@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import type {
+  HostSecretForwardDeclaration,
   InterruptionBehavior,
   LauncherCapabilities,
   LauncherContract,
@@ -59,6 +60,14 @@ function nonEmpty(value: string, label: string): string {
   return value;
 }
 
+function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
+  const value = registration.evaluationMethod.digest?.sha256;
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+    throw new TypeError("evaluation launcher registration requires a canonical evaluation method sha256 digest");
+  }
+  return `sha256:${value}`;
+}
+
 /** Forward Yarn PnP bootstrap when the launcher itself runs under PnP (CI/dev). */
 function nodeBootstrapEnv(): Record<string, string> {
   const nodeOptions = process.env["NODE_OPTIONS"];
@@ -69,7 +78,7 @@ function nodeBootstrapEnv(): Record<string, string> {
 
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
-  secretForwards: readonly { readonly grantKey: string; readonly target: string }[],
+  hostSecretForwards: readonly HostSecretForwardDeclaration[],
   configured: boolean,
 ): LauncherCapabilities {
   return {
@@ -84,7 +93,8 @@ function launcherCapabilities(
     structuredOutput: false,
     resume: interruptionBehavior === "recoverable",
     interruptionBehaviorDefault: interruptionBehavior,
-    secretForwards,
+    secretForwards: [],
+    hostSecretForwards,
     runPinning: {
       keys: [{
         key: "harness",
@@ -149,9 +159,13 @@ function launchPlan(
       structuredOutputArtifact: "out/verdict",
     },
     interruptionBehavior: registration.interruptionBehavior,
-    secretForwards: [{
-      grantKey: registration.signer.handle,
+    hostSecretForwards: [{
+      handle: registration.signer.handle,
       target: registration.signer.handle,
+      role: "evaluator",
+      evaluator: registration.evaluatorIdentity.id,
+      registrationId: registration.registrationId,
+      evaluationMethodDigest: methodDigest(registration),
     }],
   };
 }
@@ -182,11 +196,15 @@ export function makeEvaluationLauncher(
   if (signerHandles.size > 1) {
     throw new TypeError("evaluation launcher registrations have ambiguous signer forward");
   }
-  const registrationForwards = registrations.length === 0
+  const registrationForwards: readonly HostSecretForwardDeclaration[] = registrations.length === 0
     ? []
     : [{
-      grantKey: registrations[0]!.signer.handle,
+      handle: registrations[0]!.signer.handle,
       target: registrations[0]!.signer.handle,
+      role: "evaluator",
+      evaluator: registrations[0]!.evaluatorIdentity.id,
+      registrationId: registrations[0]!.registrationId,
+      evaluationMethodDigest: methodDigest(registrations[0]!),
     }];
   const selectedRegistration = (view: TaskView): EvaluatorRegistration => {
     if (options.selectRegistration === undefined) {

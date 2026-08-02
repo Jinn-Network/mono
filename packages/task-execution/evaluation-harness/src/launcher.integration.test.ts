@@ -39,7 +39,6 @@ import {
   sealSubmission,
   sealTask,
 } from "@jinn-network/task-execution-protocol";
-import type { CapabilityGrant } from "@jinn-network/task-execution-workspace";
 import {
   harvest,
   type ProvisionerContract,
@@ -210,11 +209,6 @@ function documents(): Documents {
     idempotencyKey: crypto.randomUUID(),
     nonce: crypto.randomUUID(),
     deadline: "2099-01-01T00:00:00.000Z",
-    capabilityGrants: {
-      "evaluator-agent-key.pem": {
-        reference: "test:evaluator-agent-key",
-      },
-    },
     requirements: {
       harness: {
         id: "evaluation-harness",
@@ -348,10 +342,7 @@ export const evaluationHarnessDeployment = {
               mkdir(path, { recursive: true })
             ),
           );
-          expect(grants).toEqual([{
-            key: "evaluator-agent-key.pem",
-            descriptor: { reference: "test:evaluator-agent-key" },
-          }]);
+          expect(grants).toEqual([]);
           await Promise.all([
             writeFile(join(paths.input, "task.sealed"), input.sealedTaskBytes),
             writeFile(
@@ -417,16 +408,17 @@ export const evaluationHarnessDeployment = {
         },
       },
     },
-    capabilityGrants(grants) {
-      return Object.entries(grants).map(([key, descriptor]) => ({
-        key,
-        descriptor,
-      } satisfies CapabilityGrant));
-    },
-    secretForwardResolver: {
-      async resolve({ grantKey, descriptor }) {
-        expect(grantKey).toBe(registration.signer.handle);
-        expect(descriptor).toEqual({ reference: "test:evaluator-agent-key" });
+    hostSecretResolver: {
+      async resolve(input) {
+        expect(input).toMatchObject({
+          launcherId: "evaluation-harness",
+          role: "evaluator",
+          evaluator: registration.evaluatorIdentity.id,
+          handle: registration.signer.handle,
+          registrationId: registration.registrationId,
+          evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
+          deadline: "2099-01-01T00:00:00.000Z",
+        });
         return resolvedSigner;
       },
     },
@@ -532,7 +524,14 @@ describe("evaluationLauncher", () => {
     }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
     expect(plan).toMatchObject({
       interruptionBehavior: configured.interruptionBehavior,
-      secretForwards: [{ grantKey: configured.signer.handle, target: configured.signer.handle }],
+      hostSecretForwards: [{
+        handle: configured.signer.handle,
+        target: configured.signer.handle,
+        role: "evaluator",
+        evaluator: configured.evaluatorIdentity.id,
+        registrationId: configured.registrationId,
+        evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
+      }],
     });
   });
 
@@ -550,7 +549,15 @@ describe("evaluationLauncher", () => {
     } as TaskView, {
       root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
     }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
-    expect(plan.secretForwards).toEqual([{ grantKey: "ordinary-key", target: "ordinary-key" }]);
+    expect(plan.secretForwards).toBeUndefined();
+    expect(plan.hostSecretForwards).toEqual([{
+      handle: "ordinary-key",
+      target: "ordinary-key",
+      role: "evaluator",
+      evaluator: configured.evaluatorIdentity.id,
+      registrationId: configured.registrationId,
+      evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
+    }]);
   });
 
   test("is a pure evaluation-profile launcher with only reference/path configuration", () => {
@@ -616,10 +623,19 @@ describe("evaluationLauncher", () => {
         ? {}
         : { NODE_OPTIONS: process.env["NODE_OPTIONS"]! }),
     });
-    expect(first.secretForwards).toEqual([
-      { grantKey: "evaluator-agent-key.pem", target: "evaluator-agent-key.pem" },
+    expect(first.secretForwards).toBeUndefined();
+    expect(first.hostSecretForwards).toEqual([
+      {
+        handle: "evaluator-agent-key.pem",
+        target: "evaluator-agent-key.pem",
+        role: "evaluator",
+        evaluator: evaluatorRegistration().evaluatorIdentity.id,
+        registrationId: evaluatorRegistration().registrationId,
+        evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
+      },
     ]);
-    expect(launcher.capabilities().secretForwards).toEqual(first.secretForwards);
+    expect(launcher.capabilities().secretForwards).toEqual([]);
+    expect(launcher.capabilities().hostSecretForwards).toEqual(first.hostSecretForwards);
     expect(Object.keys(first.env)).toEqual(
       expect.arrayContaining([
         "JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE",

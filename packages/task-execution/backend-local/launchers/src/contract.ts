@@ -41,6 +41,20 @@ export interface ResultContract {
 }
 
 /**
+ * A deployment-owned secret handle. Unlike `secretForwards`, this declaration is never joined
+ * to requester-controlled Submission capability grants. The backend supplies the exact Attempt,
+ * Task, Submission, launcher, and deadline to its independent host resolver.
+ */
+export interface HostSecretForwardDeclaration {
+  readonly handle: string;
+  readonly target: string;
+  readonly role: "evaluator";
+  readonly evaluator: string;
+  readonly registrationId: string;
+  readonly evaluationMethodDigest: `sha256:${string}`;
+}
+
+/**
  * The resolved invocation a launcher plans and the supervisor spawns through the shim (design
  * §8.1, frozen interface §14 item 8). `env` carries secret forwards as REFERENCES into
  * `secrets/` (handles), never resolved values — the shim resolves them at exec (§6.1 step 4);
@@ -58,6 +72,7 @@ export interface LaunchPlan {
   readonly resultContract: ResultContract;
   readonly interruptionBehavior: InterruptionBehavior;
   readonly secretForwards?: readonly { readonly grantKey: string; readonly target: string }[];
+  readonly hostSecretForwards?: readonly HostSecretForwardDeclaration[];
 }
 
 /** A backend's declared enforcement posture for a supported run-pinning key (profiles §5.2) — independently re-implemented here (this package does not depend on `@jinn-network/task-execution-backend`, so it never imports `BackendCapabilities`'s copy). */
@@ -84,6 +99,7 @@ export interface LauncherCapabilities {
   readonly interruptionBehaviorDefault: InterruptionBehavior;
   /** Exact non-secret forwards this launcher may require for every planned invocation. */
   readonly secretForwards: readonly { readonly grantKey: string; readonly target: string }[];
+  readonly hostSecretForwards?: readonly HostSecretForwardDeclaration[];
   readonly runPinning: { readonly keys: readonly LauncherRunPinningKeySupport[] };
 }
 

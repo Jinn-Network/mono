@@ -45,6 +45,7 @@ export interface AssembleCapabilitiesInput {
   readonly trustKeys: TrustKeyConfig;
   /** Secret-forward launchers are not statically usable until the host injects a resolver. */
   readonly secretForwardResolverConfigured?: boolean;
+  readonly hostSecretResolverConfigured?: boolean;
   /** Linux custody support is dynamic; absent retains the non-Linux residual path. */
   readonly custody?: { readonly ready: boolean };
   /** Only deployment-configured launchers may advertise direct pin enforcement. */
@@ -60,8 +61,10 @@ export function assembleCapabilities(
   input: AssembleCapabilitiesInput,
 ): BackendCapabilities {
   const viableLaunchers = input.launchers.filter((launcher) =>
-    input.secretForwardResolverConfigured === true
-      || launcher.capabilities().secretForwards.length === 0);
+    (input.secretForwardResolverConfigured === true
+      || launcher.capabilities().secretForwards.length === 0)
+    && (input.hostSecretResolverConfigured === true
+      || (launcher.capabilities().hostSecretForwards?.length ?? 0) === 0));
   const launcherProfiles = new Set(
     viableLaunchers.flatMap((launcher) => [
       ...launcher.capabilities().taskProfiles,

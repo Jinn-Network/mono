@@ -37,6 +37,7 @@ import type {
   LauncherContract,
   ProbeResult,
   ResultEnvelope,
+  HostSecretForwardDeclaration,
 } from "@jinn-network/task-execution-launchers";
 import { interpretResult } from "@jinn-network/task-execution-launchers";
 import { selectProfileSafeLauncher } from "@jinn-network/task-execution-launchers";
@@ -119,6 +120,7 @@ import {
   type EvidenceCaptureSession,
 } from "./evidence-join.js";
 import { materializeSecretForwards, type SecretForwardResolver } from "./secret-forwards.js";
+import { materializeHostSecretForwards, type HostSecretResolver } from "./host-secret-forwards.js";
 import { type LocalLauncherDeployment, verifyRunPinning } from "./pinning.js";
 import { ObservationWatchRegistry } from "./watch-registry.js";
 
@@ -263,11 +265,53 @@ function validateSecretForwardPlan(
   return planned;
 }
 
+function declaredHostSecretForwards(plan: LaunchPlan): readonly HostSecretForwardDeclaration[] {
+  return plan.hostSecretForwards ?? [];
+}
+
+function validateHostSecretForwardPlan(
+  launcher: LauncherContract,
+  plan: LaunchPlan,
+): readonly HostSecretForwardDeclaration[] {
+  const declared = launcher.capabilities().hostSecretForwards ?? [];
+  const planned = declaredHostSecretForwards(plan);
+  if (
+    declared.length !== planned.length
+    || declared.some((forward, index) => {
+      const candidate = planned[index];
+      return candidate === undefined
+        || forward.handle !== candidate.handle
+        || forward.target !== candidate.target
+        || forward.role !== candidate.role
+        || forward.evaluator !== candidate.evaluator
+        || forward.registrationId !== candidate.registrationId
+        || forward.evaluationMethodDigest !== candidate.evaluationMethodDigest;
+    })
+  ) throw new Error("LaunchPlan host secret forwards must exactly match the launcher capability declaration");
+  const handles = new Set<string>();
+  const targets = new Set<string>();
+  for (const forward of declared) {
+    if (
+      !validSecretForwardTarget(forward.handle)
+      || !validSecretForwardTarget(forward.target)
+      || forward.role !== "evaluator"
+      || !nonEmptyString(forward.evaluator)
+      || !nonEmptyString(forward.registrationId)
+      || !/^sha256:[0-9a-f]{64}$/u.test(forward.evaluationMethodDigest)
+      || handles.has(forward.handle)
+      || targets.has(forward.target)
+    ) throw new Error("launcher host secret declarations are invalid");
+    handles.add(forward.handle);
+    targets.add(forward.target);
+  }
+  return planned;
+}
+
 function parseLaunchPlan(value: unknown): LaunchPlan {
   if (!isRecord(value) || !hasOnlyKeys(
     value,
     ["argv", "env", "cwd", "validExitCodes", "resultContract", "interruptionBehavior"],
-    ["blameExitCodes", "secretForwards"],
+    ["blameExitCodes", "secretForwards", "hostSecretForwards"],
   )) {
     throw new TaskExecutionError("invalid-document", {
       detail: "journaled LaunchPlan has missing or unknown fields",
@@ -374,6 +418,31 @@ function parseLaunchPlan(value: unknown): LaunchPlan {
     if (new Set(grantKeys).size !== grantKeys.length || new Set(targets).size !== targets.length) {
       throw new TaskExecutionError("invalid-document", {
         detail: "journaled LaunchPlan secret forwards are not unique",
+      });
+    }
+  }
+  const hostSecretForwards = value.hostSecretForwards;
+  if (hostSecretForwards !== undefined) {
+    if (!Array.isArray(hostSecretForwards) || !hostSecretForwards.every((candidate) =>
+      isRecord(candidate)
+      && hasOnlyKeys(candidate, [
+        "handle", "target", "role", "evaluator", "registrationId", "evaluationMethodDigest",
+      ])
+      && validSecretForwardTarget(String(candidate.handle))
+      && validSecretForwardTarget(String(candidate.target))
+      && candidate.role === "evaluator"
+      && nonEmptyString(candidate.evaluator)
+      && nonEmptyString(candidate.registrationId)
+      && typeof candidate.evaluationMethodDigest === "string"
+      && /^sha256:[0-9a-f]{64}$/u.test(candidate.evaluationMethodDigest))
+    ) throw new TaskExecutionError("invalid-document", {
+      detail: "journaled LaunchPlan host secret forwards are structurally invalid",
+    });
+    const handles = hostSecretForwards.map((candidate) => candidate.handle);
+    const targets = hostSecretForwards.map((candidate) => candidate.target);
+    if (new Set(handles).size !== handles.length || new Set(targets).size !== targets.length) {
+      throw new TaskExecutionError("invalid-document", {
+        detail: "journaled LaunchPlan host secret forwards are not unique",
       });
     }
   }
@@ -513,6 +582,8 @@ export interface LocalTaskExecutionBackendConfig {
     grants: Readonly<Record<string, unknown>>,
   ) => readonly CapabilityGrant[];
   readonly secretForwardResolver?: SecretForwardResolver;
+  /** Deployment-owned authority, isolated from requester capability grants. */
+  readonly hostSecretResolver?: HostSecretResolver;
   readonly cancellationGraceMs?: number;
   readonly cancellationKillPollCeilingMs?: number;
   readonly heartbeatIntervalMs?: number;
@@ -936,6 +1007,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       recorderAvailability: this.config.recorderAvailability ?? "none",
       trustKeys: this.config.trustKeys ?? {},
       secretForwardResolverConfigured: this.config.secretForwardResolver !== undefined,
+      hostSecretResolverConfigured: this.config.hostSecretResolver !== undefined,
       custody: nativeCustodySupport(),
       enforcedLauncherIds: new Set(Object.keys(this.config.launcherDeployments ?? {})),
     });
@@ -978,8 +1050,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       return this.preflightUnavailable("no configured launcher matches the requested task profile and harness");
     }
     const viable = candidates.filter((launcher) =>
-      this.config.secretForwardResolver !== undefined
-        || launcher.capabilities().secretForwards.length === 0);
+      (this.config.secretForwardResolver !== undefined
+        || launcher.capabilities().secretForwards.length === 0)
+      && (this.config.hostSecretResolver !== undefined
+        || (launcher.capabilities().hostSecretForwards?.length ?? 0) === 0));
     if (viable.length === 0) {
       return this.preflightUnavailable("selected launcher requires secret forwards but no SecretForwardResolver is configured");
     }
@@ -1378,6 +1452,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         resultContract: plan.resultContract,
         interruptionBehavior: plan.interruptionBehavior,
         ...(plan.secretForwards === undefined ? {} : { secretForwards: plan.secretForwards }),
+        ...(plan.hostSecretForwards === undefined ? {} : { hostSecretForwards: plan.hostSecretForwards }),
       } as unknown as JsonValue);
       this.journal(attempt).fsyncedAppend({
         attemptId: attempt,
@@ -1405,6 +1480,26 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
           resolver: this.config.secretForwardResolver,
         });
       }
+      const hostSecretForwards = validateHostSecretForwardPlan(launcher, plan);
+      if (hostSecretForwards.length > 0) {
+        if (this.config.hostSecretResolver === undefined) {
+          throw new Error("launcher requires host secret forwards but no HostSecretResolver is configured");
+        }
+        await materializeHostSecretForwards({
+          authorization: {
+            attempt: identity,
+            launcherId: launcher.id,
+            taskDigest,
+            submission: submissionUri,
+            submissionDigest: digest,
+            taskProfile: view.profile.profile,
+            deadline: submission.deadline,
+          },
+          secrets: this.paths(attempt).secrets,
+          forwards: hostSecretForwards,
+          resolver: this.config.hostSecretResolver,
+        });
+      }
       const worker = this.runAcceptedAttempt({
         attempt: identity,
         taskBytes,
@@ -1415,6 +1510,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
         plan,
         planBytes,
         spawn,
+      }).finally(() => {
+        rmSync(this.paths(attempt).secrets, { recursive: true, force: true });
       }).catch((error: unknown) => {
         if (this.closeInvoked) {
           this.recordShutdownDrainFailure(error);

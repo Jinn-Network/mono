@@ -32,6 +32,7 @@ export type {
   LauncherCapabilities,
   LauncherContract,
   LauncherRunPinningKeySupport,
+  HostSecretForwardDeclaration,
   ProbeResult,
   ResultContract,
   RunPinningEnforcementPosture,
