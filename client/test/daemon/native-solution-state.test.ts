@@ -115,6 +115,7 @@ describe('native solution state', () => {
       expect(tables.map(({ name }) => name)).toEqual([
         'native_solution_artifacts',
         'native_solution_executions',
+        'native_solution_retries',
       ]);
     } finally {
       openStore?.close();

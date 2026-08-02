@@ -10,7 +10,7 @@ import {
 } from './native-operation-identity.js';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
-export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 3 as const;
+export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 4 as const;
 
 export const NATIVE_OPERATOR_STATE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS native_operator_state_metadata (
@@ -153,6 +153,17 @@ CREATE TABLE IF NOT EXISTS native_solution_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_native_solution_artifacts_digest
   ON native_solution_artifacts (record_digest);
+
+CREATE TABLE IF NOT EXISTS native_solution_retries (
+  engagement_id   TEXT PRIMARY KEY REFERENCES native_engagements(engagement_id),
+  resume_state    TEXT NOT NULL,
+  reason          TEXT NOT NULL,
+  detail_json     TEXT NOT NULL,
+  retry_count     INTEGER NOT NULL,
+  next_attempt_at TEXT NOT NULL,
+  retry_deadline  TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
 `;
 
 export class NativeOperatorStateConflictError extends Error {
@@ -171,6 +182,7 @@ export type NativeEngagementState =
   | 'solution-published'
   | 'solution-settlement-pending'
   | 'solution-settled'
+  | 'paused'
   | 'eligible'
   | 'lost'
   | 'failed';
@@ -547,7 +559,7 @@ export class NativeOperatorStateRepository {
        VALUES (1, ?, ?)`,
     ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, createdAt);
     const version = this.schemaVersion();
-    if (version === 1 || version === 2) {
+    if (version === 1 || version === 2 || version === 3) {
       this.store.db.prepare(
         `UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = ?`,
       ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, version);
@@ -1393,10 +1405,111 @@ export class NativeOperatorStateRepository {
       `SELECT * FROM native_engagements
         WHERE state IN (
           'claim-finalized', 'executing', 'solution-ready', 'solution-published',
-          'solution-settlement-pending'
+          'solution-settlement-pending', 'paused'
         )
         ORDER BY created_at, engagement_id`,
     ).all() as RawEngagement[]).map(engagementRow);
+  }
+
+  recordSolutionPaused(
+    engagementIdValue: NativeOperationId,
+    input: {
+      readonly reason: string;
+      readonly detail?: string;
+      readonly nextAttemptAt: string;
+      readonly deadline: string;
+      readonly maxAttempts: number;
+    },
+  ): 'paused' | 'failed' {
+    const next = Date.parse(input.nextAttemptAt);
+    const deadline = Date.parse(input.deadline);
+    if (!Number.isFinite(next) || !Number.isFinite(deadline) || next > deadline) {
+      this.recordSolutionFailed(engagementIdValue, { reason: 'solution-retry-deadline', detail: input.detail });
+      return 'failed';
+    }
+    if (!Number.isSafeInteger(input.maxAttempts) || input.maxAttempts <= 0) {
+      throw new RangeError('solution retry maxAttempts must be positive');
+    }
+    const now = this.timestamp();
+    return this.store.db.transaction(() => {
+      const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+        .get(engagementIdValue) as RawEngagement | undefined;
+      if (engagement === undefined || engagement.state === 'solution-settled' || engagement.state === 'failed') {
+        throw new NativeOperatorStateConflictError('solution retry requires a nonterminal engagement');
+      }
+      const existing = this.store.db.prepare(
+        `SELECT resume_state, retry_count FROM native_solution_retries WHERE engagement_id = ?`,
+      ).get(engagementIdValue) as { resume_state: NativeEngagementState; retry_count: number } | undefined;
+      const count = (existing?.retry_count ?? 0) + 1;
+      if (count > input.maxAttempts) {
+        this.store.db.prepare(
+          `UPDATE native_engagements SET state = 'failed', updated_at = ? WHERE engagement_id = ?`,
+        ).run(now, engagementIdValue);
+        this.insertAudit(engagementIdValue, null, 'solution-retry-exhausted', {
+          reason: input.reason,
+          retryCount: count,
+          maxAttempts: input.maxAttempts,
+        }, now);
+        return 'failed' as const;
+      }
+      const resumeState = existing?.resume_state ?? engagement.state;
+      this.store.db.prepare(
+        `INSERT INTO native_solution_retries
+          (engagement_id, resume_state, reason, detail_json, retry_count, next_attempt_at,
+           retry_deadline, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (engagement_id) DO UPDATE SET
+           reason = excluded.reason, detail_json = excluded.detail_json,
+           retry_count = excluded.retry_count, next_attempt_at = excluded.next_attempt_at,
+           retry_deadline = excluded.retry_deadline, updated_at = excluded.updated_at`,
+      ).run(
+        engagementIdValue,
+        resumeState,
+        input.reason,
+        detailJson({ detail: input.detail }),
+        count,
+        input.nextAttemptAt,
+        input.deadline,
+        now,
+      );
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'paused', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, engagementIdValue);
+      this.insertAudit(engagementIdValue, null, 'solution-paused', {
+        reason: input.reason,
+        retryCount: count,
+        nextAttemptAt: input.nextAttemptAt,
+        deadline: input.deadline,
+      }, now);
+      return 'paused' as const;
+    })();
+  }
+
+  resumeSolutionRetry(engagementIdValue: NativeOperationId, at: string): 'waiting' | 'resumed' | 'failed' {
+    const effective = Date.parse(at);
+    if (!Number.isFinite(effective)) throw new TypeError('solution retry time is invalid');
+    const now = this.timestamp();
+    return this.store.db.transaction(() => {
+      const retry = this.store.db.prepare(
+        `SELECT resume_state, next_attempt_at, retry_deadline FROM native_solution_retries WHERE engagement_id = ?`,
+      ).get(engagementIdValue) as {
+        resume_state: NativeEngagementState;
+        next_attempt_at: string;
+        retry_deadline: string;
+      } | undefined;
+      if (retry === undefined) throw new NativeOperatorStateConflictError('paused solution has no retry schedule');
+      if (effective > Date.parse(retry.retry_deadline)) {
+        this.store.db.prepare(`UPDATE native_engagements SET state = 'failed', updated_at = ? WHERE engagement_id = ?`)
+          .run(now, engagementIdValue);
+        this.insertAudit(engagementIdValue, null, 'solution-retry-deadline-exhausted', {}, now);
+        return 'failed' as const;
+      }
+      if (effective < Date.parse(retry.next_attempt_at)) return 'waiting' as const;
+      this.store.db.prepare(`UPDATE native_engagements SET state = ?, updated_at = ? WHERE engagement_id = ?`)
+        .run(retry.resume_state, now, engagementIdValue);
+      this.insertAudit(engagementIdValue, null, 'solution-retry-resumed', { resumeState: retry.resume_state }, now);
+      return 'resumed' as const;
+    })();
   }
 
   recordSolutionFailed(

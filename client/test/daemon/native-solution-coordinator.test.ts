@@ -53,7 +53,7 @@ function exactDocuments() {
   return { taskBytes, submissionBytes };
 }
 
-function finalizedClaim() {
+function finalizedClaim(now: () => Date = () => new Date('2026-08-02T00:00:00Z')) {
   const store = new Store(':memory:');
   store.db.prepare(
     `INSERT INTO native_discovery_cards
@@ -62,7 +62,7 @@ function finalizedClaim() {
        'announcement-1', '{}', '2026-08-02T00:00:00.000Z')`,
   ).run(`sha256:${'2'.repeat(64)}`);
   const state = new NativeOperatorStateRepository(store, {
-    now: () => new Date('2026-08-02T00:00:00Z'),
+    now,
   });
   const documents = exactDocuments();
   const admitted = state.recordDecision({
@@ -101,8 +101,13 @@ function setup(input: {
   readonly evidenceBytes?: Uint8Array | null;
   readonly verification?: Awaited<ReturnType<NativeSolutionVerificationPort['verify']>>;
   readonly settlementFacts?: readonly NativeSolutionSettlementCanonicalFact[];
+  readonly evidenceFailure?: () => Error | undefined;
+  readonly publicationFailure?: () => Error | undefined;
+  readonly settlementFailure?: () => Error | undefined;
 } = {}) {
-  const subject = finalizedClaim();
+  let nowMs = Date.parse('2026-08-02T00:00:00Z');
+  const now = () => new Date(nowMs);
+  const subject = finalizedClaim(now);
   const engagement = subject.state.getEngagement(subject.engagementId)!;
   const deliveryBytes = sealDelivery({
     protocol: 'https://jinn.network/profiles/task-execution/1.0',
@@ -147,15 +152,21 @@ function setup(input: {
     fetchArtifact: vi.fn(async () => outputBytes),
   };
   const verify = vi.fn(async () => input.verification ?? ({ ok: true as const }));
-  const publish = vi.fn(async ({ publication }: Parameters<NonNullable<ConstructorParameters<typeof NativeSolutionCoordinator>[0]['publisher']['publish']>>[0]) => ({
-    location: `https://operator.example/records/${publication.recordDigest.slice('sha256:'.length)}`,
-    sequence: '0000000000000001',
-    entryDigest: `sha256:${'6'.repeat(64)}` as const,
-  }));
+  const publish = vi.fn(async ({ publication }: Parameters<NonNullable<ConstructorParameters<typeof NativeSolutionCoordinator>[0]['publisher']['publish']>>[0]) => {
+    const failure = input.publicationFailure?.();
+    if (failure !== undefined) throw failure;
+    return {
+      location: `https://operator.example/records/${publication.recordDigest.slice('sha256:'.length)}`,
+      sequence: '0000000000000001',
+      entryDigest: `sha256:${'6'.repeat(64)}` as const,
+    };
+  });
   let settlementBroadcast = false;
   let settlementFactIndex = 0;
   const settlement = {
     broadcast: vi.fn(async () => {
+      const failure = input.settlementFailure?.();
+      if (failure !== undefined) throw failure;
       settlementBroadcast = true;
       return { txHash: `0x${'7'.repeat(64)}` as const };
     }),
@@ -179,13 +190,33 @@ function setup(input: {
     deliverySignature: { get: () => envelopeBytes },
     evidence: {
       awaitIndexed: async (reference) => ({ status: 'indexed' as const, reference }),
-      getRecord: async () => input.evidenceBytes === undefined ? evidenceBytes : input.evidenceBytes,
+      getRecord: async () => {
+        const failure = input.evidenceFailure?.();
+        if (failure !== undefined) throw failure;
+        return input.evidenceBytes === undefined ? evidenceBytes : input.evidenceBytes;
+      },
     },
     verification: { verify },
     publisher: { sourceId: 'urn:jinn:source:solver-records', publish },
     settlement,
+    retry: {
+      now,
+      delayMs: 1_000,
+      maxAttempts: 3,
+      deadline: () => '2026-08-03T00:00:00.000Z',
+    },
   });
-  return { ...subject, coordinator, backend, submit, verify, publish, settlement, deliveryBytes };
+  return {
+    ...subject,
+    coordinator,
+    backend,
+    submit,
+    verify,
+    publish,
+    settlement,
+    deliveryBytes,
+    advanceRetry: () => { nowMs += 1_001; },
+  };
 }
 
 describe('NativeSolutionCoordinator', () => {
@@ -292,6 +323,70 @@ describe('NativeSolutionCoordinator', () => {
       .toEqual([originalOperation.operationId, originalOperation.operationId]);
     expect(subject.state.listOperations(subject.engagementId)
       .filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
+  });
+
+  it.each(['evidence', 'publication', 'settlement'] as const)(
+    'durably pauses and resumes a retryable %s outage without duplicating logical operations',
+    async (dependency) => {
+      let unavailable = true;
+      const failure = () => unavailable ? new Error(`${dependency} temporarily unavailable`) : undefined;
+      const subject = setup({
+        ...(dependency === 'evidence' ? { evidenceFailure: failure } : {}),
+        ...(dependency === 'publication' ? { publicationFailure: failure } : {}),
+        ...(dependency === 'settlement' ? { settlementFailure: failure } : {}),
+      });
+
+      await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+        .resolves.toMatchObject({ kind: 'paused', reason: 'solution-dependency-failed' });
+      expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'paused' });
+      unavailable = false;
+      subject.advanceRetry();
+      await expect(subject.coordinator.reconcileStartup())
+        .resolves.toEqual([expect.objectContaining({ kind: 'solution-settled' })]);
+
+      expect(subject.state.listOperations(subject.engagementId).filter(({ kind }) => kind === 'backend-submit')).toHaveLength(1);
+      expect(subject.state.listOperations(subject.engagementId).filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
+      expect(subject.settlement.broadcast).toHaveBeenCalledTimes(dependency === 'settlement' ? 2 : 1);
+      if (dependency === 'settlement') {
+        expect(subject.settlement.readCanonical.mock.invocationCallOrder.some(
+          (order) => order < subject.settlement.broadcast.mock.invocationCallOrder[1]!,
+        )).toBe(true);
+      }
+    },
+  );
+
+  it('fails terminal after the durable solution retry budget is exhausted', async () => {
+    const subject = setup({ evidenceFailure: () => new Error('evidence offline') });
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+        .resolves.toMatchObject({ kind: 'paused' });
+      subject.advanceRetry();
+    }
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toEqual({ kind: 'failed', reason: 'solution-retry-exhausted' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'failed' });
+    expect(subject.publish).not.toHaveBeenCalled();
+    expect(subject.settlement.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('fails stop on a canonical settlement contradiction instead of scheduling a retry', async () => {
+    const subject = setup({
+      settlementFacts: [
+        { kind: 'absent', checkedAtBlock: 119n },
+        {
+          kind: 'finalized',
+          txHash: `0x${'9'.repeat(64)}`,
+          blockHash: `0x${'8'.repeat(64)}`,
+          blockNumber: 120n,
+        },
+      ],
+    });
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toEqual({ kind: 'failed', reason: 'solution-internal-failed' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'failed' });
+    expect(subject.store.db.prepare(
+      'SELECT COUNT(*) AS count FROM native_solution_retries WHERE engagement_id = ?',
+    ).get(subject.engagementId)).toEqual({ count: 0 });
   });
 });
 

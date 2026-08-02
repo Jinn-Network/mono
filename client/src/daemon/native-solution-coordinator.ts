@@ -16,6 +16,7 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import {
   NativeOperatorStateRepository,
+  NativeOperatorStateConflictError,
   type NativeEngagementRow,
   type NativeOperationRow,
   type NativePublicationRow,
@@ -87,12 +88,26 @@ export type NativeSolutionCoordinatorResult =
   | { readonly kind: 'solution-published' }
   | { readonly kind: 'solution-settlement-pending' }
   | { readonly kind: 'solution-settled'; readonly operationId: NativeOperationId }
+  | { readonly kind: 'paused'; readonly reason: string }
   | { readonly kind: 'failed'; readonly reason: string };
 
 class NativeSolutionFailure extends Error {
-  constructor(readonly reason: string, detail?: string) {
+  constructor(readonly reason: string, detail?: string, readonly retryable = false) {
     super(detail ?? reason);
     this.name = 'NativeSolutionFailure';
+  }
+}
+
+async function dependency<T>(label: string, operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof NativeSolutionFailure || error instanceof NativeOperatorStateConflictError) throw error;
+    throw new NativeSolutionFailure(
+      'solution-dependency-failed',
+      `${label}: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    );
   }
 }
 
@@ -154,6 +169,12 @@ export class NativeSolutionCoordinator {
     readonly verification: NativeSolutionVerificationPort;
     readonly publisher: NativeSolutionPublisherPort;
     readonly settlement: NativeSolutionSettlementPort;
+    readonly retry?: {
+      readonly now?: () => Date;
+      readonly delayMs?: number;
+      readonly maxAttempts?: number;
+      readonly deadline?: (engagement: NativeEngagementRow) => string;
+    };
   }) {}
 
   async reconcileStartup(): Promise<readonly NativeSolutionCoordinatorResult[]> {
@@ -166,14 +187,35 @@ export class NativeSolutionCoordinator {
 
   async reconcileEngagement(engagementId: NativeOperationId): Promise<NativeSolutionCoordinatorResult> {
     try {
+      const current = this.input.state.getEngagement(engagementId);
+      if (current?.state === 'paused') {
+        const now = this.input.retry?.now?.() ?? new Date();
+        const resumed = this.input.state.resumeSolutionRetry(engagementId, now.toISOString());
+        if (resumed === 'waiting') return { kind: 'paused', reason: 'retry-not-due' };
+        if (resumed === 'failed') return { kind: 'failed', reason: 'solution-retry-deadline' };
+      }
       return await this.drive(engagementId);
     } catch (error) {
-      const reason = error instanceof NativeSolutionFailure ? error.reason : 'solution-dependency-failed';
-      this.input.state.recordSolutionFailed(engagementId, {
+      const reason = error instanceof NativeSolutionFailure ? error.reason : 'solution-internal-failed';
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof NativeSolutionFailure) || !error.retryable) {
+        this.input.state.recordSolutionFailed(engagementId, { reason, detail });
+        return { kind: 'failed', reason };
+      }
+      const engagement = this.input.state.getEngagement(engagementId);
+      if (engagement === undefined) return { kind: 'failed', reason };
+      const now = this.input.retry?.now?.() ?? new Date();
+      const delayMs = this.input.retry?.delayMs ?? 1_000;
+      const deadline = this.input.retry?.deadline?.(engagement)
+        ?? new Date(Date.parse(engagement.createdAt) + 24 * 60 * 60 * 1000).toISOString();
+      const scheduled = this.input.state.recordSolutionPaused(engagementId, {
         reason,
-        detail: error instanceof Error ? error.message : String(error),
+        detail,
+        nextAttemptAt: new Date(now.getTime() + delayMs).toISOString(),
+        deadline,
+        maxAttempts: this.input.retry?.maxAttempts ?? 5,
       });
-      return { kind: 'failed', reason };
+      return scheduled === 'paused' ? { kind: 'paused', reason } : { kind: 'failed', reason: 'solution-retry-exhausted' };
     }
   }
 
@@ -184,7 +226,7 @@ export class NativeSolutionCoordinator {
   }
 
   private async prepareExecution(engagement: NativeEngagementRow): Promise<void> {
-    const documents = await this.input.documents.resolve(engagement);
+    const documents = await dependency('exact documents', () => this.input.documents.resolve(engagement));
     const submission = submissionFromExactBytes(documents.submissionBytes);
     const dispatchContext: DispatchContext = {
       taskDigest: engagement.taskDigest,
@@ -211,22 +253,22 @@ export class NativeSolutionCoordinator {
       attemptUri: execution.attemptUri as `urn:uuid:${string}`,
       dispatchContext: dispatch,
     };
-    const recovery = await this.input.backend.recover(twoParty.attemptUri);
+    const recovery = await dependency('backend recovery', () => this.input.backend.recover(twoParty.attemptUri));
     if (recovery.classification === 'contradictory') {
       throw new NativeSolutionFailure('backend-contradictory', recovery.detail);
     }
     if (recovery.classification === 'absent') {
-      const acknowledgement = await this.input.backend.submit(
+      const acknowledgement = await dependency('backend submit', () => this.input.backend.submit(
         execution.taskBytes,
         execution.submissionBytes,
         twoParty,
-      );
+      ));
       if (!acknowledgement.accepted) {
         throw new NativeSolutionFailure('backend-rejected', acknowledgement.error.detail);
       }
     }
     this.input.state.recordBackendSubmissionAccepted(execution.operationId);
-    const snapshot = await this.input.backend.observe(twoParty.attemptUri);
+    const snapshot = await dependency('backend observe', () => this.input.backend.observe(twoParty.attemptUri));
     if (!snapshot.descriptor.derived.terminal) return 'executing';
     if (snapshot.descriptor.derived.state !== 'delivered') {
       throw new NativeSolutionFailure('backend-terminal-failure', snapshot.descriptor.derived.state);
@@ -238,17 +280,18 @@ export class NativeSolutionCoordinator {
   private async resolveSolutionGraph(engagementId: NativeOperationId): Promise<void> {
     const engagement = this.engagement(engagementId);
     const execution = this.input.state.getSolutionExecution(engagementId)!;
-    const references = await this.input.backend.deliveries(execution.attemptUri as `urn:uuid:${string}`);
+    const references = await dependency('backend deliveries', () =>
+      this.input.backend.deliveries(execution.attemptUri as `urn:uuid:${string}`));
     if (references.length !== 1) throw new NativeSolutionFailure('delivery-cardinality');
     const reference = references[0]!;
-    const deliveryBytes = await this.input.backend.fetchDelivery(reference);
+    const deliveryBytes = await dependency('delivery retrieval', () => this.input.backend.fetchDelivery(reference));
     if (documentDigest(deliveryBytes) !== reference.digest) throw new NativeSolutionFailure('delivery-digest-mismatch');
     const delivery = deliveryFromExactBytes(deliveryBytes);
     if (delivery.attempt !== execution.attemptUri || delivery.task !== engagement.taskDigest) {
       throw new NativeSolutionFailure('delivery-reference-mismatch');
     }
     const deliveryEnvelopeBytes = this.input.deliverySignature.get(reference.digest);
-    if (deliveryEnvelopeBytes === undefined) throw new NativeSolutionFailure('delivery-envelope-missing');
+    if (deliveryEnvelopeBytes === undefined) throw new NativeSolutionFailure('delivery-envelope-missing', undefined, true);
 
     const artifacts: Array<{
       role: 'output' | 'evidence' | 'delivery' | 'delivery-envelope';
@@ -259,10 +302,10 @@ export class NativeSolutionCoordinator {
     }> = [];
     for (const evidenceReference of delivery.evidenceRecords ?? []) {
       const referenceValue = evidenceReference as EvidenceRecordReference;
-      const indexed = await this.input.evidence.awaitIndexed(referenceValue);
-      if (indexed.status !== 'indexed') throw new NativeSolutionFailure('evidence-not-indexed', indexed.status);
-      const bytes = await this.input.evidence.getRecord(referenceValue);
-      if (bytes === null) throw new NativeSolutionFailure('evidence-unavailable');
+      const indexed = await dependency('evidence index', () => this.input.evidence.awaitIndexed(referenceValue));
+      if (indexed.status !== 'indexed') throw new NativeSolutionFailure('evidence-not-indexed', indexed.status, true);
+      const bytes = await dependency('evidence retrieval', () => this.input.evidence.getRecord(referenceValue));
+      if (bytes === null) throw new NativeSolutionFailure('evidence-unavailable', undefined, true);
       if (documentDigest(bytes) !== referenceValue.digest) throw new NativeSolutionFailure('evidence-digest-mismatch');
       artifacts.push({
         role: 'evidence',
@@ -275,7 +318,7 @@ export class NativeSolutionCoordinator {
       throw new NativeSolutionFailure('output-retrieval-unavailable');
     }
     for (const output of delivery.outputs) {
-      const bytes = await this.input.backend.fetchArtifact!(output);
+      const bytes = await dependency('output retrieval', () => this.input.backend.fetchArtifact!(output));
       const digest = sha256Descriptor(output);
       if (documentDigest(bytes) !== digest) throw new NativeSolutionFailure('output-digest-mismatch');
       artifacts.push({
@@ -300,7 +343,7 @@ export class NativeSolutionCoordinator {
       name: artifact.name ?? null,
       createdAt: delivery.createdAt,
     }));
-    const verification = await this.input.verification.verify({
+    const verification = await dependency('solution verification', () => this.input.verification.verify({
       engagement,
       effectiveTime: delivery.createdAt,
       taskBytes: execution.taskBytes,
@@ -311,7 +354,7 @@ export class NativeSolutionCoordinator {
       deliveryEnvelopeBytes,
       outputs: artifactRows.filter(({ role }) => role === 'output'),
       evidence: artifactRows.filter(({ role }) => role === 'evidence'),
-    });
+    }));
     if (!verification.ok) throw new NativeSolutionFailure(verification.reason);
     this.input.state.recordSolutionReady(engagementId, {
       sourceId: this.input.publisher.sourceId,
@@ -327,11 +370,11 @@ export class NativeSolutionCoordinator {
         (candidate) => candidate.role === publication.role && candidate.digest === publication.recordDigest,
       );
       if (artifact === undefined) throw new NativeSolutionFailure('publication-artifact-missing');
-      const receipt = await this.input.publisher.publish({
+      const receipt = await dependency('solution publication', () => this.input.publisher.publish({
         publication,
         artifact,
         bytes: artifact.bytes,
-      });
+      }));
       this.input.state.recordPublicationPublished(publication.publicationKey, receipt);
     }
   }
@@ -340,7 +383,8 @@ export class NativeSolutionCoordinator {
     const engagement = this.engagement(engagementId);
     const intent = this.input.state.beginSolutionSettlement(engagementId);
     let operation = this.input.state.getOperation(intent.operationId)!;
-    let fact = await this.input.settlement.readCanonical({ operation, engagement });
+    let fact = await dependency('solution settlement canonical read', () =>
+      this.input.settlement.readCanonical({ operation, engagement }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };
@@ -361,14 +405,15 @@ export class NativeSolutionCoordinator {
     const delivery = this.input.state.listSolutionArtifacts(engagementId)
       .find(({ role }) => role === 'delivery');
     if (delivery === undefined) throw new NativeSolutionFailure('settlement-delivery-missing');
-    const broadcast = await this.input.settlement.broadcast({
+    const broadcast = await dependency('solution settlement broadcast', () => this.input.settlement.broadcast({
       operationId: intent.operationId,
       engagement,
       deliveryBytes: delivery.bytes,
-    });
+    }));
     this.input.state.recordSolutionSettlementBroadcast(intent.operationId, broadcast.txHash);
     operation = this.input.state.getOperation(intent.operationId)!;
-    fact = await this.input.settlement.readCanonical({ operation, engagement });
+    fact = await dependency('solution settlement canonical read', () =>
+      this.input.settlement.readCanonical({ operation, engagement }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };
@@ -408,6 +453,7 @@ export class NativeSolutionCoordinator {
       return { kind: 'solution-settled', operationId: operation.operationId };
     }
     if (engagement.state === 'failed') return { kind: 'failed', reason: 'failed-terminal' };
+    if (engagement.state === 'paused') return { kind: 'paused', reason: 'retry-not-due' };
     return { kind: 'solution-settlement-pending' };
   }
 }
