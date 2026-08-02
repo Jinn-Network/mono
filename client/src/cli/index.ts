@@ -50,6 +50,7 @@ import captureCommand from './commands/capture.js';
 import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js';
 import evalCommand from './commands/eval.js';
 import scrubCommand from './commands/scrub.js';
+import nativeRequesterCommand from './commands/native-requester.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -89,6 +90,7 @@ const COMMANDS: CommandModule[] = [
   codedigestRevertCheckCommand,
   evalCommand,
   scrubCommand,
+  nativeRequesterCommand,
 ];
 
 /**
