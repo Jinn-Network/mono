@@ -163,6 +163,24 @@ describe('native persistent role identities', () => {
     await expect(openAt(root, resolver)).rejects.toThrow(/revoked/i);
   });
 
+  it('requires evaluator verdict custody to be authorized for Delivery as well as verdict records', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-evaluator-delivery-scope-'));
+    let bindingIndex = 0;
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => {
+        const role = NATIVE_ROLE_IDENTITY_ROLES[bindingIndex++];
+        return resolvedBinding({
+          key: query.key,
+          scopes: role === 'evaluator-verdict'
+            ? ['authorizations', 'observations', 'verdicts']
+            : ALL_NATIVE_SCOPES,
+        });
+      }),
+    };
+
+    await expect(openAt(root, resolver)).rejects.toThrow(/evaluator-verdict.*lacks required deliveries scope/i);
+  });
+
   it('re-resolves delivery authority at Delivery.createdAt instead of trusting the boot decision', async () => {
     const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-delivery-time-'));
     const deliveryTime = '2026-08-02T12:05:00.000Z';

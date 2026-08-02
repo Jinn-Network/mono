@@ -35,14 +35,14 @@ export const NATIVE_ROLE_IDENTITY_ROLES = [
 export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number];
 
 /** Trust-core record families each native key is permitted to sign. */
-export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, string>> = {
-  'requester-submission': 'authorizations',
-  admission: 'authorizations',
-  'requester-discovery': 'observations',
-  'solver-delivery': 'deliveries',
-  'solver-discovery': 'observations',
-  'evaluator-verdict': 'verdicts',
-  'evaluator-discovery': 'observations',
+export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, readonly string[]>> = {
+  'requester-submission': ['authorizations'],
+  admission: ['authorizations'],
+  'requester-discovery': ['observations'],
+  'solver-delivery': ['deliveries'],
+  'solver-discovery': ['observations'],
+  'evaluator-verdict': ['verdicts', 'deliveries'],
+  'evaluator-discovery': ['observations'],
 };
 
 const ENVELOPE_VERSION = 1;
@@ -349,7 +349,7 @@ export class RoleIdentitySet {
   private constructor(
     readonly agent: string,
     private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
-    private readonly hostSecretPem: ReadonlyMap<NativeRoleIdentityRole, Uint8Array>,
+    private readonly hostSecretKeys: ReadonlyMap<NativeRoleIdentityRole, KeyObject>,
     private readonly bindingResolver: BindingResolver,
     private readonly now: () => Date,
   ) {}
@@ -362,7 +362,7 @@ export class RoleIdentitySet {
     const store = await IdentityStore.open({ path: input.storePath, password: input.password });
     const storedRoles = await store.loadOrCreate(now);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
-    const hostSecretPem = new Map<NativeRoleIdentityRole, Uint8Array>();
+    const hostSecretKeys = new Map<NativeRoleIdentityRole, KeyObject>();
 
     for (const stored of storedRoles) {
       const role = stored.role;
@@ -385,9 +385,10 @@ export class RoleIdentitySet {
       if (resolved.binding.expiresAt !== undefined && parseTime(resolved.binding.expiresAt, `native role "${role}" binding expiresAt`) < now.getTime()) {
         throw new IdentityStoreError(`native role "${role}" binding is expired at boot`);
       }
-      const requiredScope = NATIVE_ROLE_IDENTITY_REQUIREMENTS[role];
-      if (!resolved.binding.scope.includes(requiredScope)) {
-        throw new IdentityStoreError(`native role "${role}" binding lacks required ${requiredScope} scope`);
+      const requiredScopes = NATIVE_ROLE_IDENTITY_REQUIREMENTS[role];
+      const missingScopes = requiredScopes.filter((scope) => !resolved.binding.scope.includes(scope));
+      if (missingScopes.length > 0) {
+        throw new IdentityStoreError(`native role "${role}" binding lacks required ${missingScopes.join(', ')} scope`);
       }
       for (const revocation of resolved.revocations) {
         if (parseTime(revocation.effectiveTime, `native role "${role}" revocation effectiveTime`) <= now.getTime()) {
@@ -401,12 +402,10 @@ export class RoleIdentitySet {
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
       });
       if (role === 'evaluator-verdict') {
-        hostSecretPem.set(role, new Uint8Array(Buffer.from(
-          privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
-        )));
+        hostSecretKeys.set(role, privateKey);
       }
     }
-    return new RoleIdentitySet(input.agent, byRole, hostSecretPem, input.bindingResolver, input.now ?? (() => new Date()));
+    return new RoleIdentitySet(input.agent, byRole, hostSecretKeys, input.bindingResolver, input.now ?? (() => new Date()));
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
@@ -442,8 +441,8 @@ export class RoleIdentitySet {
       const expires = Date.parse(resolved.binding.expiresAt);
       if (!Number.isFinite(expires) || expires < effective) return { ok: false, reason: 'expired' };
     }
-    const requiredScope = NATIVE_ROLE_IDENTITY_REQUIREMENTS[role];
-    if (!resolved.binding.scope.includes(requiredScope)) {
+    const requiredScopes = NATIVE_ROLE_IDENTITY_REQUIREMENTS[role];
+    if (requiredScopes.some((scope) => !resolved.binding.scope.includes(scope))) {
       return { ok: false, reason: 'scope-policy-rejected' };
     }
     for (const revocation of resolved.revocations) {
@@ -475,8 +474,8 @@ export class RoleIdentitySet {
     if (registration.evaluator !== this.agent) {
       throw new IdentityStoreError('evaluator host-secret registration names a different agent');
     }
-    const pem = this.hostSecretPem.get('evaluator-verdict');
-    if (pem === undefined) throw new IdentityStoreError('evaluator host-secret custody is unavailable');
+    const privateKey = this.hostSecretKeys.get('evaluator-verdict');
+    if (privateKey === undefined) throw new IdentityStoreError('evaluator host-secret custody is unavailable');
     return {
       resolve: async (input, options) => {
         options.signal?.throwIfAborted();
@@ -512,7 +511,7 @@ export class RoleIdentitySet {
           throw new IdentityStoreError(`evaluator host-secret authority is not effective: ${binding.ok ? 'invalid-key' : binding.reason}`);
         }
         options.signal?.throwIfAborted();
-        return Uint8Array.from(pem);
+        return new Uint8Array(Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })));
       },
     };
   }
