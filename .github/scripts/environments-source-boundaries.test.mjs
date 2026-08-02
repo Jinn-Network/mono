@@ -475,6 +475,43 @@ function hasDynamicModuleLoad(source) {
     && tokens[index + 1]?.value === '(');
 }
 
+function memberEnd(tokens, index, name) {
+  if (tokens[index]?.value === '.' && tokens[index + 1]?.kind === 'identifier'
+    && tokens[index + 1]?.value === name) return index + 2;
+  if (tokens[index]?.value === '?' && tokens[index + 1]?.value === '.'
+    && tokens[index + 2]?.kind === 'identifier' && tokens[index + 2]?.value === name) return index + 3;
+  if (tokens[index]?.value === '[' && tokens[index + 1]?.kind === 'string'
+    && tokens[index + 1]?.value === name && tokens[index + 2]?.value === ']') return index + 3;
+  if (tokens[index]?.value === '?' && tokens[index + 1]?.value === '.'
+    && tokens[index + 2]?.value === '[' && tokens[index + 3]?.kind === 'string'
+    && tokens[index + 3]?.value === name && tokens[index + 4]?.value === ']') return index + 5;
+  return undefined;
+}
+
+function reflectiveBuiltinLoaderUses(source) {
+  const tokens = lexicalTokens(source);
+  const findings = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    let processEnd;
+    let label;
+    if (tokens[index]?.kind === 'identifier' && tokens[index]?.value === 'process'
+      && tokens[index - 1]?.value !== '.' && tokens[index - 1]?.value !== ']') {
+      processEnd = index + 1;
+      label = 'process';
+    } else if (tokens[index]?.kind === 'identifier'
+      && (tokens[index]?.value === 'globalThis' || tokens[index]?.value === 'global')) {
+      processEnd = memberEnd(tokens, index + 1, 'process');
+      label = tokens[index]?.value;
+    }
+    if (processEnd === undefined || label === undefined) continue;
+    const loaderEnd = memberEnd(tokens, processEnd, 'getBuiltinModule');
+    if (loaderEnd !== undefined) {
+      findings.push(`${label}.process`.replace('process.process', 'process') + '.getBuiltinModule');
+    }
+  }
+  return findings;
+}
+
 function onlyCreateServerNodeHttpImport(source) {
   const nodeHttpStrings = lexicalTokens(source)
     .filter((token) => token.kind === 'string' && token.value === 'node:http');
@@ -520,6 +557,55 @@ function forbiddenImportsInFiles(sourceFiles, forbiddenPackages, forbiddenRoots 
   })).sort();
 }
 
+const SOURCE_MODULE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'];
+
+function sourceRelativeModule(file, specifier) {
+  const target = resolve(dirname(file), specifier);
+  const candidates = [
+    target,
+    ...SOURCE_MODULE_EXTENSIONS.map((extension) => `${sourceModuleStem(target)}${extension}`),
+    ...SOURCE_MODULE_EXTENSIONS.map((extension) => join(target, `index${extension}`)),
+  ];
+  return candidates.find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile());
+}
+
+function sourceRelativeClosure(entrypoint) {
+  const discovered = new Set();
+  const pending = [entrypoint];
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (file === undefined || discovered.has(file)) continue;
+    discovered.add(file);
+    for (const specifier of specifiers(readFileSync(file, 'utf8')).filter((entry) => entry.startsWith('.'))) {
+      const target = sourceRelativeModule(file, specifier);
+      if (target === undefined) {
+        throw new Error(`unresolvable source relative edge: ${file} -> ${specifier}`);
+      }
+      if (!discovered.has(target)) pending.push(target);
+    }
+  }
+  return [...discovered];
+}
+
+function sourceEntrypointLeakFindings(entrypoint, testingEntry, fixtureEntry) {
+  return sourceRelativeClosure(entrypoint).flatMap((file) => {
+    const findings = [];
+    const path = relative(dirname(entrypoint), file);
+    if (file === testingEntry || /(?:^|\/)testing(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: 'testing region' });
+    }
+    if (file === fixtureEntry || /(?:^|\/)fixtures(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: 'fixture region' });
+    }
+    for (const specifier of specifiers(readFileSync(file, 'utf8'))) {
+      if (specifier === 'node:fs' || specifier === 'node:fs/promises' || specifier === 'vitest') {
+        findings.push({ file, reason: specifier });
+      }
+    }
+    return findings;
+  });
+}
+
 function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
   return forbiddenImportsInFiles(files(sourceRoot), forbiddenPackages, forbiddenRoots);
 }
@@ -551,6 +637,27 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
     ].join('\n'));
     const findings = forbiddenImports(source, ['@jinn-network/'], [forbidden]);
     assert.equal(findings.length, 11);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the root-entrypoint closure canary follows relative source edges before judging a leak', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-information-world-root-closure-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    const entrypoint = join(source, 'index.ts');
+    const support = join(source, 'support.ts');
+    const fixtures = join(source, 'fixtures.ts');
+    const testing = join(source, 'testing.ts');
+    writeFileSync(entrypoint, 'export * from "./support.js";\n');
+    writeFileSync(support, 'export * from "./fixtures.js";\nexport * from "./testing.js";\n');
+    writeFileSync(fixtures, 'import { readFile } from "node:fs/promises";\nexport { readFile };\n');
+    writeFileSync(testing, 'import { test } from "vitest";\nexport { test };\n');
+
+    assert.deepEqual(
+      sourceEntrypointLeakFindings(entrypoint, testing, fixtures).map((finding) => finding.reason).sort(),
+      ['fixture region', 'node:fs/promises', 'testing region', 'vitest'],
+    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -814,6 +921,17 @@ test('information-world is pure except for one loopback server and fixture reade
   );
   assert.equal(onlyCreateServerNodeHttpImport(serviceSource), true,
     'src/service.ts must import node:http exactly once and bind createServer only');
+  assert.deepEqual(
+    productionFiles.flatMap((file) => {
+      const sourceText = readFileSync(file, 'utf8');
+      return [
+        ...(hasDynamicModuleLoad(sourceText) ? [`${relative(root, file)} -> dynamic module loader`] : []),
+        ...reflectiveBuiltinLoaderUses(sourceText).map((loader) => `${relative(root, file)} -> ${loader}`),
+      ];
+    }),
+    [],
+    'information-world production source must not use dynamic, require, or reflective module loaders',
+  );
   const formattedCreateServerImport = [
     'import /* format */ {',
     '  createServer /*, request must stay a comment */',
@@ -839,6 +957,21 @@ test('information-world is pure except for one loopback server and fixture reade
     assert.equal(onlyCreateServerNodeHttpImport(disguisedClient), false,
       `node:http carve-out must reject ${disguisedClient}`);
   }
+  const reflective = [
+    'const direct = process.getBuiltinModule(`node:${"http"}`);',
+    'const optional = globalThis.process?.["getBuiltinModule"]("node:" + "http");',
+    'const bracketed = global["process"]["getBuiltinModule"](`node:${"http"}`);',
+    '// process.getBuiltinModule("node:http") stays a comment',
+  ].join('\n');
+  assert.deepEqual(reflectiveBuiltinLoaderUses(reflective), [
+    'process.getBuiltinModule',
+    'globalThis.process.getBuiltinModule',
+    'global.process.getBuiltinModule',
+  ]);
+  assert.deepEqual(
+    reflectiveBuiltinLoaderUses('const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;'),
+    ['process.getBuiltinModule'],
+  );
 
   // Filesystem access belongs solely to the testing region and is named one file at a time.
   const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])
@@ -861,9 +994,11 @@ test('information-world is pure except for one loopback server and fixture reade
   );
 
   assert.deepEqual(
-    forbiddenImportsInFiles([join(source, 'index.ts')], [], [testingEntry, fixtureLoaders]),
+    sourceEntrypointLeakFindings(join(source, 'index.ts'), testingEntry, fixtureLoaders)
+      .map(({ file, reason }) => `${relative(root, file)} -> ${reason}`),
     [],
-    'the root entrypoint must not re-export testing.ts or fixtures.ts',
+    'the root entrypoint must not reach testing, fixtures, filesystem, or Vitest through any '
+      + 'relative source edge',
   );
 
   const manifest = JSON.parse(readFileSync(join(packageDirectory, 'package.json'), 'utf8'));
