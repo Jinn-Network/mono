@@ -16,7 +16,8 @@ function docker(args) {
 
 docker(["info"]);
 docker([
-  "run", "--rm", "--network", "none", "--read-only", "--tmpfs", "/tmp",
+  "run", "--rm", "--network", "none", "--read-only", "--cap-drop=ALL",
+  "--security-opt=no-new-privileges", "--tmpfs", "/tmp",
   "--mount", `type=bind,src=${packageRoot},dst=/work,readonly`,
   "--workdir", "/work", image, "node", "scripts/network-denied-runtime.mjs",
 ]);

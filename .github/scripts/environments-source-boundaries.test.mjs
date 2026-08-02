@@ -460,22 +460,21 @@ function informationWorldCapabilityFindings(sourceText, fileName) {
   const findings = [];
   const add = (kind, detail) => { findings.push(`${kind}:${detail}`); };
   for (const diagnostic of source.parseDiagnostics ?? []) add('parse', ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
-  const visit = (node) => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      const moduleSpecifier = node.moduleSpecifier;
-      if (moduleSpecifier !== undefined && ts.isStringLiteralLike(moduleSpecifier)) {
-        const value = moduleSpecifier.text;
-        const permittedHttp = value === 'node:http' && fileName.endsWith('/service.ts')
-          && ts.isImportDeclaration(node) && node.importClause?.name === undefined
-          && node.importClause?.namedBindings !== undefined && ts.isNamedImports(node.importClause.namedBindings)
-          && node.importClause.namedBindings.elements.length === 1
-          && astName(node.importClause.namedBindings.elements[0].name) === 'createServer'
-          && node.importClause.namedBindings.elements[0].propertyName === undefined;
-        if (value.startsWith('node:') && !permittedHttp) add('module', value);
-        if (TRANSPORT_MODULES.includes(value)) add('transport', value);
-      }
+  const allowedImport = (node) => ts.isImportDeclaration(node) && fileName.endsWith('/service.ts')
+    && ts.isStringLiteralLike(node.moduleSpecifier) && node.moduleSpecifier.text === 'node:http'
+    && node.importClause?.name === undefined && node.importClause?.namedBindings !== undefined
+    && ts.isNamedImports(node.importClause.namedBindings) && node.importClause.namedBindings.elements.length === 1
+    && astName(node.importClause.namedBindings.elements[0].name) === 'createServer'
+    && node.importClause.namedBindings.elements[0].propertyName === undefined;
+  const denyImport = (node) => {
+    if (ts.isImportEqualsDeclaration(node)) return add('module', 'import equals');
+    if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return;
+    if (node.moduleSpecifier !== undefined && ts.isStringLiteralLike(node.moduleSpecifier)) {
+      const name = node.moduleSpecifier.text;
+      if ((name.startsWith('node:') || TRANSPORT_MODULES.includes(name)) && !allowedImport(node)) add('module', name);
     }
-    if (ts.isImportEqualsDeclaration(node)) add('module', 'import equals');
+  };
+  const denyExpression = (node) => {
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add('module', 'dynamic import');
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
       && ts.isIdentifier(node.expression.expression) && astName(node.expression.expression) === 'Object'
@@ -497,9 +496,13 @@ function informationWorldCapabilityFindings(sourceText, fileName) {
         add('reflection', `Reflect.${name ?? 'dynamic'}`);
       }
     }
-    ts.forEachChild(node, visit);
   };
-  visit(source);
+  const walk = (node) => {
+    denyImport(node);
+    denyExpression(node);
+    ts.forEachChild(node, walk);
+  };
+  walk(source);
   return findings;
 }
 
