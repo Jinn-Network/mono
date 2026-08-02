@@ -64,6 +64,9 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
   let state: ReturnType<typeof openVenueState> | undefined;
   try {
     state = openVenueState(config.stateDbPath);
+  // Capture the successfully opened state for the returned venue. The outer variable remains
+  // optional solely so the factory catch path can clean up a partial construction.
+  const ownedState = state;
   const ledger = createSubmissionLedger(state);
   const lock = createBroadcastLock(state);
   const safe = createSafeBroadcaster({
@@ -146,7 +149,7 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
         logSource.close();
       } finally {
         try {
-          state.close();
+          ownedState.close();
         } finally {
           ACTIVE_STATE_PATHS.delete(statePath);
         }
