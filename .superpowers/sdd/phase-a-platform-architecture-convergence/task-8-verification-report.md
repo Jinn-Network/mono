@@ -9,6 +9,10 @@ tracked tree remained clean after real builds, packing, deterministic regenerati
 groups. An independent audit subsequently found one direct legacy publisher bypass and one evidence
 overstatement; both were closed in fix round 1 at
 `1cbfbe3efd6da5182b5b6040f068e170b29d8166`.
+A second independent audit found two Important integration gaps: hosted identity paths could escape
+the profile output root, and release-group gate authority was not connected to receipt/workflow
+enforcement. Both were closed in fix round 2 at
+`719a0d5831a0f92bc31d72f66bf6b9580c803663`.
 
 All commands used Node `v22.22.2` from
 `/Users/adrianobradley/.nvm/versions/node/v22.22.2/bin`. Tests that build packages, temporarily
@@ -187,6 +191,76 @@ on its first publish observation; no registry or other external service was cont
 - Canary and stable CLI dry-run plans both passed. Syntax checks for all five changed modules,
   `actionlint` over all 10 Phase A workflows, generator check, and `git diff --check` passed.
 - No real npm publish, push, tag, deploy, pull request, live API call, or settings change occurred.
+
+## Independent-audit fix round 2
+
+Reviewed base: `412a793f8b34b5687d8d5183fafb9b83c8469d40`. Code fix:
+`719a0d5831a0f92bc31d72f66bf6b9580c803663`. This round used Node `v22.23.1` from
+`/opt/homebrew/opt/node@22/bin/node`.
+
+### RED evidence
+
+- The initial shared-asset/profile-root selection reported 26 passed and 6 failed: no shared Jinn
+  identifier validator existed, direct and encoded traversal were accepted, source documents could
+  claim generated manifest paths, and output-root/nested-parent symlinks were followed. The direct
+  traversal reproducer wrote `escaped.json` beside the requested output root before the later receipt
+  verifier could reject it.
+- A dangling target-symlink reproducer then failed independently: copying the document created the
+  previously absent outside target. A noncanonical `https://JINN.network/...` identity was also
+  silently treated as non-identifying before the candidate/validator boundary was tightened.
+- The release-group schema assertion failed because `requiredGateIds` was absent. After shaping the
+  schema/catalog fixture, all five gate-authority mutations failed their expectations: valid
+  package-only and group-only swaps, valid group-only addition/removal, and a prototype-inherited
+  gate all passed catalog validation.
+- The receipt test failed at module load because no catalog-derived conclusion-key function existed;
+  the receipt still depended on its independent six-domain constant.
+
+### Fix
+
+- `public-surface-assets.mjs` owns the single Jinn identifier-to-served-path validator. It accepts all
+  30 current identities and rejects empty/dot/traversal components, POSIX and Windows absolute forms,
+  backslashes, query/fragment text, percent-encoded ambiguity, noncanonical URL normalization, and
+  root `manifest.json` / `manifest.dsse.json` collisions. Semantically Jinn URLs with noncanonical
+  host, port, or credential spelling enter the validator rather than disappearing as non-claims.
+- `build-profile-root.mjs` resolves a real nonsymlink output directory, plans and preflights every
+  target before copying, proves every resolved target is strictly below the canonical root, and
+  rejects existing parent/target links and non-regular entries. Direct/encoded traversal, root and
+  nested links, dangling target links, reserved metadata collisions, and special files all fail
+  without creating an outside document; a valid nested identity remains served normally.
+- Every catalog release group now declares its required gate IDs. Schema and runtime validation make
+  them nonempty/unique, require prototype-safe gate-definition ownership, and require exact equality
+  with the union of member-package gates. One-sided add/remove/swap mutations fail while an atomic
+  group/member change passes. The generated JSON and Markdown topology expose all four gate sets;
+  the seven experimental environment-supply packages and their group remain disabled.
+- Platform receipt conclusion keys now come from the selected catalog group by validating and
+  stripping `-ci`, then adding only the three infrastructure gates (`catalog`, `artifacts`, and
+  `external-consumer`). Missing and extra catalog-derived conclusions fail. There is no independent
+  six-domain receipt list.
+- The workflow contract loads the catalog and proves exact static reusable `uses:` paths,
+  `source_sha` propagation, job `needs`/results, and receipt `--gate` keys with no omissions or
+  extras. Static calls and the no-polling rule remain intact.
+
+### GREEN verification
+
+- Shared public-asset and profile-root selection: 36 passed, 0 failed, including the exact 30 valid
+  identities and all traversal/link/special-file regressions.
+- Catalog/schema/union selection: 66 passed, 0 failed, including four one-sided gate mutations, the
+  prototype case, and the positive atomic-change case.
+- Receipt plus injected-fake publisher selection: 25 passed, 0 failed. All publisher calls remained
+  injected local fakes.
+- Catalog-derived platform workflow contract: 14 passed, 0 failed.
+- Enumerated 20-file affected/adjacent superset: **288 passed, 0 failed**. The selection comprised
+  catalog, stack graph, public assets/profile/public manifest, publication surface, generator,
+  ownership/branch/workflow controls, receipt/publisher/publisher-surface, bundle/external consumer,
+  stack workflow/trusted publishers, and fixture manifest/immutability suites.
+- Exact historical architecture/guard baseline: **151 passed, 0 failed** (the unchanged 131-test
+  inventory/boundary/publication/fixture/graph selection plus the original 20 profile-root tests).
+  The seven new fix-round profile-root cases also pass in the affected superset.
+- Deterministic generator write plus `--check` byte-compared both outputs. `actionlint` passed all 10
+  Phase A workflows; Node 22 syntax checks passed all 12 changed MJS modules; `git diff --check`
+  passed.
+- No npm publish, push, tag, deployment, pull request, live API mutation, or settings change was
+  performed.
 
 ## Remaining external blockers
 
