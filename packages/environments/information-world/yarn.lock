@@ -56,6 +56,22 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@jinn-network/chain-environment-verification@portal:../chain-verification::locator=%40jinn-network%2Finformation-world%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/chain-environment-verification@portal:../chain-verification::locator=%40jinn-network%2Finformation-world%40workspace%3A."
+  dependencies:
+    "@jinn-network/chain-environment-record": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
 "@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Finformation-world%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-protocol@portal:../../evidence/protocol::locator=%40jinn-network%2Finformation-world%40workspace%3A."
@@ -70,6 +86,7 @@ __metadata:
   resolution: "@jinn-network/information-world@workspace:."
   dependencies:
     "@jinn-network/chain-environment-record": "npm:0.1.0"
+    "@jinn-network/chain-environment-verification": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     "@types/node": "npm:^22.0.0"
@@ -84,6 +101,16 @@ __metadata:
     vitest:
       optional: true
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/trust-core@portal:../../trust/core::locator=%40jinn-network%2Finformation-world%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-core@portal:../../trust/core::locator=%40jinn-network%2Finformation-world%40workspace%3A."
+  dependencies:
+    "@noble/curves": "npm:^2.0.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
   linkType: soft
 
 "@jridgewell/sourcemap-codec@npm:^1.5.5":
@@ -105,7 +132,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:^2.2.0":
+"@noble/curves@npm:^2.0.0":
+  version: 2.2.0
+  resolution: "@noble/curves@npm:2.2.0"
+  dependencies:
+    "@noble/hashes": "npm:2.2.0"
+  checksum: 10c0/e545d3bb03ebedd5c04c2cab81342d64f5ce8a4c1019cfe207f3dc69174bc0ad7cfb50effc31bfa8616b8340900f445dd053da7454190428857c4eedd3b51413
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.2.0, @noble/hashes@npm:^2.2.0":
   version: 2.2.0
   resolution: "@noble/hashes@npm:2.2.0"
   checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034

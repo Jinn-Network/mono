@@ -61,6 +61,7 @@
   },
   "devDependencies": {
     "@jinn-network/chain-environment-record": "0.1.0",
+    "@jinn-network/chain-environment-verification": "0.1.0",
     "@jinn-network/evidence-protocol": "0.1.0",
     "@types/node": "^22.0.0",
     "ajv": "8.17.1",
@@ -70,6 +71,8 @@
   },
   "resolutions": {
     "@jinn-network/chain-environment-record": "portal:../chain-record",
-    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol"
+    "@jinn-network/chain-environment-verification": "portal:../chain-verification",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   }
 }
