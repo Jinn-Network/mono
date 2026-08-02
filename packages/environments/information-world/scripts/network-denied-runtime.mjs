@@ -23,7 +23,7 @@ function localRequest(address) {
     }, (response) => {
       const chunks = [];
       response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-      response.on("end", () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+      response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
     });
     incoming.once("error", reject);
     incoming.end();
@@ -51,6 +51,10 @@ async function dnsMustFail() {
 }
 
 const world = parseInformationWorldRecord(await readFile(join(packageRoot, "fixtures/world/synthetic.json")));
+const guide = world.corpus.entries.find((entry) => entry.request.origin === "https://docs.example.test"
+  && entry.request.path === "/guide");
+if (guide === undefined) throw new Error("synthetic fixture has no guide entry");
+const expectedGuide = await readFile(join(packageRoot, "fixtures/world/bodies", `${guide.response.body.digest.slice("sha256:".length)}.bin`));
 const service = await createReplayService(world, {
   listen: { host: "127.0.0.1", port: 0 },
   artifacts: {
@@ -64,8 +68,9 @@ const service = await createReplayService(world, {
 
 try {
   const response = await localRequest(service.address);
-  if (response.status !== 200 || response.body.length === 0) {
-    throw new Error(`loopback replay did not return its sealed response: ${JSON.stringify(response)}`);
+  if (response.status !== 200 || response.headers["x-jinn-replay"] !== "hit"
+    || !Buffer.from(response.body).equals(expectedGuide)) {
+    throw new Error("loopback replay did not return the expected sealed hit bytes");
   }
   await externalTcpMustFail();
   await dnsMustFail();

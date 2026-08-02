@@ -46,7 +46,8 @@ layers and one hard boundary between them:
    The actual egress proof runs replay under a network-denied runtime boundary, where loopback
    succeeds and external TCP/DNS cannot. A miss is answered from the record's own declared miss
    response. This does not claim arbitrary JavaScript source is intrinsically incapable of
-   egress.
+   egress. The runtime profile is verified under network-denied Linux isolation; source policy
+   is a maintainability gate, not an intrinsic-JavaScript sandbox.
 
 The record is sealed but **unsigned**: attribution and assessment arrive through separately
 published attestations that bind to it by digest. Nothing here asserts that a
@@ -6085,7 +6086,7 @@ reject or amend.
 | **CF6-7** | §4.4 does not bound the declared miss response's status. A 3xx miss would point the agent at a location the sealed world does not contain. | **Refuse 3xx miss statuses at seal time.** |
 | **CF6-8** | §4.4 gives two fidelity classes but does not say what `synthetic` may declare. A synthetic corpus carrying `capturedAt` and a capturer is a false statement by construction. | **`captured-snapshot` requires `capturedAt` + a digest-pinned capturer + at least one source; `synthetic` forbids all three.** Plus a schema-fixed `provenanceClass: "declared"`, so the record cannot imply proof it does not have. |
 | **CF6-9** | §10 adopts the cassette/VCR *pattern* and notes those libraries "usually match loosely". This plan's key is strict by default and refuses inputs it cannot canonicalize (non-ASCII host, malformed percent-encoding, non-JSON body under `json-jcs`). | **Refuse rather than fall back**, and let the *service* turn a refusal into the declared miss. Recorded because it is a deliberate departure from every library in that row, and a reviewer should see it as a choice rather than an accident. |
-| **CF6-10** | The tree's ambient-network canary bans `fetch` and friends across `packages/environments/` production source, which is exactly the property this package needs — but it does not ban `node:http`, `node:net` or `node:tls`, and no existing package in the tree needed a transport surface. | **Extend the tree guard with an explicit transport-module list and a one-file, one-binding carve-out for `node:http`'s `createServer`.** The carve-out is narrow on purpose: a second transport import anywhere in the tree fails the build. |
+| **CF6-10** | The tree needs a narrow transport admission without treating source inspection as a sandbox. | **Use independent syntax-aware capability policies with a one-file, one-binding `node:http` `createServer` carve-out, and prove the closed execution profile under a network-denied runtime boundary.** |
 | **CF6-11** | `information-world/1.0` is chain-free — design §3 calls it "the clearest seam-test pass in this design" and names "**any** frozen-source agent benchmark, no chain involved" as its standalone consumer — yet its facts profile lands in the leaf CE1 names `facts/chain-environments`. | **Accept for v1**: a facts leaf is a discovery packaging unit, not a semantic claim about the kinds inside it, and minting a package for one profile is machinery for its own sake. Revisit (split or rename the leaf) if a non-chain consumer ships a frozen-source benchmark on this kind alone. Recorded so the coupling is a decision rather than an accident. |
 
 ---
@@ -6200,7 +6201,6 @@ grep -n "TODO\|FIXME\|TBD\|XXX\|placeholder\|fill in" \
 ```
 
 Expected: only this section's own mentions.
-
 
 
 
