@@ -58,6 +58,18 @@ export function claimOperationId(engagement: NativeOperationId): NativeOperation
   return digest({ v: 1, kind: 'claim', engagementId: engagement });
 }
 
+export function backendSubmissionOperationId(input: {
+  readonly engagementId: NativeOperationId;
+  readonly attempt: string;
+}): NativeOperationId {
+  return digest({
+    v: 1,
+    kind: 'backend-submit',
+    engagementId: input.engagementId,
+    attempt: requireNonEmpty(input.attempt, 'attempt'),
+  });
+}
+
 export function solutionSettlementId(input: {
   readonly attempt: string;
   readonly deliveryDigest: `sha256:${string}`;

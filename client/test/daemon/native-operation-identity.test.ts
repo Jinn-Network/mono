@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  backendSubmissionOperationId,
   claimOperationId,
   engagementIdentityDocument,
   engagementId,
@@ -40,6 +41,10 @@ describe('native operation identities', () => {
   it('derives each logical operation from its durable protocol identity', () => {
     const engagement = engagementId(CHAIN);
     const claim = claimOperationId(engagement);
+    const backendSubmission = backendSubmissionOperationId({
+      engagementId: engagement,
+      attempt: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    });
     const solution = solutionSettlementId({
       attempt: 'urn:uuid:11111111-1111-4111-8111-111111111111',
       deliveryDigest: `sha256:${'a'.repeat(64)}`,
@@ -54,7 +59,7 @@ describe('native operation identities', () => {
       evaluationDeliveryDigest: `sha256:${'d'.repeat(64)}`,
       verdictCode: 1,
     });
-    expect(new Set([engagement, claim, solution, evaluation, verdict]).size).toBe(5);
+    expect(new Set([engagement, claim, backendSubmission, solution, evaluation, verdict]).size).toBe(6);
     expect(claim).toBe('sha256:1238bc787b25ad43ab898dd26e5c4b17d644a121869d670203ae9c99cb03173a');
     expect(solution).toBe('sha256:f0f3118e3a3022d1463559d93c08ed4884b7d570d2a09195172a0392fd723468');
     expect(evaluation).toBe('sha256:6c371f84fe63c6fc0891be0317282fde3e330e11d9a6ed64106fb8788302c49f');

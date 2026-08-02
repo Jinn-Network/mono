@@ -1,13 +1,16 @@
 import type { Store } from '../store/store.js';
 import { documentDigest, serializeCanonicalJson } from '@jinn-network/task-execution-protocol';
 import {
+  backendSubmissionOperationId,
   claimOperationId,
   engagementId,
+  publicationKey,
+  solutionSettlementId,
   type NativeOperationId,
 } from './native-operation-identity.js';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
-export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 1 as const;
+export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 2 as const;
 
 export const NATIVE_OPERATOR_STATE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS native_operator_state_metadata (
@@ -122,6 +125,34 @@ CREATE TABLE IF NOT EXISTS native_source_deferrals (
   updated_at        TEXT NOT NULL,
   PRIMARY KEY (source_agent, source_name, sequence, entry_digest, announcement_id)
 );
+
+CREATE TABLE IF NOT EXISTS native_solution_executions (
+  engagement_id           TEXT PRIMARY KEY REFERENCES native_engagements(engagement_id),
+  operation_id            TEXT NOT NULL UNIQUE REFERENCES native_operations(operation_id),
+  attempt_uri             TEXT NOT NULL,
+  task_digest             TEXT NOT NULL,
+  submission_digest       TEXT NOT NULL,
+  dispatch_context_digest TEXT NOT NULL,
+  task_bytes              BLOB NOT NULL,
+  submission_bytes        BLOB NOT NULL,
+  dispatch_context_bytes  BLOB NOT NULL,
+  status                  TEXT NOT NULL,
+  created_at              TEXT NOT NULL,
+  updated_at              TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS native_solution_artifacts (
+  engagement_id   TEXT NOT NULL REFERENCES native_engagements(engagement_id),
+  role            TEXT NOT NULL,
+  family          TEXT NOT NULL,
+  name            TEXT NOT NULL,
+  record_digest   TEXT NOT NULL,
+  exact_bytes     BLOB NOT NULL,
+  created_at      TEXT NOT NULL,
+  PRIMARY KEY (engagement_id, role, name, record_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_native_solution_artifacts_digest
+  ON native_solution_artifacts (record_digest);
 `;
 
 export class NativeOperatorStateConflictError extends Error {
@@ -135,6 +166,11 @@ export class NativeWorkerLeaseError extends Error {
 export type NativeEngagementState =
   | 'claim-pending'
   | 'claim-finalized'
+  | 'executing'
+  | 'solution-ready'
+  | 'solution-published'
+  | 'solution-settlement-pending'
+  | 'solution-settled'
   | 'eligible'
   | 'lost'
   | 'failed';
@@ -187,6 +223,54 @@ export interface NativeAuditEvent {
   readonly kind: string;
   readonly detail: string;
   readonly createdAt: string;
+}
+
+export type NativeSolutionArtifactRole =
+  | 'output'
+  | 'evidence'
+  | 'delivery'
+  | 'delivery-envelope';
+
+export interface NativeSolutionExecutionRow {
+  readonly engagementId: NativeOperationId;
+  readonly operationId: NativeOperationId;
+  readonly attemptUri: string;
+  readonly taskDigest: `sha256:${string}`;
+  readonly submissionDigest: `sha256:${string}`;
+  readonly dispatchContextDigest: `sha256:${string}`;
+  readonly taskBytes: Uint8Array;
+  readonly submissionBytes: Uint8Array;
+  readonly dispatchContextBytes: Uint8Array;
+  readonly status: 'intent' | 'accepted';
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface NativeSolutionArtifactInput {
+  readonly role: NativeSolutionArtifactRole;
+  readonly family: string;
+  readonly name?: string;
+  readonly digest: `sha256:${string}`;
+  readonly bytes: Uint8Array;
+}
+
+export interface NativeSolutionArtifactRow extends Omit<NativeSolutionArtifactInput, 'name'> {
+  readonly engagementId: NativeOperationId;
+  readonly name: string | null;
+  readonly createdAt: string;
+}
+
+export interface NativePublicationRow {
+  readonly publicationKey: NativeOperationId;
+  readonly engagementId: NativeOperationId;
+  readonly sourceId: string;
+  readonly role: NativeSolutionArtifactRole;
+  readonly recordDigest: `sha256:${string}`;
+  readonly availability: string;
+  readonly status: 'intent' | 'published';
+  readonly detail: unknown;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface NativeSourceProcessingInput {
@@ -277,6 +361,44 @@ interface RawAudit {
   created_at: string;
 }
 
+interface RawSolutionExecution {
+  engagement_id: NativeOperationId;
+  operation_id: NativeOperationId;
+  attempt_uri: string;
+  task_digest: `sha256:${string}`;
+  submission_digest: `sha256:${string}`;
+  dispatch_context_digest: `sha256:${string}`;
+  task_bytes: Uint8Array;
+  submission_bytes: Uint8Array;
+  dispatch_context_bytes: Uint8Array;
+  status: 'intent' | 'accepted';
+  created_at: string;
+  updated_at: string;
+}
+
+interface RawSolutionArtifact {
+  engagement_id: NativeOperationId;
+  role: NativeSolutionArtifactRole;
+  family: string;
+  name: string;
+  record_digest: `sha256:${string}`;
+  exact_bytes: Uint8Array;
+  created_at: string;
+}
+
+interface RawPublication {
+  publication_key: NativeOperationId;
+  engagement_id: NativeOperationId;
+  source_id: string;
+  role: NativeSolutionArtifactRole;
+  record_digest: `sha256:${string}`;
+  availability: string;
+  status: 'intent' | 'published';
+  detail_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
 function engagementRow(row: RawEngagement): NativeEngagementRow {
   return {
     engagementId: row.engagement_id,
@@ -321,6 +443,59 @@ function auditRow(row: RawAudit): NativeAuditEvent {
     kind: row.kind,
     detail: row.detail_json,
     createdAt: row.created_at,
+  };
+}
+
+function exactBytes(value: Uint8Array): Uint8Array {
+  return new Uint8Array(value);
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
+function solutionExecutionRow(row: RawSolutionExecution): NativeSolutionExecutionRow {
+  return {
+    engagementId: row.engagement_id,
+    operationId: row.operation_id,
+    attemptUri: row.attempt_uri,
+    taskDigest: row.task_digest,
+    submissionDigest: row.submission_digest,
+    dispatchContextDigest: row.dispatch_context_digest,
+    taskBytes: exactBytes(row.task_bytes),
+    submissionBytes: exactBytes(row.submission_bytes),
+    dispatchContextBytes: exactBytes(row.dispatch_context_bytes),
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function solutionArtifactRow(row: RawSolutionArtifact): NativeSolutionArtifactRow {
+  return {
+    engagementId: row.engagement_id,
+    role: row.role,
+    family: row.family,
+    name: row.name === '' ? null : row.name,
+    digest: row.record_digest,
+    bytes: exactBytes(row.exact_bytes),
+    createdAt: row.created_at,
+  };
+}
+
+function publicationRow(row: RawPublication): NativePublicationRow {
+  return {
+    publicationKey: row.publication_key,
+    engagementId: row.engagement_id,
+    sourceId: row.source_id,
+    role: row.role,
+    recordDigest: row.record_digest,
+    availability: row.availability,
+    status: row.status,
+    detail: JSON.parse(row.detail_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -372,7 +547,11 @@ export class NativeOperatorStateRepository {
        VALUES (1, ?, ?)`,
     ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, createdAt);
     const version = this.schemaVersion();
-    if (version !== NATIVE_OPERATOR_STATE_SCHEMA_VERSION) {
+    if (version === 1) {
+      this.store.db.prepare(
+        `UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = 1`,
+      ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION);
+    } else if (version !== NATIVE_OPERATOR_STATE_SCHEMA_VERSION) {
       throw new Error(`unsupported native operator state schema version ${version}`);
     }
   }
@@ -856,6 +1035,335 @@ export class NativeOperatorStateRepository {
         WHERE kind = 'claim' AND status NOT IN ('finalized', 'failed-terminal')
         ORDER BY created_at, operation_id`,
     ).all() as RawOperation[]).map(operationRow);
+  }
+
+  beginSolutionExecution(
+    engagementIdValue: NativeOperationId,
+    input: {
+      readonly taskBytes: Uint8Array;
+      readonly submissionBytes: Uint8Array;
+      readonly dispatchContextBytes: Uint8Array;
+    },
+  ): { readonly kind: 'created' | 'matching'; readonly operationId: NativeOperationId } {
+    const now = this.timestamp();
+    const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+      .get(engagementIdValue) as RawEngagement | undefined;
+    if (engagement === undefined) throw new NativeOperatorStateConflictError(`unknown native engagement ${engagementIdValue}`);
+    if (engagement.attempt_uri === null) {
+      throw new NativeOperatorStateConflictError('solution execution requires a finalized marketplace Attempt');
+    }
+    const taskDigest = documentDigest(input.taskBytes);
+    const submissionDigest = documentDigest(input.submissionBytes);
+    if (taskDigest !== engagement.task_digest || submissionDigest !== engagement.submission_digest) {
+      throw new NativeOperatorStateConflictError('solution execution bytes do not match the admitted Task and Submission digests');
+    }
+    let dispatch: unknown;
+    try {
+      dispatch = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(input.dispatchContextBytes));
+    } catch {
+      throw new NativeOperatorStateConflictError('dispatch context is not valid UTF-8 JSON');
+    }
+    if (typeof dispatch !== 'object' || dispatch === null || Array.isArray(dispatch)) {
+      throw new NativeOperatorStateConflictError('dispatch context must be a JSON object');
+    }
+    const canonicalDispatch = serializeCanonicalJson(dispatch as Parameters<typeof serializeCanonicalJson>[0]);
+    if (!bytesEqual(canonicalDispatch, input.dispatchContextBytes)) {
+      throw new NativeOperatorStateConflictError('dispatch context bytes are not the exact canonical seal');
+    }
+    const fields = dispatch as Record<string, unknown>;
+    if (
+      fields.taskDigest !== engagement.task_digest
+      || fields.submission !== engagement.submission_uri
+      || fields.attempt !== engagement.attempt_uri
+      || typeof fields.nonce !== 'string'
+      || fields.nonce.length === 0
+    ) {
+      throw new NativeOperatorStateConflictError('dispatch context does not bind the finalized claim inputs');
+    }
+    const dispatchContextDigest = documentDigest(input.dispatchContextBytes);
+    const operationId = backendSubmissionOperationId({
+      engagementId: engagementIdValue,
+      attempt: engagement.attempt_uri,
+    });
+
+    return this.store.db.transaction(() => {
+      const existing = this.store.db.prepare(
+        `SELECT * FROM native_solution_executions WHERE engagement_id = ?`,
+      ).get(engagementIdValue) as RawSolutionExecution | undefined;
+      if (existing !== undefined) {
+        if (
+          existing.operation_id !== operationId
+          || existing.attempt_uri !== engagement.attempt_uri
+          || existing.task_digest !== taskDigest
+          || existing.submission_digest !== submissionDigest
+          || existing.dispatch_context_digest !== dispatchContextDigest
+          || !bytesEqual(existing.task_bytes, input.taskBytes)
+          || !bytesEqual(existing.submission_bytes, input.submissionBytes)
+          || !bytesEqual(existing.dispatch_context_bytes, input.dispatchContextBytes)
+        ) {
+          throw new NativeOperatorStateConflictError('solution execution intent already carries different exact bytes');
+        }
+        return { kind: 'matching' as const, operationId };
+      }
+      if (engagement.state !== 'claim-finalized') {
+        throw new NativeOperatorStateConflictError(`cannot begin solution execution from ${engagement.state}`);
+      }
+      this.store.db.prepare(
+        `INSERT INTO native_operations
+          (operation_id, engagement_id, kind, status, detail_json, created_at, updated_at)
+         VALUES (?, ?, 'backend-submit', 'intent', ?, ?, ?)`,
+      ).run(operationId, engagementIdValue, detailJson({ attempt: engagement.attempt_uri }), now, now);
+      this.store.db.prepare(
+        `INSERT INTO native_solution_executions
+          (engagement_id, operation_id, attempt_uri, task_digest, submission_digest,
+           dispatch_context_digest, task_bytes, submission_bytes, dispatch_context_bytes,
+           status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'intent', ?, ?)`,
+      ).run(
+        engagementIdValue,
+        operationId,
+        engagement.attempt_uri,
+        taskDigest,
+        submissionDigest,
+        dispatchContextDigest,
+        Buffer.from(input.taskBytes),
+        Buffer.from(input.submissionBytes),
+        Buffer.from(input.dispatchContextBytes),
+        now,
+        now,
+      );
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'executing', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, engagementIdValue);
+      this.insertAudit(engagementIdValue, operationId, 'backend-submit-intent', {
+        attempt: engagement.attempt_uri,
+        taskDigest,
+        submissionDigest,
+        dispatchContextDigest,
+      }, now);
+      return { kind: 'created' as const, operationId };
+    })();
+  }
+
+  getSolutionExecution(engagement: NativeOperationId): NativeSolutionExecutionRow | undefined {
+    const row = this.store.db.prepare(
+      `SELECT * FROM native_solution_executions WHERE engagement_id = ?`,
+    ).get(engagement) as RawSolutionExecution | undefined;
+    return row === undefined ? undefined : solutionExecutionRow(row);
+  }
+
+  recordBackendSubmissionAccepted(operationId: NativeOperationId): void {
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const operation = this.store.db.prepare(`SELECT * FROM native_operations WHERE operation_id = ?`)
+        .get(operationId) as RawOperation | undefined;
+      if (operation === undefined || operation.kind !== 'backend-submit') {
+        throw new NativeOperatorStateConflictError(`unknown backend submission operation ${operationId}`);
+      }
+      if (!['intent', 'finalized'].includes(operation.status)) {
+        throw new NativeOperatorStateConflictError(`cannot accept backend submission from ${operation.status}`);
+      }
+      this.store.db.prepare(
+        `UPDATE native_operations SET status = 'finalized', updated_at = ? WHERE operation_id = ?`,
+      ).run(now, operationId);
+      this.store.db.prepare(
+        `UPDATE native_solution_executions SET status = 'accepted', updated_at = ? WHERE operation_id = ?`,
+      ).run(now, operationId);
+      this.insertAudit(operation.engagement_id, operationId, 'backend-submission-accepted', {}, now);
+    })();
+  }
+
+  recordSolutionReady(
+    engagementIdValue: NativeOperationId,
+    input: {
+      readonly sourceId: string;
+      readonly artifacts: readonly NativeSolutionArtifactInput[];
+    },
+  ): void {
+    if (input.sourceId.length === 0) throw new TypeError('solution publication sourceId must not be empty');
+    if (input.artifacts.length === 0) throw new NativeOperatorStateConflictError('solution artifact graph must not be empty');
+    const keys = new Set<string>();
+    for (const artifact of input.artifacts) {
+      if (artifact.family.length === 0) throw new TypeError('solution artifact family must not be empty');
+      if (documentDigest(artifact.bytes) !== artifact.digest) {
+        throw new NativeOperatorStateConflictError(`solution ${artifact.role} digest does not name its exact bytes`);
+      }
+      const key = `${artifact.role}\u0000${artifact.name ?? ''}\u0000${artifact.digest}`;
+      if (keys.has(key)) throw new NativeOperatorStateConflictError('solution artifact graph contains a duplicate identity');
+      keys.add(key);
+    }
+    const deliveries = input.artifacts.filter(({ role }) => role === 'delivery');
+    const envelopes = input.artifacts.filter(({ role }) => role === 'delivery-envelope');
+    if (deliveries.length !== 1 || envelopes.length !== 1) {
+      throw new NativeOperatorStateConflictError('solution artifact graph requires exactly one Delivery and one Delivery envelope');
+    }
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const execution = this.store.db.prepare(
+        `SELECT * FROM native_solution_executions WHERE engagement_id = ?`,
+      ).get(engagementIdValue) as RawSolutionExecution | undefined;
+      if (execution === undefined || execution.status !== 'accepted') {
+        throw new NativeOperatorStateConflictError('solution artifacts require an accepted backend submission');
+      }
+      const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+        .get(engagementIdValue) as RawEngagement | undefined;
+      if (engagement === undefined || engagement.state !== 'executing') {
+        throw new NativeOperatorStateConflictError(`cannot record solution artifacts from ${engagement?.state ?? 'missing'}`);
+      }
+      for (const artifact of input.artifacts) {
+        this.store.db.prepare(
+          `INSERT INTO native_solution_artifacts
+            (engagement_id, role, family, name, record_digest, exact_bytes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          engagementIdValue,
+          artifact.role,
+          artifact.family,
+          artifact.name ?? '',
+          artifact.digest,
+          Buffer.from(artifact.bytes),
+          now,
+        );
+        const publication = publicationKey({
+          sourceId: input.sourceId,
+          role: artifact.role,
+          recordDigest: artifact.digest,
+          availabilityState: 'available',
+        });
+        this.store.db.prepare(
+          `INSERT INTO native_publication_outbox
+            (publication_key, engagement_id, source_id, role, record_digest, availability,
+             status, detail_json, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'available', 'intent', ?, ?, ?)`,
+        ).run(
+          publication,
+          engagementIdValue,
+          input.sourceId,
+          artifact.role,
+          artifact.digest,
+          detailJson({ family: artifact.family, ...(artifact.name === undefined ? {} : { name: artifact.name }) }),
+          now,
+          now,
+        );
+      }
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'solution-ready', updated_at = ? WHERE engagement_id = ?`,
+      ).run(now, engagementIdValue);
+      this.insertAudit(engagementIdValue, execution.operation_id, 'solution-ready', {
+        deliveryDigest: deliveries[0]!.digest,
+        artifacts: input.artifacts.map(({ role, family, name, digest }) => ({ role, family, name, digest })),
+      }, now);
+    })();
+  }
+
+  listSolutionArtifacts(engagement: NativeOperationId): NativeSolutionArtifactRow[] {
+    return (this.store.db.prepare(
+      `SELECT * FROM native_solution_artifacts WHERE engagement_id = ? ORDER BY role, name, record_digest`,
+    ).all(engagement) as RawSolutionArtifact[]).map(solutionArtifactRow);
+  }
+
+  getSolutionArtifactBytes(input: {
+    readonly engagementId: NativeOperationId;
+    readonly role: NativeSolutionArtifactRole;
+    readonly digest: `sha256:${string}`;
+  }): Uint8Array | undefined {
+    const row = this.store.db.prepare(
+      `SELECT exact_bytes FROM native_solution_artifacts
+        WHERE engagement_id = ? AND role = ? AND record_digest = ?`,
+    ).get(input.engagementId, input.role, input.digest) as { exact_bytes: Uint8Array } | undefined;
+    return row === undefined ? undefined : exactBytes(row.exact_bytes);
+  }
+
+  listPendingPublications(): NativePublicationRow[] {
+    return (this.store.db.prepare(
+      `SELECT * FROM native_publication_outbox WHERE status = 'intent' ORDER BY created_at, publication_key`,
+    ).all() as RawPublication[]).map(publicationRow);
+  }
+
+  recordPublicationPublished(
+    key: NativeOperationId,
+    input: {
+      readonly location: string;
+      readonly sequence: string;
+      readonly entryDigest: `sha256:${string}`;
+    },
+  ): void {
+    if (input.location.length === 0 || input.sequence.length === 0) {
+      throw new TypeError('published solution location and sequence must not be empty');
+    }
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      const publication = this.store.db.prepare(
+        `SELECT * FROM native_publication_outbox WHERE publication_key = ?`,
+      ).get(key) as RawPublication | undefined;
+      if (publication === undefined) throw new NativeOperatorStateConflictError(`unknown solution publication ${key}`);
+      if (publication.status === 'published') return;
+      this.store.db.prepare(
+        `UPDATE native_publication_outbox SET status = 'published', detail_json = ?, updated_at = ?
+          WHERE publication_key = ?`,
+      ).run(detailJson(input), now, key);
+      this.insertAudit(publication.engagement_id, null, 'solution-record-published', {
+        publicationKey: key,
+        role: publication.role,
+        recordDigest: publication.record_digest,
+        ...input,
+      }, now);
+      const remaining = this.store.db.prepare(
+        `SELECT COUNT(*) AS count FROM native_publication_outbox
+          WHERE engagement_id = ? AND status <> 'published'`,
+      ).get(publication.engagement_id) as { count: number };
+      if (remaining.count === 0) {
+        this.store.db.prepare(
+          `UPDATE native_engagements SET state = 'solution-published', updated_at = ?
+            WHERE engagement_id = ? AND state = 'solution-ready'`,
+        ).run(now, publication.engagement_id);
+      }
+    })();
+  }
+
+  beginSolutionSettlement(
+    engagementIdValue: NativeOperationId,
+  ): { readonly kind: 'created' | 'matching'; readonly operationId: NativeOperationId } {
+    const now = this.timestamp();
+    return this.store.db.transaction(() => {
+      const engagement = this.store.db.prepare(`SELECT * FROM native_engagements WHERE engagement_id = ?`)
+        .get(engagementIdValue) as RawEngagement | undefined;
+      if (engagement === undefined || engagement.attempt_uri === null) {
+        throw new NativeOperatorStateConflictError('solution settlement requires a persisted marketplace Attempt');
+      }
+      const delivery = this.store.db.prepare(
+        `SELECT record_digest FROM native_solution_artifacts
+          WHERE engagement_id = ? AND role = 'delivery'`,
+      ).get(engagementIdValue) as { record_digest: `sha256:${string}` } | undefined;
+      if (delivery === undefined) throw new NativeOperatorStateConflictError('solution settlement requires exact Delivery bytes');
+      const operationId = solutionSettlementId({
+        attempt: engagement.attempt_uri,
+        deliveryDigest: delivery.record_digest,
+      });
+      const existing = this.store.db.prepare(`SELECT * FROM native_operations WHERE operation_id = ?`)
+        .get(operationId) as RawOperation | undefined;
+      if (existing !== undefined) return { kind: 'matching' as const, operationId };
+      if (engagement.state !== 'solution-published') {
+        throw new NativeOperatorStateConflictError(`cannot begin solution settlement from ${engagement.state}`);
+      }
+      this.store.db.prepare(
+        `INSERT INTO native_operations
+          (operation_id, engagement_id, kind, status, detail_json, created_at, updated_at)
+         VALUES (?, ?, 'solution-settlement', 'intent', ?, ?, ?)`,
+      ).run(operationId, engagementIdValue, detailJson({
+        attempt: engagement.attempt_uri,
+        deliveryDigest: delivery.record_digest,
+      }), now, now);
+      this.store.db.prepare(
+        `UPDATE native_engagements SET state = 'solution-settlement-pending', updated_at = ?
+          WHERE engagement_id = ?`,
+      ).run(now, engagementIdValue);
+      this.insertAudit(engagementIdValue, operationId, 'solution-settlement-intent', {
+        attempt: engagement.attempt_uri,
+        deliveryDigest: delivery.record_digest,
+      }, now);
+      return { kind: 'created' as const, operationId };
+    })();
   }
 
   getEngagement(id: NativeOperationId): NativeEngagementRow | undefined {
