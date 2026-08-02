@@ -8,6 +8,7 @@ import type {
 } from '../corpus/types.js';
 import { ENGAGEMENT_LEDGER_SCHEMA } from '../daemon/engagement-ledger.js';
 import { NATIVE_DISCOVERY_SCHEMA } from '../daemon/native-discovery.js';
+import { NATIVE_OPERATOR_STATE_SCHEMA } from '../daemon/native-operator-state.js';
 import {
   PROJECTOR_CANONICAL_JOURNAL_SCHEMA,
   PROJECTOR_CURSOR_SCHEMA,
@@ -610,6 +611,7 @@ export class Store {
     this.db.exec(PHASE_RUNS_SCHEMA);
     this.db.exec(ENGAGEMENT_LEDGER_SCHEMA);
     this.db.exec(NATIVE_DISCOVERY_SCHEMA);
+    this.db.exec(NATIVE_OPERATOR_STATE_SCHEMA);
     this.db.exec(PROJECTOR_CURSOR_SCHEMA);
     this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
     this.db.exec(PROJECTOR_CANONICAL_JOURNAL_SCHEMA);
