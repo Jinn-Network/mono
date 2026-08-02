@@ -17,6 +17,13 @@
   plugin and marketplace product designs (queued); any physical move, rename, or repository
   creation; canonical-doc rewrites (follow-up); publish-path implementation (follow-up)
 
+**Live topology:** this specification owns the platform boundary and tier semantics. Current
+package membership, classification, paths, dependencies, release groups, public surfaces,
+ownership, and transition state come from the catalog-derived
+[generated platform topology](../../../architecture/generated/platform-topology.md). Fixed
+inventory figures below that describe the 2026-07-30 research are historical context, not current
+package authority.
+
 ## 1. Problem statement
 
 The stack designs of 2026-07-23 → 2026-07-28 produced a coherent layered architecture, but its
@@ -31,11 +38,12 @@ governing ideas ended up spread across four places with no owning home:
 - and the **functional boundary** — what Jinn owes anyone who builds on it — existed only as an
   unratified conversation framing ("four contracts") produced without repository access.
 
-Meanwhile the repository's true topology went unstated (all figures reproduced at stack head
+Meanwhile the repository's true topology went unstated (this paragraph is a historical research
+snapshot reproduced at stack head
 `82e20064a`): 13,795 tracked files of which a disconnected host fork (`apps/jinn-agent`, 6,063
 files) and an inert archive (`legacy/`, 1,918 files) are 58%; two disjoint dependency regimes
-(a fully guarded stack, an unguarded product estate); no root workspace; and 45 platform
-packages dressed for npm that no workflow publishes.
+(a fully guarded stack, an unguarded product estate); no root workspace; and a then-current
+platform package set dressed for npm that no workflow published.
 
 This specification is the owning home for the platform boundary and the architecture principles
 behind it. Where it restates a rule another approved design owns (sealing, dependency direction,
@@ -171,12 +179,11 @@ mechanical rules: nothing in tiers 1–3 imports it (enforced by the dependency 
 guards), and **no tier-1–3 kit, guard, or fixture references it** — the checkable core of the
 broader intent that no first-party product's behavior is ever treated as normative.
 
-The test describes a line the repository has already mostly drawn: the 45 stack packages pass
-**every clause except schema/kit publication** today (guards, kits in CI, no product imports or
-identifiers — a handful of prose comments and test names mention products at documented seams;
-publication is gated on follow-up 1), and the legacy product estate (`client/`,
-`packages/{core,layer,plugin,sdk,indexer}`) fails the tests outright (no guards,
-product-coupled, and the repository's single cross-tree import violation). Two honesty notes:
+The test describes a line the repository has already mostly drawn. The current generated
+[`platform-v1` view](../../../architecture/generated/platform-topology.md#release-and-trusted-publishers)
+contains 50 core candidates with guards and kits; receipt-gated canary publication is implemented,
+while stable publication remains blocked on live `jinn.network` hosting verification. The catalog's
+legacy/product and transition entries remain outside that release set. Two honesty notes:
 the "third party could verify" property has a first-party proxy today — kits passing in Jinn's
 own CI — and its outstanding falsifier is the first external implementation, which does not yet
 exist; and kit **fixtures must be derivable from the specification text or the in-tree
@@ -223,14 +230,13 @@ builder would, so its departure changes nothing about how it builds. **What it c
 that the component *should* leave — that remains a decision (audience, release cadence,
 maintenance), recorded per-tree in §7.
 
-**The gate's enabling precondition is the stack publish path**: canary + stable publishing for
-the 45 platform packages (topological ordering over the 204 stack-internal `portal:` links —
-218 repo-wide — version patching, per-package npm trusted-publisher registration). Today none
-of the 45 is published —
-their `0.1.0` pins resolve only through in-repo portals built from source in CI — so nothing
-platform-dependent can pass gate item 1. The publish path is already a precondition for the
-queued daemon-composition and plugin sessions (npm consumption); it is one investment unlocking
-three workstreams. Recorded as a follow-up (§9), not designed here.
+**The gate's enabling precondition is the stack publish path.** It now derives the exact 50-package
+`platform-v1` set and runtime waves from the catalog and manifests, runs same-run verification,
+and publishes only those exact receipt-bound tarballs in the canary lane. Stable publication is
+still mechanically disabled pending verified live `jinn.network` profile hosting, so stable npm
+consumption does not yet satisfy gate item 1. The generated
+[release and topology view](../../../architecture/generated/platform-topology.md#release-and-trusted-publishers)
+is the current authority for this precondition.
 
 **One precedent of the gate's shape: Autopilot** — extracted to
 [`Jinn-Network/autopilot`](https://github.com/Jinn-Network/autopilot), consuming the published
@@ -238,22 +244,22 @@ three workstreams. Recorded as a follow-up (§9), not designed here.
 ([§6.7](./2026-07-23-autopilot-oss-maintainer-product-design.md)) independently specified the
 same gate ("self-contained and passes a non-Jinn repository fixture"). Stated precisely: this
 proves the gate's *mechanics* against the **legacy** published packages, not against the
-platform proper — no component has yet passed the gate against the 45 stack packages, and none
-can until follow-up 1 lands. The vendored `packages/autopilot` copy is residue; removal is
+platform proper — no component has yet passed the gate against a stable published `platform-v1`
+set, and none can until the hosting blocker clears. The vendored `packages/autopilot` copy is residue; removal is
 tracked in [#2252](https://github.com/Jinn-Network/mono/issues/2252).
 
 ## 7. Per-tree dispositions
 
+Cataloged manifest entries are not enumerated here. Their live classification, tier, release
+group, stability, and transition/sunset details are in the generated
+[inventory and transition report](../../../architecture/generated/platform-topology.md#transitional-and-deprecated-entries).
+That view preserves this specification's semantics: tiers 1–3 remain the platform; tier 4 remains
+product; legacy and transitional entries follow their cataloged cutover conditions. The table below
+retains only non-catalog repository-tree dispositions from the ratified decision.
+
 | Tree | Classification | Disposition | Trigger |
 | --- | --- | --- | --- |
-| `packages/task-execution`, `packages/evidence`, `packages/trust`, `packages/discovery`, `packages/benchmarking` | platform, tiers 1–3 | stay — the platform kernel | — |
-| `packages/marketplace` | platform, tier 3 (the binding to the network) | stay | — |
 | `contracts/` | **network** (the venue) | stay; a per-audit contracts split (the OLAS pattern) is explicitly deferred — OLAS's six-way split forced a synthetic umbrella repo to reconstruct the whole | external audit, if ever |
-| `client/` | product (the operator application) | stays in-repo *as a tier-4 product*; its recomposition onto the stack is the queued operator-daemon session's subject; extraction candidate only after that cutover | extraction gate green post-cutover |
-| `packages/core`, `packages/layer`, `packages/plugin` | product-support with overloaded names (plugin kernel, local runtime, evidence compatibility) | disposition owned by the queued plugin product session — candidates to dissolve or re-derive onto the evidence applications | plugin session |
-| `packages/sdk` | legacy SolverNet SDK | deprecated in place; its superseded surfaces retire as the stack SDKs land (benchmarking already declares `sdk/src/benchmarking.ts` superseded) | daemon + marketplace-surfaces sessions |
-| `packages/indexer`, `packages/indexer-enrichment` | splits: the projector role is tier 3 (aspirationally — today it fails the tier test, `portal:`-depending on the deprecated legacy `sdk`); the explorer SPA is tier 4 (out) | split *logically now* — naming and a guard; the projector role is **re-derived onto the stack** (`packages/marketplace/projector` is projector #1) as `sdk` retires; physically later if ever | coupled to the `sdk` retirement (daemon + marketplace-surfaces sessions), then the extraction gate |
-| `packages/autopilot` | tier-4 product, **already extracted** to `Jinn-Network/autopilot` | remove the vendored copy | [#2252](https://github.com/Jinn-Network/mono/issues/2252) (open) |
 | `apps/jinn-agent` | external host fork (6,063 files, 44% of tracked files, zero `@jinn-network` **package-dependency** edges — but three operational inbound edges, see note) | **leaves first** — as a *small extraction with a three-item checklist*, not a blind delete: (1) relocate the plugin source-of-truth (`jinn-plugin-split.yml` mirrors `apps/jinn-agent/plugins/jinn` and declares it the editing home of `Jinn-Network/jinn-plugin`); (2) re-home `layer-runtime.json` (read by `verify-layer-stable-version.mjs:58`, the layer publish gate); (3) re-home the `cold-stock-e2e` product gate (a `jinn-agent-ci.yml` job gating `client/` and `packages/{plugin,core,layer}` changes) | own issue carrying the checklist |
 | `legacy/` | archive (1,918 files, zero inbound edges; one comment-only reference) | delete; git history is the archive | immediate; own chore issue |
 | `apps/broadcast-bot`, `apps/website`, `deploy/`, `.github/`, `docs/`, `spec/`, `log/`, `growth/`, `examples/`, `scripts/`, `scratchpad/` | repository operations and record | stay | — |
@@ -329,13 +335,16 @@ It survives as the **functional read for newcomers** (§4) and in the About-bloc
 tier test, §5, is the gating instrument). The naming refinement it produced — "Request
 Evidence" means discover-and-retrieve; commissioning evidence is Request Work — is preserved.
 
-### 8.4 What this session verified about the current tree
+### 8.4 Historical verification snapshot
 
-Reproduced, not inherited, at stack head `82e20064a`: 13,795 tracked files; two disjoint
+The following figures were reproduced, not inherited, at stack head `82e20064a` on 2026-07-30;
+they are preserved as evidence for the decision, not as live topology. Current package facts are
+in the [generated platform topology](../../../architecture/generated/platform-topology.md).
+At that historical head: 13,795 tracked files; two disjoint
 dependency regimes with zero edges between them; exactly one cross-tree relative-import
 violation in the repository (`client/scripts/distill-run-manifest-live.ts` →
 `packages/layer/src`), sitting in the unguarded regime; 5 packages actually published (client
-0.2.2, core/plugin/jinn-layer 0.1.2, sdk 0.1.1); 45 stack packages publishable-but-unpublished
+0.2.2, core/plugin/jinn-layer 0.1.2, sdk 0.1.1); the then-current stack was publishable-but-unpublished
 resolving through 204 stack-internal `portal:` links (218 repo-wide); 36 CI workflows of which
 18 are repo-global; 24 architecture-guard scripts.
 
@@ -347,12 +356,11 @@ triggers wait on their triggers.
 
 Follow-ups (recorded once; none block this specification):
 
-1. **Stack publish path** — canary + stable for the 45 platform packages; topological
-   ordering; trusted-publisher registrations. Precondition for the extraction gate, the
-   daemon-composition session, and the plugin session. **Trigger: opened no later than the
-   start of the operator-daemon composition session** — deferring it indefinitely would keep
-   every boundary claim conveniently untestable, which is itself the failure mode. (`feat`,
-   own issue.)
+1. **Stack publish path** — implemented for same-run verified canaries over the catalog-derived
+   50-package `platform-v1` set. Stable publication remains intentionally disabled until live
+   `jinn.network` profile hosting verification exists. Current package order, trusted-publisher
+   registrations, and policy are generated in the
+   [release view](../../../architecture/generated/platform-topology.md#release-and-trusted-publishers).
 2. **Remove `apps/jinn-agent`** — a small extraction against the three-item checklist in §7
    (plugin source-of-truth relocation, `layer-runtime.json` re-homing, cold-stock gate
    re-homing), not a blind delete. (`chore`, own issue carrying the checklist.)

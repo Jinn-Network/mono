@@ -1,0 +1,508 @@
+#!/usr/bin/env node
+
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+import { validateArchitectureControl } from './architecture-control.mjs';
+import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
+import {
+  PLATFORM_CATALOG_PATH,
+  loadCatalogPackages,
+  loadPlatformCatalog,
+} from './platform-catalog.mjs';
+import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
+import { buildRegistrationList } from './stack-trusted-publishers.mjs';
+
+const GENERATED_DIRECTORY = 'architecture/generated';
+const GENERATED_FILES = ['platform-topology.md', 'platform-topology.v1.json'];
+const EDGE_SECTIONS = {
+  runtime: 'dependencies',
+  optional: 'optionalDependencies',
+  peer: 'peerDependencies',
+};
+const LIVE_TOPOLOGY_DOCS = [
+  'architecture/README.md',
+  'docs/runbooks/jinn-network-profile-hosting.md',
+  'docs/runbooks/stack-npm-publishing.md',
+  'docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md',
+  'docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md',
+  'docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md',
+];
+const HISTORICAL_TOPOLOGY_DOCS = [
+  'docs/superpowers/plans/2026-07-30-stack-publish-path.md',
+  'log/decisions/2026-07-30-platform-boundary-and-topology.md',
+];
+const OBSOLETE_EVIDENCE_LINKS = [
+  ['docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md', '../../../packages/evidence-protocol/'],
+  ['docs/superpowers/specs/2026-07-24-jinn-execution-recorder-design.md', '../../../packages/evidence-protocol/'],
+  ['docs/superpowers/specs/2026-07-24-jinn-execution-recorder-design.md', '../../../packages/evidence-repository/'],
+];
+
+function sortStrings(values) {
+  return [...values].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+function walkFiles(directory, prefix = '') {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === 'node_modules') continue;
+    const absolutePath = join(directory, entry.name);
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) files.push(...walkFiles(absolutePath, relativePath));
+    else if (entry.isFile()) files.push({ absolutePath, relativePath });
+  }
+  return files.sort((left, right) => (
+    left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0
+  ));
+}
+
+function publicSelfIdentifyingClaims(repoRoot, packages) {
+  const claims = [];
+  const byIdentifier = new Map();
+  for (const pkg of packages) {
+    const visitedFiles = new Set();
+    for (const kind of ['schemas', 'profiles']) {
+      for (const root of pkg.catalog.publicSurface[kind]) {
+        const absoluteRoot = resolve(repoRoot, pkg.directory, root);
+        for (const file of walkFiles(absoluteRoot)) {
+          if (visitedFiles.has(file.absolutePath)) continue;
+          visitedFiles.add(file.absolutePath);
+          if (!file.relativePath.endsWith('.json')) continue;
+          let document;
+          try {
+            document = JSON.parse(readFileSync(file.absolutePath, 'utf8'));
+          } catch (error) {
+            throw new Error(
+              `${pkg.name}: malformed catalog-declared publicSurface.${kind} JSON ${root}/${file.relativePath}: ${error.message}`,
+            );
+          }
+          if (!document || typeof document !== 'object' || Array.isArray(document)) continue;
+          for (const field of ['$id', 'profile']) {
+            const identifier = document[field];
+            if (typeof identifier !== 'string' || !identifier.startsWith('https://jinn.network/')) continue;
+            const existing = byIdentifier.get(identifier);
+            const source = `${pkg.directory}/${root}/${file.relativePath}`;
+            if (existing) {
+              throw new Error(`duplicate public self-identifying claim ${identifier}: ${existing} and ${source}`);
+            }
+            byIdentifier.set(identifier, source);
+            claims.push({
+              field,
+              identifier,
+              kind,
+              package: pkg.name,
+              path: source,
+            });
+          }
+        }
+      }
+    }
+  }
+  return claims.sort((left, right) => (
+    left.identifier < right.identifier ? -1 : left.identifier > right.identifier ? 1 : 0
+  ));
+}
+
+function dependencyClosure(graph) {
+  const closure = {};
+  for (const name of sortStrings(graph.keys())) {
+    const found = new Set();
+    const visit = (node) => {
+      for (const dependency of graph.get(node) ?? []) {
+        if (found.has(dependency)) continue;
+        found.add(dependency);
+        visit(dependency);
+      }
+    };
+    visit(name);
+    closure[name] = sortStrings(found);
+  }
+  return closure;
+}
+
+function releaseGroupView(catalog, groupId) {
+  const definition = catalog.releaseGroups[groupId];
+  return {
+    ...definition,
+    packages: catalog.packages
+      .filter(({ releaseGroup }) => releaseGroup === groupId)
+      .map(({ name }) => name)
+      .sort(),
+  };
+}
+
+export function buildArchitectureReport(repoRoot) {
+  const root = resolve(repoRoot);
+  const catalog = loadPlatformCatalog(root);
+  const hydrated = loadCatalogPackages(root);
+  const catalogNames = new Set(hydrated.map(({ name }) => name));
+  const packageRecords = hydrated.map(({ catalog: pkg, manifest }) => ({
+    name: pkg.name,
+    path: pkg.path,
+    version: manifest.version,
+    domain: pkg.domain,
+    role: pkg.role,
+    tier: pkg.tier,
+    classification: pkg.classification,
+    stability: pkg.stability,
+    releaseGroup: pkg.releaseGroup,
+    publishPolicy: pkg.publishPolicy,
+    ownerGroup: pkg.ownerGroup,
+    requiredGateIds: pkg.requiredGateIds,
+    boundaryPolicy: pkg.boundaryPolicy,
+    publicSurface: pkg.publicSurface,
+    supersedes: pkg.supersedes,
+    replacedBy: pkg.replacedBy,
+    transition: pkg.transition ?? null,
+    dependencies: {
+      runtime: sortStrings(Object.keys(manifest.dependencies ?? {})),
+      optional: sortStrings(Object.keys(manifest.optionalDependencies ?? {})),
+      peer: sortStrings(Object.keys(manifest.peerDependencies ?? {})),
+    },
+  }));
+  const edges = packageRecords.flatMap((pkg) => Object.entries(EDGE_SECTIONS).flatMap(([kind]) => (
+    pkg.dependencies[kind]
+      .filter((dependency) => dependency !== pkg.name && catalogNames.has(dependency))
+      .map((dependency) => ({ from: pkg.name, kind, to: dependency }))
+  ))).sort((left, right) => (
+    left.from.localeCompare(right.from)
+      || left.to.localeCompare(right.to)
+      || left.kind.localeCompare(right.kind)
+  ));
+  const platformPackages = hydrated.filter(({ catalog: pkg }) => pkg.releaseGroup === 'platform-v1');
+  const platformGraph = buildDependencyGraph(platformPackages);
+  const platformReleaseGroup = catalog.releaseGroups['platform-v1'];
+  const platformNames = platformPackages.map(({ name }) => name).sort();
+  const experimental = releaseGroupView(catalog, 'experimental-environment-supply');
+  const packagesRoot = catalog.packages.filter(({ path }) => path.startsWith('packages/'));
+  const otherPackagesRoot = packagesRoot.filter(({ releaseGroup }) => (
+    !['platform-v1', 'experimental-environment-supply'].includes(releaseGroup)
+  ));
+  const publicSurfacePackages = packageRecords.map(({ name, path, releaseGroup, publicSurface }) => ({
+    name,
+    path,
+    releaseGroup,
+    schemas: publicSurface.schemas,
+    profiles: publicSurface.profiles,
+    fixtures: publicSurface.fixtures,
+    conformance: publicSurface.conformance,
+  }));
+  return {
+    schemaVersion: 1,
+    sources: {
+      catalog: PLATFORM_CATALOG_PATH,
+      codeowners: '.github/CODEOWNERS',
+      manifests: 'catalog package paths/package.json',
+    },
+    counts: {
+      inventory: catalog.packages.length,
+      packagesRootEntries: packagesRoot.length,
+      platformV1: platformNames.length,
+      experimentalEnvironmentSupply: experimental.packages.length,
+      otherPackagesRootEntries: otherPackagesRoot.length,
+      adjacentEntries: catalog.packages.length - packagesRoot.length,
+    },
+    releaseGroups: Object.fromEntries(Object.keys(catalog.releaseGroups).sort().map((groupId) => [
+      groupId,
+      releaseGroupView(catalog, groupId),
+    ])),
+    packages: packageRecords,
+    graph: {
+      edgeSections: EDGE_SECTIONS,
+      nodes: packageRecords.map(({ name }) => name).sort(),
+      edges,
+      platformV1: {
+        closure: dependencyClosure(platformGraph),
+        waves: topologicalWaves(platformGraph),
+      },
+    },
+    release: {
+      platformV1: {
+        packages: platformNames,
+        trustedPublishers: buildRegistrationList(root),
+        policy: {
+          publishPolicies: platformReleaseGroup.publishPolicies,
+          stackPublished: platformReleaseGroup.stackPublished,
+          canary: platformReleaseGroup.canary,
+          stable: platformReleaseGroup.stable,
+          stableBlocker: 'live https://jinn.network profile hosting verification',
+        },
+      },
+      experimentalEnvironmentSupply: experimental,
+    },
+    publicSurfaces: {
+      packages: publicSurfacePackages,
+      selfIdentifyingClaims: publicSelfIdentifyingClaims(root, hydrated),
+    },
+    ownership: validateArchitectureControl({ repoRoot: root }),
+    transitions: packageRecords.filter((pkg) => (
+      ['deprecated', 'transitional'].includes(pkg.stability)
+        || pkg.supersedes.length > 0
+        || pkg.replacedBy.length > 0
+    )).map(({
+      name, path, stability, releaseGroup, publishPolicy, supersedes, replacedBy, transition,
+    }) => ({
+      name,
+      path,
+      stability,
+      releaseGroup,
+      publishPolicy,
+      supersedes,
+      replacedBy,
+      transition,
+    })),
+  };
+}
+
+function cell(value) {
+  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) {
+    return '—';
+  }
+  const rendered = Array.isArray(value) ? value.join('<br>') : String(value);
+  return rendered.replaceAll('|', '\\|').replaceAll('\n', ' ');
+}
+
+function packageInventoryRows(packages) {
+  return packages.map((pkg) => [
+    pkg.name,
+    pkg.path,
+    pkg.domain,
+    pkg.tier,
+    pkg.classification,
+    pkg.role,
+    pkg.stability,
+    pkg.releaseGroup,
+    pkg.publishPolicy,
+    pkg.dependencies.runtime,
+    pkg.dependencies.optional,
+    pkg.dependencies.peer,
+  ].map(cell).join(' | ')).map((row) => `| ${row} |`);
+}
+
+export function renderArchitectureMarkdown(report) {
+  const lines = [
+    '<!-- GENERATED FILE — DO NOT EDIT. Run: node .github/scripts/generate-architecture.mjs -->',
+    '',
+    '# Generated platform topology',
+    '',
+    `Source authority: [\`${report.sources.catalog}\`](../platform-packages.v1.json) and each cataloged package manifest.`,
+    '',
+    '## Inventory',
+    '',
+    `The catalog contains **${report.counts.inventory}** entries: **${report.counts.platformV1}** \`platform-v1\` packages, **${report.counts.experimentalEnvironmentSupply}** disabled \`experimental-environment-supply\` packages, **${report.counts.otherPackagesRootEntries}** other entries below \`packages/**\`, and **${report.counts.adjacentEntries}** adjacent entries.`,
+    '',
+    '| Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |',
+    '| --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...packageInventoryRows(report.packages),
+    '',
+    '## Runtime dependency topology',
+    '',
+    'Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute edges. `devDependencies` never affect closure or publication order.',
+    '',
+    '| From | Kind | To |',
+    '| --- | --- | --- |',
+    ...report.graph.edges.map(({ from, kind, to }) => `| ${cell(from)} | ${kind} | ${cell(to)} |`),
+    '',
+    '### `platform-v1` runtime waves',
+    '',
+    ...report.graph.platformV1.waves.map((wave, index) => `${index + 1}. ${wave.map((name) => `\`${name}\``).join(', ')}`),
+    '',
+    '### `platform-v1` transitive closure',
+    '',
+    '| Package | Runtime closure |',
+    '| --- | --- |',
+    ...Object.entries(report.graph.platformV1.closure).map(([name, closure]) => (
+      `| ${cell(name)} | ${cell(closure)} |`
+    )),
+    '',
+    '## Release and trusted publishers',
+    '',
+    '| Release group | Packages | Publish policies | Stack published | Canary | Stable |',
+    '| --- | ---: | --- | --- | --- | --- |',
+    ...Object.entries(report.releaseGroups).map(([groupId, group]) => (
+      `| ${groupId} | ${group.packages.length} | ${cell(group.publishPolicies)} | ${group.stackPublished} | ${group.canary} | ${group.stable} |`
+    )),
+    '',
+    `The exact ${report.release.platformV1.packages.length}-package trusted-publisher set is \`platform-v1\`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live \`jinn.network\` profile hosting verification passes.** The ${report.release.experimentalEnvironmentSupply.packages.length} experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.`,
+    '',
+    '| Package | Workflow | Environment field |',
+    '| --- | --- | --- |',
+    ...report.release.platformV1.trustedPublishers.map((registration) => (
+      `| ${cell(registration.package)} | ${registration.workflow} | blank |`
+    )),
+    '',
+    '## Public surfaces and identity claims',
+    '',
+    '| Package | Release group | Schemas | Profiles | Fixtures | Conformance exports |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...report.publicSurfaces.packages.map((pkg) => (
+      `| ${cell(pkg.name)} | ${pkg.releaseGroup} | ${cell(pkg.schemas)} | ${cell(pkg.profiles)} | ${cell(pkg.fixtures)} | ${cell(pkg.conformance)} |`
+    )),
+    '',
+    '### Self-identifying `jinn.network` claims',
+    '',
+    '| Identifier | Field | Kind | Package | Source |',
+    '| --- | --- | --- | --- | --- |',
+    ...report.publicSurfaces.selfIdentifyingClaims.map((claim) => (
+      `| ${cell(claim.identifier)} | \`${claim.field}\` | ${claim.kind} | ${cell(claim.package)} | ${cell(claim.path)} |`
+    )),
+    '',
+    '## Architecture-control ownership',
+    '',
+    `Task 6's validator reports ${report.ownership.paths.length} controlled paths. Required effective owners: ${report.ownership.requiredOwners.map((owner) => `\`${owner}\``).join(' ')}.`,
+    'The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.',
+    '',
+    '| Category | Controlled paths |',
+    '| --- | ---: |',
+    ...Object.entries(report.ownership.counts).map(([category, count]) => `| ${category} | ${count} |`),
+    '',
+    '## Transitional and deprecated entries',
+    '',
+    '| Package | Path | Stability | Release | Supersedes | Replaced by | Status | Reason | Sunset condition |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...report.transitions.map((entry) => (
+      `| ${cell(entry.name)} | ${cell(entry.path)} | ${entry.stability} | ${entry.releaseGroup} / ${entry.publishPolicy} | ${cell(entry.supersedes)} | ${cell(entry.replacedBy)} | ${cell(entry.transition?.status)} | ${cell(entry.transition?.reason)} | ${cell(entry.transition?.sunsetCondition)} |`
+    )),
+    '',
+  ];
+  return lines.join('\n');
+}
+
+export function generateArchitectureArtifacts(repoRoot) {
+  const report = buildArchitectureReport(repoRoot);
+  return {
+    'platform-topology.md': renderArchitectureMarkdown(report),
+    'platform-topology.v1.json': `${JSON.stringify(JSON.parse(canonicalJsonBytes(report)), null, 2)}\n`,
+  };
+}
+
+function unexpectedGeneratedFiles(outDir, expected) {
+  return readdirSync(outDir, { withFileTypes: true })
+    .filter((entry) => !entry.isFile() || !expected.has(entry.name))
+    .map(({ name }) => name)
+    .sort();
+}
+
+export function writeGeneratedArchitecture({ repoRoot, outDir = resolve(repoRoot, GENERATED_DIRECTORY) }) {
+  const output = resolve(outDir);
+  const artifacts = generateArchitectureArtifacts(repoRoot);
+  mkdirSync(output, { recursive: true });
+  const unexpected = unexpectedGeneratedFiles(output, new Set(Object.keys(artifacts)));
+  if (unexpected.length > 0) throw new Error(`unexpected generated architecture file: ${unexpected[0]}`);
+  for (const [filename, bytes] of Object.entries(artifacts)) {
+    writeFileSync(join(output, filename), bytes, 'utf8');
+  }
+  return { files: Object.keys(artifacts).sort() };
+}
+
+export function checkGeneratedArchitecture({ repoRoot, trackedDir = resolve(repoRoot, GENERATED_DIRECTORY) }) {
+  const tracked = resolve(trackedDir);
+  const expectedNames = new Set(GENERATED_FILES);
+  const actualNames = readdirSync(tracked, { withFileTypes: true }).map(({ name }) => name).sort();
+  const unexpected = actualNames.filter((name) => !expectedNames.has(name));
+  if (unexpected.length > 0) throw new Error(`unexpected generated architecture file: ${unexpected[0]}`);
+  const temporary = mkdtempSync(join(tmpdir(), 'jinn-generated-architecture-check-'));
+  try {
+    writeGeneratedArchitecture({ repoRoot, outDir: temporary });
+    for (const filename of GENERATED_FILES) {
+      let actual;
+      try {
+        actual = readFileSync(join(tracked, filename));
+      } catch {
+        throw new Error(`generated architecture drift: ${filename} is missing`);
+      }
+      const expected = readFileSync(join(temporary, filename));
+      if (!actual.equals(expected)) throw new Error(`generated architecture drift: ${filename}`);
+    }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  return { files: [...GENERATED_FILES] };
+}
+
+function source(repoRoot, path) {
+  return readFileSync(resolve(repoRoot, ...path.split('/')), 'utf8');
+}
+
+export function architectureDocumentationViolations(repoRoot) {
+  const root = resolve(repoRoot);
+  const violations = [];
+  for (const path of LIVE_TOPOLOGY_DOCS) {
+    const text = source(root, path);
+    if (!text.includes('architecture/generated/platform-topology.md')) {
+      violations.push(`${path}: must link to generated platform topology`);
+    }
+  }
+  for (const path of [
+    'docs/runbooks/stack-npm-publishing.md',
+    'docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md',
+  ]) {
+    const text = source(root, path);
+    if (/\b45 (?:platform |stack )?packages?\b/iu.test(text)) {
+      violations.push(`${path}: contains stale live 45-package authority`);
+    }
+    if (text.includes('STACK_ROOTS')) violations.push(`${path}: contains retired STACK_ROOTS authority`);
+  }
+  const evidence = source(root, 'docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md');
+  if (evidence.includes('The consolidated eight-package foundation already contains:')) {
+    violations.push('docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md: contains a hand-maintained package inventory');
+  }
+  const discovery = source(root, 'docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md');
+  if (discovery.includes('packages/discovery/\n  protocol/')) {
+    violations.push('docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md: contains a hand-maintained package inventory');
+  }
+  const profileRunbook = source(root, 'docs/runbooks/jinn-network-profile-hosting.md');
+  if (profileRunbook.includes("PROFILE_SOURCE_DIRECTORIES") || profileRunbook.includes('walking that directory')) {
+    violations.push('docs/runbooks/jinn-network-profile-hosting.md: contains retired directory-walker rationale');
+  }
+  for (const [path, obsolete] of OBSOLETE_EVIDENCE_LINKS) {
+    if (source(root, path).includes(obsolete)) violations.push(`${path}: obsolete evidence path ${obsolete}`);
+  }
+  for (const path of HISTORICAL_TOPOLOGY_DOCS) {
+    const text = source(root, path);
+    if (!text.includes('Historical snapshot (2026-07-30)')
+      || !text.includes('architecture/generated/platform-topology.md')) {
+      violations.push(`${path}: requires a dated historical snapshot notice and live topology link`);
+    }
+  }
+  return violations.sort();
+}
+
+function parseArgs(argv) {
+  const parsed = { repoRoot: process.cwd(), check: false };
+  for (let index = 0; index < argv.length; index += 1) {
+    const flag = argv[index];
+    if (flag === '--check') parsed.check = true;
+    else if (flag === '--root' || flag === '--out') {
+      const value = argv[index + 1];
+      if (!value) throw new Error(`${flag} requires a value`);
+      if (flag === '--root') parsed.repoRoot = value;
+      else parsed.outDir = value;
+      index += 1;
+    } else throw new Error(`unknown argument: ${flag}`);
+  }
+  return parsed;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const options = parseArgs(process.argv.slice(2));
+    const outDir = options.outDir ?? resolve(options.repoRoot, GENERATED_DIRECTORY);
+    const result = options.check
+      ? checkGeneratedArchitecture({ repoRoot: options.repoRoot, trackedDir: outDir })
+      : writeGeneratedArchitecture({ repoRoot: options.repoRoot, outDir });
+    process.stdout.write(`${options.check ? 'checked' : 'wrote'} ${result.files.length} generated architecture files in ${basename(outDir)}\n`);
+  } catch (error) {
+    process.stderr.write(`architecture generation failed: ${error.message}\n`);
+    process.exitCode = 1;
+  }
+}

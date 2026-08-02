@@ -1,0 +1,240 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { test } from 'node:test';
+
+import { validateArchitectureControl } from './architecture-control.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
+import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+
+const implementation = import('./generate-architecture.mjs');
+const repoRoot = resolve(import.meta.dirname, '../..');
+
+test('machine view covers the exact catalog split and manifest-owned dependency kinds', async () => {
+  const { buildArchitectureReport } = await implementation;
+  const report = buildArchitectureReport(repoRoot);
+
+  assert.deepEqual(report.counts, {
+    adjacentEntries: 4,
+    experimentalEnvironmentSupply: 7,
+    inventory: 69,
+    otherPackagesRootEntries: 8,
+    packagesRootEntries: 65,
+    platformV1: 50,
+  });
+  assert.equal(report.packages.length, 69);
+  assert.deepEqual(
+    report.packages.map(({ path }) => path),
+    [...report.packages.map(({ path }) => path)].sort(),
+  );
+  const evidence = report.packages.find(({ name }) => name === '@jinn-network/evidence-protocol');
+  assert.deepEqual(
+    Object.keys(evidence).sort(),
+    [
+      'boundaryPolicy', 'classification', 'dependencies', 'domain', 'name', 'ownerGroup',
+      'path', 'publicSurface', 'publishPolicy', 'releaseGroup', 'replacedBy', 'requiredGateIds',
+      'role', 'stability', 'supersedes', 'tier', 'transition', 'version',
+    ],
+  );
+  assert.deepEqual(Object.keys(evidence.dependencies).sort(), ['optional', 'peer', 'runtime']);
+  assert.equal('dev' in evidence.dependencies, false);
+});
+
+test('runtime graph preserves dependency kinds, excludes dev-only edges, and records closure and waves', async () => {
+  const { buildArchitectureReport } = await implementation;
+  const report = buildArchitectureReport(repoRoot);
+
+  assert.deepEqual(report.graph.edgeSections, {
+    optional: 'optionalDependencies',
+    peer: 'peerDependencies',
+    runtime: 'dependencies',
+  });
+  assert.ok(report.graph.edges.every(({ kind }) => ['optional', 'peer', 'runtime'].includes(kind)));
+  assert.equal(report.graph.edges.some(({ from, to }) => (
+    from === '@jinn-network/benchmarking-run'
+      && to === '@jinn-network/evidence-protocol'
+  )), false, 'a dev-only dependency must not enter generated architecture order');
+  assert.deepEqual(report.graph.platformV1.waves, [
+    ['@jinn-network/evidence-protocol', '@jinn-network/task-execution-protocol', '@jinn-network/trust-core'],
+    [
+      '@jinn-network/benchmarking-records', '@jinn-network/evidence-derivation',
+      '@jinn-network/evidence-repository', '@jinn-network/evidence-trajectory',
+      '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-profiles', '@jinn-network/trust-resolve',
+    ],
+    [
+      '@jinn-network/attestation-issuer', '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-interop', '@jinn-network/benchmarking-run',
+      '@jinn-network/benchmarking-testing', '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-publication', '@jinn-network/evidence-repository-ipfs',
+      '@jinn-network/evidence-repository-oci', '@jinn-network/evidence-trace-decode',
+      '@jinn-network/execution-recorder', '@jinn-network/marketplace-binding',
+      '@jinn-network/record-discovery-client', '@jinn-network/record-discovery-facts-benchmarking',
+      '@jinn-network/record-discovery-facts-task-execution', '@jinn-network/record-discovery-facts-trust',
+      '@jinn-network/record-discovery-serve', '@jinn-network/record-discovery-testing',
+      '@jinn-network/task-execution-supervisor', '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-testing',
+    ],
+    [
+      '@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-contribution',
+      '@jinn-network/evidence-retrieval', '@jinn-network/execution-recorder-bridge',
+      '@jinn-network/marketplace-projector', '@jinn-network/record-discovery-facts-evidence',
+      '@jinn-network/record-discovery-source-evidence-journal',
+      '@jinn-network/record-discovery-transport-http', '@jinn-network/task-execution-launchers',
+    ],
+    [
+      '@jinn-network/benchmarking-marketplace', '@jinn-network/evidence-local-runtime',
+      '@jinn-network/marketplace-venue-base', '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-evaluation-harness',
+    ],
+    [
+      '@jinn-network/marketplace-pipeline', '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-testing',
+    ],
+    ['@jinn-network/marketplace-testing'],
+  ]);
+  assert.equal(Object.keys(report.graph.platformV1.closure).length, 50);
+  assert.deepEqual(
+    report.graph.platformV1.closure['@jinn-network/evidence-protocol'],
+    [],
+  );
+  assert.deepEqual(
+    new Set(report.graph.platformV1.waves.flat()),
+    new Set(report.release.platformV1.packages),
+  );
+});
+
+test('release, public-surface, ownership, and transition views reuse their canonical authorities', async () => {
+  const { buildArchitectureReport } = await implementation;
+  const report = buildArchitectureReport(repoRoot);
+  const expectedPlatform = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' })
+    .map(({ name }) => name)
+    .sort();
+
+  assert.deepEqual(report.release.platformV1.packages, expectedPlatform);
+  assert.deepEqual(
+    report.release.platformV1.trustedPublishers.map(({ package: name }) => name),
+    expectedPlatform,
+  );
+  assert.deepEqual(report.release.platformV1.policy, {
+    canary: true,
+    publishPolicies: ['canary-only'],
+    stable: false,
+    stableBlocker: 'live https://jinn.network profile hosting verification',
+    stackPublished: true,
+  });
+  assert.equal(report.release.experimentalEnvironmentSupply.packages.length, 7);
+  assert.deepEqual(report.release.experimentalEnvironmentSupply.publishPolicies, ['disabled']);
+  assert.ok(report.publicSurfaces.packages.some(({ name, schemas }) => (
+    name === '@jinn-network/evidence-trajectory' && schemas.includes('schemas')
+  )));
+  assert.equal(report.release.platformV1.packages.includes('@jinn-network/environment-record'), false);
+  assert.equal(report.release.platformV1.packages.includes('@jinn-network/environment-verification'), false);
+  assert.equal(new Set(report.publicSurfaces.selfIdentifyingClaims.map(({ identifier }) => identifier)).size,
+    report.publicSurfaces.selfIdentifyingClaims.length);
+  assert.ok(report.publicSurfaces.selfIdentifyingClaims.every(({ identifier }) => (
+    identifier.startsWith('https://jinn.network/')
+  )));
+  assert.deepEqual(report.ownership, validateArchitectureControl({ repoRoot }));
+  assert.equal(report.transitions.length, 8);
+  assert.ok(report.transitions.every(({ transition }) => (
+    transition.reason && transition.status && transition.sunsetCondition
+  )));
+});
+
+test('catalog-declared public identity extraction fails closed on malformed and duplicate claims', async (t) => {
+  const { buildArchitectureReport } = await implementation;
+  await t.test('malformed schema JSON', () => {
+    const catalog = fixtureCatalog();
+    catalog.packages[0].publicSurface.schemas = ['schemas'];
+    const root = fixtureRepo({ catalog });
+    try {
+      mkdirSync(join(root, catalog.packages[0].path, 'schemas'), { recursive: true });
+      writeFileSync(join(root, catalog.packages[0].path, 'schemas/broken.schema.json'), '{', 'utf8');
+      assert.throws(
+        () => buildArchitectureReport(root),
+        /malformed catalog-declared publicSurface\.schemas JSON schemas\/broken\.schema\.json/u,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  await t.test('duplicate profile identity', () => {
+    const catalog = fixtureCatalog();
+    catalog.packages[0].publicSurface.profiles = ['profiles'];
+    catalog.packages[1].publicSurface.profiles = ['profiles'];
+    const root = fixtureRepo({ catalog });
+    try {
+      for (const pkg of catalog.packages.slice(0, 2)) {
+        mkdirSync(join(root, pkg.path, 'profiles'), { recursive: true });
+        writeFileSync(
+          join(root, pkg.path, 'profiles/profile.json'),
+          '{"profile":"https://jinn.network/records/example/facts/v1"}\n',
+          'utf8',
+        );
+      }
+      assert.throws(
+        () => buildArchitectureReport(root),
+        /duplicate public self-identifying claim https:\/\/jinn\.network\/records\/example\/facts\/v1/u,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+test('generated JSON and Markdown are deterministic, portable, and expose every required section', async () => {
+  const { generateArchitectureArtifacts } = await implementation;
+  const first = generateArchitectureArtifacts(repoRoot);
+  const second = generateArchitectureArtifacts(repoRoot);
+  assert.deepEqual(first, second);
+  assert.deepEqual(Object.keys(first), ['platform-topology.md', 'platform-topology.v1.json']);
+  for (const bytes of Object.values(first)) {
+    assert.equal(bytes.includes(repoRoot), false);
+    assert.doesNotMatch(bytes, /generatedAt|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/u);
+  }
+  const parsed = JSON.parse(first['platform-topology.v1.json']);
+  assert.equal(`${JSON.stringify(parsed, null, 2)}\n`, first['platform-topology.v1.json']);
+  assert.match(first['platform-topology.md'], /^<!-- GENERATED FILE — DO NOT EDIT/mu);
+  for (const heading of [
+    '## Inventory', '## Runtime dependency topology', '## Release and trusted publishers',
+    '## Public surfaces and identity claims', '## Architecture-control ownership',
+    '## Transitional and deprecated entries',
+  ]) assert.ok(first['platform-topology.md'].includes(heading), heading);
+});
+
+test('check mode regenerates separately, byte-compares the exact tracked set, and rejects unknown drift', async () => {
+  const { checkGeneratedArchitecture, writeGeneratedArchitecture } = await implementation;
+  assert.deepEqual(checkGeneratedArchitecture({ repoRoot }), {
+    files: ['platform-topology.md', 'platform-topology.v1.json'],
+  });
+  const trackedDir = mkdtempSync(join(tmpdir(), 'jinn-architecture-tracked-'));
+  try {
+    writeGeneratedArchitecture({ repoRoot, outDir: trackedDir });
+    assert.deepEqual(checkGeneratedArchitecture({ repoRoot, trackedDir }), {
+      files: ['platform-topology.md', 'platform-topology.v1.json'],
+    });
+    writeFileSync(
+      join(trackedDir, 'platform-topology.md'),
+      `${readFileSync(join(trackedDir, 'platform-topology.md'), 'utf8')}drift\n`,
+    );
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /generated architecture drift: platform-topology\.md/u,
+    );
+    writeGeneratedArchitecture({ repoRoot, outDir: trackedDir });
+    writeFileSync(join(trackedDir, 'unknown.json'), '{}\n');
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /unexpected generated architecture file: unknown\.json/u,
+    );
+  } finally {
+    rmSync(trackedDir, { recursive: true, force: true });
+  }
+});
+
+test('live documentation converges on generated truth while dated records remain labeled snapshots', async () => {
+  const { architectureDocumentationViolations } = await implementation;
+  assert.deepEqual(architectureDocumentationViolations(repoRoot), []);
+});

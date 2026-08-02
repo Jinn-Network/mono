@@ -4,6 +4,11 @@
 
 **Status:** settled for the evidence substrate; updated after package consolidation
 
+**Live package view:** the catalog-derived [generated platform topology](../../../architecture/generated/platform-topology.md#inventory)
+is the current authority for evidence package membership, roles, paths, dependencies, release
+classification, and public surfaces. This dated design owns the role boundaries and semantics; it
+does not maintain a parallel package inventory.
+
 **Scope:** how evidence entrypoints and guarded source regions stratify, what each role owns, how
 the consolidated packages preserve those boundaries, and where the remaining primitives belong
 
@@ -106,33 +111,15 @@ imported by it.
 The plugin, not Autopilot, owns the Autopilot recording integration. Autopilot invokes the plugin;
 the plugin maps that execution into the producer-neutral recorder API.
 
-## 4. Implemented and remaining primitives
+## 4. Implemented primitives
 
-The consolidated eight-package foundation already contains:
-
-| Capability | Home |
-| --- | --- |
-| Evidence semantics and structural conformance | `evidence-protocol` |
-| Exact-byte repository contract and contract kit | `evidence-repository` |
-| Native filesystem repository binding | `evidence-repository/fs` |
-| OCI repository binding | `evidence-repository-oci` |
-| Catalog contracts and query API | `evidence-discovery` |
-| Announcement indexing pipeline | `evidence-discovery/indexer` |
-| Filesystem announcement journal | `evidence-discovery/journal` |
-| SQLite catalog binding | `evidence-catalog-sqlite` |
-| Execution producer | `execution-recorder` |
-| Evaluation/verification producer and injected DSSE signer port | `attestation-issuer` |
-| Local composition | `evidence-local-runtime` |
-
-The remaining designed work is:
-
-| Capability | Role | Intended home |
-| --- | --- | --- |
-| Repository size capabilities | Contract refinement | `evidence-repository` |
-| IPFS repository | Binding | `evidence-repository-ipfs` |
-| Public derivation | Pipeline | `evidence-derivation` |
-| `AnnouncementSink`, publication recovery, and reconciliation | Contract + pipeline | `evidence-publication` |
-| Durable publication journal | Binding | `evidence-publication/fs` |
+The current implemented evidence-domain packages and subpaths are recorded in the generated
+[inventory](../../../architecture/generated/platform-topology.md#inventory), with their
+manifest-derived dependency edges in the generated
+[runtime topology](../../../architecture/generated/platform-topology.md#runtime-dependency-topology).
+The role distinctions in §2–§3 remain normative even when one package exposes multiple guarded
+entrypoints. New implementation work changes the catalog and generated view atomically rather than
+adding another intended-home table here.
 
 A concrete public announcement medium is **not** designed by these documents. Publication defines
 the sink port and the shared recovery pipeline. A later medium profile and adapter must implement
@@ -143,23 +130,9 @@ resolution and trust policy remain higher-level concerns.
 
 ## 5. Directory and package rules
 
-Domain is a stable nesting axis, so all evidence packages live under `packages/evidence/`. Layer is
-not a directory axis.
-
-```text
-packages/evidence/
-├── protocol
-├── repository
-├── repository-oci
-├── repository-ipfs*     # future package
-├── discovery
-├── catalog-sqlite
-├── execution-recorder
-├── attestation-issuer
-├── derivation*          # future package
-├── publication*         # future package, including /fs
-└── local-runtime
-```
+Domain remains a stable nesting axis and layer is not a directory axis. The catalog's `evidence`
+domain entries in the generated [inventory](../../../architecture/generated/platform-topology.md#inventory)
+are the current directory and package view; this design does not freeze a second tree listing.
 
 The repository asserts this structure through:
 

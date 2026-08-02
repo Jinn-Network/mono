@@ -157,15 +157,13 @@ the operator's seat.
 
 ## 5. Stack coverage and usage disciplines
 
-The runtime consumes five of the six package trees, each in its designed role:
-task-execution (all nine packages — the backend-local tree embedded, profiles for evaluation
-specs, the evaluation harness in the evaluator loop), marketplace (all four), discovery
-(serve + client + facts in the projector loop), trust (resolver + DSSE verification in the
-verdict gate), evidence (recorder through publication via the evidence driver, and the
-attestation-issuer in the evaluator loop). Correct non-uses: **benchmarking** (a different
-application), **repository-oci** (an alternate repository backend the operator does not
-select), and the attestation-issuer's *second* family — Execution Verification Evidence —
-whose producer (a process verifier) is a Phase B.1 actor, not the operator.
+The runtime composes cataloged capabilities from the task-execution, marketplace, discovery,
+trust, and evidence domains in their designed roles. Exact package membership and runtime edges
+come from the [generated platform topology](../../../architecture/generated/platform-topology.md),
+not a fixed tree count in this design. Correct non-uses: **benchmarking** (a different
+application), **repository-oci** (an alternate repository backend the operator does not select),
+and the attestation-issuer's *second* family — Execution Verification Evidence — whose producer
+(a process verifier) is a Phase B.1 actor, not the operator.
 
 Disciplines held by construction: composition through public interfaces only (the
 source-boundary guard enforces it); seal-once — the work loop mints the Attempt URI, hands

@@ -992,25 +992,14 @@ Frozen at this design's granularity (signatures refined at implementation):
 ## 17. Packages
 
 Discovery is cross-protocol — it distributes TEP, Evidence, and trust records alike — so it
-lives beside the other protocol trees, not under any of them (scope names are working titles,
-settled at implementation planning like the rest of the stack's):
+remains beside the other protocol domains, not under any of them. The catalog-derived
+[generated inventory](../../../architecture/generated/platform-topology.md#inventory) is the
+current authority for discovery package names, paths, roles, facts leaves, and release groups;
+the generated [runtime topology](../../../architecture/generated/platform-topology.md#runtime-dependency-topology)
+records the implemented dependency directions without a second hand-maintained tree here.
 
-```text
-packages/discovery/
-  protocol/    sealed shapes (entry, head, item), chain rules, named verifications,
-               facts-profile contract, record-kind grammar, CloudEvents envelope
-               mappings for the subscribe plane
-               depends on: trust core ONLY — sealing is re-implemented per the
-               trust-layer precedent, with cross-package sealing-equivalence fixtures
-               (a shared sealing package is a possible later stack-wide refactor);
-               kind-agnostic, never imports a record-defining package
-  facts/*      per-kind facts-profile leaf packages (§12) — each depends on
-               protocol + exactly one record-kind tree; the only place both edges meet
-  serve/       published-source toolkit: layout writer, head maintenance, archive pager
-  client/      chain-walk sync, high-water-mark store, query/subscribe clients,
-               verification driver
-  testing/     conformance kit (§18) — built before any real implementation
-``` The **marketplace projector is an application of
+The protocol stays kind-agnostic; facts-profile leaves are the only meeting point of the discovery
+edge and one record-kind edge. The **marketplace projector is an application of
 the protocol**, living in the marketplace tree beside the binding — the same reasoning as the
 binding itself. The evidence journal/catalog stay exactly where they are, as the conforming
 unpublished instance. Extraction-ready discipline applies as everywhere in the stack: no

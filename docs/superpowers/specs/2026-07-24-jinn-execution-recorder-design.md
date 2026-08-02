@@ -11,9 +11,9 @@ conforming Jinn Execution Evidence record and commits it to an injected Evidence
 
 Jinn has two settled foundation layers:
 
-1. the [Execution Evidence Protocol](../../../packages/evidence-protocol/README.md), which defines
+1. the [Execution Evidence Protocol](../../../packages/evidence/protocol/README.md), which defines
    and validates portable execution evidence; and
-2. the [Evidence Repository](../../../packages/evidence-repository/README.md), which persists exact
+2. the [Evidence Repository](../../../packages/evidence/repository/README.md), which persists exact
    record and artifact bytes by SHA-256 without interpreting them.
 
 What is missing is the producer-facing boundary between a live execution and those foundations.

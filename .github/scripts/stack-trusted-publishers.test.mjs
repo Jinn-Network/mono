@@ -58,6 +58,9 @@ test('registrations exclude every experimental, legacy, and product package', ()
 test('the markdown rendering states the blank-environment rule and one row per package', () => {
   const markdown = renderRegistrationMarkdown(buildRegistrationList(repoRoot));
   assert.match(markdown, /Environment field MUST be blank/);
+  assert.match(markdown, /Stable publication remains disabled.*live `jinn\.network` hosting verification/su);
+  assert.match(markdown, /canaries from `npm-publish`/u);
+  assert.doesNotMatch(markdown, /stable from `npm-stable-publish`/u);
   assert.match(markdown, /\| `@jinn-network\/evidence-protocol` \| `stack-npm-publish\.yml` \|/);
   assert.doesNotMatch(markdown, /[\u{1F300}-\u{1FAFF}]/u, 'no emoji in produced artifacts');
 });

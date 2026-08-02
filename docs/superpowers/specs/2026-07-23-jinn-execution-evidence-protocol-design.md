@@ -2,7 +2,7 @@
 
 > **Status:** Design rationale. The implemented normative profile, schemas, fixtures, and
 > reference validator live in
-> [`packages/evidence-protocol`](../../../packages/evidence-protocol/README.md). Where this
+> [`packages/evidence/protocol`](../../../packages/evidence/protocol/README.md). Where this
 > rationale and the packaged profile differ, the packaged profile is authoritative.
 
 **Date:** 2026-07-23
@@ -927,7 +927,7 @@ values.
 
 ### 11.6 Source-backed Autopilot trial
 
-The [Autopilot issue #1697 fixture](../../../packages/evidence-protocol/fixtures/autopilot-issue-1697/README.md) applies this design to
+The [Autopilot issue #1697 fixture](../../../packages/evidence/protocol/fixtures/autopilot-issue-1697/README.md) applies this design to
 one real execution without filling gaps from current repository state. Task, Execution, Result,
 private trace commitment, public trace projection, and the observed parts of the Runtime
 Specification map cleanly. Full Execution Evidence conformance fails because the run did not
@@ -943,7 +943,7 @@ until those detector or allowlist decisions are resolved.
 
 ### 11.7 Complete golden fixture
 
-The [Golden Execution Evidence v1 fixture](../../../packages/evidence-protocol/fixtures/golden-execution-evidence-v1/README.md) is the
+The [Golden Execution Evidence v1 fixture](../../../packages/evidence/protocol/fixtures/golden-execution-evidence-v1/README.md) is the
 complete target counterpart to the historical import. It is synthetic rather than an assertion
 about a real run, but all artifact bytes, SHA-256 commitments, RO-Crate relationships, DSSE
 payloads, Ed25519 signatures, and append-only claim subjects are real and mechanically
