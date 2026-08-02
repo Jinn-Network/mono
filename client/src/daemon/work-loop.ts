@@ -505,7 +505,7 @@ export class WorkLoop {
           // reads the mech Deliver fact it produces.
           await deliverToMarketplace(
             { mechAddress: composition.mechAddress, requestId: input.requestId, deliveryBytes },
-            composition.venue.safe,
+            composition.deliveryBroadcaster,
           );
           return base.settlement.readMechDeliveryFacts(input);
         },

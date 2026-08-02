@@ -1281,26 +1281,18 @@ export async function startDaemon(
       generation: 'today',
     };
 
-    // Neither key has production key material yet (both left as explicit follow-ups by design
-    // — see `composition-root.ts`'s `CompositionRootInput.deliverySigningKey` /
-    // `.legacyBridgeSigner` doc comments). Without them the loop cannot close: no
-    // `deliverySigningKey` → `executorBinding` reports "missing" → `verificationFailure` REJECTS
-    // every settlement; no `legacyBridgeSigner` → `deliveryExtensions` stays `() => ({})` and the
-    // legacy evaluator gets no envelope. The e2e harness supplies real (test-only) key material
-    // for both so the full settlement path is genuinely exercised.
-
-    // 1. `deliverySigningKey` — real Ed25519 key, wired exactly as
-    //    `client/test/daemon/settlement-grade.test.ts`'s "REAL LocalTaskExecutionBackend delivery
-    //    (finding E31)" fixture drives `trustKeys.deliverySigningKey`.
+    // This full-loop fixture covers the explicit legacy bridge composition. Its delivery signer is
+    // test-only and remains confined to that legacy path; production startup supplies no such
+    // Ed25519 key, while native composition takes its signer from RoleIdentitySet instead.
     const deliveryKeyPair = generateKeyPairSync('ed25519');
-    const deliverySigningKey = {
+    const legacyDeliverySigningKey = {
       keyId: `e2e-daemon-harness-${label}`,
       publicKey: deliveryKeyPair.publicKey,
       sign: (payload: Uint8Array): Uint8Array =>
         new Uint8Array(cryptoSign(null, payload, deliveryKeyPair.privateKey)),
     };
 
-    // 2. `legacyBridgeSigner` — real synchronous secp256k1 signer, ported from
+    // `legacyBridgeSigner` — real synchronous secp256k1 signer, ported from
     //    `client/test/bridge/converged-delivery-legacy-evaluator.test.ts`'s `syncSign`. Recovery
     //    format is reordered to r||s||recovery (the convention `harnesses/engine/signing.ts`
     //    uses); noble's own `'recovered'` format puts the recovery byte first.
@@ -1317,6 +1309,7 @@ export async function startDaemon(
     };
 
     composition = await buildOperatorComposition({
+      mode: 'legacy',
       config: compositionConfig,
       publicClient: agentClients.publicClient,
       walletClient: agentClients.walletClient as unknown as WalletClient,
@@ -1327,7 +1320,7 @@ export async function startDaemon(
       evidenceRoot: join(fixture.implStateRoot, `${label}-evidence`),
       venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
       profileStore,
-      deliverySigningKey,
+      legacyDeliverySigningKey,
       legacyBridgeSigner,
       // C8: required — backs the projector's durable cursor/observations and the engagement
       // ledger. Its absence here (an accidental omission, not intentional) is exactly what made

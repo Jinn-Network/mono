@@ -8,13 +8,10 @@
  *
  * CLOSED AT C8 (previously KNOWN GAPS 1 and 2 below):
  *
- *  1. `BaseVenueConfig.observations` is now backed by a REAL, constructed `ProjectorLoop`
- *     (log source via C3's `createProjectorLogSource`, enrich via C4's `createProjectorEnrich`,
- *     durable observations via C5's `ProjectorCursorStore.readObservations()`) rather than
- *     `async () => []`. Per finding E4 / C3's own docstring, the projector's `VenueStateDatabase`
- *     is opened (via venue-base's `openVenueState`) and the projector is fully constructed
- *     BEFORE `createBaseVenue`, since the venue's `observations` port needs the already-built
- *     cursor store.
+ *  1. `BaseVenueConfig.observations` is backed by a real `ProjectorLoop` (C3 log source, C4
+ *     enrich, C5 durable observations), rather than `async () => []`. The sole `BaseVenue`
+ *     owns the venue state path and supplies its log source to the projector; components never
+ *     open that state path independently.
  *
  *  2. `verifySettlementGrade` is now C6's real implementation (`./settlement-grade.js`), wired
  *     against this composition's own `EngagementLedger` and `ProfileStore`. The local fail-closed
@@ -70,22 +67,10 @@
  *     Because of (a), `transition.events` is always empty in this composition today, so neither
  *     of these is actually reachable yet -- they exist so a FUTURE fix to (a) fails loud instead
  *     of silently fabricating discovery entries.
- *  c. Discovery-announcement signer / executor-binding key: no persistent per-operator Ed25519
- *     signing identity exists anywhere in the repo for either purpose (discovery-entry signing or
- *     the executor-binding DSSE envelope C6 checks for). A single ephemeral Ed25519 keypair is
- *     generated per composition boot and used for both -- genuinely functional cryptography (a
- *     signature under this key really does verify), but nothing yet treats this specific key as a
- *     trusted, stable operator identity. `checkExecutorBinding` will legitimately report
- *     `"missing"` against every real delivery until a persistent key AND a producer of the
- *     `EXECUTOR_BINDING_EXTENSION_URI` envelope both exist (C7's bridge signs a DIFFERENT,
- *     secp256k1 envelope -- see `bridge-legacy-delivery.ts`).
- *  d. Double venue-state open (recorded per the task's own instruction, not worked around):
- *     `createProjectorLogSource` needs an already-open `VenueStateDatabase`, opened here via
- *     `openVenueState(input.venueStateDbPath)`, BEFORE `createBaseVenue` — but `createBaseVenue`
- *     has no seam to accept a pre-opened handle and always opens its OWN second connection to the
- *     SAME file. WAL journaling (venue-base's `openVenueState` enforces `journal_mode = WAL`)
- *     makes two connections to one SQLite file safe; it is wasteful, not incorrect. Both handles
- *     are closed on `composition.close()`.
+ *  c. Native role identities: the caller supplies the persistent, effective-time-trusted
+ *     `RoleIdentitySet`. Its solver-delivery and solver-discovery identities are the only keys
+ *     this native composition exposes to delivery verification and discovery signing. Omission
+ *     fails native boot closed; no EOA-derived or boot-generated signing key is available here.
  *
  * CLOSED (cutover stage 1 close-out C7, finding E24). `LocalTaskExecutionBackendConfig`'s
  * `deliveryExtensions` hook now attaches the bridge-era legacy execution envelope for real,
@@ -99,22 +84,20 @@
  * for the engagement ledger, strictly before `backend.submit()` -- `attemptUri` is
  * deterministic (`deriveMarketplaceAttemptUri`) so it is known ahead of submit and matches
  * exactly what `backend.ts`'s `completeAttempt` later keys its own note lookup by.
- * `legacyBridgeSigner` stays OPTIONAL and absent by default (`main.ts` does not supply one --
- * out of this task's write scope): with no signer, `deliveryExtensions` stays the safe no-op
- * `() => ({})` it always was. A follow-up task needs to give `main.ts` an actual synchronous
- * secp256k1 signer (e.g. derived from the operator's own keystore) to activate this in
- * production; `buildLegacyDeliveryExtensions` below is exported so that follow-up, and this
- * composition's own tests, can drive the exact same wiring.
+ * `legacyBridgeSigner` is consumed only by the explicit `mode: "legacy"` bridge path. Native
+ * delivery and discovery signing are supplied by the persistent role set; native mode never
+ * receives or derives an EOA-based Ed25519 key.
  */
-import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { createHash, type KeyObject } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import {
   createBaseVenue,
-  openVenueState,
   type BaseVenue,
+  type BaseVenueSafeBroadcaster,
+  type ChainLogSource,
 } from '@jinn-network/marketplace-venue-base';
 import type {
   ClaimPorts,
@@ -145,6 +128,7 @@ import {
   hermesLauncher,
   predictionV1BaselineLauncher,
   EVALUATION_TASK_PROFILE,
+  PREDICTION_FORECAST_PROFILE,
   REPOSITORY_WORK_PROFILE,
   type LauncherContract,
 } from '@jinn-network/task-execution-launchers';
@@ -182,7 +166,7 @@ import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesize
 import { EngagementLedger } from './engagement-ledger.js';
 import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
 import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
-import { createFinalizedHeadReader, createProjectorLogSource } from './projector-log-source.js';
+import { createFinalizedHeadReader } from './projector-log-source.js';
 import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-enrich.js';
 import { ProjectorCursorStore } from './projector-cursor.js';
 import { ProjectorLoop } from './projector-loop.js';
@@ -190,12 +174,19 @@ import type { ProjectorPortsInput } from './projector-ports.js';
 import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } from './work-loop.js';
 import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
+import type { RoleIdentitySet } from './role-identities.js';
 
 export interface OperatorComposition {
+  /** Explicit composition path: legacy bridge or native effective-time-trusted operator. */
+  readonly mode: 'legacy' | 'native';
   readonly backend: TaskExecutionBackend;
   readonly pipelineConfig: PipelineConfig;
   readonly pipelinePorts: PipelinePorts;
   readonly venue: BaseVenue;
+  /** Narrow Safe port for the work loop's deliver leg; it never receives the full venue. */
+  readonly deliveryBroadcaster: BaseVenueSafeBroadcaster;
+  /** Complete persistent role set, present only in native mode after effective-time validation. */
+  readonly identities?: RoleIdentitySet;
   readonly evidence: OperatorEvidence;
   readonly chain: MarketplaceChainConfig;
   readonly safeAddress: `0x${string}`;
@@ -245,7 +236,22 @@ export interface OperatorComposition {
   close(): Promise<void>;
 }
 
+/**
+ * Compatibility-only executor signer for the explicit legacy composition. Native composition
+ * instead takes its delivery identity exclusively from `RoleIdentitySet`.
+ */
+export interface LegacyDeliverySigningKey {
+  readonly keyId: string;
+  readonly publicKey: KeyObject;
+  sign(payload: Uint8Array): Uint8Array;
+}
+
 export interface CompositionRootInput {
+  /**
+   * Explicitly selects the bridge-compatible legacy path or the native role-identity path.
+   * There is intentionally no default: callers cannot silently downgrade native boot.
+   */
+  readonly mode: 'legacy' | 'native';
   readonly config: JinnConfig;
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
@@ -268,21 +274,16 @@ export interface CompositionRootInput {
    */
   readonly legacyBridgeSigner?: (hash: `0x${string}`) => `0x${string}`;
   /**
-   * Real executor delivery-signing key (finding E31 close-out), host-supplied, keystore-derived
-   * the same way the operator's other trust keys are meant to be. Mirrors `legacyBridgeSigner`'s
-   * own shape and gap exactly: OPTIONAL, absent by default -- `main.ts` does not supply one today
-   * (out of this task's write scope) -- so `trustKeys.deliverySigningKey` stays unset,
-   * `deliverySigningKeyConfigured`/`signedDeliveries` correctly report `false`, and
-   * `completeAttempt` never signs (additive: byte-identical Delivery output either way). A
-   * follow-up task needs to give `main.ts` an actual key (e.g. deterministically derived from the
-   * operator's own wallet keystore, domain-separated from its secp256k1 signing use) to activate
-   * this in production.
+   * Compatibility-only Ed25519 delivery signer for `mode: 'legacy'`. Production startup does not
+   * supply it; hermetic legacy loop tests use it to retain their historical settlement coverage.
    */
-  readonly deliverySigningKey?: {
-    readonly keyId: string;
-    readonly publicKey: import('node:crypto').KeyObject;
-    sign(payload: Uint8Array): Uint8Array;
-  };
+  readonly legacyDeliverySigningKey?: LegacyDeliverySigningKey;
+  /**
+   * Persistent identities created by `RoleIdentitySet.open`, which requires a real
+   * effective-time BindingResolver. Omission remains structurally possible only so legacy
+   * callers get a deliberate native boot refusal rather than an accidental fallback.
+   */
+  readonly nativeRoleIdentities?: RoleIdentitySet;
   /**
    * C8: the daemon's shared SQLite `Store` — backs the projector's durable cursor/observations
    * (C5, `ProjectorCursorStore`) and the engagement ledger (C6). Required so this composition can
@@ -478,12 +479,6 @@ function buildProvisioner(runtime: WorkspaceRuntimePorts) {
 // exist anywhere in the repo (file header, new gap b), and C6's real `verifySettlementGrade`
 // (`./settlement-grade.js`) does not consume them either — its `executorBinding` check is a
 // genuine DSSE/Ed25519 verification that needs only a keyid + public key, not a binding resolver.
-
-/** Ephemeral per-boot Ed25519 identity — see file header item c. */
-function buildEphemeralExecutorKey(): { readonly keyId: string; readonly publicKey: import('node:crypto').KeyObject; readonly privateKey: import('node:crypto').KeyObject } {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  return { keyId: 'ephemeral-composition-key', publicKey, privateKey };
-}
 
 // ── Legacy bridge delivery extension (gap 3, closed — see file header) ──────
 
@@ -732,16 +727,16 @@ function buildResolveRecord(
 
 /**
  * Assembles a fully-real `ProjectorLoop` (C3 log source, C4 enrich, C5 durable observations) plus
- * the `ClaimGate` (contract 3) that wraps its `hasCaughtUp()`. Opens its OWN `VenueStateDatabase`
- * handle via venue-base's `openVenueState` (file header gap d — a second, separate connection
- * from whatever `createBaseVenue` opens internally to the SAME file; WAL-safe, documented rather
- * than worked around) — the caller closes it.
+ * the `ClaimGate` (contract 3) that wraps its `hasCaughtUp()`. It consumes the sole BaseVenue's
+ * `logSource`; it never independently opens the venue state path.
  */
 function buildProjector(input: {
   readonly chain: MarketplaceChainConfig;
   readonly publicClient: PublicClient;
   readonly mechAddress: Address;
-  readonly venueStateDbPath: string;
+  readonly logSource: ChainLogSource;
+  readonly archiveRoot: string;
+  readonly discoverySigner: ScopedDiscoverySigner;
   readonly ipfsGatewayUrl: string;
   readonly store: Store;
   readonly pollIntervalMs: number;
@@ -758,24 +753,12 @@ function buildProjector(input: {
    *  port's async, loosely-typed `ProtocolObservation[]`) — `buildArchiveSubscription` (finding
    *  E36) reads this directly rather than opening a second `ProjectorCursorStore`. */
   readonly readObservations: () => readonly import('@jinn-network/marketplace-projector').MarketplaceProtocolObservation[];
-  readonly closeState: () => void;
 } {
-  // Per finding E4 / C3's own docstring: this state handle, and the projector built from it,
-  // exist BEFORE `createBaseVenue` — `BaseVenueConfig.observations` below needs the already-built
-  // cursor store.
-  const venueState = openVenueState(input.venueStateDbPath);
   const cursorKey = `${input.chain.chainId}:${input.chain.taskCoordinator.toLowerCase()}`;
   const cursorStore = new ProjectorCursorStore(input.store, cursorKey);
 
   const isAuthorizedMechOrigin = (address: Address): boolean =>
     address.toLowerCase() === input.mechAddress.toLowerCase();
-
-  const logSource = createProjectorLogSource({
-    chain: input.chain,
-    publicClient: input.publicClient,
-    state: venueState,
-    mechAddresses: [input.mechAddress],
-  });
 
   const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
   const resolveSubmissionBytes = buildResolveSubmissionBytes({
@@ -794,19 +777,11 @@ function buildProjector(input: {
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
-  // Discovery-announcement signer (file header gap c): ephemeral per-boot Ed25519 identity —
-  // genuinely functional DSSE signing, no persistent operator discovery key exists yet.
-  const discoveryKey = generateKeyPairSync('ed25519');
-  const signer: ScopedDiscoverySigner = {
-    scope: DISCOVERY_SIGNING_SCOPE,
-    sign: async (pae) => [{ keyid: 'ephemeral-discovery-key', sig: new Uint8Array(cryptoSign(null, pae, discoveryKey.privateKey)) }],
-  };
-
   const pageCountKey = `projector-page-count:${cursorKey}`;
   const ports: ProjectorPortsInput = {
     source: { agent: `urn:jinn:operator:${input.mechAddress.toLowerCase()}`, name: 'operator-projector' },
-    signer,
-    archiveRoot: join(input.venueStateDbPath, '..', 'discovery-archive'),
+    signer: input.discoverySigner,
+    archiveRoot: input.archiveRoot,
     resolveRecord: buildResolveRecord(resolveSubmissionBytes, input.chain),
     verifyVerdictObservation: verifyVerdictObservationGap,
     referencedBytes: { fetch: fetchIpfsBytes },
@@ -816,7 +791,7 @@ function buildProjector(input: {
 
   const projector = new ProjectorLoop({
     chain: input.chain,
-    logSource,
+    logSource: input.logSource,
     cursorStore,
     ports,
     enrich,
@@ -838,7 +813,6 @@ function buildProjector(input: {
     claimGate,
     observations: async () => cursorStore.readObservations(),
     readObservations: () => cursorStore.readObservations(),
-    closeState: () => venueState.close(),
   };
 }
 
@@ -860,6 +834,26 @@ export async function buildOperatorComposition(
   input: CompositionRootInput,
 ): Promise<OperatorComposition> {
   const { config } = input;
+  const identities = input.nativeRoleIdentities;
+  if (input.mode === 'native' && identities === undefined) {
+    throw new Error('native operator boot requires persistent role identities with effective bindings');
+  }
+  if (input.mode === 'legacy' && identities !== undefined) {
+    throw new Error('legacy operator composition must not receive native role identities');
+  }
+  if (input.mode === 'native' && input.legacyBridgeSigner !== undefined) {
+    throw new Error('native operator composition must not receive a legacy bridge signer');
+  }
+  if (input.mode === 'native' && input.legacyDeliverySigningKey !== undefined) {
+    throw new Error('native operator composition must not receive a legacy delivery signing key');
+  }
+  const solverDeliveryIdentity = input.mode === 'native'
+    ? identities!.get('solver-delivery')
+    : undefined;
+  const solverDiscoveryIdentity = input.mode === 'native'
+    ? identities!.get('solver-discovery')
+    : undefined;
+  const deliverySigningIdentity = solverDeliveryIdentity ?? input.legacyDeliverySigningKey;
 
   const fetchImpl = globalThis.fetch;
   const ipfsPin = createRegistryPinPort({ registryUrl: config.ipfsRegistryUrl, fetchImpl });
@@ -873,27 +867,6 @@ export async function buildOperatorComposition(
   // C2: venue-base refuses ambient filesystem authority; tier-4 composition prepares the path.
   await mkdir(dirname(input.venueStateDbPath), { recursive: true });
 
-  // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
-  // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
-  // E4 / C3's own docstring).
-  const { projector, claimGate, observations, readObservations, closeState } = buildProjector({
-    chain: input.chain,
-    publicClient: input.publicClient,
-    mechAddress: input.mechAddress,
-    venueStateDbPath: input.venueStateDbPath,
-    ipfsGatewayUrl: config.ipfsGatewayUrl,
-    store: input.store,
-    pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
-    engagementLedger,
-    ...(input.logger === undefined ? {} : { logger: input.logger }),
-  });
-
-  // Finding E31 close-out: verification checks against the REAL `input.deliverySigningKey`'s
-  // keyid/public key when the host supplied one; the ephemeral per-boot identity (file header
-  // gap c) is retained only as the inert fallback when it wasn't -- unreachable in that case,
-  // since nothing ever signs under it, so `checkExecutorBinding` legitimately keeps reporting
-  // `"missing"`, unchanged from before this finding.
-  const executorKey = buildEphemeralExecutorKey();
   // `getDeliverySignature` is bound to `backend` via this mutable slot: `verifySettlementGrade`
   // is only ever CALLED later, at settlement time, well after `backend` is constructed below --
   // but it must be BUILT here, before `backend` exists, because `venue` (constructed next) needs
@@ -903,8 +876,10 @@ export async function buildOperatorComposition(
   const verifySettlementGrade = buildRealVerifySettlementGrade({
     profileStore: input.profileStore,
     engagementLedger,
-    executorKeyId: input.deliverySigningKey?.keyId ?? executorKey.keyId,
-    executorPublicKey: input.deliverySigningKey?.publicKey ?? executorKey.publicKey,
+    ...(deliverySigningIdentity === undefined ? {} : {
+      executorKeyId: deliverySigningIdentity.keyId,
+      executorPublicKey: deliverySigningIdentity.publicKey,
+    }),
     getDeliverySignature: (digest) => backendForDeliverySignatures?.getDeliverySignature(digest),
   });
 
@@ -919,6 +894,10 @@ export async function buildOperatorComposition(
   // leg's scope. Recorded as finding E26. The cast names the exact expected type rather than
   // `as never`, so it documents what is being asserted instead of erasing it.
   type VenueClients = Parameters<typeof createBaseVenue>[0];
+  // BaseVenue captures (but does not invoke) observations during construction. Bind it to the
+  // projector only after the venue supplies its single shared logSource; any premature use is a
+  // boot ordering fault and rejects rather than returning an empty observation set.
+  let projectorParts: ReturnType<typeof buildProjector> | undefined;
   const venue = createBaseVenue({
     chain: input.chain,
     publicClient: input.publicClient as unknown as VenueClients['publicClient'],
@@ -930,8 +909,42 @@ export async function buildOperatorComposition(
     verifySettlementGrade,
     isAuthorizedMechOrigin: (address: Address) =>
       address.toLowerCase() === input.mechAddress.toLowerCase(),
-    observations,
+    observations: () => {
+      if (projectorParts === undefined) {
+        return Promise.reject(new Error('projector observation source is unavailable during venue boot'));
+      }
+      return projectorParts.observations();
+    },
   });
+
+  const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
+    ? {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        sign: async () => {
+          throw new Error('legacy composition cannot sign native discovery announcements');
+        },
+      }
+    : {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        sign: async (pae) => [{
+          keyid: solverDiscoveryIdentity.keyId,
+          sig: solverDiscoveryIdentity.sign(pae),
+        }],
+      };
+  projectorParts = buildProjector({
+    chain: input.chain,
+    publicClient: input.publicClient,
+    mechAddress: input.mechAddress,
+    logSource: venue.logSource,
+    archiveRoot: join(dirname(input.venueStateDbPath), 'discovery-archive'),
+    discoverySigner,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    store: input.store,
+    pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
+    engagementLedger,
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+  const { projector, claimGate, readObservations } = projectorParts;
 
   // Contract 1 (finding E16 / C2 ruling: per-daemon state, not a process-global install). Built
   // once per composition and returned on `OperatorComposition.broadcaster` — the host threads
@@ -941,6 +954,7 @@ export async function buildOperatorComposition(
     safeAddress: input.safeAddress,
     execute: (request) => venue.safe.execute(request),
   };
+  const deliveryBroadcaster = venue.safe;
 
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
@@ -958,7 +972,7 @@ export async function buildOperatorComposition(
     launcherDeployments,
     provisioner: buildProvisioner(workspaceRuntime),
     provisionerCapabilities: {
-      taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE],
+      taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE, PREDICTION_FORECAST_PROFILE],
       workspaceKinds: ['dir'],
       inputMediaTypes: ['application/json'],
       outputMediaTypes: ['application/json', 'application/octet-stream'],
@@ -970,12 +984,7 @@ export async function buildOperatorComposition(
     recorderAvailability: 'always',
     trustKeys: {
       observationSigningKeyConfigured: true,
-      // Finding E31: real key material, not a hardcoded claim. Absent (the default; `main.ts`
-      // does not supply `input.deliverySigningKey` today, mirroring `legacyBridgeSigner`'s own
-      // gap) means `completeAttempt` never signs and `deliverySigningKeyConfigured`/
-      // `signedDeliveries` correctly reports `false` -- ending the lie the old unconditional
-      // `true` told.
-      ...(input.deliverySigningKey === undefined ? {} : { deliverySigningKey: input.deliverySigningKey }),
+      ...(deliverySigningIdentity === undefined ? {} : { deliverySigningKey: deliverySigningIdentity }),
     },
     evidence: evidence.ports,
     capabilityGrants: buildCapabilityGrants,
@@ -984,10 +993,9 @@ export async function buildOperatorComposition(
       : { secretForwardResolver: input.secretForwardResolver }),
     cancellationGraceMs: 30_000,
     heartbeatIntervalMs: 10_000,
-    // Bridge era only (gap 3, file header — CLOSED by C7). Real when `legacyBridgeSigner` was
-    // supplied; the safe no-op it always was otherwise.
+    // Bridge era only: this extension can be installed only by the explicit legacy path.
     deliveryExtensions:
-      input.legacyBridgeSigner === undefined
+      input.mode !== 'legacy' || input.legacyBridgeSigner === undefined
         ? () => ({})
         : buildLegacyDeliveryExtensions({
             stateRoot: input.stateRoot,
@@ -1078,10 +1086,13 @@ export async function buildOperatorComposition(
   });
 
   return {
+    mode: input.mode,
     backend,
     pipelineConfig,
     pipelinePorts,
     venue,
+    deliveryBroadcaster,
+    ...(identities === undefined ? {} : { identities }),
     evidence,
     chain: input.chain,
     safeAddress: input.safeAddress,
@@ -1095,11 +1106,11 @@ export async function buildOperatorComposition(
     readSealedDocuments,
     archive,
     async close(): Promise<void> {
-      await evidence.close();
-      venue.close();
-      // File header gap d: this composition's OWN `openVenueState` handle for the projector's
-      // log source, distinct from `createBaseVenue`'s own separate connection to the same file.
-      closeState();
+      try {
+        await evidence.close();
+      } finally {
+        venue.close();
+      }
     },
   };
 }
