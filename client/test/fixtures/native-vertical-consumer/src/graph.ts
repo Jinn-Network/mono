@@ -432,6 +432,41 @@ function requireExecutionEvidence(artifact: ExactPublicArtifact): void {
   }
 }
 
+function evidenceReferences(value: unknown): readonly string[] | undefined {
+  const values = Array.isArray(value) ? value : [value];
+  const references = values.map((candidate) => record(candidate)?.['@id']);
+  return references.every((candidate): candidate is string => typeof candidate === 'string') ? references : undefined;
+}
+
+function executionIdsFromEvidence(artifact: ExactPublicArtifact): readonly string[] {
+  let document: unknown;
+  try { document = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(artifact.bytes)); }
+  catch (cause) { throw new NativeGraphError('execution-evidence-invalid', `${artifact.name}: ${String(cause)}`); }
+  const graph = record(document)?.['@graph'];
+  if (!Array.isArray(graph)) throw new NativeGraphError('execution-evidence-join-invalid', artifact.name);
+  const root = graph.map(record).find((entity) => entity?.['@id'] === './');
+  const mentioned = evidenceReferences(root?.mentions);
+  const ids = new Set(graph.map(record).map((entity) => entity?.['@id'])
+    .filter((value): value is string => typeof value === 'string'));
+  if (mentioned === undefined || mentioned.length === 0 || mentioned.some((value) => !ids.has(value))) {
+    throw new NativeGraphError('execution-evidence-join-invalid', artifact.name);
+  }
+  return mentioned;
+}
+
+export function verifyExecutionEvidenceJoin(input: {
+  readonly delivery: ReturnType<typeof DeliveryRecordSchema.parse>;
+  readonly evidence: readonly ExactPublicArtifact[];
+  readonly label: string;
+}): void {
+  const declared = new Set(input.delivery.executionIds ?? []);
+  const evidenced = new Set(input.evidence.flatMap(executionIdsFromEvidence));
+  if (declared.size === 0 || declared.size !== evidenced.size
+    || [...declared].some((executionId) => !evidenced.has(executionId))) {
+    throw new NativeGraphError('execution-evidence-join-invalid', input.label);
+  }
+}
+
 async function fetchArtifact(input: {
   readonly client: DiscoveryQueryClient;
   readonly state: ConsumerState;
@@ -534,6 +569,7 @@ export async function retrieveNativePublicGraph(input: {
     solver(`solution-evidence:${index}`, value.digest as `sha256:${string}`, EXECUTION_EVIDENCE_MEDIA_TYPE),
   ));
   for (const artifact of solutionEvidence) requireExecutionEvidence(artifact);
+  verifyExecutionEvidenceJoin({ delivery: solutionDocument, evidence: solutionEvidence, label: 'solution' });
 
   const evaluationTask = await evaluator(
     'evaluation-task', input.roots.evaluation.task.digest, input.roots.evaluation.task.mediaType,
@@ -596,6 +632,7 @@ export async function retrieveNativePublicGraph(input: {
     evaluator(`evaluation-evidence:${index}`, value.digest, value.mediaType),
   ));
   for (const artifact of evaluationEvidence) requireExecutionEvidence(artifact);
+  verifyExecutionEvidenceJoin({ delivery: evaluationDeliveryDocument, evidence: evaluationEvidence, label: 'evaluation' });
 
   const all = [
     task, submission, evaluationSpec, admissionReceipt, requesterEnvelope,

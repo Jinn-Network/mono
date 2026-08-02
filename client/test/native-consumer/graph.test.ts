@@ -16,6 +16,7 @@ import {
   SUBMISSION_MEDIA_TYPE,
   TASK_MEDIA_TYPE,
   TASK_EXECUTION_PROTOCOL_URI,
+  DeliveryRecordSchema,
   documentDigest,
   sealDelivery,
   sealSubmission,
@@ -43,6 +44,7 @@ import {
   deriveConsumerEvaluationId,
   discoverNativeGraphRoots,
   retrieveNativePublicGraph,
+  verifyExecutionEvidenceJoin,
   type NativeGraphRoots,
 } from '../fixtures/native-vertical-consumer/src/graph.js';
 
@@ -189,6 +191,29 @@ function seed(state: ConsumerState, missingRequesterLocation = false): void {
 }
 
 describe('native public graph discovery', () => {
+  it('joins array-form mentions across multiple exact execution evidence documents', () => {
+    const executionIds = [
+      'urn:uuid:11111111-1111-4111-8111-111111111111',
+      'urn:uuid:22222222-2222-4222-8222-222222222222',
+    ] as const;
+    const evidence = executionIds.map((executionId, index) => {
+      const bytes = new TextEncoder().encode(JSON.stringify({
+        '@context': {},
+        '@graph': [
+          { '@id': './', '@type': 'Dataset', mentions: [{ '@id': executionId }] },
+          { '@id': executionId, '@type': ['CreateAction', 'prov:Activity'] },
+        ],
+      }));
+      return { name: `evidence-${index}`, bytes, digest: documentDigest(bytes), mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE };
+    });
+    const delivery = DeliveryRecordSchema.parse({
+      protocol: TASK_EXECUTION_PROTOCOL_URI,
+      attempt: 'urn:uuid:33333333-3333-4333-8333-333333333333',
+      task: `sha256:${'3'.repeat(64)}`,
+      outputs: [], outcome: 'fulfilled', executionIds, createdAt: '2026-08-02T00:00:00Z',
+    });
+    expect(() => verifyExecutionEvidenceJoin({ delivery, evidence, label: 'multi' })).not.toThrow();
+  });
   it('selects one requester association and joins solver/evaluator records only through signed announcement facts', async () => {
     const consumer = await state();
     seed(consumer);
@@ -353,6 +378,7 @@ function retrievalFixture(options: { failure?:
     attempt: 'urn:uuid:00000000-0000-4000-8000-000000000002', task: documentDigest(task),
     outputs: [{ name: 'prediction', mediaType: 'application/json', digest: { sha256: documentDigest(solutionOutput).slice(7) } }],
     evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(solutionEvidence) }],
+    executionIds: ['urn:uuid:22222222-2222-4222-8222-222222222222'],
     outcome: 'fulfilled', createdAt: '2026-08-02T10:00:00Z',
   });
   const solutionEnvelope = envelope(solutionDelivery, DELIVERY_MEDIA_TYPE);
@@ -392,6 +418,7 @@ function retrievalFixture(options: { failure?:
     attempt: 'urn:uuid:00000000-0000-4000-8000-000000000004', task: documentDigest(evaluationTask),
     outputs: [{ name: 'verdict', digest: { sha256: documentDigest(verdict).slice(7) } }],
     evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(evaluationEvidence) }],
+    executionIds: ['urn:uuid:22222222-2222-4222-8222-222222222222'],
     outcome: 'fulfilled', createdAt: '2026-08-02T11:00:00Z',
   });
   const evaluationEnvelope = envelope(evaluationDelivery, DELIVERY_MEDIA_TYPE);
