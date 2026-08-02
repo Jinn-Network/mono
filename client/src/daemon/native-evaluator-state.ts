@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS native_evaluations (
   source_entry_digest         TEXT NOT NULL,
   canonical_event_identity    TEXT NOT NULL UNIQUE,
   block_hash                  TEXT NOT NULL,
+  block_number                TEXT NOT NULL,
   transaction_hash            TEXT NOT NULL,
   log_index                   INTEGER NOT NULL,
   subject_task_digest         TEXT NOT NULL,
@@ -160,6 +161,7 @@ export interface NativeEvaluationRow {
   readonly sourceEntryDigest: `sha256:${string}`;
   readonly canonicalEventIdentity: string;
   readonly blockHash: `0x${string}`;
+  readonly blockNumber: bigint;
   readonly transactionHash: `0x${string}`;
   readonly logIndex: number;
   readonly subjectTaskDigest: `sha256:${string}`;
@@ -238,6 +240,7 @@ interface RawEvaluation {
   source_entry_digest: `sha256:${string}`;
   canonical_event_identity: string;
   block_hash: `0x${string}`;
+  block_number: string;
   transaction_hash: `0x${string}`;
   log_index: number;
   subject_task_digest: `sha256:${string}`;
@@ -266,6 +269,7 @@ function row(value: RawEvaluation): NativeEvaluationRow {
     sourceEntryDigest: value.source_entry_digest,
     canonicalEventIdentity: value.canonical_event_identity,
     blockHash: value.block_hash,
+    blockNumber: BigInt(value.block_number),
     transactionHash: value.transaction_hash,
     logIndex: value.log_index,
     subjectTaskDigest: value.subject_task_digest,
@@ -392,7 +396,7 @@ export class NativeEvaluatorStateRepository {
         ) throw new NativeEvaluatorStateConflictError("canonical replacement is not eligible to reopen evaluation");
         this.store.db.prepare(
           `UPDATE native_evaluations SET source = ?, source_sequence = ?, source_entry_digest = ?,
-             canonical_event_identity = ?, block_hash = ?, transaction_hash = ?, log_index = ?,
+             canonical_event_identity = ?, block_hash = ?, block_number = ?, transaction_hash = ?, log_index = ?,
              state = 'evaluation-pending', updated_at = ? WHERE evaluation_id = ?`,
         ).run(
           input.opportunity.source,
@@ -400,6 +404,7 @@ export class NativeEvaluatorStateRepository {
           input.opportunity.sourceEntryDigest,
           input.opportunity.canonicalEventIdentity,
           input.opportunity.blockHash,
+          input.opportunity.blockNumber.toString(10),
           input.opportunity.transactionHash,
           input.opportunity.logIndex,
           now,
@@ -424,9 +429,9 @@ export class NativeEvaluatorStateRepository {
         `INSERT INTO native_evaluations
           (evaluation_id, chain_id, coordinator, task_id, solution_attempt_index,
            solution_request_id, solution_operator, evaluator_agent, source, source_sequence,
-           source_entry_digest, canonical_event_identity, block_hash, transaction_hash, log_index,
+           source_entry_digest, canonical_event_identity, block_hash, block_number, transaction_hash, log_index,
            subject_task_digest, advertised_delivery_digest, subject_graph_digest, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'evaluation-pending', ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'evaluation-pending', ?, ?)`,
       ).run(
         id,
         String(input.opportunity.chainId),
@@ -441,6 +446,7 @@ export class NativeEvaluatorStateRepository {
         input.opportunity.sourceEntryDigest,
         input.opportunity.canonicalEventIdentity,
         input.opportunity.blockHash,
+        input.opportunity.blockNumber.toString(10),
         input.opportunity.transactionHash,
         input.opportunity.logIndex,
         input.material.task.digest,
@@ -915,8 +921,13 @@ export class NativeEvaluatorStateRepository {
   beginVerdictSettlement(evaluation: NativeOperationId): { readonly operationId: NativeOperationId } {
     const current = this.getEvaluation(evaluation);
     const delivery = this.listEvaluationArtifacts(evaluation).find(({ role }) => role === "evaluation-delivery");
+    const marketplaceDelivery = this.listEvaluationOperations(evaluation)
+      .find(({ kind }) => kind === "evaluation-marketplace-delivery");
     if (current === undefined || delivery === undefined || current.evaluationAttemptUri === null || current.verdictCode === null) {
       throw new NativeEvaluatorStateConflictError("verdict settlement requires exact evaluation Delivery and verdict code");
+    }
+    if (marketplaceDelivery?.status !== "finalized") {
+      throw new NativeEvaluatorStateConflictError("verdict settlement requires finalized marketplace Deliver");
     }
     const result = this.createOperation(evaluation, verdictSettlementId({
       evaluationAttempt: current.evaluationAttemptUri,
@@ -927,6 +938,91 @@ export class NativeEvaluatorStateRepository {
       "UPDATE native_evaluations SET state = 'verdict-settlement-pending', updated_at = ? WHERE evaluation_id = ?",
     ).run(this.timestamp(), evaluation);
     return result;
+  }
+
+  recordEvaluationMarketplaceDeliveryFinalized(operationId: NativeOperationId, fact: {
+    readonly txHash: `0x${string}`;
+    readonly blockHash: `0x${string}`;
+    readonly blockNumber: bigint;
+  }): void {
+    const operation = this.requireOperation(operationId);
+    if (operation.kind !== "evaluation-marketplace-delivery") {
+      throw new NativeEvaluatorStateConflictError("operation is not evaluation marketplace Deliver");
+    }
+    this.finalizeOperation(operation, fact);
+  }
+
+  recordVerdictSettlementFinalized(operationId: NativeOperationId, fact: {
+    readonly txHash: `0x${string}`;
+    readonly blockHash: `0x${string}`;
+    readonly blockNumber: bigint;
+  }): void {
+    const operation = this.requireOperation(operationId);
+    if (operation.kind !== "verdict-settlement") {
+      throw new NativeEvaluatorStateConflictError("operation is not verdict settlement");
+    }
+    const now = this.timestamp();
+    this.store.db.transaction(() => {
+      this.finalizeOperation(operation, fact, now);
+      this.store.db.prepare(
+        "UPDATE native_evaluations SET state = 'complete', updated_at = ? WHERE evaluation_id = ?",
+      ).run(now, operation.evaluationId);
+      this.audit(operation.evaluationId, "verdict-settlement-finalized", {
+        operationId,
+        txHash: fact.txHash,
+        blockHash: fact.blockHash,
+        blockNumber: fact.blockNumber.toString(10),
+      }, now);
+    })();
+  }
+
+  recordEvaluationOperationOrphaned(operationId: NativeOperationId, reason: string): void {
+    const operation = this.requireOperation(operationId);
+    const now = this.timestamp();
+    const rollback: NativeEvaluationState = operation.kind === "evaluation-claim"
+      ? "evaluation-pending"
+      : "verdict-published";
+    this.store.db.transaction(() => {
+      this.store.db.prepare(
+        "UPDATE native_evaluation_operations SET status = 'orphaned', detail_json = ?, updated_at = ? WHERE operation_id = ?",
+      ).run(JSON.stringify({ reason }), now, operationId);
+      this.store.db.prepare(
+        `UPDATE native_evaluations SET state = ?,
+           evaluation_attempt_uri = CASE WHEN ? = 'evaluation-claim' THEN NULL ELSE evaluation_attempt_uri END,
+           evaluation_request_id = CASE WHEN ? = 'evaluation-claim' THEN NULL ELSE evaluation_request_id END,
+           updated_at = ? WHERE evaluation_id = ?`,
+      ).run(rollback, operation.kind, operation.kind, now, operation.evaluationId);
+      if (operation.kind === "evaluation-claim") this.store.db.prepare(
+        "UPDATE native_evaluation_executions SET attempt_uri = NULL, updated_at = ? WHERE evaluation_id = ?",
+      ).run(now, operation.evaluationId);
+      this.audit(operation.evaluationId, "evaluation-operation-orphaned", { operationId, reason }, now);
+    })();
+  }
+
+  recordEvaluationPaused(evaluation: NativeOperationId, reason: string): void {
+    if (this.getEvaluation(evaluation) === undefined) throw new NativeEvaluatorStateConflictError("unknown evaluation aggregate");
+    const now = this.timestamp();
+    this.store.db.prepare(
+      "UPDATE native_evaluations SET state = 'paused', updated_at = ? WHERE evaluation_id = ?",
+    ).run(now, evaluation);
+    this.audit(evaluation, "evaluation-paused", { reason }, now);
+  }
+
+  private finalizeOperation(
+    operation: NativeEvaluationOperationRow,
+    fact: { readonly txHash: `0x${string}`; readonly blockHash: `0x${string}`; readonly blockNumber: bigint },
+    now = this.timestamp(),
+  ): void {
+    requireHash(fact.txHash, "transaction hash");
+    requireHash(fact.blockHash, "block hash");
+    if (fact.blockNumber < 0n) throw new NativeEvaluatorStateConflictError("finalized block number is invalid");
+    if (operation.txHash !== null && operation.txHash !== fact.txHash) {
+      throw new NativeEvaluatorStateConflictError("canonical operation names a different transaction");
+    }
+    this.store.db.prepare(
+      `UPDATE native_evaluation_operations SET status = 'finalized', tx_hash = ?, block_hash = ?,
+       block_number = ?, updated_at = ? WHERE operation_id = ?`,
+    ).run(fact.txHash, fact.blockHash, fact.blockNumber.toString(10), now, operation.operationId);
   }
 
   listEvaluationOperations(evaluation?: NativeOperationId): readonly NativeEvaluationOperationRow[] {

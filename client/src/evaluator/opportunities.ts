@@ -32,6 +32,7 @@ export interface EvaluationOpportunity {
   /** SHA-256 digest advertised by the finalized chain/projection correspondence. */
   readonly advertisedDeliveryDigest: `sha256:${string}`;
   readonly blockHash: `0x${string}`;
+  readonly blockNumber: bigint;
   readonly transactionHash: `0x${string}`;
   readonly logIndex: number;
   readonly canonicalEventIdentity: string;
@@ -91,6 +92,7 @@ export function mapFinalizedSolutionDeliveryObservation(
       deliveryCid: rawCodecCidFromSha256Digest(advertisedDeliveryDigest),
       advertisedDeliveryDigest,
       blockHash: derivation.blockHash,
+      blockNumber: BigInt(derivation.blockNumber),
       transactionHash: derivation.txHash,
       logIndex: derivation.logIndex,
       canonicalEventIdentity: `${derivation.chainId}:${derivation.blockHash}:${derivation.logIndex}`,

@@ -27,6 +27,7 @@ function finalizedSolutionClaimed(operator: string) {
       derivation: {
         chainId: 84532,
         blockHash: `0x${"ee".repeat(32)}`,
+        blockNumber: 99,
         txHash: `0x${"ef".repeat(32)}`,
         logIndex: 4,
         finalityTier: "finalized",
@@ -57,6 +58,7 @@ describe("mapFinalizedSolutionDeliveryObservation", () => {
         deliveryCid: advertisedDelivery.cid,
         advertisedDeliveryDigest: advertisedDelivery.sha256Digest,
         blockHash: `0x${"ee".repeat(32)}`,
+        blockNumber: 99n,
         transactionHash: `0x${"ef".repeat(32)}`,
         logIndex: 4,
         canonicalEventIdentity: `84532:0x${"ee".repeat(32)}:4`,

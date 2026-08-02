@@ -43,6 +43,7 @@ const opportunity = {
   deliveryCid: "bafk-solution",
   advertisedDeliveryDigest: material.delivery.digest,
   blockHash: `0x${"d".repeat(64)}` as const,
+  blockNumber: 120n,
   transactionHash: `0x${"e".repeat(64)}` as const,
   logIndex: 3,
   canonicalEventIdentity: `84532:0x${"d".repeat(64)}:3`,
@@ -248,6 +249,12 @@ describe("NativeEvaluatorStateRepository", () => {
     }
     expect(state.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "verdict-published" });
     const deliver = state.beginEvaluationMarketplaceDelivery(admitted.evaluationId);
+    state.recordOperationBroadcast(deliver.operationId, `0x${"8".repeat(64)}`);
+    state.recordEvaluationMarketplaceDeliveryFinalized(deliver.operationId, {
+      txHash: `0x${"8".repeat(64)}`,
+      blockHash: `0x${"9".repeat(64)}`,
+      blockNumber: 101n,
+    });
     const settlement = state.beginVerdictSettlement(admitted.evaluationId);
     expect(state.listEvaluationOperations(admitted.evaluationId).map(({ kind }) => kind)).toEqual([
       "evaluation-claim",
@@ -256,5 +263,12 @@ describe("NativeEvaluatorStateRepository", () => {
       "verdict-settlement",
     ]);
     expect(deliver.operationId).not.toBe(settlement.operationId);
+    state.recordOperationBroadcast(settlement.operationId, `0x${"a".repeat(64)}`);
+    state.recordVerdictSettlementFinalized(settlement.operationId, {
+      txHash: `0x${"a".repeat(64)}`,
+      blockHash: `0x${"b".repeat(64)}`,
+      blockNumber: 102n,
+    });
+    expect(state.getEvaluation(admitted.evaluationId)).toMatchObject({ state: "complete" });
   });
 });
