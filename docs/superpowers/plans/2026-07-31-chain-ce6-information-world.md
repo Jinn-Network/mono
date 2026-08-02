@@ -15,10 +15,10 @@
 
 **Goal:** ship `@jinn-network/information-world` — the sealed `information-world/1.0` record
 kind (tier 2), the canonical request key that makes a frozen corpus resolvable the same way
-across runs, and the loopback replay service that serves that corpus and can reach nothing
-else (tier 3) — plus its fixtures, its `./testing` conformance kit, its published JSON Schema,
-its discovery facts profile, and its registration in the existing `packages/environments/`
-guard trio and CI.
+across runs, and the loopback replay service that serves that corpus inside the network-denied
+closed execution profile (tier 3) — plus its fixtures, its `./testing` conformance kit, its
+published JSON Schema, its discovery facts profile, and its registration in the existing
+`packages/environments/` guard trio and CI.
 
 **Architecture:** one record = one information world = one `(corpus, request-key policy, miss
 policy, capture provenance, fidelity class)` binding, sealed as an I-JSON document under RFC
@@ -6113,7 +6113,7 @@ reject or amend.
 | Composition: request budget (count and bytes) | `RequestBudget`; the `budget-exhausted` outcome and its 429 | 9, 10 |
 | Honesty rule 1 — closure is non-negotiable | Injected reader plus Linux Docker `--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges`; independent source policies are maintainability gates | 10, 14 |
 | Honesty rule 2 — fidelity is a declaration | `provenanceClass: "declared"` fixed in the schema; the `captured-provenance-unprovable` fixture seals and is *labelled*; README and JSON Schema wording; the bounded-claims gate | 7, 11, 12, 14 |
-| Honesty rule 3 — live sources are class E15 | **Out of scope by construction**: this package cannot reach a live source, so it cannot produce a `live-source-observed` run. Recorded here so the reviewer sees it was considered, not omitted. | — |
+| Honesty rule 3 — live sources are class E15 | **Outside CE6's closed profile**: live-source execution belongs to E15, so CE6 does not produce a `live-source-observed` run. Recorded here so the reviewer sees it was considered, not omitted. | — |
 | "The request key is the practical failure mode" | The generated permutation probe (78 computations, one key), the published vector corpus, and the kit's group-collision assertion | 6, 11, 12 |
 | Composite references components by digest | `resolveOriginRouting` routes to a `worldDigest`; the composite record itself is CE1's | 8 |
 
@@ -6206,4 +6206,3 @@ grep -n "TODO\|FIXME\|TBD\|XXX\|placeholder\|fill in" \
 ```
 
 Expected: only this section's own mentions.
-
