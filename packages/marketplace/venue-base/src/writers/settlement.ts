@@ -269,12 +269,20 @@ async function readRouterDeliveryFacts(
 
 async function claimSolutionDelivery(
   input: SettlementWriterInput,
-  args: { readonly requestId: Hex; readonly solutionDigest: Hex },
-): Promise<{ readonly status: "settled" | "already-settled" | "rejected" | "delivered-unsettled" }> {
+  args: { readonly requestId: Hex; readonly solutionDigest: Hex; readonly operationId?: string },
+): Promise<{
+  readonly status: "settled" | "already-settled" | "rejected" | "delivered-unsettled";
+  readonly txHash?: Hex;
+}> {
   const alreadyClaimed = await input.publicClient.readContract({
     address: input.chain.jinnRouter, abi: CLAIMED_VIEW_ABI, functionName: "claimed", args: [args.requestId],
   });
-  if (alreadyClaimed) return { status: "already-settled" };
+  if (alreadyClaimed) {
+    return {
+      status: "already-settled",
+      ...(await readTodaySettlementTransaction(input, args.requestId)),
+    };
+  }
 
   const data = encodeFunctionData({
     abi: JINN_ROUTER_V3_ABI, functionName: "claimSolutionDelivery",
@@ -283,14 +291,36 @@ async function claimSolutionDelivery(
   try {
     const receipt = await input.broadcaster.execute({
       to: input.chain.jinnRouter, value: 0n, data,
-      logicalTx: `settlement.claimSolutionDelivery:${args.requestId}`,
+      logicalTx: args.operationId ?? `settlement.claimSolutionDelivery:${args.requestId}`,
     });
-    return { status: receipt.alreadySettled ? "already-settled" : "settled" };
+    const transaction = /^0x[0-9a-fA-F]{64}$/.test(receipt.txHash)
+      ? { txHash: receipt.txHash }
+      : await readTodaySettlementTransaction(input, args.requestId);
+    return {
+      status: receipt.alreadySettled ? "already-settled" : "settled",
+      ...transaction,
+    };
   } catch (error) {
     const classified = classifySettlementRevert(error);
     if (classified === undefined) throw error;
     return { status: classified };
   }
+}
+
+async function readTodaySettlementTransaction(
+  input: SettlementWriterInput,
+  requestId: Hex,
+): Promise<{ readonly txHash?: Hex }> {
+  const events = await input.publicClient.getContractEvents({
+    address: input.chain.jinnRouter,
+    abi: JINN_ROUTER_V3_ABI,
+    eventName: "SolutionDeliveryClaimed",
+    args: { requestId },
+    fromBlock: 0n,
+    toBlock: "latest",
+  });
+  const txHash = events.at(-1)?.transactionHash;
+  return txHash === undefined ? {} : { txHash };
 }
 
 function decodeClaimedRequestIdFromLogs(logs: readonly Log[]): Hex | undefined {
@@ -466,7 +496,11 @@ export function createSettlementPorts(input: SettlementWriterInput): SettlementP
       readMechDeliveryFacts(input, args),
     readRouterDeliveryFacts: (args: { readonly requestId: Hex; readonly config: MarketplaceChainConfig }) =>
       readRouterDeliveryFacts(input, args),
-    claimSolutionDelivery: (args: { readonly requestId: Hex; readonly solutionDigest: Hex }) =>
+    claimSolutionDelivery: (args: {
+      readonly requestId: Hex;
+      readonly solutionDigest: Hex;
+      readonly operationId?: string;
+    }) =>
       claimSolutionDelivery(input, args),
   };
   if (input.chain.generation !== "revised") return base;

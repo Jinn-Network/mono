@@ -123,12 +123,16 @@ export interface SettlementPorts {
   readonly claimSolutionDelivery: (input: {
     readonly requestId: Hex;
     readonly solutionDigest: Hex;
+    /** Product-owned durable identity; venue broadcast reconciliation adopts only this operation. */
+    readonly operationId?: string;
   }) => Promise<{
     readonly status:
       | "settled"
       | "already-settled"
       | "rejected"
       | "delivered-unsettled";
+    /** The mined transaction when this call observed one. Canonical finality remains a read concern. */
+    readonly txHash?: Hex;
   }>;
   /**
    * Executes the V4 prepare -> signed Marketplace Deliver -> router claim sequence as one
