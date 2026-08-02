@@ -9,7 +9,7 @@ import {
 } from './stack-package-graph.mjs';
 import { resolvePublishVersion } from './stack-publish-manifest.mjs';
 
-const FLAGS_WITH_VALUES = new Set(['--mode', '--sha', '--release-tag', '--npm', '--root']);
+const FLAGS_WITH_VALUES = new Set(['--mode', '--sha', '--release-tag', '--root']);
 
 export function parsePublishArgs(argv) {
   const parsed = {
@@ -17,7 +17,6 @@ export function parsePublishArgs(argv) {
     sha: undefined,
     releaseTag: undefined,
     dryRun: false,
-    npmCommand: 'npm',
     repoRoot: process.cwd(),
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -33,7 +32,6 @@ export function parsePublishArgs(argv) {
     if (flag === '--mode') parsed.mode = value;
     if (flag === '--sha') parsed.sha = value;
     if (flag === '--release-tag') parsed.releaseTag = value;
-    if (flag === '--npm') parsed.npmCommand = value;
     if (flag === '--root') parsed.repoRoot = value;
   }
   if (!parsed.mode) throw new Error('--mode is required (canary or stable)');
@@ -86,12 +84,13 @@ export function renderPlan(plan) {
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   try {
     const args = parsePublishArgs(process.argv.slice(2));
+    if (!args.dryRun) {
+      throw new Error(
+        'direct publication is disabled; use the receipt-gated publish-verified-platform.mjs publisher',
+      );
+    }
     const plan = buildPublishPlan(args);
     console.log(renderPlan(plan));
-    if (!args.dryRun) {
-      const { runPublish } = await import('./publish-stack-run.mjs');
-      await runPublish(plan, args);
-    }
   } catch (error) {
     if (error instanceof EmptyPackageSetError) {
       console.log(error.message);

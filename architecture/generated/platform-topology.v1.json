@@ -1410,7 +1410,7 @@
       "decisionRecords": 2,
       "discoveredFirstPartySurfaces": 2403,
       "generatedOutputSources": 997,
-      "generatorSources": 503,
+      "generatorSources": 504,
       "marketplaceControl": 2,
       "requiredGates": 18,
       "staticControl": 6
@@ -1890,6 +1890,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/platform-catalog.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/platform-publisher-surface.test.mjs"
       },
       {
         "categories": [
