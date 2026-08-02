@@ -103,7 +103,7 @@
     "typecheck": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && tsc --noEmit",
     "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
     "test": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && yarn build:layer && vitest run",
-    "test:hermetic:packed-closure": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && tsc && node scripts/smoke-test-hermetic-packed-closure.mjs",
+    "test:hermetic:packed-closure": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && node scripts/smoke-test-hermetic-packed-closure.mjs",
     "test:hermetic": "yarn test:hermetic:packed-closure && vitest run --config vitest.hermetic.config.ts",
     "smoke:build-anvil-snapshot": "vitest run test/scripts/build-anvil-snapshot-entrypoint.test.ts",
     "test:watch": "vitest",

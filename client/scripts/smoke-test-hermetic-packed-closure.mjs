@@ -7,6 +7,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import {
+  cpSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -26,6 +27,8 @@ const packagesRoot = join(repoRoot, 'packages');
 const closureRoot = mkdtempSync(join(tmpdir(), 'jinn-hermetic-packed-closure-'));
 const archivesRoot = join(closureRoot, 'archives');
 const consumerRoot = join(closureRoot, 'consumer');
+const stagingRoot = join(closureRoot, 'staging');
+const productRoot = join(consumerRoot, 'product');
 
 function run(command, args, context, options = {}) {
   const result = spawnSync(command, args, {
@@ -33,8 +36,11 @@ function run(command, args, context, options = {}) {
     ...options,
   });
   if (result.status !== 0) {
+    const output = [result.error?.message, result.stderr, result.stdout]
+      .filter((value) => typeof value === 'string' && value.length > 0)
+      .join('\n');
     throw new Error(
-      `${context} failed\n${result.error?.message ?? result.stderr ?? result.stdout}`,
+      `${context} failed\n${output}`,
     );
   }
   return result;
@@ -82,15 +88,105 @@ function closurePackageNames(clientManifest, packageRoots) {
   return [...names].sort();
 }
 
-function pack(root, destination, context, ignoreScripts = true) {
+function noLocalSpec(value, context) {
+  if (typeof value === 'string' && /^(?:file|portal|workspace):/iu.test(value)) {
+    throw new Error(`${context} contains a forbidden local dependency specifier: ${value}`);
+  }
+}
+
+function assertNoForbiddenLocalSpecs(value, context) {
+  if (typeof value === 'string') {
+    noLocalSpec(value, context);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoForbiddenLocalSpecs(item, context);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value)) assertNoForbiddenLocalSpecs(item, context);
+  }
+}
+
+function sanitizedManifest(manifest, context, stripDevelopment = true) {
+  const sanitized = { ...manifest };
+  if (stripDevelopment) delete sanitized.devDependencies;
+  delete sanitized.resolutions;
+  delete sanitized.workspaces;
+  for (const [field, value] of Object.entries(sanitized)) {
+    if (/dependencies$/iu.test(field) && value !== null && typeof value === 'object') {
+      for (const specifier of Object.values(value)) noLocalSpec(specifier, context);
+    }
+  }
+  return sanitized;
+}
+
+function copyPackage(sourceRoot, targetRoot, context) {
+  cpSync(sourceRoot, targetRoot, {
+    recursive: true,
+    filter: (source) => {
+      const name = source.split('/').at(-1);
+      return name !== 'node_modules' && name !== '.git' && !name?.startsWith('.jinn-pack-');
+    },
+  });
+  writeFileSync(
+    join(targetRoot, 'package.json'),
+    `${JSON.stringify(sanitizedManifest(readPackageJson(sourceRoot), context), null, 2)}\n`,
+  );
+}
+
+function pack(root, destination, context) {
   const args = ['pack', '--json', '--pack-destination', destination];
-  if (ignoreScripts) args.push('--ignore-scripts');
+  args.push('--ignore-scripts');
   const output = run('npm', args, context, { cwd: root }).stdout;
   const entries = JSON.parse(output);
   if (entries.length !== 1 || typeof entries[0]?.filename !== 'string') {
     throw new Error(`${context} did not produce exactly one tarball.`);
   }
   return join(destination, entries[0].filename);
+}
+
+function stageAndPack(sourceRoot, packageName) {
+  const stagedRoot = join(stagingRoot, packageName.replaceAll('/', '__'));
+  copyPackage(sourceRoot, stagedRoot, packageName);
+  return pack(stagedRoot, archivesRoot, `pack ${packageName}`);
+}
+
+function installPackedArchives(archives, context, offline = false) {
+  run(
+    'npm',
+    [
+      'install',
+      '--no-save',
+      '--ignore-scripts',
+      '--package-lock=false',
+      '--no-audit',
+      '--no-fund',
+      ...(offline ? ['--offline'] : []),
+      ...archives,
+    ],
+    context,
+    { cwd: consumerRoot },
+  );
+}
+
+function writeConsumerManifest(dependencies, devDependencies = {}) {
+  const manifest = sanitizedManifest({
+    private: true,
+    type: 'module',
+    dependencies,
+    devDependencies,
+  }, 'clean consumer manifest', false);
+  writeFileSync(join(consumerRoot, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function assertNoPersistedLocalSpecs(root) {
+  const manifest = readPackageJson(root);
+  assertNoForbiddenLocalSpecs(manifest, `${root}/package.json`);
+  for (const packageName of readdirSync(join(root, 'node_modules', '@jinn-network'))) {
+    const packageRoot = join(root, 'node_modules', '@jinn-network', packageName);
+    assertNoForbiddenLocalSpecs(readPackageJson(packageRoot), `${packageName}/package.json`);
+  }
 }
 
 function assertArchiveContains(archive, entry, context) {
@@ -114,40 +210,78 @@ function assertInstalledUnderConsumer(packageName) {
 try {
   const packageRoots = discoverPackageRoots(packagesRoot);
   const clientManifest = readPackageJson(clientRoot);
-  const names = closurePackageNames(clientManifest, packageRoots);
+  const compileManifest = {
+    ...clientManifest,
+    dependencies: {
+      ...clientManifest.dependencies,
+      ...Object.fromEntries(
+        Object.entries(clientManifest.devDependencies ?? {})
+          .filter(([name]) => name.startsWith('@jinn-network/')),
+      ),
+    },
+  };
+  const names = closurePackageNames(compileManifest, packageRoots);
 
   mkdirSync(archivesRoot, { recursive: true });
+  mkdirSync(stagingRoot, { recursive: true });
   const archives = new Map();
   for (const name of names) {
-    archives.set(name, pack(packageRoots.get(name), archivesRoot, `pack ${name}`));
+    const archive = stageAndPack(packageRoots.get(name), name);
+    archives.set(name, archive);
   }
-  const clientArchive = pack(clientRoot, archivesRoot, 'pack client', false);
+
+  mkdirSync(consumerRoot, { recursive: true });
+  const closureDependencies = Object.fromEntries(names.map((name) => [
+    name,
+    readPackageJson(packageRoots.get(name)).version,
+  ]));
+  const runtimeExternalDependencies = Object.fromEntries(
+    Object.entries({
+      ...clientManifest.dependencies,
+      ...clientManifest.optionalDependencies,
+    }).filter(([name]) => !name.startsWith('@jinn-network/')),
+  );
+  const compilerDependencies = Object.fromEntries(
+    ['typescript', '@types/node', '@types/semver', '@types/ws']
+      .map((name) => [name, clientManifest.devDependencies?.[name]])
+      .filter(([, version]) => typeof version === 'string'),
+  );
+  writeConsumerManifest(runtimeExternalDependencies, compilerDependencies);
+  run(
+    'npm',
+    ['install', '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund'],
+    'install dependency-only packed closure',
+    { cwd: consumerRoot },
+  );
+  installPackedArchives([...archives.values()], 'install dependency-only packed closure');
+  writeConsumerManifest({ ...runtimeExternalDependencies, ...closureDependencies }, compilerDependencies);
+
+  for (const name of names) {
+    assertInstalledUnderConsumer(name);
+  }
+  assertNoPersistedLocalSpecs(consumerRoot);
+
+  copyPackage(clientRoot, productRoot, '@jinn-network/client');
+  const tsc = join(consumerRoot, 'node_modules', '.bin', 'tsc');
+  run(tsc, ['--project', 'tsconfig.json'], 'compile client against clean packed closure', {
+    cwd: productRoot,
+  });
+  const clientArchive = stageAndPack(productRoot, '@jinn-network/client');
   assertArchiveContains(clientArchive, 'package/dist/bin/jinn.js', 'packed client');
   assertArchiveContains(
     clientArchive,
     'package/dist/daemon/bridge-legacy-delivery.js',
     'packed client',
   );
-
-  mkdirSync(consumerRoot, { recursive: true });
-  writeFileSync(join(consumerRoot, 'package.json'), `${JSON.stringify({
-    private: true,
-    type: 'module',
-    dependencies: {
-      '@jinn-network/client': `file:${clientArchive}`,
-      ...Object.fromEntries(names.map((name) => [name, `file:${archives.get(name)}`])),
-    },
-  }, null, 2)}\n`);
-  run(
-    'npm',
-    ['install', '--ignore-scripts', '--no-audit', '--no-fund'],
-    'install complete packed client closure',
-    { cwd: consumerRoot },
-  );
-
-  for (const name of ['@jinn-network/client', ...names]) {
-    assertInstalledUnderConsumer(name);
-  }
+  rmSync(productRoot, { recursive: true, force: true });
+  writeConsumerManifest({
+    ...runtimeExternalDependencies,
+    ...closureDependencies,
+    '@jinn-network/client': clientManifest.version,
+  }, compilerDependencies);
+  installPackedArchives([clientArchive], 'install packed client into clean closure', true);
+  assertInstalledUnderConsumer('@jinn-network/client');
+  assertNoPersistedLocalSpecs(consumerRoot);
   const resolved = run(
     process.execPath,
     [
@@ -184,7 +318,7 @@ try {
     'inspect packed client dependency graph',
     { cwd: consumerRoot },
   );
-  console.log(`smoke-test-hermetic-packed-closure: packed ${names.length} Jinn packages with no source-tree resolution.`);
+  console.log(`smoke-test-hermetic-packed-closure: compiled and loaded the client against ${names.length} packed Jinn packages with no local dependency specifiers.`);
 } finally {
   rmSync(closureRoot, { recursive: true, force: true });
 }
