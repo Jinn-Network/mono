@@ -32,6 +32,26 @@ interface VerificationKey {
   publicKey: Record<string, string>;
 }
 
+/**
+ * Reads the five B1 contract artifacts as exact, opaque bytes. Callers that make a
+ * decision from the template must first run `verifyPredictionSnapshotFixture()`;
+ * this loader intentionally does not parse and reserialize any of the records.
+ */
+export async function loadPredictionSnapshotFixture(): Promise<{
+  readonly task: Uint8Array;
+  readonly evaluationSpec: Uint8Array;
+  readonly admissionReceiptDsse: Uint8Array;
+  readonly submission: Uint8Array;
+  readonly requesterDsse: Uint8Array;
+}> {
+  const manifest = JSON.parse(await readFile(new URL("manifest.json", FIXTURE_ROOT), "utf8")) as FixtureManifest;
+  const artifacts = await Promise.all(ARTIFACT_NAMES.map(async (name) => [
+    name,
+    new Uint8Array(await readFile(new URL(manifest.artifacts[name].path, FIXTURE_ROOT))),
+  ] as const));
+  return Object.fromEntries(artifacts) as Record<ArtifactName, Uint8Array>;
+}
+
 function exactCanonical(bytes: Uint8Array, label: string): Record<string, unknown> {
   const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error(`${label} is not an object`);
@@ -64,11 +84,7 @@ export async function verifyPredictionSnapshotFixture(): Promise<{
   const manifest = JSON.parse(await readFile(new URL("manifest.json", FIXTURE_ROOT), "utf8")) as FixtureManifest;
   if (manifest.fixtureVersion !== 1) throw new Error("unexpected prediction fixture version");
   const verificationKey = JSON.parse(await readFile(new URL("verification-key.json", FIXTURE_ROOT), "utf8")) as VerificationKey;
-  const artifacts = await Promise.all(ARTIFACT_NAMES.map(async (name) => [
-    name,
-    new Uint8Array(await readFile(new URL(manifest.artifacts[name].path, FIXTURE_ROOT))),
-  ] as const));
-  const bytes = Object.fromEntries(artifacts) as Record<ArtifactName, Uint8Array>;
+  const bytes = await loadPredictionSnapshotFixture();
   const artifactDigests = Object.fromEntries(ARTIFACT_NAMES.map((name) => [name, recordDigest(bytes[name])])) as Record<ArtifactName, Digest>;
   for (const name of ARTIFACT_NAMES) {
     if (artifactDigests[name] !== manifest.artifacts[name].digest) throw new Error(`${name} digest differs from manifest`);
