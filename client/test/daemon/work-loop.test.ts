@@ -341,6 +341,27 @@ function build(overrides: Record<string, unknown> = {}) {
 }
 
 describe('work loop', () => {
+  it('uses the verified native queue and never falls through to the legacy archive adapter', async () => {
+    const archiveSince = vi.fn(async () => [card()]);
+    const sync = vi.fn(async () => ({ accepted: 0, verifiedSources: 1 }));
+    const takePending = vi.fn(() => []);
+    const { loop } = build({
+      archive: { since: archiveSince },
+      nativeDiscovery: {
+        sync,
+        takePending,
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+    });
+
+    await expect(loop.tick()).resolves.toEqual([]);
+    expect(sync).toHaveBeenCalledOnce();
+    expect(takePending).toHaveBeenCalledOnce();
+    expect(archiveSince).not.toHaveBeenCalled();
+  });
+
   it('refuses to claim before the projector catch-up gate opens', async () => {
     const { loop } = build({ claimGate: closedGate() });
     expect(await loop.tick()).toEqual([

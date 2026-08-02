@@ -76,6 +76,7 @@ import type { Store } from '../store/store.js';
 import type { EngagementLedger } from './engagement-ledger.js';
 import type { ClaimGate } from './claim-gate.js';
 import type { OperatorComposition } from './composition-root.js';
+import type { NativeDiscoveryConsumer, NativeDiscoveryQueuedCard } from './native-discovery.js';
 import { runLoop } from './loop-heartbeat.js';
 import { gateClaimByAiUnits } from './ai-units-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
@@ -113,7 +114,10 @@ export interface SpendCapConfig {
 
 export interface WorkLoopConfig {
   readonly composition: OperatorComposition;
-  readonly archive: ArchiveSubscription;
+  /** Explicit legacy-only compatibility adapter. Native work never reads this source. */
+  readonly archive?: ArchiveSubscription;
+  /** Verified, checkpointed native source consumer. Mutually exclusive with native archive use. */
+  readonly nativeDiscovery?: NativeDiscoveryConsumer;
   readonly ledger: EngagementLedger;
   readonly claimGate: ClaimGate;
   readonly store: Store;
@@ -140,6 +144,7 @@ export type WorkLoopOutcome =
   | { readonly kind: 'pipeline'; readonly result: PipelineRunOutcome };
 
 const noopLogger = { info: (): void => undefined, warn: (): void => undefined };
+const LEGACY_ARCHIVE_START_SEQUENCE = '';
 
 function idempotencyKeyFor(chain: { chainId: number; taskCoordinator: string }, taskId: bigint): string {
   return `${chain.chainId}:${chain.taskCoordinator}:${taskId.toString()}`;
@@ -221,15 +226,45 @@ export class WorkLoop {
 
   /** One pass over new archive cards. Returns per-card outcomes for assertions. */
   async tick(): Promise<readonly { card: string; outcome: WorkLoopOutcome }[]> {
-    // Gap 3 (file header): no cursor is derivable from a card, so every tick re-lists from the
-    // start; the engagement ledger's own dedupe makes re-processing an already-claimed card safe.
-    const cards = await this.config.archive.since('');
+    const nativeQueued = await this.readNativeCards();
+    // This legacy-only compatibility branch remains deliberately separate from native source
+    // consumption. Native work has no call path to ArchiveSubscription at all.
+    const cards = nativeQueued === undefined
+      ? await this.readLegacyCards()
+      : nativeQueued.map((item) => item.card);
     const results: { card: string; outcome: WorkLoopOutcome }[] = [];
-    for (const card of cards) {
-      results.push({ card: card.chain.submission, outcome: await this.processCard(card) });
+    for (const [index, card] of cards.entries()) {
+      const outcome = await this.processCard(card);
+      results.push({ card: card.chain.submission, outcome });
+      // A closed projector gate is not processing: retain the durable queue row so a later
+      // verified-head/open-gate pass can claim it. Every other completed pass is idempotently
+      // represented by the ledger/pipeline and may acknowledge the queue delivery.
+      if (
+        nativeQueued !== undefined
+        && !(outcome.kind === 'skipped' && outcome.reason === 'gate-closed')
+      ) {
+        this.config.nativeDiscovery!.acknowledge(nativeQueued[index]!);
+      }
     }
     this.logOutcomes(cards, results);
     return results;
+  }
+
+  private async readNativeCards(): Promise<readonly NativeDiscoveryQueuedCard[] | undefined> {
+    const native = this.config.nativeDiscovery;
+    if (native === undefined) return undefined;
+    // `sync()` is the verified signed-head gate. A stale/tampered/rewound head rejects before
+    // `takePending()` is reached, so even previously queued cards cannot start native work under
+    // a failed current sync.
+    await native.sync();
+    return native.takePending();
+  }
+
+  private async readLegacyCards(): Promise<readonly AnnouncedSubmissionCard[]> {
+    if (this.config.archive === undefined) {
+      throw new Error('work loop requires archive in legacy mode or nativeDiscovery in native mode');
+    }
+    return this.config.archive.since(LEGACY_ARCHIVE_START_SEQUENCE);
   }
 
   private logger(): { info(m: string): void; warn(m: string): void } {

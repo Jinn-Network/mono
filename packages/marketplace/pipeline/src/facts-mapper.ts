@@ -4,6 +4,21 @@
 import { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
 import type { SubmissionFacts } from "./types.js";
 
+export interface NativeDiscoveryCardProvenance {
+  /** Structural on purpose: pipeline stays independent of discovery's package tree. */
+  readonly source: { readonly agent: string; readonly name: string };
+  readonly sequence: string;
+  readonly entryDigest: `sha256:${string}`;
+  /** Exact signed source high-water that gated this card's admission. */
+  readonly signedHighWater: {
+    readonly sequence: string;
+    readonly entry: `sha256:${string}`;
+    readonly issuedAt: string;
+    readonly refreshBy: string;
+    readonly signature: unknown;
+  };
+}
+
 /** The structural slice of a discovery announcement this mapper reads. No discovery import. */
 export interface AnnouncedSubmissionCard {
   readonly record: { readonly kind: string; readonly digest: `sha256:${string}` };
@@ -19,6 +34,8 @@ export interface AnnouncedSubmissionCard {
   readonly derivationKind?: "chain" | "legacy";
   /** Present only on `legacy` cards: the anchored manifest digest the venue posted with. */
   readonly legacyManifestDigest?: string;
+  /** Native discovery provenance; absent on the explicit legacy adapter path. */
+  readonly discovery?: NativeDiscoveryCardProvenance;
 }
 
 export type FactsMappingRefusal =
