@@ -36,14 +36,18 @@ describe("identifiers", () => {
 });
 
 describe("namespaced extension keys", () => {
-  test("accepts reverse-DNS and absolute-URI names", () => {
-    expect(isNamespacedExtensionKey("network.jinn.note")).toBe(true);
-    expect(isNamespacedExtensionKey("https://example.test/ext")).toBe(true);
-  });
-
-  test("rejects bare names", () => {
-    expect(isNamespacedExtensionKey("note")).toBe(false);
-    expect(isNamespacedExtensionKey("")).toBe(false);
+  test.each([
+    ["network.jinn.note", true],
+    ["mailto:operator@example.test", true],
+    ["urn:jinn:information-world", true],
+    ["https://example.test/ext", true],
+    ["mailto:", false],
+    ["http://", false],
+    ["http://example.test/ext a", false],
+    ["note", false],
+    ["", false],
+  ])("classifies %j as %s", (key, expected) => {
+    expect(isNamespacedExtensionKey(key)).toBe(expected);
   });
 
   test("topLevelRecordSchema admits namespaced extras and refuses bare ones", () => {
