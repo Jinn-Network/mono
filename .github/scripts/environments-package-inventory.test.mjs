@@ -15,6 +15,7 @@ const ENVIRONMENT_PACKAGES = [
   ['chain-record', '@jinn-network/chain-environment-record'],
   ['chain-verification', '@jinn-network/chain-environment-verification'],
   ['chain-extraction', '@jinn-network/chain-state-extraction'],
+  ['information-world', '@jinn-network/information-world'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/environments; map name -> absolute dir
@@ -92,6 +93,21 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // `trust-resolve` is install-graph only (a portal's own resolutions do not apply, so
     // `trust-testing`'s Jinn dependency is resolved here). Importing it is banned below.
     devDependencies: ['@jinn-network/trust-resolve', '@jinn-network/trust-testing'],
+    optionalDependencies: [],
+    peerDependencies: [],
+  }],
+  // `information-world` is tier 2 + tier 3 in one package (design §3, §4.4) and still takes
+  // ZERO Jinn runtime dependencies: the record layer is pure, and the replay service's only
+  // non-relative import is `node:http`. Both Jinn entries are test-only — `evidence-protocol`
+  // is the seal-equivalence oracle (program §4 contract 3), and `chain-environment-record` is
+  // the composite whose composition block this package's routing input must accept without
+  // adaptation. The source-boundary guard enforces that neither reaches production source.
+  ['information-world', {
+    dependencies: [],
+    devDependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/evidence-protocol',
+    ],
     optionalDependencies: [],
     peerDependencies: [],
   }],
@@ -177,6 +193,7 @@ test('every environments package declares Vitest as an exact optional peer where
     ['chain-record', ['.', './fixtures/*', './schemas/*', './testing']],
     ['chain-verification', ['.', './fixtures/*', './testing']],
     ['chain-extraction', ['.', './fixtures/*', './testing']],
+    ['information-world', ['.', './fixtures/*', './schemas/*', './testing']],
   ]);
   assert.equal(expectedExports.size, ENVIRONMENT_PACKAGES.length);
   for (const [directory] of ENVIRONMENT_PACKAGES) {
