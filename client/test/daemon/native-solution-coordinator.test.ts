@@ -14,6 +14,7 @@ import { Store } from '../../src/store/store.js';
 import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
 import {
   NativeSolutionCoordinator,
+  type NativeSolutionSettlementCanonicalFact,
   type NativeSolutionVerificationPort,
 } from '../../src/daemon/native-solution-coordinator.js';
 
@@ -99,6 +100,7 @@ function setup(input: {
   readonly recover?: ReconciliationReport;
   readonly evidenceBytes?: Uint8Array | null;
   readonly verification?: Awaited<ReturnType<NativeSolutionVerificationPort['verify']>>;
+  readonly settlementFacts?: readonly NativeSolutionSettlementCanonicalFact[];
 } = {}) {
   const subject = finalizedClaim();
   const engagement = subject.state.getEngagement(subject.engagementId)!;
@@ -151,19 +153,24 @@ function setup(input: {
     entryDigest: `sha256:${'6'.repeat(64)}` as const,
   }));
   let settlementBroadcast = false;
+  let settlementFactIndex = 0;
   const settlement = {
     broadcast: vi.fn(async () => {
       settlementBroadcast = true;
       return { txHash: `0x${'7'.repeat(64)}` as const };
     }),
-    readCanonical: vi.fn(async () => settlementBroadcast
-      ? {
-          kind: 'finalized' as const,
-          txHash: `0x${'7'.repeat(64)}` as const,
-          blockHash: `0x${'8'.repeat(64)}` as const,
-          blockNumber: 120n,
-        }
-      : { kind: 'absent' as const, checkedAtBlock: 119n }),
+    readCanonical: vi.fn(async () => {
+      const configured = input.settlementFacts?.[settlementFactIndex++];
+      if (configured !== undefined) return configured;
+      return settlementBroadcast
+        ? {
+            kind: 'finalized' as const,
+            txHash: `0x${'7'.repeat(64)}` as const,
+            blockHash: `0x${'8'.repeat(64)}` as const,
+            blockNumber: 120n,
+          }
+        : { kind: 'absent' as const, checkedAtBlock: 119n };
+    }),
   };
   const coordinator = new NativeSolutionCoordinator({
     state: subject.state,
@@ -255,6 +262,36 @@ describe('NativeSolutionCoordinator', () => {
     }));
     expect(subject.publish).not.toHaveBeenCalled();
     expect(subject.settlement.broadcast).not.toHaveBeenCalled();
+  });
+
+  it('reopens an orphaned settlement with the same durable operation identity', async () => {
+    const txHash = `0x${'7'.repeat(64)}` as const;
+    const subject = setup({
+      settlementFacts: [
+        { kind: 'absent', checkedAtBlock: 119n },
+        { kind: 'orphaned', txHash, reason: 'projector-reorg-correction' },
+        { kind: 'absent', checkedAtBlock: 121n },
+        {
+          kind: 'finalized', txHash,
+          blockHash: `0x${'8'.repeat(64)}`, blockNumber: 122n,
+        },
+      ],
+    });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toEqual({ kind: 'solution-published' });
+    const originalOperation = subject.state.listOperations(subject.engagementId)
+      .find(({ kind }) => kind === 'solution-settlement')!;
+    expect(originalOperation.status).toBe('orphaned');
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'solution-settled', operationId: originalOperation.operationId });
+
+    expect(subject.settlement.broadcast).toHaveBeenCalledTimes(2);
+    expect(subject.settlement.broadcast.mock.calls.map(([request]) => request.operationId))
+      .toEqual([originalOperation.operationId, originalOperation.operationId]);
+    expect(subject.state.listOperations(subject.engagementId)
+      .filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
   });
 });
 

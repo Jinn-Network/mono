@@ -1342,7 +1342,29 @@ export class NativeOperatorStateRepository {
       });
       const existing = this.store.db.prepare(`SELECT * FROM native_operations WHERE operation_id = ?`)
         .get(operationId) as RawOperation | undefined;
-      if (existing !== undefined) return { kind: 'matching' as const, operationId };
+      if (existing !== undefined) {
+        if (existing.status === 'orphaned') {
+          if (engagement.state !== 'solution-published') {
+            throw new NativeOperatorStateConflictError(
+              `cannot reopen orphaned solution settlement from ${engagement.state}`,
+            );
+          }
+          this.store.db.prepare(
+            `UPDATE native_operations
+              SET status = 'intent', prior_tx_hash = tx_hash, tx_hash = NULL,
+                block_hash = NULL, block_number = NULL, updated_at = ?
+              WHERE operation_id = ?`,
+          ).run(now, operationId);
+          this.store.db.prepare(
+            `UPDATE native_engagements SET state = 'solution-settlement-pending', updated_at = ?
+              WHERE engagement_id = ?`,
+          ).run(now, engagementIdValue);
+          this.insertAudit(engagementIdValue, operationId, 'solution-settlement-reopened', {
+            priorTxHash: existing.tx_hash,
+          }, now);
+        }
+        return { kind: 'matching' as const, operationId };
+      }
       if (engagement.state !== 'solution-published') {
         throw new NativeOperatorStateConflictError(`cannot begin solution settlement from ${engagement.state}`);
       }

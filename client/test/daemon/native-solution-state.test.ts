@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 import {
   documentDigest,
@@ -35,8 +38,8 @@ const submissionBytes = new TextEncoder().encode('{"native":"submission"}');
 const taskDigest = documentDigest(taskBytes);
 const submissionDigest = documentDigest(submissionBytes);
 
-function finalizedClaim() {
-  const store = new Store(':memory:');
+function finalizedClaim(dbPath = ':memory:') {
+  const store = new Store(dbPath);
   store.db.prepare(
     `INSERT INTO native_discovery_cards
        (id, source_agent, source_name, sequence, entry_digest, announcement_id, card_json, accepted_at)
@@ -82,19 +85,40 @@ function finalizedClaim() {
 }
 
 describe('native solution state', () => {
-  it('migrates v1 metadata additively and leaves claim rows intact', () => {
-    const subject = finalizedClaim();
-    subject.store.db.prepare(
-      `UPDATE native_operator_state_metadata SET schema_version = 1 WHERE singleton = 1`,
-    ).run();
+  it('opens a real on-disk v1 database additively and leaves claim rows intact', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-state-v1-'));
+    const dbPath = join(root, 'operator.sqlite');
+    let openStore: Store | undefined;
+    try {
+      const subject = finalizedClaim(dbPath);
+      const engagementId = subject.engagement.engagementId;
+      const attemptUri = subject.engagement.attemptUri;
+      subject.store.db.exec(`
+        DROP TABLE native_solution_artifacts;
+        DROP TABLE native_solution_executions;
+        UPDATE native_operator_state_metadata SET schema_version = 1 WHERE singleton = 1;
+      `);
+      subject.store.close();
 
-    const reopened = new NativeOperatorStateRepository(subject.store);
+      openStore = new Store(dbPath);
+      const reopened = new NativeOperatorStateRepository(openStore);
 
-    expect(reopened.schemaVersion()).toBe(2);
-    expect(reopened.getEngagement(subject.engagement.engagementId)).toMatchObject({
-      state: 'claim-finalized',
-      attemptUri: subject.engagement.attemptUri,
-    });
+      expect(reopened.schemaVersion()).toBe(2);
+      expect(reopened.getEngagement(engagementId)).toMatchObject({
+        state: 'claim-finalized',
+        attemptUri,
+      });
+      const tables = openStore.db.prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'native_solution_%' ORDER BY name`,
+      ).all() as Array<{ name: string }>;
+      expect(tables.map(({ name }) => name)).toEqual([
+        'native_solution_artifacts',
+        'native_solution_executions',
+      ]);
+    } finally {
+      openStore?.close();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it('persists exact execution inputs and one backend operation before submission', () => {
