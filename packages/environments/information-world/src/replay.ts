@@ -263,7 +263,7 @@ export async function buildReplayIndex(
     bodyOf: (key: string): Uint8Array => {
       const body = state.bodies.get(key);
       if (body === undefined) {
-        throw new CorpusIntegrityError(`corpus.entries.${key}`, "no verified body for this key");
+        throw new CorpusIntegrityError(`corpus.entries.${key}`, "no body matches the digest and declared size for this key");
       }
       return Uint8Array.from(body);
     },

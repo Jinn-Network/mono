@@ -6,7 +6,9 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction'];
+const environmentDirectories = [
+  'record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction', 'information-world',
+];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -178,6 +180,37 @@ const VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 const VERIFICATION_FOREIGN_PACKAGES = [
   ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
   '@jinn-network/trust-resolve',
+];
+// `packages/environments/information-world` is tier 2 + tier 3 in one package: the record
+// layer is pure, and the replay service is the tree's ONLY production transport surface.
+// Closure is a negative property, so this tree guard backs up the package-local closure test:
+// exactly one file may name `node:http`, and that one file may bind `createServer` only.
+const INFORMATION_WORLD_ALLOWED_EXTERNALS = ['@noble/hashes', 'zod'];
+const INFORMATION_WORLD_ALLOWED_DEPENDENCIES = ['@noble/hashes', 'zod'];
+const INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/evidence-protocol',
+  '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
+];
+const INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const INFORMATION_WORLD_TEST_ONLY_JINN_PACKAGES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/evidence-protocol',
+];
+const INFORMATION_WORLD_TRANSPORT_SOURCE = 'information-world/src/service.ts';
+const INFORMATION_WORLD_FILESYSTEM_SOURCES = [
+  'information-world/src/fixtures.ts',
+  'information-world/src/closure.test.ts',
+  'information-world/src/schema-parity.test.ts',
+];
+const INFORMATION_WORLD_FOREIGN_ROOTS = environmentDirectories
+  .filter((directory) => directory !== 'information-world')
+  .map((directory) => join(packages, directory));
+const TRANSPORT_MODULES = [
+  'node:https', 'node:net', 'node:tls', 'node:dns', 'node:dgram', 'node:http2',
+  'undici', 'axios', 'node-fetch', 'got', 'superagent', 'ws',
 ];
 // Finding F-C2-5: the staged-state file store is this tree's only production
 // filesystem surface. Its directory is an argument, not ambient authority --
@@ -365,6 +398,92 @@ function specifiers(source) {
     new RegExp(String.raw`\bimport${trivia}\(${trivia}\x60((?:(?!\$\{)[^\x60])*)\x60${trivia}\)`, 'g'),
     new RegExp(String.raw`\brequire${trivia}\(${trivia}\x60((?:(?!\$\{)[^\x60])*)\x60${trivia}\)`, 'g'),
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
+}
+
+// This intentionally uses a small lexical scanner rather than a comment-tolerant regex. A
+// regex may backtrack from one block-comment opener to a later closer and treat executable
+// code as trivia, which would make a client binding invisible to the carve-out.
+function lexicalTokens(source) {
+  const tokens = [];
+  for (let index = 0; index < source.length;) {
+    const character = source[index];
+    const next = source[index + 1];
+    if (/\s/u.test(character)) { index += 1; continue; }
+    if (character === '/' && next === '/') {
+      index += 2;
+      while (index < source.length && source[index] !== '\n' && source[index] !== '\r') index += 1;
+      continue;
+    }
+    if (character === '/' && next === '*') {
+      const close = source.indexOf('*/', index + 2);
+      index = close === -1 ? source.length : close + 2;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === '`') {
+      const quote = character;
+      let value = '';
+      index += 1;
+      while (index < source.length && source[index] !== quote) {
+        if (source[index] === '\\') {
+          value += source.slice(index, index + 2);
+          index += 2;
+        } else {
+          value += source[index];
+          index += 1;
+        }
+      }
+      if (source[index] === quote) index += 1;
+      tokens.push({ kind: 'string', value });
+      continue;
+    }
+    if (/[A-Za-z_$]/u.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < source.length && /[A-Za-z0-9_$]/u.test(source[index])) index += 1;
+      tokens.push({ kind: 'identifier', value: source.slice(start, index) });
+      continue;
+    }
+    tokens.push({ kind: 'punctuation', value: character });
+    index += 1;
+  }
+  return tokens;
+}
+
+function nodeHttpNamedImports(source) {
+  const tokens = lexicalTokens(source);
+  const imports = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (tokens[index]?.kind !== 'identifier' || tokens[index]?.value !== 'import'
+      || tokens[index + 1]?.value !== '{') continue;
+    const bindings = [];
+    let cursor = index + 2;
+    while (tokens[cursor]?.value !== '}' && cursor < tokens.length) {
+      if (tokens[cursor]?.kind === 'identifier') bindings.push(tokens[cursor].value);
+      cursor += 1;
+    }
+    if (tokens[cursor]?.value !== '}' || tokens[cursor + 1]?.value !== 'from'
+      || tokens[cursor + 2]?.kind !== 'string' || tokens[cursor + 2]?.value !== 'node:http') continue;
+    imports.push(bindings.filter((value) => value !== 'type').sort());
+  }
+  return imports;
+}
+
+function hasDynamicModuleLoad(source) {
+  const tokens = lexicalTokens(source);
+  return tokens.some((token, index) => token.kind === 'identifier'
+    && (token.value === 'import' || token.value === 'require')
+    && tokens[index + 1]?.value === '(');
+}
+
+function onlyCreateServerNodeHttpImport(source) {
+  const nodeHttpStrings = lexicalTokens(source)
+    .filter((token) => token.kind === 'string' && token.value === 'node:http');
+  const namedImports = nodeHttpNamedImports(source);
+  return !hasDynamicModuleLoad(source)
+    && nodeHttpStrings.length === 1
+    && namedImports.length === 1
+    && namedImports[0].length === 1
+    && namedImports[0][0] === 'createServer';
 }
 
 function inside(child, parent) {
@@ -656,6 +775,111 @@ test('environment-verification takes exactly its two approved package edges', ()
     [...new Set(externals)].sort().filter((name) => !VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
     [],
     'environment-verification production source imports an unapproved external package',
+  );
+});
+
+test('information-world is pure except for one loopback server and fixture readers', () => {
+  const packageDirectory = join(packages, 'information-world');
+  const source = join(packageDirectory, 'src');
+  const testingEntry = join(source, 'testing.ts');
+  const fixtureLoaders = join(source, 'fixtures.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(source);
+  const testingFiles = allFiles.filter((file) =>
+    file === testingEntry || file === fixtureLoaders || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  // Production source has no Jinn package, no foreign tree by relative path, and no I/O
+  // except the one `node:http` admission below.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      ['@jinn-network/', ...NODE_IO_MODULES, ...TRANSPORT_MODULES, 'vitest'],
+      [...FORBIDDEN_ROOTS, ...INFORMATION_WORLD_FOREIGN_ROOTS],
+    ).filter((finding) => finding !== `packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE} -> node:http`),
+    [],
+    'information-world production source must import no Jinn package or transport module other '
+      + 'than node:http in src/service.ts',
+  );
+
+  // This deliberately rejects namespace/default imports, every dynamic import or require,
+  // a second import, and comment-split client bindings. The lexical recognizer accepts one
+  // named static import only, so no code path can add a client capability to the carve-out.
+  const serviceSource = readFileSync(join(source, 'service.ts'), 'utf8');
+  assert.deepEqual(
+    forbiddenImportsInFiles(productionFiles, ['node:http']).map((finding) => finding.split(' ->')[0]),
+    [`packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE}`],
+    'node:http is admitted in src/service.ts only',
+  );
+  assert.equal(onlyCreateServerNodeHttpImport(serviceSource), true,
+    'src/service.ts must import node:http exactly once and bind createServer only');
+  const formattedCreateServerImport = [
+    'import /* format */ {',
+    '  createServer /*, request must stay a comment */',
+    '} /* format */ from /* format */ "node:http";',
+  ].join('\n');
+  assert.deepEqual(
+    lexicalTokens(formattedCreateServerImport)
+      .filter((token) => token.kind === 'string').map((token) => token.value),
+    ['node:http'],
+  );
+  assert.deepEqual(nodeHttpNamedImports(formattedCreateServerImport), [['createServer']]);
+  assert.equal(onlyCreateServerNodeHttpImport(formattedCreateServerImport), true,
+    'multiline and commented createServer formatting stays admitted');
+  for (const disguisedClient of [
+    'import * as http from "node:http";',
+    'import http from "node:http";',
+    'import { createServer, request } from "node:http";',
+    'await import(/* client */ "node:http");',
+    'await import("node:" + "http");',
+    'require("node:http");',
+    'import { createServer } from "node:http"; import { request } from "node:http";',
+  ]) {
+    assert.equal(onlyCreateServerNodeHttpImport(disguisedClient), false,
+      `node:http carve-out must reject ${disguisedClient}`);
+  }
+
+  // Filesystem access belongs solely to the testing region and is named one file at a time.
+  const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])
+    .filter((finding) => !INFORMATION_WORLD_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)));
+  assert.deepEqual(fsUsers, [],
+    `only ${INFORMATION_WORLD_FILESYSTEM_SOURCES.join(' and ')} may touch the filesystem`);
+
+  // CE1, CE3, and evidence-protocol are test-only contract oracles. No other Jinn package,
+  // including a relative reach into an otherwise admitted package, crosses this boundary.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      ['@jinn-network/'],
+      [...FORBIDDEN_ROOTS, ...INFORMATION_WORLD_FOREIGN_ROOTS],
+    ).filter((finding) => !INFORMATION_WORLD_TEST_ONLY_JINN_PACKAGES.some(
+      (allowed) => finding.endsWith(`-> ${allowed}`))),
+    [],
+    'information-world testing files must not cross into foreign package roots',
+  );
+
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(source, 'index.ts')], [], [testingEntry, fixtureLoaders]),
+    [],
+    'the root entrypoint must not re-export testing.ts or fixtures.ts',
+  );
+
+  const manifest = JSON.parse(readFileSync(join(packageDirectory, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './schemas/*', './testing']);
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !INFORMATION_WORLD_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'information-world production source imports an unapproved external package',
   );
 });
 
@@ -967,6 +1191,10 @@ test('environments source and docs make no unqualified determinism or verificati
     join(packages, 'chain-record', 'README.md'),
     join(packages, 'chain-record', 'schemas', 'chain-environment.schema.json'),
     join(packages, 'chain-record', 'schemas', 'crypto-environment.schema.json'),
+    ...files(join(packages, 'information-world', 'src'))
+      .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
+    join(packages, 'information-world', 'README.md'),
+    join(packages, 'information-world', 'schemas', 'information-world.schema.json'),
   ].filter((file) => existsSync(file));
 
   const findings = candidates.flatMap((file) => readFileSync(file, 'utf8')

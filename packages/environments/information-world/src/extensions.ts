@@ -4,7 +4,7 @@ import { z } from "zod";
  * Extension names are either reverse-DNS names or URI-shaped names. A URI-shaped name has a
  * non-empty scheme-specific part; a `//` hierarchical form additionally needs an authority.
  * This source is also embedded in the published JSON Schema, so its grammar is one explicit,
- * deterministic contract rather than a host URL parser on one side and a regex on the other.
+ * shared contract rather than a host URL parser on one side and a regex on the other.
  */
 export const NAMESPACED_EXTENSION_KEY_PATTERN =
   "^(?:[A-Za-z][A-Za-z0-9-]*(?:\\.[A-Za-z][A-Za-z0-9-]*)+|[A-Za-z][A-Za-z0-9+.-]*:(?:\\/\\/[^\\s\\/?#][^\\s]*|(?!\\/\\/)[^\\s]+))$";
