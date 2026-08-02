@@ -27,13 +27,30 @@ describe("composite kind compatibility", () => {
       ],
       serviceRuntimes: [],
       composition: {
-        originRouting: [],
+        originRouting: [
+          {
+            origin: "https://information.example.test",
+            worldId: "information",
+            precedence: 0,
+          },
+        ],
         missPolicy: { mode: "declared-response", status: 404 },
-        endpointAllowlist: [],
+        endpointAllowlist: ["https://information.example.test"],
         requestBudget: { maxRequests: 1, maxResponseBytes: 1 },
       },
     });
 
     expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.composition.originRouting).toEqual([
+      {
+        origin: "https://information.example.test",
+        worldId: "information",
+        precedence: 0,
+      },
+    ]);
+    expect(parsed.data.composition.endpointAllowlist).toEqual([
+      "https://information.example.test",
+    ]);
   });
 });
