@@ -9,6 +9,7 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import { Store } from '../../src/store/store.js';
 import {
+  NATIVE_OPERATOR_STATE_SCHEMA_VERSION,
   NativeOperatorStateConflictError,
   NativeOperatorStateRepository,
 } from '../../src/daemon/native-operator-state.js';
@@ -103,7 +104,7 @@ describe('native solution state', () => {
       openStore = new Store(dbPath);
       const reopened = new NativeOperatorStateRepository(openStore);
 
-      expect(reopened.schemaVersion()).toBe(2);
+      expect(reopened.schemaVersion()).toBe(NATIVE_OPERATOR_STATE_SCHEMA_VERSION);
       expect(reopened.getEngagement(engagementId)).toMatchObject({
         state: 'claim-finalized',
         attemptUri,
