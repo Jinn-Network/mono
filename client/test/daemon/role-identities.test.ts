@@ -162,4 +162,28 @@ describe('native persistent role identities', () => {
 
     await expect(openAt(root, resolver)).rejects.toThrow(/revoked/i);
   });
+
+  it('re-resolves delivery authority at Delivery.createdAt instead of trusting the boot decision', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-delivery-time-'));
+    const deliveryTime = '2026-08-02T12:05:00.000Z';
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query, atTime) => resolvedBinding({
+        key: query.key,
+        scopes: ALL_NATIVE_SCOPES,
+        ...(atTime === deliveryTime
+          ? { revocations: [{ effectiveTime: '2026-08-02T12:04:00.000Z' }] }
+          : {}),
+      })),
+    };
+    const identities = await openAt(root, resolver);
+
+    await expect(identities.resolveEffective('solver-delivery', deliveryTime)).resolves.toEqual({
+      ok: false,
+      reason: 'revoked',
+    });
+    expect(resolver.resolveBinding).toHaveBeenCalledWith({
+      key: identities.get('solver-delivery').keyId,
+      agent: AGENT,
+    }, deliveryTime);
+  });
 });

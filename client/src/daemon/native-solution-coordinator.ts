@@ -132,7 +132,9 @@ function deliveryFromExactBytes(bytes: Uint8Array): DeliveryRecord {
 }
 
 function sha256Descriptor(descriptor: ResourceDescriptor): `sha256:${string}` {
-  return `sha256:${descriptor.digest.sha256}`;
+  const sha256 = descriptor.digest?.sha256;
+  if (typeof sha256 !== 'string') throw new NativeSolutionFailure('output-digest-missing');
+  return `sha256:${sha256}`;
 }
 
 export class NativeSolutionCoordinator {

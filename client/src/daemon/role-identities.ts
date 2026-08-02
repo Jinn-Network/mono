@@ -72,6 +72,14 @@ export interface NativeRoleIdentitySetInput {
   readonly now?: () => Date;
 }
 
+export type NativeRoleBindingDecision =
+  | { readonly ok: true; readonly bindingDigest: string }
+  | {
+      readonly ok: false;
+      readonly reason: 'invalid-effective-time' | 'binding-not-resolved' | 'binding-key-mismatch'
+        | 'not-effective' | 'expired' | 'scope-policy-rejected' | 'revoked';
+    };
+
 interface StoredRoleIdentity {
   readonly role: NativeRoleIdentityRole;
   readonly keyId: string;
@@ -339,6 +347,7 @@ export class RoleIdentitySet {
   private constructor(
     readonly agent: string,
     private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
+    private readonly bindingResolver: BindingResolver,
   ) {}
 
   static async open(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
@@ -387,13 +396,51 @@ export class RoleIdentitySet {
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
       });
     }
-    return new RoleIdentitySet(input.agent, byRole);
+    return new RoleIdentitySet(input.agent, byRole, input.bindingResolver);
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
     const identity = this.byRole.get(role);
     if (identity === undefined) throw new IdentityStoreError(`native role identity "${role}" is unavailable`);
     return identity;
+  }
+
+  /**
+   * Re-resolves role authority at the signed record's own effective time. The successful boot
+   * decision is never cached as authority for a later Delivery or verdict: policy scope,
+   * validity window, and revocations are evaluated again against the durable resolver.
+   */
+  async resolveEffective(
+    role: NativeRoleIdentityRole,
+    atTime: string,
+  ): Promise<NativeRoleBindingDecision> {
+    const effective = Date.parse(atTime);
+    if (!Number.isFinite(effective)) return { ok: false, reason: 'invalid-effective-time' };
+    const identity = this.get(role);
+    const resolved = await this.bindingResolver.resolveBinding(
+      { key: identity.keyId, agent: this.agent },
+      atTime,
+    );
+    if (resolved === null) return { ok: false, reason: 'binding-not-resolved' };
+    if (
+      resolved.binding.key.didKey !== identity.keyId
+      || resolved.binding.key.keyid !== identity.keyId
+    ) return { ok: false, reason: 'binding-key-mismatch' };
+    const start = Date.parse(resolved.effectiveStart);
+    if (!Number.isFinite(start) || start > effective) return { ok: false, reason: 'not-effective' };
+    if (resolved.binding.expiresAt !== undefined) {
+      const expires = Date.parse(resolved.binding.expiresAt);
+      if (!Number.isFinite(expires) || expires < effective) return { ok: false, reason: 'expired' };
+    }
+    const requiredScope = NATIVE_ROLE_IDENTITY_REQUIREMENTS[role];
+    if (!resolved.binding.scope.includes(requiredScope)) {
+      return { ok: false, reason: 'scope-policy-rejected' };
+    }
+    for (const revocation of resolved.revocations) {
+      const revokedAt = Date.parse(revocation.effectiveTime);
+      if (!Number.isFinite(revokedAt) || revokedAt <= effective) return { ok: false, reason: 'revoked' };
+    }
+    return { ok: true, bindingDigest: resolved.bindingDigest };
   }
 }
 
