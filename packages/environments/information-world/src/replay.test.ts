@@ -8,6 +8,7 @@ import {
   resolveReplay,
   type CorpusArtifactReader,
   type Consumed,
+  type ReplayIndex,
 } from "./replay.js";
 import {
   canonicalRequestKeyFromParts,
@@ -163,6 +164,19 @@ describe("buildReplayIndex", () => {
       .rejects.toBeInstanceOf(CorpusIntegrityError);
   });
 
+  test("maps a hostile reader failure value to a corpus integrity error", async () => {
+    const fixture = makeFixture();
+    const hostile = new Proxy({}, {
+      getPrototypeOf() {
+        throw new Error("hostile error prototype");
+      },
+    });
+    const unavailable: CorpusArtifactReader = { async read() { throw hostile; } };
+
+    await expect(buildReplayIndex(fixture.world, { artifacts: unavailable }))
+      .rejects.toBeInstanceOf(CorpusIntegrityError);
+  });
+
   test("copies loaded bytes before caching and copies each returned body", async () => {
     const fixture = makeFixture();
     const index = await buildReplayIndex(fixture.world, { artifacts: fixture.reader });
@@ -173,6 +187,117 @@ describe("buildReplayIndex", () => {
     exposed[0] = 0x59;
 
     expect(decoder.decode(index.bodyOf(key))).toBe('{"pools":[{"symbol":"USDC","apy":4.21}]}');
+  });
+
+  test("seals a fresh artifact descriptor before a reader can rewrite it", async () => {
+    const fixture = makeFixture();
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        Reflect.set(descriptor as object, "digest", fixture.docs.digest);
+        return fixture.reader.read(descriptor);
+      },
+    };
+    const index = await buildReplayIndex(fixture.world, { artifacts: reader });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
+
+    expect(decoder.decode(index.bodyOf(key))).toBe('{"pools":[{"symbol":"USDC","apy":4.21}]}');
+  });
+
+  test("snapshots every corpus declaration before reader code can mutate the source world", async () => {
+    const fixture = makeFixture();
+    let first = true;
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        if (first) {
+          first = false;
+          const later = fixture.world.corpus.entries.find(
+            (candidate) => candidate.request.path === "/guide",
+          );
+          if (later === undefined) throw new Error("fixture guide entry is absent");
+          later.response.body.digest = fixture.pools.digest;
+          later.response.body.sizeBytes = fixture.pools.sizeBytes;
+        }
+        return fixture.reader.read(descriptor);
+      },
+    };
+    const index = await buildReplayIndex(fixture.world, { artifacts: reader });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.docsOrigin, "/guide"), policy);
+
+    expect(decoder.decode(index.bodyOf(key))).toBe("# Protocol docs\n\nSupply, borrow, repay.\n");
+  });
+
+  test("owns Buffer bytes rather than retaining the loader's shared view", async () => {
+    const fixture = makeFixture();
+    const loaded = Buffer.from(fixture.pools.bytes);
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        return descriptor.digest === fixture.pools.digest ? loaded : Uint8Array.from(fixture.docs.bytes);
+      },
+    };
+    const index = await buildReplayIndex(fixture.world, { artifacts: reader });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
+
+    loaded[0] = 0x58;
+    const exposed = index.bodyOf(key);
+    exposed[1] = 0x59;
+
+    expect(decoder.decode(index.bodyOf(key))).toBe('{"pools":[{"symbol":"USDC","apy":4.21}]}');
+  });
+
+  test("owns subclass bytes whose slice method aliases the same backing storage", async () => {
+    class SliceAliasingBytes extends Uint8Array {
+      override slice(_start?: number, _end?: number): Uint8Array<ArrayBuffer> {
+        return this as unknown as Uint8Array<ArrayBuffer>;
+      }
+    }
+
+    const fixture = makeFixture();
+    const loaded = new SliceAliasingBytes(fixture.pools.bytes);
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        return descriptor.digest === fixture.pools.digest ? loaded : Uint8Array.from(fixture.docs.bytes);
+      },
+    };
+    const index = await buildReplayIndex(fixture.world, { artifacts: reader });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
+
+    loaded[0] = 0x58;
+
+    expect(decoder.decode(index.bodyOf(key))).toBe('{"pools":[{"symbol":"USDC","apy":4.21}]}');
+  });
+
+  test("maps hostile byte-copy failures to corpus integrity errors", async () => {
+    class IteratorBomb extends Uint8Array {
+      override [Symbol.iterator](): never {
+        throw new Error("iterator bomb");
+      }
+    }
+
+    const fixture = makeFixture();
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        return descriptor.digest === fixture.pools.digest
+          ? new IteratorBomb(fixture.pools.bytes)
+          : Uint8Array.from(fixture.docs.bytes);
+      },
+    };
+
+    await expect(buildReplayIndex(fixture.world, { artifacts: reader }))
+      .rejects.toBeInstanceOf(CorpusIntegrityError);
+  });
+
+  test("maps detached typed-array resources to corpus integrity errors", async () => {
+    const fixture = makeFixture();
+    const detached = Uint8Array.from(fixture.pools.bytes);
+    structuredClone(detached.buffer, { transfer: [detached.buffer] });
+    const reader: CorpusArtifactReader = {
+      async read(descriptor) {
+        return descriptor.digest === fixture.pools.digest ? detached : Uint8Array.from(fixture.docs.bytes);
+      },
+    };
+
+    await expect(buildReplayIndex(fixture.world, { artifacts: reader }))
+      .rejects.toBeInstanceOf(CorpusIntegrityError);
   });
 
   test("defaults the allowlist to declared origins and only permits a subset", async () => {
@@ -237,6 +362,53 @@ describe("resolveReplay", () => {
     }, fresh())).toEqual({ kind: "off-allowlist", origin: fixture.docsOrigin });
   });
 
+  test("keeps replay state private when callers mutate every public view", async () => {
+    const fixture = makeFixture();
+    const index = await buildReplayIndex(fixture.world, {
+      artifacts: fixture.reader,
+      allowlist: [fixture.apiOrigin],
+      budget: { maxRequests: 10, maxResponseBytes: 1_000_000 },
+    });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
+    const entry = index.entry(key);
+    if (entry === undefined || index.budget === undefined) throw new Error("fixture index is absent");
+
+    expect(Reflect.set(index as object, "entry", () => undefined)).toBe(false);
+    expect(Reflect.set(index.allowlist as object, "has", () => true)).toBe(false);
+    expect(Reflect.set(index.budget as object, "maxRequests", 0)).toBe(false);
+    expect(Reflect.set(index.world.requestKeyPolicy as object, "bodyCanonicalization", "utf8-trim"))
+      .toBe(false);
+    expect(Reflect.set(entry.response as object, "status", 599)).toBe(false);
+
+    expect(resolveReplay(index, {
+      method: "GET",
+      url: `${fixture.apiOrigin}/pools`,
+    }, fresh()).kind).toBe("hit");
+    expect(resolveReplay(index, {
+      method: "GET",
+      url: `${fixture.docsOrigin}/guide`,
+    }, fresh())).toEqual({ kind: "off-allowlist", origin: fixture.docsOrigin });
+    expect(index.entry(key)?.response.status).toBe(200);
+  });
+
+  test("fails closed for a structural replay-index counterfeit", async () => {
+    const fixture = makeFixture();
+    const real = await buildReplayIndex(fixture.world, { artifacts: fixture.reader });
+    const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
+    const counterfeit = {
+      world: real.world,
+      allowlist: { has: () => true },
+      budget: undefined,
+      entry: () => real.entry(key),
+      bodyOf: () => real.bodyOf(key),
+    } as unknown as ReplayIndex;
+
+    expect(resolveReplay(counterfeit, {
+      method: "GET",
+      url: `${fixture.apiOrigin}/pools`,
+    }, fresh())).toEqual({ kind: "miss", reason: "unkeyable" });
+  });
+
   test("checks an exhausted request budget before allowlist and key lookup", async () => {
     const fixture = makeFixture();
     const index = await buildReplayIndex(fixture.world, {
@@ -251,6 +423,52 @@ describe("resolveReplay", () => {
     }, { requests: 1, bytes: 0 })).toEqual({ kind: "budget-exhausted", limit: "requests" });
   });
 
+  test.each([
+    ["NaN request limit", { maxRequests: Number.NaN, maxResponseBytes: 1_000_000 }],
+    ["infinite byte limit", { maxRequests: 1, maxResponseBytes: Number.POSITIVE_INFINITY }],
+    ["negative request limit", { maxRequests: -1, maxResponseBytes: 1_000_000 }],
+    ["fractional byte limit", { maxRequests: 1, maxResponseBytes: 1.5 }],
+    ["unsafe request limit", { maxRequests: Number.MAX_SAFE_INTEGER + 1, maxResponseBytes: 1 }],
+  ])("rejects a malformed budget with %s", async (_label, budget) => {
+    const fixture = makeFixture();
+
+    await expect(buildReplayIndex(fixture.world, { artifacts: fixture.reader, budget }))
+      .rejects.toBeInstanceOf(CorpusIntegrityError);
+  });
+
+  test.each([
+    ["NaN requests", { requests: Number.NaN, bytes: 0 }],
+    ["infinite bytes", { requests: 0, bytes: Number.POSITIVE_INFINITY }],
+    ["negative requests", { requests: -1, bytes: 0 }],
+    ["fractional bytes", { requests: 0, bytes: 0.5 }],
+    ["unsafe requests", { requests: Number.MAX_SAFE_INTEGER + 1, bytes: 0 }],
+  ])("fails closed for malformed consumed counters: %s", async (_label, consumed) => {
+    const fixture = makeFixture();
+    const index = await buildReplayIndex(fixture.world, {
+      artifacts: fixture.reader,
+      budget: { maxRequests: 10, maxResponseBytes: 1_000_000 },
+    });
+
+    expect(resolveReplay(index, {
+      method: "GET",
+      url: `${fixture.apiOrigin}/pools`,
+    }, consumed as Consumed)).toEqual({ kind: "miss", reason: "unkeyable" });
+  });
+
+  test("uses remaining byte capacity without an overflowing addition", async () => {
+    const fixture = makeFixture();
+    const index = await buildReplayIndex(fixture.world, {
+      artifacts: fixture.reader,
+      budget: { maxRequests: 10, maxResponseBytes: Number.MAX_SAFE_INTEGER },
+    });
+
+    expect(resolveReplay(index, {
+      method: "GET",
+      url: `${fixture.apiOrigin}/pools`,
+    }, { requests: 0, bytes: Number.MAX_SAFE_INTEGER }))
+      .toEqual({ kind: "budget-exhausted", limit: "bytes" });
+  });
+
   test("uses verified bytes rather than mutable descriptor metadata for the byte budget", async () => {
     const fixture = makeFixture();
     const index = await buildReplayIndex(fixture.world, {
@@ -260,7 +478,7 @@ describe("resolveReplay", () => {
     const key = canonicalRequestKeyFromParts(requestParts(fixture.apiOrigin, "/pools"), policy);
     const recorded = index.entry(key);
     if (recorded === undefined) throw new Error("fixture entry is absent");
-    recorded.response.body.sizeBytes = 0;
+    expect(Reflect.set(recorded.response.body as object, "sizeBytes", 0)).toBe(false);
 
     expect(resolveReplay(index, {
       method: "GET",
