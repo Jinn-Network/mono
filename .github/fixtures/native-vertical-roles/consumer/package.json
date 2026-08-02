@@ -1,6 +1,6 @@
 {
-  "name": "jinn-native-vertical-consumer-fixture",
-  "version": "0.1.0",
+  "name": "jinn-native-consumer-role-fixture",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
@@ -11,8 +11,6 @@
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
-    "@jinn-network/trust-resolve": "0.1.0",
-    "better-sqlite3": "13.0.1",
-    "zod": "4.4.3"
+    "@jinn-network/trust-resolve": "0.1.0"
   }
 }

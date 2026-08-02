@@ -1,0 +1,18 @@
+{
+  "name": "jinn-native-requester-role-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/marketplace-projector": "0.1.0",
+    "@jinn-network/record-discovery-facts-task-execution": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0",
+    "@jinn-network/record-discovery-transport-http": "0.1.0",
+    "@jinn-network/task-admission": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0"
+  }
+}

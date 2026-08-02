@@ -135,8 +135,28 @@
       "canary": true,
       "stable": false
     },
+    "native-task-supply-canary": {
+      "expectedPackageCount": 3,
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "native-task-supply-canary",
+        "platform-v1"
+      ],
+      "stackPublished": true,
+      "canary": true,
+      "stable": false
+    },
     "experimental-environment-supply": {
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 9,
       "publishPolicies": [
         "disabled"
       ],
@@ -150,6 +170,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "native-task-supply-canary",
         "platform-v1"
       ],
       "stackPublished": false,
@@ -173,7 +194,9 @@
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
         "legacy-product-lines",
+        "native-task-supply-canary",
         "platform-v1"
       ],
       "stackPublished": false,
@@ -3232,7 +3255,7 @@
       "role": "task admission capability",
       "tier": 3,
       "classification": "platform",
-      "stability": "experimental",
+      "stability": "candidate",
       "authority": {
         "documents": [
           {
@@ -3242,8 +3265,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "experimental-environment-supply",
-      "publishPolicy": "disabled",
+      "releaseGroup": "native-task-supply-canary",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "task-supply-ci"
@@ -3308,7 +3331,7 @@
       "role": "task derivation capability",
       "tier": 3,
       "classification": "platform",
-      "stability": "experimental",
+      "stability": "candidate",
       "authority": {
         "documents": [
           {
@@ -3318,8 +3341,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "experimental-environment-supply",
-      "publishPolicy": "disabled",
+      "releaseGroup": "native-task-supply-canary",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "task-supply-ci"
@@ -3348,7 +3371,7 @@
       "role": "task posting capability",
       "tier": 3,
       "classification": "platform",
-      "stability": "experimental",
+      "stability": "candidate",
       "authority": {
         "documents": [
           {
@@ -3358,8 +3381,8 @@
         ],
         "decisionRecord": null
       },
-      "releaseGroup": "experimental-environment-supply",
-      "publishPolicy": "disabled",
+      "releaseGroup": "native-task-supply-canary",
+      "publishPolicy": "canary-only",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "task-supply-ci"

@@ -18,6 +18,11 @@ import { pathToFileURL } from 'node:url';
 
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { loadCatalogPackages } from './platform-catalog.mjs';
+import {
+  deriveNativeVerticalRoleClosures,
+  loadNativeVerticalRoleFixtures,
+  nativeVerticalRuntimePackageNames,
+} from './native-vertical-role-packages.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const SRI_SHA512 = /^sha512-[A-Za-z0-9+/]+={0,2}$/u;
@@ -53,9 +58,36 @@ function sameNames(left, right) {
     && JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 }
 
+function assertNoForbiddenLocalProvenance(value, context) {
+  if (typeof value === 'string') {
+    if (/^(?:file|link|portal|workspace):/iu.test(value)) {
+      throw new Error(`${context} retains forbidden local provenance ${value}`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoForbiddenLocalProvenance(item, context);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const item of Object.values(value)) assertNoForbiddenLocalProvenance(item, context);
+  }
+}
+
 function inside(child, parent) {
   const path = relative(parent, child);
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`));
+}
+
+function removeNpmBinShims(directory) {
+  if (!existsSync(directory)) return;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const absolute = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === '.bin') rmSync(absolute, { recursive: true, force: true });
+      else removeNpmBinShims(absolute);
+    }
+  }
 }
 
 function walkSourceFiles(directory, prefix, found) {
@@ -111,9 +143,6 @@ function validateBundle(repoRoot, manifestPath) {
   if (!COMMIT_SHA.test(String(manifest.sourceSha))) {
     throw new Error('prepublication manifest sourceSha must be a 40-character lowercase commit SHA');
   }
-  if (manifest.releaseGroup !== 'platform-v1') {
-    throw new Error(`prepublication manifest releaseGroup must be platform-v1, got ${manifest.releaseGroup}`);
-  }
   const actualCatalogDigest = catalogSha256(repoRoot);
   if (manifest.catalog?.sha256 !== actualCatalogDigest) {
     throw new Error(
@@ -121,7 +150,36 @@ function validateBundle(repoRoot, manifestPath) {
     );
   }
 
-  const catalogPackages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
+  const allCatalogPackages = loadCatalogPackages(repoRoot);
+  let catalogPackages;
+  if (manifest.selection?.kind === 'native-vertical-runtime-closure') {
+    const roleRoots = Object.fromEntries(Object.entries(loadNativeVerticalRoleFixtures(repoRoot))
+      .map(([role, { roots }]) => [role, roots]));
+    if (!sameNames(Object.keys(manifest.selection.roleRoots ?? {}), Object.keys(roleRoots))
+      || Object.entries(roleRoots).some(([role, roots]) => (
+        !sameNames(manifest.selection.roleRoots[role] ?? [], roots)
+      ))) {
+      throw new Error('native vertical role roots do not match the checked-in runtime imports');
+    }
+    const promoted = new Set(loadCatalogPackages(repoRoot, {
+      releaseGroup: 'native-task-supply-canary',
+    }).map(({ name }) => name));
+    const selected = new Set(nativeVerticalRuntimePackageNames(
+      repoRoot,
+      allCatalogPackages,
+      [...promoted],
+    ));
+    catalogPackages = allCatalogPackages.filter(({ name }) => selected.has(name));
+    const closureOnly = [...selected].filter((name) => !promoted.has(name)).sort();
+    if (JSON.stringify(manifest.selection.closureOnlyPackages) !== JSON.stringify(closureOnly)) {
+      throw new Error('native vertical closure-only package set does not match the catalog-derived closure');
+    }
+  } else {
+    if (manifest.releaseGroup !== 'platform-v1') {
+      throw new Error(`prepublication manifest releaseGroup must be platform-v1, got ${manifest.releaseGroup}`);
+    }
+    catalogPackages = allCatalogPackages.filter(({ catalog }) => catalog.releaseGroup === 'platform-v1');
+  }
   const catalogNames = catalogPackages.map(({ name }) => name);
   const order = manifest.packageOrder;
   const waveOrder = Array.isArray(manifest.waves) ? manifest.waves.flat() : [];
@@ -133,7 +191,7 @@ function validateBundle(repoRoot, manifestPath) {
     || !sameNames(order, catalogNames)
     || JSON.stringify(order) !== JSON.stringify(waveOrder)
     || JSON.stringify(order) !== JSON.stringify(tarballNames)) {
-    throw new Error('bundle package set does not match the platform-v1 catalog release group');
+    throw new Error('bundle package set does not match its catalog-derived package selection');
   }
 
   const bundleRoot = dirname(resolve(manifestPath));
@@ -159,15 +217,43 @@ function validateBundle(repoRoot, manifestPath) {
 async function consumerProbeMain() {
   const {
     existsSync: fileExists,
+    lstatSync: fileLstat,
     readFileSync: readFile,
     readdirSync: readDirectory,
+    realpathSync: realPath,
     statSync: fileStat,
+    writeFileSync: writeFile,
   } = await import('node:fs');
   const { join: joinPath, relative: relativePath, resolve: resolvePath, sep: pathSeparator } = await import('node:path');
   const { fileURLToPath: urlToPath } = await import('node:url');
 
   const consumerRoot = process.cwd();
   const expectations = JSON.parse(readFile(joinPath(consumerRoot, 'consumer-expectations.json'), 'utf8'));
+
+  function assertNoLocalSpecs(value, context) {
+    if (typeof value === 'string') {
+      if (/^(?:file|link|portal|workspace):/iu.test(value)) {
+        throw new Error(`${context} retains forbidden local specifier ${value}`);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) assertNoLocalSpecs(item, context);
+      return;
+    }
+    if (value !== null && typeof value === 'object') {
+      for (const item of Object.values(value)) assertNoLocalSpecs(item, context);
+    }
+  }
+
+  if (fileExists(joinPath(consumerRoot, 'package-lock.json'))
+    || fileExists(joinPath(consumerRoot, 'node_modules', '.package-lock.json'))) {
+    throw new Error('clean consumer retained a package-lock with installation provenance');
+  }
+  assertNoLocalSpecs(
+    JSON.parse(readFile(joinPath(consumerRoot, 'package.json'), 'utf8')),
+    'clean consumer package.json',
+  );
 
   function walk(directory, prefix = '') {
     const files = [];
@@ -236,7 +322,16 @@ async function consumerProbeMain() {
     const packageRoot = joinPath(consumerRoot, 'node_modules', ...expected.name.split('/'));
     const manifestPath = joinPath(packageRoot, 'package.json');
     if (!fileExists(manifestPath)) throw new Error(`${expected.name}: installed package is missing`);
+    if (fileLstat(packageRoot).isSymbolicLink()) {
+      throw new Error(`${expected.name}: installed package is a symbolic link`);
+    }
+    const realPackageRoot = realPath(packageRoot);
+    const relativeRealRoot = relativePath(realPath(consumerRoot), realPackageRoot);
+    if (relativeRealRoot === '..' || relativeRealRoot.startsWith(`..${pathSeparator}`)) {
+      throw new Error(`${expected.name}: installed package resolves outside the clean consumer`);
+    }
     const manifest = JSON.parse(readFile(manifestPath, 'utf8'));
+    assertNoLocalSpecs(manifest, `${expected.name} installed manifest`);
     if (manifest.name !== expected.name
       || manifest.version !== expectations.packageVersion
       || manifest.gitHead !== expectations.sourceSha) {
@@ -328,7 +423,42 @@ async function consumerProbeMain() {
       }
     }
   }
-  console.log(`resolved ${resolvedSpecifiers.size} installed targets across ${expectations.packages.length} packages`);
+  if (expectations.role) {
+    const namespace = await import('./role-fixture.mjs');
+    if (namespace.role !== expectations.role) {
+      throw new Error(`${expectations.role}: role fixture did not start with the expected identity`);
+    }
+    if (expectations.role === 'consumer') {
+      const reportPath = joinPath(consumerRoot, 'native-vertical-verification.json');
+      if (!fileExists(reportPath)) throw new Error('consumer fixture did not emit its verification report');
+      const report = JSON.parse(readFile(reportPath, 'utf8'));
+      if (report.schemaVersion !== 1 || report.verified !== true
+        || !String(report.recordDigest).startsWith('sha256:')
+        || !String(report.taskDigest).startsWith('sha256:')) {
+        throw new Error('consumer fixture emitted an invalid verification report');
+      }
+      if (JSON.stringify(report).includes(consumerRoot)) {
+        throw new Error('consumer verification report contains a private state path');
+      }
+    }
+  }
+  const resolutionProvenance = [...resolvedSpecifiers].sort().map((specifier) => {
+    const resolved = urlToPath(import.meta.resolve(specifier));
+    const path = relativePath(consumerRoot, resolved).split(pathSeparator).join('/');
+    if (path === '..' || path.startsWith('../')) {
+      throw new Error(`${specifier}: module-resolution provenance escapes the clean consumer`);
+    }
+    return { specifier, path };
+  });
+  writeFile(
+    joinPath(consumerRoot, 'module-resolution-provenance.json'),
+    `${JSON.stringify({ schemaVersion: 1, resolutions: resolutionProvenance })}\n`,
+    'utf8',
+  );
+  console.log(
+    `resolved ${resolvedSpecifiers.size} installed targets across ${expectations.packages.length} packages`
+    + `${expectations.role ? ` and started ${expectations.role}` : ''}`,
+  );
 }
 
 function probeSource() {
@@ -351,62 +481,126 @@ export function runConsumerProbe({ consumerRoot, exec = defaultExec }) {
 export async function runTarballConsumer({
   repoRoot,
   manifestPath,
+  nativeManifestPath,
   keep = false,
   exec = defaultExec,
 }) {
   const root = resolve(repoRoot);
   const validated = validateBundle(root, resolve(manifestPath));
-  const consumerRoot = mkdtempSync(join(tmpdir(), 'jinn-platform-prepublication-consumer-'));
+  const nativeValidated = nativeManifestPath
+    ? validateBundle(root, resolve(nativeManifestPath))
+    : undefined;
+  if (nativeValidated && (
+    nativeValidated.manifest.sourceSha !== validated.manifest.sourceSha
+    || nativeValidated.manifest.catalog.sha256 !== validated.manifest.catalog.sha256
+    || nativeValidated.manifest.packageVersion !== validated.manifest.packageVersion
+  )) throw new Error('platform and native role bundles do not share one exact source identity');
+  const consumerRoots = [];
   try {
-    const dependencies = Object.fromEntries(validated.tarballs.map(({ name, path }) => [name, `file:${path}`]));
-    writeFileSync(join(consumerRoot, 'package.json'), canonicalJsonBytes({
-      name: 'jinn-platform-prepublication-consumer',
-      version: '0.0.0',
-      private: true,
-      type: 'module',
-      dependencies,
-    }), 'utf8');
-    writeFileSync(join(consumerRoot, '.npmrc'), [
-      `@jinn-network:registry=${UNREACHABLE_SCOPED_REGISTRY}`,
-      'fetch-retries=0',
-      'audit=false',
-      'fund=false',
-      '',
-    ].join('\n'), 'utf8');
-    writeConsumerProbe({
-      consumerRoot,
-      expectations: {
-        sourceSha: validated.manifest.sourceSha,
-        packageVersion: validated.manifest.packageVersion,
-        packages: validated.catalogPackages.map((pkg) => ({
-          name: pkg.name,
-          exports: pkg.manifest.exports ?? {},
-          publicFiles: publicFileInventory(root, pkg),
-          publicSurface: pkg.catalog.publicSurface,
-        })),
-      },
-    });
+    const install = ({ label, bundle, packages, role, fixtureSource }) => {
+      const consumerRoot = mkdtempSync(join(tmpdir(), `jinn-${label}-prepublication-consumer-`));
+      consumerRoots.push(consumerRoot);
+      const selected = new Set(packages.map(({ name }) => name));
+      const tarballs = bundle.tarballs.filter(({ name }) => selected.has(name));
+      if (tarballs.length !== packages.length) throw new Error(`${label}: bundle is missing role closure tarballs`);
+      const dependencies = Object.fromEntries(packages.map(({ name }) => [
+        name,
+        bundle.manifest.packageVersion,
+      ]));
+      writeFileSync(join(consumerRoot, 'package.json'), canonicalJsonBytes({
+        name: `jinn-${label}-prepublication-consumer`,
+        version: '0.0.0',
+        private: true,
+        type: 'module',
+        dependencies,
+      }), 'utf8');
+      writeFileSync(join(consumerRoot, '.npmrc'), [
+        `@jinn-network:registry=${UNREACHABLE_SCOPED_REGISTRY}`,
+        'fetch-retries=0',
+        'audit=false',
+        'fund=false',
+        '',
+      ].join('\n'), 'utf8');
+      writeConsumerProbe({
+        consumerRoot,
+        expectations: {
+          sourceSha: bundle.manifest.sourceSha,
+          packageVersion: bundle.manifest.packageVersion,
+          role,
+          packages: packages.map((pkg) => ({
+            name: pkg.name,
+            exports: pkg.manifest.exports ?? {},
+            publicFiles: publicFileInventory(root, pkg),
+            publicSurface: pkg.catalog.publicSurface,
+          })),
+        },
+      });
+      if (fixtureSource) writeFileSync(join(consumerRoot, 'role-fixture.mjs'), fixtureSource, 'utf8');
+      const isolatedHome = join(consumerRoot, '.home');
+      const isolatedCache = join(consumerRoot, '.npm-cache');
+      mkdirSync(isolatedHome);
+      mkdirSync(isolatedCache);
+      requireSuccess(exec('npm', [
+        'install',
+        '--no-save',
+        '--no-package-lock',
+        '--ignore-scripts',
+        '--registry',
+        'https://registry.npmjs.org',
+        ...tarballs.map(({ path }) => path),
+      ], consumerRoot, {
+        env: { HOME: isolatedHome, npm_config_cache: isolatedCache },
+      }), `${label} clean versioned tarball install`);
+      // npm 11 writes an internal installation lock even when package-lock is disabled. It records
+      // the transient tarball paths, so it is not acceptable retained provenance for this proof.
+      // The versioned root manifest plus npm-ls document below are the durable provenance record.
+      rmSync(join(consumerRoot, 'node_modules', '.package-lock.json'), { force: true });
+      // npm also creates executable symlinks for package bins. The acceptance fixtures start with
+      // node directly, so retain neither those shims nor any symlink-shaped resolution provenance.
+      removeNpmBinShims(join(consumerRoot, 'node_modules'));
+      requireSuccess(runConsumerProbe({ consumerRoot, exec }), `${label} installed public-target probe`);
+      const provenance = exec('npm', ['ls', '--all', '--json'], consumerRoot, {
+        env: { HOME: isolatedHome, npm_config_cache: isolatedCache },
+      });
+      requireSuccess(provenance, `${label} dependency provenance`);
+      const provenanceDocument = JSON.parse(provenance.stdout || '{}');
+      assertNoForbiddenLocalProvenance(provenanceDocument, `${label} npm dependency provenance`);
+      writeFileSync(
+        join(consumerRoot, 'dependency-provenance.json'),
+        canonicalJsonBytes(provenanceDocument),
+        'utf8',
+      );
+      return {
+        label,
+        consumerRoot,
+        packageCount: packages.length,
+        provenance: provenanceDocument,
+      };
+    };
 
-    const isolatedHome = join(consumerRoot, '.home');
-    const isolatedCache = join(consumerRoot, '.npm-cache');
-    mkdirSync(isolatedHome);
-    mkdirSync(isolatedCache);
-
-    requireSuccess(exec('npm', [
-      'install',
-      '--no-package-lock',
-      '--registry',
-      'https://registry.npmjs.org',
-    ], consumerRoot, {
-      env: {
-        HOME: isolatedHome,
-        npm_config_cache: isolatedCache,
-      },
-    }), 'clean tarball consumer install');
-    requireSuccess(runConsumerProbe({ consumerRoot, exec }), 'installed public-target probe');
-    return { packageCount: validated.catalogPackages.length };
+    const results = [install({
+      label: 'platform',
+      bundle: validated,
+      packages: validated.catalogPackages,
+    })];
+    if (nativeValidated) {
+      const roles = deriveNativeVerticalRoleClosures(root, nativeValidated.catalogPackages);
+      const byName = new Map(nativeValidated.catalogPackages.map((pkg) => [pkg.name, pkg]));
+      for (const [role, definition] of Object.entries(roles)) {
+        results.push(install({
+          label: `native-${role}`,
+          role,
+          fixtureSource: definition.source,
+          bundle: nativeValidated,
+          packages: definition.closure.map((name) => byName.get(name)),
+        }));
+      }
+    }
+    return { packageCount: validated.catalogPackages.length, results };
   } finally {
-    if (!keep) rmSync(consumerRoot, { recursive: true, force: true });
+    if (!keep) for (const consumerRoot of consumerRoots) {
+      rmSync(consumerRoot, { recursive: true, force: true });
+    }
   }
 }
 
@@ -418,11 +612,14 @@ function parseArgs(argv) {
       parsed.keep = true;
       continue;
     }
-    if (flag !== '--root' && flag !== '--manifest') throw new Error(`unknown argument: ${flag}`);
+    if (flag !== '--root' && flag !== '--manifest' && flag !== '--native-manifest') {
+      throw new Error(`unknown argument: ${flag}`);
+    }
     const value = argv[index + 1];
     if (value === undefined) throw new Error(`${flag} requires a value`);
     if (flag === '--root') parsed.repoRoot = value;
     if (flag === '--manifest') parsed.manifestPath = value;
+    if (flag === '--native-manifest') parsed.nativeManifestPath = value;
     index += 1;
   }
   if (!parsed.manifestPath) throw new Error('--manifest is required');
@@ -431,8 +628,12 @@ function parseArgs(argv) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const result = await runTarballConsumer(parseArgs(process.argv.slice(2)));
+    const args = parseArgs(process.argv.slice(2));
+    const result = await runTarballConsumer(args);
     console.log(`external consumer accepted ${result.packageCount} prepublication tarballs`);
+    if (args.keep) for (const entry of result.results) {
+      console.log(`${entry.label} prefix: ${entry.consumerRoot}`);
+    }
   } catch (error) {
     console.error(error?.message ?? String(error));
     process.exitCode = 1;

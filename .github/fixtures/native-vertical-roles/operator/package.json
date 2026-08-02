@@ -1,0 +1,28 @@
+{
+  "name": "jinn-native-operator-role-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@jinn-network/evidence-local-runtime": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@jinn-network/evidence-publication": "0.1.0",
+    "@jinn-network/evidence-repository": "0.1.0",
+    "@jinn-network/marketplace-binding": "0.1.0",
+    "@jinn-network/marketplace-pipeline": "0.1.0",
+    "@jinn-network/marketplace-projector": "0.1.0",
+    "@jinn-network/marketplace-venue-base": "0.1.0",
+    "@jinn-network/record-discovery-client": "0.1.0",
+    "@jinn-network/record-discovery-protocol": "0.1.0",
+    "@jinn-network/record-discovery-serve": "0.1.0",
+    "@jinn-network/record-discovery-transport-http": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "@jinn-network/task-execution-backend-local": "0.1.0",
+    "@jinn-network/task-execution-launchers": "0.1.0",
+    "@jinn-network/task-execution-profiles": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
+    "@jinn-network/task-execution-workspace": "0.1.0",
+    "@jinn-network/trust-core": "0.1.0",
+    "@jinn-network/trust-resolve": "0.1.0"
+  }
+}

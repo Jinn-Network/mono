@@ -40,13 +40,24 @@ const FORBIDDEN_ROOTS = [
   join(root, 'packages', 'environments', 'verification'),
 ];
 
-// Admission's approved Jinn imports are exactly two packages (design §3.3): environments/record
-// and trust-core. Nothing else in the monorepo is reachable from its production source.
+// Admission's approved task-execution import is exactly the portable protocol package used by
+// its deterministic prediction fixture. Every other task-execution package remains denied by
+// family-derived default.
+const ADMISSION_TASK_EXECUTION_ALLOWED = ['@jinn-network/task-execution-protocol'];
+
 const ADMISSION_FORBIDDEN_EXTRA = [
   '@jinn-network/task-derivation',
   '@jinn-network/task-posting',
   '@jinn-network/task-curation',
 ];
+
+function admissionForbiddenPackages(allowed = ADMISSION_TASK_EXECUTION_ALLOWED) {
+  return [
+    ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => forbidden !== '@jinn-network/task-execution-*'),
+    ...familyMembers('task-execution').filter((name) => !allowed.includes(name)).sort(),
+    ...ADMISSION_FORBIDDEN_EXTRA,
+  ];
+}
 
 // Derivation's pinned output IS sealed Task + EvaluationSpec pairs, which only the packages that
 // own those two kinds can produce (`sealTask`, `sealEvaluationSpec`). So the tree-wide
@@ -405,13 +416,14 @@ test('the attestation and verification bans hold by exact name and by wildcard f
 });
 
 test('task-supply source boundaries remain one-way across the approved graph', () => {
-  // admission imports environments/record + trust-core only (design §3.3).
+  // admission imports environments/record, trust-core, and the portable protocol used to build
+  // its deterministic prediction receipt fixture.
   // `src/testing.ts` is production source under this same boundary: its `vitest` import is an
   // optional peer (not a Jinn package), and its only Jinn import is the approved
   // `@jinn-network/environment-record`.
   assertBoundary(
     join(packages, 'admission', 'src'),
-    [...TASK_SUPPLY_FOREIGN_PACKAGES, ...ADMISSION_FORBIDDEN_EXTRA],
+    admissionForbiddenPackages(),
     FORBIDDEN_ROOTS,
   );
   // curation is a pure projection over verdict observations (design §9) and imports NO Jinn

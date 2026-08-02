@@ -1,9 +1,9 @@
 {
   "counts": {
     "adjacentEntries": 5,
-    "experimentalEnvironmentSupply": 12,
+    "experimentalEnvironmentSupply": 9,
     "inventory": 75,
-    "otherPackagesRootEntries": 8,
+    "otherPackagesRootEntries": 11,
     "packagesRootEntries": 70,
     "platformV1": 50
   },
@@ -172,7 +172,17 @@
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
+        "to": "@jinn-network/attestation-issuer"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
         "to": "@jinn-network/core"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/environment-record"
       },
       {
         "from": "@jinn-network/client",
@@ -257,12 +267,32 @@
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
+        "to": "@jinn-network/sdk"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
         "to": "@jinn-network/task-execution-backend"
       },
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-backend-local"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
       },
       {
         "from": "@jinn-network/client",
@@ -788,6 +818,11 @@
         "from": "@jinn-network/task-admission",
         "kind": "runtime",
         "to": "@jinn-network/environment-record"
+      },
+      {
+        "from": "@jinn-network/task-admission",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
       },
       {
         "from": "@jinn-network/task-admission",
@@ -1469,14 +1504,14 @@
       "authorityDocuments": 19,
       "boundaryPolicies": 19,
       "catalogManifests": 75,
-      "catalogPublicSurfaces": 1103,
+      "catalogPublicSurfaces": 1107,
       "catalogSchema": 2,
       "conformancePackedTargets": 54,
       "conformanceSources": 27,
       "decisionRecords": 2,
-      "discoveredFirstPartySurfaces": 2557,
-      "generatedOutputSources": 1157,
-      "generatorSources": 538,
+      "discoveredFirstPartySurfaces": 2623,
+      "generatedOutputSources": 1161,
+      "generatorSources": 541,
       "marketplaceControl": 2,
       "requiredGates": 18,
       "staticControl": 6
@@ -1916,6 +1951,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/marketplace-source-boundaries.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/native-vertical-role-packages.mjs"
       },
       {
         "categories": [
@@ -4401,6 +4446,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/smoke-test-hermetic-packed-closure.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/smoke-test-pack-private-runtime.mjs"
       },
       {
@@ -6171,7 +6226,37 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/evaluator-primitives.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/golden-envelope.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/native-claim-boundaries.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/native-solution-boundaries.test.ts"
       },
       {
         "categories": [
@@ -6971,6 +7056,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/native-requester.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/open-browser.test.ts"
       },
       {
@@ -7721,6 +7816,176 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/native-claim-coordinator.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-claim-policy.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-discovery.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-evaluator-composition.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-evaluator-coordinator.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-evaluator-publisher.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-evaluator-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-operation-identity.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-operator-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-projector-resolve-record.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-recovery-matrix.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solution-coordinator.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solution-publisher.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solution-settlement.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solution-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-solution-verification.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-worker-lease.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/projector-cursor.test.ts"
       },
       {
@@ -7772,6 +8037,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/readiness-gate.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/role-identities.test.ts"
       },
       {
         "categories": [
@@ -9420,6 +9695,96 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/evaluator"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/deployment.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/native-evaluation-derivation.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/native-subject-authority.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/native-verdict-verification.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/opportunities.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/self-evaluation.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/subject-material.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/evaluator/verdict-gate.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/events"
       },
       {
@@ -9661,6 +10026,106 @@
           "@ritsukai"
         ],
         "path": "client/test/fixtures/jinn-repo/pool.sample.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-recovery-matrix.v1.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/package.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/src"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/src/graph.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/src/state.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/src/sync.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/src/verification.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-vertical-consumer/tsconfig.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/fixtures/native-worker-lease-holder.ts"
       },
       {
         "categories": [
@@ -11931,6 +12396,96 @@
           "@ritsukai"
         ],
         "path": "client/test/monitoring/net-liveness.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/_real-identity.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/graph.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/public-vertical.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/sync.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/verification.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-requester"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-requester/requester.test.ts"
       },
       {
         "categories": [
@@ -29108,6 +29663,26 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/marketplace/venue-base/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/marketplace/venue-base/test/verdict.anvil.test.ts"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -32928,6 +33503,54 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/task-profiles/repository-work"
       },
       {
@@ -34242,6 +34865,106 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/admission-receipt.dsse.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/evaluation-spec.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/manifest.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/README.md"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/requester.dsse.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/submission.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/task.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/fixtures/prediction-snapshot-v1/verification-key.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -34269,6 +34992,16 @@
           "@ritsukai"
         ],
         "path": "packages/task-supply/admission/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/admission/scripts/generate-prediction-snapshot-fixture.mjs"
       },
       {
         "categories": [
@@ -36149,7 +36882,9 @@
           "@grpc/grpc-js",
           "@hono/node-server",
           "@huggingface/transformers",
+          "@jinn-network/attestation-issuer",
           "@jinn-network/core",
+          "@jinn-network/environment-record",
           "@jinn-network/evidence-catalog-sqlite",
           "@jinn-network/evidence-discovery",
           "@jinn-network/evidence-local-runtime",
@@ -36166,8 +36901,12 @@
           "@jinn-network/record-discovery-protocol",
           "@jinn-network/record-discovery-serve",
           "@jinn-network/record-discovery-transport-http",
+          "@jinn-network/sdk",
+          "@jinn-network/task-admission",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-backend-local",
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
           "@jinn-network/task-execution-launchers",
           "@jinn-network/task-execution-profiles",
           "@jinn-network/task-execution-protocol",
@@ -36217,7 +36956,8 @@
           "viem",
           "ws",
           "yaml",
-          "zod"
+          "zod",
+          "zod-to-json-schema"
         ]
       },
       "domain": "operator",
@@ -38925,6 +39665,7 @@
         ],
         "runtime": [
           "@jinn-network/environment-record",
+          "@jinn-network/task-execution-protocol",
           "@jinn-network/trust-core",
           "zod"
         ]
@@ -38941,14 +39682,14 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "disabled",
-      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "native-task-supply-canary",
       "replacedBy": [],
       "requiredGateIds": [
         "task-supply-ci"
       ],
       "role": "task admission capability",
-      "stability": "experimental",
+      "stability": "candidate",
       "supersedes": [],
       "tier": 3,
       "transition": null,
@@ -39074,14 +39815,14 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "disabled",
-      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "native-task-supply-canary",
       "replacedBy": [],
       "requiredGateIds": [
         "task-supply-ci"
       ],
       "role": "task derivation capability",
-      "stability": "experimental",
+      "stability": "candidate",
       "supersedes": [],
       "tier": 3,
       "transition": null,
@@ -39113,14 +39854,14 @@
         "profiles": [],
         "schemas": []
       },
-      "publishPolicy": "disabled",
-      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "canary-only",
+      "releaseGroup": "native-task-supply-canary",
       "replacedBy": [],
       "requiredGateIds": [
         "task-supply-ci"
       ],
       "role": "task posting capability",
-      "stability": "experimental",
+      "stability": "candidate",
       "supersedes": [],
       "tier": 3,
       "transition": null,
@@ -45204,6 +45945,28 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://jinn.network/task-profiles/prediction-forecast/1.0",
+          "servedPath": "task-profiles/prediction-forecast/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json",
+        "relativeSource": "profiles/task-profiles/prediction-forecast/1.0/profile.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.sha256",
+        "relativeSource": "profiles/task-profiles/prediction-forecast/1.0/profile.sha256"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://jinn.network/task-profiles/repository-work/1.0",
           "servedPath": "task-profiles/repository-work/1.0"
         },
@@ -47067,7 +47830,7 @@
         "name": "@jinn-network/task-admission",
         "path": "packages/task-supply/admission",
         "profiles": [],
-        "releaseGroup": "experimental-environment-supply",
+        "releaseGroup": "native-task-supply-canary",
         "schemas": []
       },
       {
@@ -47104,7 +47867,7 @@
         "name": "@jinn-network/task-derivation",
         "path": "packages/task-supply/derivation",
         "profiles": [],
-        "releaseGroup": "experimental-environment-supply",
+        "releaseGroup": "native-task-supply-canary",
         "schemas": []
       },
       {
@@ -47113,7 +47876,7 @@
         "name": "@jinn-network/task-posting",
         "path": "packages/task-supply/posting",
         "profiles": [],
-        "releaseGroup": "experimental-environment-supply",
+        "releaseGroup": "native-task-supply-canary",
         "schemas": []
       },
       {
@@ -47402,6 +48165,13 @@
       },
       {
         "field": "profile",
+        "identifier": "https://jinn.network/task-profiles/prediction-forecast/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://jinn.network/task-profiles/repository-work/1.0",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
@@ -47416,10 +48186,11 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "native-task-supply-canary",
         "platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 9,
       "packages": [
         "@jinn-network/chain-environment-record",
         "@jinn-network/chain-environment-verification",
@@ -47429,10 +48200,7 @@
         "@jinn-network/environment-verification",
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
-        "@jinn-network/task-admission",
-        "@jinn-network/task-curation",
-        "@jinn-network/task-derivation",
-        "@jinn-network/task-posting"
+        "@jinn-network/task-curation"
       ],
       "publishPolicies": [
         "disabled"
@@ -48068,10 +48836,11 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "native-task-supply-canary",
         "platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 12,
+      "expectedPackageCount": 9,
       "packages": [
         "@jinn-network/chain-environment-record",
         "@jinn-network/chain-environment-verification",
@@ -48081,10 +48850,7 @@
         "@jinn-network/environment-verification",
         "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
-        "@jinn-network/task-admission",
-        "@jinn-network/task-curation",
-        "@jinn-network/task-derivation",
-        "@jinn-network/task-posting"
+        "@jinn-network/task-curation"
       ],
       "publishPolicies": [
         "disabled"
@@ -48103,7 +48869,9 @@
         "product"
       ],
       "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
         "legacy-product-lines",
+        "native-task-supply-canary",
         "platform-v1"
       ],
       "canary": false,
@@ -48127,6 +48895,31 @@
       ],
       "stable": false,
       "stackPublished": false
+    },
+    "native-task-supply-canary": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "native-task-supply-canary",
+        "platform-v1"
+      ],
+      "canary": true,
+      "expectedPackageCount": 3,
+      "packages": [
+        "@jinn-network/task-admission",
+        "@jinn-network/task-derivation",
+        "@jinn-network/task-posting"
+      ],
+      "publishPolicies": [
+        "canary-only"
+      ],
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "stable": false,
+      "stackPublished": true
     },
     "platform-v1": {
       "allowedClassifications": [

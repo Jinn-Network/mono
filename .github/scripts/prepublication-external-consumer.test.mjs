@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,6 +16,11 @@ import { test } from 'node:test';
 
 import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { loadCatalogPackages } from './platform-catalog.mjs';
+import {
+  deriveNativeVerticalRoleClosures,
+  nativeVerticalRuntimePackageNames,
+} from './native-vertical-role-packages.mjs';
 import {
   sourceWildcardExportViolations,
   runConsumerProbe,
@@ -66,7 +73,7 @@ function bundleFixture(root) {
   return { bundle, manifest, manifestPath };
 }
 
-test('installs every catalog tarball as a direct file root with unreachable scoped fallback', async () => {
+test('installs every catalog tarball transiently behind exact version roots with no retained local provenance', async () => {
   const root = fixtureRepo();
   const { bundle, manifest, manifestPath } = bundleFixture(root);
   const calls = [];
@@ -83,25 +90,40 @@ test('installs every catalog tarball as a direct file root with unreachable scop
           installedManifest = JSON.parse(readFileSync(join(cwd, 'package.json'), 'utf8'));
           npmrc = readFileSync(join(cwd, '.npmrc'), 'utf8');
           npmOptions = options;
+          if (args[0] === 'install') {
+            mkdirSync(join(cwd, 'node_modules/.bin'), { recursive: true });
+            symlinkSync('../package/bin.mjs', join(cwd, 'node_modules/.bin/package'));
+          }
         }
         return { status: 0, stdout: '', stderr: '' };
       },
     });
 
     assert.equal(result.packageCount, manifest.packageOrder.length);
+    assert.equal(result.results.length, 1);
     assert.equal(Object.keys(installedManifest.dependencies).length, manifest.packageOrder.length);
     for (const specifier of Object.values(installedManifest.dependencies)) {
-      assert.match(specifier, /^file:\/.+\.tgz$/u);
+      assert.equal(specifier, manifest.packageVersion);
     }
     assert.match(npmrc, /^@jinn-network:registry=http:\/\/127\.0\.0\.1:9\/$/mu);
     assert.match(npmrc, /^fetch-retries=0$/mu);
     assert.match(npmOptions.env.HOME, /jinn-platform-prepublication-consumer-/u);
     assert.match(npmOptions.env.npm_config_cache, /jinn-platform-prepublication-consumer-.+\/\.npm-cache$/u);
-    assert.deepEqual(calls.map(({ command, args }) => [command, ...args]), [
-      ['npm', 'install', '--no-package-lock', '--registry', 'https://registry.npmjs.org'],
-      [process.execPath, 'consumer-probe.mjs'],
+    assert.equal(calls.length, 3);
+    assert.deepEqual(calls[0].args.slice(0, 7), [
+      'install',
+      '--no-save',
+      '--no-package-lock',
+      '--ignore-scripts',
+      '--registry',
+      'https://registry.npmjs.org',
+      join(bundle, manifest.tarballs[0].filename),
     ]);
+    assert.equal(calls[0].args.slice(6).length, manifest.packageOrder.length);
+    assert.deepEqual([calls[1].command, ...calls[1].args], [process.execPath, 'consumer-probe.mjs']);
+    assert.deepEqual([calls[2].command, ...calls[2].args], ['npm', 'ls', '--all', '--json']);
     assert.equal(calls.some(({ args }) => args.includes('publish')), false);
+    assert.equal(existsSync(join(calls[0].cwd, 'node_modules/.bin')), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(bundle, { recursive: true, force: true });
@@ -129,6 +151,30 @@ test('a missing tarball fails before npm or the probe can run', async () => {
   }
 });
 
+test('rejects local provenance reported by the installed dependency graph', async () => {
+  const root = fixtureRepo();
+  const { bundle, manifestPath } = bundleFixture(root);
+  try {
+    await assert.rejects(runTarballConsumer({
+      repoRoot: root,
+      manifestPath,
+      exec(command, args) {
+        if (command === 'npm' && args[0] === 'ls') {
+          return {
+            status: 0,
+            stdout: JSON.stringify({ dependencies: { bad: { resolved: 'file:/source/package.tgz' } } }),
+            stderr: '',
+          };
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+    }), /retains forbidden local provenance file:\/source\/package\.tgz/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(bundle, { recursive: true, force: true });
+  }
+});
+
 test('package-set drift fails before npm or the probe can run', async () => {
   const root = fixtureRepo();
   const { bundle, manifest, manifestPath } = bundleFixture(root);
@@ -143,7 +189,7 @@ test('package-set drift fails before npm or the probe can run', async () => {
         calls.push(args);
         return { status: 0, stdout: '', stderr: '' };
       } }),
-      /bundle package set does not match the platform-v1 catalog release group/u,
+      /bundle package set does not match its catalog-derived package selection/u,
     );
     assert.deepEqual(calls, []);
   } finally {
@@ -171,6 +217,13 @@ function installedProbeFixture() {
       './fixtures/*': './fixtures/*',
     },
   };
+  writeFileSync(join(consumer, 'package.json'), `${JSON.stringify({
+    name: 'jinn-installed-consumer-fixture',
+    version: '0.0.0',
+    private: true,
+    type: 'module',
+    dependencies: { [manifest.name]: manifest.version },
+  })}\n`, 'utf8');
   writeFileSync(join(packageRoot, 'package.json'), `${JSON.stringify(manifest)}\n`, 'utf8');
   writeFileSync(join(packageRoot, 'dist/index.js'), 'export const installed = true;\n', 'utf8');
   writeFileSync(join(packageRoot, 'dist/default.js'), 'export const wrongCondition = true;\n', 'utf8');
@@ -209,6 +262,12 @@ test('the external probe resolves installed roots, conformance exports, schemas,
     const result = runConsumerProbe({ consumerRoot: consumer });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /resolved 6 installed targets across 1 packages/u);
+    const provenance = JSON.parse(readFileSync(
+      join(consumer, 'module-resolution-provenance.json'),
+      'utf8',
+    ));
+    assert.equal(provenance.schemaVersion, 1);
+    assert.ok(provenance.resolutions.every(({ path }) => path.startsWith('node_modules/')));
   } finally {
     rmSync(consumer, { recursive: true, force: true });
   }
@@ -299,4 +358,19 @@ test('the external probe rejects an installed package export with no concrete ta
 
 test('every platform wildcard export has at least one concrete source target to pack', () => {
   assert.deepEqual(sourceWildcardExportViolations(repoRoot), []);
+});
+
+test('native role closures come from executable fixture manifests and include only transitive catalog dependencies', () => {
+  const packages = loadCatalogPackages(repoRoot);
+  const roles = deriveNativeVerticalRoleClosures(repoRoot, packages);
+  assert.deepEqual(Object.keys(roles), ['requester', 'operator', 'evaluator', 'consumer']);
+  assert.equal(roles.requester.roots.includes('@jinn-network/task-derivation'), false);
+  assert.equal(roles.requester.roots.includes('@jinn-network/task-posting'), false);
+  assert.ok(roles.requester.closure.includes('@jinn-network/environment-record'));
+  const promoted = loadCatalogPackages(repoRoot, { releaseGroup: 'native-task-supply-canary' })
+    .map(({ name }) => name);
+  const packed = nativeVerticalRuntimePackageNames(repoRoot, packages, promoted);
+  for (const name of promoted) assert.ok(packed.includes(name), name);
+  assert.equal(packed.includes('@jinn-network/task-curation'), false);
+  assert.equal(packed.includes('@jinn-network/chain-scenarios'), false);
 });

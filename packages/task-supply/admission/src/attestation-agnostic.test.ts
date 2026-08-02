@@ -28,7 +28,7 @@ describe("admission is attestation-agnostic by construction (design §7.1, progr
     peerDependencies?: Record<string, string>;
   };
 
-  it("declares exactly two Jinn dependencies and no verification or issuer package", () => {
+  it("declares only record, portable protocol, and trust dependencies with no verifier or issuer", () => {
     const jinn = [
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.devDependencies ?? {}),
@@ -36,6 +36,7 @@ describe("admission is attestation-agnostic by construction (design §7.1, progr
     ].filter((name) => name.startsWith("@jinn-network/")).sort();
     expect(jinn).toStrictEqual([
       "@jinn-network/environment-record",
+      "@jinn-network/task-execution-protocol",
       "@jinn-network/trust-core",
     ]);
   });

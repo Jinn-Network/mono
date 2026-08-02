@@ -8,6 +8,7 @@ const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree portal dependencies: pack every dependency this package resolves via a portal
 // locally too, so the consumer graph resolves end-to-end without reaching the npm registry.
 const environmentRecordRoot = join(packageRoot, "..", "..", "environments", "record");
+const taskExecutionProtocolRoot = join(packageRoot, "..", "..", "task-execution", "protocol");
 const trustCoreRoot = join(packageRoot, "..", "..", "trust", "core");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-task-admission-"));
 const consumer = join(temporaryRoot, "consumer");
@@ -33,6 +34,10 @@ try {
   // Sequential, not Promise.all: a concurrent `yarn pack` on cross-tree dependencies races their
   // `dist` wipe-and-rebuild prepack steps against each other's type-resolution reads.
   const trustCoreArchive = await packOne(trustCoreRoot, "trust-core.tgz");
+  const taskExecutionProtocolArchive = await packOne(
+    taskExecutionProtocolRoot,
+    "task-execution-protocol.tgz",
+  );
   const environmentRecordArchive = await packOne(environmentRecordRoot, "environment-record.tgz");
   const admissionArchive = await packOne(packageRoot, "task-admission.tgz");
 
@@ -45,6 +50,7 @@ try {
       dependencies: {
         "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         "@jinn-network/environment-record": `file:${environmentRecordArchive}`,
+        "@jinn-network/task-execution-protocol": `file:${taskExecutionProtocolArchive}`,
         "@jinn-network/task-admission": `file:${admissionArchive}`,
       },
     }),
@@ -70,7 +76,11 @@ if (DIFFERENTIAL_ADMISSION_POLICY_V3.observationsPerSide !== 2) {
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
-const expectedJinnDependencies = ["@jinn-network/environment-record", "@jinn-network/trust-core"];
+const expectedJinnDependencies = [
+  "@jinn-network/environment-record",
+  "@jinn-network/task-execution-protocol",
+  "@jinn-network/trust-core",
+];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));
 }

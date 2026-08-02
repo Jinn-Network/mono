@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  buildNativeVerticalPrepublicationBundle,
   buildPrepublicationBundle,
   canonicalJsonBytes,
 } from './build-prepublication-bundle.mjs';
@@ -140,6 +141,39 @@ test('packs a differently sized release group using only its catalog-derived mem
   }
 });
 
+test('packs the executable native role closure while keeping experimental dependencies closure-only', async () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-native-role-prepublication-out-'));
+  const calls = [];
+  try {
+    const manifest = await buildNativeVerticalPrepublicationBundle({
+      repoRoot,
+      outDir,
+      sourceSha: SHA,
+      catalogDigest: digestCatalog(repoRoot),
+      exec: fakePackExec(calls),
+    });
+    assert.equal(manifest.selection.kind, 'native-vertical-runtime-closure');
+    for (const name of [
+      '@jinn-network/task-admission',
+      '@jinn-network/task-derivation',
+      '@jinn-network/task-posting',
+    ]) assert.ok(manifest.packageOrder.includes(name), name);
+    assert.ok(manifest.selection.closureOnlyPackages.includes('@jinn-network/environment-record'));
+    assert.equal(manifest.packageOrder.includes('@jinn-network/task-curation'), false);
+    assert.equal(manifest.packageOrder.includes('@jinn-network/chain-scenarios'), false);
+    assert.equal(
+      manifest.selection.roleRoots.requester.includes('@jinn-network/task-derivation'),
+      false,
+    );
+    assert.equal(
+      calls.filter(({ command, args }) => command === 'npm' && args[0] === 'pack').length,
+      manifest.packageOrder.length,
+    );
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 test('a catalog-disabled canary group fails before any package command', async () => {
   const catalog = disableReleaseGroup(fixtureCatalog());
   const root = fixtureRepo({ catalog });
@@ -156,7 +190,7 @@ test('a catalog-disabled canary group fails before any package command', async (
         lane: 'canary',
         exec: fakePackExec(calls),
       }),
-      /release group platform-v1 is not eligible for canary publication/u,
+      /release group platform-v1 is not eligible for canary prepublication/u,
     );
     assert.deepEqual(calls, []);
   } finally {

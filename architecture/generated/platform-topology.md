@@ -6,12 +6,12 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **75** entries: **50** `platform-v1` packages, **12** disabled `experimental-environment-supply` packages, **8** other entries below `packages/**`, and **5** adjacent entries.
+The catalog contains **75** entries: **50** `platform-v1` packages, **9** disabled `experimental-environment-supply` packages, **11** other entries below `packages/**`, and **5** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | @jinn-network/broadcast-bot | apps/broadcast-bot | repository-operations | — | repository-tooling | repository and community communications automation | stable-semantics | transitional-or-private | never | smol-toml<br>twitter-api-v2<br>viem<br>zod | — | — |
-| @jinn-network/client | client | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/core<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod | @coinbase/cdp-sdk | — |
+| @jinn-network/client | client | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/attestation-issuer<br>@jinn-network/core<br>@jinn-network/environment-record<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/sdk<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod<br>zod-to-json-schema | @coinbase/cdp-sdk | — |
 | @jinn-network/operator-spa | client/src/dashboard/spa | operator | 4 | product | operator dashboard product | candidate | transitional-or-private | private | @hookform/resolvers<br>@radix-ui/react-alert-dialog<br>@radix-ui/react-dialog<br>@radix-ui/react-dropdown-menu<br>@radix-ui/react-label<br>@radix-ui/react-popover<br>@radix-ui/react-progress<br>@radix-ui/react-radio-group<br>@radix-ui/react-scroll-area<br>@radix-ui/react-slot<br>@radix-ui/react-switch<br>@radix-ui/react-tabs<br>@radix-ui/react-tooltip<br>@tanstack/react-query<br>@tanstack/react-table<br>class-variance-authority<br>clsx<br>html-to-image<br>lucide-react<br>react<br>react-dom<br>react-hook-form<br>sonner<br>tailwind-merge<br>tailwindcss-animate<br>wouter<br>xterm<br>xterm-addon-fit<br>xterm-addon-web-links<br>zod | — | — |
 | @jinn-network/autopilot | packages/autopilot | autopilot | 4 | transitional | vendored tier-4 product residue | transitional | transitional-or-private | private | @jinn-network/sdk<br>zod | — | — |
 | @jinn-network/benchmarking-aggregate | packages/benchmarking/aggregate | benchmarking | 3 | platform | aggregation capability | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/trust-core | — | — |
@@ -75,11 +75,11 @@ The catalog contains **75** entries: **50** `platform-v1` packages, **12** disab
 | @jinn-network/task-execution-profiles | packages/task-execution/profiles | task-execution | 1 | platform | task profile family | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol<br>@noble/hashes<br>ajv<br>safe-regex<br>zod | — | — |
 | @jinn-network/task-execution-protocol | packages/task-execution/protocol | task-execution | 1 | platform | task-execution protocol | candidate | platform-v1 | canary-only | @noble/hashes<br>zod | — | — |
 | @jinn-network/task-execution-testing | packages/task-execution/testing | task-execution | — | platform-support | task-execution conformance kit | candidate | platform-v1 | canary-only | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | vitest |
-| @jinn-network/task-admission | packages/task-supply/admission | task-supply | 3 | platform | task admission capability | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/trust-core<br>zod | — | vitest |
+| @jinn-network/task-admission | packages/task-supply/admission | task-supply | 3 | platform | task admission capability | candidate | native-task-supply-canary | canary-only | @jinn-network/environment-record<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>zod | — | vitest |
 | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios | task-supply | 3 | platform | verified chain-environment scenario derivation capability | experimental | experimental-environment-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/task-curation | packages/task-supply/curation | task-supply | 3 | platform | task curation projection | experimental | experimental-environment-supply | disabled | zod | — | — |
-| @jinn-network/task-derivation | packages/task-supply/derivation | task-supply | 3 | platform | task derivation capability | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
-| @jinn-network/task-posting | packages/task-supply/posting | task-supply | 3 | platform | task posting capability | experimental | experimental-environment-supply | disabled | @jinn-network/marketplace-binding<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-protocol<br>viem | — | — |
+| @jinn-network/task-derivation | packages/task-supply/derivation | task-supply | 3 | platform | task derivation capability | candidate | native-task-supply-canary | canary-only | @jinn-network/environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
+| @jinn-network/task-posting | packages/task-supply/posting | task-supply | 3 | platform | task posting capability | candidate | native-task-supply-canary | canary-only | @jinn-network/marketplace-binding<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-protocol<br>viem | — | — |
 | @jinn-network/trust-core | packages/trust/core | trust | 1 | platform | trust records and policy | candidate | platform-v1 | canary-only | @noble/curves<br>@noble/hashes<br>zod | — | — |
 | @jinn-network/trust-resolve | packages/trust/resolve | trust | 3 | platform | trust resolution binding | candidate | platform-v1 | canary-only | @jinn-network/trust-core<br>viem | — | — |
 | @jinn-network/trust-testing | packages/trust/testing | trust | — | platform-support | trust conformance kit | candidate | platform-v1 | canary-only | @jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@noble/curves<br>@noble/hashes | — | vitest |
@@ -123,7 +123,9 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/chain-state-extraction | runtime | @jinn-network/chain-environment-record |
 | @jinn-network/chain-state-extraction | runtime | @jinn-network/chain-environment-verification |
 | @jinn-network/chain-state-extraction | runtime | @jinn-network/trust-core |
+| @jinn-network/client | runtime | @jinn-network/attestation-issuer |
 | @jinn-network/client | runtime | @jinn-network/core |
+| @jinn-network/client | runtime | @jinn-network/environment-record |
 | @jinn-network/client | runtime | @jinn-network/evidence-catalog-sqlite |
 | @jinn-network/client | runtime | @jinn-network/evidence-discovery |
 | @jinn-network/client | runtime | @jinn-network/evidence-local-runtime |
@@ -140,8 +142,12 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/client | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/client | runtime | @jinn-network/record-discovery-serve |
 | @jinn-network/client | runtime | @jinn-network/record-discovery-transport-http |
+| @jinn-network/client | runtime | @jinn-network/sdk |
+| @jinn-network/client | runtime | @jinn-network/task-admission |
 | @jinn-network/client | runtime | @jinn-network/task-execution-backend |
 | @jinn-network/client | runtime | @jinn-network/task-execution-backend-local |
+| @jinn-network/client | runtime | @jinn-network/task-execution-evaluation-harness |
+| @jinn-network/client | runtime | @jinn-network/task-execution-evaluator-adapters |
 | @jinn-network/client | runtime | @jinn-network/task-execution-launchers |
 | @jinn-network/client | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/client | runtime | @jinn-network/task-execution-protocol |
@@ -247,6 +253,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-serve |
 | @jinn-network/task-admission | runtime | @jinn-network/environment-record |
+| @jinn-network/task-admission | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/task-admission | runtime | @jinn-network/trust-core |
 | @jinn-network/task-derivation | runtime | @jinn-network/environment-record |
 | @jinn-network/task-derivation | runtime | @jinn-network/task-admission |
@@ -362,12 +369,13 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 | Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |
 | --- | ---: | --- | --- | --- | --- | --- |
-| experimental-environment-supply | 12 | environments-ci<br>record-discovery-ci<br>task-supply-ci | disabled | false | false | false |
+| experimental-environment-supply | 9 | environments-ci<br>record-discovery-ci<br>task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 5 | client-ci<br>core-ci<br>layer-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
+| native-task-supply-canary | 3 | task-supply-ci | canary-only | true | true | false |
 | platform-v1 | 50 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
 | transitional-or-private | 8 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>task-supply-ci | private<br>never | false | false | false |
 
-The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 12 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 9 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -491,11 +499,11 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/task-execution-profiles | platform-v1 | — | profiles | fixtures | ./testing |
 | @jinn-network/task-execution-protocol | platform-v1 | schemas | — | fixtures | — |
 | @jinn-network/task-execution-testing | platform-v1 | — | — | fixtures | . |
-| @jinn-network/task-admission | experimental-environment-supply | — | — | — | ./testing |
+| @jinn-network/task-admission | native-task-supply-canary | — | — | — | ./testing |
 | @jinn-network/chain-scenarios | experimental-environment-supply | — | — | fixtures | ./testing |
 | @jinn-network/task-curation | experimental-environment-supply | — | — | fixtures | — |
-| @jinn-network/task-derivation | experimental-environment-supply | — | — | fixtures | ./testing |
-| @jinn-network/task-posting | experimental-environment-supply | — | — | — | — |
+| @jinn-network/task-derivation | native-task-supply-canary | — | — | fixtures | ./testing |
+| @jinn-network/task-posting | native-task-supply-canary | — | — | — | — |
 | @jinn-network/trust-core | platform-v1 | — | — | fixtures | — |
 | @jinn-network/trust-resolve | platform-v1 | — | — | — | — |
 | @jinn-network/trust-testing | platform-v1 | — | — | fixtures | . |
@@ -1136,6 +1144,8 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/threshold-pass.json | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json | — | — | https://jinn.network/task-profiles/evaluation-task/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.sha256 | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json | — | — | https://jinn.network/task-profiles/prediction-forecast/1.0 |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.json | — | — | https://jinn.network/task-profiles/repository-work/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.sha256 | — | — | — |
 | conformance | @jinn-network/task-execution-profiles | packages/task-execution/profiles/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
@@ -1298,11 +1308,12 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | https://jinn.network/records/trajectory/1.0/schema | `$id` | schemas | @jinn-network/evidence-trajectory | packages/evidence/trajectory/schemas/trajectory.schema.json |
 | https://jinn.network/records/trust-policy/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/trust-policy.1.0.json |
 | https://jinn.network/task-profiles/evaluation-task/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json |
+| https://jinn.network/task-profiles/prediction-forecast/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json |
 | https://jinn.network/task-profiles/repository-work/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.json |
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3225 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3294 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1310,14 +1321,14 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 19 |
 | boundaryPolicies | 19 |
 | catalogManifests | 75 |
-| catalogPublicSurfaces | 1103 |
+| catalogPublicSurfaces | 1107 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 54 |
 | conformanceSources | 27 |
 | decisionRecords | 2 |
-| discoveredFirstPartySurfaces | 2557 |
-| generatedOutputSources | 1157 |
-| generatorSources | 538 |
+| discoveredFirstPartySurfaces | 2623 |
+| generatedOutputSources | 1161 |
+| generatorSources | 541 |
 | marketplaceControl | 2 |
 | requiredGates | 18 |
 | staticControl | 6 |

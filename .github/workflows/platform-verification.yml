@@ -27,7 +27,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Bind and validate source catalog
         id: catalog
         env:
@@ -105,7 +105,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -143,6 +143,12 @@ jobs:
             --release-group platform-v1 \
             --lane "${LANE}" \
             --out .platform-verification/pack
+          node .github/scripts/build-prepublication-bundle.mjs \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --lane "${LANE}" \
+            --native-vertical-roles \
+            --out .platform-verification/native-role-pack
       - name: Generate trusted-publisher registration prerequisites
         run: >-
           node .github/scripts/stack-trusted-publishers.mjs
@@ -177,6 +183,8 @@ jobs:
           subject-path: |
             .platform-verification/pack/manifest.json
             .platform-verification/pack/tarballs/*.tgz
+            .platform-verification/native-role-pack/manifest.json
+            .platform-verification/native-role-pack/tarballs/*.tgz
             .platform-verification/public-surface-manifest.json
             .platform-verification/profile-root/**
             .platform-verification/trusted-publishers/trusted-publishers.json
@@ -193,7 +201,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Install npm 11.19.0
         run: npm install -g npm@11.19.0
       - name: Download prepublication artifacts
@@ -205,6 +213,7 @@ jobs:
         run: >-
           node .github/scripts/prepublication-external-consumer.mjs
           --manifest .platform-verification/pack/manifest.json
+          --native-manifest .platform-verification/native-role-pack/manifest.json
 
   verification_receipt:
     needs:
@@ -228,7 +237,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
       - name: Download prepublication artifacts
         if: needs.artifacts.result == 'success'
         uses: actions/download-artifact@v4

@@ -31,11 +31,16 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
 ]);
 
-// Admission consumes environments/record types + digests and trust-core's DSSE spine, and
-// nothing else (design §3.3). Every addition to this graph is a design question first.
+// Admission consumes environments/record types + digests, trust-core's DSSE spine, and the
+// portable Task/EvaluationSpec descriptor types used by its deterministic prediction fixture.
+// Every addition to this graph is a design question first.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['admission', {
-    dependencies: ['@jinn-network/environment-record', '@jinn-network/trust-core'],
+    dependencies: [
+      '@jinn-network/environment-record',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/trust-core',
+    ],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
   // curation is a pure projection over verdict observations (design §9): it derives
