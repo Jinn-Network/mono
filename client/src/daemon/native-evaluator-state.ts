@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS native_evaluation_artifacts (
   evaluation_id TEXT NOT NULL REFERENCES native_evaluations(evaluation_id),
   role          TEXT NOT NULL,
   name          TEXT NOT NULL,
+  media_type    TEXT NOT NULL,
   record_digest TEXT NOT NULL,
   exact_bytes   BLOB NOT NULL,
   created_at    TEXT NOT NULL,
@@ -185,6 +186,7 @@ export interface NativeEvaluationRow {
 export interface NativeEvaluationArtifactRow extends ExactSubjectArtifact {
   readonly evaluationId: NativeOperationId;
   readonly role: string;
+  readonly mediaType?: string;
   readonly createdAt: string;
 }
 
@@ -861,6 +863,7 @@ export class NativeEvaluatorStateRepository {
     readonly artifacts: readonly {
       readonly role: string;
       readonly name: string;
+      readonly mediaType: string;
       readonly digest: `sha256:${string}`;
       readonly bytes: Uint8Array;
     }[];
@@ -881,8 +884,8 @@ export class NativeEvaluatorStateRepository {
         }
         this.store.db.prepare(
           `INSERT OR IGNORE INTO native_evaluation_artifacts
-            (evaluation_id, role, name, record_digest, exact_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        ).run(evaluation, artifact.role, artifact.name, artifact.digest, Buffer.from(artifact.bytes), now);
+            (evaluation_id, role, name, media_type, record_digest, exact_bytes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(evaluation, artifact.role, artifact.name, artifact.mediaType, artifact.digest, Buffer.from(artifact.bytes), now);
         const key = publicationKey({
           sourceId: input.sourceId,
           role: artifact.role,
@@ -906,10 +909,12 @@ export class NativeEvaluatorStateRepository {
       "SELECT * FROM native_evaluation_artifacts WHERE evaluation_id = ? ORDER BY role, name",
     ).all(evaluation) as Array<{
       evaluation_id: NativeOperationId; role: string; name: string;
+      media_type: string;
       record_digest: `sha256:${string}`; exact_bytes: Uint8Array; created_at: string;
     }>).map((value) => ({
       evaluationId: value.evaluation_id,
       role: value.role,
+      mediaType: value.media_type,
       name: value.name,
       digest: value.record_digest,
       bytes: new Uint8Array(value.exact_bytes),

@@ -275,8 +275,8 @@ describe("NativeEvaluatorStateRepository", () => {
       sourceId: "urn:jinn:source:evaluator-records",
       verdictCode: 1,
       artifacts: [
-        { role: "verdict", ...verdict },
-        { role: "evaluation-delivery", ...delivery },
+        { role: "verdict", mediaType: "application/vnd.in-toto+json", ...verdict },
+        { role: "evaluation-delivery", mediaType: "application/json", ...delivery },
       ],
     });
     expect(state.listPendingEvaluationPublications()).toHaveLength(2);

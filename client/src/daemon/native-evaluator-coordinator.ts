@@ -356,12 +356,21 @@ export class NativeEvaluatorCoordinator {
     }
     const envelopeBytes = this.input.deliverySignature.get(reference.digest);
     if (envelopeBytes === undefined) throw new EvaluatorCoordinatorFailure("evaluation-delivery-envelope-missing", undefined, true);
-    const artifacts: Array<{ role: string; name: string; digest: `sha256:${string}`; bytes: Uint8Array }> = [
-      { role: "verdict", name: "verdict", digest: verdictDigest, bytes: verdictBytes },
-      { role: "evaluation-delivery", name: "evaluation-delivery", digest: reference.digest, bytes: deliveryBytes },
+    const artifacts: Array<{ role: string; name: string; mediaType: string; digest: `sha256:${string}`; bytes: Uint8Array }> = [
+      {
+        role: "verdict", name: "verdict",
+        mediaType: verdictDescriptor.mediaType ?? "application/vnd.in-toto+json",
+        digest: verdictDigest, bytes: verdictBytes,
+      },
+      {
+        role: "evaluation-delivery", name: "evaluation-delivery",
+        mediaType: "application/vnd.jinn.task-execution.delivery.v1+json",
+        digest: reference.digest, bytes: deliveryBytes,
+      },
       {
         role: "evaluation-delivery-envelope",
         name: "evaluation-delivery-envelope",
+        mediaType: "application/vnd.dsse.envelope.v1+json",
         digest: documentDigest(envelopeBytes),
         bytes: envelopeBytes,
       },
@@ -379,6 +388,7 @@ export class NativeEvaluatorCoordinator {
       artifacts.push({
         role: "evaluation-evidence",
         name: `evidence:${typed.family}`,
+        mediaType: typed.family,
         digest: typed.digest,
         bytes,
       });
