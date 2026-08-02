@@ -45,7 +45,7 @@ function sorted(values) {
   return [...values].sort();
 }
 
-test('the reusable interface requires source_sha and lane', () => {
+test('the reusable interface grants OIDC only to artifact-only attestation jobs', () => {
   const header = platform.slice(0, platform.indexOf('\njobs:\n'));
   assert.match(header, /workflow_call:\n\s+inputs:\n/u);
   for (const input of ['source_sha', 'lane']) {
@@ -59,9 +59,16 @@ test('the reusable interface requires source_sha and lane', () => {
   assert.match(header, /contents: read/u);
   for (const job of ['artifacts', 'verification_receipt']) {
     const block = jobBlock(platform, job);
+    assert.doesNotMatch(block, /id-token: write|attestations: write|actions\/attest@/u);
+  }
+  for (const job of ['artifact_attestation', 'receipt_attestation']) {
+    const block = jobBlock(platform, job);
     assert.match(block, /id-token: write/u);
     assert.match(block, /attestations: write/u);
     assert.match(block, /artifact-metadata: write/u);
+    assert.match(block, /uses: actions\/download-artifact@v4/u);
+    assert.match(block, /uses: actions\/attest@v4/u);
+    assert.doesNotMatch(block, /actions\/checkout|actions\/setup-node|^\s+-?\s*run:/mu);
   }
 });
 
@@ -167,7 +174,7 @@ test('the static reusable workflow set exactly equals the platform release-group
   );
 });
 
-test('artifacts build public/profile/pack outputs and attest every prepublication subject', () => {
+test('artifacts build and upload public/profile/pack outputs without OIDC', () => {
   const artifacts = jobBlock(platform, 'artifacts');
   assert.match(artifacts, /build-platform-public-surface\.mjs/u);
   assert.match(artifacts, /build-profile-root\.mjs/u);
@@ -177,18 +184,28 @@ test('artifacts build public/profile/pack outputs and attest every prepublicatio
   assert.match(artifacts, /--source-sha "\$\{SOURCE_SHA\}"/u);
   assert.match(artifacts, /--catalog-digest "\$\{CATALOG_DIGEST\}"/u);
   assert.match(artifacts, /--lane "\$\{LANE\}"/u);
-  assert.match(artifacts, /uses: actions\/attest@v4/u);
-  assert.match(artifacts, /\.platform-verification\/pack\/tarballs\/\*\.tgz/u);
-  assert.match(artifacts, /\.platform-verification\/public-surface-manifest\.json/u);
-  assert.match(artifacts, /\.platform-verification\/profile-root\/\*\*/u);
-  assert.match(artifacts, /\.platform-verification\/trusted-publishers\/trusted-publishers\.json/u);
-  assert.match(artifacts, /\.platform-verification\/trusted-publishers\/trusted-publishers\.md/u);
+  assert.doesNotMatch(artifacts, /id-token: write|attestations: write|uses: actions\/attest@/u);
   assert.match(artifacts, /uses: actions\/upload-artifact@v4/u);
   assert.match(
     artifacts,
     /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/u,
     'the dot-directory artifact must opt in to hidden files',
   );
+});
+
+test('artifact attestation downloads immutable build outputs without executing repository code', () => {
+  const attestation = jobBlock(platform, 'artifact_attestation');
+  assert.match(attestation, /needs: artifacts/u);
+  assert.match(attestation, /name: platform-verification-artifacts/u);
+  for (const subject of [
+    /\.platform-verification\/pack\/manifest\.json/u,
+    /\.platform-verification\/pack\/tarballs\/\*\.tgz/u,
+    /\.platform-verification\/public-surface-manifest\.json/u,
+    /\.platform-verification\/profile-root\/\*\*/u,
+    /\.platform-verification\/trusted-publishers\/trusted-publishers\.json/u,
+    /\.platform-verification\/trusted-publishers\/trusted-publishers\.md/u,
+  ]) assert.match(attestation, subject);
+  assert.doesNotMatch(attestation, /actions\/checkout|actions\/setup-node|^\s+-?\s*run:/mu);
 });
 
 test('external consumer accepts only the downloaded same-run tarball bundle', () => {
@@ -199,12 +216,13 @@ test('external consumer accepts only the downloaded same-run tarball bundle', ()
   assert.match(consumer, /\.platform-verification\/pack\/manifest\.json/u);
 });
 
-test('the always-running receipt receives every exact job conclusion and is uploaded/attested only on success', () => {
+test('the always-running receipt receives every exact job conclusion and is uploaded only on success', () => {
   const receipt = jobBlock(platform, 'verification_receipt');
   assert.match(receipt, /if: always\(\)/u);
   const infrastructure = new Map([
     ['catalog', 'catalog'],
     ['artifacts', 'artifacts'],
+    ['artifact-attestation', 'artifact_attestation'],
     ['external-consumer', 'external_consumer'],
   ]);
   const expectedGateJobs = new Map([
@@ -230,14 +248,23 @@ test('the always-running receipt receives every exact job conclusion and is uplo
     assert.equal(resultVariables.get(cliGates.get(gate)), expectedJob, `${gate} must bind ${expectedJob}.result`);
   }
   assert.match(receipt, /platform-verification-receipt\.mjs/u);
-  assert.match(receipt, /uses: actions\/attest@v4/u);
+  assert.doesNotMatch(receipt, /id-token: write|attestations: write|uses: actions\/attest@/u);
   assert.match(receipt, /uses: actions\/upload-artifact@v4/u);
   assert.match(
     receipt,
     /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/u,
     'the dot-directory receipt must opt in to hidden files',
   );
-  assert.equal((receipt.match(/if: success\(\)/gu) ?? []).length, 2);
+  assert.equal((receipt.match(/if: success\(\)/gu) ?? []).length, 1);
+});
+
+test('receipt attestation downloads only the completed receipt and executes no repository code', () => {
+  const attestation = jobBlock(platform, 'receipt_attestation');
+  assert.match(attestation, /needs: verification_receipt/u);
+  assert.match(attestation, /name: platform-verification-receipt/u);
+  assert.match(attestation, /subject-path: \.platform-verification-receipt\/verification-receipt\.json/u);
+  assert.doesNotMatch(attestation, /platform-verification-artifacts/u);
+  assert.doesNotMatch(attestation, /actions\/checkout|actions\/setup-node|^\s+-?\s*run:/mu);
 });
 
 test('the experimental environment-supply group remains continuously represented and disabled', () => {

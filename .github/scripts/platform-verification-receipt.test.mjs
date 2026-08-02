@@ -214,7 +214,7 @@ test('failed, skipped, neutral, cancelled, and missing gates cannot produce a re
 test('receipt conclusion keys strip a validated -ci suffix from catalog group gates', () => {
   assert.deepEqual(
     verificationGateConclusionIds(fixtureCatalog(), 'platform-v1'),
-    ['artifacts', 'catalog', 'external-consumer', 'fixture'],
+    ['artifact-attestation', 'artifacts', 'catalog', 'external-consumer', 'fixture'],
   );
   const catalog = fixtureCatalog();
   catalog.releaseGroups['platform-v1'].requiredGateIds = ['fixture-gate'];

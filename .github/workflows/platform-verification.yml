@@ -46,24 +46,32 @@ jobs:
 
   benchmarking:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/benchmarking-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
   discovery:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/record-discovery-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
   evidence:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/evidence-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
   marketplace:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/marketplace-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
@@ -72,12 +80,16 @@ jobs:
 
   task_execution:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/task-execution-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
 
   trust:
     needs: catalog
+    permissions:
+      contents: read
     uses: ./.github/workflows/trust-ci.yml
     with:
       source_sha: ${{ inputs.source_sha }}
@@ -87,9 +99,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
-      artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -138,6 +147,30 @@ jobs:
         run: >-
           node .github/scripts/stack-trusted-publishers.mjs
           --out .platform-verification/trusted-publishers
+      - name: Upload prepublication artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  artifact_attestation:
+    name: artifact-attestation
+    needs: artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download immutable prepublication artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
       - name: Attest tarballs and public artifacts
         uses: actions/attest@v4
         with:
@@ -148,18 +181,12 @@ jobs:
             .platform-verification/profile-root/**
             .platform-verification/trusted-publishers/trusted-publishers.json
             .platform-verification/trusted-publishers/trusted-publishers.md
-      - name: Upload prepublication artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: platform-verification-artifacts
-          path: .platform-verification
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 1
 
   external_consumer:
     needs: artifacts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -189,14 +216,12 @@ jobs:
       - task_execution
       - trust
       - artifacts
+      - artifact_attestation
       - external_consumer
     if: always()
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
-      artifact-metadata: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -224,6 +249,7 @@ jobs:
           TASK_EXECUTION_RESULT: ${{ needs.task_execution.result }}
           TRUST_RESULT: ${{ needs.trust.result }}
           ARTIFACTS_RESULT: ${{ needs.artifacts.result }}
+          ARTIFACT_ATTESTATION_RESULT: ${{ needs.artifact_attestation.result }}
           EXTERNAL_CONSUMER_RESULT: ${{ needs.external_consumer.result }}
         run: |
           node .github/scripts/platform-verification-receipt.mjs \
@@ -242,13 +268,9 @@ jobs:
             --gate "task-execution=${TASK_EXECUTION_RESULT}" \
             --gate "trust=${TRUST_RESULT}" \
             --gate "artifacts=${ARTIFACTS_RESULT}" \
+            --gate "artifact-attestation=${ARTIFACT_ATTESTATION_RESULT}" \
             --gate "external-consumer=${EXTERNAL_CONSUMER_RESULT}" \
             --out .platform-verification/verification-receipt.json
-      - name: Attest verification receipt
-        if: success()
-        uses: actions/attest@v4
-        with:
-          subject-path: .platform-verification/verification-receipt.json
       - name: Upload verification receipt
         if: success()
         uses: actions/upload-artifact@v4
@@ -258,3 +280,23 @@ jobs:
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 90
+
+  receipt_attestation:
+    name: receipt-attestation
+    needs: verification_receipt
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download immutable verification receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-receipt
+          path: .platform-verification-receipt
+      - name: Attest verification receipt
+        uses: actions/attest@v4
+        with:
+          subject-path: .platform-verification-receipt/verification-receipt.json

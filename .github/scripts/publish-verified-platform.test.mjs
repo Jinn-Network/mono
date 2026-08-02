@@ -474,6 +474,21 @@ test('trusted-publisher registration drift or absence blocks npm', async () => {
       registrations[0].repository = 'other';
       writeFileSync(fixture.trustedPublishersJsonPath, `${JSON.stringify(registrations, null, 2)}\n`);
     },
+    (fixture) => {
+      const registrations = JSON.parse(readFileSync(fixture.trustedPublishersJsonPath, 'utf8'));
+      registrations[0].environment = '';
+      writeFileSync(fixture.trustedPublishersJsonPath, `${JSON.stringify(registrations, null, 2)}\n`);
+    },
+    (fixture) => {
+      const registrations = JSON.parse(readFileSync(fixture.trustedPublishersJsonPath, 'utf8'));
+      delete registrations[0].allowedActions;
+      writeFileSync(fixture.trustedPublishersJsonPath, `${JSON.stringify(registrations, null, 2)}\n`);
+    },
+    (fixture) => {
+      const registrations = JSON.parse(readFileSync(fixture.trustedPublishersJsonPath, 'utf8'));
+      registrations[0].allowedActions = ['npm publish', 'npm stage publish'];
+      writeFileSync(fixture.trustedPublishersJsonPath, `${JSON.stringify(registrations, null, 2)}\n`);
+    },
     (fixture) => writeFileSync(fixture.trustedPublishersMarkdownPath, '# drift\n'),
   ];
   for (const mutate of mutations) {

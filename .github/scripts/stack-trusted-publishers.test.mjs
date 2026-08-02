@@ -37,7 +37,8 @@ test('every canonical platform-v1 package gets one registration bound to this re
     assert.equal(registration.organization, 'Jinn-Network');
     assert.equal(registration.repository, 'mono');
     assert.equal(registration.workflow, 'stack-npm-publish.yml');
-    assert.equal(registration.environment, '', 'the optional npmjs Environment field must be blank');
+    assert.equal(registration.environment, 'npm-publish');
+    assert.deepEqual(registration.allowedActions, ['npm publish']);
     assert.ok(registration.package.startsWith('@jinn-network/'));
   }
 });
@@ -55,11 +56,12 @@ test('registrations exclude every experimental, legacy, and product package', ()
   assert.equal(registered.has('@jinn-network/record-discovery-facts-environments'), false);
 });
 
-test('the markdown rendering states the blank-environment rule and one row per package', () => {
+test('the markdown rendering requires the protected environment and publish-only action', () => {
   const markdown = renderRegistrationMarkdown(buildRegistrationList(repoRoot));
-  assert.match(markdown, /Environment field MUST be blank/);
-  assert.match(markdown, /Stable publication remains disabled.*live `jinn\.network` hosting verification/su);
-  assert.match(markdown, /canaries from `npm-publish`/u);
+  assert.match(markdown, /Environment field MUST equal `npm-publish`/);
+  assert.match(markdown, /Allowed action MUST be exactly `npm publish`/);
+  assert.match(markdown, /Stable publication remains disabled.*live `jinn\.network`\s+hosting verification/su);
+  assert.doesNotMatch(markdown, /Leave blank|MUST be blank/u);
   assert.doesNotMatch(markdown, /stable from `npm-stable-publish`/u);
   assert.match(markdown, /\| `@jinn-network\/evidence-protocol` \| `stack-npm-publish\.yml` \|/);
   assert.doesNotMatch(markdown, /[\u{1F300}-\u{1FAFF}]/u, 'no emoji in produced artifacts');
@@ -72,7 +74,12 @@ test('the CLI writes both artifact files', () => {
     assert.equal(result.status, 0, result.stderr);
     const json = JSON.parse(readFileSync(join(out, 'trusted-publishers.json'), 'utf8'));
     assert.equal(json.length, 50);
-    assert.match(readFileSync(join(out, 'trusted-publishers.md'), 'utf8'), /Environment field MUST be blank/);
+    assert.ok(json.every((entry) => entry.environment === 'npm-publish'));
+    assert.ok(json.every((entry) => JSON.stringify(entry.allowedActions) === '["npm publish"]'));
+    assert.match(
+      readFileSync(join(out, 'trusted-publishers.md'), 'utf8'),
+      /Environment field MUST equal `npm-publish`/,
+    );
   } finally {
     rmSync(out, { recursive: true, force: true });
   }

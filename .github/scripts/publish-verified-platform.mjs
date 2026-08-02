@@ -28,6 +28,7 @@ export const TRUSTED_REPOSITORY = 'Jinn-Network/mono';
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const NOT_FOUND = Symbol('not-found');
 const REGISTRATION_KEYS = [
+  'allowedActions',
   'environment',
   'organization',
   'package',
@@ -219,7 +220,8 @@ function validateTrustedPublishers(verificationRoot, receipt) {
       || registration.organization !== 'Jinn-Network'
       || registration.repository !== 'mono'
       || registration.workflow !== 'stack-npm-publish.yml'
-      || registration.environment !== '') {
+      || registration.environment !== 'npm-publish'
+      || JSON.stringify(registration.allowedActions) !== '["npm publish"]') {
       throw new Error(`trusted-publisher identity drifted for ${registration.package}`);
     }
   }

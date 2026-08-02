@@ -70,17 +70,22 @@ For every generated row, configure npmjs with:
 | Repository | `mono` |
 | Workflow filename | `stack-npm-publish.yml` |
 | Allowed action | `npm publish` |
-| Optional Environment | **Leave blank** |
+| Environment | `npm-publish` |
 
-The Environment field remains blank. Receipt-gated canaries currently publish from
-`npm-publish`; the stable lane is on hold and does not publish from `npm-stable-publish`.
+The Environment field must equal `npm-publish`, and the allowed action must be exactly
+`npm publish`. This binds registry authority to the final protected publication job; build,
+external-consumer, receipt-construction, and stable-verification jobs never enter that environment.
+The stable lane remains on hold and does not publish from `npm-stable-publish`.
 
 An npm scope owner must complete this once for every generated registration:
 
 - [ ] Confirm the operator belongs to a team in the `@jinn-network` npm organization.
 - [ ] Regenerate the list and compare it with the generated release view.
-- [ ] Add every registration using the exact fields above and leave Environment blank.
+- [ ] Add every registration using the exact fields above, including Environment `npm-publish`.
+- [ ] Protect the `npm-publish` GitHub environment with required reviewers and allowed branches.
 - [ ] Add no `NODE_AUTH_TOKEN` or other long-lived npm credential.
+- [ ] Run the full hosted verifier and record its exact successful source SHA.
+- [ ] Set repository variable `PLATFORM_CANARY_PUBLISH_ENABLED=true` only after every preceding item is recorded.
 - [ ] Record the operator and completion date in the operational change record.
 
 ## Recovery

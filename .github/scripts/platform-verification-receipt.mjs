@@ -33,6 +33,7 @@ const SRI_SHA512 = /^sha512-[A-Za-z0-9+/]+={0,2}$/u;
 const INFRASTRUCTURE_VERIFICATION_GATES = Object.freeze([
   'catalog',
   'artifacts',
+  'artifact-attestation',
   'external-consumer',
 ]);
 

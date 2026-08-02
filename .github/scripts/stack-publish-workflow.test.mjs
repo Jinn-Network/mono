@@ -37,6 +37,9 @@ test('the canary publisher directly needs exact verification success', () => {
   assert.match(block, /needs: canary-verification/u);
   assert.match(block, /needs\.canary-verification\.result == 'success'/u);
   assert.match(block, /github\.event_name == 'push'/u);
+  assert.match(block, /vars\.PLATFORM_CANARY_PUBLISH_ENABLED == 'true'/u);
+  assert.match(block, /environment: npm-publish/u);
+  assert.equal((workflow.match(/environment: npm-publish/gu) ?? []).length, 1);
 });
 
 test('the publisher downloads only the current run verification artifacts and receipt', () => {

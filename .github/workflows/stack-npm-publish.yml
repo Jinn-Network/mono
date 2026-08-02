@@ -40,7 +40,10 @@ jobs:
   canary-publish:
     name: stack-canary
     needs: canary-verification
-    if: github.event_name == 'push' && needs.canary-verification.result == 'success'
+    if: >-
+      github.event_name == 'push' &&
+      needs.canary-verification.result == 'success' &&
+      vars.PLATFORM_CANARY_PUBLISH_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: npm-publish
