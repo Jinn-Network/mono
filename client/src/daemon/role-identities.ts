@@ -19,6 +19,8 @@ import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:f
 import { dirname, isAbsolute } from 'node:path';
 import bs58 from 'bs58';
 import type { BindingResolver } from '@jinn-network/trust-core';
+import type { HostSecretResolver } from '@jinn-network/task-execution-backend-local';
+import { EVALUATION_TASK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 
 export const NATIVE_ROLE_IDENTITY_ROLES = [
   'requester-submission',
@@ -347,7 +349,9 @@ export class RoleIdentitySet {
   private constructor(
     readonly agent: string,
     private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
+    private readonly hostSecretPem: ReadonlyMap<NativeRoleIdentityRole, Uint8Array>,
     private readonly bindingResolver: BindingResolver,
+    private readonly now: () => Date,
   ) {}
 
   static async open(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
@@ -358,6 +362,7 @@ export class RoleIdentitySet {
     const store = await IdentityStore.open({ path: input.storePath, password: input.password });
     const storedRoles = await store.loadOrCreate(now);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
+    const hostSecretPem = new Map<NativeRoleIdentityRole, Uint8Array>();
 
     for (const stored of storedRoles) {
       const role = stored.role;
@@ -395,8 +400,13 @@ export class RoleIdentitySet {
         publicKey,
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
       });
+      if (role === 'evaluator-verdict') {
+        hostSecretPem.set(role, new Uint8Array(Buffer.from(
+          privateKey.export({ type: 'pkcs8', format: 'pem' }) as string,
+        )));
+      }
     }
-    return new RoleIdentitySet(input.agent, byRole, input.bindingResolver);
+    return new RoleIdentitySet(input.agent, byRole, hostSecretPem, input.bindingResolver, input.now ?? (() => new Date()));
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
@@ -441,6 +451,70 @@ export class RoleIdentitySet {
       if (!Number.isFinite(revokedAt) || revokedAt <= effective) return { ok: false, reason: 'revoked' };
     }
     return { ok: true, bindingDigest: resolved.bindingDigest };
+  }
+
+  /**
+   * Produces the backend's host-owned evaluator secret resolver. The child handle is only one
+   * leg: every request must match the exact sealed Submission, evaluation profile, Attempt,
+   * evaluator role, and immutable deployment registration/method selected by the host.
+   */
+  createEvaluatorHostSecretResolver(registration: {
+    readonly handle: string;
+    readonly evaluator: string;
+    readonly registrationId: string;
+    readonly evaluationMethodDigest: `sha256:${string}`;
+    readonly authorize: (input: {
+      readonly attemptUri: string;
+      readonly taskDigest: `sha256:${string}`;
+      readonly submission: `urn:uuid:${string}`;
+      readonly submissionDigest: `sha256:${string}`;
+      readonly deadline: string;
+    }) => Promise<boolean> | boolean;
+  }): HostSecretResolver {
+    const identity = this.get('evaluator-verdict');
+    if (registration.evaluator !== this.agent) {
+      throw new IdentityStoreError('evaluator host-secret registration names a different agent');
+    }
+    const pem = this.hostSecretPem.get('evaluator-verdict');
+    if (pem === undefined) throw new IdentityStoreError('evaluator host-secret custody is unavailable');
+    return {
+      resolve: async (input, options) => {
+        options.signal?.throwIfAborted();
+        if (input.role !== 'evaluator'
+          || input.launcherId !== 'evaluation-harness'
+          || input.evaluator !== registration.evaluator
+          || input.handle !== registration.handle
+          || input.target !== registration.handle
+          || input.registrationId !== registration.registrationId
+          || input.evaluationMethodDigest !== registration.evaluationMethodDigest
+          || input.taskProfile !== EVALUATION_TASK_PROFILE_URI
+          || !/^sha256:[0-9a-f]{64}$/u.test(input.taskDigest)
+          || !/^sha256:[0-9a-f]{64}$/u.test(input.submissionDigest)
+          || !/^urn:uuid:/u.test(input.submission)
+          || input.attempt.attemptUri.length === 0) {
+          throw new IdentityStoreError('evaluator host-secret request is outside its sealed Attempt/registration scope');
+        }
+        if (!await registration.authorize({
+          attemptUri: input.attempt.attemptUri,
+          taskDigest: input.taskDigest,
+          submission: input.submission,
+          submissionDigest: input.submissionDigest,
+          deadline: input.deadline,
+        })) {
+          throw new IdentityStoreError('evaluator host-secret request does not match the durable sealed evaluation');
+        }
+        const now = this.now();
+        if (!Number.isFinite(now.getTime()) || Date.parse(input.deadline) <= now.getTime()) {
+          throw new IdentityStoreError('evaluator host-secret request is expired');
+        }
+        const binding = await this.resolveEffective('evaluator-verdict', now.toISOString());
+        if (!binding.ok || identity.keyId.length === 0) {
+          throw new IdentityStoreError(`evaluator host-secret authority is not effective: ${binding.ok ? 'invalid-key' : binding.reason}`);
+        }
+        options.signal?.throwIfAborted();
+        return Uint8Array.from(pem);
+      },
+    };
   }
 }
 
