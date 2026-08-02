@@ -1,0 +1,75 @@
+{
+  "name": "@jinn-network/information-world",
+  "version": "0.1.0",
+  "description": "The sealed information-world record kind, its canonical request key, and its loopback replay service.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/environments/information-world"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing.js",
+      "types": "./dist/testing.d.ts"
+    },
+    "./schemas/*": "./schemas/*",
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "schemas/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "generate:fixtures": "yarn build && node scripts/generate-fixtures.mjs --write",
+    "check:fixtures": "yarn build && node scripts/generate-fixtures.mjs --check",
+    "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
+    "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.2.0",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.8"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@jinn-network/chain-environment-record": "0.1.0",
+    "@jinn-network/evidence-protocol": "0.1.0",
+    "@types/node": "^22.0.0",
+    "ajv": "8.17.1",
+    "canonicalize": "^2.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/chain-environment-record": "portal:../chain-record",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol"
+  }
+}
