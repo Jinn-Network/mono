@@ -11,6 +11,7 @@ import {
 import {
   SUBMISSION_MEDIA_TYPE,
   TASK_MEDIA_TYPE,
+  SubmissionRecordSchema,
 } from '@jinn-network/task-execution-protocol';
 import { EVALUATION_SPEC_MEDIA_TYPE } from '@jinn-network/task-execution-profiles';
 import { archivePagePath, WELL_KNOWN_PATH } from '@jinn-network/record-discovery-protocol';
@@ -159,6 +160,8 @@ describe('native requester', () => {
     ]);
     expect(post).toHaveBeenCalledOnce();
     const postInput = post.mock.calls[0]![0];
+    expect(SubmissionRecordSchema.parse(JSON.parse(new TextDecoder().decode(postInput.submissionBytes))).requester)
+      .toBe(REQUESTER_AGENT);
     expect(recordDigest(postInput.taskBytes)).toBe(
       'sha256:40ae3efd61b75951ad68a868fdd020de931e3d27eb1b448f341997bf4917a598',
     );

@@ -542,6 +542,7 @@ async function sealRunBundle(input: {
   const submissionBytes = sealSubmission({
     ...templateSubmission,
     submission: uuidFromHex(seed),
+    requester: input.requesterAgent,
     idempotencyKey: `native-prediction-forecast:${input.runId}:${taskDigest.slice(7, 23)}`,
     nonce: seed.slice(0, 32),
     task: { digest: { sha256: taskDigest.slice('sha256:'.length) } },
