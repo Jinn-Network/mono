@@ -44,6 +44,7 @@
     "check:fixtures": "yarn build && node scripts/generate-fixtures.mjs --check",
     "generate:schemas": "yarn build && node scripts/generate-schemas.mjs --write",
     "check:schemas": "yarn build && node scripts/generate-schemas.mjs --check",
+    "check:network-denied": "yarn build && node scripts/check-network-denied.mjs",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

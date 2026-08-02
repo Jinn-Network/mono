@@ -31,6 +31,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Install the information-world AST policy compiler
+        working-directory: packages/environments/information-world
+        run: yarn install --immutable
       - name: Verify package inventory and dependency graph
         run: node --test .github/scripts/environments-package-inventory.test.mjs
       - name: Verify source boundaries and canaries
@@ -128,6 +135,9 @@ jobs:
           yarn check:fixtures
           yarn check:schemas
           yarn pack:smoke
+      - name: Prove the closed execution profile under a network-denied runtime
+        working-directory: packages/environments/information-world
+        run: yarn check:network-denied
       - name: Upload Information World distribution
         uses: actions/upload-artifact@v4
         with:

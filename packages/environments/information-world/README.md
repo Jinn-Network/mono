@@ -11,11 +11,12 @@ exact bytes is the record's identity, written `sha256:<64 lowercase hex>`. Seale
 forever — there is no status field, and nothing in this package ever rewrites a sealed record.
 
 **The corpus is that world's whole web.** A request that is not in the corpus receives the
-record's own declared miss response. There is no fallback to a live source, because there is no
-code in this package that can reach one: production source imports no HTTP client and no
-ambient network global, and `src/service.ts` — the only file permitted to name a transport
-module — imports exactly `createServer` from `node:http` and binds only the loopback address
-its caller supplies. `src/closure.test.ts` asserts that by scanning the source.
+record's own declared miss response. CE6's closed execution profile admits only loopback replay:
+production source statically rejects undeclared transport and ambient capabilities, and
+`src/service.ts` is the sole file permitted to import `createServer` from `node:http`. The
+conformance check also runs the actual replay service inside Docker's network-denied namespace,
+where loopback succeeds while external TCP and DNS cannot. The syntax-aware source policies are
+maintainability gates; the network-denied runtime boundary is the egress guarantee.
 
 **Fidelity is a declaration, not a proof.** `captured-snapshot` records what an author states
 a source returned at a stated time for stated requests. This package makes no claim that the

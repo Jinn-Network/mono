@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
+// This guard runs before the package test job, so the architecture job installs the package's
+// declared TypeScript compiler first. Resolving from that package, rather than this repository
+// script, keeps the policy pinned to the information-world toolchain.
+const informationWorldRequire = createRequire(join(packages, 'information-world', 'package.json'));
+const ts = informationWorldRequire('typescript');
 const environmentDirectories = [
   'record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction', 'information-world',
 ];
@@ -400,218 +406,101 @@ function specifiers(source) {
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
 
-// This intentionally uses a small lexical scanner rather than a comment-tolerant regex. A
-// regex may backtrack from one block-comment opener to a later closer and treat executable
-// code as trivia, which would make a client binding invisible to the carve-out.
-function lexicalTokens(source) {
-  const tokens = [];
-  for (let index = 0; index < source.length;) {
-    const character = source[index];
-    const next = source[index + 1];
-    if (/\s/u.test(character)) { index += 1; continue; }
-    if (character === '/' && next === '/') {
-      index += 2;
-      while (index < source.length && source[index] !== '\n' && source[index] !== '\r') index += 1;
-      continue;
-    }
-    if (character === '/' && next === '*') {
-      const close = source.indexOf('*/', index + 2);
-      index = close === -1 ? source.length : close + 2;
-      continue;
-    }
-    if (character === '"' || character === "'" || character === '`') {
-      const quote = character;
-      let value = '';
-      index += 1;
-      while (index < source.length && source[index] !== quote) {
-        if (source[index] === '\\') {
-          value += source.slice(index, index + 2);
-          index += 2;
-        } else {
-          value += source[index];
-          index += 1;
-        }
-      }
-      if (source[index] === quote) index += 1;
-      tokens.push({ kind: 'string', value });
-      continue;
-    }
-    if (/[A-Za-z_$]/u.test(character)) {
-      const start = index;
-      index += 1;
-      while (index < source.length && /[A-Za-z0-9_$]/u.test(source[index])) index += 1;
-      tokens.push({ kind: 'identifier', value: source.slice(start, index) });
-      continue;
-    }
-    tokens.push({ kind: 'punctuation', value: character });
-    index += 1;
+const INFORMATION_WORLD_AMBIENT_ROOTS = new Set([
+  'process', 'globalThis', 'global', 'window', 'self', 'Function', 'eval', 'require',
+  'fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest',
+]);
+
+function astName(name) {
+  return String(name.escapedText);
+}
+
+function astStaticString(expression, constants) {
+  if (ts.isStringLiteralLike(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
+  if (ts.isIdentifier(expression)) return constants.get(astName(expression));
+  if (ts.isParenthesizedExpression(expression)) return astStaticString(expression.expression, constants);
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = astStaticString(expression.left, constants);
+    const right = astStaticString(expression.right, constants);
+    return left === undefined || right === undefined ? undefined : left + right;
   }
-  return tokens;
-}
-
-function nodeHttpNamedImports(source) {
-  const tokens = lexicalTokens(source);
-  const imports = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    if (tokens[index]?.kind !== 'identifier' || tokens[index]?.value !== 'import'
-      || tokens[index + 1]?.value !== '{') continue;
-    const bindings = [];
-    let cursor = index + 2;
-    while (tokens[cursor]?.value !== '}' && cursor < tokens.length) {
-      if (tokens[cursor]?.kind === 'identifier') bindings.push(tokens[cursor].value);
-      cursor += 1;
-    }
-    if (tokens[cursor]?.value !== '}' || tokens[cursor + 1]?.value !== 'from'
-      || tokens[cursor + 2]?.kind !== 'string' || tokens[cursor + 2]?.value !== 'node:http') continue;
-    imports.push(bindings.filter((value) => value !== 'type').sort());
-  }
-  return imports;
-}
-
-function hasDynamicModuleLoad(source) {
-  const tokens = lexicalTokens(source);
-  return tokens.some((token, index) => token.kind === 'identifier'
-    && (token.value === 'import' || token.value === 'require')
-    && tokens[index + 1]?.value === '(');
-}
-
-function memberEnd(tokens, index, name) {
-  if (tokens[index]?.value === '.' && tokens[index + 1]?.kind === 'identifier'
-    && tokens[index + 1]?.value === name) return index + 2;
-  if (tokens[index]?.value === '?' && tokens[index + 1]?.value === '.'
-    && tokens[index + 2]?.kind === 'identifier' && tokens[index + 2]?.value === name) return index + 3;
-  if (tokens[index]?.value === '[' && tokens[index + 1]?.kind === 'string'
-    && tokens[index + 1]?.value === name && tokens[index + 2]?.value === ']') return index + 3;
-  if (tokens[index]?.value === '?' && tokens[index + 1]?.value === '.'
-    && tokens[index + 2]?.value === '[' && tokens[index + 3]?.kind === 'string'
-    && tokens[index + 3]?.value === name && tokens[index + 4]?.value === ']') return index + 5;
   return undefined;
 }
 
-function reflectiveBuiltinLoaderUses(source) {
-  const tokens = lexicalTokens(source);
-  const findings = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    let processEnd;
-    let label;
-    if (tokens[index]?.kind === 'identifier' && tokens[index]?.value === 'process'
-      && tokens[index - 1]?.value !== '.' && tokens[index - 1]?.value !== ']') {
-      processEnd = index + 1;
-      label = 'process';
-    } else if (tokens[index]?.kind === 'identifier'
-      && (tokens[index]?.value === 'globalThis' || tokens[index]?.value === 'global')) {
-      processEnd = memberEnd(tokens, index + 1, 'process');
-      label = tokens[index]?.value;
-    }
-    if (processEnd === undefined || label === undefined) continue;
-    const loaderEnd = memberEnd(tokens, processEnd, 'getBuiltinModule');
-    if (loaderEnd !== undefined) {
-      findings.push(`${label}.process`.replace('process.process', 'process') + '.getBuiltinModule');
-    }
-  }
-  return findings;
-}
-
-// The replay package never needs ambient authority. Flag a root before it can be aliased into
-// a reflective loader or evaluator, rather than trying to prove every alias chain harmless.
-function ambientAuthorityUses(source) {
-  const forbidden = new Set([
-    'process', 'globalThis', 'global', 'window', 'self', 'Function', 'eval', 'require',
-  ]);
-  const tokens = lexicalTokens(source);
-  return [
-    ...tokens
-    .filter((token) => token.kind === 'identifier' && forbidden.has(token.value))
-    .map((token) => token.value),
-    ...evaluatorRecoveryUses(tokens),
-  ];
-}
-
-function staticStringAt(tokens, start) {
-  const first = tokens[start];
-  if (first?.kind !== 'string' || first.value.includes('${')) return undefined;
-  let value = first.value;
-  let cursor = start + 1;
-  while (tokens[cursor]?.value === '+') {
-    const next = tokens[cursor + 1];
-    if (next?.kind !== 'string' || next.value.includes('${')) return undefined;
-    value += next.value;
-    cursor += 2;
-  }
-  return { value, end: cursor };
-}
-
-function staticStringConstants(tokens) {
+function astStringConstants(source) {
   const constants = new Map();
-  for (let index = 0; index < tokens.length - 3; index += 1) {
-    if ((tokens[index]?.value !== 'const' && tokens[index]?.value !== 'let')
-      || tokens[index + 1]?.kind !== 'identifier' || tokens[index + 2]?.value !== '=') continue;
-    const value = staticStringAt(tokens, index + 3);
-    if (value !== undefined && (tokens[value.end]?.value === ';' || value.end === tokens.length)) {
-      constants.set(tokens[index + 1].value, value.value);
+  const visit = (node) => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
+      const value = astStaticString(node.initializer, constants);
+      if (value !== undefined) constants.set(astName(node.name), value);
     }
-  }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return constants;
 }
 
-function memberName(tokens, index, constants) {
-  const base = tokens[index - 1];
-  if (tokens[index]?.value === '.' && tokens[index + 1]?.kind === 'identifier') {
-    return { name: tokens[index + 1].value, end: index + 2, base };
-  }
-  if (tokens[index]?.value === '?' && tokens[index + 1]?.value === '.'
-    && tokens[index + 2]?.kind === 'identifier') {
-    return { name: tokens[index + 2].value, end: index + 3, base };
-  }
-  const start = tokens[index]?.value === '[' ? index + 1
-    : tokens[index]?.value === '?' && tokens[index + 1]?.value === '.' && tokens[index + 2]?.value === '['
-      ? index + 3 : undefined;
-  if (start === undefined) return undefined;
-  const literal = staticStringAt(tokens, start);
-  if (literal !== undefined && tokens[literal.end]?.value === ']') {
-    return { name: literal.value, end: literal.end + 1, base };
-  }
-  if (tokens[start]?.kind === 'identifier' && tokens[start + 1]?.value === ']') {
-    const name = constants.get(tokens[start].value);
-    if (name !== undefined) return { name, end: start + 2, base };
-  }
-  return undefined;
+function astPropertyName(node, constants) {
+  return ts.isPropertyAccessExpression(node)
+    ? astName(node.name)
+    : node.argumentExpression === undefined ? undefined : astStaticString(node.argumentExpression, constants);
 }
 
-// Function constructors are ambient evaluators. The package deliberately admits no evaluator,
-// no evaluator-capable property recovery, and no Reflect operation beyond `Reflect.ownKeys`, so
-// future code cannot recover `process` (or a client transport) through `createServer`.
-function evaluatorRecoveryUses(tokens) {
-  const constants = staticStringConstants(tokens);
-  const findings = new Set();
-  for (let index = 0; index < tokens.length; index += 1) {
-    const literal = staticStringAt(tokens, index);
-    if (literal?.value === 'constructor') findings.add('constructor');
-
-    const member = memberName(tokens, index, constants);
-    if (member === undefined) continue;
-    if (member.name === 'constructor' || member.name === '__proto__') {
-      findings.add(member.name);
-    }
-    if (member.name === 'prototype' && member.base?.value !== 'Object' && member.base?.value !== 'Array') {
-      findings.add('prototype');
-    }
-    if (member.base?.value === 'Reflect' && member.name !== 'ownKeys') {
-      findings.add(`Reflect.${member.name}`);
-    }
-  }
-  return [...findings];
+function astReflectOwnKeysBase(node) {
+  return ts.isPropertyAccessExpression(node.parent)
+    && node.parent.expression === node && astName(node.parent.name) === 'ownKeys';
 }
 
-function onlyCreateServerNodeHttpImport(source) {
-  const nodeHttpStrings = lexicalTokens(source)
-    .filter((token) => token.kind === 'string' && token.value === 'node:http');
-  const namedImports = nodeHttpNamedImports(source);
-  return !hasDynamicModuleLoad(source)
-    && nodeHttpStrings.length === 1
-    && namedImports.length === 1
-    && namedImports[0].length === 1
-    && namedImports[0][0] === 'createServer';
+// This is deliberately independent from the package-local AST policy. Both use the compiler's
+// normalized syntax tree, but this repository guard owns a separate implementation and test
+// canaries, so weakening either one does not weaken the other.
+function informationWorldCapabilityFindings(sourceText, fileName) {
+  const source = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const constants = astStringConstants(source);
+  const findings = [];
+  const add = (kind, detail) => { findings.push(`${kind}:${detail}`); };
+  for (const diagnostic of source.parseDiagnostics ?? []) add('parse', ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
+  const visit = (node) => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier;
+      if (moduleSpecifier !== undefined && ts.isStringLiteralLike(moduleSpecifier)) {
+        const value = moduleSpecifier.text;
+        const permittedHttp = value === 'node:http' && fileName.endsWith('/service.ts')
+          && ts.isImportDeclaration(node) && node.importClause?.name === undefined
+          && node.importClause?.namedBindings !== undefined && ts.isNamedImports(node.importClause.namedBindings)
+          && node.importClause.namedBindings.elements.length === 1
+          && astName(node.importClause.namedBindings.elements[0].name) === 'createServer'
+          && node.importClause.namedBindings.elements[0].propertyName === undefined;
+        if (value.startsWith('node:') && !permittedHttp) add('module', value);
+        if (TRANSPORT_MODULES.includes(value)) add('transport', value);
+      }
+    }
+    if (ts.isImportEqualsDeclaration(node)) add('module', 'import equals');
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add('module', 'dynamic import');
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression) && astName(node.expression.expression) === 'Object'
+      && ['getOwnPropertyDescriptor', 'getPrototypeOf'].includes(astName(node.expression.name))
+      && node.arguments.some((argument) => astStaticString(argument, constants) === 'constructor')) {
+      add('evaluator', 'constructor');
+    }
+    if (ts.isIdentifier(node)) {
+      const name = astName(node);
+      if (INFORMATION_WORLD_AMBIENT_ROOTS.has(name)) add('ambient', name);
+      if (name === 'Reflect' && !astReflectOwnKeysBase(node)) add('reflection', 'Reflect');
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const name = astPropertyName(node, constants);
+      if (name === 'constructor' || name === '__proto__') add('evaluator', name);
+      if (name === 'prototype' && (!ts.isIdentifier(node.expression)
+        || !['Object', 'Array', 'String', 'Number', 'Boolean'].includes(astName(node.expression)))) add('evaluator', name);
+      if (ts.isIdentifier(node.expression) && astName(node.expression) === 'Reflect' && name !== 'ownKeys') {
+        add('reflection', `Reflect.${name ?? 'dynamic'}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return findings;
 }
 
 function inside(child, parent) {
@@ -1001,43 +890,26 @@ test('information-world is pure except for one loopback server and fixture reade
       + 'than node:http in src/service.ts',
   );
 
-  // This deliberately rejects namespace/default imports, every dynamic import or require,
-  // a second import, and comment-split client bindings. The lexical recognizer accepts one
-  // named static import only, so no code path can add a client capability to the carve-out.
+  // The tree guard uses its own TypeScript AST policy. Unlike the old source-token scanner,
+  // escaped identifiers are normalized and statically assembled property keys are evaluated.
   const serviceSource = readFileSync(join(source, 'service.ts'), 'utf8');
   assert.deepEqual(
     forbiddenImportsInFiles(productionFiles, ['node:http']).map((finding) => finding.split(' ->')[0]),
     [`packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE}`],
     'node:http is admitted in src/service.ts only',
   );
-  assert.equal(onlyCreateServerNodeHttpImport(serviceSource), true,
-    'src/service.ts must import node:http exactly once and bind createServer only');
   assert.deepEqual(
     productionFiles.flatMap((file) => {
       const sourceText = readFileSync(file, 'utf8');
-      return [
-        ...(hasDynamicModuleLoad(sourceText) ? [`${relative(root, file)} -> dynamic module loader`] : []),
-        ...reflectiveBuiltinLoaderUses(sourceText).map((loader) => `${relative(root, file)} -> ${loader}`),
-        ...ambientAuthorityUses(sourceText).map((rootName) => `${relative(root, file)} -> ${rootName}`),
-      ];
+      return informationWorldCapabilityFindings(sourceText, file)
+        .map((finding) => `${relative(root, file)} -> ${finding}`);
     }),
     [],
-    'information-world production source must not use dynamic, require, or reflective module loaders',
+    'information-world production source must satisfy the AST capability policy',
   );
-  const formattedCreateServerImport = [
-    'import /* format */ {',
-    '  createServer /*, request must stay a comment */',
-    '} /* format */ from /* format */ "node:http";',
-  ].join('\n');
-  assert.deepEqual(
-    lexicalTokens(formattedCreateServerImport)
-      .filter((token) => token.kind === 'string').map((token) => token.value),
-    ['node:http'],
-  );
-  assert.deepEqual(nodeHttpNamedImports(formattedCreateServerImport), [['createServer']]);
-  assert.equal(onlyCreateServerNodeHttpImport(formattedCreateServerImport), true,
-    'multiline and commented createServer formatting stays admitted');
-  for (const disguisedClient of [
+  assert.deepEqual(informationWorldCapabilityFindings(serviceSource, join(source, 'service.ts')), [],
+    'src/service.ts may retain the sole named createServer import');
+  for (const disguisedCapability of [
     'import * as http from "node:http";',
     'import http from "node:http";',
     'import { createServer, request } from "node:http";',
@@ -1045,61 +917,15 @@ test('information-world is pure except for one loopback server and fixture reade
     'await import("node:" + "http");',
     'require("node:http");',
     'import { createServer } from "node:http"; import { request } from "node:http";',
+    'const p = pro\\u0063ess.getBuiltinModule("node:http");',
+    'await fetch("https://example.test");',
+    'const key = "con" + "structor"; createServer[key]("return process")();',
+    'const reflect = Reflect; const get = reflect["g" + "et"]; get(createServer, "constructor");',
+    'const descriptor = Object.getOwnPropertyDescriptor(createServer, "constructor");',
   ]) {
-    assert.equal(onlyCreateServerNodeHttpImport(disguisedClient), false,
-      `node:http carve-out must reject ${disguisedClient}`);
+    assert.notDeepEqual(informationWorldCapabilityFindings(disguisedCapability, join(source, 'candidate.ts')), [],
+      `AST capability policy must reject ${disguisedCapability}`);
   }
-  const reflective = [
-    'const direct = process.getBuiltinModule(`node:${"http"}`);',
-    'const optional = globalThis.process?.["getBuiltinModule"]("node:" + "http");',
-    'const bracketed = global["process"]["getBuiltinModule"](`node:${"http"}`);',
-    '// process.getBuiltinModule("node:http") stays a comment',
-  ].join('\n');
-  assert.deepEqual(reflectiveBuiltinLoaderUses(reflective), [
-    'process.getBuiltinModule',
-    'globalThis.process.getBuiltinModule',
-    'global.process.getBuiltinModule',
-  ]);
-  assert.deepEqual(
-    reflectiveBuiltinLoaderUses('const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;'),
-    ['process.getBuiltinModule'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const p = process; const m = p.getBuiltinModule("node:http"); const { request: dial } = m; dial();'),
-    ['process'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const g = globalThis; const build = Function; const run = eval; const load = require;'),
-    ['globalThis', 'Function', 'eval', 'require'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const p = createServer.constructor("return pro" + "cess")(); const m = p.getBuiltinModule("node:" + "http"); const { request: dial } = m; dial();'),
-    ['constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const key = "con" + "structor"; createServer[key]("return pro" + "cess")();'),
-    ['constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('createServer["constructor"]("return pro" + "cess")();'),
-    ['constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const make = (() => {}).__proto__["con" + "structor"]; make("return pro" + "cess")();'),
-    ['__proto__', 'constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const make = createServer.prototype.constructor; make("return pro" + "cess")();'),
-    ['prototype', 'constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const make = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(createServer), "constructor")?.value; make("return pro" + "cess")();'),
-    ['constructor'],
-  );
-  assert.deepEqual(
-    ambientAuthorityUses('const make = Reflect["g" + "et"](createServer, "constructor"); make("return pro" + "cess")();'),
-    ['Reflect.get', 'constructor'],
-  );
 
   // Filesystem access belongs solely to the testing region and is named one file at a time.
   const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])

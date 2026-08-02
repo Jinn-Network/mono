@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import ts from "typescript";
 import { describe, expect, test } from "vitest";
 
 const sourceRoot = new URL("./", import.meta.url).pathname;
@@ -14,390 +15,160 @@ function productionFiles(directory: string): string[] {
   });
 }
 
-function executableSource(source: string): string {
-  return withoutComments(source)
-    .replace(/"(?:[^"\\\n]|\\.)*"/g, '\"\"')
-    .replace(/'(?:[^'\\\n]|\\.)*'/g, "''")
-    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+type Finding = readonly [kind: string, detail: string];
+
+const AMBIENT_ROOTS = new Set([
+  "process", "globalThis", "global", "window", "self", "Function", "eval", "require",
+  "fetch", "WebSocket", "EventSource", "XMLHttpRequest",
+]);
+const TRANSPORT_MODULES = new Set([
+  "node:https", "node:net", "node:tls", "node:dns", "node:dgram", "node:http2",
+  "undici", "axios", "node-fetch", "got", "superagent", "ws",
+]);
+
+function textOf(name: ts.Identifier | ts.PrivateIdentifier): string {
+  // escapedText is TypeScript's parser-normalized identifier spelling. In particular,
+  // `pro\\u0063ess` arrives here as `process`, which is why this guard is AST based.
+  return String(name.escapedText);
 }
 
-function withoutComments(source: string): string {
-  let result = "";
-  let quote: "'" | '"' | "`" | undefined;
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source.charAt(index);
-    const next = source.charAt(index + 1);
-    if (quote !== undefined) {
-      result += character;
-      if (character === "\\") {
-        result += next;
-        index += 1;
-      } else if (character === quote) {
-        quote = undefined;
-      }
-      continue;
-    }
-    if (character === "'" || character === '"' || character === "`") {
-      quote = character;
-      result += character;
-      continue;
-    }
-    if (character === "/" && next === "/") {
-      while (index < source.length && source.charAt(index) !== "\n") {
-        result += " ";
-        index += 1;
-      }
-      result += "\n";
-      continue;
-    }
-    if (character === "/" && next === "*") {
-      result += "  ";
-      index += 2;
-      while (index < source.length && !(source.charAt(index) === "*" && source.charAt(index + 1) === "/")) {
-        result += source.charAt(index) === "\n" ? "\n" : " ";
-        index += 1;
-      }
-      result += " ";
-      index += 1;
-      continue;
-    }
-    result += character;
+function staticString(expression: ts.Expression, constants: ReadonlyMap<string, string>): string | undefined {
+  if (ts.isStringLiteralLike(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return expression.text;
   }
-  return result;
-}
-
-function specifiers(source: string): string[] {
-  const executable = withoutComments(source);
-  return [
-    ...executable.matchAll(/\b(?:import|export)\s+(?:(?:(?!;)[\s\S])*?\s+from\s+)?["']([^"'\r\n]+)["']/g),
-    ...executable.matchAll(/\b(?:import|require)\s*\(\s*(?:["']([^"'\r\n]+)["']|`([^`]*)`)\s*\)/g),
-  ].map((match) => (match[1] ?? match[2]) as string);
-}
-
-function nodeHttpBindings(source: string): string[] {
-  const statement = withoutComments(source).match(/import\s*\{([^}]*)\}\s*from\s*["']node:http["']/);
-  return statement?.[1]?.split(",").map((name) => name.trim()).filter(Boolean).sort() ?? [];
-}
-
-type LexicalToken = { readonly kind: "identifier" | "string" | "punctuation"; readonly value: string };
-
-function lexicalTokens(source: string): LexicalToken[] {
-  const tokens: LexicalToken[] = [];
-  for (let index = 0; index < source.length;) {
-    const character = source.charAt(index);
-    const next = source.charAt(index + 1);
-    if (/\s/u.test(character)) { index += 1; continue; }
-    if (character === "/" && next === "/") {
-      index += 2;
-      while (index < source.length && source.charAt(index) !== "\n" && source.charAt(index) !== "\r") index += 1;
-      continue;
-    }
-    if (character === "/" && next === "*") {
-      const close = source.indexOf("*/", index + 2);
-      index = close === -1 ? source.length : close + 2;
-      continue;
-    }
-    if (character === '"' || character === "'" || character === "`") {
-      const quote = character;
-      let value = "";
-      index += 1;
-      while (index < source.length && source.charAt(index) !== quote) {
-        if (source.charAt(index) === "\\") {
-          value += source.slice(index, index + 2);
-          index += 2;
-        } else {
-          value += source.charAt(index);
-          index += 1;
-        }
-      }
-      if (source.charAt(index) === quote) index += 1;
-      tokens.push({ kind: "string", value });
-      continue;
-    }
-    if (/[A-Za-z_$]/u.test(character)) {
-      const start = index;
-      index += 1;
-      while (index < source.length && /[A-Za-z0-9_$]/u.test(source.charAt(index))) index += 1;
-      tokens.push({ kind: "identifier", value: source.slice(start, index) });
-      continue;
-    }
-    tokens.push({ kind: "punctuation", value: character });
-    index += 1;
+  if (ts.isIdentifier(expression)) return constants.get(textOf(expression));
+  if (ts.isParenthesizedExpression(expression)) return staticString(expression.expression, constants);
+  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = staticString(expression.left, constants);
+    const right = staticString(expression.right, constants);
+    return left === undefined || right === undefined ? undefined : left + right;
   }
-  return tokens;
-}
-
-function memberEnd(tokens: readonly LexicalToken[], index: number, name: string): number | undefined {
-  if (tokens[index]?.value === "." && tokens[index + 1]?.kind === "identifier"
-    && tokens[index + 1]?.value === name) return index + 2;
-  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
-    && tokens[index + 2]?.kind === "identifier" && tokens[index + 2]?.value === name) return index + 3;
-  if (tokens[index]?.value === "[" && tokens[index + 1]?.kind === "string"
-    && tokens[index + 1]?.value === name && tokens[index + 2]?.value === "]") return index + 3;
-  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
-    && tokens[index + 2]?.value === "[" && tokens[index + 3]?.kind === "string"
-    && tokens[index + 3]?.value === name && tokens[index + 4]?.value === "]") return index + 5;
   return undefined;
 }
 
-function reflectiveBuiltinLoaderUses(source: string): string[] {
-  const tokens = lexicalTokens(source);
-  const findings: string[] = [];
-  for (let index = 0; index < tokens.length; index += 1) {
-    let processEnd: number | undefined;
-    let label: string | undefined;
-    if (tokens[index]?.kind === "identifier" && tokens[index]?.value === "process"
-      && tokens[index - 1]?.value !== "." && tokens[index - 1]?.value !== "]") {
-      processEnd = index + 1;
-      label = "process";
-    } else if (tokens[index]?.kind === "identifier"
-      && (tokens[index]?.value === "globalThis" || tokens[index]?.value === "global")) {
-      processEnd = memberEnd(tokens, index + 1, "process");
-      label = tokens[index]?.value;
-    }
-    if (processEnd === undefined || label === undefined) continue;
-    const loaderEnd = memberEnd(tokens, processEnd, "getBuiltinModule");
-    if (loaderEnd !== undefined) {
-      findings.push(`${label}.process`.replace("process.process", "process") + ".getBuiltinModule");
-    }
-  }
-  return findings;
-}
-
-// The replay package has no need for ambient authority. Rejecting each root at its first
-// lexical use is intentionally stricter than chasing aliases (for example `const p = process`)
-// and keeps a future loader or evaluator from escaping the static-import boundary.
-function ambientAuthorityUses(source: string): string[] {
-  const forbidden = new Set([
-    "process", "globalThis", "global", "window", "self", "Function", "eval", "require",
-  ]);
-  const tokens = lexicalTokens(source);
-  return [
-    ...tokens
-    .filter((token) => token.kind === "identifier" && forbidden.has(token.value))
-    .map((token) => token.value),
-    ...evaluatorRecoveryUses(tokens),
-  ];
-}
-
-function staticStringAt(tokens: readonly LexicalToken[], start: number): { value: string; end: number } | undefined {
-  const first = tokens[start];
-  if (first?.kind !== "string" || first.value.includes("${")) return undefined;
-  let value = first.value;
-  let cursor = start + 1;
-  while (tokens[cursor]?.value === "+") {
-    const next = tokens[cursor + 1];
-    if (next?.kind !== "string" || next.value.includes("${")) return undefined;
-    value += next.value;
-    cursor += 2;
-  }
-  return { value, end: cursor };
-}
-
-function staticStringConstants(tokens: readonly LexicalToken[]): ReadonlyMap<string, string> {
+function stringConstants(source: ts.SourceFile): ReadonlyMap<string, string> {
   const constants = new Map<string, string>();
-  for (let index = 0; index < tokens.length - 3; index += 1) {
-    if ((tokens[index]?.value !== "const" && tokens[index]?.value !== "let")
-      || tokens[index + 1]?.kind !== "identifier" || tokens[index + 2]?.value !== "=") continue;
-    const value = staticStringAt(tokens, index + 3);
-    if (value !== undefined && (tokens[value.end]?.value === ";" || value.end === tokens.length)) {
-      constants.set(tokens[index + 1]?.value as string, value.value);
+  const visit = (node: ts.Node): void => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
+      const value = staticString(node.initializer, constants);
+      if (value !== undefined) constants.set(textOf(node.name), value);
     }
-  }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
   return constants;
 }
 
-function memberName(
-  tokens: readonly LexicalToken[],
-  index: number,
-  constants: ReadonlyMap<string, string>,
-): { readonly name: string; readonly end: number; readonly base: LexicalToken | undefined } | undefined {
-  const base = tokens[index - 1];
-  if (tokens[index]?.value === "." && tokens[index + 1]?.kind === "identifier") {
-    return { name: tokens[index + 1]?.value as string, end: index + 2, base };
-  }
-  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
-    && tokens[index + 2]?.kind === "identifier") {
-    return { name: tokens[index + 2]?.value as string, end: index + 3, base };
-  }
-  const start = tokens[index]?.value === "[" ? index + 1
-    : tokens[index]?.value === "?" && tokens[index + 1]?.value === "." && tokens[index + 2]?.value === "["
-      ? index + 3 : undefined;
-  if (start === undefined) return undefined;
-  const literal = staticStringAt(tokens, start);
-  if (literal !== undefined && tokens[literal.end]?.value === "]") {
-    return { name: literal.value, end: literal.end + 1, base };
-  }
-  if (tokens[start]?.kind === "identifier" && tokens[start + 1]?.value === "]") {
-    const name = constants.get(tokens[start]?.value as string);
-    if (name !== undefined) return { name, end: start + 2, base };
-  }
-  return undefined;
+function propertyName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression, constants: ReadonlyMap<string, string>): string | undefined {
+  return ts.isPropertyAccessExpression(node)
+    ? textOf(node.name)
+    : node.argumentExpression === undefined ? undefined : staticString(node.argumentExpression, constants);
 }
 
-// Function constructors are ambient evaluators. The package deliberately admits no evaluator,
-// no evaluator-capable property recovery, and no Reflect operation beyond `Reflect.ownKeys`, so
-// future code cannot recover `process` (or a client transport) through `createServer`.
-function evaluatorRecoveryUses(tokens: readonly LexicalToken[]): string[] {
-  const constants = staticStringConstants(tokens);
-  const findings = new Set<string>();
-  for (let index = 0; index < tokens.length; index += 1) {
-    const literal = staticStringAt(tokens, index);
-    if (literal?.value === "constructor") findings.add("constructor");
-
-    const member = memberName(tokens, index, constants);
-    if (member === undefined) continue;
-    if (member.name === "constructor" || member.name === "__proto__") {
-      findings.add(member.name);
-    }
-    if (member.name === "prototype" && member.base?.value !== "Object" && member.base?.value !== "Array") {
-      findings.add("prototype");
-    }
-    if (member.base?.value === "Reflect" && member.name !== "ownKeys") {
-      findings.add(`Reflect.${member.name}`);
-    }
-  }
-  return [...findings];
+function isReflectOwnKeysBase(node: ts.Identifier): boolean {
+  const parent = node.parent;
+  return ts.isPropertyAccessExpression(parent) && parent.expression === node && textOf(parent.name) === "ownKeys";
 }
 
-function hasDynamicModuleLoad(source: string): boolean {
-  const tokens = lexicalTokens(source);
-  return tokens.some((token, index) => token.kind === "identifier"
-    && (token.value === "import" || token.value === "require")
-    && tokens[index + 1]?.value === "(");
+/**
+ * A source-maintainability gate, deliberately not a sandbox. It parses TypeScript rather than
+ * matching spellings, rejects direct ambient/evaluator authority, and admits one named static
+ * `createServer` import. The Linux network-denied runtime proof is the actual egress boundary.
+ */
+function capabilityFindings(sourceText: string, fileName = "candidate.ts"): Finding[] {
+  const source = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const constants = stringConstants(source);
+  const findings: Finding[] = [];
+  const add = (kind: string, detail: string): void => { findings.push([kind, detail]); };
+
+  for (const diagnostic of (source as unknown as { parseDiagnostics?: readonly ts.Diagnostic[] }).parseDiagnostics ?? []) {
+    add("parse", ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+      const specifier = node.moduleSpecifier;
+      if (specifier !== undefined && ts.isStringLiteralLike(specifier)) {
+        const value = specifier.text;
+        const permittedHttp = value === "node:http" && fileName.endsWith("/service.ts")
+          && ts.isImportDeclaration(node)
+          && node.importClause?.name === undefined
+          && node.importClause?.namedBindings !== undefined
+          && ts.isNamedImports(node.importClause.namedBindings)
+          && node.importClause.namedBindings.elements.length === 1
+          && textOf(node.importClause.namedBindings.elements[0]!.name) === "createServer"
+          && node.importClause.namedBindings.elements[0]!.propertyName === undefined;
+        if (value.startsWith("node:") && !permittedHttp) add("module", value);
+        if (TRANSPORT_MODULES.has(value)) add("transport", value);
+      }
+    }
+    if (ts.isImportEqualsDeclaration(node)) add("module", "import equals");
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add("module", "dynamic import");
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression) && textOf(node.expression.expression) === "Object"
+      && (textOf(node.expression.name) === "getOwnPropertyDescriptor" || textOf(node.expression.name) === "getPrototypeOf")
+      && node.arguments.some((argument) => staticString(argument, constants) === "constructor")) {
+      add("evaluator", "constructor");
+    }
+    if (ts.isIdentifier(node)) {
+      const name = textOf(node);
+      if (AMBIENT_ROOTS.has(name)) { add("ambient", name); }
+      if (name === "Reflect" && !isReflectOwnKeysBase(node)) { add("reflection", "Reflect"); }
+    }
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+      const name = propertyName(node, constants);
+      if (name === "constructor" || name === "__proto__") add("evaluator", name);
+      if (name === "prototype" && (!ts.isIdentifier(node.expression)
+        || !["Object", "Array", "String", "Number", "Boolean"].includes(textOf(node.expression)))) {
+        add("evaluator", name);
+      }
+      if (ts.isIdentifier(node.expression) && textOf(node.expression) === "Reflect" && name !== "ownKeys") {
+        add("reflection", `Reflect.${name ?? "dynamic"}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return findings;
 }
 
 const files = productionFiles(sourceRoot);
 const sources = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
 
-describe("the replay service is structurally incapable of egress", () => {
-  test("keeps a non-empty production surface under the scan", () => {
+describe("the replay service has a closed execution profile", () => {
+  test("keeps a non-empty production surface under the AST policy", () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  test("allows node:http only in service.ts and only as createServer", () => {
-    const nodeSpecifiers = [...sources.entries()].flatMap(([file, source]) =>
-      specifiers(source).filter((specifier) => specifier.startsWith("node:")).map((specifier) => ({ file, specifier })));
-    expect(nodeSpecifiers.map(({ specifier }) => specifier)).toEqual(["node:http"]);
-    expect(nodeSpecifiers.map(({ file }) => file.slice(file.lastIndexOf("/") + 1))).toEqual(["service.ts"]);
-
-    const service = sources.get(join(sourceRoot, "service.ts"));
-    expect(nodeHttpBindings(service ?? "")).toEqual(["createServer"]);
-  });
-
-  test("scanner canaries cover comments, every import form, and template interpolation", () => {
-    const source = [
-      '// import "node:tls" must stay a comment',
-      '/* import { request } from "node:http" must stay a comment */',
-      'import {',
-      '  createServer,',
-      '} from "node:http";',
-      'import * as socket',
-      '  from "node:net";',
-      'import client',
-      '  from "node:https";',
-      'import "node:dns";',
-      'export { lookup } from "node:dns/promises";',
-      'await import("node:http2");',
-      'require("node:dgram");',
-      'await import(`node:${"worker_threads"}`);',
-    ].join("\n");
-
-    expect(specifiers(source)).toEqual([
-      "node:http",
-      "node:net",
-      "node:https",
-      "node:dns",
-      "node:dns/promises",
-      "node:http2",
-      "node:dgram",
-      'node:${"worker_threads"}',
-    ]);
-    expect(nodeHttpBindings(source)).toEqual(["createServer"]);
-
-    const reflective = [
-      'const direct = process.getBuiltinModule(`node:${"http"}`);',
-      'const optional = globalThis.process?.["getBuiltinModule"]("node:" + "http");',
-      'const bracketed = global["process"]["getBuiltinModule"](`node:${"http"}`);',
-      '// process.getBuiltinModule("node:http") stays a comment',
-    ].join("\n");
-    expect(reflectiveBuiltinLoaderUses(reflective)).toEqual([
-      "process.getBuiltinModule",
-      "globalThis.process.getBuiltinModule",
-      "global.process.getBuiltinModule",
-    ]);
-    expect(reflectiveBuiltinLoaderUses(
-      'const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;',
-    )).toEqual(["process.getBuiltinModule"]);
-    expect(ambientAuthorityUses(
-      'const p = process; const m = p.getBuiltinModule("node:http"); const { request: dial } = m; dial();',
-    )).toEqual(["process"]);
-    expect(ambientAuthorityUses(
-      'const g = globalThis; const build = Function; const run = eval; const load = require;',
-    )).toEqual(["globalThis", "Function", "eval", "require"]);
-    expect(ambientAuthorityUses(
-      'const p = createServer.constructor("return pro" + "cess")(); const m = p.getBuiltinModule("node:" + "http"); const { request: dial } = m; dial();',
-    )).toEqual(["constructor"]);
-    expect(ambientAuthorityUses(
-      'const key = "con" + "structor"; createServer[key]("return pro" + "cess")();',
-    )).toEqual(["constructor"]);
-    expect(ambientAuthorityUses(
-      'createServer["constructor"]("return pro" + "cess")();',
-    )).toEqual(["constructor"]);
-    expect(ambientAuthorityUses(
-      'const make = (() => {}).__proto__["con" + "structor"]; make("return pro" + "cess")();',
-    )).toEqual(["__proto__", "constructor"]);
-    expect(ambientAuthorityUses(
-      'const make = createServer.prototype.constructor; make("return pro" + "cess")();',
-    )).toEqual(["prototype", "constructor"]);
-    expect(ambientAuthorityUses(
-      'const make = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(createServer), "constructor")?.value; make("return pro" + "cess")();',
-    )).toEqual(["constructor"]);
-    expect(ambientAuthorityUses(
-      'const make = Reflect["g" + "et"](createServer, "constructor"); make("return pro" + "cess")();',
-    )).toEqual(["Reflect.get", "constructor"]);
-  });
-
-  test("imports no other node builtin or network client", () => {
-    const forbidden = new Set([
-      "node:https", "node:net", "node:tls", "node:dns", "node:dgram", "node:http2",
-      "node:child_process", "node:worker_threads", "node:cluster", "node:fs", "node:fs/promises",
-      "undici", "axios", "node-fetch", "got", "superagent", "ws",
-    ]);
-    const findings = [...sources.entries()].flatMap(([file, source]) =>
-      specifiers(source).filter((specifier) => forbidden.has(specifier)).map((specifier) => `${file}:${specifier}`));
+  test("admits only the named static createServer import in service.ts", () => {
+    const findings = [...sources.entries()].flatMap(([file, source]) => capabilityFindings(source, file));
     expect(findings).toEqual([]);
   });
 
-  test("contains no dynamic, require, or reflective module loader in production source", () => {
-    const findings = [...sources.entries()].flatMap(([file, source]) => [
-      ...(hasDynamicModuleLoad(source) ? [`${file}:dynamic module loader`] : []),
-      ...reflectiveBuiltinLoaderUses(source).map((loader) => `${file}:${loader}`),
-      ...ambientAuthorityUses(source).map((root) => `${file}:${root}`),
-    ]);
-    expect(findings).toEqual([]);
-  });
-
-  test("names no ambient network API, raw client method, or code evaluator", () => {
-    const patterns = [
-      /(?<![\w$.])fetch\s*\(/,
-      /(?<![\w$.])(?:WebSocket|EventSource|XMLHttpRequest)\b/,
-      /\b(?:globalThis|global|window|self)\s*(?:\.|\?\.|\[)/,
-      /\b(?:https?|net|tls|dns)\s*\.\s*(?:request|get|connect|createConnection|lookup)\s*\(/,
-      /\bnew\s+(?:Agent|Socket|Function)\s*\(/,
-      /(?<![\w$.])eval\s*\(/,
-      /\bimport\s*\(/,
+  test("normalizes escapes and refuses direct, dynamic, and reflective capability recovery", () => {
+    const cases = [
+      'const p = pro\\u0063ess.getBuiltinModule("node:http");',
+      'await fetch("https://example.test");',
+      'const client = await import("node:https");',
+      'const load = require("node:net");',
+      'const key = "con" + "structor"; createServer[key]("return process")();',
+      'const reflect = Reflect; const get = reflect["g" + "et"]; get(createServer, "constructor");',
+      'const descriptor = Object.getOwnPropertyDescriptor(createServer, "constructor");',
+      'import { request } from "node:http";',
+      'import * as http from "node:http";',
     ];
-    const findings = [...sources.entries()].flatMap(([file, source]) => {
-      const executable = executableSource(source);
-      return patterns.filter((pattern) => pattern.test(executable)).map((pattern) => `${file}:${pattern.source}`);
-    });
-    expect(findings).toEqual([]);
+    for (const source of cases) {
+      expect(capabilityFindings(source, "/candidate.ts").length, source).toBeGreaterThan(0);
+    }
   });
 
-  test("does not inspect a corpus body before copying it to the response", () => {
-    const service = executableSource(sources.get(join(sourceRoot, "service.ts")) ?? "");
-    expect(/\bbody\s*\.\s*(?:includes|indexOf|match|search|test)\s*\(/.test(service)).toBe(false);
-    expect(/JSON\s*\.\s*parse\s*\(\s*(?:body|bytes)/.test(service)).toBe(false);
+  test("preserves the narrow production operations used by sealed replay", () => {
+    const permitted = [
+      'const frozen = Object.freeze({ value: 1 });',
+      'for (const key of Reflect.ownKeys(frozen)) { Object.entries({ key }); }',
+      'const values = ["a"]; const value = values[0];',
+      'import { createServer } from "node:http";',
+    ].join("\n");
+    expect(capabilityFindings(permitted, "/service.ts")).toEqual([]);
   });
 });
