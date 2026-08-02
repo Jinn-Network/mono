@@ -20,3 +20,6 @@ export const chainEnvironmentFactsProfile: FactsProfileDocument =
 
 export const cryptoEnvironmentFactsProfile: FactsProfileDocument =
   loadProfile("crypto-environment.1.0.json");
+
+export const informationWorldFactsProfile: FactsProfileDocument =
+  loadProfile("information-world.1.0.json");

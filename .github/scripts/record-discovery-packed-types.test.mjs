@@ -62,6 +62,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
+  ['@jinn-network/information-world', join(root, 'packages', 'environments', 'information-world')],
 ];
 
 function run(command, args, options = {}) {

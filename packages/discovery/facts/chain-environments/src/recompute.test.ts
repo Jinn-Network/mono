@@ -9,10 +9,12 @@ import { recordDigest } from "@jinn-network/record-discovery-protocol";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
+import { INFORMATION_WORLD_KIND } from "./identifiers.js";
 import {
   CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE,
   chainEnvironmentRecompute,
   cryptoEnvironmentRecompute,
+  informationWorldRecompute,
 } from "./recompute.js";
 
 const noReferences = { fetch: async () => undefined };
@@ -25,6 +27,9 @@ const goldenJson = async (path: string): Promise<Record<string, unknown>> =>
       "utf8",
     ),
   ) as Record<string, unknown>;
+
+const loadInformationWorldGolden = (): Promise<Uint8Array> =>
+  readFile(new URL(import.meta.resolve("@jinn-network/information-world/fixtures/world/synthetic.json")));
 
 describe("chain-environment record-fact recompute", () => {
   it("recomputes every fact from the record's own sealed bytes", async () => {
@@ -92,10 +97,38 @@ describe("crypto-environment record-fact recompute", () => {
   });
 });
 
+describe("information world recompute", () => {
+  it("recomputes the card from the record's own sealed bytes", async () => {
+    const bytes = await loadInformationWorldGolden();
+    const facts = await informationWorldRecompute(bytes, noReferences);
+    expect(facts).toMatchObject({
+      "capture.fidelity": "synthetic",
+      "requestKeyPolicy.version": "irk1",
+    });
+    expect(facts["corpus.entryCount"]).toBeGreaterThan(0);
+    expect(facts.informationWorldRecordDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it("re-serialized bytes recompute to nothing, so a card cannot be attached to them", async () => {
+    const bytes = await loadInformationWorldGolden();
+    const pretty = new TextEncoder().encode(
+      JSON.stringify(JSON.parse(new TextDecoder().decode(bytes)), null, 2),
+    );
+    expect(await informationWorldRecompute(pretty, noReferences)).toEqual({});
+  });
+
+  it("the registry resolves this kind and skips unknown ones", () => {
+    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(INFORMATION_WORLD_KIND)).toBeDefined();
+    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://jinn.network/records/nope/1.0"))
+      .toBeUndefined();
+  });
+});
+
 describe("the registry", () => {
-  it("registers both kinds and nothing else", () => {
+  it("registers all three kinds and nothing else", () => {
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(CHAIN_ENVIRONMENT_KIND)).toBe(chainEnvironmentRecompute);
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(CRYPTO_ENVIRONMENT_KIND)).toBe(cryptoEnvironmentRecompute);
+    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(INFORMATION_WORLD_KIND)).toBe(informationWorldRecompute);
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://jinn.network/records/environment/1.0")).toBeUndefined();
   });
 });
