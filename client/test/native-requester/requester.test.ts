@@ -1,12 +1,19 @@
-import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordDigest } from '@jinn-network/trust-core';
+import { archivePagePath, WELL_KNOWN_PATH } from '@jinn-network/record-discovery-protocol';
+import { coldSync, createVerifyDriver, fetchHead, type SyncedEntry } from '@jinn-network/record-discovery-client';
+import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
+import { createInMemoryPostingIntentStore } from '@jinn-network/marketplace-binding';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createNativeRequester,
+  createNativeRequesterPostTask,
   type NativeRequesterRoles,
+  type NativeRequesterSubmissionVerifier,
+  createNativeRequesterSubmissionResolver,
 } from '../../src/native-requester/requester.js';
 
 const CHAIN = {
@@ -21,20 +28,35 @@ const CREATOR = '0x1111111111111111111111111111111111111111' as const;
 const TX_HASH = `0x${'ab'.repeat(32)}` as const;
 const REQUESTER_AGENT = 'urn:jinn:requester:test';
 
-function roles(): NativeRequesterRoles {
+function roles(): NativeRequesterRoles & {
+  readonly requesterSubmission: NativeRequesterSubmissionVerifier;
+  readonly requesterDiscovery: NativeRequesterSubmissionVerifier;
+} {
   const byRole = new Map();
   for (const role of ['requester-submission', 'admission', 'requester-discovery'] as const) {
     const pair = generateKeyPairSync('ed25519');
     byRole.set(role, {
       keyId: `did:key:${role}`,
+      publicKey: pair.publicKey,
       sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, pair.privateKey)),
     });
   }
+  const requesterSubmission = byRole.get('requester-submission');
+  const requesterDiscovery = byRole.get('requester-discovery');
+  if (requesterSubmission === undefined || requesterDiscovery === undefined) throw new Error('test requester identity missing');
   return {
     get(role) {
       const identity = byRole.get(role);
       if (identity === undefined) throw new Error(`missing test role ${role}`);
       return identity;
+    },
+    requesterSubmission: {
+      keyId: requesterSubmission.keyId,
+      publicKey: requesterSubmission.publicKey,
+    },
+    requesterDiscovery: {
+      keyId: requesterDiscovery.keyId,
+      publicKey: requesterDiscovery.publicKey,
     },
   };
 }
@@ -172,6 +194,153 @@ describe('native requester', () => {
 
     expect(post).toHaveBeenCalledOnce();
     expect(replayed.association).toEqual(recovered.association);
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('resolves only an exact canonical association whose requester DSSE verifies with the B2 key', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-resolver-'));
+    const identities = roles();
+    const { requester, post } = fixture({
+      stateDir,
+      loadRoles: async () => identities,
+    });
+    const result = await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'trusted-association',
+    });
+    const resolver = createNativeRequesterSubmissionResolver({
+      stateDir,
+      requesterSubmission: identities.requesterSubmission,
+    });
+
+    await expect(resolver({
+      chainId: CHAIN.chainId,
+      coordinator: CHAIN.taskCoordinator,
+      taskId: result.association.taskId,
+      taskDigest: result.association.taskDigest,
+    })).resolves.toEqual(post.mock.calls[0]![0].submissionBytes);
+    await expect(resolver({
+      chainId: CHAIN.chainId,
+      coordinator: CHAIN.taskCoordinator,
+      taskId: result.association.taskId + 1n,
+      taskDigest: result.association.taskDigest,
+    })).resolves.toBeUndefined();
+
+    const impostor = generateKeyPairSync('ed25519');
+    const badSignatureResolver = createNativeRequesterSubmissionResolver({
+      stateDir,
+      requesterSubmission: {
+        keyId: identities.requesterSubmission.keyId,
+        publicKey: impostor.publicKey,
+      },
+    });
+    await expect(badSignatureResolver({
+      chainId: CHAIN.chainId,
+      coordinator: CHAIN.taskCoordinator,
+      taskId: result.association.taskId,
+      taskDigest: result.association.taskDigest,
+    })).resolves.toBeUndefined();
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('uses marketplace-binding native postTask through the production adapter without a live transaction', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-post-task-'));
+    const { requester, post } = fixture({ stateDir });
+    await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'native-post-task-adapter',
+    });
+    const postInput = post.mock.calls[0]![0];
+    const pinned: Uint8Array[] = [];
+    const broadcast = vi.fn(async () => ({ taskId: 18n, txHash: `0x${'cd'.repeat(32)}` as const }));
+    const nativePost = createNativeRequesterPostTask({
+      terms: {
+        solutionMaxDeliveryRateWei: 2n,
+        verdictMaxDeliveryRateWei: 3n,
+        responseTimeoutSeconds: 60n,
+        allowSolverSelfEvaluation: false,
+      },
+      ports: {
+        ipfs: { pin: async (bytes) => { pinned.push(bytes); } },
+        intents: createInMemoryPostingIntentStore(),
+        safe: { broadcastCreateTask: broadcast },
+      },
+    });
+
+    await expect(nativePost.post(postInput)).resolves.toEqual({ taskId: 18n, txHash: `0x${'cd'.repeat(32)}` });
+    expect(pinned).toEqual([postInput.taskBytes, postInput.submissionBytes]);
+    expect(broadcast).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      safeAddress: CREATOR,
+      to: CHAIN.jinnRouter,
+      value: 5n,
+    }));
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('serves a signed well-known/head/archive source that a separate discovery client verifies', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-discovery-'));
+    const identities = roles();
+    const { requester } = fixture({ stateDir, loadRoles: async () => identities });
+    const result = await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'discovery-client-verifies',
+    });
+    const baseUrl = 'https://requester.test';
+    const wellKnown = await requester.handleDiscoveryRequest(new Request(`${baseUrl}${WELL_KNOWN_PATH}`));
+    expect(wellKnown.status).toBe(200);
+
+    const transport = createHttpTransport(baseUrl, async (url, init) => requester.handleDiscoveryRequest(new Request(url, {
+      method: init?.method ?? 'GET', headers: init?.headers ?? {},
+    })));
+    const endpoint = {
+      agent: REQUESTER_AGENT,
+      name: 'requester',
+      servingRoot: baseUrl,
+      archiveRootUrl: `${baseUrl}${archivePagePath('requester', result.association.publication.page)}`,
+    };
+    const head = await fetchHead(endpoint, transport);
+    const synced: SyncedEntry[] = [];
+    for await (const item of coldSync(endpoint, { transport })) synced.push(item);
+    expect(synced).toHaveLength(1);
+    if (head.signature === undefined || synced[0]?.signature === undefined) throw new Error('source was not signed');
+
+    const decodeWireEnvelope = (envelope: { payloadType: string; payload: string; signatures: Array<{ keyid?: string; sig: string }> }) => ({
+      ...envelope,
+      payload: new TextDecoder().decode(Buffer.from(envelope.payload, 'base64')),
+    });
+    let mark: { sequence: string; entry: string; issuedAt: string } | undefined;
+    const verifier = createVerifyDriver({
+      trust: {
+        keys: {
+          resolve: async (agent: string) => agent === REQUESTER_AGENT ? [{
+            keyid: identities.requesterDiscovery.keyId, publicKey: 'B2 requester discovery key', algorithm: 'Ed25519',
+          }] : [],
+          everBound: async (agent: string, keyId: string) => agent === REQUESTER_AGENT && keyId === identities.requesterDiscovery.keyId,
+        },
+        sigs: {
+          verify: async (pae: Uint8Array, signature: Uint8Array) => cryptoVerify(
+            null,
+            pae,
+            identities.requesterDiscovery.publicKey,
+            Buffer.from(new TextDecoder().decode(signature), 'base64'),
+          ),
+        },
+        fresh: { isFresh: (refreshBy: string, now: Date) => new Date(refreshBy).getTime() > now.getTime() },
+      },
+      hwm: { get: async () => mark, put: async (_source, next) => { mark = next; } },
+      factsProfiles: { get: () => undefined },
+      factsRecompute: { get: () => undefined },
+      records: { fetch: async () => { throw new Error('record fetch is not part of source-chain verification'); } },
+      entries: { fetch: async () => { throw new Error('entry fetch is not part of source-chain verification'); } },
+      now: () => new Date('2026-08-02T12:00:01.000Z'),
+    });
+    await expect(verifier.verifySource({
+      source: { agent: REQUESTER_AGENT, name: 'requester' },
+      head: head.head,
+      headSignature: decodeWireEnvelope(head.signature),
+      entries: (async function* () {
+        for (const item of synced) yield { entry: item.entry, signature: decodeWireEnvelope(item.signature!) };
+      })(),
+      firstAdoption: true,
+    })).resolves.toMatchObject({ status: 'ok' });
+    expect(mark?.entry).toBe(result.association.publication.entryDigest);
     await rm(stateDir, { recursive: true, force: true });
   });
 });

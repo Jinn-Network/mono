@@ -175,6 +175,11 @@ import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } fr
 import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
 import type { RoleIdentitySet } from './role-identities.js';
+import {
+  createNativeRequesterSubmissionResolver,
+  type NativeRequesterSubmissionLookup,
+  type NativeRequesterSubmissionVerifier,
+} from '../native-requester/requester.js';
 
 export interface OperatorComposition {
   /** Explicit composition path: legacy bridge or native effective-time-trusted operator. */
@@ -284,6 +289,11 @@ export interface CompositionRootInput {
    * callers get a deliberate native boot refusal rather than an accidental fallback.
    */
   readonly nativeRoleIdentities?: RoleIdentitySet;
+  /**
+   * Durable requester association directory for native projection. Omitted uses the operator
+   * state root's `native-requester` child; it is read-only from projector composition.
+   */
+  readonly nativeRequesterStateDir?: string;
   /**
    * C8: the daemon's shared SQLite `Store` — backs the projector's durable cursor/observations
    * (C5, `ProjectorCursorStore`) and the engagement ledger (C6). Required so this composition can
@@ -651,6 +661,38 @@ export function buildResolveSubmissionBytes(input: {
 }
 
 /**
+ * Native-only `projectAnnouncements.resolveRecord` path. Its resolver reads a local, requester-
+ * signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop document,
+ * SignedTaskV1 parser, or synthesized projection on this path.
+ */
+export function buildNativeResolveRecord(
+  chain: MarketplaceChainConfig,
+  resolveAssociation: (lookup: NativeRequesterSubmissionLookup) => Promise<Uint8Array | undefined>,
+): (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole) => Promise<AnnouncementRecordMaterial> {
+  return async (event, role) => {
+    if (role === 'submission' && 'taskId' in event.facts) {
+      if (
+        event.derivation.chainId !== chain.chainId
+        || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
+      ) {
+        throw new Error('native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator');
+      }
+      const bytes = await resolveAssociation({
+        chainId: chain.chainId,
+        coordinator: chain.taskCoordinator,
+        taskId: event.facts.taskId,
+        taskDigest: event.projection.taskDigest,
+      });
+      if (bytes !== undefined) return { kind: RECORD_KINDS.submission, bytes };
+    }
+    throw new Error(
+      `resolveRecord has no production implementation for role "${role}" (composition-root.ts `
+      + 'file header gap b)',
+    );
+  };
+}
+
+/**
  * Gap (a, file header — second half CLOSED, finding E35 ruled): `work-loop.ts`'s wrapped
  * `claimTask` now seals the dispatch-context document (TEP §9.3) exactly once, at claim time —
  * I-JSON, JCS, sha256 (TEP §9.1; `docs/superpowers/specs/2026-07-30-stack-design-principles.md`
@@ -731,6 +773,7 @@ function buildResolveRecord(
  * `logSource`; it never independently opens the venue state path.
  */
 function buildProjector(input: {
+  readonly mode: 'legacy' | 'native';
   readonly chain: MarketplaceChainConfig;
   readonly publicClient: PublicClient;
   readonly mechAddress: Address;
@@ -743,6 +786,11 @@ function buildProjector(input: {
   /** Same instance `buildOperatorComposition` later wires into `verifySettlementGrade` — the
    * dispatch-context resolver (finding E35) reads the exact rows `work-loop.ts` seals into. */
   readonly engagementLedger: EngagementLedger;
+  /** Present only after native composition proved B2's requester-submission binding. */
+  readonly nativeRequester?: {
+    readonly stateDir: string;
+    readonly requesterSubmission: NativeRequesterSubmissionVerifier;
+  };
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }): {
   readonly projector: ProjectorLoop;
@@ -761,11 +809,21 @@ function buildProjector(input: {
     address.toLowerCase() === input.mechAddress.toLowerCase();
 
   const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
-  const resolveSubmissionBytes = buildResolveSubmissionBytes({
-    publicClient: input.publicClient,
-    jinnRouter: input.chain.jinnRouter,
-    fetchIpfsBytes,
-  });
+  const resolveAssociation = input.mode === 'native'
+    ? createNativeRequesterSubmissionResolver(input.nativeRequester ?? (() => {
+      throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
+    })())
+    : undefined;
+  const resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'] = input.mode === 'native'
+    ? async ({ chainId, taskCoordinator, taskId, taskDigest }) => {
+      if (taskDigest === undefined || resolveAssociation === undefined) return undefined;
+      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest });
+    }
+    : buildResolveSubmissionBytes({
+      publicClient: input.publicClient,
+      jinnRouter: input.chain.jinnRouter,
+      fetchIpfsBytes,
+    });
   const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
   const enrich = createProjectorEnrich({
     chain: input.chain,
@@ -774,6 +832,7 @@ function buildProjector(input: {
     resolveSubmissionBytes,
     resolveDispatchContext,
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
+    allowLegacySignedTaskV1: input.mode === 'legacy',
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
@@ -782,7 +841,9 @@ function buildProjector(input: {
     source: { agent: `urn:jinn:operator:${input.mechAddress.toLowerCase()}`, name: 'operator-projector' },
     signer: input.discoverySigner,
     archiveRoot: input.archiveRoot,
-    resolveRecord: buildResolveRecord(resolveSubmissionBytes, input.chain),
+    resolveRecord: input.mode === 'native'
+      ? buildNativeResolveRecord(input.chain, resolveAssociation!)
+      : buildResolveRecord(resolveSubmissionBytes, input.chain),
     verifyVerdictObservation: verifyVerdictObservationGap,
     referencedBytes: { fetch: fetchIpfsBytes },
     readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),
@@ -932,6 +993,7 @@ export async function buildOperatorComposition(
         }],
       };
   projectorParts = buildProjector({
+    mode: input.mode,
     chain: input.chain,
     publicClient: input.publicClient,
     mechAddress: input.mechAddress,
@@ -942,6 +1004,12 @@ export async function buildOperatorComposition(
     store: input.store,
     pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
     engagementLedger,
+    ...(input.mode === 'native' ? {
+      nativeRequester: {
+        stateDir: input.nativeRequesterStateDir ?? join(input.stateRoot, 'native-requester'),
+        requesterSubmission: identities!.get('requester-submission'),
+      },
+    } : {}),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
   const { projector, claimGate, readObservations } = projectorParts;

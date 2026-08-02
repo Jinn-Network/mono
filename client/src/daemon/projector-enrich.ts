@@ -74,6 +74,12 @@ type Sha256Digest = `sha256:${string}`;
 
 export interface ProjectorEnrichPorts {
   readonly chain: MarketplaceChainConfig;
+  /**
+   * Compatibility-only legacy CreatorLoop bridge. Native requester composition must set this to
+   * false: it then drops a non-TEP document before SignedTaskV1 parsing or projection synthesis.
+   * Omitted remains true only for the explicit legacy composition and its existing tests.
+   */
+  readonly allowLegacySignedTaskV1?: boolean;
   /** Live block reads, keyed by block hash so a reorg never serves a stale cached timestamp. */
   readonly publicClient: Pick<PublicClient, 'getBlock'>;
   /**
@@ -93,6 +99,8 @@ export interface ProjectorEnrichPorts {
     readonly taskCoordinator: Address;
     readonly taskId: bigint;
     readonly generation: ContractGeneration;
+    /** TaskCreated's canonical on-chain anchor, required by native association lookup. */
+    readonly taskDigest?: Sha256Digest;
     readonly submissionDigest?: Sha256Digest;
   }) => Promise<Uint8Array | undefined>;
   /**
@@ -276,6 +284,7 @@ export function createProjectorEnrich(
       taskCoordinator: ports.chain.taskCoordinator,
       taskId: input.taskId,
       generation: input.generation,
+      taskDigest: input.onChainTaskDigest,
       submissionDigest: input.submissionDigest,
     });
     if (submissionBytes === undefined) {
@@ -284,6 +293,10 @@ export function createProjectorEnrich(
     }
     const record = parseSubmissionBytes(submissionBytes);
     if (record === undefined) {
+      if (ports.allowLegacySignedTaskV1 === false) {
+        ports.logger?.warn(`[projector-enrich] native resolver returned a non-TEP Submission for task ${input.taskId} -- dropping`);
+        return undefined;
+      }
       // Bridge synthesis path (finding E32 / ruling E32): the resolved bytes failed TEP
       // `SubmissionRecordSchema` validation, but the legacy `CreatorLoop` posts a `SignedTaskV1`
       // document directly -- there is no sealed Submission to fail. Per the composition spec

@@ -7,11 +7,15 @@
  * durable association from a canonical today-mode `TaskCreated` to the exact Submission graph.
  */
 import { mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
+import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   BASE_SEPOLIA_TODAY,
+  postTask,
   type MarketplaceChainConfig,
   type PostingOutcome,
+  type PostingPorts,
+  type PostingTerms,
 } from '@jinn-network/marketplace-binding';
 import {
   admitPredictionSnapshot,
@@ -27,6 +31,8 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import {
   canonicalJsonBytes,
+  dssePreAuthEncoding,
+  parseSignedRecordEnvelope,
   sealSignedRecord,
 } from '@jinn-network/trust-core';
 import {
@@ -71,6 +77,12 @@ export interface NativeRequesterIdentity {
   sign(payload: Uint8Array): Uint8Array;
 }
 
+/** Public half of B2's requester-submission identity, used by the native projector only. */
+export interface NativeRequesterSubmissionVerifier {
+  readonly keyId: string;
+  readonly publicKey: KeyObject;
+}
+
 /** Narrow B2 dependency: the requester never gains authority over solver/evaluator keys. */
 export interface NativeRequesterRoles {
   get(role: NativeRequesterRole): NativeRequesterIdentity;
@@ -92,7 +104,7 @@ export interface CanonicalTaskCreated {
   readonly txHash: `0x${string}`;
 }
 
-interface NativeRequesterPostInput {
+export interface NativeRequesterPostInput {
   readonly taskBytes: Uint8Array;
   readonly evaluationSpecBytes: Uint8Array;
   readonly admissionReceiptBytes: Uint8Array;
@@ -221,9 +233,38 @@ export interface NativeRequesterDeps {
     | 'source-announced') => Promise<void>;
 }
 
+/**
+ * The production posting adapter: B3's only broadcast operation is marketplace-binding's native
+ * `postTask`, which owns its own durable posting-intent WAL and Safe broadcast fence. The caller
+ * still supplies those infrastructure ports; the feature-disabled CLI never instantiates this.
+ */
+export function createNativeRequesterPostTask(input: {
+  readonly terms: PostingTerms;
+  readonly ports: PostingPorts;
+}): Pick<NativeRequesterDeps['posting'], 'post'> {
+  return {
+    post: async (request) => postTask(
+      request.taskBytes,
+      request.submissionBytes,
+      input.terms,
+      request.chain,
+      request.creatorSafe,
+      input.ports,
+    ),
+  };
+}
+
 export interface NativeRequesterResult {
   readonly association: NativeRequesterAssociation;
   readonly reused: boolean;
+}
+
+/** The only native projector lookup shape: the canonical TaskCreated tuple, no legacy hints. */
+export interface NativeRequesterSubmissionLookup {
+  readonly chainId: number;
+  readonly coordinator: `0x${string}`;
+  readonly taskId: bigint;
+  readonly taskDigest: Digest;
 }
 
 function lowerAddress(address: string): string {
@@ -643,6 +684,105 @@ async function appendRequesterSource(input: {
   association = { ...association, publication: { ...publication, state: 'published' } };
   await input.state.writeAssociation(associationKey(association), association);
   return association;
+}
+
+function descriptorSha256(value: unknown): Digest | undefined {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
+    ? `sha256:${value}` as Digest
+    : undefined;
+}
+
+async function readExactRecord(
+  state: NativeRequesterState,
+  expected: StoredExactRecord,
+): Promise<Uint8Array | undefined> {
+  if (expected.path !== recordPath(expected.digest)) return undefined;
+  const record = await state.records.get(expected.path);
+  if (record === undefined || rawDigest(record.bytes) !== expected.digest) return undefined;
+  return record.bytes;
+}
+
+/**
+ * Native-only projector resolver. It accepts a Submission only when its local association has
+ * the exact canonical `(chainId, coordinator, taskId, taskDigest)` key and its requester DSSE
+ * verifies against B2's requester-submission public key. This intentionally has no IPFS,
+ * SignedTaskV1, CreatorLoop, or projection fallback.
+ */
+export function createNativeRequesterSubmissionResolver(input: {
+  readonly stateDir: string;
+  readonly requesterSubmission: NativeRequesterSubmissionVerifier;
+}): (lookup: NativeRequesterSubmissionLookup) => Promise<Uint8Array | undefined> {
+  const state = new NativeRequesterState(input.stateDir);
+
+  return async (lookup) => {
+    try {
+      const key = associationKey(lookup);
+      const association = await state.readAssociation(key);
+      if (
+        association === undefined
+        || association.chainId !== lookup.chainId
+        || lowerAddress(association.coordinator) !== lowerAddress(lookup.coordinator)
+        || association.taskId !== lookup.taskId
+        || association.taskDigest !== lookup.taskDigest
+        || association.task.digest !== lookup.taskDigest
+        || association.submission.digest !== association.submissionDigest
+        || association.requesterEnvelope.digest !== association.requesterEnvelopeDigest
+        || association.admissionReceipt.digest !== association.admissionReceiptDigest
+      ) return undefined;
+
+      const [taskBytes, submissionBytes, requesterEnvelopeBytes, receiptBytes] = await Promise.all([
+        readExactRecord(state, association.task),
+        readExactRecord(state, association.submission),
+        readExactRecord(state, association.requesterEnvelope),
+        readExactRecord(state, association.admissionReceipt),
+      ]);
+      if (
+        taskBytes === undefined
+        || submissionBytes === undefined
+        || requesterEnvelopeBytes === undefined
+        || receiptBytes === undefined
+        || rawDigest(taskBytes) !== lookup.taskDigest
+      ) return undefined;
+
+      const envelope = parseSignedRecordEnvelope(requesterEnvelopeBytes, ADMISSION_RECEIPT_MEDIA_TYPE);
+      const signature = envelope.signatures.find((candidate) => candidate.keyid === input.requesterSubmission.keyId);
+      if (
+        signature === undefined
+        || !cryptoVerify(
+          null,
+          Buffer.from(dssePreAuthEncoding(ADMISSION_RECEIPT_MEDIA_TYPE, envelope.payloadBytes)),
+          input.requesterSubmission.publicKey,
+          Buffer.from(signature.sig, 'base64'),
+        )
+      ) return undefined;
+
+      const statement = bytesToObject(envelope.payloadBytes, 'requester Submission association');
+      const subject = statement.subject;
+      const predicate = statement.predicate;
+      if (
+        statement._type !== 'https://in-toto.io/Statement/v1'
+        || statement.predicateType !== REQUESTER_ENVELOPE_PREDICATE
+        || !Array.isArray(subject)
+        || subject.length !== 1
+        || typeof subject[0] !== 'object'
+        || subject[0] === null
+        || (subject[0] as Record<string, unknown>).name !== 'submission'
+        || descriptorSha256(((subject[0] as Record<string, unknown>).digest as Record<string, unknown> | undefined)?.sha256) !== association.submissionDigest
+        || typeof predicate !== 'object'
+        || predicate === null
+      ) return undefined;
+      const associationFact = predicate as Record<string, unknown>;
+      if (
+        associationFact.taskDigest !== lookup.taskDigest
+        || associationFact.submissionDigest !== association.submissionDigest
+        || associationFact.admissionReceiptDigest !== association.admissionReceiptDigest
+        || typeof associationFact.runId !== 'string'
+      ) return undefined;
+      return submissionBytes;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /**
