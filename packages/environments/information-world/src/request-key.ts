@@ -5,6 +5,7 @@ import { assertIJsonString, type JsonValue } from "./json.js";
 import { compareCodeUnitStrings } from "./order.js";
 import {
   REQUEST_KEY_VERSION,
+  RequestKeyPolicySchema,
   assertRequestKeyPolicy,
   type RequestKeyPolicy,
 } from "./request-key-policy.js";
@@ -74,6 +75,18 @@ function assertRequestString(value: unknown, what: string): asserts value is str
 
 function invalidStoredPart(path: string, message: string): never {
   throw new InvalidDocumentError([{ path, message }]);
+}
+
+function validateRequestKeyPolicy(value: unknown): RequestKeyPolicy {
+  const parsed = RequestKeyPolicySchema.safeParse(value);
+  if (!parsed.success) {
+    throw new InvalidDocumentError(parsed.error.issues.map((issue) => ({
+      path: issue.path.join("."),
+      message: issue.message,
+    })));
+  }
+  assertRequestKeyPolicy(parsed.data);
+  return parsed.data;
 }
 
 function storedString(value: unknown, path: string): string {
@@ -152,6 +165,15 @@ function canonicalTarget(url: string, policy: RequestKeyPolicy): {
   const rawAuthority = authorityMatch[1] as string;
   if (!isAsciiHost(rawAuthority)) {
     throw new InvalidRequestError("request url authority must be ASCII");
+  }
+  if (rawAuthority.includes("@")) {
+    throw new InvalidRequestError("request url authority must not carry userinfo");
+  }
+  for (let index = 0; index < rawAuthority.length; index += 1) {
+    const codeUnit = rawAuthority.charCodeAt(index);
+    if (codeUnit <= 0x20 || codeUnit === 0x7f) {
+      throw new InvalidRequestError("request url authority must not contain URL control characters");
+    }
   }
   if (rawAuthority.includes("%")) {
     throw new InvalidRequestError("request url authority must not use percent-encoding");
@@ -266,12 +288,119 @@ function canonicalHeaders(
     }
   }
 
-  const canonical: Record<string, string[]> = {};
+  const canonical = Object.create(null) as Record<string, string[]>;
   for (const name of policy.headerSubset) {
     const values = collected.get(name);
     if (values !== undefined) canonical[name] = [...values].sort(compareCodeUnitStrings);
   }
   return canonical;
+}
+
+function parseJsonRejectingDuplicateNames(text: string): JsonValue {
+  let index = 0;
+
+  const skipWhitespace = (): void => {
+    while (index < text.length) {
+      const character = text.charAt(index);
+      if (character !== " " && character !== "\t" && character !== "\n" && character !== "\r") return;
+      index += 1;
+    }
+  };
+
+  const parseString = (): string => {
+    const start = index;
+    if (text.charAt(index) !== "\"") throw new SyntaxError("expected a JSON string");
+    index += 1;
+    while (index < text.length) {
+      const character = text.charAt(index);
+      if (character === "\"") {
+        index += 1;
+        return JSON.parse(text.slice(start, index)) as string;
+      }
+      if (character === "\\") {
+        index += 1;
+        if (text.charAt(index) === "u") index += 5;
+        else index += 1;
+        continue;
+      }
+      index += 1;
+    }
+    throw new SyntaxError("unterminated JSON string");
+  };
+
+  const parsePrimitive = (): void => {
+    const start = index;
+    while (index < text.length) {
+      const character = text.charAt(index);
+      if (character === " " || character === "\t" || character === "\n" || character === "\r"
+        || character === "," || character === "]" || character === "}") break;
+      index += 1;
+    }
+    if (index === start) throw new SyntaxError("expected a JSON value");
+    JSON.parse(text.slice(start, index)) as unknown;
+  };
+
+  const parseValue = (): void => {
+    skipWhitespace();
+    const character = text.charAt(index);
+    if (character === "{") {
+      index += 1;
+      skipWhitespace();
+      if (text.charAt(index) === "}") {
+        index += 1;
+        return;
+      }
+      const names = new Set<string>();
+      while (index < text.length) {
+        skipWhitespace();
+        const name = parseString();
+        if (names.has(name)) throw new SyntaxError("JSON object contains a duplicate name");
+        names.add(name);
+        skipWhitespace();
+        if (text.charAt(index) !== ":") throw new SyntaxError("expected a colon after a JSON name");
+        index += 1;
+        parseValue();
+        skipWhitespace();
+        if (text.charAt(index) === "}") {
+          index += 1;
+          return;
+        }
+        if (text.charAt(index) !== ",") throw new SyntaxError("expected a comma in a JSON object");
+        index += 1;
+      }
+      throw new SyntaxError("unterminated JSON object");
+    }
+    if (character === "[") {
+      index += 1;
+      skipWhitespace();
+      if (text.charAt(index) === "]") {
+        index += 1;
+        return;
+      }
+      while (index < text.length) {
+        parseValue();
+        skipWhitespace();
+        if (text.charAt(index) === "]") {
+          index += 1;
+          return;
+        }
+        if (text.charAt(index) !== ",") throw new SyntaxError("expected a comma in a JSON array");
+        index += 1;
+      }
+      throw new SyntaxError("unterminated JSON array");
+    }
+    if (character === "\"") {
+      parseString();
+      return;
+    }
+    parsePrimitive();
+  };
+
+  skipWhitespace();
+  parseValue();
+  skipWhitespace();
+  if (index !== text.length) throw new SyntaxError("unexpected content after the JSON value");
+  return JSON.parse(text) as JsonValue;
 }
 
 function canonicalBody(
@@ -289,7 +418,7 @@ function canonicalBody(
     case "json-jcs": {
       let parsed: JsonValue;
       try {
-        parsed = JSON.parse(decodeUtf8Strict(body, "body")) as JsonValue;
+        parsed = parseJsonRejectingDuplicateNames(decodeUtf8Strict(body, "body"));
         return `sha256:${sha256Hex(serializeCanonicalJson(parsed))}`;
       } catch (error) {
         if (error instanceof InvalidRequestError) throw error;
@@ -309,6 +438,21 @@ function compareQueryPairs(left: QueryPair, right: QueryPair): number {
   if (leftValue === undefined) return rightValue === undefined ? 0 : -1;
   if (rightValue === undefined) return 1;
   return compareCodeUnitStrings(leftValue, rightValue);
+}
+
+function storedArray(value: unknown, path: string): unknown[] {
+  if (!Array.isArray(value)) invalidStoredPart(path, "must be an array");
+  const allowedKeys = new Set<PropertyKey>(["length"]);
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) invalidStoredPart(`${path}.${index}`, "array must not contain holes");
+    allowedKeys.add(String(index));
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (!allowedKeys.has(key)) {
+      invalidStoredPart(path, `array must not contain the unexpected property ${String(key)}`);
+    }
+  }
+  return value as unknown[];
 }
 
 function validateStoredOrigin(value: unknown, policy: RequestKeyPolicy): string {
@@ -395,15 +539,18 @@ function validateStoredQueryComponent(
 }
 
 function validateStoredQuery(value: unknown, policy: RequestKeyPolicy): QueryPair[] {
-  if (!Array.isArray(value)) invalidStoredPart("query", "must be an array of query pairs");
-  const query: QueryPair[] = value.map((candidate, index) => {
-    if (!Array.isArray(candidate) || (candidate.length !== 1 && candidate.length !== 2)) {
+  const candidates = storedArray(value, "query");
+  const query: QueryPair[] = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = storedArray(candidates[index], `query.${index}`);
+    if (candidate.length !== 1 && candidate.length !== 2) {
       invalidStoredPart(`query.${index}`, "must be a one- or two-member query tuple");
     }
     const name = validateStoredQueryComponent(candidate[0], `query.${index}.0`, policy, true);
-    if (candidate.length === 1) return [name];
-    return [name, validateStoredQueryComponent(candidate[1], `query.${index}.1`, policy, false)];
-  });
+    query.push(candidate.length === 1
+      ? [name]
+      : [name, validateStoredQueryComponent(candidate[1], `query.${index}.1`, policy, false)]);
+  }
   for (let index = 1; index < query.length; index += 1) {
     if (compareQueryPairs(query[index - 1] as QueryPair, query[index] as QueryPair) > 0) {
       invalidStoredPart(`query.${index}`, "query pairs must be sorted by name and then value");
@@ -424,24 +571,25 @@ function validateStoredHeaders(
     }
   }
 
-  const headers: Record<string, string[]> = {};
+  const headers = Object.create(null) as Record<string, string[]>;
   for (const name of policy.headerSubset) {
     if (!Object.hasOwn(value, name)) continue;
-    const candidate = value[name];
-    if (!Array.isArray(candidate) || candidate.length === 0) {
+    const candidate = storedArray(value[name], `headers.${name}`);
+    if (candidate.length === 0) {
       invalidStoredPart(`headers.${name}`, "must be a non-empty array of values");
     }
-    const values = candidate.map((member, index) => {
+    const values: string[] = [];
+    for (let index = 0; index < candidate.length; index += 1) {
       const path = `headers.${name}.${index}`;
-      const headerValue = storedString(member, path);
+      const headerValue = storedString(candidate[index], path);
       if (!isValidHeaderValue(headerValue)) {
         invalidStoredPart(path, "contains a forbidden control character");
       }
       if (trimOws(headerValue) !== headerValue) {
         invalidStoredPart(path, "must already be trimmed of HTTP optional whitespace");
       }
-      return headerValue;
-    });
+      values.push(headerValue);
+    }
     for (let index = 1; index < values.length; index += 1) {
       if (compareCodeUnitStrings(values[index - 1] as string, values[index] as string) > 0) {
         invalidStoredPart(`headers.${name}.${index}`, "header values must be sorted by code unit");
@@ -501,20 +649,20 @@ export function canonicalRequestParts(
   request: CanonicalizableRequest,
   policy: RequestKeyPolicy,
 ): CanonicalRequestParts {
-  assertRequestKeyPolicy(policy);
+  const validPolicy = validateRequestKeyPolicy(policy);
   if (!isRecord(request)) throw new InvalidRequestError("request must be an object");
   assertRequestString(request.method, "method");
   if (request.body !== undefined && request.body !== null && !(request.body instanceof Uint8Array)) {
     throw new InvalidRequestError("body must be a Uint8Array");
   }
-  const target = canonicalTarget(request.url, policy);
+  const target = canonicalTarget(request.url, validPolicy);
   return {
     method: canonicalMethod(request.method),
     origin: target.origin,
     path: target.path,
-    query: canonicalQuery(target.rawQuery, policy),
-    headers: canonicalHeaders(request.headers, policy),
-    body: canonicalBody(request.body, policy),
+    query: canonicalQuery(target.rawQuery, validPolicy),
+    headers: canonicalHeaders(request.headers, validPolicy),
+    body: canonicalBody(request.body, validPolicy),
   };
 }
 
@@ -523,15 +671,15 @@ export function canonicalRequestKeyFromParts(
   parts: CanonicalRequestParts,
   policy: RequestKeyPolicy,
 ): string {
-  assertRequestKeyPolicy(policy);
-  const canonical = validateCanonicalRequestParts(parts, policy);
+  const validPolicy = validateRequestKeyPolicy(policy);
+  const canonical = validateCanonicalRequestParts(parts, validPolicy);
   const material: JsonValue = {
     v: REQUEST_KEY_VERSION,
     policy: {
-      headerSubset: [...policy.headerSubset],
-      pathTrailingSlash: policy.pathTrailingSlash,
-      plusInQuery: policy.plusInQuery,
-      bodyCanonicalization: policy.bodyCanonicalization,
+      headerSubset: [...validPolicy.headerSubset],
+      pathTrailingSlash: validPolicy.pathTrailingSlash,
+      plusInQuery: validPolicy.plusInQuery,
+      bodyCanonicalization: validPolicy.bodyCanonicalization,
     },
     method: canonical.method,
     origin: canonical.origin,

@@ -9,6 +9,7 @@ import {
   canonicalRequestParts,
   type CanonicalizableRequest,
   type CanonicalRequestParts,
+  type QueryPair,
 } from "./request-key.js";
 
 const policy: RequestKeyPolicy = {
@@ -133,6 +134,44 @@ describe("policy validation", () => {
       { method: "GET", url: "https://a.test/x" },
       { ...policy, headerSubset: ["content-type", "accept"] },
     )).toThrow(InvalidDocumentError);
+  });
+
+  const stored: CanonicalRequestParts = {
+    method: "GET",
+    origin: "https://a.test",
+    path: "/x",
+    query: [],
+    headers: {},
+    body: null,
+  };
+  const entryPoints: readonly [string, (candidate: RequestKeyPolicy) => unknown][] = [
+    ["canonicalRequestParts", (candidate) => canonicalRequestParts(
+      { method: "GET", url: "https://a.test/x" },
+      candidate,
+    )],
+    ["canonicalRequestKeyFromParts", (candidate) => canonicalRequestKeyFromParts(
+      stored,
+      candidate,
+    )],
+    ["canonicalRequestKey", (candidate) => canonicalRequestKey(
+      { method: "GET", url: "https://a.test/x" },
+      candidate,
+    )],
+  ];
+  const malformedPolicies: readonly [string, unknown][] = [
+    ["an unsupported version", { ...policy, version: "irk2" }],
+    ["a non-array header subset", { ...policy, headerSubset: null }],
+    ["an unknown trailing-slash rule", { ...policy, pathTrailingSlash: "ignore" }],
+    ["an extra member", { ...policy, matchLoosely: true }],
+  ];
+
+  test.each(entryPoints)("%s applies the complete policy schema", (_name, compute) => {
+    for (const [label, malformed] of malformedPolicies) {
+      expect(
+        () => compute(malformed as RequestKeyPolicy),
+        label,
+      ).toThrow(InvalidDocumentError);
+    }
   });
 });
 
@@ -309,6 +348,28 @@ describe("body canonicalization", () => {
     }, jcs)).toThrow(InvalidRequestError);
   });
 
+  test.each([
+    ["the top-level object", '{"a":1,"a":2}'],
+    ["an escaped-equivalent nested name", '{"outer":{"a":1,"\\u0061":2}}'],
+    ["an object nested in an array", '[{"a":1,"a":2}]'],
+  ])("json-jcs refuses duplicate object names in %s", (_location, body) => {
+    const jcs: RequestKeyPolicy = { ...policy, bodyCanonicalization: "json-jcs" };
+    expect(() => canonicalRequestKey({
+      method: "POST",
+      url: "https://a.test/x",
+      body: utf8(body),
+    }, jcs)).toThrow(InvalidRequestError);
+  });
+
+  test("json-jcs scopes duplicate detection to each individual object", () => {
+    const jcs: RequestKeyPolicy = { ...policy, bodyCanonicalization: "json-jcs" };
+    expect(() => canonicalRequestKey({
+      method: "POST",
+      url: "https://a.test/x",
+      body: utf8('{"left":{"a":1},"right":{"a":2}}'),
+    }, jcs)).not.toThrow();
+  });
+
   test("utf8-trim removes surrounding whitespace only", () => {
     const trim: RequestKeyPolicy = { ...policy, bodyCanonicalization: "utf8-trim" };
     expect(canonicalRequestKey({
@@ -355,6 +416,22 @@ describe("uncanonicalizable live requests", () => {
       expect(() => canonicalRequestKey({ method: "GET", url }, policy), url)
         .toThrow(InvalidRequestError);
     }
+  });
+
+  test("refuses a raw userinfo marker even when WHATWG parses an empty username", () => {
+    expect(() => canonicalRequestKey(
+      { method: "GET", url: "https://@a.test/x" },
+      policy,
+    )).toThrow(InvalidRequestError);
+  });
+
+  test.each([
+    ["TAB", "https://a.\ttest/x"],
+    ["LF", "https://a.\ntest/x"],
+    ["CR", "https://a.\rtest/x"],
+  ])("refuses raw %s in the authority before WHATWG can strip it", (_label, url) => {
+    expect(() => canonicalRequestKey({ method: "GET", url }, policy))
+      .toThrow(InvalidRequestError);
   });
 
   test.each<readonly [string, unknown]>([
@@ -506,5 +583,100 @@ describe("stored canonical request parts", () => {
       { ...stored, query: [["q", "a b"]] },
       space,
     )).not.toThrow();
+  });
+
+  test("refuses holes and unexpected properties in stored query arrays", () => {
+    const sparseQuery = new Array<QueryPair>(1);
+    expect(() => canonicalRequestKeyFromParts(
+      { ...stored, query: sparseQuery },
+      policy,
+    )).toThrow(InvalidDocumentError);
+
+    const queryWithExtra: QueryPair[] = [];
+    Object.defineProperty(queryWithExtra, "extra", { value: true, enumerable: true });
+    expect(() => canonicalRequestKeyFromParts(
+      { ...stored, query: queryWithExtra },
+      policy,
+    )).toThrow(InvalidDocumentError);
+
+    const pairWithExtra = ["q", "value"] as unknown as QueryPair;
+    Object.defineProperty(pairWithExtra, "extra", { value: true, enumerable: true });
+    expect(() => canonicalRequestKeyFromParts(
+      { ...stored, query: [pairWithExtra] },
+      policy,
+    )).toThrow(InvalidDocumentError);
+  });
+
+  test("refuses holes and unexpected properties in stored header-value arrays", () => {
+    const sparseValues = new Array<string>(1);
+    expect(() => canonicalRequestKeyFromParts({
+      ...stored,
+      headers: { accept: sparseValues },
+    }, policy)).toThrow(InvalidDocumentError);
+
+    const valuesWithExtra = ["application/json"];
+    Object.defineProperty(valuesWithExtra, "extra", { value: true, enumerable: true });
+    expect(() => canonicalRequestKeyFromParts({
+      ...stored,
+      headers: { accept: valuesWithExtra },
+    }, policy)).toThrow(InvalidDocumentError);
+  });
+});
+
+describe("prototype-spelled declared headers", () => {
+  const protoPolicy: RequestKeyPolicy = {
+    ...policy,
+    headerSubset: ["__proto__"],
+  };
+  const storedBase: CanonicalRequestParts = {
+    method: "GET",
+    origin: "https://api.example.test",
+    path: "/pools",
+    query: [],
+    headers: {},
+    body: null,
+  };
+
+  test("preserves a live __proto__ header as an own member and keeps values distinct", () => {
+    const withX = canonicalRequestParts({
+      method: "GET",
+      url: "https://api.example.test/pools",
+      headers: [["__proto__", "x"]],
+    }, protoPolicy);
+    expect(Object.hasOwn(withX.headers, "__proto__")).toBe(true);
+    expect(withX.headers.__proto__).toEqual(["x"]);
+
+    const keys = [
+      canonicalRequestKey({ method: "GET", url: "https://api.example.test/pools" }, protoPolicy),
+      canonicalRequestKey({
+        method: "GET",
+        url: "https://api.example.test/pools",
+        headers: [["__proto__", "x"]],
+      }, protoPolicy),
+      canonicalRequestKey({
+        method: "GET",
+        url: "https://api.example.test/pools",
+        headers: [["__proto__", "y"]],
+      }, protoPolicy),
+    ];
+    expect(new Set(keys).size).toBe(3);
+  });
+
+  test("preserves own stored __proto__ values and refuses prototype-only impostors", () => {
+    const withX = JSON.parse('{"__proto__":["x"]}') as Record<string, readonly string[]>;
+    const withY = JSON.parse('{"__proto__":["y"]}') as Record<string, readonly string[]>;
+    expect(Object.hasOwn(withX, "__proto__")).toBe(true);
+
+    const keys = [
+      canonicalRequestKeyFromParts(storedBase, protoPolicy),
+      canonicalRequestKeyFromParts({ ...storedBase, headers: withX }, protoPolicy),
+      canonicalRequestKeyFromParts({ ...storedBase, headers: withY }, protoPolicy),
+    ];
+    expect(new Set(keys).size).toBe(3);
+
+    expect(() => canonicalRequestKeyFromParts({
+      ...storedBase,
+      headers: { __proto__: ["x"] },
+    }, protoPolicy)).toThrow(InvalidDocumentError);
   });
 });
