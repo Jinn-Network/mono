@@ -38,8 +38,8 @@ import {
   canonicalJsonBytes,
   DSSE_ENVELOPE_MEDIA_TYPE,
   dssePreAuthEncoding,
-  parseSignedRecordEnvelope,
-  sealSignedRecord,
+  parseExactDsseEnvelope,
+  sealDsseEnvelope,
 } from '@jinn-network/trust-core';
 import {
   DISCOVERY_SIGNING_SCOPE,
@@ -71,7 +71,6 @@ import {
 
 const FIXTURE = 'prediction-snapshot-v1' as const;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const REQUESTER_ENVELOPE_PREDICATE = 'https://jinn.network/attestations/requester-submission/v1';
 const REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
 const JSON_MEDIA_TYPE = 'application/json';
 
@@ -271,6 +270,32 @@ export interface NativeRequesterSubmissionLookup {
   readonly coordinator: `0x${string}`;
   readonly taskId: bigint;
   readonly taskDigest: Digest;
+}
+
+/** Exact requester-authentication boundary shared by local resolution and public consumers. */
+export function verifyNativeRequesterSubmissionEnvelope(input: {
+  readonly envelopeBytes: Uint8Array;
+  readonly submissionBytes: Uint8Array;
+  readonly requesterSubmission: NativeRequesterSubmissionVerifier;
+}): boolean {
+  try {
+    const envelope = parseExactDsseEnvelope(input.envelopeBytes);
+    if (
+      envelope.payloadType !== SUBMISSION_MEDIA_TYPE
+      || Buffer.compare(Buffer.from(envelope.payloadBytes), Buffer.from(input.submissionBytes)) !== 0
+    ) return false;
+    const signature = envelope.signatures.find(
+      (candidate) => candidate.keyid === input.requesterSubmission.keyId,
+    );
+    return signature !== undefined && cryptoVerify(
+      null,
+      Buffer.from(dssePreAuthEncoding(SUBMISSION_MEDIA_TYPE, envelope.payloadBytes)),
+      input.requesterSubmission.publicKey,
+      Buffer.from(signature.sig, 'base64'),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function lowerAddress(address: string): string {
@@ -526,21 +551,13 @@ async function sealRunBundle(input: {
   await input.checkpoint?.('submission-sealed');
 
   const requesterRole = input.roles.get('requester-submission');
-  const requesterEnvelope = await sealSignedRecord({
-    payloadType: ADMISSION_RECEIPT_MEDIA_TYPE,
-    signer: roleDsseSigner(requesterRole),
-    record: {
-      _type: 'https://in-toto.io/Statement/v1',
-      subject: [{ name: 'submission', digest: { sha256: submissionDigest.slice('sha256:'.length) } }],
-      predicateType: REQUESTER_ENVELOPE_PREDICATE,
-      predicate: {
-        requester: templateSubmission.requester,
-        taskDigest,
-        submissionDigest,
-        admissionReceiptDigest: sealedReceipt.receiptDigest,
-        runId: input.runId,
-      },
-    },
+  const requesterEnvelopeBytes = sealDsseEnvelope({
+    payloadType: SUBMISSION_MEDIA_TYPE,
+    payloadBytes: submissionBytes,
+    signatures: [{
+      keyid: requesterRole.keyId,
+      signature: requesterRole.sign(dssePreAuthEncoding(SUBMISSION_MEDIA_TYPE, submissionBytes)),
+    }],
   });
   await input.checkpoint?.('requester-envelope-sealed');
   return {
@@ -548,7 +565,7 @@ async function sealRunBundle(input: {
     taskBytes,
     admissionReceiptBytes,
     submissionBytes,
-    requesterEnvelopeBytes: requesterEnvelope.envelopeBytes,
+    requesterEnvelopeBytes,
   };
 }
 
@@ -698,12 +715,6 @@ async function appendRequesterSource(input: {
   return association;
 }
 
-function descriptorSha256(value: unknown): Digest | undefined {
-  return typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)
-    ? `sha256:${value}` as Digest
-    : undefined;
-}
-
 async function readExactRecord(
   state: NativeRequesterState,
   expected: StoredExactRecord,
@@ -740,6 +751,7 @@ export function createNativeRequesterSubmissionResolver(input: {
         || association.submission.digest !== association.submissionDigest
         || association.requesterEnvelope.digest !== association.requesterEnvelopeDigest
         || association.admissionReceipt.digest !== association.admissionReceiptDigest
+        || association.publication.state !== 'published'
       ) return undefined;
 
       const [taskBytes, submissionBytes, requesterEnvelopeBytes, receiptBytes] = await Promise.all([
@@ -756,40 +768,12 @@ export function createNativeRequesterSubmissionResolver(input: {
         || rawDigest(taskBytes) !== lookup.taskDigest
       ) return undefined;
 
-      const envelope = parseSignedRecordEnvelope(requesterEnvelopeBytes, ADMISSION_RECEIPT_MEDIA_TYPE);
-      const signature = envelope.signatures.find((candidate) => candidate.keyid === input.requesterSubmission.keyId);
-      if (
-        signature === undefined
-        || !cryptoVerify(
-          null,
-          Buffer.from(dssePreAuthEncoding(ADMISSION_RECEIPT_MEDIA_TYPE, envelope.payloadBytes)),
-          input.requesterSubmission.publicKey,
-          Buffer.from(signature.sig, 'base64'),
-        )
-      ) return undefined;
+      if (!verifyNativeRequesterSubmissionEnvelope({
+        envelopeBytes: requesterEnvelopeBytes,
+        submissionBytes,
+        requesterSubmission: input.requesterSubmission,
+      })) return undefined;
 
-      const statement = bytesToObject(envelope.payloadBytes, 'requester Submission association');
-      const subject = statement.subject;
-      const predicate = statement.predicate;
-      if (
-        statement._type !== 'https://in-toto.io/Statement/v1'
-        || statement.predicateType !== REQUESTER_ENVELOPE_PREDICATE
-        || !Array.isArray(subject)
-        || subject.length !== 1
-        || typeof subject[0] !== 'object'
-        || subject[0] === null
-        || (subject[0] as Record<string, unknown>).name !== 'submission'
-        || descriptorSha256(((subject[0] as Record<string, unknown>).digest as Record<string, unknown> | undefined)?.sha256) !== association.submissionDigest
-        || typeof predicate !== 'object'
-        || predicate === null
-      ) return undefined;
-      const associationFact = predicate as Record<string, unknown>;
-      if (
-        associationFact.taskDigest !== lookup.taskDigest
-        || associationFact.submissionDigest !== association.submissionDigest
-        || associationFact.admissionReceiptDigest !== association.admissionReceiptDigest
-        || typeof associationFact.runId !== 'string'
-      ) return undefined;
       return submissionBytes;
     } catch {
       return undefined;

@@ -12,7 +12,7 @@ describe("prediction snapshot golden fixture", () => {
       evaluationSpec: "sha256:4e9b938d24e7752630f0fb27c2295781a7b5ecfcb130daa28d320bbedd96e962",
       admissionReceiptDsse: "sha256:63f36443d682269bb3dd8f256e5f859f735abc0b14627e61ad50adce94ef826d",
       submission: "sha256:5514ad79452da75e10978092ae46c2e90eaaa69b239fc459b70712e2f8aeaed0",
-      requesterDsse: "sha256:2dd3370dc1fe48d555f665c39d96ce24e4fffcc703edfbec4163d72115e7d4fc",
+      requesterDsse: "sha256:ae1282dbc54308fcf35fabc2764b7a6966dcd463be06393dd1550fb5cb923367",
     });
   });
 });

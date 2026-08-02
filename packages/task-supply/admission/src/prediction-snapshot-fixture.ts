@@ -2,7 +2,8 @@
 
 import { readFile } from "node:fs/promises";
 import { createPublicKey, verify } from "node:crypto";
-import { canonicalJsonBytes, dssePreAuthEncoding, parseSignedRecordEnvelope, recordDigest } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, dssePreAuthEncoding, parseExactDsseEnvelope, recordDigest } from "@jinn-network/trust-core";
+import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import { ADMISSION_RECEIPT_MEDIA_TYPE } from "./identifiers.js";
 import { admitPredictionSnapshot } from "./prediction-snapshot.js";
 
@@ -66,13 +67,19 @@ function digestSetValue(value: Digest): string {
   return value.slice("sha256:".length);
 }
 
-function verifyEnvelopeSignature(bytes: Uint8Array, key: VerificationKey, label: string): Record<string, unknown> {
-  const envelope = parseSignedRecordEnvelope(bytes, ADMISSION_RECEIPT_MEDIA_TYPE);
+function verifyEnvelopeSignature(
+  bytes: Uint8Array,
+  key: VerificationKey,
+  label: string,
+  payloadType: string,
+): Uint8Array {
+  const envelope = parseExactDsseEnvelope(bytes);
+  if (envelope.payloadType !== payloadType) throw new Error(`${label} payloadType is not ${payloadType}`);
   const signature = envelope.signatures.find((candidate) => candidate.keyid === key.keyid);
   if (signature === undefined) throw new Error(`${label} is not signed by the fixture key`);
-  const ok = verify(null, Buffer.from(dssePreAuthEncoding(ADMISSION_RECEIPT_MEDIA_TYPE, envelope.payloadBytes)), createPublicKey({ key: key.publicKey as never, format: "jwk" }), Buffer.from(signature.sig, "base64"));
+  const ok = verify(null, Buffer.from(dssePreAuthEncoding(payloadType, envelope.payloadBytes)), createPublicKey({ key: key.publicKey as never, format: "jwk" }), Buffer.from(signature.sig, "base64"));
   if (!ok) throw new Error(`${label} DSSE PAE signature does not verify`);
-  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes)) as Record<string, unknown>;
+  return envelope.payloadBytes;
 }
 
 /** Verifies every fixture byte, digest, subject, and causal relationship offline. */
@@ -99,10 +106,14 @@ export async function verifyPredictionSnapshotFixture(): Promise<{
     issuer: "did:jinn:admitter",
   });
 
-  const receiptStatement = verifyEnvelopeSignature(bytes.admissionReceiptDsse, verificationKey, "admission receipt");
-  const requesterStatement = verifyEnvelopeSignature(bytes.requesterDsse, verificationKey, "requester envelope");
-  if (receiptStatement._type !== "https://in-toto.io/Statement/v1" || requesterStatement._type !== "https://in-toto.io/Statement/v1") {
-    throw new Error("fixture DSSE payload is not an in-toto Statement/v1");
+  const receiptStatement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(
+    verifyEnvelopeSignature(bytes.admissionReceiptDsse, verificationKey, "admission receipt", ADMISSION_RECEIPT_MEDIA_TYPE),
+  )) as Record<string, unknown>;
+  const requesterSubmission = verifyEnvelopeSignature(
+    bytes.requesterDsse, verificationKey, "requester envelope", SUBMISSION_MEDIA_TYPE,
+  );
+  if (receiptStatement._type !== "https://in-toto.io/Statement/v1") {
+    throw new Error("fixture admission DSSE payload is not an in-toto Statement/v1");
   }
   if (receiptStatement.predicateType !== "https://jinn.network/attestations/prediction-snapshot-admission/v1") {
     throw new Error("admission receipt predicate type is wrong");
@@ -141,19 +152,9 @@ export async function verifyPredictionSnapshotFixture(): Promise<{
     { name: "task", digest: { sha256: digestSetValue(taskDigest) } },
     { name: "evaluation-spec", digest: { sha256: digestSetValue(evaluationSpecDigest) } },
   ]))) !== 0) throw new Error("admission receipt subjects are not the exact Task/EvaluationSpec pair");
-  const requesterSubject = requesterStatement.subject;
-  if (Buffer.compare(Buffer.from(canonicalJsonBytes(requesterSubject)), Buffer.from(canonicalJsonBytes([
-    { name: "submission", digest: { sha256: digestSetValue(submissionDigest) } },
-  ]))) !== 0) throw new Error("requester envelope does not subject-bind the exact Submission");
-  if (requesterStatement.predicateType !== "https://jinn.network/attestations/requester-submission/v1") throw new Error("requester envelope predicate type is wrong");
-  const requesterPredicate = requesterStatement.predicate as Record<string, unknown> | undefined;
-  if (
-    requesterPredicate === undefined
-    || requesterPredicate.requester !== submission.requester
-    || requesterPredicate.taskDigest !== taskDigest
-    || requesterPredicate.submissionDigest !== submissionDigest
-    || requesterPredicate.admissionReceiptDigest !== admissionReceiptDigest
-  ) throw new Error("requester envelope predicate does not bind the exact graph");
+  if (Buffer.compare(Buffer.from(requesterSubmission), Buffer.from(bytes.submission)) !== 0) {
+    throw new Error("requester envelope payload is not the exact Submission bytes");
+  }
   const operationId = `native-prediction-forecast:${taskDigest.slice(7, 23)}:${submissionDigest.slice(7, 23)}`;
   if (manifest.operation.id !== operationId || manifest.operation.relationship !== "requester seals Task -> EvaluationSpec -> admission receipt DSSE -> Submission -> requester DSSE") {
     throw new Error("manifest operation identity or relationship is not derived from immutable material");

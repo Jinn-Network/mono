@@ -2,8 +2,12 @@ import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordDigest } from '@jinn-network/trust-core';
-import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
+import {
+  DSSE_ENVELOPE_MEDIA_TYPE,
+  dssePreAuthEncoding,
+  recordDigest,
+  sealDsseEnvelope,
+} from '@jinn-network/trust-core';
 import {
   SUBMISSION_MEDIA_TYPE,
   TASK_MEDIA_TYPE,
@@ -20,6 +24,7 @@ import {
   type NativeRequesterRoles,
   type NativeRequesterSubmissionVerifier,
   createNativeRequesterSubmissionResolver,
+  verifyNativeRequesterSubmissionEnvelope,
 } from '../../src/native-requester/requester.js';
 
 const CHAIN = {
@@ -278,13 +283,47 @@ describe('native requester', () => {
       stateDir,
       requesterSubmission: identities.requesterSubmission,
     });
+    const submissionBytes = post.mock.calls[0]![0].submissionBytes;
+    const envelopeResponse = await requester.handleDiscoveryRequest(new Request(
+      `https://requester.test${result.association.requesterEnvelope.path}`,
+    ));
+    const envelopeBytes = new Uint8Array(await envelopeResponse.arrayBuffer());
+    expect(verifyNativeRequesterSubmissionEnvelope({
+      envelopeBytes,
+      submissionBytes,
+      requesterSubmission: identities.requesterSubmission,
+    })).toBe(true);
+
+    const requesterRole = identities.get('requester-submission');
+    const wrongPayload = new TextEncoder().encode('{}');
+    const wrongPayloadEnvelope = sealDsseEnvelope({
+      payloadType: SUBMISSION_MEDIA_TYPE,
+      payloadBytes: wrongPayload,
+      signatures: [{
+        keyid: requesterRole.keyId,
+        signature: requesterRole.sign(dssePreAuthEncoding(SUBMISSION_MEDIA_TYPE, wrongPayload)),
+      }],
+    });
+    expect(verifyNativeRequesterSubmissionEnvelope({
+      envelopeBytes: wrongPayloadEnvelope,
+      submissionBytes,
+      requesterSubmission: identities.requesterSubmission,
+    })).toBe(false);
+    const noncanonical = new TextEncoder().encode(JSON.stringify(
+      JSON.parse(new TextDecoder().decode(envelopeBytes)), null, 2,
+    ));
+    expect(verifyNativeRequesterSubmissionEnvelope({
+      envelopeBytes: noncanonical,
+      submissionBytes,
+      requesterSubmission: identities.requesterSubmission,
+    })).toBe(false);
 
     await expect(resolver({
       chainId: CHAIN.chainId,
       coordinator: CHAIN.taskCoordinator,
       taskId: result.association.taskId,
       taskDigest: result.association.taskDigest,
-    })).resolves.toEqual(post.mock.calls[0]![0].submissionBytes);
+    })).resolves.toEqual(submissionBytes);
     await expect(resolver({
       chainId: CHAIN.chainId,
       coordinator: CHAIN.taskCoordinator,

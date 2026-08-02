@@ -4,7 +4,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createPrivateKey, sign } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { canonicalJsonBytes, recordDigest, sealSignedRecord } from "@jinn-network/trust-core";
+import {
+  canonicalJsonBytes,
+  dssePreAuthEncoding,
+  recordDigest,
+  sealDsseEnvelope,
+} from "@jinn-network/trust-core";
+import { SUBMISSION_MEDIA_TYPE } from "@jinn-network/task-execution-protocol";
 import {
   admitPredictionSnapshot,
   sealPredictionSnapshotAdmissionReceipt,
@@ -99,27 +105,24 @@ const submission = {
   } },
 };
 const submissionBytes = bytes(submission);
-const requesterSealed = await sealSignedRecord({
-  payloadType,
-  signer,
-  record: {
-    _type: "https://in-toto.io/Statement/v1",
-    subject: [{ name: "submission", digest: { sha256: recordDigest(submissionBytes).slice(7) } }],
-    predicateType: "https://jinn.network/attestations/requester-submission/v1",
-    predicate: {
-      requester: submission.requester,
-      taskDigest: recordDigest(taskBytes),
-      submissionDigest: recordDigest(submissionBytes),
-      admissionReceiptDigest: sealedReceipt.receiptDigest,
-    },
-  },
+const requesterEnvelopeBytes = sealDsseEnvelope({
+  payloadType: SUBMISSION_MEDIA_TYPE,
+  payloadBytes: submissionBytes,
+  signatures: [{
+    keyid,
+    signature: new Uint8Array(sign(
+      null,
+      Buffer.from(dssePreAuthEncoding(SUBMISSION_MEDIA_TYPE, submissionBytes)),
+      privateKey,
+    )),
+  }],
 });
 const digests = {
   task: recordDigest(taskBytes),
   evaluationSpec: recordDigest(evaluationSpecBytes),
   admissionReceiptDsse: sealedReceipt.receiptDigest,
   submission: recordDigest(submissionBytes),
-  requesterDsse: requesterSealed.recordDigest,
+  requesterDsse: recordDigest(requesterEnvelopeBytes),
 };
 const manifest = {
   fixtureVersion: 1,
@@ -153,7 +156,7 @@ const generated = {
   "evaluation-spec.json": evaluationSpecBytes,
   "admission-receipt.dsse.json": sealedReceipt.envelopeBytes,
   "submission.json": submissionBytes,
-  "requester.dsse.json": requesterSealed.envelopeBytes,
+  "requester.dsse.json": requesterEnvelopeBytes,
   "manifest.json": bytes(manifest),
   "verification-key.json": bytes({ keyid, algorithm: "Ed25519", publicKey }),
 };
