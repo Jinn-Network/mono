@@ -406,104 +406,193 @@ function specifiers(source) {
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
 
-const INFORMATION_WORLD_AMBIENT_ROOTS = new Set([
-  'process', 'globalThis', 'global', 'window', 'self', 'Function', 'eval', 'require',
-  'fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest',
+function capabilityName(identifier) {
+  // `escapedText` is TypeScript's normalized spelling: pro\\u0063ess becomes `process`.
+  return String(identifier.escapedText);
+}
+
+// This is intentionally a capability inventory, not a source-level sandbox. The real egress
+// boundary is the Linux Docker execution profile. Here we make new module/global authority a
+// deliberate review event: production source may use only this already-audited ambient surface.
+const INFORMATION_WORLD_APPROVED_GLOBALS = new Set([
+  'Array', 'Error', 'JSON', 'Map', 'Number', 'Object', 'Promise', 'Reflect', 'RegExp', 'Set',
+  'String', 'Symbol', 'SyntaxError', 'TextDecoder', 'TextEncoder', 'TypeError', 'URL', 'Uint8Array',
+  'WeakMap', 'WeakSet',
+]);
+const INFORMATION_WORLD_APPROVED_MODULE_BINDINGS = new Set([
+  '@noble/hashes/sha2.js#sha256',
+  '@noble/hashes/utils.js#bytesToHex',
+  'zod#z',
+  'node:http#createServer',
 ]);
 
-function astName(name) {
-  return String(name.escapedText);
+function capabilityCompilerOptions() {
+  return {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    strict: true,
+    skipLibCheck: true,
+    types: ['node'],
+    lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  };
 }
 
-function astStaticString(expression, constants) {
-  if (ts.isStringLiteralLike(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
-  if (ts.isIdentifier(expression)) return constants.get(astName(expression));
-  if (ts.isParenthesizedExpression(expression)) return astStaticString(expression.expression, constants);
-  if (ts.isBinaryExpression(expression) && expression.operatorToken.kind === ts.SyntaxKind.PlusToken) {
-    const left = astStaticString(expression.left, constants);
-    const right = astStaticString(expression.right, constants);
-    return left === undefined || right === undefined ? undefined : left + right;
+function capabilityProgram(sourceTexts) {
+  const options = capabilityCompilerOptions();
+  const host = ts.createCompilerHost(options, true);
+  const normalized = new Map([...sourceTexts.entries()].map(([file, source]) => [resolve(file), source]));
+  const baseGetSourceFile = host.getSourceFile.bind(host);
+  const baseReadFile = host.readFile.bind(host);
+  const baseFileExists = host.fileExists.bind(host);
+  host.getSourceFile = (file, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const source = normalized.get(resolve(file));
+    return source === undefined
+      ? baseGetSourceFile(file, languageVersion, onError, shouldCreateNewSourceFile)
+      : ts.createSourceFile(file, source, languageVersion, true, ts.ScriptKind.TS);
+  };
+  host.readFile = (file) => normalized.get(resolve(file)) ?? baseReadFile(file);
+  host.fileExists = (file) => normalized.has(resolve(file)) || baseFileExists(file);
+  return ts.createProgram({ rootNames: [...normalized.keys()], options, host });
+}
+
+function importedBindings(declaration) {
+  if (declaration.importClause === undefined) return ['<side-effect>'];
+  const bindings = [];
+  if (declaration.importClause.name !== undefined) bindings.push('default');
+  const named = declaration.importClause.namedBindings;
+  if (named !== undefined) {
+    if (ts.isNamespaceImport(named)) bindings.push('*');
+    else bindings.push(...named.elements.map((entry) => capabilityName(entry.propertyName ?? entry.name)));
   }
-  return undefined;
+  return bindings;
 }
 
-function astStringConstants(source) {
-  const constants = new Map();
-  const visit = (node) => {
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer !== undefined) {
-      const value = astStaticString(node.initializer, constants);
-      if (value !== undefined) constants.set(astName(node.name), value);
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(source);
-  return constants;
+function isReferenceIdentifier(node) {
+  // TypeScript's broad `isExpression` helper also accepts identifier-shaped property and type
+  // names. Capability inventory is about value reads, so exclude those named positions first.
+  const parent = node.parent;
+  if ((ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent)
+    || ts.isPropertyDeclaration(parent) || ts.isPropertySignature(parent)
+    || ts.isMethodDeclaration(parent) || ts.isMethodSignature(parent)
+    || ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent)) && parent.name === node) return false;
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isImportSpecifier(parent) || ts.isImportClause(parent) || ts.isNamespaceImport(parent)
+    || ts.isImportEqualsDeclaration(parent) || ts.isExportSpecifier(parent)) return false;
+  if (ts.isTypeReferenceNode(parent) || ts.isExpressionWithTypeArguments(parent)
+    || ts.isQualifiedName(parent) || ts.isTypeQueryNode(parent)) return false;
+  return ts.isExpression(node);
 }
 
-function astPropertyName(node, constants) {
-  return ts.isPropertyAccessExpression(node)
-    ? astName(node.name)
-    : node.argumentExpression === undefined ? undefined : astStaticString(node.argumentExpression, constants);
+function isDirectReflectOwnKeys(node) {
+  const property = node.parent;
+  return ts.isPropertyAccessExpression(property)
+    && property.expression === node
+    && capabilityName(property.name) === 'ownKeys'
+    && ts.isCallExpression(property.parent)
+    && property.parent.expression === property;
 }
 
-function astReflectOwnKeysBase(node) {
-  return ts.isPropertyAccessExpression(node.parent)
-    && node.parent.expression === node && astName(node.parent.name) === 'ownKeys';
+function canonicalSymbol(symbol, checker) {
+  return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
 }
 
-// This is deliberately independent from the package-local AST policy. Both use the compiler's
-// normalized syntax tree, but this repository guard owns a separate implementation and test
-// canaries, so weakening either one does not weaken the other.
-function informationWorldCapabilityFindings(sourceText, fileName) {
-  const source = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
-  const constants = astStringConstants(source);
+function isDirectCreateServerCall(node, createServerSymbols, checker) {
+  const symbol = checker.getSymbolAtLocation(node);
+  return symbol !== undefined
+    && (createServerSymbols.has(symbol) || createServerSymbols.has(canonicalSymbol(symbol, checker)))
+    && ts.isCallExpression(node.parent)
+    && node.parent.expression === node;
+}
+
+/**
+ * Build a separately maintained inventory of the static module edges and ambient capabilities
+ * used by information-world production source. Unlike `closure.test.ts`, this does not attempt
+ * to reconstruct arbitrary property names or evaluator paths; runtime Docker isolation owns
+ * that guarantee. Its job is to make capability drift explicit and reviewable.
+ */
+function informationWorldCapabilityInventory(sourceTexts) {
+  const program = capabilityProgram(sourceTexts);
+  const checker = program.getTypeChecker();
   const findings = [];
+  const moduleEdges = [];
+  const globalCapabilities = new Set();
+  const createServerSymbols = new Set();
   const add = (kind, detail) => { findings.push(`${kind}:${detail}`); };
-  for (const diagnostic of source.parseDiagnostics ?? []) add('parse', ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
-  const allowedImport = (node) => ts.isImportDeclaration(node) && fileName.endsWith('/service.ts')
-    && ts.isStringLiteralLike(node.moduleSpecifier) && node.moduleSpecifier.text === 'node:http'
-    && node.importClause?.name === undefined && node.importClause?.namedBindings !== undefined
-    && ts.isNamedImports(node.importClause.namedBindings) && node.importClause.namedBindings.elements.length === 1
-    && astName(node.importClause.namedBindings.elements[0].name) === 'createServer'
-    && node.importClause.namedBindings.elements[0].propertyName === undefined;
-  const denyImport = (node) => {
-    if (ts.isImportEqualsDeclaration(node)) return add('module', 'import equals');
-    if (!ts.isImportDeclaration(node) && !ts.isExportDeclaration(node)) return;
-    if (node.moduleSpecifier !== undefined && ts.isStringLiteralLike(node.moduleSpecifier)) {
-      const name = node.moduleSpecifier.text;
-      if ((name.startsWith('node:') || TRANSPORT_MODULES.includes(name)) && !allowedImport(node)) add('module', name);
+
+  for (const [file] of sourceTexts) {
+    const source = program.getSourceFile(resolve(file));
+    if (source === undefined) {
+      add('program', `missing ${file}`);
+      continue;
     }
-  };
-  const denyExpression = (node) => {
-    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) add('module', 'dynamic import');
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-      && ts.isIdentifier(node.expression.expression) && astName(node.expression.expression) === 'Object'
-      && ['getOwnPropertyDescriptor', 'getPrototypeOf'].includes(astName(node.expression.name))
-      && node.arguments.some((argument) => astStaticString(argument, constants) === 'constructor')) {
-      add('evaluator', 'constructor');
+    for (const diagnostic of source.parseDiagnostics ?? []) {
+      add('parse', ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
     }
-    if (ts.isIdentifier(node)) {
-      const name = astName(node);
-      if (INFORMATION_WORLD_AMBIENT_ROOTS.has(name)) add('ambient', name);
-      if (name === 'Reflect' && !astReflectOwnKeysBase(node)) add('reflection', 'Reflect');
-    }
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
-      const name = astPropertyName(node, constants);
-      if (name === 'constructor' || name === '__proto__') add('evaluator', name);
-      if (name === 'prototype' && (!ts.isIdentifier(node.expression)
-        || !['Object', 'Array', 'String', 'Number', 'Boolean'].includes(astName(node.expression)))) add('evaluator', name);
-      if (ts.isIdentifier(node.expression) && astName(node.expression) === 'Reflect' && name !== 'ownKeys') {
-        add('reflection', `Reflect.${name ?? 'dynamic'}`);
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node)) {
+        if (!ts.isStringLiteralLike(node.moduleSpecifier)) {
+          add('module', 'non-static import declaration');
+        } else {
+          for (const binding of importedBindings(node)) {
+            const edge = `${node.moduleSpecifier.text}#${binding}`;
+            moduleEdges.push(`${relative(root, file)} -> ${edge}`);
+            if (!node.moduleSpecifier.text.startsWith('.')
+              && !INFORMATION_WORLD_APPROVED_MODULE_BINDINGS.has(edge)) add('module', edge);
+          }
+          if (node.moduleSpecifier.text === 'node:http'
+            && file.endsWith('/service.ts')
+            && node.importClause?.namedBindings !== undefined
+            && ts.isNamedImports(node.importClause.namedBindings)) {
+            for (const binding of node.importClause.namedBindings.elements) {
+              if (capabilityName(binding.propertyName ?? binding.name) === 'createServer'
+                && capabilityName(binding.name) === 'createServer') {
+                const symbol = checker.getSymbolAtLocation(binding.name);
+                if (symbol !== undefined) {
+                  createServerSymbols.add(symbol);
+                  createServerSymbols.add(canonicalSymbol(symbol, checker));
+                }
+              }
+            }
+          }
+        }
+      } else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
+        if (!ts.isStringLiteralLike(node.moduleSpecifier)) add('module', 'non-static export declaration');
+        else if (!node.moduleSpecifier.text.startsWith('.')) add('module', `${node.moduleSpecifier.text}#export`);
+      } else if (ts.isImportEqualsDeclaration(node)) {
+        add('module', 'import equals');
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        add('module', 'dynamic import');
       }
-    }
+
+      if (ts.isIdentifier(node) && isReferenceIdentifier(node)) {
+        const name = capabilityName(node);
+        const symbol = checker.getSymbolAtLocation(node);
+        if (symbol === undefined) {
+          add('ambient', `unresolved ${name}`);
+        } else if (createServerSymbols.has(symbol) || createServerSymbols.has(canonicalSymbol(symbol, checker))) {
+          if (!isDirectCreateServerCall(node, createServerSymbols, checker)) add('binding', 'node:http#createServer');
+        } else {
+          const declarations = symbol.getDeclarations() ?? [];
+          const ambient = declarations.some((declaration) => /(?:^|\/)lib\..*\.d\.ts$/u.test(declaration.getSourceFile().fileName)
+            || /(?:^|\/)@types\/node(?:\/|$)/u.test(declaration.getSourceFile().fileName));
+          if (ambient) {
+            const capability = name === 'Reflect' && isDirectReflectOwnKeys(node) ? 'Reflect.ownKeys' : name;
+            globalCapabilities.add(capability);
+            if ((name === 'Reflect' && capability !== 'Reflect.ownKeys')
+              || !INFORMATION_WORLD_APPROVED_GLOBALS.has(name)) add('ambient', capability);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return {
+    findings: [...new Set(findings)].sort(),
+    moduleEdges: [...new Set(moduleEdges)].sort(),
+    globalCapabilities: [...globalCapabilities].sort(),
   };
-  const walk = (node) => {
-    denyImport(node);
-    denyExpression(node);
-    ts.forEachChild(node, walk);
-  };
-  walk(source);
-  return findings;
 }
 
 function inside(child, parent) {
@@ -893,41 +982,50 @@ test('information-world is pure except for one loopback server and fixture reade
       + 'than node:http in src/service.ts',
   );
 
-  // The tree guard uses its own TypeScript AST policy. Unlike the old source-token scanner,
-  // escaped identifiers are normalized and statically assembled property keys are evaluated.
-  const serviceSource = readFileSync(join(source, 'service.ts'), 'utf8');
+  // This repository-level gate inventories parsed module and global capabilities. It is
+  // deliberately unlike the package-local deny-oriented closure visitor: Docker's
+  // network-denied execution profile, not either source policy, proves no external egress.
+  const productionSources = new Map(productionFiles.map((file) => [file, readFileSync(file, 'utf8')]));
   assert.deepEqual(
     forbiddenImportsInFiles(productionFiles, ['node:http']).map((finding) => finding.split(' ->')[0]),
     [`packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE}`],
     'node:http is admitted in src/service.ts only',
   );
   assert.deepEqual(
-    productionFiles.flatMap((file) => {
-      const sourceText = readFileSync(file, 'utf8');
-      return informationWorldCapabilityFindings(sourceText, file)
-        .map((finding) => `${relative(root, file)} -> ${finding}`);
-    }),
+    informationWorldCapabilityInventory(productionSources).findings,
     [],
-    'information-world production source must satisfy the AST capability policy',
+    'information-world production source must preserve its approved capability inventory',
   );
-  assert.deepEqual(informationWorldCapabilityFindings(serviceSource, join(source, 'service.ts')), [],
-    'src/service.ts may retain the sole named createServer import');
-  for (const disguisedCapability of [
-    'import * as http from "node:http";',
-    'import http from "node:http";',
-    'import { createServer, request } from "node:http";',
-    'await import(/* client */ "node:http");',
-    'await import("node:" + "http");',
-    'require("node:http");',
-    'import { createServer } from "node:http"; import { request } from "node:http";',
-    'const p = pro\\u0063ess.getBuiltinModule("node:http");',
-    'await fetch("https://example.test");',
-    'const key = "con" + "structor"; createServer[key]("return process")();',
-    'const reflect = Reflect; const get = reflect["g" + "et"]; get(createServer, "constructor");',
-    'const descriptor = Object.getOwnPropertyDescriptor(createServer, "constructor");',
+  const inventory = informationWorldCapabilityInventory(productionSources);
+  assert.deepEqual(inventory.moduleEdges.filter((edge) => !edge.includes(' -> .')),
+    [
+      'packages/environments/information-world/src/extensions.ts -> zod#z',
+      'packages/environments/information-world/src/hashing.ts -> @noble/hashes/sha2.js#sha256',
+      'packages/environments/information-world/src/hashing.ts -> @noble/hashes/utils.js#bytesToHex',
+      'packages/environments/information-world/src/request-key-policy.ts -> zod#z',
+      'packages/environments/information-world/src/schema.ts -> zod#z',
+      'packages/environments/information-world/src/sealing.ts -> zod#z',
+      'packages/environments/information-world/src/service.ts -> node:http#createServer',
+    ],
+    'production external module capabilities must remain the reviewed static inventory');
+  assert.deepEqual(inventory.globalCapabilities,
+    ['Array', 'Error', 'JSON', 'Map', 'Number', 'Object', 'Promise', 'Reflect.ownKeys', 'RegExp', 'Set',
+      'String', 'Symbol', 'SyntaxError', 'TextDecoder', 'TextEncoder', 'TypeError', 'URL', 'Uint8Array',
+      'WeakMap', 'WeakSet'],
+    'production ambient capabilities must remain the reviewed inventory');
+
+  const canaryFindings = (candidate) => informationWorldCapabilityInventory(
+    new Map([[join(source, 'candidate.ts'), candidate]]),
+  ).findings;
+  for (const [capabilityDrift, candidate] of [
+    ['new client module edge', 'import { request } from "node:https";'],
+    ['escaped ambient global', 'pro\\u0063ess.cwd();'],
+    ['direct evaluator global', 'Function("return 1")();'],
+    ['reflect capability alias', 'const own = Reflect.ownKeys; own({});'],
+    ['unexpected global capability', 'Deno.exit();'],
   ]) {
-    assert.notDeepEqual(informationWorldCapabilityFindings(disguisedCapability, join(source, 'candidate.ts')), [],
-      `AST capability policy must reject ${disguisedCapability}`);
+    assert.notDeepEqual(canaryFindings(candidate), [],
+      `capability inventory must reject ${capabilityDrift}`);
   }
 
   // Filesystem access belongs solely to the testing region and is named one file at a time.
