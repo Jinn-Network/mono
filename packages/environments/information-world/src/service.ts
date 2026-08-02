@@ -61,6 +61,11 @@ type Admission =
 type ActiveAttempt = {
   readonly admission: Extract<Admission, { kind: "admitted" }>;
   readonly method: string | undefined;
+  readonly output: Output;
+};
+type SocketAttempts = {
+  readonly attempts: ActiveAttempt[];
+  terminal: boolean;
 };
 
 const LOOPBACK_VALUES = Object.freeze(["127.0.0.1", "::1"] as const);
@@ -363,8 +368,7 @@ export async function createReplayService(
 
   const consumed = { requests: 0, bytes: 0 };
   const counts = { requests: 0, hits: 0, misses: 0, offAllowlist: 0, budgetExhausted: 0 };
-  const activeSockets = new WeakMap<object, ActiveAttempt>();
-  const terminalSockets = new WeakSet<object>();
+  const attemptsBySocket = new WeakMap<object, SocketAttempts>();
 
   const emit = (event: ReplayEvent): void => {
     try {
@@ -397,7 +401,6 @@ export async function createReplayService(
         const headers = hitHeaders.get(outcome.entry.requestKey);
         if (headers === undefined) throw invalidDocument("corpus", "response headers were not preflighted");
         counts.hits += 1;
-        consumed.bytes += body.byteLength;
         const frame = framedBody(outcome.entry.response.status, method, body);
         send(output, outcome.entry.response.status, wireHeaders(headers, "hit", frame), frame);
         emit({ kind: "hit", requestKey: outcome.entry.requestKey, bytes: body.byteLength });
@@ -457,66 +460,119 @@ export async function createReplayService(
     return admission;
   };
 
-  const server = createServer({ maxHeaderSize: MAX_REQUEST_HEADER_BYTES }, (incoming, outgoing) => {
-    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
+  const socketAttempts = (socket: object): SocketAttempts => {
+    const existing = attemptsBySocket.get(socket);
+    if (existing !== undefined) return existing;
+    const state: SocketAttempts = { attempts: [], terminal: false };
+    attemptsBySocket.set(socket, state);
+    return state;
+  };
+  const releaseAttempt = (socket: object, attempt: ActiveAttempt, terminal = false): void => {
+    const state = attemptsBySocket.get(socket);
+    if (state === undefined) return;
+    const position = state.attempts.indexOf(attempt);
+    if (position !== -1) state.attempts.splice(position, 1);
+    if (terminal) state.terminal = true;
+    if (state.attempts.length === 0 && !state.terminal) attemptsBySocket.delete(socket);
+  };
+  const startAttempt = (
+    socket: object,
+    output: Output,
+    method: string | undefined,
+    terminal = false,
+  ): ActiveAttempt | undefined => {
+    const state = socketAttempts(socket);
+    if (!terminal && state.terminal && state.attempts.length === 0) state.terminal = false;
+    const admission = begin(output, method);
     if (admission === undefined) {
+      if (terminal) state.terminal = true;
+      return undefined;
+    }
+    const attempt: ActiveAttempt = { admission, method, output };
+    state.attempts.push(attempt);
+    if (terminal) state.terminal = true;
+    return attempt;
+  };
+  const resolveRequest = (
+    method: string,
+    url: string,
+    headers: readonly HeaderPair[],
+    body: Uint8Array,
+    admission: Extract<Admission, { kind: "admitted" }>,
+  ): ReplayOutcome => {
+    const outcome = resolveReplay(index, { method, url, headers, body }, {
+      requests: admission.before.requests,
+      bytes: consumed.bytes,
+    });
+    if (outcome.kind === "hit") consumed.bytes += index.bodyOf(outcome.entry.requestKey).byteLength;
+    return outcome;
+  };
+
+  const server = createServer({ maxHeaderSize: MAX_REQUEST_HEADER_BYTES }, (incoming, outgoing) => {
+    const output: Output = { kind: "server", value: outgoing };
+    const attempt = startAttempt(incoming.socket, output, incoming.method);
+    if (attempt === undefined) {
       incoming.resume();
       return;
     }
-    activeSockets.set(incoming.socket, { admission, method: incoming.method });
     const serve = async (): Promise<void> => {
       const body = await requestBody(incoming);
+      if (attempt.admission.responded) return;
       if (body.kind === "refused") {
-        answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+        answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
         return;
       }
       const headers = requestHeaders(incoming.rawHeaders);
       const url = incoming.method === "CONNECT" ? undefined : targetUrl(incoming.url, headers, scheme);
       const outcome: ReplayOutcome = url === undefined
         ? { kind: "miss", reason: "unkeyable" }
-        : resolveReplay(index, {
-          method: incoming.method ?? "GET",
-          url,
-          headers,
-          body: body.body,
-        }, admission.before);
-      answer({ kind: "server", value: outgoing }, admission, incoming.method, outcome);
+        : resolveRequest(incoming.method ?? "GET", url, headers, body.body, attempt.admission);
+      answer(output, attempt.admission, attempt.method, outcome);
     };
     void serve().catch(() => {
-      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
-    }).finally(() => activeSockets.delete(incoming.socket));
+      answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
+    }).finally(() => releaseAttempt(incoming.socket, attempt));
   });
 
   const socketEvent = (socket: SocketOutput & object, method: string | undefined): void => {
-    if (terminalSockets.has(socket)) return;
-    terminalSockets.add(socket);
     const output: Output = { kind: "socket", value: socket };
-    const admission = begin(output, method);
-    if (admission !== undefined) answer(output, admission, method, { kind: "miss", reason: "unkeyable" });
+    const state = socketAttempts(socket);
+    if (state.terminal) return;
+    const attempt = startAttempt(socket, output, method, true);
+    if (attempt !== undefined) {
+      answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
+      releaseAttempt(socket, attempt, true);
+    }
   };
   server.on("connect", (_incoming, socket) => socketEvent(socket, "CONNECT"));
   server.on("upgrade", (_incoming, socket) => socketEvent(socket, "GET"));
   server.on("checkContinue", (incoming, outgoing) => {
-    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
+    const output: Output = { kind: "server", value: outgoing };
+    const attempt = startAttempt(incoming.socket, output, incoming.method, true);
     incoming.resume();
-    if (admission !== undefined) {
-      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+    if (attempt !== undefined) {
+      answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
+      releaseAttempt(incoming.socket, attempt, true);
     }
   });
   server.on("checkExpectation", (incoming, outgoing) => {
-    const admission = begin({ kind: "server", value: outgoing }, incoming.method);
+    const output: Output = { kind: "server", value: outgoing };
+    const attempt = startAttempt(incoming.socket, output, incoming.method, true);
     incoming.resume();
-    if (admission !== undefined) {
-      answer({ kind: "server", value: outgoing }, admission, incoming.method, { kind: "miss", reason: "unkeyable" });
+    if (attempt !== undefined) {
+      answer(output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
+      releaseAttempt(incoming.socket, attempt, true);
     }
   });
   server.on("clientError", (_error, socket) => {
-    const active = activeSockets.get(socket);
-    if (active !== undefined) {
-      activeSockets.delete(socket);
-      answer({ kind: "socket", value: socket }, active.admission, active.method, { kind: "miss", reason: "unkeyable" });
+    const state = attemptsBySocket.get(socket);
+    const attempt = state?.attempts.at(-1);
+    if (attempt !== undefined) {
+      answer(attempt.output, attempt.admission, attempt.method, { kind: "miss", reason: "unkeyable" });
+      releaseAttempt(socket, attempt);
       return;
     }
+    if (state?.terminal) return;
     socketEvent(socket, undefined);
   });
 

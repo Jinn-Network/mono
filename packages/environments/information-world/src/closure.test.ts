@@ -69,9 +69,14 @@ function withoutComments(source: string): string {
 function specifiers(source: string): string[] {
   const executable = withoutComments(source);
   return [
-    ...executable.matchAll(/\b(?:import|export)\s+(?:[^\n;]*?\s+from\s+)?["']([^"'\r\n]+)["']/g),
+    ...executable.matchAll(/\b(?:import|export)\s+(?:(?:(?!;)[\s\S])*?\s+from\s+)?["']([^"'\r\n]+)["']/g),
     ...executable.matchAll(/\b(?:import|require)\s*\(\s*(?:["']([^"'\r\n]+)["']|`([^`]*)`)\s*\)/g),
   ].map((match) => (match[1] ?? match[2]) as string);
+}
+
+function nodeHttpBindings(source: string): string[] {
+  const statement = withoutComments(source).match(/import\s*\{([^}]*)\}\s*from\s*["']node:http["']/);
+  return statement?.[1]?.split(",").map((name) => name.trim()).filter(Boolean).sort() ?? [];
 }
 
 const files = productionFiles(sourceRoot);
@@ -89,17 +94,20 @@ describe("the replay service is structurally incapable of egress", () => {
     expect(nodeSpecifiers.map(({ file }) => file.slice(file.lastIndexOf("/") + 1))).toEqual(["service.ts"]);
 
     const service = sources.get(join(sourceRoot, "service.ts"));
-    const statement = service?.match(/import\s*\{([^}]*)\}\s*from\s*["']node:http["']/);
-    expect(statement?.[1]?.split(",").map((name) => name.trim()).filter(Boolean).sort())
-      .toEqual(["createServer"]);
+    expect(nodeHttpBindings(service ?? "")).toEqual(["createServer"]);
   });
 
   test("scanner canaries cover comments, every import form, and template interpolation", () => {
     const source = [
       '// import "node:tls" must stay a comment',
-      'import { createServer } from "node:http";',
-      'import * as socket from "node:net";',
-      'import client from "node:https";',
+      '/* import { request } from "node:http" must stay a comment */',
+      'import {',
+      '  createServer,',
+      '} from "node:http";',
+      'import * as socket',
+      '  from "node:net";',
+      'import client',
+      '  from "node:https";',
       'import "node:dns";',
       'export { lookup } from "node:dns/promises";',
       'await import("node:http2");',
@@ -117,6 +125,7 @@ describe("the replay service is structurally incapable of egress", () => {
       "node:dgram",
       'node:${"worker_threads"}',
     ]);
+    expect(nodeHttpBindings(source)).toEqual(["createServer"]);
   });
 
   test("imports no other node builtin or network client", () => {
