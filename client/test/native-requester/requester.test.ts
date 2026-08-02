@@ -66,6 +66,7 @@ function fixture(input: {
   readonly loadRoles?: () => Promise<NativeRequesterRoles>;
   readonly readChain?: () => Promise<typeof CHAIN>;
   readonly post?: ReturnType<typeof vi.fn>;
+  readonly recover?: ReturnType<typeof vi.fn>;
   readonly checkpoints?: (name: string) => Promise<void>;
 }) {
   const post = input.post ?? vi.fn(async () => ({ taskId: 17n, txHash: TX_HASH }));
@@ -81,7 +82,7 @@ function fixture(input: {
       creatorSafe: CREATOR,
       posting: {
         post,
-        recover: async () => null,
+        recover: input.recover ?? (async () => null),
         canonicalTaskCreated: async (expected) => ({
           canonical: true as const,
           chainId: expected.chainId,
@@ -194,6 +195,49 @@ describe('native requester', () => {
 
     expect(post).toHaveBeenCalledOnce();
     expect(replayed.association).toEqual(recovered.association);
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('recovers wallet-return uncertainty before any rebroadcast and announces the same sealed bundle once', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-wallet-uncertain-'));
+    const identities = roles();
+    let invoked = false;
+    const post = vi.fn(async () => {
+      invoked = true;
+      throw new Error('wallet result lost after invocation');
+    });
+    const recover = vi.fn(async () => invoked ? ({ taskId: 17n, txHash: TX_HASH }) : null);
+    const first = fixture({
+      stateDir,
+      post,
+      recover,
+      loadRoles: async () => identities,
+    }).requester;
+
+    await expect(first.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+    })).rejects.toThrow(/wallet result lost/u);
+    const restarted = fixture({
+      stateDir,
+      post,
+      recover,
+      loadRoles: async () => identities,
+    }).requester;
+    const recovered = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+    });
+    const replay = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+    });
+
+    expect(post).toHaveBeenCalledOnce();
+    expect(recover).toHaveBeenCalledOnce();
+    expect(recovered.reused).toBe(true);
+    expect(replay.association).toEqual(recovered.association);
+    expect(recovered.association.publication).toMatchObject({
+      state: 'published',
+      sequence: '0000000000000001',
+    });
     await rm(stateDir, { recursive: true, force: true });
   });
 
