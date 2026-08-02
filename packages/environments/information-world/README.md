@@ -14,9 +14,10 @@ forever — there is no status field, and nothing in this package ever rewrites 
 record's own declared miss response. CE6's closed execution profile admits only loopback replay:
 production source statically rejects undeclared transport and ambient capabilities, and
 `src/service.ts` is the sole file permitted to import `createServer` from `node:http`. The
-conformance check also runs the actual replay service inside Docker's network-denied namespace,
-where loopback succeeds while external TCP and DNS cannot. The syntax-aware source policies are
-maintainability gates; the network-denied runtime boundary is the egress guarantee.
+conformance check also runs the actual replay service in Linux Docker with
+`--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges`, where loopback
+succeeds while external TCP and DNS cannot. The syntax-aware source policies are maintainability
+gates; that network-denied runtime profile is the egress guarantee.
 
 **Fidelity is a declaration, not a proof.** `captured-snapshot` records what an author states
 a source returned at a stated time for stated requests. This package makes no claim that the

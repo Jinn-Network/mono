@@ -42,7 +42,7 @@ layers and one hard boundary between them:
    `src/service.ts` is the one file in this package permitted to import a transport module, it
    may import exactly `node:http`'s `createServer`, it binds only a loopback address supplied
    by the caller, and it holds no client of any kind. Independently implemented syntax-aware
-   source policies reject undeclared transport/evaluator capabilities as maintainability gates.
+   source policies inventory undeclared module/global capabilities as maintainability gates.
    The actual egress proof runs replay under a network-denied runtime boundary, where loopback
    succeeds and external TCP/DNS cannot. A miss is answered from the record's own declared miss
    response. This does not claim arbitrary JavaScript source is intrinsically incapable of
@@ -98,8 +98,10 @@ this component. The values are law, not defaults.
     locally with output shown before any task is reported done.
 11. **Stop on missing Consumes** — a symbol not on the base branch is a stop-and-report.
     Task 1 Step 2 is the census that discharges this for every CE1 symbol this plan names.
-12. *(Docker-dependent tests — not applicable: this package spawns no container and no
-    process. Its only runtime dependency is a loopback socket on an ephemeral port.)*
+12. **Closed-execution proof.** The service is exercised in Linux Docker with
+    `--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges`: loopback
+    replay must work while external TCP and DNS fail. Docker is an execution dependency of the
+    conformance check, not of the package API.
 
 Additional constraints specific to this component:
 
@@ -3380,8 +3382,8 @@ git commit -m "feat(information-world): the pure replay decision — hit, fail-c
 >   header when present, otherwise from `options.defaultScheme` (default `https`, because
 >   captured corpora are overwhelmingly https origins).
 > - **`CONNECT` is not implemented, and TLS is out of scope.** Supporting HTTPS termination
->   would mean importing `node:tls` and holding a certificate authority, which is exactly the
->   structural egress capability this package must not have. A TLS-terminating replay front end
+>   would mean importing `node:tls` and holding a certificate authority, a transport capability
+>   outside this package's approved execution profile. A TLS-terminating replay front end
 >   is the runner's problem, or §13's hosted-site-replica extension's.
 > - A request with no usable `Host` and no absolute target is a **miss** with reason
 >   `unkeyable`, never an error the agent can distinguish from an uncaptured request.
@@ -3932,10 +3934,9 @@ Expected: PASS — 15 tests, zero typecheck errors. No test may hang: if the sui
 `src/closure.test.ts`:
 
 ```ts
-// Program §4 contract 4, design §4.4 first honesty rule: closure is non-negotiable. The claim
-// this suite makes is structural, not behavioral — it is not "we did not observe egress", it
-// is "there is no code in this package that could egress". It reads the production source and
-// asserts what is absent.
+// Program §4 contract 4, design §4.4 first honesty rule: closure is non-negotiable. This
+// syntax-aware policy is a maintainability gate over declared source capabilities; it is not a
+// JavaScript sandbox. The Linux Docker network-denied profile is the egress proof.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -3976,7 +3977,7 @@ function specifiers(source: string): string[] {
 const files = productionFiles(sourceRoot);
 const sources = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
 
-describe("the replay service is structurally incapable of egress", () => {
+describe("the replay service retains its declared source capability inventory", () => {
   test("the production surface is non-empty, so an empty scan cannot pass vacuously", () => {
     expect(files.length).toBeGreaterThan(10);
   });
@@ -5482,8 +5483,8 @@ test('information-world is pure except for one loopback server and one fixture r
   assert.deepEqual(
     httpImports[0][1].split(',').map((name) => name.trim()).filter(Boolean).sort(),
     ['createServer'],
-    'src/service.ts may bind only createServer from node:http; a client binding would give '
-    + 'this package an egress path, which design §4.4 forbids',
+    'src/service.ts may bind only createServer from node:http; a client binding would expand '
+    + 'the approved transport capability inventory',
   );
 
   // Filesystem: three named files, all in the testing region.
@@ -6001,16 +6002,18 @@ Expected output names, at minimum: entry byte-identity, request-key equivalence 
 permutation, the declared miss, the unreachable non-allowlisted origin, budget enforcement, and
 verbatim serving.
 
-- [ ] **Step 3: Confirm no egress path exists, from two independent scanners**
+- [ ] **Step 3: Confirm the declared source inventory and the runtime egress boundary**
 
 ```bash
 cd packages/environments/information-world && yarn test src/closure.test.ts && cd -
 node --test .github/scripts/environments-source-boundaries.test.mjs
+cd packages/environments/information-world && yarn check:network-denied && cd -
 grep -rn "fetch(\|node:https\|node:net\|node:tls\|undici\|axios" \
   packages/environments/information-world/src/*.ts | grep -v "\.test\.ts" || echo "no client surface"
 ```
 
-Expected: both suites pass and the grep prints `no client surface`.
+Expected: both independent syntax-aware maintainability gates pass; the Docker profile proves
+loopback replay works while external TCP and DNS fail; the grep prints `no client surface`.
 
 - [ ] **Step 4: Open the PR**
 
@@ -6037,8 +6040,8 @@ verification attestation digest + `closed-reproducible` outcome, admitted task r
 - `canonicalRequestKey` — the determinism-critical function, with a generated permutation
   probe and a published vector corpus (`fixtures/request-key-v1/vectors.json`).
 - `createReplayService` — loopback-only, injected listen address, injected corpus reader,
-  fail-closed miss, endpoint allowlist, request budget. No HTTP client exists in this package;
-  two independent scanners assert that.
+  fail-closed miss, endpoint allowlist, request budget. Its declared source capability inventory
+  is independently checked, and Linux Docker proves the network-denied execution profile.
 - Kit, fixtures, JSON Schema, facts leaf, guard-trio and CI registration.
 
 ## Findings carried
@@ -6061,9 +6064,11 @@ design** before anything merges onto this branch. The reviewer should be given:
   1. **Is the request key right?** Every projection it makes (`+` handling, trailing slash,
      header sorting, `json-jcs`) is a place where two honest runs could diverge or two distinct
      resources could merge. Name any projection that is wrong in either direction.
-  2. **Is closure actually structural?** The claim is "no code in this package can egress",
-     evidenced by a source scan and a tree guard. Find the path that defeats both, or confirm
-     there is none.
+  2. **Does the closed execution profile hold?** Check that the source policies remain
+     independent maintainability gates, and that the Linux Docker
+     `--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges` proof lets
+     loopback replay work while external TCP and DNS fail. Do not treat source policy as a
+     JavaScript sandbox.
   3. **Is any claim unbounded?** `captured-snapshot` must read as a declaration everywhere it
      appears — schema, README, kit, facts card. Find a place where it reads as a proof.
 
@@ -6078,7 +6083,7 @@ reject or amend.
 | # | Finding | Proposed disposition |
 | --- | --- | --- |
 | **CF6-1** | §4.4 defines the declared header subset but does not exclude credential-bearing names. A policy naming `authorization` would put credential-shaped material in a sealed portable document and would make the corpus resolvable only by whoever holds the credential. | **Adopt the ban** (`authorization`, `cookie`, `proxy-authorization`), enforced at seal time and at every key computation. It follows design §8's custody restatement and the TEP confidential-task rule. |
-| **CF6-2** | §4.4 says "loopback replay service" without settling the transport binding. Supporting HTTPS through `CONNECT` would require `node:tls` and a certificate authority — exactly the structural egress capability closure forbids. | **Bind origin-form (`Host` + optional `x-jinn-forwarded-proto`) and absolute-form plain-HTTP targets; implement no `CONNECT` and import no TLS.** TLS-terminating replay rides with §13's hosted-site-replica extension, where the browser stack is already in scope. |
+| **CF6-2** | §4.4 says "loopback replay service" without settling the transport binding. Supporting HTTPS through `CONNECT` would require `node:tls` and a certificate authority, outside the approved transport capability inventory. | **Bind origin-form (`Host` + optional `x-jinn-forwarded-proto`) and absolute-form plain-HTTP targets; implement no `CONNECT` and import no TLS.** TLS-terminating replay rides with §13's hosted-site-replica extension, where the browser stack is already in scope. |
 | **CF6-3** | §4.4 requires a declared miss response but does not say where its bytes live. A miss answered from an artifact would make the fail-closed path depend on artifact resolution — the one path that must never depend on anything. | **Carry the miss body inline in the record, bounded at 4096 UTF-8 bytes.** A closed world can then answer a miss with zero resolution. |
 | **CF6-4** | The composite (CE1) references `informationWorlds[]` and had to spell this kind's URI before this package existed, so the string is duplicated across CE1 and CE6. | **CE6 owns `INFORMATION_WORLD_KIND`; CE1 imports it in a follow-up.** Until then `src/composite-pin.test.ts` pins the two spellings to each other, so a divergence breaks a test rather than splitting the kind. Program-plan coordination note, not a local patch. |
 | **CF6-5** | §4.4 says the request key "is a sealed part of the record" without saying whether entries *store* their key or *derive* it. | **Store it and re-derive it at seal time** (`entry.requestKey === canonicalRequestKeyFromParts(entry.request, policy)`), with entries in strictly ascending key order. The record becomes self-checking, collision detection is local, and a third party recomputes every key from the record alone. |
@@ -6098,15 +6103,15 @@ reject or amend.
 | §4.4 element | Where it lands | Task |
 | --- | --- | --- |
 | Corpus entries (digest-pinned captured responses) | `CorpusEntrySchema.response.body` as a `ResourceDescriptor`; verified against its bytes at `buildReplayIndex` | 7, 9 |
-| The corpus *is* that world's web | `resolveReplay` has four outcomes and no fifth; `closure.test.ts` proves no client exists | 9, 10 |
+| The corpus *is* that world's web | `resolveReplay` has four outcomes and no fifth; the network-denied Docker profile exercises replay without external network access | 9, 10 |
 | The canonical request key (method, origin, path, sorted query, declared header subset, canonicalized body) | `canonicalRequestParts` / `canonicalRequestKeyFromParts` / `canonicalRequestKey`, all six components | 5, 6 |
-| Fail-closed miss policy (declared response, never a live fetch) | `MissPolicySchema` required + inline; the `miss` outcome; the fetch-stubbed behavioral test; the source scan | 7, 9, 10 |
+| Fail-closed miss policy (declared response, never a live fetch) | `MissPolicySchema` required + inline; the `miss` outcome; the fetch-stubbed behavioral test; independent source capability inventories | 7, 9, 10 |
 | Capture provenance (what, from where, at what time, by which pinned capturer) | `CaptureProvenanceSchema` — `sources[]`, `capturedAt`, digest-pinned `capturer` | 7 |
 | Corpus fidelity class (`synthetic` \| `captured-snapshot`) | `capture.fidelity` + the exclusivity invariant (CF6-8) | 7 |
 | Composition: origin → world routing with **explicit precedence** | `resolveOriginRouting`, refusing undeclared, tied and partial precedence | 8 |
 | Composition: reachable-endpoint allowlist | `ReplayIndexOptions.allowlist`, tighten-only; the `off-allowlist` outcome and its 403 | 9, 10 |
 | Composition: request budget (count and bytes) | `RequestBudget`; the `budget-exhausted` outcome and its 429 | 9, 10 |
-| Honesty rule 1 — closure is non-negotiable | Two independent scanners plus the injected reader; nothing ambient | 10, 14 |
+| Honesty rule 1 — closure is non-negotiable | Injected reader plus Linux Docker `--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges`; independent source policies are maintainability gates | 10, 14 |
 | Honesty rule 2 — fidelity is a declaration | `provenanceClass: "declared"` fixed in the schema; the `captured-provenance-unprovable` fixture seals and is *labelled*; README and JSON Schema wording; the bounded-claims gate | 7, 11, 12, 14 |
 | Honesty rule 3 — live sources are class E15 | **Out of scope by construction**: this package cannot reach a live source, so it cannot produce a `live-source-observed` run. Recorded here so the reviewer sees it was considered, not omitted. | — |
 | "The request key is the practical failure mode" | The generated permutation probe (78 computations, one key), the published vector corpus, and the kit's group-collision assertion | 6, 11, 12 |
@@ -6122,7 +6127,7 @@ reject or amend.
 | A non-allowlisted origin is unreachable | kit `a non-allowlisted origin is unreachable` (Task 12) |
 | No origin claimed by two worlds without declared precedence | `composition.test.ts` (Task 8); called by CE3 for the composite |
 | The request budget enforces | kit `the request budget enforces` (Task 12) |
-| No egress occurred while serving any of it | `closure.test.ts` (structural) + the tree guard (Tasks 10, 14) + the fetch-stubbed behavioral test (Task 10) |
+| No external egress while serving any of it | `yarn check:network-denied` exercises replay in Linux Docker with `--network none --read-only --cap-drop=ALL --security-opt=no-new-privileges`; loopback succeeds while external TCP and DNS fail |
 
 ### Other design clauses
 
@@ -6201,6 +6206,4 @@ grep -n "TODO\|FIXME\|TBD\|XXX\|placeholder\|fill in" \
 ```
 
 Expected: only this section's own mentions.
-
-
 
