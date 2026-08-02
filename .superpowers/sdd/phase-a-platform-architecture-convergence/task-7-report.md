@@ -21,7 +21,7 @@ were performed.
 The generated inventory contains 69 entries: 65 below `packages/**` and 4 adjacent entries. It
 records the exact 50-package `platform-v1` group, 7 disabled experimental-environment packages,
 8 other `packages/**` entries, 188 first-party runtime/optional/peer edges, seven `platform-v1`
-waves, 30 catalog-declared self-identifying public claims, 3,023 Task 6 ownership paths, and eight
+waves, 30 catalog-declared self-identifying public claims, 3,024 Task 6 ownership paths, and eight
 transitional/deprecated entries. Development dependencies never enter the graph or release order.
 
 Check mode regenerates into a fresh temporary directory and byte-compares both tracked files. It
@@ -83,7 +83,7 @@ failed while output was compact and passed after deterministic two-space formatt
 
 ## Self-review and residual concerns
 
-- The compact Markdown deliberately summarizes ownership by category; the exhaustive 3,021-path
+- The compact Markdown deliberately summarizes ownership by category; the exhaustive 3,024-path
   Task 6 result remains in machine JSON. This keeps the human artifact reviewable without creating
   a second ownership model.
 - Public self-identifiers are extracted only from catalog-declared schema/profile roots. Nested
@@ -157,3 +157,67 @@ failed.
   fails instead of silently reintroducing raw-filesystem dependence.
 - Stable npm publication remains blocked on automated live `jinn.network` hosting verification;
   this fix round does not change or weaken that external-state hold.
+
+## Independent-review fix round 2
+
+Reviewed base: `411948b57b28fec3ec4f2b3a53e0ae9b6589cac5`. Implementation commit:
+`46da82ce107960c4d8d4e96bfca8275e27a2ec0f`.
+
+### RED evidence
+
+The Node 22 focused review-regression matrix covered the public-asset enumerator, profile-root
+builder, and architecture-control report. Before implementation it reported 45 passed and 3 failed.
+
+- An ignored `.DS_Store` below a catalog-declared schema root entered the exact asset inventory.
+- The same ignored file increased the profile manifest document count from two to three and changed
+  its canonical bytes.
+- A non-fixture document declaring both `$id=https://jinn.network/schemas/alpha` and
+  `profile=https://jinn.network/profiles/beta` was silently accepted by choosing `$id`, including
+  when another document claimed the beta identity.
+
+The Task 6 Git fixture independently established that ignored files leave the ownership report
+byte-identical while unignored untracked schema/control files remain visible. The broader GREEN
+matrix then caught the established nested `profiles/fixtures/**` exclusion while the duplicate
+profile-root identity parser was being removed; the shared classifier was corrected before the
+final run and that regression was strengthened with both identity fields.
+
+### Fixes
+
+- Extracted tracked-plus-unignored-untracked candidate discovery into the dependency-neutral
+  `.github/scripts/repository-candidates.mjs`. Git checkouts fail closed if
+  `git ls-files --cached --others --exclude-standard -z` fails; non-Git fixtures retain a
+  deterministic filesystem fallback and callers can inject a fixed candidate list.
+- Task 6 and the public-asset enumerator now consume the same normalized candidate inventory.
+  Static schema/profile/fixture traversal and conformance-source selection intersect their
+  containment-checked walks with that inventory, so ignored files cannot affect generated topology,
+  validation, ownership, public artifacts, or profile serving. Legitimate unignored untracked files
+  remain in scope and subject to ownership checks.
+- Public JSON identity parsing now collects all qualifying top-level Jinn `$id` and `profile`
+  claims and rejects more than one with the document path and both field/value pairs before global
+  collision handling. Profile serving consumes the already-validated shared claim instead of
+  reparsing. Catalog fixture roots and nested `fixtures` paths remain non-self-identifying even
+  when their payloads contain both fields.
+- Regeneration adds the new candidate module to Task 6 custody, moving the exhaustive ownership
+  count from 3,023 to 3,024 and `generatorSources` from 502 to 503; the public asset set remains 639.
+
+### GREEN verification
+
+- Final Task 6/7, public asset/profile/artifact, publication, catalog, and workflow matrix: 297 tests
+  passed, 0 failed under Node 22.
+- Generator write followed by exact `--check`: both tracked files byte-identical to fresh
+  regeneration.
+- `/opt/homebrew/bin/actionlint .github/workflows/platform-architecture-control.yml`: exit 0.
+- Node syntax checks for all four changed implementation modules: exit 0.
+- Machine artifact invariants: 639 assets, 23 conformance assets, 3,024 controlled paths, no
+  ignored `.DS_Store`, local absolute path, or ISO wall-clock timestamp.
+- Relative Markdown links: 2 checked in the changed generated Markdown artifact; both resolved.
+- `git diff --check`: exit 0.
+
+### Residual concerns
+
+- Non-Git fixture repositories intentionally have no Git-ignore semantics and therefore use the
+  deterministic fallback; production Git checkouts never fall back after a Git enumeration error.
+- Ignored entries are skipped before classification or parsing. Declared public roots and every
+  candidate entry still pass the existing symlink and realpath-containment checks.
+- Stable npm publication remains blocked on automated live `jinn.network` hosting verification;
+  this round neither changes nor weakens that external-state hold.
