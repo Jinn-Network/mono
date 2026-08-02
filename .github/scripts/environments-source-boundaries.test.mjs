@@ -512,6 +512,17 @@ function reflectiveBuiltinLoaderUses(source) {
   return findings;
 }
 
+// The replay package never needs ambient authority. Flag a root before it can be aliased into
+// a reflective loader or evaluator, rather than trying to prove every alias chain harmless.
+function ambientAuthorityUses(source) {
+  const forbidden = new Set([
+    'process', 'globalThis', 'global', 'window', 'self', 'Function', 'eval', 'require',
+  ]);
+  return lexicalTokens(source)
+    .filter((token) => token.kind === 'identifier' && forbidden.has(token.value))
+    .map((token) => token.value);
+}
+
 function onlyCreateServerNodeHttpImport(source) {
   const nodeHttpStrings = lexicalTokens(source)
     .filter((token) => token.kind === 'string' && token.value === 'node:http');
@@ -927,6 +938,7 @@ test('information-world is pure except for one loopback server and fixture reade
       return [
         ...(hasDynamicModuleLoad(sourceText) ? [`${relative(root, file)} -> dynamic module loader`] : []),
         ...reflectiveBuiltinLoaderUses(sourceText).map((loader) => `${relative(root, file)} -> ${loader}`),
+        ...ambientAuthorityUses(sourceText).map((rootName) => `${relative(root, file)} -> ${rootName}`),
       ];
     }),
     [],
@@ -971,6 +983,14 @@ test('information-world is pure except for one loopback server and fixture reade
   assert.deepEqual(
     reflectiveBuiltinLoaderUses('const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;'),
     ['process.getBuiltinModule'],
+  );
+  assert.deepEqual(
+    ambientAuthorityUses('const p = process; const m = p.getBuiltinModule("node:http"); const { request: dial } = m; dial();'),
+    ['process'],
+  );
+  assert.deepEqual(
+    ambientAuthorityUses('const g = globalThis; const build = Function; const run = eval; const load = require;'),
+    ['globalThis', 'Function', 'eval', 'require'],
   );
 
   // Filesystem access belongs solely to the testing region and is named one file at a time.

@@ -164,6 +164,18 @@ function reflectiveBuiltinLoaderUses(source: string): string[] {
   return findings;
 }
 
+// The replay package has no need for ambient authority. Rejecting each root at its first
+// lexical use is intentionally stricter than chasing aliases (for example `const p = process`)
+// and keeps a future loader or evaluator from escaping the static-import boundary.
+function ambientAuthorityUses(source: string): string[] {
+  const forbidden = new Set([
+    "process", "globalThis", "global", "window", "self", "Function", "eval", "require",
+  ]);
+  return lexicalTokens(source)
+    .filter((token) => token.kind === "identifier" && forbidden.has(token.value))
+    .map((token) => token.value);
+}
+
 function hasDynamicModuleLoad(source: string): boolean {
   const tokens = lexicalTokens(source);
   return tokens.some((token, index) => token.kind === "identifier"
@@ -233,6 +245,12 @@ describe("the replay service is structurally incapable of egress", () => {
     expect(reflectiveBuiltinLoaderUses(
       'const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;',
     )).toEqual(["process.getBuiltinModule"]);
+    expect(ambientAuthorityUses(
+      'const p = process; const m = p.getBuiltinModule("node:http"); const { request: dial } = m; dial();',
+    )).toEqual(["process"]);
+    expect(ambientAuthorityUses(
+      'const g = globalThis; const build = Function; const run = eval; const load = require;',
+    )).toEqual(["globalThis", "Function", "eval", "require"]);
   });
 
   test("imports no other node builtin or network client", () => {
@@ -250,6 +268,7 @@ describe("the replay service is structurally incapable of egress", () => {
     const findings = [...sources.entries()].flatMap(([file, source]) => [
       ...(hasDynamicModuleLoad(source) ? [`${file}:dynamic module loader`] : []),
       ...reflectiveBuiltinLoaderUses(source).map((loader) => `${file}:${loader}`),
+      ...ambientAuthorityUses(source).map((root) => `${file}:${root}`),
     ]);
     expect(findings).toEqual([]);
   });
