@@ -43690,7 +43690,10 @@
       },
       "trustedPublishers": [
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/attestation-issuer",
           "provider": "GitHub Actions",
@@ -43698,7 +43701,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-aggregate",
           "provider": "GitHub Actions",
@@ -43706,7 +43712,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-interop",
           "provider": "GitHub Actions",
@@ -43714,7 +43723,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-marketplace",
           "provider": "GitHub Actions",
@@ -43722,7 +43734,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-records",
           "provider": "GitHub Actions",
@@ -43730,7 +43745,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-run",
           "provider": "GitHub Actions",
@@ -43738,7 +43756,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/benchmarking-testing",
           "provider": "GitHub Actions",
@@ -43746,7 +43767,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-catalog-sqlite",
           "provider": "GitHub Actions",
@@ -43754,7 +43778,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-contribution",
           "provider": "GitHub Actions",
@@ -43762,7 +43789,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-derivation",
           "provider": "GitHub Actions",
@@ -43770,7 +43800,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-discovery",
           "provider": "GitHub Actions",
@@ -43778,7 +43811,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-local-runtime",
           "provider": "GitHub Actions",
@@ -43786,7 +43822,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-protocol",
           "provider": "GitHub Actions",
@@ -43794,7 +43833,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-publication",
           "provider": "GitHub Actions",
@@ -43802,7 +43844,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-repository",
           "provider": "GitHub Actions",
@@ -43810,7 +43855,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-repository-ipfs",
           "provider": "GitHub Actions",
@@ -43818,7 +43866,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-repository-oci",
           "provider": "GitHub Actions",
@@ -43826,7 +43877,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-retrieval",
           "provider": "GitHub Actions",
@@ -43834,7 +43888,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-trace-decode",
           "provider": "GitHub Actions",
@@ -43842,7 +43899,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/evidence-trajectory",
           "provider": "GitHub Actions",
@@ -43850,7 +43910,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/execution-recorder",
           "provider": "GitHub Actions",
@@ -43858,7 +43921,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/execution-recorder-bridge",
           "provider": "GitHub Actions",
@@ -43866,7 +43932,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/marketplace-binding",
           "provider": "GitHub Actions",
@@ -43874,7 +43943,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/marketplace-pipeline",
           "provider": "GitHub Actions",
@@ -43882,7 +43954,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/marketplace-projector",
           "provider": "GitHub Actions",
@@ -43890,7 +43965,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/marketplace-testing",
           "provider": "GitHub Actions",
@@ -43898,7 +43976,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/marketplace-venue-base",
           "provider": "GitHub Actions",
@@ -43906,7 +43987,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-client",
           "provider": "GitHub Actions",
@@ -43914,7 +43998,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-facts-benchmarking",
           "provider": "GitHub Actions",
@@ -43922,7 +44009,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-facts-evidence",
           "provider": "GitHub Actions",
@@ -43930,7 +44020,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-facts-task-execution",
           "provider": "GitHub Actions",
@@ -43938,7 +44031,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-facts-trust",
           "provider": "GitHub Actions",
@@ -43946,7 +44042,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-protocol",
           "provider": "GitHub Actions",
@@ -43954,7 +44053,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-serve",
           "provider": "GitHub Actions",
@@ -43962,7 +44064,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-source-evidence-journal",
           "provider": "GitHub Actions",
@@ -43970,7 +44075,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-testing",
           "provider": "GitHub Actions",
@@ -43978,7 +44086,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/record-discovery-transport-http",
           "provider": "GitHub Actions",
@@ -43986,7 +44097,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-backend",
           "provider": "GitHub Actions",
@@ -43994,7 +44108,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-backend-local",
           "provider": "GitHub Actions",
@@ -44002,7 +44119,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-evaluation-harness",
           "provider": "GitHub Actions",
@@ -44010,7 +44130,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-evaluator-adapters",
           "provider": "GitHub Actions",
@@ -44018,7 +44141,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-launchers",
           "provider": "GitHub Actions",
@@ -44026,7 +44152,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-profiles",
           "provider": "GitHub Actions",
@@ -44034,7 +44163,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-protocol",
           "provider": "GitHub Actions",
@@ -44042,7 +44174,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-supervisor",
           "provider": "GitHub Actions",
@@ -44050,7 +44185,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-testing",
           "provider": "GitHub Actions",
@@ -44058,7 +44196,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/task-execution-workspace",
           "provider": "GitHub Actions",
@@ -44066,7 +44207,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/trust-core",
           "provider": "GitHub Actions",
@@ -44074,7 +44218,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/trust-resolve",
           "provider": "GitHub Actions",
@@ -44082,7 +44229,10 @@
           "workflow": "stack-npm-publish.yml"
         },
         {
-          "environment": "",
+          "allowedActions": [
+            "npm publish"
+          ],
+          "environment": "npm-publish",
           "organization": "Jinn-Network",
           "package": "@jinn-network/trust-testing",
           "provider": "GitHub Actions",

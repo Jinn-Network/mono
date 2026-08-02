@@ -25,6 +25,7 @@
       "mode": "package"
     }
   ],
+  "manifestExclusions": [],
   "ownerGroups": {
     "architecture-control": [
       "@oaksprout",

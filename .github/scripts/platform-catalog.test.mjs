@@ -17,6 +17,17 @@ import {
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
+function manifestExclusion(path, overrides = {}) {
+  return {
+    path,
+    reason: 'Upstream vendored package is governed outside the platform architecture.',
+    ownerGroup: 'architecture-control',
+    classification: 'vendored',
+    reviewCondition: 'Review when the upstream snapshot is replaced or removed.',
+    ...overrides,
+  };
+}
+
 test('loads a controlled catalog and hydrates package metadata only from manifests', () => {
   const root = fixtureRepo();
   try {
@@ -50,6 +61,96 @@ test('rejects a scoped manifest that the catalog omits', () => {
     assert.throws(
       () => loadPlatformCatalog(root),
       /catalog completeness.*packages\/fixture\/uncataloged/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects an uncataloged first-party manifest beneath an undeclared top-level root', () => {
+  const root = fixtureRepo({
+    manifests: {
+      'services/new-service': { name: '@jinn-network/new-service', version: '0.1.0' },
+    },
+  });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /catalog completeness.*services\/new-service/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('accepts a repository-wide first-party manifest only through an explicit governed exclusion', () => {
+  const catalog = fixtureCatalog();
+  catalog.manifestExclusions = [manifestExclusion('vendor/upstream')];
+  const root = fixtureRepo({
+    catalog,
+    manifests: {
+      'vendor/upstream': { name: '@jinn-network/upstream-vendored', version: '1.0.0' },
+    },
+  });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects manifest exclusions without a reason or owner', async (t) => {
+  for (const field of ['reason', 'ownerGroup']) {
+    await t.test(field, () => {
+      const catalog = fixtureCatalog();
+      const exclusion = manifestExclusion('vendor/upstream');
+      delete exclusion[field];
+      catalog.manifestExclusions = [exclusion];
+      const root = fixtureRepo({
+        catalog,
+        manifests: {
+          'vendor/upstream': { name: '@jinn-network/upstream-vendored', version: '1.0.0' },
+        },
+      });
+      try {
+        assert.throws(
+          () => loadPlatformCatalog(root),
+          new RegExp(`manifestExclusions\\[0\\].*missing required field ${field}`, 'u'),
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+test('rejects a first-party manifest that is both cataloged and excluded', () => {
+  const catalog = fixtureCatalog();
+  catalog.manifestExclusions = [manifestExclusion('packages/fixture/protocol')];
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /packages\/fixture\/protocol.*both cataloged and excluded/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('rejects duplicate first-party package names in different repository paths', () => {
+  const root = fixtureRepo({
+    manifests: {
+      'tools/duplicate-protocol': {
+        name: '@jinn-network/fixture-protocol',
+        version: '0.1.0',
+      },
+    },
+  });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /duplicate first-party package name @jinn-network\/fixture-protocol.*packages\/fixture\/protocol.*tools\/duplicate-protocol/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -675,6 +776,7 @@ test('the canonical repository catalog validates the exact initial topology', ()
   assert.deepEqual(schema.required, [
     'catalogVersion',
     'manifestRoots',
+    'manifestExclusions',
     'ownerGroups',
     'gateDefinitions',
     'releaseGroups',

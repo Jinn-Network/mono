@@ -116,6 +116,7 @@ export function fixtureCatalog() {
       { path: 'client/src/dashboard/spa', mode: 'package' },
       { path: 'plugin/runtime', mode: 'package' },
     ],
+    manifestExclusions: [],
     ownerGroups: {
       'architecture-control': ['@oaksprout', '@ritsukai'],
     },

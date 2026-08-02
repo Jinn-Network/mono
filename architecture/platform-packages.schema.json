@@ -7,6 +7,7 @@
   "required": [
     "catalogVersion",
     "manifestRoots",
+    "manifestExclusions",
     "ownerGroups",
     "gateDefinitions",
     "releaseGroups",
@@ -38,6 +39,41 @@
               "type": "string",
               "minLength": 1
             }
+          }
+        }
+      }
+    },
+    "manifestExclusions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "reason",
+          "ownerGroup",
+          "classification",
+          "reviewCondition"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/repositoryPath"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ownerGroup": {
+            "type": "string",
+            "minLength": 1
+          },
+          "classification": {
+            "enum": ["vendored", "fixture", "external", "transitional"]
+          },
+          "reviewCondition": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }

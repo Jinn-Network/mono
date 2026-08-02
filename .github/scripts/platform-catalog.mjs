@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
 import { normalizePackageRelativePublicPath } from './public-surface-assets.mjs';
+import { repositoryCandidateFiles } from './repository-candidates.mjs';
 
 export const PLATFORM_CATALOG_PATH = 'architecture/platform-packages.v1.json';
 export const PLATFORM_CATALOG_SCHEMA_PATH = 'architecture/platform-packages.schema.json';
@@ -67,6 +68,12 @@ const REQUIRED_PACKAGE_FIELDS = [
   'replacedBy',
 ];
 const PUBLIC_SURFACE_FIELDS = ['schemas', 'profiles', 'fixtures', 'conformance'];
+const MANIFEST_EXCLUSION_CLASSIFICATIONS = new Set([
+  'vendored',
+  'fixture',
+  'external',
+  'transitional',
+]);
 const INITIAL_EXPERIMENTAL_PACKAGES = [
   '@jinn-network/record-discovery-facts-environments',
   '@jinn-network/environment-record',
@@ -408,11 +415,28 @@ function readManifest(path, directory) {
   }
 }
 
+function discoverRepositoryManifests(repoRoot) {
+  const manifests = new Map();
+  for (const candidate of repositoryCandidateFiles(repoRoot)) {
+    if (candidate !== 'package.json' && !candidate.endsWith('/package.json')) continue;
+    const directory = candidate === 'package.json'
+      ? '.'
+      : candidate.slice(0, -'/package.json'.length);
+    const manifestPath = resolve(repoRoot, ...candidate.split('/'));
+    const manifest = readManifest(manifestPath, directory);
+    manifests.set(directory, { manifest, manifestPath, directory });
+  }
+  return manifests;
+}
+
 function validateTopLevel(catalog) {
   requireObject(catalog, 'catalog');
   if (catalog.catalogVersion !== 1) throw new Error(`catalogVersion must be 1, got ${catalog.catalogVersion ?? '<missing>'}`);
   if (!Array.isArray(catalog.manifestRoots) || catalog.manifestRoots.length === 0) {
     throw new Error('manifestRoots must be a non-empty array');
+  }
+  if (!Array.isArray(catalog.manifestExclusions)) {
+    throw new Error('manifestExclusions must be an array');
   }
   requireObject(catalog.ownerGroups, 'ownerGroups');
   requireObject(catalog.gateDefinitions, 'gateDefinitions');
@@ -426,6 +450,22 @@ function validateDefinitions(catalog, repoRoot) {
   for (const [ownerGroup, owners] of Object.entries(catalog.ownerGroups)) {
     requireString(ownerGroup, 'owner group id');
     requireStringArray(owners, `ownerGroups.${ownerGroup}`, { nonEmpty: true });
+  }
+  const exclusionPaths = new Set();
+  for (const [index, exclusion] of catalog.manifestExclusions.entries()) {
+    requireObject(exclusion, `manifestExclusions[${index}]`);
+    const path = requireRepoRelativePath(exclusion.path, `manifestExclusions[${index}].path`);
+    if (exclusionPaths.has(path)) throw new Error(`duplicate manifest exclusion path ${path}`);
+    exclusionPaths.add(path);
+    requireString(exclusion.reason, `manifestExclusions[${index}].reason`);
+    requireString(exclusion.ownerGroup, `manifestExclusions[${index}].ownerGroup`);
+    if (!Object.hasOwn(catalog.ownerGroups, exclusion.ownerGroup)) {
+      throw new Error(`manifestExclusions[${index}]: unknown owner group ${exclusion.ownerGroup}`);
+    }
+    if (!MANIFEST_EXCLUSION_CLASSIFICATIONS.has(exclusion.classification)) {
+      throw new Error(`manifestExclusions[${index}]: unknown classification ${exclusion.classification}`);
+    }
+    requireString(exclusion.reviewCondition, `manifestExclusions[${index}].reviewCondition`);
   }
   for (const [gateId, gate] of Object.entries(catalog.gateDefinitions)) {
     requireObject(gate, `gateDefinitions.${gateId}`);
@@ -613,6 +653,7 @@ function validateReleaseGroups(catalog) {
 
 function validateManifestAgreement(catalog, repoRoot) {
   const scoped = discoverScopedManifests(catalog, repoRoot);
+  const repositoryManifests = discoverRepositoryManifests(repoRoot);
   const catalogByPath = new Map();
   const catalogByName = new Map();
   for (const pkg of catalog.packages) {
@@ -621,7 +662,58 @@ function validateManifestAgreement(catalog, repoRoot) {
     catalogByPath.set(pkg.path, pkg);
     catalogByName.set(pkg.name, pkg);
   }
-  const missingFromCatalog = [...scoped.keys()].filter((path) => !catalogByPath.has(path)).sort();
+  const exclusionByPath = new Map(catalog.manifestExclusions.map((exclusion) => [
+    exclusion.path,
+    exclusion,
+  ]));
+  for (const path of exclusionByPath.keys()) {
+    if (catalogByPath.has(path)) {
+      throw new Error(`${path}: first-party manifest cannot be both cataloged and excluded`);
+    }
+  }
+
+  const firstPartyByName = new Map();
+  for (const entry of repositoryManifests.values()) {
+    if (typeof entry.manifest.name !== 'string'
+      || !entry.manifest.name.startsWith('@jinn-network/')) continue;
+    const entries = firstPartyByName.get(entry.manifest.name) ?? [];
+    entries.push(entry);
+    firstPartyByName.set(entry.manifest.name, entries);
+  }
+  for (const [name, entries] of firstPartyByName) {
+    if (entries.length > 1) {
+      throw new Error(
+        `duplicate first-party package name ${name}: ${entries.map(({ directory }) => directory).sort().join(', ')}`,
+      );
+    }
+  }
+
+  for (const path of exclusionByPath.keys()) {
+    const entry = repositoryManifests.get(path);
+    if (!entry || typeof entry.manifest.name !== 'string'
+      || !entry.manifest.name.startsWith('@jinn-network/')) {
+      throw new Error(`manifest exclusion ${path} does not name a repository-wide first-party manifest`);
+    }
+  }
+
+  const repositoryFirstParty = [...firstPartyByName.values()].flat();
+  const uncatalogedFirstParty = repositoryFirstParty
+    .filter(({ directory }) => !catalogByPath.has(directory) && !exclusionByPath.has(directory))
+    .map(({ directory }) => directory)
+    .sort();
+  const missingRepositoryManifest = [...catalogByPath.keys()]
+    .filter((path) => !repositoryManifests.has(path))
+    .sort();
+  if (uncatalogedFirstParty.length > 0 || missingRepositoryManifest.length > 0) {
+    throw new Error(
+      `catalog completeness mismatch; uncataloged first-party manifests: ${uncatalogedFirstParty.join(', ') || '<none>'}; `
+      + `catalog paths without repository manifests: ${missingRepositoryManifest.join(', ') || '<none>'}`,
+    );
+  }
+
+  const missingFromCatalog = [...scoped.keys()]
+    .filter((path) => !catalogByPath.has(path) && !exclusionByPath.has(path))
+    .sort();
   const missingFromScope = [...catalogByPath.keys()].filter((path) => !scoped.has(path)).sort();
   if (missingFromCatalog.length > 0 || missingFromScope.length > 0) {
     throw new Error(
@@ -630,9 +722,8 @@ function validateManifestAgreement(catalog, repoRoot) {
     );
   }
   const manifests = new Map();
-  for (const [directory, manifestPath] of scoped) {
-    const manifest = readManifest(manifestPath, directory);
-    const pkg = catalogByPath.get(directory);
+  for (const [directory, pkg] of catalogByPath) {
+    const { manifest, manifestPath } = repositoryManifests.get(directory);
     if (manifest.name !== pkg.name) {
       throw new Error(`${directory}: catalog names ${pkg.name}, manifest names ${manifest.name ?? '<missing>'}`);
     }

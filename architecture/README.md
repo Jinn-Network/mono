@@ -6,6 +6,13 @@ for npm identity, version, dependencies, files, exports, privacy, and publicatio
 approved specifications and decision records define semantics and rationale; they do not replace
 the catalog or manifests.
 
+Catalog completeness is checked independently of `manifestRoots`: repository-wide discovery
+parses every tracked or non-ignored `package.json` and requires each `@jinn-network/*` manifest to
+have exactly one catalog record. A deliberately unmanaged first-party manifest must instead have
+one `manifestExclusions` entry recording its path, reason, owner group, classification, and review
+condition. `manifestRoots` remain the governed layout and generation policy; they do not define
+the completeness universe.
+
 The reviewable live projection is
 [`generated/platform-topology.md`](./generated/platform-topology.md) (repository path
 `architecture/generated/platform-topology.md`). Its machine-readable peer is
