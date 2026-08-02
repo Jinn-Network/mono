@@ -150,6 +150,7 @@ function loop(input: {
   store?: Store;
   cursorStore?: ProjectorCursorStore;
   logger?: { info(m: string): void; warn(m: string): void };
+  resolveRecord?: ProjectorLoopConfig['ports']['resolveRecord'];
   overrides?: Partial<ProjectorLoopConfig>;
 }): { readonly projector: ProjectorLoop; readonly cursorStore: ProjectorCursorStore } {
   const store = input.store ?? new Store(':memory:');
@@ -170,10 +171,10 @@ function loop(input: {
       source: { agent: 'urn:jinn:operator:test', name: 'test-operator' },
       signer: fakeDiscoverySigner(),
       archiveRoot: mkdtempSync(join(tmpdir(), 'jinn-archive-')),
-      resolveRecord: async () => ({
+      resolveRecord: input.resolveRecord ?? (async () => ({
         kind: RECORD_KINDS.submission,
         bytes: new TextEncoder().encode('{}'),
-      }),
+      })),
       verifyVerdictObservation: async () => ({ gate: { decisionGrade: true, failures: [] } }),
       referencedBytes: { fetch: async () => undefined },
       readPageCount: () => pageCounts.get('test-operator') ?? 0,
@@ -337,5 +338,29 @@ describe('projector loop', () => {
     chain.setFinalized(125n);
     await projector.tick();
     expect(cursorStore.readObservations()).toHaveLength(1);
+  });
+
+  it('persists observations when announcement publication throws', async () => {
+    const chain = buildScriptedChain();
+    chain.mine(120);
+    chain.setFinalized(120n);
+    chain.addLog(120n, taskCreatedLog());
+
+    const warn = vi.fn();
+    const { projector, cursorStore } = loop({
+      chain,
+      state,
+      logger: { info: vi.fn(), warn },
+      resolveRecord: async () => {
+        throw new Error('resolveRecord has no production implementation for role "evaluation-delivery"');
+      },
+    });
+
+    const result = await projector.tick();
+
+    expect(result.announcements).toBe(0);
+    expect(warn.mock.calls.flat().join('\n')).toContain('announcement publication failed');
+    expect(cursorStore.readObservations()).toHaveLength(1);
+    expect(cursorStore.read()!.liveBlockNumber).toBe(120n);
   });
 });

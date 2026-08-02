@@ -3,14 +3,18 @@ import { EVALUATION_SPEC_FORMAT_URI } from "../identifiers.js";
 import { accessClassifiedResourceDescriptor } from "../resource-descriptor.js";
 import { VerdictRuleSchema } from "./verdict-rule.js";
 import { UnscorableSchema } from "./unscorable.js";
-import { FAMILY_BLOCK_SCHEMAS } from "./family-blocks.js";
+import { FAMILY_BLOCK_SCHEMAS, STATE_PREDICATE_FAMILY } from "./family-blocks.js";
+import { checkStatePredicateSpec } from "./state-predicate/spec-checks.js";
 
-/** Grader families (4, frozen, §7.1). */
+/** Grader families (5, §7.1 + chain-environment design §6/CF1: `state-predicate` added
+ * additively — an enum amendment plus a typed block, proposed explicitly, never an appeal to
+ * extension rules the profiles design does not carry). */
 export const GRADER_FAMILIES = [
   "deterministic-process",
   "model-graded",
   "human-review",
   "composite",
+  "state-predicate",
 ] as const;
 export type GraderFamily = (typeof GRADER_FAMILIES)[number];
 
@@ -59,6 +63,12 @@ export const EvaluationSpecSchema = z
     if (!result.success) {
       for (const issue of result.error.issues) {
         ctx.addIssue({ code: "custom", path: ["familyBlock", ...issue.path], message: issue.message });
+      }
+    }
+    if (spec.family === STATE_PREDICATE_FAMILY) {
+      const check = checkStatePredicateSpec(spec);
+      if (!check.ok) {
+        ctx.addIssue({ code: "custom", message: check.reason });
       }
     }
   });

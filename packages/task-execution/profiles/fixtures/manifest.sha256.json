@@ -62,6 +62,14 @@
       "sha256": "03718fc46ed6eb289b9f30ea3c67d316f0c3f522251e36fee3ee3b499dc5fdf8"
     },
     {
+      "id": "evaluation-spec/golden/state-predicate-minimal.json",
+      "sha256": "ffff9b238955ca5e2c07b3821f5449089fc3606efea6705f9365a9fe6c8b3d93"
+    },
+    {
+      "id": "evaluation-spec/golden/state-predicate-minimal.sha256",
+      "sha256": "d5d9d8eafdbca3c6f022584ec618ed21407a927d686ce8f248c972f88167b057"
+    },
+    {
       "id": "evaluation-task-derivation/adversarial/competitor-delivery.json",
       "sha256": "b4682d54c3d3c278d771cdb0696238e46bc168ff16c365e9aea464bdcfec1f8b"
     },
@@ -252,6 +260,106 @@
     {
       "id": "schema-hardening/golden/valid-rejects-nonconforming-payload.json",
       "sha256": "71b736030838f8712b338108bc871a0efd89d903d6daeeebb3d5c77f47041ac7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/bare-extra-key.json",
+      "sha256": "ec342a62df78877812ec70ee343ef1f887d726537088000cfd8cf6d4b31ae9b7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/environment-record-inlined-content.json",
+      "sha256": "e18d57c84636b5e6b65e64bcac73e34e83404ee763af83a8d63989a84bc28ebd"
+    },
+    {
+      "id": "state-predicate-block/adversarial/environment-record-prefixed-digest.json",
+      "sha256": "0e4031c08084038f085b519e008b8d119885095a00543257f947338c5c83dbc7"
+    },
+    {
+      "id": "state-predicate-block/adversarial/predicate-bare-extra-key.json",
+      "sha256": "925181fcca468bb9dd0e41ad1d7db9d6a4e87a91f12ad17810bc595bd6780f5c"
+    },
+    {
+      "id": "state-predicate-block/adversarial/reserved-measurement-name.json",
+      "sha256": "06643de73ff53375cf8a341d497d4fa8ee0ea84315ab119d634c7e36f3ee61bc"
+    },
+    {
+      "id": "state-predicate-block/adversarial/safety-constraint-state-predicate.json",
+      "sha256": "d3b4a04fdad4055f2aca6939a1293d102db5e969ac1b0064597972068e98b508"
+    },
+    {
+      "id": "state-predicate-block/adversarial/source-consulted-as-success-predicate.json",
+      "sha256": "3d6f5ecd58af8f63ed8db78a8163f79fded8533edddfec3850b1dc3d6155231a"
+    },
+    {
+      "id": "state-predicate-block/adversarial/tolerance-without-within-comparator.json",
+      "sha256": "106b163530b208209befb3d78f271ee96568a0d436da3fe509631b0cb7f41d1b"
+    },
+    {
+      "id": "state-predicate-block/adversarial/unknown-predicate-kind.json",
+      "sha256": "edb6e4488bf9d2eb23f0849a60cbeeaa70bb0543fa94619563ce46b2be8a4ffc"
+    },
+    {
+      "id": "state-predicate-block/golden/measurements-and-tightenings.json",
+      "sha256": "c5d04b43bcea85d341d205267a8d5e2ba59c2773cfd8ffdc2326a288e32572d8"
+    },
+    {
+      "id": "state-predicate-block/golden/minimal.json",
+      "sha256": "e90d255c881c7f45294f8b89f8f9e4cbf327b98f5f1a9592f477e1f06fee0ab2"
+    },
+    {
+      "id": "state-predicate-block/golden/namespaced-extra-key.json",
+      "sha256": "ef74ac9841905eb55129c99a4966dab15e385820d8d7eba4d6c9a3aa76a7fa03"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/duplicate-state-read.json",
+      "sha256": "89b084f814eeffa4de7fc9216b0322383aab29cbd888815b73f21f76aebe18fe"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/environment-record-mismatch.json",
+      "sha256": "55c4f3a61255047e82930d5a1bcccfb7ab7d9e22a98fe2ee9ab0f4d066174a6e"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/replay-refused.json",
+      "sha256": "7b2c62046e21e11c0a4791d5b68ae90b7df1fec83cd21f39d956fecb292355d4"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/reported-value-post-replay-only.json",
+      "sha256": "acf7d35b517cb1ae9bdfbb866aa0d837c43ebfe265cea14bf7073783f9440ba1"
+    },
+    {
+      "id": "state-predicate-evaluation/adversarial/source-read-unavailable.json",
+      "sha256": "f95fbeb85ce186aab749bb79dd3a3eaf0a4cda61df046b7276ce1c212ed8176e"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/declarative-call-ground-truth.json",
+      "sha256": "bd6ea0a86b633e02430beb71266dfde9df0c35f1121cca83775e88caf3170f45"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json",
+      "sha256": "0299c6ade658ae9b4d6834f18524e79ef6209fb4b5cf6eec050dabbf3f61d82b"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json",
+      "sha256": "d8f977c8137913ce6f63f4198bf6c17532676e0baf000ec390deb190bc5c68d3"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/reported-value-post-replay-declared.json",
+      "sha256": "78539fdd1c87de65f8cbebcec70042010f1994c3ddde65954128b47d36124dad"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/safety-violated-unlimited-approval.json",
+      "sha256": "54272c33413e5bcaed8079f71935e1413d0bb809800f2139b2ef858b62bf0146"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/source-value-and-consulted.json",
+      "sha256": "68a219c86492dd884618feeb02ed2b25ecad5521c6416365982080d5f7aca1d4"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/success-conjunction-satisfied.json",
+      "sha256": "bf192b797a4c5895d2bbf1c509ec74253711689dc447eb5d45d956b976120d3c"
+    },
+    {
+      "id": "state-predicate-evaluation/golden/time-bound-across-timewarp.json",
+      "sha256": "7d1e59d9fa9bc447eb35997080172e110a64bbd8fd2c21d8e6dde45404f96cbd"
     },
     {
       "id": "sub-profile/adversarial/chain-depth-9.json",

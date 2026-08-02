@@ -56,8 +56,9 @@ const { digest } = sealTaskProfile(buildRepositoryWorkProfile());
 
 The `./testing` subpath re-exports the pure structural runner (`loadFixtureFamily`,
 `runStructuralCheck`), the named structural checks (`checkAdmissionReceipt`,
-`checkAllOfConstruction`, `checkMeasurementCoverage`, `checkVerdictConsistency`,
-`deriveEvaluationTask`, `resolveFamilyUri`), and `FIXTURE_FAMILIES` — every fixture family this
+`checkAllOfConstruction`, `checkMeasurementCoverage`, `checkStatePredicateBlock`,
+`checkStatePredicateSpec`, `checkVerdictConsistency`, `deriveEvaluationTask`,
+`evaluatePredicates`, `resolveFamilyUri`), and `FIXTURE_FAMILIES` — every fixture family this
 package ships under `fixtures/*`. A downstream consumer (the marketplace binding, the Autopilot
 adapter) drives its own conformance suite by iterating `FIXTURE_FAMILIES`, loading each with
 `loadFixtureFamily`, and running the matching structural check with `runStructuralCheck` — without
@@ -75,6 +76,18 @@ for (const family of FIXTURE_FAMILIES) {
   // run(cases, ...)
 }
 ```
+
+### `state-predicate` family
+
+The `state-predicate` grader family is a sealed criteria document over a sealed chain world: the
+`familyBlock` references the **composite** crypto-environment record by digest (never inlined),
+and `evaluatePredicates` is a pure function over a canonical chain observation that both
+admission and evaluation compose. Predicate outcomes use **satisfied / violated / unevaluable**
+against the named information contract — not "verified", because the evaluator states what the
+sealed world showed under the block's criteria, not absolute truth.
+
+Fixture families: `state-predicate-block`, `state-predicate-evaluation`, and the sealed
+`evaluation-spec/golden/state-predicate-minimal` pin.
 
 ## Development
 

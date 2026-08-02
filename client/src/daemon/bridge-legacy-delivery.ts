@@ -16,8 +16,10 @@ import {
 } from '@jinn-network/task-execution-protocol';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import type { HarvestResult } from '@jinn-network/task-execution-workspace';
-import { keccak256 } from 'viem';
+import { keccak256, type Hex } from 'viem';
+import { keccakEvidenceHash } from '@jinn-network/marketplace-binding';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { SignedEnvelopeSchema } from '../types/envelope.js';
 import type { SignedTaskV1 } from '../types/task-document.js';
 
 export const LEGACY_ENVELOPE_EXTENSION_KEY =
@@ -94,16 +96,19 @@ export function synthesizeLegacyFactsCard(anchored: {
  * `CreatorLoop` posts sealed TEP Submissions, `resolveTaskProjection` resolves a real Submission
  * on its first attempt and never reaches this fallback.
  */
-/** RFC 3339 deadline for a legacy SignedTaskV1 (seconds in claimPolicy, mixed units in window). */
+/** RFC 3339 deadline for a legacy SignedTaskV1 (claimPolicy / window may use sec or ms). */
+function epochToIso(ts: number): string {
+  // Same heuristic as window.endTs: values past ~2001-09-09 in ms-space are ms.
+  const ms = ts > 1_000_000_000_000 ? ts : ts * 1000;
+  return new Date(ms).toISOString();
+}
+
 function legacyEffectiveDeadline(task: SignedTaskV1): string {
   const submissionDeadlineTs = task.claimPolicy.submissionDeadlineTs;
   if (typeof submissionDeadlineTs === 'number') {
-    return new Date(submissionDeadlineTs * 1000).toISOString();
+    return epochToIso(submissionDeadlineTs);
   }
-  const endTs = task.window.endTs;
-  // Harness/e2e fixtures store millisecond timestamps in `window`; older fixtures use seconds.
-  const endMs = endTs > 1_000_000_000_000 ? endTs : endTs * 1000;
-  return new Date(endMs).toISOString();
+  return epochToIso(task.window.endTs);
 }
 
 export function synthesizeLegacyTaskProjection(input: {
@@ -199,6 +204,57 @@ export function legacyRestorationResultFromDelivery(
   if (typeof parsed !== 'object' || parsed === null) return undefined;
   const value = (parsed as Record<string, unknown>)[LEGACY_ENVELOPE_EXTENSION_KEY];
   return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * Bridge read path (E43): IPFS pins a sealed TEP Delivery with the legacy
+ * `jinn.execution.v1` envelope nested under `LEGACY_ENVELOPE_EXTENSION_KEY`. Claim/wait
+ * callers that historically expected a bare SignedEnvelope must unwrap first. Falls back
+ * to the input when no bridge annotation is present (pre-bridge / test fixtures).
+ */
+export function signedEnvelopeJsonFromDeliveryOrRaw(document: unknown): unknown {
+  if (typeof document !== 'object' || document === null) return document;
+  const bridged = (document as Record<string, unknown>)[LEGACY_ENVELOPE_EXTENSION_KEY];
+  if (typeof bridged !== 'string') return document;
+  try {
+    return JSON.parse(bridged);
+  } catch {
+    return document;
+  }
+}
+
+/** True when `sealedBytes` decode to a TEP Delivery carrying the bridge envelope extension. */
+export function isBridgedTepDeliveryBytes(sealedBytes: Uint8Array): boolean {
+  return legacyRestorationResultFromDelivery(sealedBytes) !== undefined;
+}
+
+/**
+ * E46: router delivery-claim evidence hash for the exact IPFS-fetched bytes.
+ * Bridged TEP Deliveries settle on `keccakEvidenceHash(sealedBytes)`; bare
+ * `jinn.execution.v1` envelopes keep the legacy envelope JCS keccak.
+ */
+export function deliveryClaimEvidenceHash(exactFetchedBytes: Uint8Array): Hex {
+  if (isBridgedTepDeliveryBytes(exactFetchedBytes)) {
+    return keccakEvidenceHash(exactFetchedBytes);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(exactFetchedBytes));
+  } catch {
+    throw new Error('delivery claim: IPFS payload is not valid JSON');
+  }
+  const envelopeSource = signedEnvelopeJsonFromDeliveryOrRaw(parsed);
+  const envelopeRecord = SignedEnvelopeSchema.parse(envelopeSource);
+  const rawSigned = envelopeSource as Record<string, unknown>;
+  const { signature: _rawSignature, ...unsignedBody } = rawSigned;
+  const jcsBytes = new TextEncoder().encode(canonicalJson(unsignedBody));
+  const recomputed = keccak256(jcsBytes);
+  if (recomputed !== envelopeRecord.signature.hash) {
+    throw new Error(
+      `recomputed hash ${recomputed} !== envelope.signature.hash ${envelopeRecord.signature.hash}`,
+    );
+  }
+  return recomputed;
 }
 
 /**

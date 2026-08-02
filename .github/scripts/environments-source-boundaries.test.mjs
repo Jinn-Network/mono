@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record', 'verification'];
+const environmentDirectories = ['record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction'];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -55,6 +55,99 @@ const RECORD_ALLOWED_DEV_DEPENDENCIES = [
 ];
 const RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 
+// `packages/environments/chain-record` is tier 2 with the same purity rules as `record`: zod +
+// noble-class primitives only, no ports, no I/O outside the fixture loaders. Two Jinn packages
+// are admitted into the TESTING REGION only, for the seal-equivalence legs (program §4
+// contract 3): `evidence-protocol` for the evidence tree's digest spelling, and
+// `environment-record` for the SWE sibling this package's primitives were materialized from.
+// The chain kind is a SIBLING of the SWE kind, never an extension of it, so a production
+// import of `environment-record` is a boundary failure and the guard below says so by name.
+const CHAIN_RECORD_ALLOWED_DEPENDENCIES = ['@noble/hashes', 'zod'];
+const CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/environment-record', '@jinn-network/evidence-protocol',
+  '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
+];
+const CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+
+// `packages/environments/chain-verification` is tier 3: it runs the closed-state and archive
+// protocols and seals the attestation. Design §3 gives it exactly two package edges — the
+// record kinds it verifies, and trust/core for DSSE + JCS + hashing — so `@jinn-network/
+// trust-*` is lifted from the foreign list for this package only.
+const CHAIN_VERIFICATION_ALLOWED_EXTERNALS = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/trust-core',
+  '@noble/hashes',
+  'zod',
+];
+const CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/trust-core',
+  '@noble/hashes',
+  'zod',
+];
+const CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@types/node',
+  // Test-only differential oracle for the hand-rolled ABI encoder (ruling CR8), exactly as
+  // `canonicalize` and `ajv` are test-only oracles for the record package above. Production
+  // source never imports it -- the externals assertion below scans production files only.
+  'ox',
+  'typescript',
+  'vitest',
+];
+const CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_VERIFICATION_FOREIGN_PACKAGES = [
+  ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
+  '@jinn-network/trust-resolve',
+];
+// `packages/environments/chain-extraction` is tier 3. Design §3 gives it exactly two Jinn
+// package edges plus trust/core. Its only network dependency is an *injected port*, so the
+// ambient-network ban applies to it in full — a `fetch` identifier anywhere in this
+// package's source is the exact violation the design's custody law forbids.
+const CHAIN_EXTRACTION_ALLOWED_EXTERNALS = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/trust-core',
+  '@noble/hashes',
+  'zod',
+];
+const CHAIN_EXTRACTION_ALLOWED_DEPENDENCIES = [...CHAIN_EXTRACTION_ALLOWED_EXTERNALS];
+const CHAIN_EXTRACTION_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/trust-resolve',
+  '@jinn-network/trust-testing',
+  '@types/node',
+  'typescript',
+  'vitest',
+];
+const CHAIN_EXTRACTION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const CHAIN_EXTRACTION_FOREIGN_PACKAGES = [
+  ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
+  '@jinn-network/trust-resolve',
+];
+// Finding F-CE3-6: the staged-state file store is this package's only production filesystem
+// surface, and it takes its directory as an argument rather than as ambient authority. The
+// three test files below read this package's own shipped fixtures and source. Every path is
+// named one by one so a new filesystem user needs a deliberate edit here.
+const CHAIN_VERIFICATION_FILESYSTEM_SOURCES = [
+  'chain-verification/src/staged-state-store.ts',
+  'chain-verification/src/testing.ts',
+  // The ABI vector corpus loader, shared by the unit and differential suites.
+  'chain-verification/src/abi-vectors.ts',
+  'chain-verification/src/abi-encode.differential.test.ts',
+  'chain-verification/src/staged-state-store.test.ts',
+  'chain-verification/src/testing.test.ts',
+  'chain-verification/src/bounded-claims.test.ts',
+  'chain-verification/src/fixture-keys.test.ts',
+  'chain-verification/src/ports.test.ts',
+];
+// Finding F-CE3-7: design §10's caveats are measured against a real pinned Anvil, which needs
+// a process. Exactly one opt-in test file may spawn one; it is excluded from the default
+// vitest project, so a machine without Foundry still runs the whole kit.
+const CHAIN_VERIFICATION_PROCESS_SOURCES = [
+  'chain-verification/src/anvil-caveats.anvil.test.ts',
+];
+
 // `packages/environments/verification` is tier 3: it executes the K-run protocol and seals
 // the attestation. Design §3.3 gives it exactly two package edges — the record kind it
 // verifies, and trust/core for DSSE + JCS + hashing — so `@jinn-network/trust-*` is lifted
@@ -101,6 +194,17 @@ const FILESYSTEM_ALLOWED_SOURCES = [
   'verification/src/staged-state-store.test.ts',
   'verification/src/testing.test.ts',
   'verification/src/bounded-claims.test.ts',
+  // The extraction pipeline is crash-safe: its state file is the resume point, and its
+  // directory is an argument, not ambient authority. Named one file at a time so a second
+  // filesystem user still needs a deliberate edit here.
+  'chain-extraction/src/extraction-state-store.ts',
+  'chain-extraction/src/testing.ts',
+  'chain-extraction/src/extraction-state-store.test.ts',
+  'chain-extraction/src/testing.test.ts',
+  'chain-extraction/src/bounded-claims.test.ts',
+  // Reads this package's own source to assert no hand-rolled digest-prefix stripping
+  // (T5 step 6). Named individually, like the rest.
+  'chain-extraction/src/artifact.test.ts',
 ];
 
 const AMBIENT_NETWORK_APIS = ['fetch', 'WebSocket', 'EventSource', 'XMLHttpRequest'];
@@ -399,6 +503,84 @@ test('environments source boundaries remain one-way across the approved graph', 
   assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
 });
 
+test('chain-environment-record stays pure and keeps the SWE kind out of production source', () => {
+  const chainRecord = join(packages, 'chain-record');
+  const source = join(chainRecord, 'src');
+  const testingEntry = join(source, 'testing.ts');
+  const fixtureLoaders = join(source, 'fixtures.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(source);
+  const testingFiles = allFiles.filter((file) =>
+    file === testingEntry || file === fixtureLoaders || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  // Production source: no Jinn package at all -- including the in-tree SWE record package,
+  // which is named explicitly because it is NOT covered by ENVIRONMENTS_FOREIGN_PACKAGES.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...ENVIRONMENTS_FOREIGN_PACKAGES, '@jinn-network/environment-record',
+        '@jinn-network/environment-verification', ...NODE_IO_MODULES, 'vitest'],
+      [...FORBIDDEN_ROOTS, join(packages, 'record'), join(packages, 'verification')],
+    ),
+    [],
+    'chain-environment-record production source must not import any Jinn package, vitest, or I/O module',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(source, 'index.ts')], [], [testingEntry, fixtureLoaders]),
+    [],
+    'the root entrypoint must not re-export testing.ts or fixtures.ts',
+  );
+
+  // Testing region: evidence-protocol and environment-record are admitted for seal equivalence;
+  // nothing else Jinn, and no other tree by relative path.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/evidence-*'),
+      FORBIDDEN_ROOTS,
+    ),
+    [],
+    'chain-environment-record testing files must not cross into foreign package roots',
+  );
+  assert.deepEqual(
+    forbiddenImportsInFiles(testingFiles, ['@jinn-network/environment-verification']),
+    [],
+    'the verification capability is never a dependency of a record package, in any region',
+  );
+
+  // `node:fs/promises` is permitted in exactly one file.
+  const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])
+    .filter((finding) => !finding.startsWith(relative(root, fixtureLoaders)));
+  assert.deepEqual(fsUsers, [],
+    'only src/fixtures.ts may touch the filesystem, and only to read this package\'s own corpus');
+
+  // `src/ports.ts` declares TYPES only. A value export there would make four consumers depend
+  // on an implementation, which is the whole reason the port types live in this package.
+  const portsSource = readFileSync(join(source, 'ports.ts'), 'utf8');
+  assert.match(portsSource, /^import type /mu,
+    'ports.ts must import types only');
+  assert.deepEqual(
+    [...portsSource.matchAll(/^export\s+(?!type\b|interface\b)/gmu)].map((match) => match[0]),
+    [],
+    'ports.ts must export only types and interfaces; a runtime value there breaks the contract-only seam',
+  );
+
+  // Manifest shape.
+  const manifest = JSON.parse(readFileSync(join(chainRecord, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(),
+    ['.', './fixtures/*', './schemas/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_RECORD_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+});
+
 test('environment-verification takes exactly its two approved package edges', () => {
   const verification = join(packages, 'verification');
   const verificationSource = join(verification, 'src');
@@ -474,6 +656,163 @@ test('environment-verification takes exactly its two approved package edges', ()
     [...new Set(externals)].sort().filter((name) => !VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
     [],
     'environment-verification production source imports an unapproved external package',
+  );
+});
+
+test('chain-environment-verification takes exactly its two approved package edges', () => {
+  const verification = join(packages, 'chain-verification');
+  const verificationSource = join(verification, 'src');
+  const testingEntry = join(verificationSource, 'testing.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(verificationSource);
+  const testingFiles = allFiles.filter((file) => file === testingEntry || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...CHAIN_VERIFICATION_FOREIGN_PACKAGES, ...NODE_IO_MODULES, 'vitest'],
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ).filter((finding) => !CHAIN_VERIFICATION_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    )),
+    [],
+    'chain-environment-verification production source must take only its two approved package edges',
+  );
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      CHAIN_VERIFICATION_FOREIGN_PACKAGES,
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ),
+    [],
+    'chain-environment-verification testing files must not cross into foreign package roots',
+  );
+
+  const fsUsers = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !CHAIN_VERIFICATION_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
+    ));
+  assert.deepEqual(fsUsers, [],
+    `only ${CHAIN_VERIFICATION_FILESYSTEM_SOURCES.join(' and ')} may touch the filesystem, and only `
+    + 'through a directory supplied as an argument');
+  const fsCarveOutUses = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !finding.includes('node:fs/promises'))
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)
+        && (finding.includes('node:child_process') || finding.includes('node:http')),
+    ));
+  assert.deepEqual(fsCarveOutUses, [],
+    'the filesystem carve-out covers node:fs/promises only; no other I/O module is admitted');
+
+  const processUsers = forbiddenImportsInFiles(allFiles, ['node:child_process', 'node:http'])
+    .filter((finding) => !CHAIN_VERIFICATION_PROCESS_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ));
+  assert.deepEqual(processUsers, [],
+    `only ${CHAIN_VERIFICATION_PROCESS_SOURCES.join(' and ')} may spawn a process or dial HTTP`);
+
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(verificationSource, 'index.ts')], [], [testingEntry]),
+    [],
+    'the root entrypoint must not re-export testing.ts',
+  );
+
+  const manifest = JSON.parse(readFileSync(join(verification, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_VERIFICATION_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !CHAIN_VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'chain-environment-verification production source imports an unapproved external package',
+  );
+});
+
+test('chain-state-extraction takes exactly its three approved package edges', () => {
+  const extraction = join(packages, 'chain-extraction');
+  const extractionSource = join(extraction, 'src');
+  const testingEntry = join(extractionSource, 'testing.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(extractionSource);
+  const testingFiles = allFiles.filter((file) => file === testingEntry || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      [...CHAIN_EXTRACTION_FOREIGN_PACKAGES, ...NODE_IO_MODULES, 'vitest'],
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ).filter((finding) => !FILESYSTEM_ALLOWED_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    )),
+    [],
+    'chain-state-extraction production source must take only its three approved package edges',
+  );
+
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      CHAIN_EXTRACTION_FOREIGN_PACKAGES,
+      FORBIDDEN_ROOTS.filter((forbiddenRoot) => forbiddenRoot !== join(root, 'packages', 'trust')),
+    ),
+    [],
+    'chain-state-extraction testing files must not cross into foreign package roots',
+  );
+
+  const fsUsers = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !FILESYSTEM_ALLOWED_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`),
+    ));
+  assert.deepEqual(fsUsers, [],
+    `only ${FILESYSTEM_ALLOWED_SOURCES.filter((entry) => entry.startsWith('chain-extraction/')).join(' and ')} may touch the filesystem, and only `
+    + 'through a directory supplied as an argument');
+  const fsCarveOutUses = forbiddenImportsInFiles(allFiles, NODE_IO_MODULES)
+    .filter((finding) => !finding.includes('node:fs/promises'));
+  assert.deepEqual(fsCarveOutUses, [],
+    'the filesystem carve-out covers node:fs/promises only; no other I/O module is admitted');
+
+  assert.deepEqual(
+    forbiddenImportsInFiles([join(extractionSource, 'index.ts')], [], [testingEntry]),
+    [],
+    'the root entrypoint must not re-export testing.ts',
+  );
+
+  const manifest = JSON.parse(readFileSync(join(extraction, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './testing']);
+  assert.deepEqual(manifest.exports['.'],
+    { import: './dist/index.js', types: './dist/index.d.ts' });
+  assert.deepEqual(manifest.exports['./testing'],
+    { import: './dist/testing.js', types: './dist/testing.d.ts' });
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), CHAIN_EXTRACTION_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !CHAIN_EXTRACTION_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'chain-state-extraction production source imports an unapproved external package',
   );
 });
 
@@ -624,6 +963,10 @@ test('environments source and docs make no unqualified determinism or verificati
     ...files(join(record, 'src')).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
     join(record, 'README.md'),
     join(record, 'schemas', 'environment.schema.json'),
+    ...files(join(packages, 'chain-record', 'src')).filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
+    join(packages, 'chain-record', 'README.md'),
+    join(packages, 'chain-record', 'schemas', 'chain-environment.schema.json'),
+    join(packages, 'chain-record', 'schemas', 'crypto-environment.schema.json'),
   ].filter((file) => existsSync(file));
 
   const findings = candidates.flatMap((file) => readFileSync(file, 'utf8')

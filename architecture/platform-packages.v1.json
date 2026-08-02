@@ -23,6 +23,10 @@
     {
       "path": "plugin/runtime",
       "mode": "package"
+    },
+    {
+      "path": "scripts/chain-only-gate",
+      "mode": "package"
     }
   ],
   "manifestExclusions": [],
@@ -132,7 +136,7 @@
       "stable": false
     },
     "experimental-environment-supply": {
-      "expectedPackageCount": 7,
+      "expectedPackageCount": 12,
       "publishPolicies": [
         "disabled"
       ],
@@ -177,7 +181,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 7,
+      "expectedPackageCount": 8,
       "publishPolicies": [
         "private",
         "never"
@@ -186,9 +190,11 @@
         "autopilot-ci",
         "broadcast-bot-ci",
         "client-ci",
+        "environments-ci",
         "indexer-ci",
         "indexer-enrichment-ci",
-        "plugin-tree-ci"
+        "plugin-tree-ci",
+        "task-supply-ci"
       ],
       "allowedClassifications": [
         "product",
@@ -238,6 +244,248 @@
     }
   },
   "packages": [
+    {
+      "name": "@jinn-network/chain-environment-record",
+      "path": "packages/environments/chain-record",
+      "domain": "environments",
+      "role": "sealed chain and composite crypto environment record family",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-environment-verification",
+      "path": "packages/environments/chain-verification",
+      "domain": "environments",
+      "role": "chain environment materialization and verification capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-state-extraction",
+      "path": "packages/environments/chain-extraction",
+      "domain": "environments",
+      "role": "archive-fork chain-state extraction capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-scenarios",
+      "path": "packages/task-supply/chain-scenarios",
+      "domain": "task-supply",
+      "role": "verified chain-environment scenario derivation capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/record-discovery-facts-chain-environments",
+      "path": "packages/discovery/facts/chain-environments",
+      "domain": "environments",
+      "role": "chain-environment facts projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [
+          "profiles"
+        ],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/chain-only-gate-harness",
+      "path": "scripts/chain-only-gate",
+      "domain": "repository-operations",
+      "role": "live chain-environment end-to-end gate harness",
+      "tier": null,
+      "tierReason": "Repository gate tooling is outside the platform and product tier model.",
+      "classification": "repository-tooling",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci",
+        "task-supply-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/environments-ci.yml"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
     {
       "ownerGroup": "architecture-control",
       "publicSurface": {

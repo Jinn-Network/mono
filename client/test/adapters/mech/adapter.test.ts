@@ -140,6 +140,7 @@ vi.mock('../../../src/adapters/mech/ipfs.js', () => ({
   fetchFromIpfs: vi.fn().mockResolvedValue({ data: 'result' }),
   fetchSignedTaskFromIpfs: vi.fn().mockResolvedValue(signedTask()),
   fetchSignedEnvelopeFromIpfs: vi.fn().mockResolvedValue(null),
+  fetchRawBytesFromIpfs: vi.fn().mockResolvedValue(new TextEncoder().encode('{}')),
   digestHexToGatewayUrl: vi.fn(),
 }));
 
@@ -2192,7 +2193,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs, fetchRawBytesFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
 
     const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
@@ -2208,6 +2209,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
     };
     vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked(fetchRawBytesFromIpfs).mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(fakeEnvelope)),
+    );
     vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'solution' });
     vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
@@ -2238,7 +2242,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       { variant: 'v2', kind: 'solution', evidenceHash: expectedHash },
       undefined,
     );
-    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
+    expect(fetchRawBytesFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
 
     await adapter.stop();
   });
@@ -2247,7 +2251,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs, fetchRawBytesFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
 
     const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
@@ -2266,6 +2270,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
     };
     vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked(fetchRawBytesFromIpfs).mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(fakeEnvelope)),
+    );
     vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'verdict' });
     vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
@@ -2300,7 +2307,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
       undefined,
     );
-    expect(fetchSignedEnvelopeFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
+    expect(fetchRawBytesFromIpfs).toHaveBeenCalledWith(TEST_CONFIG.ipfsGatewayUrl, TASK_CID, undefined);
 
     await adapter.stop();
   });
@@ -2309,7 +2316,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery, decodeDeliverLogs } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchFromIpfs, fetchRawBytesFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
 
     const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
@@ -2329,6 +2336,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
     };
     vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked(fetchRawBytesFromIpfs).mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(fakeEnvelope)),
+    );
     vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
     vi.mocked(fetchFromIpfs).mockResolvedValueOnce({ data: 'verdict' });
     vi.mocked(decodeDeliverLogs).mockReturnValueOnce([{
@@ -2381,7 +2391,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
     const { keccak256 } = await import('viem');
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { claimDelivery } = await import('../../../src/adapters/mech/contracts.js');
-    const { fetchSignedEnvelopeFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { fetchSignedEnvelopeFromIpfs, fetchRawBytesFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
     const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
 
     const expectedHash = keccak256(new TextEncoder().encode('{"mocked":"jcs"}'));
@@ -2400,6 +2410,9 @@ describe('MechAdapter TaskCoordinator flow', () => {
       },
     };
     vi.mocked(fetchSignedEnvelopeFromIpfs).mockResolvedValueOnce(fakeEnvelope);
+    vi.mocked(fetchRawBytesFromIpfs).mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(fakeEnvelope)),
+    );
     vi.mocked((SignedEnvelopeSchema as any).parse).mockReturnValue(fakeEnvelope);
 
     const adapter = new MechAdapter({ ...TEST_CONFIG, routerClaimDeliveryVariant: 'v3' });

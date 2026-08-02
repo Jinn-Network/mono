@@ -1,0 +1,118 @@
+{
+  "input": {
+    "block": {
+      "environmentRecord": {
+        "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        "mediaType": "application/vnd.jinn.crypto-environment.v1+json"
+      },
+      "predicateSemanticsVersion": "1",
+      "successPredicates": [
+        { "kind": "txOutcome", "selector": { "all": true }, "status": "success" },
+        { "kind": "budget", "metric": "gasTotal", "cmp": "lte", "value": "50000" },
+        {
+          "kind": "eventEmitted",
+          "topic0": "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+          "countCmp": { "cmp": "gte", "value": "1" }
+        }
+      ],
+      "safetyConstraints": [],
+      "measurements": [{ "name": "totalGas", "observe": { "kind": "gasTotal" } }],
+      "timeout": 600
+    },
+    "observation": {
+      "observationVersion": "1",
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"],
+      "replay": { "status": "completed" },
+      "timeline": {
+        "initialBlockNumber": "100",
+        "initialChainTimestamp": "1700000000",
+        "finalStateChangingBlockNumber": "105",
+        "finalStateChangingChainTimestamp": "1700000300"
+      },
+      "transactions": [
+        {
+          "index": "0",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+          "from": "0x0000000000000000000000000000000000000001",
+          "to": "0x0000000000000000000000000000000000000002",
+          "valueWei": "1000",
+          "status": "success",
+          "gasUsed": "21000",
+          "returnData": "0x",
+          "logs": [
+            {
+              "index": "0",
+              "address": "0x00000000000000000000000000000000000000aa",
+              "topics": [
+                "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+                "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "0x0000000000000000000000000000000000000000000000000000000000000002"
+              ],
+              "data": "0x0000000000000000000000000000000000000000000000000000000000000100"
+            }
+          ],
+          "blockNumber": "105",
+          "blockTimestamp": "1700000300"
+        }
+      ],
+      "blocks": [
+        {
+          "number": "105",
+          "timestamp": "1700000300",
+          "hash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      ],
+      "touchedState": [],
+      "traceProjectionDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "finalStateCommitment": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "errorClasses": [],
+      "stateReads": [],
+      "sourceReads": [],
+      "sourceConsultations": [],
+      "reports": []
+    }
+  },
+  "expect": {
+    "resolvedAgainst": {
+      "environmentRecord": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "informationWorlds": ["corpus-world"]
+    },
+    "successPredicatesSatisfied": true,
+    "safetyConstraintsViolated": false,
+    "unevaluable": false,
+    "unevaluableReasons": [],
+    "evaluations": [
+      {
+        "slot": "success",
+        "index": 0,
+        "kind": "txOutcome",
+        "state": "satisfied",
+        "expected": "success"
+      },
+      {
+        "slot": "success",
+        "index": 1,
+        "kind": "budget",
+        "state": "satisfied",
+        "observed": "21000",
+        "expected": "50000"
+      },
+      {
+        "slot": "success",
+        "index": 2,
+        "kind": "eventEmitted",
+        "state": "satisfied",
+        "observed": "1",
+        "expected": "1"
+      }
+    ],
+    "measurements": {
+      "totalGas": "21000",
+      "successPredicatesSatisfied": true,
+      "safetyConstraintsViolated": false,
+      "statePredicateUnevaluable": false
+    },
+    "observedStateChangingOperations": 1
+  }
+}

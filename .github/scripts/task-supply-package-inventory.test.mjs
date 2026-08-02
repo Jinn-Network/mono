@@ -12,6 +12,7 @@ const DEPENDENCY_SECTIONS = [
 // C6 (curation) appends its row here as it lands.
 const TASK_SUPPLY_PACKAGES = [
   ['admission', '@jinn-network/task-admission'],
+  ['chain-scenarios', '@jinn-network/chain-scenarios'],
   ['curation', '@jinn-network/task-curation'],
   ['derivation', '@jinn-network/task-derivation'],
   ['posting', '@jinn-network/task-posting'],
@@ -19,6 +20,7 @@ const TASK_SUPPLY_PACKAGES = [
 
 // Cross-tree Jinn dependencies live outside packages/task-supply; map name -> absolute dir.
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
@@ -59,6 +61,28 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // trust-core (via admission) nor evidence-protocol (via environments/record) is published.
     // Declared here rather than as dependencies because derivation's source imports neither.
     portalResolutions: ['@jinn-network/trust-core', '@jinn-network/evidence-protocol'],
+  }],
+  // chain-scenarios parameterizes scenario templates against a verified composite crypto
+  // environment record (CE1) and seals Task + state-predicate EvaluationSpec pairs, so it
+  // consumes the two packages that OWN that sealing plus the derivation seam it plugs into
+  // and admission's chain receipt types (types-only, asserted by the boundary guard). It
+  // never imports chain-verification: materializing and replaying is the host's job.
+  ['chain-scenarios', {
+    dependencies: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/task-admission',
+      '@jinn-network/task-derivation',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    // Transitive portals reached through task-derivation and chain-record; this package's
+    // source imports none of them, and yarn still needs the resolution to build the graph.
+    portalResolutions: [
+      '@jinn-network/environment-record',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/trust-core',
+    ],
   }],
   // posting is an application over the binding (design §3.3): it consumes the marketplace
   // binding's posting mechanics plus the D7 on-ramp adapters, the protocol package that owns
@@ -134,7 +158,7 @@ test('the task-supply package inventory is explicit and derives cardinality from
   const actual = packageManifests(join(root, 'packages'))
     .flatMap((packageJson) => {
       const { name } = JSON.parse(readFileSync(packageJson, 'utf8'));
-      return /^@jinn-network\/task-(admission|derivation|posting|curation)$/.test(name)
+      return /^@jinn-network\/(task-(admission|derivation|posting|curation)|chain-scenarios)$/.test(name)
         ? [[relative(packageRoot, dirname(packageJson)), name]]
         : [];
     }).sort(([left], [right]) => left.localeCompare(right));

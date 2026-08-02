@@ -28,3 +28,11 @@ Three rules define the boundary (design §7.1):
 
 Admission owns no container runtime: `runInEnvironment` is an injected port. It owns no key
 material: `sealReceipt` takes a `DsseSigner`.
+
+## Two families, two policies
+
+`admitCandidate` implements the SWE differential: empty versus gold over declared test-path
+transitions. `admitChainCandidate` implements the state-predicate differential: do-nothing
+versus reference over the success **conjunction**. Individual predicates holding at baseline is
+expected and is never a refusal — only the conjunction's flip from false (empty) to true
+(reference) earns a receipt.

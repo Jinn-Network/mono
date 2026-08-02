@@ -1,0 +1,14 @@
+{
+  "protocol": "https://jinn.network/record-discovery/1.0",
+  "kind": "https://jinn.network/records/chain-environment/1.0",
+  "profile": "https://jinn.network/records/chain-environment/1.0/facts/1.0",
+  "fields": [
+    { "name": "chainEnvironmentRecordDigest", "class": "record" },
+    { "name": "runtime.family", "class": "record", "cloudEvents": { "attribute": "family", "scalar": "string" } },
+    { "name": "runtime.version", "class": "record", "cloudEvents": { "attribute": "rtversion", "scalar": "string" } },
+    { "name": "runtime.image.manifestDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "image", "scalar": "string" } },
+    { "name": "stateMaterialization.closureClass", "class": "record", "cloudEvents": { "attribute": "closure", "scalar": "string" } },
+    { "name": "stateMaterialization.fidelityClass", "class": "record", "cloudEvents": { "attribute": "fidelity", "scalar": "string" } },
+    { "name": "stateMaterialization.stateArtifactDigest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "artifact", "scalar": "string" } }
+  ]
+}

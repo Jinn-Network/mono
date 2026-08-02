@@ -1,10 +1,22 @@
 {
   "version": 1,
   "entries": [
-    { "id": "parsers/prediction-market.parser.json", "sha256": "fdf33b359e1d142a372b374abddab4e582fd4cbff5a32e53de9333a5515c2d1a" },
-    { "id": "parsers/swe-rebench-v2.parser.json", "sha256": "5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a" },
-    { "id": "prediction/README.md", "sha256": "e686bc86d91a582265898f287320f4b4e1b7f1f268e18ab876b2de1313e5e20a" },
-    { "id": "swe-rebench/README.md", "sha256": "ec16af244440d6c3011b8674568a2f6a989afb22d878beb8c0f2fc26242ef9db" }
+    {
+      "id": "parsers/prediction-market.parser.json",
+      "sha256": "fdf33b359e1d142a372b374abddab4e582fd4cbff5a32e53de9333a5515c2d1a"
+    },
+    {
+      "id": "parsers/swe-rebench-v2.parser.json",
+      "sha256": "5b859d500777a1370bdadcee098ce9449f92772b7c9572709b502d9ee3be9e7a"
+    },
+    {
+      "id": "prediction/README.md",
+      "sha256": "e686bc86d91a582265898f287320f4b4e1b7f1f268e18ab876b2de1313e5e20a"
+    },
+    {
+      "id": "swe-rebench/README.md",
+      "sha256": "ec16af244440d6c3011b8674568a2f6a989afb22d878beb8c0f2fc26242ef9db"
+    }
   ],
   "errata": []
 }

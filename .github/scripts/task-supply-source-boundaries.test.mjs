@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'task-supply');
-const taskSupplyDirectories = ['admission', 'curation', 'derivation', 'posting'];
+const taskSupplyDirectories = ['admission', 'chain-scenarios', 'curation', 'derivation', 'posting'];
 
 // The whole task-supply tree is forbidden the frozen trio, every evidence/discovery/marketplace
 // package, every task-execution package, and every chain/storage client. Admission additionally
@@ -66,6 +66,33 @@ const DERIVATION_FORBIDDEN_EXTRA = [
   '@jinn-network/task-curation',
   '@jinn-network/trust-core',
 ];
+
+// chain-scenarios seals Task + state-predicate EvaluationSpec pairs, so it needs the same
+// two task-execution packages derivation does. It additionally may never import the two
+// chain capability packages: materialization and replay are the HOST's job (design §3 —
+// the runtime surface is public, and this package is not one of its four consumers).
+const CHAIN_SCENARIOS_TASK_EXECUTION_ALLOWED = [
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-protocol',
+];
+
+const CHAIN_SCENARIOS_FORBIDDEN_EXTRA = [
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/chain-state-extraction',
+  '@jinn-network/task-curation',
+  '@jinn-network/task-posting',
+  '@jinn-network/trust-core',
+];
+
+function chainScenariosForbiddenPackages(allowed = CHAIN_SCENARIOS_TASK_EXECUTION_ALLOWED) {
+  const stillForbidden = familyMembers('task-execution')
+    .filter((name) => !allowed.includes(name)).sort();
+  return [
+    ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => forbidden !== '@jinn-network/task-execution-*'),
+    ...stillForbidden,
+    ...CHAIN_SCENARIOS_FORBIDDEN_EXTRA,
+  ];
+}
 
 /**
  * The tree-wide `@jinn-network/task-execution-*` wildcard, replaced by an explicit ban on every
@@ -402,6 +429,13 @@ test('task-supply source boundaries remain one-way across the approved graph', (
     derivationForbiddenPackages(DERIVATION_TASK_EXECUTION_ALLOWED),
     FORBIDDEN_ROOTS,
   );
+  // chain-scenarios imports chain-record (CE1), the two sealing packages, derivation's seam
+  // types and admission's chain receipt types. Never chain-verification (design §3).
+  assertBoundary(
+    join(packages, 'chain-scenarios', 'src'),
+    chainScenariosForbiddenPackages(),
+    [...FORBIDDEN_ROOTS, join(root, 'packages', 'environments', 'chain-verification')],
+  );
   // posting imports the marketplace binding (posting mechanics + D7 on-ramp adapters), the
   // protocol package that owns Submission sealing, and task-derivation for types only.
   assertBoundary(
@@ -437,6 +471,19 @@ test('posting\'s marketplace and task-execution carve-outs admit one package eac
       banned.map((name) => `import y from ${JSON.stringify(name)};`).join('\n'));
     assert.equal(forbiddenImports(join(source, 'banned.ts'), forbidden).length, banned.length);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('chain-scenarios reaches task-admission for types only (design §3: admission is a port)', () => {
+  const production = files(join(packages, 'chain-scenarios', 'src'))
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
+  const valueImports = production.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [...source.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+["']@jinn-network\/task-admission["']/gmu)]
+      .map((match) => `${relative(root, file)} -> ${match[0].trim()}`);
+  });
+  assert.deepEqual(valueImports, [],
+    'chain-scenarios may import @jinn-network/task-admission with `import type` only: it '
+      + 'calls admission through an injected port, never directly (program ruling R4)');
 });
 
 test('task-posting reaches task-derivation for types only (supply plan finding F-C5-5)', () => {

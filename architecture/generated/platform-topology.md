@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **69** entries: **50** `platform-v1` packages, **7** disabled `experimental-environment-supply` packages, **8** other entries below `packages/**`, and **4** adjacent entries.
+The catalog contains **75** entries: **50** `platform-v1` packages, **12** disabled `experimental-environment-supply` packages, **8** other entries below `packages/**`, and **5** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -23,6 +23,7 @@ The catalog contains **69** entries: **50** `platform-v1` packages, **7** disabl
 | @jinn-network/core | packages/core | legacy-plugin-stack | — | legacy | legacy product-support kernel | transitional | legacy-product-lines | independent | @huggingface/transformers<br>@jinn-network/plugin<br>@lmoe/gliner-onnx<br>@noble/hashes<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>better-sqlite3<br>canonicalize<br>zod | — | vitest |
 | @jinn-network/record-discovery-client | packages/discovery/client | discovery | 3 | platform | discovery client and resolution | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>@jinn-network/trust-core<br>zod | — | — |
 | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking | discovery | 3 | platform | benchmarking facts projection | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/record-discovery-protocol | — | — |
+| @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments | environments | 3 | platform | chain-environment facts projection | experimental | experimental-environment-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/record-discovery-protocol | — | — |
 | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments | environments | 3 | platform | experimental environment facts projection | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/record-discovery-protocol | — | — |
 | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence | discovery | 3 | platform | evidence facts projection | candidate | platform-v1 | canary-only | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>zod | — | — |
 | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution | discovery | 3 | platform | task-execution facts projection | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>zod | — | — |
@@ -32,6 +33,9 @@ The catalog contains **69** entries: **50** `platform-v1` packages, **7** disabl
 | @jinn-network/record-discovery-source-evidence-journal | packages/discovery/sources/evidence-journal | discovery | 3 | platform | evidence-journal source adapter | candidate | platform-v1 | canary-only | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>zod | — | — |
 | @jinn-network/record-discovery-testing | packages/discovery/testing | discovery | — | platform-support | record-discovery conformance kit | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-protocol<br>zod | — | vitest |
 | @jinn-network/record-discovery-transport-http | packages/discovery/transport-http | discovery | 3 | platform | HTTP discovery transport | candidate | platform-v1 | canary-only | @jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve | — | — |
+| @jinn-network/chain-state-extraction | packages/environments/chain-extraction | environments | 3 | platform | archive-fork chain-state extraction capability | experimental | experimental-environment-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/chain-environment-verification<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
+| @jinn-network/chain-environment-record | packages/environments/chain-record | environments | 2 | platform | sealed chain and composite crypto environment record family | experimental | experimental-environment-supply | disabled | @noble/hashes<br>zod | — | vitest |
+| @jinn-network/chain-environment-verification | packages/environments/chain-verification | environments | 3 | platform | chain environment materialization and verification capability | experimental | experimental-environment-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/trust-core<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/environment-record | packages/environments/record | environments | 2 | platform | environment record family | experimental | experimental-environment-supply | disabled | @noble/hashes<br>zod | — | vitest |
 | @jinn-network/environment-verification | packages/environments/verification | environments | 3 | platform | environment verification capability | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/trust-core<br>zod | — | vitest |
 | @jinn-network/attestation-issuer | packages/evidence/attestation-issuer | evidence | 3 | platform | attestation issuance capability | candidate | platform-v1 | canary-only | @jinn-network/evidence-protocol<br>@jinn-network/evidence-repository | — | vitest |
@@ -72,6 +76,7 @@ The catalog contains **69** entries: **50** `platform-v1` packages, **7** disabl
 | @jinn-network/task-execution-protocol | packages/task-execution/protocol | task-execution | 1 | platform | task-execution protocol | candidate | platform-v1 | canary-only | @noble/hashes<br>zod | — | — |
 | @jinn-network/task-execution-testing | packages/task-execution/testing | task-execution | — | platform-support | task-execution conformance kit | candidate | platform-v1 | canary-only | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | vitest |
 | @jinn-network/task-admission | packages/task-supply/admission | task-supply | 3 | platform | task admission capability | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/trust-core<br>zod | — | vitest |
+| @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios | task-supply | 3 | platform | verified chain-environment scenario derivation capability | experimental | experimental-environment-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/task-curation | packages/task-supply/curation | task-supply | 3 | platform | task curation projection | experimental | experimental-environment-supply | disabled | zod | — | — |
 | @jinn-network/task-derivation | packages/task-supply/derivation | task-supply | 3 | platform | task derivation capability | experimental | experimental-environment-supply | disabled | @jinn-network/environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/task-posting | packages/task-supply/posting | task-supply | 3 | platform | task posting capability | experimental | experimental-environment-supply | disabled | @jinn-network/marketplace-binding<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-protocol<br>viem | — | — |
@@ -79,6 +84,7 @@ The catalog contains **69** entries: **50** `platform-v1` packages, **7** disabl
 | @jinn-network/trust-resolve | packages/trust/resolve | trust | 3 | platform | trust resolution binding | candidate | platform-v1 | canary-only | @jinn-network/trust-core<br>viem | — | — |
 | @jinn-network/trust-testing | packages/trust/testing | trust | — | platform-support | trust conformance kit | candidate | platform-v1 | canary-only | @jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@noble/curves<br>@noble/hashes | — | vitest |
 | @jinn-network/plugin-runtime | plugin/runtime | plugin-product | — | product-support | unpublished plugin product support runtime | candidate | transitional-or-private | never | @jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-derivation<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/evidence-retrieval<br>@jinn-network/evidence-trace-decode<br>@jinn-network/evidence-trajectory<br>@jinn-network/execution-recorder<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-protocol<br>@jinn-network/trust-core<br>@modelcontextprotocol/sdk<br>better-sqlite3<br>zod | — | — |
+| @jinn-network/chain-only-gate-harness | scripts/chain-only-gate | repository-operations | — | repository-tooling | live chain-environment end-to-end gate harness | experimental | transitional-or-private | never | — | — | — |
 
 ## Runtime dependency topology
 
@@ -107,6 +113,16 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmarking-testing | runtime | @jinn-network/benchmarking-records |
 | @jinn-network/benchmarking-testing | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/benchmarking-testing | runtime | @jinn-network/task-execution-protocol |
+| @jinn-network/chain-environment-verification | runtime | @jinn-network/chain-environment-record |
+| @jinn-network/chain-environment-verification | runtime | @jinn-network/trust-core |
+| @jinn-network/chain-scenarios | runtime | @jinn-network/chain-environment-record |
+| @jinn-network/chain-scenarios | runtime | @jinn-network/task-admission |
+| @jinn-network/chain-scenarios | runtime | @jinn-network/task-derivation |
+| @jinn-network/chain-scenarios | runtime | @jinn-network/task-execution-profiles |
+| @jinn-network/chain-scenarios | runtime | @jinn-network/task-execution-protocol |
+| @jinn-network/chain-state-extraction | runtime | @jinn-network/chain-environment-record |
+| @jinn-network/chain-state-extraction | runtime | @jinn-network/chain-environment-verification |
+| @jinn-network/chain-state-extraction | runtime | @jinn-network/trust-core |
 | @jinn-network/client | runtime | @jinn-network/core |
 | @jinn-network/client | runtime | @jinn-network/evidence-catalog-sqlite |
 | @jinn-network/client | runtime | @jinn-network/evidence-discovery |
@@ -208,6 +224,8 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/record-discovery-client | runtime | @jinn-network/trust-core |
 | @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/benchmarking-records |
 | @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/record-discovery-protocol |
+| @jinn-network/record-discovery-facts-chain-environments | runtime | @jinn-network/chain-environment-record |
+| @jinn-network/record-discovery-facts-chain-environments | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-facts-environments | runtime | @jinn-network/environment-record |
 | @jinn-network/record-discovery-facts-environments | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-facts-evidence | runtime | @jinn-network/evidence-discovery |
@@ -344,12 +362,12 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 
 | Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |
 | --- | ---: | --- | --- | --- | --- | --- |
-| experimental-environment-supply | 7 | environments-ci<br>record-discovery-ci<br>task-supply-ci | disabled | false | false | false |
+| experimental-environment-supply | 12 | environments-ci<br>record-discovery-ci<br>task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 5 | client-ci<br>core-ci<br>layer-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | platform-v1 | 50 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
-| transitional-or-private | 7 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci | private<br>never | false | false | false |
+| transitional-or-private | 8 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>task-supply-ci | private<br>never | false | false | false |
 
-The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 7 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
+The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 12 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
 | Package | Workflow | Environment field |
 | --- | --- | --- |
@@ -421,6 +439,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/core | legacy-product-lines | — | — | — | — |
 | @jinn-network/record-discovery-client | platform-v1 | — | — | — | — |
 | @jinn-network/record-discovery-facts-benchmarking | platform-v1 | — | profiles | — | — |
+| @jinn-network/record-discovery-facts-chain-environments | experimental-environment-supply | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-environments | experimental-environment-supply | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-evidence | platform-v1 | — | profiles | — | — |
 | @jinn-network/record-discovery-facts-task-execution | platform-v1 | — | profiles | — | — |
@@ -430,6 +449,9 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/record-discovery-source-evidence-journal | platform-v1 | — | — | fixtures | — |
 | @jinn-network/record-discovery-testing | platform-v1 | — | — | fixtures | . |
 | @jinn-network/record-discovery-transport-http | platform-v1 | — | — | — | — |
+| @jinn-network/chain-state-extraction | experimental-environment-supply | — | — | fixtures | ./testing |
+| @jinn-network/chain-environment-record | experimental-environment-supply | schemas | — | fixtures | ./testing |
+| @jinn-network/chain-environment-verification | experimental-environment-supply | — | — | fixtures | ./testing |
 | @jinn-network/environment-record | experimental-environment-supply | schemas | — | fixtures | ./testing |
 | @jinn-network/environment-verification | experimental-environment-supply | — | — | fixtures | ./testing |
 | @jinn-network/attestation-issuer | platform-v1 | — | — | fixtures | ./testing |
@@ -470,6 +492,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/task-execution-protocol | platform-v1 | schemas | — | fixtures | — |
 | @jinn-network/task-execution-testing | platform-v1 | — | — | fixtures | . |
 | @jinn-network/task-admission | experimental-environment-supply | — | — | — | ./testing |
+| @jinn-network/chain-scenarios | experimental-environment-supply | — | — | fixtures | ./testing |
 | @jinn-network/task-curation | experimental-environment-supply | — | — | fixtures | — |
 | @jinn-network/task-derivation | experimental-environment-supply | — | — | fixtures | ./testing |
 | @jinn-network/task-posting | experimental-environment-supply | — | — | — | — |
@@ -477,6 +500,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/trust-resolve | platform-v1 | — | — | — | — |
 | @jinn-network/trust-testing | platform-v1 | — | — | fixtures | . |
 | @jinn-network/plugin-runtime | transitional-or-private | — | — | — | — |
+| @jinn-network/chain-only-gate-harness | transitional-or-private | — | — | — | — |
 
 ### Exact public assets
 
@@ -596,6 +620,8 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.1.0.json | — | — | https://jinn.network/records/benchmark-matrix/1.0/facts/1.0 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.1.0.json | — | — | https://jinn.network/records/benchmark-report/1.0/facts/1.0 |
 | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.1.0.json | — | — | https://jinn.network/records/benchmark-run/1.0/facts/1.0 |
+| profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json | — | — | https://jinn.network/records/chain-environment/1.0/facts/1.0 |
+| profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json | — | — | https://jinn.network/records/crypto-environment/1.0/facts/1.0 |
 | profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.1.0.json | — | — | https://jinn.network/records/environment/1.0/facts/1.0 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-evidence.1.0.json | — | — | https://jinn.network/records/execution-evidence/1.0/facts/1.0 |
 | profiles | @jinn-network/record-discovery-facts-evidence | packages/discovery/facts/evidence/profiles/execution-verification.1.0.json | — | — | https://jinn.network/records/execution-verification/1.0/facts/1.0 |
@@ -689,6 +715,78 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/withdrawal-of-withdrawal/vector.json | — | — | — |
 | fixtures | @jinn-network/record-discovery-testing | packages/discovery/testing/fixtures/vectors/wrong-signing-scope/vector.json | — | — | — |
 | conformance | @jinn-network/record-discovery-testing | packages/discovery/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/.gitkeep | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/adversarial-v1/uncovered-entry.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/adversarial-v1/unsorted-slots.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/adversarial-v1/uppercase-hex.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/artifacts-v1/converged.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/artifacts-v1/converged.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.json | — | — | — |
+| fixtures | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.sha256 | — | — | — |
+| conformance | @jinn-network/chain-state-extraction | packages/environments/chain-extraction/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/anchor-root-as-initial-commitment/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/artifact-entry-uncovered/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/bare-extension-key/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/digest-confusion-bare-hex/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/index-digest-as-manifest/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/manifest.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/namespaced-extension-preserved/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/origin-precedence-undeclared/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/recanonicalized-bytes/document.bytes | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/adversarial-v1/well-known-fixture-address/document.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/archive-dependent.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/archive-dependent.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/closed-anchored-subset.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/closed-anchored-subset.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/closed-local.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/chain/closed-local.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/chain-only.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/chain-only.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/composed.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/composed.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/extension.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/composite/extension.sha256 | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/equivalence/expected-digest.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/equivalence/input-a.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/equivalence/input-b.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/anchor-root-as-initial-commitment.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/artifact-entry-uncovered.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/bare-extension-key.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/checksummed-address.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/digest-confusion-bare-hex.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/digest-confusion-prefixed-descriptor.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/index-digest-as-manifest.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/origin-precedence-undeclared.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/snapshot-reset-closed-state.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-record | packages/environments/chain-record/fixtures/invalid/well-known-fixture-address.json | — | — | — |
+| schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/chain-environment.schema.json | — | — | https://jinn.network/records/chain-environment/1.0/schema |
+| schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/crypto-environment.schema.json | — | — | https://jinn.network/records/crypto-environment/1.0/schema |
+| conformance | @jinn-network/chain-environment-record | packages/environments/chain-record/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/abi-vectors-v1/vectors.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/artifact-unavailable.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/composite-chain-only.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/composite-colliding-origins.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/coverage-incomplete.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/divergent-on-run-3.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/fork-backend-refusal.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/README.md | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/sealed-stable.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/attestations-v1/upstream-fetch-succeeds.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/archive-observed.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/closed-reproducible.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-closed-with-divergent-per-run.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-coverage-uncovered-but-reproducible.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-k-below-minimum.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-prefixed-digest-set.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-reason-outcome-mismatch.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-runs-on-non-run-bearing.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/predicate-v1/invalid-sealed-without-boundary-probe.json | — | — | — |
+| fixtures | @jinn-network/chain-environment-verification | packages/environments/chain-verification/fixtures/state-read-keys-v1/keys.json | — | — | — |
+| conformance | @jinn-network/chain-environment-verification | packages/environments/chain-verification/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/environment-record | packages/environments/record/fixtures/adversarial-v1/bare-extension-key/document.json | — | — | — |
 | fixtures | @jinn-network/environment-record | packages/environments/record/fixtures/adversarial-v1/bare-hex-manifest-digest/document.json | — | — | — |
 | fixtures | @jinn-network/environment-record | packages/environments/record/fixtures/adversarial-v1/index-digest-as-manifest/document.json | — | — | — |
@@ -931,6 +1029,8 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-spec/golden/deterministic-minimal.sha256 | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-spec/golden/fractional-threshold.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-spec/golden/fractional-threshold.sha256 | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.sha256 | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-task-derivation/adversarial/competitor-delivery.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-task-derivation/adversarial/evaluator-modified-template.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/evaluation-task-derivation/adversarial/superseded-delivery.json | — | — | — |
@@ -981,6 +1081,31 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/schema-hardening/adversarial/remote-ref.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/schema-hardening/golden/valid-conforms.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/schema-hardening/golden/valid-rejects-nonconforming-payload.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/bare-extra-key.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-inlined-content.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-prefixed-digest.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/predicate-bare-extra-key.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/reserved-measurement-name.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/safety-constraint-state-predicate.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/source-consulted-as-success-predicate.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/tolerance-without-within-comparator.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/unknown-predicate-kind.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/golden/measurements-and-tightenings.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/golden/minimal.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-block/golden/namespaced-extra-key.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/duplicate-state-read.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/environment-record-mismatch.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/replay-refused.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/reported-value-post-replay-only.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/source-read-unavailable.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/declarative-call-ground-truth.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-post-replay-declared.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/safety-violated-unlimited-approval.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/source-value-and-consulted.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/success-conjunction-satisfied.json | — | — | — |
+| fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/time-bound-across-timewarp.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/sub-profile/adversarial/chain-depth-9.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/sub-profile/adversarial/closed-parent.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/sub-profile/adversarial/widening-subprofile.json | — | — | — |
@@ -1074,6 +1199,20 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-testing | packages/task-execution/testing/fixtures/manifest.sha256.json | — | — | — |
 | conformance | @jinn-network/task-execution-testing | packages/task-execution/testing/src/index.ts | . | ./dist/index.d.ts<br>./dist/index.js | — |
 | conformance | @jinn-network/task-admission | packages/task-supply/admission/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/environment/approval-chain.sealed.json | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/environment/approval-record.sealed.json | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/environment/chain.sealed.json | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/environment/record.sealed.json | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/environment/record.source.json | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/evaluation-spec.bytes | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/pool-manifest.bytes | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/reference-script.digest | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/task.bytes | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/evaluation-spec.bytes | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/pool-manifest.bytes | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/reference-script.digest | — | — | — |
+| fixtures | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/task.bytes | — | — | — |
+| conformance | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
 | fixtures | @jinn-network/task-curation | packages/task-supply/curation/fixtures/observations-bucket.json | — | — | — |
 | fixtures | @jinn-network/task-curation | packages/task-supply/curation/fixtures/observations-golden.json | — | — | — |
 | fixtures | @jinn-network/task-curation | packages/task-supply/curation/fixtures/observations-manipulation.json | — | — | — |
@@ -1138,7 +1277,11 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | https://jinn.network/records/benchmark-report/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.1.0.json |
 | https://jinn.network/records/benchmark-run/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/run.1.0.json |
 | https://jinn.network/records/benchmark/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/benchmark.1.0.json |
+| https://jinn.network/records/chain-environment/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json |
+| https://jinn.network/records/chain-environment/1.0/schema | `$id` | schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/chain-environment.schema.json |
 | https://jinn.network/records/checkpoint/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/checkpoint.1.0.json |
+| https://jinn.network/records/crypto-environment/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-chain-environments | packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json |
+| https://jinn.network/records/crypto-environment/1.0/schema | `$id` | schemas | @jinn-network/chain-environment-record | packages/environments/chain-record/schemas/crypto-environment.schema.json |
 | https://jinn.network/records/delivery/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-task-execution | packages/discovery/facts/task-execution/profiles/delivery.1.0.json |
 | https://jinn.network/records/environment/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-environments | packages/discovery/facts/environments/profiles/environment.1.0.json |
 | https://jinn.network/records/environment/1.0/schema | `$id` | schemas | @jinn-network/environment-record | packages/environments/record/schemas/environment.schema.json |
@@ -1159,22 +1302,22 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3025 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3225 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
 | authorityDocuments | 19 |
-| boundaryPolicies | 18 |
-| catalogManifests | 69 |
-| catalogPublicSurfaces | 951 |
+| boundaryPolicies | 19 |
+| catalogManifests | 75 |
+| catalogPublicSurfaces | 1103 |
 | catalogSchema | 2 |
-| conformancePackedTargets | 46 |
-| conformanceSources | 23 |
+| conformancePackedTargets | 54 |
+| conformanceSources | 27 |
 | decisionRecords | 2 |
-| discoveredFirstPartySurfaces | 2403 |
-| generatedOutputSources | 997 |
-| generatorSources | 504 |
+| discoveredFirstPartySurfaces | 2557 |
+| generatedOutputSources | 1157 |
+| generatorSources | 538 |
 | marketplaceControl | 2 |
 | requiredGates | 18 |
 | staticControl | 6 |

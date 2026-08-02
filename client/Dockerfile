@@ -143,6 +143,7 @@ COPY packages/trust/core/README.md ./packages/trust/core/README.md
 # `materialize-bundled-workspaces.mjs prepare` copies each portal into node_modules.
 COPY packages/evidence/local-runtime/README.md ./packages/evidence/local-runtime/README.md
 COPY packages/marketplace/binding/README.md ./packages/marketplace/binding/README.md
+COPY packages/marketplace/binding/fixtures/ ./packages/marketplace/binding/fixtures/
 COPY packages/marketplace/pipeline/README.md ./packages/marketplace/pipeline/README.md
 COPY packages/marketplace/projector/README.md ./packages/marketplace/projector/README.md
 COPY packages/marketplace/venue-base/README.md ./packages/marketplace/venue-base/README.md

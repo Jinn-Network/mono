@@ -52,4 +52,5 @@
 /client/                @oaksprout @ritsukai
 /packages/              @oaksprout @ritsukai
 /plugin/runtime/        @oaksprout @ritsukai
+/scripts/               @oaksprout @ritsukai
 /.github/CODEOWNERS     @oaksprout @ritsukai

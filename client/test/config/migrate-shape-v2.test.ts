@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { keccak256, toBytes } from 'viem';
 import { describe, expect, it } from 'vitest';
 import { migrateConfigShapeV2 } from '../../src/config/migrate-shape-v2.js';
 
@@ -52,7 +53,7 @@ describe('config shape v2 migration', () => {
         plugins: ['learner'],
         credentialRef: 'claude-code-default',
         isolationPolicy: 'process',
-        legacyManifestDigest: 'QmSolver',
+        legacyManifestDigest: keccak256(toBytes('QmSolver')),
       },
     ]);
     // Amendment (coordinator amendment 1): a configured operator carries the

@@ -19,6 +19,7 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { keccak256, toBytes } from 'viem';
 import { backupConfigFile, writeConfigFileAtomic } from './atomic-write.js';
 import {
   CONFIG_SHAPE_VERSION,
@@ -46,6 +47,8 @@ interface JoinedEntry {
   readonly harness?: string;
   readonly model?: string;
   readonly plugins?: readonly string[];
+  readonly contract?: { readonly id?: string; readonly version?: string };
+  readonly solverType?: string;
 }
 
 function readJson(path: string): Record<string, unknown> | undefined {
@@ -62,6 +65,18 @@ function readJson(path: string): Record<string, unknown> | undefined {
 
 const DEFAULT_MODEL_FALLBACK = 'claude-haiku-4-5-20251001';
 
+function workKindFromJoined(manifestCid: string, entry: JoinedEntry): string {
+  if (typeof entry.solverType === 'string' && entry.solverType.length > 0) {
+    return entry.solverType;
+  }
+  const contractId = entry.contract?.id;
+  const contractVersion = entry.contract?.version;
+  if (typeof contractId === 'string' && typeof contractVersion === 'string') {
+    return `${contractId}.${contractVersion}`;
+  }
+  return manifestCid;
+}
+
 /**
  * A legacy joined entry may carry no per-net `model` (the daemon fell back to
  * the operator's top-level `claudeModel` at solve time — see
@@ -77,13 +92,15 @@ function wiringFromJoined(
   return Object.entries(joined)
     .filter(([, entry]) => (entry.roles ?? []).includes('solver'))
     .map(([manifestCid, entry]) => ({
-      workKind: manifestCid,
+      workKind: workKindFromJoined(manifestCid, entry),
       harness: entry.harness ?? 'claude-code',
       model: entry.model ?? operatorClaudeModel ?? DEFAULT_MODEL_FALLBACK,
       plugins: [...(entry.plugins ?? [])],
       credentialRef: `${entry.harness ?? 'claude-code'}-default`,
       isolationPolicy: 'process',
-      legacyManifestDigest: manifestCid,
+      // Must be the on-chain digest hex, not the CID string — cards carry
+      // `keccak256(toBytes(manifestCid))` from TaskCreated.
+      legacyManifestDigest: keccak256(toBytes(manifestCid)),
     }));
 }
 

@@ -1,10 +1,10 @@
 {
   "counts": {
-    "adjacentEntries": 4,
-    "experimentalEnvironmentSupply": 7,
-    "inventory": 69,
+    "adjacentEntries": 5,
+    "experimentalEnvironmentSupply": 12,
+    "inventory": 75,
     "otherPackagesRootEntries": 8,
-    "packagesRootEntries": 65,
+    "packagesRootEntries": 70,
     "platformV1": 50
   },
   "graph": {
@@ -118,6 +118,56 @@
         "from": "@jinn-network/benchmarking-testing",
         "kind": "runtime",
         "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/chain-environment-verification",
+        "kind": "runtime",
+        "to": "@jinn-network/chain-environment-record"
+      },
+      {
+        "from": "@jinn-network/chain-environment-verification",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@jinn-network/chain-scenarios",
+        "kind": "runtime",
+        "to": "@jinn-network/chain-environment-record"
+      },
+      {
+        "from": "@jinn-network/chain-scenarios",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@jinn-network/chain-scenarios",
+        "kind": "runtime",
+        "to": "@jinn-network/task-derivation"
+      },
+      {
+        "from": "@jinn-network/chain-scenarios",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/chain-scenarios",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/chain-state-extraction",
+        "kind": "runtime",
+        "to": "@jinn-network/chain-environment-record"
+      },
+      {
+        "from": "@jinn-network/chain-state-extraction",
+        "kind": "runtime",
+        "to": "@jinn-network/chain-environment-verification"
+      },
+      {
+        "from": "@jinn-network/chain-state-extraction",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/client",
@@ -625,6 +675,16 @@
         "to": "@jinn-network/record-discovery-protocol"
       },
       {
+        "from": "@jinn-network/record-discovery-facts-chain-environments",
+        "kind": "runtime",
+        "to": "@jinn-network/chain-environment-record"
+      },
+      {
+        "from": "@jinn-network/record-discovery-facts-chain-environments",
+        "kind": "runtime",
+        "to": "@jinn-network/record-discovery-protocol"
+      },
+      {
         "from": "@jinn-network/record-discovery-facts-environments",
         "kind": "runtime",
         "to": "@jinn-network/environment-record"
@@ -965,6 +1025,11 @@
       "@jinn-network/benchmarking-run",
       "@jinn-network/benchmarking-testing",
       "@jinn-network/broadcast-bot",
+      "@jinn-network/chain-environment-record",
+      "@jinn-network/chain-environment-verification",
+      "@jinn-network/chain-only-gate-harness",
+      "@jinn-network/chain-scenarios",
+      "@jinn-network/chain-state-extraction",
       "@jinn-network/client",
       "@jinn-network/core",
       "@jinn-network/environment-record",
@@ -998,6 +1063,7 @@
       "@jinn-network/plugin-runtime",
       "@jinn-network/record-discovery-client",
       "@jinn-network/record-discovery-facts-benchmarking",
+      "@jinn-network/record-discovery-facts-chain-environments",
       "@jinn-network/record-discovery-facts-environments",
       "@jinn-network/record-discovery-facts-evidence",
       "@jinn-network/record-discovery-facts-task-execution",
@@ -1401,16 +1467,16 @@
   "ownership": {
     "counts": {
       "authorityDocuments": 19,
-      "boundaryPolicies": 18,
-      "catalogManifests": 69,
-      "catalogPublicSurfaces": 951,
+      "boundaryPolicies": 19,
+      "catalogManifests": 75,
+      "catalogPublicSurfaces": 1103,
       "catalogSchema": 2,
-      "conformancePackedTargets": 46,
-      "conformanceSources": 23,
+      "conformancePackedTargets": 54,
+      "conformanceSources": 27,
       "decisionRecords": 2,
-      "discoveredFirstPartySurfaces": 2403,
-      "generatedOutputSources": 997,
-      "generatorSources": 504,
+      "discoveredFirstPartySurfaces": 2557,
+      "generatedOutputSources": 1157,
+      "generatorSources": 538,
       "marketplaceControl": 2,
       "requiredGates": 18,
       "staticControl": 6
@@ -2568,6 +2634,7 @@
       },
       {
         "categories": [
+          "boundaryPolicies",
           "generatorSources",
           "requiredGates"
         ],
@@ -4145,6 +4212,16 @@
           "@ritsukai"
         ],
         "path": "client/scripts/release/scenario-types.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/scripts/release/stage1-closed-loop.ts"
       },
       {
         "categories": [
@@ -6215,6 +6292,16 @@
           "@ritsukai"
         ],
         "path": "client/test/bridge/converged-delivery-legacy-evaluator.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/bridge/delivery-claim-evidence.test.ts"
       },
       {
         "categories": [
@@ -18829,6 +18916,82 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/discovery/facts/chain-environments/package.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/profiles"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/discovery/facts/chain-environments/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/discovery/facts/environments/package.json"
       },
       {
@@ -21218,6 +21381,1376 @@
           "@ritsukai"
         ],
         "path": "packages/discovery/transport-http/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/.gitkeep"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/uncovered-entry.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/unsorted-slots.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/uppercase-hex.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/converged.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/converged.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.sha256"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/scripts/generate-fixtures.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-extraction/src/testing.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/anchor-root-as-initial-commitment"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/anchor-root-as-initial-commitment/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/artifact-entry-uncovered"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/artifact-entry-uncovered/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/bare-extension-key"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/bare-extension-key/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/digest-confusion-bare-hex"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/digest-confusion-bare-hex/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/index-digest-as-manifest"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/index-digest-as-manifest/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/manifest.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/namespaced-extension-preserved"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/namespaced-extension-preserved/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/origin-precedence-undeclared"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/origin-precedence-undeclared/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/recanonicalized-bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/recanonicalized-bytes/document.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/well-known-fixture-address"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/well-known-fixture-address/document.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/archive-dependent.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/archive-dependent.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-anchored-subset.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-anchored-subset.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-local.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-local.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/chain-only.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/chain-only.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/composed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/composed.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/extension.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/composite/extension.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/equivalence"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/equivalence/expected-digest.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/equivalence/input-a.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/equivalence/input-b.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/anchor-root-as-initial-commitment.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/artifact-entry-uncovered.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/bare-extension-key.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/checksummed-address.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/digest-confusion-bare-hex.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/digest-confusion-prefixed-descriptor.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/index-digest-as-manifest.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/origin-precedence-undeclared.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/snapshot-reset-closed-state.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/fixtures/invalid/well-known-fixture-address.json"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/package.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/schemas"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/schemas/chain-environment.schema.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/schemas/crypto-environment.schema.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/scripts/generate-fixtures.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/scripts/generate-schemas.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-record/src/testing.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/abi-vectors-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/abi-vectors-v1/vectors.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/artifact-unavailable.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/composite-chain-only.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/composite-colliding-origins.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/coverage-incomplete.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/divergent-on-run-3.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/fork-backend-refusal.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/README.md"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/sealed-stable.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/upstream-fetch-succeeds.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/archive-observed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/closed-reproducible.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-closed-with-divergent-per-run.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-coverage-uncovered-but-reproducible.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-k-below-minimum.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-prefixed-digest-set.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-reason-outcome-mismatch.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-runs-on-non-run-bearing.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-sealed-without-boundary-probe.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/state-read-keys-v1"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/fixtures/state-read-keys-v1/keys.json"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/scripts/generate-goldens.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/environments/chain-verification/src/testing.ts"
       },
       {
         "categories": [
@@ -29501,6 +31034,30 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.sha256"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/fixtures/evaluation-task-derivation"
       },
       {
@@ -30366,6 +31923,378 @@
           "@ritsukai"
         ],
         "path": "packages/task-execution/profiles/fixtures/schema-hardening/golden/valid-rejects-nonconforming-payload.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/bare-extra-key.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-inlined-content.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-prefixed-digest.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/predicate-bare-extra-key.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/reserved-measurement-name.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/safety-constraint-state-predicate.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/source-consulted-as-success-predicate.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/tolerance-without-within-comparator.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/unknown-predicate-kind.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/measurements-and-tightenings.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/minimal.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/namespaced-extra-key.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/duplicate-state-read.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/environment-record-mismatch.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/replay-refused.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/reported-value-post-replay-only.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/source-read-unavailable.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/declarative-call-ground-truth.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-post-replay-declared.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/safety-violated-unlimited-approval.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/source-value-and-consulted.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/success-conjunction-satisfied.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/time-bound-across-timewarp.json"
       },
       {
         "categories": [
@@ -32365,6 +34294,296 @@
       },
       {
         "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/dist/testing.d.ts"
+      },
+      {
+        "categories": [
+          "conformancePackedTargets",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/dist/testing.js"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/approval-chain.sealed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/approval-record.sealed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/chain.sealed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/record.sealed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/record.source.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/evaluation-spec.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/pool-manifest.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/reference-script.digest"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/task.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/evaluation-spec.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/pool-manifest.bytes"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/reference-script.digest"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/task.bytes"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "conformanceSources",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-supply/chain-scenarios/src/testing.ts"
+      },
+      {
+        "categories": [
           "catalogPublicSurfaces",
           "discoveredFirstPartySurfaces",
           "generatedOutputSources"
@@ -33693,6 +35912,172 @@
       },
       {
         "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/admission-anvil.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/admission-observation.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/anvil-fork.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/anvil-hosts.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/archive-port.mjs"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/fixtures/MiniToken.abi"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/fixtures/MiniToken.bin"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/fixtures/MiniToken.bin-runtime"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/fixtures/MiniToken.sol"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/gate-evidence.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/gate-evidence.md"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/gate-runtime.mjs"
+      },
+      {
+        "categories": [
+          "catalogManifests",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "scripts/chain-only-gate/run.mjs"
+      },
+      {
+        "categories": [
           "authorityDocuments"
         ],
         "owners": [
@@ -34352,6 +36737,45 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/chain-environment-record",
+          "@jinn-network/record-discovery-protocol"
+        ]
+      },
+      "domain": "environments",
+      "name": "@jinn-network/record-discovery-facts-chain-environments",
+      "ownerGroup": "architecture-control",
+      "path": "packages/discovery/facts/chain-environments",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [
+          "profiles"
+        ],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-environment-supply",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "record-discovery-ci"
+      ],
+      "role": "chain-environment facts projection",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/record-discovery-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
           "@jinn-network/environment-record",
           "@jinn-network/record-discovery-protocol"
         ]
@@ -34698,6 +37122,142 @@
       ],
       "role": "HTTP discovery transport",
       "stability": "candidate",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/chain-environment-record",
+          "@jinn-network/chain-environment-verification",
+          "@jinn-network/trust-core",
+          "@noble/hashes",
+          "zod"
+        ]
+      },
+      "domain": "environments",
+      "name": "@jinn-network/chain-state-extraction",
+      "ownerGroup": "architecture-control",
+      "path": "packages/environments/chain-extraction",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-environment-supply",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "role": "archive-fork chain-state extraction capability",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@noble/hashes",
+          "zod"
+        ]
+      },
+      "domain": "environments",
+      "name": "@jinn-network/chain-environment-record",
+      "ownerGroup": "architecture-control",
+      "path": "packages/environments/chain-record",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": [
+          "schemas"
+        ]
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-environment-supply",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "role": "sealed chain and composite crypto environment record family",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 2,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/chain-environment-record",
+          "@jinn-network/trust-core",
+          "@noble/hashes",
+          "zod"
+        ]
+      },
+      "domain": "environments",
+      "name": "@jinn-network/chain-environment-verification",
+      "ownerGroup": "architecture-control",
+      "path": "packages/environments/chain-verification",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-environment-supply",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "role": "chain environment materialization and verification capability",
+      "stability": "experimental",
       "supersedes": [],
       "tier": 3,
       "transition": null,
@@ -36402,6 +38962,54 @@
       "classification": "platform",
       "dependencies": {
         "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/chain-environment-record",
+          "@jinn-network/task-admission",
+          "@jinn-network/task-derivation",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@noble/hashes",
+          "zod"
+        ]
+      },
+      "domain": "task-supply",
+      "name": "@jinn-network/chain-scenarios",
+      "ownerGroup": "architecture-control",
+      "path": "packages/task-supply/chain-scenarios",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-environment-supply",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "task-supply-ci"
+      ],
+      "role": "verified chain-environment scenario derivation capability",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
         "peer": [],
         "runtime": [
           "zod"
@@ -36690,6 +39298,40 @@
       "tier": null,
       "transition": null,
       "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/environments-ci.yml"
+      },
+      "classification": "repository-tooling",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": []
+      },
+      "domain": "repository-operations",
+      "name": "@jinn-network/chain-only-gate-harness",
+      "ownerGroup": "architecture-control",
+      "path": "scripts/chain-only-gate",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "never",
+      "releaseGroup": "transitional-or-private",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "environments-ci",
+        "task-supply-ci"
+      ],
+      "role": "live chain-environment end-to-end gate harness",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": null,
+      "transition": null
     }
   ],
   "publicSurfaces": {
@@ -37742,6 +40384,32 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://jinn.network/records/chain-environment/1.0/facts/1.0",
+          "servedPath": "records/chain-environment/1.0/facts/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json",
+        "relativeSource": "profiles/chain-environment.1.0.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://jinn.network/records/crypto-environment/1.0/facts/1.0",
+          "servedPath": "records/crypto-environment/1.0/facts/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "packedTargets": [],
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json",
+        "relativeSource": "profiles/crypto-environment.1.0.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://jinn.network/records/environment/1.0/facts/1.0",
           "servedPath": "records/environment/1.0/facts/1.0"
         },
@@ -38634,6 +41302,671 @@
         ],
         "path": "packages/discovery/testing/src/index.ts",
         "relativeSource": "src/index.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/.gitkeep",
+        "relativeSource": "fixtures/.gitkeep"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/uncovered-entry.json",
+        "relativeSource": "fixtures/adversarial-v1/uncovered-entry.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/unsorted-slots.json",
+        "relativeSource": "fixtures/adversarial-v1/unsorted-slots.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/adversarial-v1/uppercase-hex.json",
+        "relativeSource": "fixtures/adversarial-v1/uppercase-hex.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/converged.json",
+        "relativeSource": "fixtures/artifacts-v1/converged.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/converged.sha256",
+        "relativeSource": "fixtures/artifacts-v1/converged.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.json",
+        "relativeSource": "fixtures/artifacts-v1/minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/artifacts-v1/minimal.sha256",
+        "relativeSource": "fixtures/artifacts-v1/minimal.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.json",
+        "relativeSource": "fixtures/coverage-v1/fixture-coverage.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/fixture-coverage.sha256",
+        "relativeSource": "fixtures/coverage-v1/fixture-coverage.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.json",
+        "relativeSource": "fixtures/coverage-v1/proof-bundle.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [],
+        "path": "packages/environments/chain-extraction/fixtures/coverage-v1/proof-bundle.sha256",
+        "relativeSource": "fixtures/coverage-v1/proof-bundle.sha256"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/chain-state-extraction",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/environments/chain-extraction/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/anchor-root-as-initial-commitment/document.json",
+        "relativeSource": "fixtures/adversarial-v1/anchor-root-as-initial-commitment/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/artifact-entry-uncovered/document.json",
+        "relativeSource": "fixtures/adversarial-v1/artifact-entry-uncovered/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/bare-extension-key/document.json",
+        "relativeSource": "fixtures/adversarial-v1/bare-extension-key/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/digest-confusion-bare-hex/document.json",
+        "relativeSource": "fixtures/adversarial-v1/digest-confusion-bare-hex/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/index-digest-as-manifest/document.json",
+        "relativeSource": "fixtures/adversarial-v1/index-digest-as-manifest/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/manifest.json",
+        "relativeSource": "fixtures/adversarial-v1/manifest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/namespaced-extension-preserved/document.json",
+        "relativeSource": "fixtures/adversarial-v1/namespaced-extension-preserved/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/origin-precedence-undeclared/document.json",
+        "relativeSource": "fixtures/adversarial-v1/origin-precedence-undeclared/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/recanonicalized-bytes/document.bytes",
+        "relativeSource": "fixtures/adversarial-v1/recanonicalized-bytes/document.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/adversarial-v1/well-known-fixture-address/document.json",
+        "relativeSource": "fixtures/adversarial-v1/well-known-fixture-address/document.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/archive-dependent.json",
+        "relativeSource": "fixtures/chain/archive-dependent.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/archive-dependent.sha256",
+        "relativeSource": "fixtures/chain/archive-dependent.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-anchored-subset.json",
+        "relativeSource": "fixtures/chain/closed-anchored-subset.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-anchored-subset.sha256",
+        "relativeSource": "fixtures/chain/closed-anchored-subset.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-local.json",
+        "relativeSource": "fixtures/chain/closed-local.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/chain/closed-local.sha256",
+        "relativeSource": "fixtures/chain/closed-local.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/chain-only.json",
+        "relativeSource": "fixtures/composite/chain-only.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/chain-only.sha256",
+        "relativeSource": "fixtures/composite/chain-only.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/composed.json",
+        "relativeSource": "fixtures/composite/composed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/composed.sha256",
+        "relativeSource": "fixtures/composite/composed.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/extension.json",
+        "relativeSource": "fixtures/composite/extension.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/composite/extension.sha256",
+        "relativeSource": "fixtures/composite/extension.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/equivalence/expected-digest.json",
+        "relativeSource": "fixtures/equivalence/expected-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/equivalence/input-a.json",
+        "relativeSource": "fixtures/equivalence/input-a.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/equivalence/input-b.json",
+        "relativeSource": "fixtures/equivalence/input-b.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/anchor-root-as-initial-commitment.json",
+        "relativeSource": "fixtures/invalid/anchor-root-as-initial-commitment.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/artifact-entry-uncovered.json",
+        "relativeSource": "fixtures/invalid/artifact-entry-uncovered.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/bare-extension-key.json",
+        "relativeSource": "fixtures/invalid/bare-extension-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/checksummed-address.json",
+        "relativeSource": "fixtures/invalid/checksummed-address.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/digest-confusion-bare-hex.json",
+        "relativeSource": "fixtures/invalid/digest-confusion-bare-hex.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/digest-confusion-prefixed-descriptor.json",
+        "relativeSource": "fixtures/invalid/digest-confusion-prefixed-descriptor.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/index-digest-as-manifest.json",
+        "relativeSource": "fixtures/invalid/index-digest-as-manifest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/origin-precedence-undeclared.json",
+        "relativeSource": "fixtures/invalid/origin-precedence-undeclared.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/snapshot-reset-closed-state.json",
+        "relativeSource": "fixtures/invalid/snapshot-reset-closed-state.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/fixtures/invalid/well-known-fixture-address.json",
+        "relativeSource": "fixtures/invalid/well-known-fixture-address.json"
+      },
+      {
+        "claim": {
+          "field": "$id",
+          "identifier": "https://jinn.network/records/chain-environment/1.0/schema",
+          "servedPath": "records/chain-environment/1.0/schema"
+        },
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/schemas/chain-environment.schema.json",
+        "relativeSource": "schemas/chain-environment.schema.json"
+      },
+      {
+        "claim": {
+          "field": "$id",
+          "identifier": "https://jinn.network/records/crypto-environment/1.0/schema",
+          "servedPath": "records/crypto-environment/1.0/schema"
+        },
+        "export": null,
+        "kind": "schemas",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [],
+        "path": "packages/environments/chain-record/schemas/crypto-environment.schema.json",
+        "relativeSource": "schemas/crypto-environment.schema.json"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/chain-environment-record",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/environments/chain-record/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/abi-vectors-v1/vectors.json",
+        "relativeSource": "fixtures/abi-vectors-v1/vectors.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/artifact-unavailable.json",
+        "relativeSource": "fixtures/attestations-v1/artifact-unavailable.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/composite-chain-only.json",
+        "relativeSource": "fixtures/attestations-v1/composite-chain-only.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/composite-colliding-origins.json",
+        "relativeSource": "fixtures/attestations-v1/composite-colliding-origins.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/coverage-incomplete.json",
+        "relativeSource": "fixtures/attestations-v1/coverage-incomplete.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/divergent-on-run-3.json",
+        "relativeSource": "fixtures/attestations-v1/divergent-on-run-3.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/fork-backend-refusal.json",
+        "relativeSource": "fixtures/attestations-v1/fork-backend-refusal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/README.md",
+        "relativeSource": "fixtures/attestations-v1/README.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/sealed-stable.json",
+        "relativeSource": "fixtures/attestations-v1/sealed-stable.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/attestations-v1/upstream-fetch-succeeds.json",
+        "relativeSource": "fixtures/attestations-v1/upstream-fetch-succeeds.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/archive-observed.json",
+        "relativeSource": "fixtures/predicate-v1/archive-observed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/closed-reproducible.json",
+        "relativeSource": "fixtures/predicate-v1/closed-reproducible.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-closed-with-divergent-per-run.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-closed-with-divergent-per-run.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-coverage-uncovered-but-reproducible.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-coverage-uncovered-but-reproducible.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-k-below-minimum.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-k-below-minimum.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-prefixed-digest-set.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-prefixed-digest-set.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-reason-outcome-mismatch.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-reason-outcome-mismatch.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-runs-on-non-run-bearing.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-runs-on-non-run-bearing.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/predicate-v1/invalid-sealed-without-boundary-probe.json",
+        "relativeSource": "fixtures/predicate-v1/invalid-sealed-without-boundary-probe.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [],
+        "path": "packages/environments/chain-verification/fixtures/state-read-keys-v1/keys.json",
+        "relativeSource": "fixtures/state-read-keys-v1/keys.json"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/chain-environment-verification",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/environments/chain-verification/src/testing.ts",
+        "relativeSource": "src/testing.ts"
       },
       {
         "claim": null,
@@ -40907,6 +44240,24 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.json",
+        "relativeSource": "fixtures/evaluation-spec/golden/state-predicate-minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/evaluation-spec/golden/state-predicate-minimal.sha256",
+        "relativeSource": "fixtures/evaluation-spec/golden/state-predicate-minimal.sha256"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/evaluation-task-derivation/adversarial/competitor-delivery.json",
         "relativeSource": "fixtures/evaluation-task-derivation/adversarial/competitor-delivery.json"
       },
@@ -41350,6 +44701,231 @@
         "packedTargets": [],
         "path": "packages/task-execution/profiles/fixtures/schema-hardening/golden/valid-rejects-nonconforming-payload.json",
         "relativeSource": "fixtures/schema-hardening/golden/valid-rejects-nonconforming-payload.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/bare-extra-key.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/bare-extra-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-inlined-content.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/environment-record-inlined-content.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/environment-record-prefixed-digest.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/environment-record-prefixed-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/predicate-bare-extra-key.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/predicate-bare-extra-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/reserved-measurement-name.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/reserved-measurement-name.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/safety-constraint-state-predicate.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/safety-constraint-state-predicate.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/source-consulted-as-success-predicate.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/source-consulted-as-success-predicate.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/tolerance-without-within-comparator.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/tolerance-without-within-comparator.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/adversarial/unknown-predicate-kind.json",
+        "relativeSource": "fixtures/state-predicate-block/adversarial/unknown-predicate-kind.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/measurements-and-tightenings.json",
+        "relativeSource": "fixtures/state-predicate-block/golden/measurements-and-tightenings.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/minimal.json",
+        "relativeSource": "fixtures/state-predicate-block/golden/minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-block/golden/namespaced-extra-key.json",
+        "relativeSource": "fixtures/state-predicate-block/golden/namespaced-extra-key.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/duplicate-state-read.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/adversarial/duplicate-state-read.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/environment-record-mismatch.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/adversarial/environment-record-mismatch.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/replay-refused.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/adversarial/replay-refused.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/reported-value-post-replay-only.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/adversarial/reported-value-post-replay-only.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/adversarial/source-read-unavailable.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/adversarial/source-read-unavailable.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/declarative-call-ground-truth.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/declarative-call-ground-truth.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/do-nothing-satisfies-conjunction.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/reported-value-baseline-ground-truth.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/reported-value-post-replay-declared.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/reported-value-post-replay-declared.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/safety-violated-unlimited-approval.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/safety-violated-unlimited-approval.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/source-value-and-consulted.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/source-value-and-consulted.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/success-conjunction-satisfied.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/success-conjunction-satisfied.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/fixtures/state-predicate-evaluation/golden/time-bound-across-timewarp.json",
+        "relativeSource": "fixtures/state-predicate-evaluation/golden/time-bound-across-timewarp.json"
       },
       {
         "claim": null,
@@ -42209,6 +45785,135 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/approval-chain.sealed.json",
+        "relativeSource": "fixtures/environment/approval-chain.sealed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/approval-record.sealed.json",
+        "relativeSource": "fixtures/environment/approval-record.sealed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/chain.sealed.json",
+        "relativeSource": "fixtures/environment/chain.sealed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/record.sealed.json",
+        "relativeSource": "fixtures/environment/record.sealed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/environment/record.source.json",
+        "relativeSource": "fixtures/environment/record.source.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/evaluation-spec.bytes",
+        "relativeSource": "fixtures/golden/approval-hygiene/evaluation-spec.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/pool-manifest.bytes",
+        "relativeSource": "fixtures/golden/approval-hygiene/pool-manifest.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/reference-script.digest",
+        "relativeSource": "fixtures/golden/approval-hygiene/reference-script.digest"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/approval-hygiene/task.bytes",
+        "relativeSource": "fixtures/golden/approval-hygiene/task.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/evaluation-spec.bytes",
+        "relativeSource": "fixtures/golden/lending-lifecycle/evaluation-spec.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/pool-manifest.bytes",
+        "relativeSource": "fixtures/golden/lending-lifecycle/pool-manifest.bytes"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/reference-script.digest",
+        "relativeSource": "fixtures/golden/lending-lifecycle/reference-script.digest"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [],
+        "path": "packages/task-supply/chain-scenarios/fixtures/golden/lending-lifecycle/task.bytes",
+        "relativeSource": "fixtures/golden/lending-lifecycle/task.bytes"
+      },
+      {
+        "claim": null,
+        "export": "./testing",
+        "kind": "conformance",
+        "package": "@jinn-network/chain-scenarios",
+        "packedTargets": [
+          "./dist/testing.d.ts",
+          "./dist/testing.js"
+        ],
+        "path": "packages/task-supply/chain-scenarios/src/testing.ts",
+        "relativeSource": "src/testing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
         "package": "@jinn-network/task-curation",
         "packedTargets": [],
         "path": "packages/task-supply/curation/fixtures/observations-bucket.json",
@@ -42774,6 +46479,17 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments",
+        "profiles": [
+          "profiles"
+        ],
+        "releaseGroup": "experimental-environment-supply",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/record-discovery-facts-environments",
         "path": "packages/discovery/facts/environments",
         "profiles": [
@@ -42866,6 +46582,47 @@
         "path": "packages/discovery/transport-http",
         "profiles": [],
         "releaseGroup": "platform-v1",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "name": "@jinn-network/chain-state-extraction",
+        "path": "packages/environments/chain-extraction",
+        "profiles": [],
+        "releaseGroup": "experimental-environment-supply",
+        "schemas": []
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "name": "@jinn-network/chain-environment-record",
+        "path": "packages/environments/chain-record",
+        "profiles": [],
+        "releaseGroup": "experimental-environment-supply",
+        "schemas": [
+          "schemas"
+        ]
+      },
+      {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "name": "@jinn-network/chain-environment-verification",
+        "path": "packages/environments/chain-verification",
+        "profiles": [],
+        "releaseGroup": "experimental-environment-supply",
         "schemas": []
       },
       {
@@ -43314,6 +47071,19 @@
         "schemas": []
       },
       {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "name": "@jinn-network/chain-scenarios",
+        "path": "packages/task-supply/chain-scenarios",
+        "profiles": [],
+        "releaseGroup": "experimental-environment-supply",
+        "schemas": []
+      },
+      {
         "conformance": [],
         "fixtures": [
           "fixtures"
@@ -43384,6 +47154,15 @@
         "fixtures": [],
         "name": "@jinn-network/plugin-runtime",
         "path": "plugin/runtime",
+        "profiles": [],
+        "releaseGroup": "transitional-or-private",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/chain-only-gate-harness",
+        "path": "scripts/chain-only-gate",
         "profiles": [],
         "releaseGroup": "transitional-or-private",
         "schemas": []
@@ -43476,10 +47255,38 @@
       },
       {
         "field": "profile",
+        "identifier": "https://jinn.network/records/chain-environment/1.0/facts/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://jinn.network/records/chain-environment/1.0/schema",
+        "kind": "schemas",
+        "package": "@jinn-network/chain-environment-record",
+        "path": "packages/environments/chain-record/schemas/chain-environment.schema.json"
+      },
+      {
+        "field": "profile",
         "identifier": "https://jinn.network/records/checkpoint/1.0/facts/1.0",
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "path": "packages/discovery/facts/task-execution/profiles/checkpoint.1.0.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://jinn.network/records/crypto-environment/1.0/facts/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json"
+      },
+      {
+        "field": "$id",
+        "identifier": "https://jinn.network/records/crypto-environment/1.0/schema",
+        "kind": "schemas",
+        "package": "@jinn-network/chain-environment-record",
+        "path": "packages/environments/chain-record/schemas/crypto-environment.schema.json"
       },
       {
         "field": "profile",
@@ -43612,10 +47419,15 @@
         "platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 7,
+      "expectedPackageCount": 12,
       "packages": [
+        "@jinn-network/chain-environment-record",
+        "@jinn-network/chain-environment-verification",
+        "@jinn-network/chain-scenarios",
+        "@jinn-network/chain-state-extraction",
         "@jinn-network/environment-record",
         "@jinn-network/environment-verification",
+        "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/task-admission",
         "@jinn-network/task-curation",
@@ -44259,10 +48071,15 @@
         "platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 7,
+      "expectedPackageCount": 12,
       "packages": [
+        "@jinn-network/chain-environment-record",
+        "@jinn-network/chain-environment-verification",
+        "@jinn-network/chain-scenarios",
+        "@jinn-network/chain-state-extraction",
         "@jinn-network/environment-record",
         "@jinn-network/environment-verification",
+        "@jinn-network/record-discovery-facts-chain-environments",
         "@jinn-network/record-discovery-facts-environments",
         "@jinn-network/task-admission",
         "@jinn-network/task-curation",
@@ -44401,10 +48218,11 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 7,
+      "expectedPackageCount": 8,
       "packages": [
         "@jinn-network/autopilot",
         "@jinn-network/broadcast-bot",
+        "@jinn-network/chain-only-gate-harness",
         "@jinn-network/explorer-spa",
         "@jinn-network/indexer",
         "@jinn-network/indexer-enrichment",
@@ -44419,9 +48237,11 @@
         "autopilot-ci",
         "broadcast-bot-ci",
         "client-ci",
+        "environments-ci",
         "indexer-ci",
         "indexer-enrichment-ci",
-        "plugin-tree-ci"
+        "plugin-tree-ci",
+        "task-supply-ci"
       ],
       "stable": false,
       "stackPublished": false
