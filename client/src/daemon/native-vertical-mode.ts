@@ -2,6 +2,7 @@ import {
   BASE_SEPOLIA_TODAY,
   type MarketplaceChainConfig,
 } from '@jinn-network/marketplace-binding';
+import type { ValidatedPhaseBClosureManifest } from './phase-b-closure-manifest.js';
 
 export type OperatorVerticalMode = 'legacy' | 'native-v1';
 
@@ -12,13 +13,6 @@ export type NativeVerticalReadinessReason =
   | 'network-mismatch'
   | 'generation-mismatch'
   | 'contracts-mismatch';
-
-export interface ValidatedLiveClosure {
-  readonly status: 'validated';
-  readonly chain: MarketplaceChainConfig;
-  readonly solutionSettlementFinalized: true;
-  readonly verdictSettlementFinalized: true;
-}
 
 export class NativeVerticalReadinessError extends Error {
   override readonly name = 'NativeVerticalReadinessError';
@@ -76,14 +70,16 @@ function assertNativeDeployment(input: {
   }
 }
 
-function assertValidatedLiveClosure(liveClosure: ValidatedLiveClosure): void {
+function assertValidatedLiveClosure(liveClosure: ValidatedPhaseBClosureManifest): void {
+  const manifest = liveClosure.manifest;
   if (
-    liveClosure.status !== 'validated'
-    || liveClosure.chain.chainId !== BASE_SEPOLIA_TODAY.chainId
-    || liveClosure.chain.generation !== 'today'
-    || !sameDeployment(liveClosure.chain, BASE_SEPOLIA_TODAY)
-    || liveClosure.solutionSettlementFinalized !== true
-    || liveClosure.verdictSettlementFinalized !== true
+    !/^sha256:[0-9a-f]{64}$/u.test(liveClosure.digest)
+    || manifest.liveRun !== true
+    || manifest.chain.chainId !== BASE_SEPOLIA_TODAY.chainId
+    || manifest.chain.generation !== 'today'
+    || !sameDeployment(manifest.chain as MarketplaceChainConfig, BASE_SEPOLIA_TODAY)
+    || manifest.settlements.solution.finalized !== true
+    || manifest.settlements.verdict.finalized !== true
   ) {
     throw new NativeVerticalReadinessError(
       'live-closure-invalid',
@@ -96,7 +92,7 @@ export function resolveOperatorVerticalMode(input: {
   readonly requestedMode?: OperatorVerticalMode;
   readonly network: 'mainnet' | 'testnet';
   readonly chain: MarketplaceChainConfig;
-  readonly liveClosure?: ValidatedLiveClosure;
+  readonly liveClosure?: ValidatedPhaseBClosureManifest;
 }): OperatorVerticalDecision {
   if (input.requestedMode === 'legacy') {
     return { requestedMode: 'legacy', effectiveMode: 'legacy', readiness: 'explicit-legacy' };

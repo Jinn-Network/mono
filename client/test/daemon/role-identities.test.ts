@@ -1,5 +1,6 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync, mkdtempSync } from 'node:fs';
+import { createDecipheriv, scryptSync } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
@@ -47,7 +48,103 @@ function openAt(root: string, bindingResolver: BindingResolver) {
   });
 }
 
+function decryptStoredRoles(pathBytes: string, password: string): readonly string[] {
+  const envelope = JSON.parse(pathBytes) as {
+    salt: string; iv: string; authTag: string; ciphertext: string;
+  };
+  const key = scryptSync(password, Buffer.from(envelope.salt, 'base64'), 32);
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
+    decipher.final(),
+  ]);
+  const value = JSON.parse(plaintext.toString('utf8')) as {
+    metadata: { ownedRoles: readonly string[] };
+    roles: readonly { role: string }[];
+  };
+  expect(value.metadata.ownedRoles).toEqual(value.roles.map(({ role }) => role));
+  return value.metadata.ownedRoles;
+}
+
 describe('native persistent role identities', () => {
+  it('opens only explicitly owned roles and subjects every family to the full authority gate', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-scoped-'));
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+    };
+    const verifyRoleBinding = vi.fn(async () => ({ bindingDigest: `sha256:${'1'.repeat(64)}` as const }));
+    const identities = await openRoleIdentitySet({
+      storePath: join(root, 'identity', 'roles.enc.json'),
+      password: 'operator-password',
+      agent: 'urn:jinn:solver:scoped',
+      requiredRoles: ['solver-delivery', 'solver-discovery'],
+      bindingResolver: resolver,
+      verifyRoleBinding,
+      now: () => new Date(BOOT_TIME),
+    });
+
+    expect(identities.get('solver-delivery').role).toBe('solver-delivery');
+    expect(identities.get('solver-discovery').role).toBe('solver-discovery');
+    expect(() => identities.get('requester-submission')).toThrow(/unavailable/u);
+    expect(resolver.resolveBinding).toHaveBeenCalledTimes(2);
+    expect(verifyRoleBinding.mock.calls.map(([value]) => [value.role, value.agent, value.family])).toEqual([
+      ['solver-delivery', 'urn:jinn:solver:scoped', 'deliveries'],
+      ['solver-discovery', 'urn:jinn:solver:scoped', 'observations'],
+    ]);
+    const encrypted = await readFile(join(root, 'identity', 'roles.enc.json'), 'utf8');
+    expect(decryptStoredRoles(encrypted, 'operator-password')).toEqual([
+      'solver-delivery',
+      'solver-discovery',
+    ]);
+    expect(encrypted).not.toContain('requester-submission');
+    expect(encrypted).not.toContain('evaluator-verdict');
+  });
+
+  it('requester custody has no solver/evaluator/admission private authority', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-requester-custody-'));
+    const path = join(root, 'identity', 'requester.enc.json');
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
+    };
+    await openRoleIdentitySet({
+      storePath: path,
+      password: 'operator-password',
+      agent: 'urn:jinn:requester:scoped',
+      requiredRoles: ['requester-submission', 'requester-discovery'],
+      bindingResolver: resolver,
+      now: () => new Date(BOOT_TIME),
+    });
+    const encrypted = await readFile(path, 'utf8');
+    expect(decryptStoredRoles(encrypted, 'operator-password')).toEqual([
+      'requester-submission',
+      'requester-discovery',
+    ]);
+    expect(encrypted).not.toContain('solver-delivery');
+    expect(encrypted).not.toContain('evaluator-verdict');
+    expect(encrypted).not.toContain('admission');
+  });
+
+  it('refuses a co-hosted admission key when it is opened under the requester Agent', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-wrong-agent-'));
+    const admissionAgent = 'urn:jinn:admission:stable';
+    const resolver: BindingResolver = {
+      resolveBinding: vi.fn(async (query) => query.agent === admissionAgent
+        ? resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })
+        : null),
+    };
+    const common = {
+      storePath: join(root, 'identity', 'roles.enc.json'),
+      password: 'operator-password',
+      requiredRoles: ['admission'] as const,
+      bindingResolver: resolver,
+      now: () => new Date(BOOT_TIME),
+    };
+    await expect(openRoleIdentitySet({ ...common, agent: 'urn:jinn:requester:wrong' }))
+      .rejects.toThrow(/admission.*no effective binding/u);
+    await expect(openRoleIdentitySet({ ...common, agent: admissionAgent })).resolves.toBeDefined();
+  });
+
   it('rejects a relative identity-store path before changing filesystem permissions', async () => {
     const resolver: BindingResolver = { resolveBinding: vi.fn(async () => null) };
     const implicitCwdPath = resolve('roles.enc.json');

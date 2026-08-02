@@ -180,6 +180,8 @@ interface RawCheckpoint {
 
 interface RawQueuedCard {
   id: number;
+  source_agent: string;
+  source_name: string;
   announcement_id: string;
   card_json: string;
 }
@@ -431,10 +433,10 @@ export function createNativeDiscoveryConsumer(input: {
 
     takePending() {
       const rows = input.store.db.prepare(
-        `SELECT id, announcement_id, card_json FROM native_discovery_cards
+        `SELECT id, source_agent, source_name, announcement_id, card_json FROM native_discovery_cards
           WHERE acknowledged_at IS NULL ORDER BY id ASC`,
       ).all() as RawQueuedCard[];
-      return rows.map((row) => ({
+      return rows.filter((row) => keys.has(`${row.source_agent}/${row.source_name}`)).map((row) => ({
         id: row.id,
         announcementId: row.announcement_id,
         card: deserialize<AnnouncedSubmissionCard>(row.card_json),

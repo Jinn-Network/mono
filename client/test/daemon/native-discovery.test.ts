@@ -312,4 +312,37 @@ describe('native discovery consumer', () => {
     expect(transport.url).toBe(`${ROOT}/subscribe?cursor=${encodeURIComponent(sealJson(first).digest)}`);
     subscription.close();
   });
+
+  it('isolates durable pending cards when two domain consumers share one product database', () => {
+    const store = new Store(':memory:');
+    const firstSource = source(new Map(), async () => ({ status: 'ok' as const }));
+    const secondSource: NativeDiscoverySource = {
+      ...firstSource,
+      endpoint: { ...firstSource.endpoint, agent: 'did:key:zNativeSolver', name: 'solver' },
+    };
+    const first = createNativeDiscoveryConsumer({
+      store,
+      sources: [firstSource],
+      transport: { fetch: async () => { throw new Error('not used'); } },
+      decode: async () => undefined,
+    });
+    const second = createNativeDiscoveryConsumer({
+      store,
+      sources: [secondSource],
+      transport: { fetch: async () => { throw new Error('not used'); } },
+      decode: async () => undefined,
+    });
+    const encodedCard = JSON.stringify(cardFor('0000000000000001'), (_key, value: unknown) =>
+      typeof value === 'bigint' ? { $bigint: value.toString(10) } : value);
+    const insert = store.db.prepare(
+      `INSERT INTO native_discovery_cards
+        (source_agent, source_name, sequence, entry_digest, announcement_id, card_json, accepted_at)
+       VALUES (?, ?, '0000000000000001', ?, ?, ?, '2026-08-02T00:00:00.000Z')`,
+    );
+    insert.run(AGENT, SOURCE_NAME, DIGEST_A, 'requester-card', encodedCard);
+    insert.run('did:key:zNativeSolver', 'solver', DIGEST_B, 'solver-card', encodedCard);
+
+    expect(first.takePending().map(({ announcementId }) => announcementId)).toEqual(['requester-card']);
+    expect(second.takePending().map(({ announcementId }) => announcementId)).toEqual(['solver-card']);
+  });
 });

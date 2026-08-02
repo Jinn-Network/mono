@@ -6,8 +6,10 @@
 
 export interface NativeOperatorHealth {
   readonly mode: 'native-v1';
+  readonly role: 'requester' | 'solver' | 'evaluator';
   readonly roleKeyIds: Readonly<Record<string, string>>;
   readonly sourceLag: number;
+  readonly sourceLagBySource: Readonly<Record<string, number>>;
   readonly leaseOwned: boolean;
   readonly venue: {
     readonly canonicalBlock: string;
@@ -15,7 +17,11 @@ export interface NativeOperatorHealth {
     readonly caughtUp: boolean;
   };
   readonly backendReady: boolean;
+  readonly backendRequired: boolean;
+  readonly executableDigest?: `sha256:${string}`;
   readonly evidenceReady: boolean;
+  readonly evidenceRequired: boolean;
+  readonly publicSourceReady: boolean;
   readonly uncertainOperations: number;
   readonly nativeFallbackCount: 0;
 }
@@ -27,12 +33,16 @@ export interface NativeOperatorHost {
 }
 
 export interface NativeOperatorHostInput {
+  readonly role: NativeOperatorHealth['role'];
   readonly roleKeyIds: Readonly<Record<string, string>>;
   readonly lease: {
     acquire(): void | Promise<void>;
-    owned(): boolean;
+    owned(): boolean | Promise<boolean>;
+    renew?(): void | Promise<void>;
     release(): void | Promise<void>;
   };
+  /** Defaults to ten seconds, below the production lease's thirty-second TTL. */
+  readonly leaseRenewIntervalMs?: number;
   readonly bindings: { verify(): Promise<void> };
   readonly venue: {
     rollbackToFinalized(): Promise<void>;
@@ -44,11 +54,15 @@ export interface NativeOperatorHostInput {
     reconcilePublications(): Promise<void>;
     uncertainCount(): number;
   };
-  readonly discovery: { sync(): Promise<{ readonly lag: number }> };
+  readonly discovery: { sync(): Promise<{ readonly lag: number; readonly bySource?: Readonly<Record<string, number>> }> };
   readonly recovery: { recoverBackends(): Promise<void> };
   readonly readiness: {
+    readonly backendRequired: boolean;
+    readonly evidenceRequired: boolean;
     backend(): Promise<boolean>;
     evidence(): Promise<boolean>;
+    publicSource(): Promise<boolean>;
+    readonly executableDigest?: `sha256:${string}`;
   };
   readonly work: { start(): Promise<void>; stop(): void | Promise<void> };
 }
@@ -59,15 +73,24 @@ export class NativeOperatorHostError extends Error {
 
 export function createNativeOperatorHost(input: NativeOperatorHostInput): NativeOperatorHost {
   let sourceLag = Number.POSITIVE_INFINITY;
+  let sourceLagBySource: Readonly<Record<string, number>> = {};
   let backendReady = false;
   let evidenceReady = false;
+  let publicSourceReady = false;
   let started = false;
   let closed = false;
   let acquired = false;
+  let renewalTimer: ReturnType<typeof setInterval> | undefined;
+  let renewing = false;
+  let renewalFailure: unknown;
 
   async function cleanup(): Promise<void> {
     if (closed) return;
     closed = true;
+    if (renewalTimer !== undefined) {
+      clearInterval(renewalTimer);
+      renewalTimer = undefined;
+    }
     const failures: unknown[] = [];
     try {
       await input.work.stop();
@@ -75,7 +98,7 @@ export function createNativeOperatorHost(input: NativeOperatorHostInput): Native
       failures.push(error);
     }
     try {
-      if (acquired && input.lease.owned()) await input.lease.release();
+      if (acquired && await input.lease.owned()) await input.lease.release();
     } catch (error) {
       failures.push(error);
     }
@@ -90,19 +113,28 @@ export function createNativeOperatorHost(input: NativeOperatorHostInput): Native
   }
 
   async function health(): Promise<NativeOperatorHealth> {
+    if (renewalFailure !== undefined) {
+      throw new NativeOperatorHostError(`native worker lease renewal failed: ${String(renewalFailure)}`);
+    }
     const venue = await input.venue.health();
     return {
       mode: 'native-v1',
+      role: input.role,
       roleKeyIds: { ...input.roleKeyIds },
       sourceLag,
-      leaseOwned: input.lease.owned(),
+      sourceLagBySource: { ...sourceLagBySource },
+      leaseOwned: await input.lease.owned(),
       venue: {
         canonicalBlock: venue.canonicalBlock.toString(10),
         finalizedBlock: venue.finalizedBlock.toString(10),
         caughtUp: venue.caughtUp,
       },
       backendReady,
+      backendRequired: input.readiness.backendRequired,
+      ...(input.readiness.executableDigest === undefined ? {} : { executableDigest: input.readiness.executableDigest }),
       evidenceReady,
+      evidenceRequired: input.readiness.evidenceRequired,
+      publicSourceReady,
       uncertainOperations: input.operations.uncertainCount(),
       nativeFallbackCount: 0,
     };
@@ -114,19 +146,36 @@ export function createNativeOperatorHost(input: NativeOperatorHostInput): Native
       if (started) return;
       await input.lease.acquire();
       acquired = true;
+      if (input.lease.renew !== undefined) {
+        renewalTimer = setInterval(() => {
+          if (closed || renewing || input.lease.renew === undefined) return;
+          renewing = true;
+          void Promise.resolve(input.lease.renew()).catch(async (cause: unknown) => {
+            renewalFailure = cause;
+            await cleanup().catch((cleanupCause: unknown) => {
+              renewalFailure = new AggregateError([cause, cleanupCause], 'native lease renewal cleanup failed');
+            });
+          }).finally(() => { renewing = false; });
+        }, input.leaseRenewIntervalMs ?? 10_000);
+        renewalTimer.unref?.();
+      }
       try {
         await input.bindings.verify();
         await input.venue.rollbackToFinalized();
         await input.operations.reconcileTransactions();
         await input.operations.reconcilePublications();
-        sourceLag = (await input.discovery.sync()).lag;
+        const discovery = await input.discovery.sync();
+        sourceLag = discovery.lag;
+        sourceLagBySource = discovery.bySource ?? {};
         await input.recovery.recoverBackends();
         const venue = await input.venue.health();
-        [backendReady, evidenceReady] = await Promise.all([
+        [backendReady, evidenceReady, publicSourceReady] = await Promise.all([
           input.readiness.backend(),
           input.readiness.evidence(),
+          input.readiness.publicSource(),
         ]);
-        if (!input.lease.owned()) throw new NativeOperatorHostError('native worker lease is not owned');
+        if (!await input.lease.owned()) throw new NativeOperatorHostError('native worker lease is not owned');
+        if (renewalFailure !== undefined) throw new NativeOperatorHostError('native worker lease renewal failed during startup');
         if (input.operations.uncertainCount() !== 0) {
           throw new NativeOperatorHostError('native startup has a nonterminal uncertain operation');
         }
@@ -134,7 +183,9 @@ export function createNativeOperatorHost(input: NativeOperatorHostInput): Native
         if (!venue.caughtUp || venue.canonicalBlock < venue.finalizedBlock) {
           throw new NativeOperatorHostError('native venue is not caught up to finalized chain state');
         }
-        if (!backendReady || !evidenceReady) {
+        if ((input.readiness.backendRequired && !backendReady)
+          || (input.readiness.evidenceRequired && !evidenceReady)
+          || !publicSourceReady) {
           throw new NativeOperatorHostError('native backend or evidence runtime is not ready');
         }
         await input.work.start();

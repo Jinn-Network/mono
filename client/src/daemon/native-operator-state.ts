@@ -1318,7 +1318,16 @@ export class NativeOperatorStateRepository {
 
   listPendingPublications(): NativePublicationRow[] {
     return (this.store.db.prepare(
-      `SELECT * FROM native_publication_outbox WHERE status = 'intent' ORDER BY created_at, publication_key`,
+      `SELECT * FROM native_publication_outbox WHERE status = 'intent'
+       ORDER BY created_at,
+         CASE role
+           WHEN 'output' THEN 0
+           WHEN 'evidence' THEN 1
+           WHEN 'delivery-envelope' THEN 2
+           WHEN 'delivery' THEN 3
+           ELSE 4
+         END,
+         publication_key`,
     ).all() as RawPublication[]).map(publicationRow);
   }
 

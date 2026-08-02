@@ -6,6 +6,7 @@ describe('native operator host lifecycle', () => {
   it('starts in the fail-closed ownership/recovery order and exposes sanitized health', async () => {
     const order: string[] = [];
     const host = createNativeOperatorHost({
+      role: 'solver',
       roleKeyIds: {
         'solver-delivery': 'did:key:solver-delivery',
         'solver-discovery': 'did:key:solver-discovery',
@@ -29,8 +30,12 @@ describe('native operator host lifecycle', () => {
         recoverBackends: async () => { order.push('backends'); },
       },
       readiness: {
+        backendRequired: true,
+        evidenceRequired: true,
         backend: async () => true,
         evidence: async () => true,
+        publicSource: async () => true,
+        executableDigest: `sha256:${'ab'.repeat(32)}`,
       },
       work: { start: async () => { order.push('work'); }, stop: vi.fn() },
     });
@@ -41,15 +46,21 @@ describe('native operator host lifecycle', () => {
     ]);
     expect(await host.health()).toEqual({
       mode: 'native-v1',
+      role: 'solver',
       roleKeyIds: {
         'solver-delivery': 'did:key:solver-delivery',
         'solver-discovery': 'did:key:solver-discovery',
       },
       sourceLag: 0,
+      sourceLagBySource: {},
       leaseOwned: true,
       venue: { canonicalBlock: '101', finalizedBlock: '100', caughtUp: true },
       backendReady: true,
+      backendRequired: true,
+      executableDigest: `sha256:${'ab'.repeat(32)}`,
       evidenceReady: true,
+      evidenceRequired: true,
+      publicSourceReady: true,
       uncertainOperations: 0,
       nativeFallbackCount: 0,
     });
@@ -59,6 +70,7 @@ describe('native operator host lifecycle', () => {
   it('never starts work after a binding, source, evidence, or uncertain-operation refusal', async () => {
     const work = vi.fn();
     const host = createNativeOperatorHost({
+      role: 'solver',
       roleKeyIds: { 'solver-delivery': 'did:key:delivery' },
       lease: { acquire: vi.fn(), owned: () => true, release: vi.fn() },
       bindings: { verify: vi.fn(async () => undefined) },
@@ -74,7 +86,10 @@ describe('native operator host lifecycle', () => {
       },
       discovery: { sync: vi.fn(async () => ({ lag: 0 })) },
       recovery: { recoverBackends: vi.fn(async () => undefined) },
-      readiness: { backend: vi.fn(async () => true), evidence: vi.fn(async () => true) },
+      readiness: {
+        backendRequired: true, evidenceRequired: true,
+        backend: vi.fn(async () => true), evidence: vi.fn(async () => true), publicSource: vi.fn(async () => true),
+      },
       work: { start: work, stop: vi.fn() },
     });
 
@@ -88,6 +103,7 @@ describe('native operator host lifecycle', () => {
     const closeVenue = vi.fn(async () => undefined);
     const stopWork = vi.fn(async () => undefined);
     const host = createNativeOperatorHost({
+      role: 'solver',
       roleKeyIds: { 'solver-delivery': 'did:key:delivery' },
       lease: { acquire: vi.fn(), owned: () => true, release },
       bindings: { verify: vi.fn(async () => { throw new Error('binding revoked'); }) },
@@ -101,7 +117,10 @@ describe('native operator host lifecycle', () => {
       },
       discovery: { sync: vi.fn() },
       recovery: { recoverBackends: vi.fn() },
-      readiness: { backend: vi.fn(), evidence: vi.fn() },
+      readiness: {
+        backendRequired: true, evidenceRequired: true,
+        backend: vi.fn(), evidence: vi.fn(), publicSource: vi.fn(),
+      },
       work: { start: vi.fn(), stop: stopWork },
     });
 
@@ -112,5 +131,45 @@ describe('native operator host lifecycle', () => {
     await host.close();
     expect(release).toHaveBeenCalledOnce();
     expect(closeVenue).toHaveBeenCalledOnce();
+  });
+
+  it('renews the scoped worker lease while running and stops renewal during close', async () => {
+    vi.useFakeTimers();
+    try {
+      const renew = vi.fn(async () => undefined);
+      const host = createNativeOperatorHost({
+        role: 'solver',
+        roleKeyIds: { 'solver-delivery': 'did:key:delivery' },
+        leaseRenewIntervalMs: 10_000,
+        lease: { acquire: vi.fn(), owned: () => true, renew, release: vi.fn() },
+        bindings: { verify: vi.fn(async () => undefined) },
+        venue: {
+          rollbackToFinalized: vi.fn(async () => undefined),
+          health: vi.fn(async () => ({ canonicalBlock: 1n, finalizedBlock: 1n, caughtUp: true })),
+          close: vi.fn(),
+        },
+        operations: {
+          reconcileTransactions: vi.fn(async () => undefined),
+          reconcilePublications: vi.fn(async () => undefined),
+          uncertainCount: () => 0,
+        },
+        discovery: { sync: vi.fn(async () => ({ lag: 0 })) },
+        recovery: { recoverBackends: vi.fn(async () => undefined) },
+        readiness: {
+          backendRequired: true, evidenceRequired: true,
+          backend: vi.fn(async () => true), evidence: vi.fn(async () => true), publicSource: vi.fn(async () => true),
+        },
+        work: { start: vi.fn(async () => undefined), stop: vi.fn(async () => undefined) },
+      });
+
+      await host.start();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(renew).toHaveBeenCalledTimes(2);
+      await host.close();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(renew).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

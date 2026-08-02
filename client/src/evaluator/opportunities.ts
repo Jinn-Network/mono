@@ -1,5 +1,5 @@
 import { rawCodecCidFromSha256Digest } from "@jinn-network/marketplace-binding";
-import type { ObservationMarketplaceEvent } from "@jinn-network/marketplace-projector";
+import type { MarketplaceEvent } from "@jinn-network/marketplace-projector";
 import {
   selfEvaluationSkip,
   type EvaluationSkipReason,
@@ -11,9 +11,11 @@ export interface FinalizedSolutionDeliveryObservation {
   readonly source: string;
   readonly sourceSequence: string;
   readonly sourceEntryDigest: `sha256:${string}`;
+  /** Exact digest from the trusted signed solver source, independently joined to chain bytes. */
+  readonly advertisedDeliveryDigest: `sha256:${string}`;
   /** The caller must establish canonicality before the evaluator sees the observation. */
   readonly canonical: true;
-  readonly event: Extract<ObservationMarketplaceEvent, { event: "SolutionDeliveryClaimed" }>;
+  readonly event: Extract<MarketplaceEvent, { event: "SolutionDeliveryClaimed" }>;
 }
 
 export interface EvaluationOpportunity {
@@ -71,10 +73,7 @@ export function mapFinalizedSolutionDeliveryObservation(
   if (skip !== undefined) {
     return { kind: "skipped", reason: skip, taskId: facts.taskId, attemptIndex: facts.attemptIndex };
   }
-  const advertisedDeliveryDigest = observation.event.projection.deliveryCorrespondence?.sha256Digest;
-  if (advertisedDeliveryDigest === undefined) {
-    return { kind: "ignored", reason: "missing-delivery-digest" };
-  }
+  const advertisedDeliveryDigest = observation.advertisedDeliveryDigest;
   const derivation = observation.event.derivation;
   return {
     kind: "opportunity",

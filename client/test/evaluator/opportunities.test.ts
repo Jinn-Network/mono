@@ -15,6 +15,7 @@ function finalizedSolutionClaimed(operator: string) {
     source: "https://operator.example/.well-known/jinn-source",
     sourceSequence: "0000000000000042",
     sourceEntryDigest: `sha256:${"ab".repeat(32)}`,
+    advertisedDeliveryDigest: advertisedDelivery.sha256Digest,
     canonical: true,
     event: {
       event: "SolutionDeliveryClaimed",
@@ -31,9 +32,6 @@ function finalizedSolutionClaimed(operator: string) {
         txHash: `0x${"ef".repeat(32)}`,
         logIndex: 4,
         finalityTier: "finalized",
-      },
-      projection: {
-        deliveryCorrespondence: { sha256Digest: advertisedDelivery.sha256Digest },
       },
     },
   } as never;

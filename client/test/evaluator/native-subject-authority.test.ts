@@ -99,7 +99,7 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
       admissionReceipt: receipt,
       delivery,
       deliveryEnvelope: artifact("delivery-envelope", envelope(
-        "application/vnd.jinn.task-execution.delivery.v1+json",
+        "application/vnd.jinn.marketplace.executor-binding.v1+json",
         deliveryBytes,
         EXECUTOR_KEY,
       )),

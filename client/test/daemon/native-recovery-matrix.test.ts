@@ -113,6 +113,7 @@ async function requesterRun(input: {
   const deps = {
     stateDir: input.stateDir,
     requesterAgent: 'urn:jinn:requester:B800',
+    admissionAgent: 'urn:jinn:admission:B800',
     publicBaseUrl: 'https://requester.example',
     readChain: async () => BASE_SEPOLIA_TODAY,
     loadRoles: async () => input.roles,
@@ -140,12 +141,12 @@ async function requesterRun(input: {
   let requester = createNativeRequester(deps);
   if (input.recover) {
     await expect(requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'B800',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'B800',
     })).rejects.toThrow(/wallet response lost/u);
     requester = createNativeRequester(deps);
   }
   const outcome = await requester.request({
-    network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'B800',
+    network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'B800',
   });
   const association = outcome.association;
   return {

@@ -69,7 +69,7 @@ const CHAIN = {
 const REQUESTER_AGENT = 'https://agents.example/requester';
 const SOLVER_AGENT = 'https://agents.example/solver';
 const EVALUATOR_AGENT = 'https://agents.example/evaluator';
-const ADMISSION_AGENT = `${REQUESTER_AGENT}/admission/public-golden-run`;
+const ADMISSION_AGENT = 'urn:jinn:admission:public-golden';
 const REQUESTER_ADDRESS = '0x1111111111111111111111111111111111111111' as const;
 const SOLVER_ADDRESS = '0x2222222222222222222222222222222222222222' as const;
 const EVALUATOR_ADDRESS = '0x3333333333333333333333333333333333333333' as const;
@@ -166,6 +166,7 @@ describe('native public vertical consumer', () => {
     const requester = createNativeRequester({
       stateDir: producer.requester,
       requesterAgent: REQUESTER_AGENT,
+      admissionAgent: ADMISSION_AGENT,
       publicBaseUrl: REQUESTER_BASE,
       readChain: async () => CHAIN,
       loadRoles: async () => roles(requesterKeys),
@@ -178,7 +179,7 @@ describe('native public vertical consumer', () => {
       },
       now: () => new Date('2026-08-02T12:00:00Z'),
     });
-    const requested = await requester.request({ network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: RUN_ID });
+    const requested = await requester.request({ network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: RUN_ID });
     const association = requested.association;
     const [taskBytes, submissionBytes, specBytes, receiptBytes, requesterEnvelopeBytes] = await Promise.all([
       exact(requester.handleDiscoveryRequest, REQUESTER_BASE, association.task.path),

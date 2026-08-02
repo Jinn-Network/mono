@@ -376,7 +376,10 @@ export async function verifyNativeVertical(input: {
     || input.taskCreated.taskId !== input.graph.roots.requester.chain.taskId
     || input.taskCreated.taskDigest !== input.graph.task.digest
     || input.taskCreated.taskDigest !== input.graph.roots.requester.taskDigest
+    || input.taskCreated.creator.toLowerCase() !== input.graph.roots.requester.chain.creator.toLowerCase()
     || input.taskCreated.creator.toLowerCase() !== input.authority.requester.address.toLowerCase()
+    || input.taskCreated.transaction.hash.toLowerCase() !== input.graph.roots.requester.chain.transactionHash.toLowerCase()
+    || Date.parse(input.graph.roots.requester.chain.sealedAt) !== Date.parse(input.authority.requester.sealingTime)
     || !/^\d+$/u.test(input.taskCreated.taskId)
     || input.taskCreated.maxClaims !== 1
     || input.taskCreated.postingTerms.solutionMaxDeliveryRateWei !== input.graph.roots.requester.postingTerms.solutionMaxDeliveryRateWei

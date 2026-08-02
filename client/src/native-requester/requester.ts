@@ -76,7 +76,10 @@ import {
   createFsBlobStore,
 } from '@jinn-network/record-discovery-transport-http';
 
-const FIXTURE = 'prediction-snapshot-v1' as const;
+// Public, stable product fixture name. The admission package may retain its
+// internal snapshot fixture directory; that storage detail must not leak into
+// the accepted requester command contract.
+const FIXTURE = 'prediction-forecast-golden.json' as const;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
 const JSON_MEDIA_TYPE = 'application/json';
@@ -188,6 +191,7 @@ export interface NativeRequesterAssociation {
   readonly version: 1;
   readonly chainId: number;
   readonly coordinator: `0x${string}`;
+  readonly creator: `0x${string}`;
   readonly taskId: bigint;
   readonly taskDigest: Digest;
   readonly submissionDigest: Digest;
@@ -224,6 +228,8 @@ export interface NativeRequesterDeps {
   /** Absolute directory owned by this requester process. */
   readonly stateDir: string;
   readonly requesterAgent: string;
+  /** Stable admission authority; never derived from runId or requester identity. */
+  readonly admissionAgent: string;
   readonly publicBaseUrl: string;
   /** This is intentionally first: mismatches reject before key loading or transaction preparation. */
   readonly readChain: () => Promise<MarketplaceChainConfig>;
@@ -430,14 +436,17 @@ export async function decodeNativeRequesterAnnouncement(input: {
       'admissionReceiptDigest',
       'chainId',
       'coordinator',
+      'creator',
       'intendedSpendWei',
       'nonce',
       'postingTerms',
       'requesterEnvelopeDigest',
       'runId',
       'submission',
+      'sealedAt',
       'taskDigest',
       'taskId',
+      'txHash',
     ];
     if (Object.keys(association).sort().join('|') !== expectedAssociationMembers.sort().join('|')) {
       failAssociation('requester association fact has missing or unexpected members');
@@ -450,6 +459,11 @@ export async function decodeNativeRequesterAnnouncement(input: {
     }
     if (association.coordinator !== canonical.coordinator) {
       failAssociation('coordinator does not match canonical TaskCreated');
+    }
+    if (association.creator !== canonical.creator) failAssociation('creator does not match canonical TaskCreated');
+    if (association.txHash !== canonical.txHash) failAssociation('transaction hash does not match canonical TaskCreated');
+    if (typeof association.sealedAt !== 'string' || !Number.isFinite(Date.parse(association.sealedAt))) {
+      failAssociation('sealedAt is not an RFC 3339 instant');
     }
     const taskId = uint256Decimal(association.taskId, 'taskId');
     if (taskId !== canonical.taskId) failAssociation('taskId does not match canonical TaskCreated');
@@ -784,6 +798,7 @@ async function storeExactRecords(
 async function sealRunBundle(input: {
   readonly runId: string;
   readonly requesterAgent: string;
+  readonly admissionAgent: string;
   readonly roles: NativeRequesterRoles;
   readonly checkpoint?: NativeRequesterDeps['checkpoints'];
 }): Promise<{
@@ -808,7 +823,7 @@ async function sealRunBundle(input: {
   const receipt = admitPredictionSnapshot({
     taskBytes,
     evaluationSpecBytes,
-    issuer: `${input.requesterAgent}/admission/${input.runId}`,
+    issuer: input.admissionAgent,
   });
   const sealedReceipt = await sealPredictionSnapshotAdmissionReceipt(receipt, roleDsseSigner(admissionRole));
   const admissionReceiptBytes = sealedReceipt.envelopeBytes;
@@ -889,6 +904,7 @@ async function sourceFacts(
   association: Pick<NativeRequesterAssociation,
     | 'chainId'
     | 'coordinator'
+    | 'creator'
     | 'taskId'
     | 'taskDigest'
     | 'submissionUri'
@@ -896,8 +912,10 @@ async function sourceFacts(
     | 'postingTerms'
     | 'intendedSpendWei'
     | 'requesterEnvelopeDigest'
-    | 'admissionReceiptDigest'>,
+    | 'admissionReceiptDigest'
+    | 'txHash'>,
   runId: string,
+  sealedAt: string,
 ): Promise<Record<string, unknown>> {
   const recompute = TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission);
   if (recompute === undefined) throw new Error('submission facts recompute is not registered');
@@ -911,6 +929,7 @@ async function sourceFacts(
     [NATIVE_REQUESTER_ASSOCIATION_FACT]: {
       chainId: association.chainId,
       coordinator: association.coordinator,
+      creator: association.creator,
       taskId: association.taskId.toString(10),
       taskDigest: association.taskDigest,
       submission: association.submissionUri,
@@ -919,6 +938,8 @@ async function sourceFacts(
       intendedSpendWei: association.intendedSpendWei,
       admissionReceiptDigest: association.admissionReceiptDigest,
       requesterEnvelopeDigest: association.requesterEnvelopeDigest,
+      txHash: association.txHash,
+      sealedAt,
       runId,
     },
   };
@@ -963,6 +984,7 @@ async function appendRequesterSource(input: {
           (await input.state.records.get(association.submission.path))!.bytes,
           association,
           input.runId,
+          issuedAt,
         ),
       }],
     };
@@ -1106,6 +1128,8 @@ export function createNativeRequesterSubmissionResolver(input: {
  * all key, chain, post, recovery, and canonical-read authority through this seam.
  */
 export function createNativeRequester(deps: NativeRequesterDeps): {
+  /** Reconciles every durable posting/outbox before the native host admits new work. */
+  reconcile(): Promise<void>;
   request(input: NativeRequesterRequest): Promise<NativeRequesterResult>;
   handleDiscoveryRequest(request: Request): Promise<Response>;
 } {
@@ -1175,6 +1199,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       version: 1,
       chainId: canonical.chainId,
       coordinator: canonical.coordinator,
+      creator: canonical.creator,
       taskId: canonical.taskId,
       taskDigest: canonical.taskDigest,
       submissionDigest: draft.submissionDigest,
@@ -1235,6 +1260,11 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
   }
 
   return {
+    async reconcile(): Promise<void> {
+      const chain = assertBaseSepoliaTarget('base-sepolia', await deps.readChain());
+      const roles = await deps.loadRoles();
+      await reconcile(chain, roles);
+    },
     async request(input): Promise<NativeRequesterResult> {
       assertRunId(input.runId);
       if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
@@ -1264,6 +1294,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       const bundle = await sealRunBundle({
         runId: input.runId,
         requesterAgent: deps.requesterAgent,
+        admissionAgent: deps.admissionAgent,
         roles,
         ...(deps.checkpoints === undefined ? {} : { checkpoint: deps.checkpoints }),
       });

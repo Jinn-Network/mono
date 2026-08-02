@@ -32,6 +32,8 @@ export interface NativeSolutionSettlementDependencies {
   readonly readObservations: () => readonly MarketplaceProtocolObservation[];
   readonly readFinalizedBlockNumber: () => bigint;
   readonly readCanonicalBlockHash: (blockNumber: bigint) => Promise<Hex | undefined>;
+  /** Canonical chain-only reader supplied by bounded infrastructure in native product mode. */
+  readonly canonicalReader?: NativeSolutionSettlementPort['readCanonical'];
   /** Test seam around the real venue deliver port; production composition omits it. */
   readonly deliver?: DeliverPort;
 }
@@ -191,7 +193,7 @@ export function buildNativeSolutionSettlementPort(
       ) throw new Error('native solution router facts do not bind the exact Delivery');
       return { txHash: settlementTxHash };
     },
-    readCanonical: ({ operation, engagement }) =>
-      readCanonicalSettlement(dependencies, operation, engagement),
+    readCanonical: dependencies.canonicalReader ?? (({ operation, engagement }) =>
+      readCanonicalSettlement(dependencies, operation, engagement)),
   };
 }

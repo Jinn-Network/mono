@@ -28,7 +28,7 @@ import type { SubjectMaterial } from "./subject-material.js";
 const SUBMISSION_DSSE_PAYLOAD_TYPE =
   "application/vnd.jinn.task-execution.submission.v1+json";
 const DELIVERY_DSSE_PAYLOAD_TYPE =
-  "application/vnd.jinn.task-execution.delivery.v1+json";
+  "application/vnd.jinn.marketplace.executor-binding.v1+json";
 const ADMISSION_RECEIPT_ANNOTATION_URI =
   "https://jinn.network/annotations/admission-receipt/1.0";
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   DSSE_ENVELOPE_MEDIA_TYPE,
   dssePreAuthEncoding,
+  parseDsseEnvelope,
   recordDigest,
   sealDsseEnvelope,
 } from '@jinn-network/trust-core';
@@ -102,6 +103,7 @@ function fixture(input: {
     requester: createNativeRequester({
       stateDir: input.stateDir,
       requesterAgent: REQUESTER_AGENT,
+      admissionAgent: 'urn:jinn:admission:test',
       publicBaseUrl: 'https://requester.test',
       readChain,
       loadRoles,
@@ -144,7 +146,7 @@ describe('native requester', () => {
     });
 
     await expect(requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'run-1',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'run-1',
     })).rejects.toThrow(/Base Sepolia.*84532|mainnet/i);
     expect(loadRoles).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
@@ -160,7 +162,7 @@ describe('native requester', () => {
     });
 
     const result = await requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'run-one',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'run-one',
     });
 
     expect(order).toEqual([
@@ -180,6 +182,11 @@ describe('native requester', () => {
     expect(postInput.terms).toEqual(TERMS);
     expect(SubmissionRecordSchema.parse(JSON.parse(new TextDecoder().decode(postInput.submissionBytes))).requester)
       .toBe(REQUESTER_AGENT);
+    const admissionPayload = JSON.parse(new TextDecoder().decode(
+      parseDsseEnvelope(postInput.admissionReceiptBytes).payloadBytes,
+    )) as { predicate?: { issuer?: string } };
+    expect(admissionPayload.predicate?.issuer).toBe('urn:jinn:admission:test');
+    expect(admissionPayload.predicate?.issuer).not.toContain('run-one');
     expect(recordDigest(postInput.taskBytes)).toBe(
       'sha256:40ae3efd61b75951ad68a868fdd020de931e3d27eb1b448f341997bf4917a598',
     );
@@ -239,16 +246,16 @@ describe('native requester', () => {
     const first = fixture({ stateDir, post, checkpoints: failAfterBroadcast }).requester;
 
     await expect(first.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'recover-me',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'recover-me',
     })).rejects.toThrow(/simulated process death/i);
     expect(post).toHaveBeenCalledOnce();
 
     const restarted = fixture({ stateDir, post }).requester;
     const recovered = await restarted.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'recover-me',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'recover-me',
     });
     const replayed = await restarted.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'recover-me',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'recover-me',
     });
 
     expect(post).toHaveBeenCalledOnce();
@@ -273,7 +280,7 @@ describe('native requester', () => {
     }).requester;
 
     await expect(first.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'wallet-uncertain',
     })).rejects.toThrow(/wallet result lost/u);
     const restarted = fixture({
       stateDir,
@@ -282,10 +289,10 @@ describe('native requester', () => {
       loadRoles: async () => identities,
     }).requester;
     const recovered = await restarted.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'wallet-uncertain',
     });
     const replay = await restarted.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'wallet-uncertain',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'wallet-uncertain',
     });
 
     expect(post).toHaveBeenCalledOnce();
@@ -327,7 +334,7 @@ describe('native requester', () => {
     }).requester;
 
     await expect(first.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'terms-survive-restart',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'terms-survive-restart',
     })).rejects.toThrow(/wallet result unavailable/u);
 
     const restarted = fixture({
@@ -338,7 +345,7 @@ describe('native requester', () => {
       loadRoles: async () => identities,
     }).requester;
     const result = await restarted.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'terms-survive-restart',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'terms-survive-restart',
     });
 
     expect(result.association.postingTerms).toEqual({
@@ -361,7 +368,7 @@ describe('native requester', () => {
       loadRoles: async () => identities,
     });
     const result = await requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'trusted-association',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'trusted-association',
     });
     const resolver = createNativeRequesterSubmissionResolver({
       stateDir,
@@ -436,7 +443,7 @@ describe('native requester', () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-post-task-'));
     const { requester, post } = fixture({ stateDir });
     await requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'native-post-task-adapter',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'native-post-task-adapter',
     });
     const postInput = post.mock.calls[0]![0];
     const pinned: Uint8Array[] = [];
@@ -471,7 +478,7 @@ describe('native requester', () => {
     const identities = roles();
     const { requester } = fixture({ stateDir, loadRoles: async () => identities });
     const result = await requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'discovery-client-verifies',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'discovery-client-verifies',
     });
     const baseUrl = 'https://requester.test';
     const wellKnown = await requester.handleDiscoveryRequest(new Request(`${baseUrl}${WELL_KNOWN_PATH}`));
@@ -531,8 +538,11 @@ describe('native requester', () => {
     expect(synced[0]!.entry.announcements[0]!.facts?.[NATIVE_REQUESTER_ASSOCIATION_FACT]).toEqual({
       chainId: 84532,
       coordinator: CHAIN.taskCoordinator,
+      creator: CREATOR,
       taskId: '17',
       taskDigest: result.association.taskDigest,
+      txHash: TX_HASH,
+      sealedAt: '2026-08-02T12:00:00.000Z',
       submission: result.association.submissionUri,
       nonce: result.association.nonce,
       postingTerms: {
@@ -554,7 +564,7 @@ describe('native requester', () => {
     const identities = roles();
     const { requester, post } = fixture({ stateDir, loadRoles: async () => identities });
     const result = await requester.request({
-      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'decode-exact-card',
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'decode-exact-card',
     });
     const entry = result.association.publication.entry;
     const announcement = entry.announcements[0];

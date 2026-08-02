@@ -1,34 +1,45 @@
 import { existsSync, readFileSync } from 'node:fs';
 
-import type { JinnConfig } from '../config.js';
-import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import {
   resolveOperatorVerticalMode,
   type OperatorVerticalDecision,
-  type ValidatedLiveClosure,
 } from './native-vertical-mode.js';
-
-function parseLiveClosure(value: unknown): ValidatedLiveClosure {
-  if (value === null || typeof value !== 'object') throw new Error('live closure receipt must be an object');
-  const receipt = value as Record<string, unknown>;
-  const chain = receipt['chain'] as Record<string, unknown> | undefined;
-  if (
-    receipt['status'] !== 'validated'
-    || receipt['solutionSettlementFinalized'] !== true
-    || receipt['verdictSettlementFinalized'] !== true
-    || chain === undefined
-    || typeof chain['chainId'] !== 'number'
-    || typeof chain['generation'] !== 'string'
-    || typeof chain['taskCoordinator'] !== 'string'
-    || typeof chain['jinnRouter'] !== 'string'
-    || typeof chain['mechMarketplace'] !== 'string'
-    || typeof chain['activityChecker'] !== 'string'
-  ) throw new Error('live closure receipt is not a finalized Phase B receipt');
-  return receipt as unknown as ValidatedLiveClosure;
-}
+import {
+  parseValidatedPhaseBClosureManifest,
+  type ValidatedPhaseBClosureManifest,
+} from './phase-b-closure-manifest.js';
 
 /** Resolves the product mode using structured config before any role key or wallet is loaded. */
-export function resolveConfiguredOperatorVerticalMode(config: Pick<JinnConfig, 'network' | 'operator'>): OperatorVerticalDecision {
+interface VerticalModeConfig {
+  readonly network: 'mainnet' | 'testnet';
+  readonly operator?: {
+    readonly verticalMode?: 'legacy' | 'native-v1';
+    readonly native?: {
+      readonly chainId: number;
+      readonly generation: 'today' | 'revised';
+      readonly contracts: {
+        readonly taskCoordinator: string;
+        readonly jinnRouter: string;
+        readonly mechMarketplace: string;
+        readonly activityChecker: string;
+      };
+      readonly liveClosureReceiptPath: string;
+    };
+  };
+}
+
+function configuredChain(native: NonNullable<NonNullable<VerticalModeConfig['operator']>['native']>) {
+  return {
+    chainId: native.chainId,
+    generation: native.generation,
+    taskCoordinator: native.contracts.taskCoordinator as `0x${string}`,
+    jinnRouter: native.contracts.jinnRouter as `0x${string}`,
+    mechMarketplace: native.contracts.mechMarketplace as `0x${string}`,
+    activityChecker: native.contracts.activityChecker as `0x${string}`,
+  };
+}
+
+export function resolveConfiguredOperatorVerticalMode(config: VerticalModeConfig): OperatorVerticalDecision {
   const requestedMode = config.operator?.verticalMode;
   const native = config.operator?.native;
   if (requestedMode === 'legacy') {
@@ -37,7 +48,7 @@ export function resolveConfiguredOperatorVerticalMode(config: Pick<JinnConfig, '
       network: config.network,
       chain: native === undefined
         ? ({ chainId: config.network === 'mainnet' ? 8453 : 84532 } as never)
-        : { ...native.contracts, chainId: native.chainId, generation: native.generation } as MarketplaceChainConfig,
+        : configuredChain(native),
     });
   }
   if (native === undefined) {
@@ -48,14 +59,14 @@ export function resolveConfiguredOperatorVerticalMode(config: Pick<JinnConfig, '
       readiness: 'live-closure-missing',
     };
   }
-  let liveClosure: ValidatedLiveClosure | undefined;
+  let liveClosure: ValidatedPhaseBClosureManifest | undefined;
   if (existsSync(native.liveClosureReceiptPath)) {
-    liveClosure = parseLiveClosure(JSON.parse(readFileSync(native.liveClosureReceiptPath, 'utf8')));
+    liveClosure = parseValidatedPhaseBClosureManifest(readFileSync(native.liveClosureReceiptPath));
   }
   return resolveOperatorVerticalMode({
     requestedMode,
     network: config.network,
-    chain: { ...native.contracts, chainId: native.chainId, generation: native.generation } as MarketplaceChainConfig,
+    chain: configuredChain(native),
     ...(liveClosure === undefined ? {} : { liveClosure }),
   });
 }

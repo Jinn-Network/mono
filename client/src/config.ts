@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod/v3';
+import { NativeOperatorConfigSchema } from './daemon/native-product-config.js';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
@@ -35,9 +36,6 @@ import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migra
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
-const NativeAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/u, 'must be an EVM address');
-const NativeDigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u, 'must be a sha256 digest');
-const NativeWeiSchema = z.string().regex(/^\d+$/u, 'must be a decimal wei string');
 
 export const JinnConfigSchema = z.object({
   /**
@@ -546,48 +544,7 @@ export const JinnConfigSchema = z.object({
       /** Explicit product boundary. Native never silently falls back to legacy. */
       verticalMode: z.enum(['legacy', 'native-v1']).optional(),
       /** Stable native deployment configuration. Private keys and tokens are env-only. */
-      native: z.object({
-        role: z.enum(['requester', 'solver', 'evaluator']),
-        publicBaseUrl: z.string().url(),
-        sources: z.array(z.object({
-          agent: z.string().min(1),
-          name: z.string().min(1),
-          baseUrl: z.string().url(),
-        })).min(1),
-        ipfs: z.object({ apiUrl: z.string().url() }),
-        chainId: z.literal(84532),
-        generation: z.literal('today'),
-        contracts: z.object({
-          taskCoordinator: NativeAddressSchema,
-          jinnRouter: NativeAddressSchema,
-          mechMarketplace: NativeAddressSchema,
-          activityChecker: NativeAddressSchema,
-        }),
-        transactionCaps: z.object({
-          createTaskMaxWei: NativeWeiSchema,
-          claimMaxWei: NativeWeiSchema,
-          solutionSettlementMaxWei: NativeWeiSchema,
-          evaluationClaimMaxWei: NativeWeiSchema,
-          verdictSettlementMaxWei: NativeWeiSchema,
-          escrowMaxWei: NativeWeiSchema,
-        }),
-        stateDir: z.string().min(1),
-        identityStorePath: z.string().min(1),
-        trustRootsPath: z.string().min(1),
-        runtime: z.object({
-          /** Digest-pinned deployment composition; it supplies real B2-B7 owned ports. */
-          deploymentModule: z.string().min(1),
-          moduleDigest: NativeDigestSchema,
-        }),
-        evaluator: z.object({
-          deploymentModule: z.string().min(1),
-          moduleDigest: NativeDigestSchema,
-          signerHandle: z.string().min(1),
-          evaluationMethodDigest: NativeDigestSchema,
-        }),
-        finality: z.object({ confirmations: z.number().int().positive() }),
-        liveClosureReceiptPath: z.string().min(1),
-      }).optional(),
+      native: NativeOperatorConfigSchema.optional(),
       publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()

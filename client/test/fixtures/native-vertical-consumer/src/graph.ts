@@ -84,7 +84,10 @@ export interface NativeGraphRoots {
     readonly chain: {
       readonly chainId: number;
       readonly coordinator: `0x${string}`;
+      readonly creator: `0x${string}`;
       readonly taskId: string;
+      readonly transactionHash: `0x${string}`;
+      readonly sealedAt: string;
     };
   };
   readonly solution: {
@@ -313,15 +316,23 @@ export function discoverNativeGraphRoots(input: {
   }), 'requester-root-ambiguous');
   const association = record(requesterMatch.facts[REQUESTER_ASSOCIATION_FACT])!;
   const associationMembers = [
-    'admissionReceiptDigest', 'chainId', 'coordinator', 'intendedSpendWei', 'nonce',
-    'postingTerms', 'requesterEnvelopeDigest', 'runId', 'submission', 'taskDigest', 'taskId',
+    'admissionReceiptDigest', 'chainId', 'coordinator', 'creator', 'intendedSpendWei', 'nonce',
+    'postingTerms', 'requesterEnvelopeDigest', 'runId', 'sealedAt', 'submission', 'taskDigest', 'taskId', 'txHash',
   ];
   if (Object.keys(association).sort().join('|') !== associationMembers.sort().join('|')) {
     throw new NativeGraphError('public-record-fact-invalid', 'requester association members');
   }
   const chainId = association.chainId;
   const coordinator = stringFact(association.coordinator, 'coordinator');
-  if (!Number.isSafeInteger(chainId) || (chainId as number) < 0 || !/^0x[a-fA-F0-9]{40}$/u.test(coordinator)) {
+  const creator = stringFact(association.creator, 'creator');
+  const transactionHash = stringFact(association.txHash, 'txHash');
+  const sealedAt = stringFact(association.sealedAt, 'sealedAt');
+  if (!Number.isSafeInteger(chainId) || (chainId as number) < 0
+      || !/^0x[a-fA-F0-9]{40}$/u.test(coordinator)
+      || !/^0x[a-fA-F0-9]{40}$/u.test(creator)
+      || !/^0x[a-fA-F0-9]{64}$/u.test(transactionHash)
+      || !/^\d{4}-\d{2}-\d{2}T/u.test(sealedAt)
+      || !Number.isFinite(Date.parse(sealedAt))) {
     throw new NativeGraphError('public-record-fact-invalid', 'chain identity');
   }
   const taskDigest = digestFact(association.taskDigest, 'taskDigest');
@@ -382,7 +393,10 @@ export function discoverNativeGraphRoots(input: {
       chain: {
         chainId: chainId as number,
         coordinator: coordinator as `0x${string}`,
+        creator: creator as `0x${string}`,
         taskId,
+        transactionHash: transactionHash as `0x${string}`,
+        sealedAt,
       },
     },
     solution: {

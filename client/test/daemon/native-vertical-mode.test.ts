@@ -6,13 +6,15 @@ import {
   NativeVerticalReadinessError,
   resolveOperatorVerticalMode,
 } from '../../src/daemon/native-vertical-mode.js';
+import {
+  buildPhaseBClosureManifest,
+  parseValidatedPhaseBClosureManifest,
+} from '../../src/daemon/phase-b-closure-manifest.js';
+import { phaseBClosureFixture } from '../_support/phase-b-closure-fixture.js';
 
-const VALIDATED = {
-  status: 'validated' as const,
-  chain: BASE_SEPOLIA_TODAY,
-  solutionSettlementFinalized: true,
-  verdictSettlementFinalized: true,
-};
+const VALIDATED = parseValidatedPhaseBClosureManifest(
+  buildPhaseBClosureManifest(phaseBClosureFixture()),
+);
 
 describe('operator vertical mode', () => {
   it('keeps legacy as the effective default and reports missing closure readiness', () => {
@@ -72,8 +74,17 @@ describe('operator vertical mode', () => {
         verticalMode: 'native-v1',
         native: {
           role: 'solver',
+          agent: 'urn:jinn:agent:solver',
+          safeAddress: `0x${'12'.repeat(20)}`,
+          marketplaceAgentAddress: `0x${'13'.repeat(20)}`,
+          evmCustody: {
+            keystorePath: '/var/lib/jinn/evm-keystore.json',
+            expectedOwnerAddress: `0x${'14'.repeat(20)}`,
+            accountIndex: 1,
+          },
           publicBaseUrl: 'https://solver.example.test',
-          sources: [{ agent: 'did:web:requester.example.test', name: 'requester', baseUrl: 'https://requester.example.test' }],
+          publicListen: { host: '127.0.0.1', port: 18533 },
+          sources: [{ role: 'requester', agent: 'did:web:requester.example.test', name: 'requester', baseUrl: 'https://requester.example.test' }],
           ipfs: { apiUrl: 'https://ipfs.example.test' },
           chainId: 84532,
           generation: 'today',
@@ -83,12 +94,10 @@ describe('operator vertical mode', () => {
             evaluationClaimMaxWei: '4', verdictSettlementMaxWei: '5', escrowMaxWei: '6',
           },
           stateDir: '/var/lib/jinn/native',
-          identityStorePath: '/var/lib/jinn/identities',
+          identityStores: { solver: '/var/lib/jinn/identities' },
           trustRootsPath: '/etc/jinn/trust-roots.json',
-          runtime: {
-            deploymentModule: '/opt/jinn/native-runtime.mjs',
-            moduleDigest: `sha256:${'cc'.repeat(32)}`,
-          },
+          trustPolicyGenesisDigest: `sha256:${'dd'.repeat(32)}`,
+          runtime: { provider: 'first-party' },
           evaluator: {
             deploymentModule: '/opt/jinn/prediction-evaluator.mjs',
             moduleDigest: `sha256:${'aa'.repeat(32)}`,

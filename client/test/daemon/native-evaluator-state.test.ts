@@ -55,8 +55,8 @@ const opportunity = {
 };
 
 describe("NativeEvaluatorStateRepository", () => {
-  it.each([1, 2, 3])("migrates an on-disk v%s operator DB to v4 without changing solver state", (version) => {
-    const root = mkdtempSync(join(tmpdir(), `native-evaluator-v${version}-v4-`));
+  it.each([1, 2, 3])("migrates an on-disk v%s operator DB to v5 without changing solver state", (version) => {
+    const root = mkdtempSync(join(tmpdir(), `native-evaluator-v${version}-v5-`));
     const path = join(root, "operator.sqlite");
     try {
       const before = new Store(path);
@@ -80,7 +80,7 @@ describe("NativeEvaluatorStateRepository", () => {
 
       const after = new Store(path);
       const evaluator = new NativeEvaluatorStateRepository(after);
-      expect(evaluator.schemaVersion()).toBe(4);
+      expect(evaluator.schemaVersion()).toBe(5);
       expect(after.db.prepare("SELECT * FROM native_engagements").get()).toEqual(preserved);
       expect(after.db.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'native_evaluations'",

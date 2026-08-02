@@ -202,6 +202,11 @@ describe('native solution state', () => {
     ]));
     const pending = subject.state.listPendingPublications();
     expect(pending).toHaveLength(4);
+    // The externally advertised Delivery is the signed high-water for evaluator admission;
+    // every exact referenced artifact and the executor envelope must precede it.
+    expect(pending.map(({ role }) => role)).toEqual([
+      'output', 'evidence', 'delivery-envelope', 'delivery',
+    ]);
     expect(pending).toEqual(expect.arrayContaining([
       expect.objectContaining({ sourceId: 'urn:jinn:source:solver-records', role: 'delivery', recordDigest: documentDigest(delivery) }),
       expect.objectContaining({ role: 'evidence', recordDigest: documentDigest(evidence) }),

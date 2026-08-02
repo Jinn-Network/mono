@@ -47,7 +47,7 @@ export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdenti
 };
 
 const ENVELOPE_VERSION = 1;
-const STORE_VERSION = 2;
+const STORE_VERSION = 3;
 const SCRYPT_KEY_LENGTH = 32;
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
@@ -66,12 +66,22 @@ export interface NativeRoleIdentity {
 export interface NativeRoleIdentitySetInput {
   /** Absolute, durable operator identity used in every binding-resolver query. */
   readonly agent: string;
+  /** Roles actually owned by this process. Omission retains the pre-cutover all-role test API. */
+  readonly requiredRoles?: readonly NativeRoleIdentityRole[];
   /** Persistent encrypted identity store path, owned by this operator process. */
   readonly storePath: string;
   /** Existing keystore password: unlocks ciphertext but is never used as key material. */
   readonly password: string;
   /** Real trust-resolve implementation; native composition has no permissive fallback. */
   readonly bindingResolver: BindingResolver;
+  /** Full ceremony/DSSE/policy verification supplied by the native trust authority. */
+  readonly verifyRoleBinding?: (input: {
+    readonly role: NativeRoleIdentityRole;
+    readonly key: string;
+    readonly agent: string;
+    readonly family: string;
+    readonly atTime: string;
+  }) => Promise<{ readonly bindingDigest: `sha256:${string}` }>;
   /** Injectable only for deterministic tests; production uses wall-clock boot time. */
   readonly now?: () => Date;
 }
@@ -99,10 +109,11 @@ interface StoredRoleMetadata {
   readonly createdAt: string;
 }
 
-interface StoredIdentitySetV2 {
-  readonly version: 2;
+interface StoredIdentitySetV3 {
+  readonly version: 3;
   readonly metadata: {
-    readonly format: 'jinn.native-role-identities/1';
+    readonly format: 'jinn.native-role-identities/2';
+    readonly ownedRoles: readonly NativeRoleIdentityRole[];
     readonly roles: readonly StoredRoleMetadata[];
   };
   readonly roles: readonly StoredRoleIdentity[];
@@ -162,9 +173,12 @@ function metadataFor(roles: readonly StoredRoleIdentity[]): readonly StoredRoleM
   }));
 }
 
-function validateRoles(roles: readonly StoredRoleIdentity[]): readonly StoredRoleIdentity[] {
-  if (roles.length !== NATIVE_ROLE_IDENTITY_ROLES.length) {
-    throw new IdentityStoreError('identity store is missing a required native role identity');
+function validateRoles(
+  roles: readonly StoredRoleIdentity[],
+  expectedRoles: readonly NativeRoleIdentityRole[],
+): readonly StoredRoleIdentity[] {
+  if (roles.length !== expectedRoles.length) {
+    throw new IdentityStoreError('identity store role set does not equal the explicitly owned role set');
   }
   const byRole = new Map<NativeRoleIdentityRole, StoredRoleIdentity>();
   for (const candidate of roles) {
@@ -187,14 +201,17 @@ function validateRoles(roles: readonly StoredRoleIdentity[]): readonly StoredRol
     }
     byRole.set(role, { ...candidate, role });
   }
-  return NATIVE_ROLE_IDENTITY_ROLES.map((role) => {
+  return expectedRoles.map((role) => {
     const stored = byRole.get(role);
     if (stored === undefined) throw new IdentityStoreError(`identity store is missing required role "${role}"`);
     return stored;
   });
 }
 
-function parseStoredIdentitySet(bytes: Uint8Array): { readonly value: StoredIdentitySetV2; readonly migrated: boolean } {
+function parseStoredIdentitySet(
+  bytes: Uint8Array,
+  expectedRoles: readonly NativeRoleIdentityRole[],
+): { readonly value: StoredIdentitySetV3; readonly migrated: boolean } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(new TextDecoder().decode(bytes));
@@ -204,32 +221,50 @@ function parseStoredIdentitySet(bytes: Uint8Array): { readonly value: StoredIden
   if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { roles?: unknown }).roles)) {
     throw new IdentityStoreError('identity store plaintext has no role list');
   }
-  const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles);
   const version = (parsed as { version?: unknown }).version;
-  if (version === 1) {
+  if (version === 1 || version === 2) {
+    if (expectedRoles.length !== NATIVE_ROLE_IDENTITY_ROLES.length
+      || expectedRoles.some((role, index) => role !== NATIVE_ROLE_IDENTITY_ROLES[index])) {
+      throw new IdentityStoreError('legacy all-role identity store cannot be narrowed or reused by a scoped production role');
+    }
+    const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
     // Add metadata only. The stored key bytes/key IDs retain their exact authority; legacy EVM
     // material is never read, transformed, or treated as a native role identity.
     return {
-      value: { version: STORE_VERSION, metadata: { format: 'jinn.native-role-identities/1', roles: metadataFor(roles) }, roles },
+      value: {
+        version: STORE_VERSION,
+        metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: metadataFor(roles) },
+        roles,
+      },
       migrated: true,
     };
   }
   if (version !== STORE_VERSION) throw new IdentityStoreError(`identity store version ${String(version)} is unsupported`);
-  const metadata = (parsed as Partial<StoredIdentitySetV2>).metadata;
-  if (metadata?.format !== 'jinn.native-role-identities/1' || !Array.isArray(metadata.roles)) {
+  const metadata = (parsed as Partial<StoredIdentitySetV3>).metadata;
+  if (metadata?.format !== 'jinn.native-role-identities/2'
+    || !Array.isArray(metadata.ownedRoles)
+    || !Array.isArray(metadata.roles)) {
     throw new IdentityStoreError('identity store key metadata is missing');
   }
+  if (JSON.stringify(metadata.ownedRoles) !== JSON.stringify(expectedRoles)) {
+    throw new IdentityStoreError('identity store owned role set does not match the process role set');
+  }
+  const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
   const expectedMetadata = metadataFor(roles);
   if (JSON.stringify(metadata.roles) !== JSON.stringify(expectedMetadata)) {
     throw new IdentityStoreError('identity store key metadata does not match stored role keys');
   }
   return {
-    value: { version: STORE_VERSION, metadata: { format: 'jinn.native-role-identities/1', roles: expectedMetadata }, roles },
+    value: {
+      version: STORE_VERSION,
+      metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: expectedMetadata },
+      roles,
+    },
     migrated: false,
   };
 }
 
-function encrypt(value: StoredIdentitySetV2, password: string): EncryptedIdentityEnvelope {
+function encrypt(value: StoredIdentitySetV3, password: string): EncryptedIdentityEnvelope {
   const salt = randomBytes(16);
   const iv = randomBytes(12);
   const key = scryptSync(password, salt, SCRYPT_KEY_LENGTH);
@@ -275,7 +310,7 @@ function decrypt(bytes: Uint8Array, password: string): Uint8Array {
   }
 }
 
-/** Encrypted, durable custody for the complete native role-key set. */
+/** Encrypted, durable custody for one explicit process-owned role set. */
 export class IdentityStore {
   private constructor(
     private readonly path: string,
@@ -290,7 +325,10 @@ export class IdentityStore {
     return new IdentityStore(input.path, input.password);
   }
 
-  async loadOrCreate(now: Date): Promise<readonly StoredRoleIdentity[]> {
+  async loadOrCreate(
+    now: Date,
+    ownedRoles: readonly NativeRoleIdentityRole[],
+  ): Promise<readonly StoredRoleIdentity[]> {
     let encrypted: Uint8Array | undefined;
     try {
       encrypted = await readFile(this.path);
@@ -302,21 +340,21 @@ export class IdentityStore {
 
     if (encrypted === undefined) {
       const createdAt = now.toISOString();
-      const roles = NATIVE_ROLE_IDENTITY_ROLES.map((role) => createStoredRole(role, createdAt));
+      const roles = ownedRoles.map((role) => createStoredRole(role, createdAt));
       await this.write({
         version: STORE_VERSION,
-        metadata: { format: 'jinn.native-role-identities/1', roles: metadataFor(roles) },
+        metadata: { format: 'jinn.native-role-identities/2', ownedRoles, roles: metadataFor(roles) },
         roles,
       });
       return roles;
     }
 
-    const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password));
+    const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password), ownedRoles);
     if (parsed.migrated) await this.write(parsed.value);
     return parsed.value.roles;
   }
 
-  private async write(value: StoredIdentitySetV2): Promise<void> {
+  private async write(value: StoredIdentitySetV3): Promise<void> {
     const tempPath = `${this.path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
     const serialized = `${JSON.stringify(encrypt(value, this.password))}\n`;
     let temporary: Awaited<ReturnType<typeof openFile>> | undefined;
@@ -362,12 +400,21 @@ export class RoleIdentitySet {
     if (!Number.isFinite(now.getTime())) throw new IdentityStoreError('native role identity boot time is invalid');
     const effectiveTime = now.toISOString();
     const store = await IdentityStore.open({ path: input.storePath, password: input.password });
-    const storedRoles = await store.loadOrCreate(now);
+    const requiredRoles = input.requiredRoles ?? NATIVE_ROLE_IDENTITY_ROLES;
+    const required = new Set<NativeRoleIdentityRole>();
+    for (const role of requiredRoles) {
+      if (required.has(role)) throw new IdentityStoreError(`native role "${role}" is requested more than once`);
+      required.add(role);
+    }
+    if (required.size === 0) throw new IdentityStoreError('native process must own at least one role identity');
+    const orderedRequired = NATIVE_ROLE_IDENTITY_ROLES.filter((role) => required.has(role));
+    const storedRoles = await store.loadOrCreate(now, orderedRequired);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
     const hostSecretKeys = new Map<NativeRoleIdentityRole, KeyObject>();
 
     for (const stored of storedRoles) {
       const role = stored.role;
+      if (!required.has(role)) continue;
       const publicKey = createPublicKey({ key: Buffer.from(stored.publicKeyDer, 'base64'), format: 'der', type: 'spki' });
       const privateKey = createPrivateKey({ key: Buffer.from(stored.privateKeyDer, 'base64'), format: 'der', type: 'pkcs8' });
       const resolved = await input.bindingResolver.resolveBinding(
@@ -397,6 +444,18 @@ export class RoleIdentitySet {
           throw new IdentityStoreError(`native role "${role}" binding is revoked at boot`);
         }
       }
+      if (input.verifyRoleBinding !== undefined) {
+        for (const family of requiredScopes) {
+          // eslint-disable-next-line no-await-in-loop -- every owned role/family is an independent authority gate.
+          await input.verifyRoleBinding({
+            role,
+            key: stored.keyId,
+            agent: input.agent,
+            family,
+            atTime: effectiveTime,
+          });
+        }
+      }
       byRole.set(role, {
         role,
         keyId: stored.keyId,
@@ -408,7 +467,14 @@ export class RoleIdentitySet {
         hostSecretKeys.set(role, privateKey);
       }
     }
-    return new RoleIdentitySet(input.agent, byRole, hostSecretKeys, input.bindingResolver, input.now ?? (() => new Date()));
+    if (byRole.size !== required.size) throw new IdentityStoreError('identity store did not load every process-owned role');
+    return new RoleIdentitySet(
+      input.agent,
+      byRole,
+      hostSecretKeys,
+      input.bindingResolver,
+      input.now ?? (() => new Date()),
+    );
   }
 
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {

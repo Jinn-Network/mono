@@ -6,6 +6,13 @@
 export const MECH_MARKETPLACE_ABI = [
   {
     type: "function",
+    name: "mapAgentMechFactories",
+    stateMutability: "view",
+    inputs: [{ name: "mech", type: "address" }],
+    outputs: [{ name: "factory", type: "address" }],
+  },
+  {
+    type: "function",
     name: "request",
     stateMutability: "payable",
     inputs: [
@@ -42,6 +49,17 @@ export const MECH_MARKETPLACE_ABI = [
       { name: "requestIds", type: "bytes32[]", indexed: false },
       { name: "requestDatas", type: "bytes[]", indexed: false },
     ],
+  },
+] as const;
+
+/** Authoritative per-Mech ownership read used by native preflight. */
+export const MECH_OPERATOR_ABI = [
+  {
+    type: "function",
+    name: "getOperator",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "operator", type: "address" }],
   },
 ] as const;
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-
-import type { JinnConfig } from './config.js';
-import type { NativeOperatorHost } from './daemon/native-operator-host.js';
+import { join } from 'node:path';
+import {
+  type NativeOperatorHealth,
+  type NativeOperatorHost,
+} from './daemon/native-operator-host.js';
+import {
+  NativeProductFileSchema,
+  type NativeProductConfig,
+} from './daemon/native-product-config.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import type { OperatorVerticalDecision } from './daemon/native-vertical-mode.js';
 
@@ -16,17 +18,11 @@ export interface NativeDeploymentFactoryInput {
   readonly decision: OperatorVerticalDecision;
 }
 
-export interface NativeDeploymentModule {
-  createNativeOperatorHost(input: NativeDeploymentFactoryInput): NativeOperatorHost | Promise<NativeOperatorHost>;
-}
-
 export interface NativeMainDeps {
   readonly loadConfig: () => NativeProductConfig;
-  readonly loadDeployment: (config: NativeProductConfig) => Promise<NativeDeploymentModule>;
+  readonly buildHost: (input: NativeDeploymentFactoryInput) => Promise<NativeOperatorHost>;
   readonly installSignalHandlers?: boolean;
 }
-
-export type NativeProductConfig = Pick<JinnConfig, 'network' | 'operator'> & { readonly rpcUrl?: string };
 
 function loadNativeProductConfig(): NativeProductConfig {
   const index = process.argv.indexOf('--config');
@@ -34,43 +30,41 @@ function loadNativeProductConfig(): NativeProductConfig {
     ? process.argv[index + 1]!
     : join(homedir(), '.jinn-client', 'config.json');
   if (!existsSync(path)) throw new Error(`native-v1 structured config is missing: ${path}`);
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as NativeProductConfig;
-  const native = parsed.operator?.native;
-  if (parsed.network !== 'testnet' || native === undefined) {
-    throw new Error('native-v1 requires structured testnet operator.native configuration');
+  let raw: unknown;
+  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (cause) {
+    throw new Error(`native-v1 structured config is not JSON: ${String(cause)}`);
   }
-  for (const [name, value] of Object.entries({
-    stateDir: native.stateDir,
-    identityStorePath: native.identityStorePath,
-    trustRootsPath: native.trustRootsPath,
-    publicBaseUrl: native.publicBaseUrl,
-    runtimeModule: native.runtime.deploymentModule,
-    runtimeDigest: native.runtime.moduleDigest,
-  })) {
-    if (typeof value !== 'string' || value.length === 0) throw new Error(`native-v1 config is missing ${name}`);
-  }
-  return parsed;
+  const parsed = NativeProductFileSchema.safeParse(raw);
+  if (!parsed.success) throw new Error(`native-v1 structured config is invalid: ${parsed.error.message}`);
+  return parsed.data;
 }
 
-async function loadConfiguredDeployment(config: NativeProductConfig): Promise<NativeDeploymentModule> {
-  const runtime = config.operator?.native?.runtime;
-  if (runtime === undefined) throw new Error('native-v1 requires a digest-pinned runtime deployment module');
-  if (!isAbsolute(runtime.deploymentModule)) throw new Error('native runtime deployment module path must be absolute');
-  const bytes = await readFile(runtime.deploymentModule);
-  const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-  if (actual !== runtime.moduleDigest) throw new Error('native runtime deployment module digest mismatch');
-  const loaded = await import(pathToFileURL(runtime.deploymentModule).href) as Partial<NativeDeploymentModule>;
-  if (typeof loaded.createNativeOperatorHost !== 'function') {
-    throw new Error('native runtime deployment module must export createNativeOperatorHost');
-  }
-  return loaded as NativeDeploymentModule;
+async function buildProductionHost(input: NativeDeploymentFactoryInput): Promise<NativeOperatorHost> {
+  const { createNativeProductionOperatorHost } = await import('./daemon/native-production-deployment.js');
+  return createNativeProductionOperatorHost(input);
 }
 
 const PRODUCTION_DEPS: NativeMainDeps = {
   loadConfig: loadNativeProductConfig,
-  loadDeployment: loadConfiguredDeployment,
+  buildHost: buildProductionHost,
   installSignalHandlers: true,
 };
+
+function validateStartedHealth(health: NativeOperatorHealth): void {
+  if (health.mode !== 'native-v1'
+    || health.nativeFallbackCount !== 0
+    || !health.leaseOwned
+    || health.sourceLag !== 0
+    || health.uncertainOperations !== 0
+    || !health.venue.caughtUp
+    || BigInt(health.venue.canonicalBlock) < BigInt(health.venue.finalizedBlock)
+    || (health.backendRequired && !health.backendReady)
+    || (health.evidenceRequired && !health.evidenceReady)
+    || !health.publicSourceReady
+    || Object.keys(health.roleKeyIds).length === 0) {
+    throw new Error('native-v1 host health is not decision-ready');
+  }
+}
 
 /** Native-only entry. It has no import path to Daemon, TaskEngine, bridge records, or watchers. */
 export async function main(deps: NativeMainDeps = PRODUCTION_DEPS): Promise<{
@@ -78,26 +72,36 @@ export async function main(deps: NativeMainDeps = PRODUCTION_DEPS): Promise<{
   readonly kind: 'native_daemon_started';
   readonly mode: 'native-v1';
   readonly readiness: OperatorVerticalDecision['readiness'];
-  readonly health: unknown;
+  readonly health: NativeOperatorHealth;
 }> {
   const config = deps.loadConfig();
   const decision = resolveConfiguredOperatorVerticalMode(config);
   if (decision.effectiveMode !== 'native-v1') {
     throw new Error(`native entry refused effective mode ${decision.effectiveMode} (${decision.readiness})`);
   }
-  const deployment = await deps.loadDeployment(config);
-  const host = await deployment.createNativeOperatorHost({ config, decision });
-  await host.start();
-  const stop = async () => { await host.close(); };
-  if (deps.installSignalHandlers === true) {
-    process.once('SIGINT', stop);
-    process.once('SIGTERM', stop);
+  const host = await deps.buildHost({ config, decision });
+  try {
+    await host.start();
+    const health = await host.health();
+    validateStartedHealth(health);
+    const stop = async () => { await host.close(); };
+    if (deps.installSignalHandlers === true) {
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+    }
+    return {
+      schemaVersion: 1,
+      kind: 'native_daemon_started',
+      mode: 'native-v1',
+      readiness: decision.readiness,
+      health,
+    };
+  } catch (cause) {
+    try {
+      await host.close();
+    } catch (cleanupCause) {
+      throw new AggregateError([cause, cleanupCause], 'native-v1 startup/health and cleanup failed');
+    }
+    throw cause;
   }
-  return {
-    schemaVersion: 1,
-    kind: 'native_daemon_started',
-    mode: 'native-v1',
-    readiness: decision.readiness,
-    health: await host.health(),
-  };
 }
