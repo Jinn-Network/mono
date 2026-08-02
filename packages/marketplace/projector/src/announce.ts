@@ -95,6 +95,15 @@ export interface AnnouncementProjectionPorts {
     event: ObservationMarketplaceEvent,
     role: "submission" | "delivery",
   ) => Promise<string | undefined>;
+  /**
+   * Optional local-source readback used to recover publication that completed before the daemon
+   * cursor transaction did. Entries are immutable archive facts, so this is an exact recovery
+   * input rather than a best-effort cache.
+   */
+  readonly readPublishedArchive?: () => Promise<{
+    readonly head?: SourceHead;
+    readonly entries: readonly AnnouncementEntry[];
+  }>;
 }
 
 export type ProjectedAnnouncement =
@@ -175,6 +184,10 @@ function announcementId(
   return [
     "ann",
     event.derivation.chainId,
+    // A replacement block can legitimately preserve a transaction/log position. Include the
+    // canonical block identity so a re-announced fact after a reorg is a distinct availability,
+    // never a collision with the append-only orphaned one it supersedes.
+    event.derivation.blockHash.slice(2),
     event.derivation.txHash.slice(2),
     event.derivation.logIndex,
     role,

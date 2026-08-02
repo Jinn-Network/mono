@@ -8,7 +8,11 @@ import type {
 } from '../corpus/types.js';
 import { ENGAGEMENT_LEDGER_SCHEMA } from '../daemon/engagement-ledger.js';
 import { NATIVE_DISCOVERY_SCHEMA } from '../daemon/native-discovery.js';
-import { PROJECTOR_CURSOR_SCHEMA, PROJECTOR_OBSERVATIONS_SCHEMA } from '../daemon/projector-cursor.js';
+import {
+  PROJECTOR_CANONICAL_JOURNAL_SCHEMA,
+  PROJECTOR_CURSOR_SCHEMA,
+  PROJECTOR_OBSERVATIONS_SCHEMA,
+} from '../daemon/projector-cursor.js';
 import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
@@ -608,6 +612,7 @@ export class Store {
     this.db.exec(NATIVE_DISCOVERY_SCHEMA);
     this.db.exec(PROJECTOR_CURSOR_SCHEMA);
     this.db.exec(PROJECTOR_OBSERVATIONS_SCHEMA);
+    this.db.exec(PROJECTOR_CANONICAL_JOURNAL_SCHEMA);
     this.ensureArtifactsTaskColumns();
     this.ensureEngagementLedgerRequestIdColumn();
     this.ensureEngagementLedgerDispatchContextColumns();

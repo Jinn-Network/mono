@@ -166,7 +166,7 @@ import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesize
 import { EngagementLedger } from './engagement-ledger.js';
 import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
 import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
-import { createFinalizedHeadReader } from './projector-log-source.js';
+import { createCanonicalBlockHashReader, createFinalizedHeadReader } from './projector-log-source.js';
 import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-enrich.js';
 import { ProjectorCursorStore } from './projector-cursor.js';
 import { ProjectorLoop } from './projector-loop.js';
@@ -860,6 +860,7 @@ function buildProjector(input: {
     store: input.store,
     isAuthorizedMechOrigin,
     readFinalizedBlockNumber: createFinalizedHeadReader(input.publicClient),
+    readCanonicalBlockHash: createCanonicalBlockHashReader(input.publicClient),
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 

@@ -11,6 +11,12 @@
  * nothing durable to read from. See `readObservations()` below — the accessor `BaseVenueConfig`
  * wants (C8 wires it in; not this module's job).
  */
+import {
+  createMarketplaceProjectionState,
+  reduceMarketplaceProjection,
+  type ObservationMarketplaceEvent,
+  type ProjectedAnnouncement,
+} from '@jinn-network/marketplace-projector';
 import type {
   MarketplaceProjectionState,
   MarketplaceProtocolObservation,
@@ -125,6 +131,44 @@ CREATE TABLE IF NOT EXISTS projector_observations (
 CREATE INDEX IF NOT EXISTS idx_projector_observations_key_id ON projector_observations(key, id);
 `;
 
+/**
+ * Canonical event and availability journals are additive. They retain precisely the provenance
+ * needed to rebuild projection state from a finalized boundary and to append a retraction for
+ * every still-active availability whose original block becomes orphaned. They never rewrite the
+ * published discovery archive; `orphaned_at` only changes the local canonical view.
+ */
+export const PROJECTOR_CANONICAL_JOURNAL_SCHEMA = `
+CREATE TABLE IF NOT EXISTS projector_canonical_events (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  key                TEXT NOT NULL,
+  event_key          TEXT NOT NULL,
+  block_number       INTEGER NOT NULL,
+  block_hash         TEXT NOT NULL,
+  event_json         TEXT NOT NULL,
+  orphaned_at        TEXT,
+  UNIQUE (key, event_key)
+);
+CREATE INDEX IF NOT EXISTS idx_projector_events_canonical_range
+  ON projector_canonical_events (key, block_number, id)
+  WHERE orphaned_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_projector_events_block_hash
+  ON projector_canonical_events (key, block_hash)
+  WHERE orphaned_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS projector_availability_journal (
+  key                TEXT NOT NULL,
+  announcement_id    TEXT NOT NULL,
+  block_number       INTEGER NOT NULL,
+  block_hash         TEXT NOT NULL,
+  announcement_json  TEXT NOT NULL,
+  retracted_at       TEXT,
+  PRIMARY KEY (key, announcement_id)
+);
+CREATE INDEX IF NOT EXISTS idx_projector_availability_active_hash
+  ON projector_availability_journal (key, block_hash)
+  WHERE retracted_at IS NULL;
+`;
+
 export interface ProjectorCursor {
   readonly liveBlockNumber: bigint;
   readonly liveBlockHash: `0x${string}`;
@@ -149,6 +193,23 @@ interface RawRow {
   updated_at: string;
 }
 
+interface RawJournalEvent {
+  event_json: string;
+}
+
+interface RawAvailability {
+  announcement_json: string;
+}
+
+export interface ProjectorJournalWrite {
+  /** Newly admitted canonical events: exactly the inputs accepted by the reducer this tick. */
+  readonly events?: readonly ObservationMarketplaceEvent[];
+  /** Signed-source actions emitted this tick. Withdrawals close `retracts` in the local view. */
+  readonly announcements?: readonly ProjectedAnnouncement[];
+  /** Prior canonical provenance that a reorg proved displaced. */
+  readonly orphanedBlockHashes?: readonly `0x${string}`[];
+}
+
 function toCursor(raw: RawRow): ProjectorCursor {
   return {
     liveBlockNumber: BigInt(raw.live_block_number),
@@ -160,6 +221,17 @@ function toCursor(raw: RawRow): ProjectorCursor {
     headJson: raw.head_json,
     stateJson: raw.state_json,
   };
+}
+
+function eventKey(event: ObservationMarketplaceEvent): string {
+  const { derivation } = event;
+  return [
+    derivation.chainId,
+    derivation.contract.toLowerCase(),
+    derivation.blockHash.toLowerCase(),
+    derivation.txHash.toLowerCase(),
+    derivation.logIndex,
+  ].join(':');
 }
 
 export class ProjectorCursorStore {
@@ -183,7 +255,11 @@ export class ProjectorCursorStore {
    * venue's view of the chain from the projector's, which is exactly what this transaction rules
    * out.
    */
-  write(cursor: ProjectorCursor, observations: readonly MarketplaceProtocolObservation[] = []): void {
+  write(
+    cursor: ProjectorCursor,
+    observations: readonly MarketplaceProtocolObservation[] = [],
+    journal: ProjectorJournalWrite = {},
+  ): void {
     this.store.db.transaction(() => {
       this.store.db
         .prepare(
@@ -215,15 +291,114 @@ export class ProjectorCursorStore {
           new Date().toISOString(),
         );
 
-      if (observations.length === 0) return;
-      const insertObservation = this.store.db.prepare(
-        `INSERT INTO projector_observations (key, observation_json, created_at) VALUES (?, ?, ?)`,
-      );
       const insertedAt = new Date().toISOString();
-      for (const observation of observations) {
-        insertObservation.run(this.key, serializeObservation(observation), insertedAt);
+      if (observations.length > 0) {
+        const insertObservation = this.store.db.prepare(
+          `INSERT INTO projector_observations (key, observation_json, created_at) VALUES (?, ?, ?)`,
+        );
+        for (const observation of observations) {
+          insertObservation.run(this.key, serializeObservation(observation), insertedAt);
+        }
+      }
+
+      const orphaned = new Set((journal.orphanedBlockHashes ?? []).map((hash) => hash.toLowerCase()));
+      if (orphaned.size > 0) {
+        const orphanEvent = this.store.db.prepare(
+          `UPDATE projector_canonical_events
+              SET orphaned_at = ?
+            WHERE key = ? AND lower(block_hash) = ? AND orphaned_at IS NULL`,
+        );
+        for (const blockHash of orphaned) orphanEvent.run(insertedAt, this.key, blockHash);
+      }
+
+      const insertEvent = this.store.db.prepare(
+        `INSERT INTO projector_canonical_events
+           (key, event_key, block_number, block_hash, event_json)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(key, event_key) DO NOTHING`,
+      );
+      for (const event of journal.events ?? []) {
+        insertEvent.run(
+          this.key,
+          eventKey(event),
+          event.derivation.blockNumber,
+          event.derivation.blockHash,
+          serializeBigintAware(event),
+        );
+      }
+
+      const retractAvailability = this.store.db.prepare(
+        `UPDATE projector_availability_journal
+            SET retracted_at = ?
+          WHERE key = ? AND announcement_id = ? AND retracted_at IS NULL`,
+      );
+      const insertAvailability = this.store.db.prepare(
+        `INSERT INTO projector_availability_journal
+           (key, announcement_id, block_number, block_hash, announcement_json)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(key, announcement_id) DO NOTHING`,
+      );
+      for (const announcement of journal.announcements ?? []) {
+        if (announcement.action === 'withdrawn') {
+          retractAvailability.run(insertedAt, this.key, announcement.retracts);
+          continue;
+        }
+        insertAvailability.run(
+          this.key,
+          announcement.announcementId,
+          announcement.derivation.blockNumber,
+          announcement.derivation.blockHash,
+          serializeBigintAware(announcement),
+        );
       }
     })();
+  }
+
+  /** Replays only retained canonical events through a final, immutable boundary. */
+  rebuildCanonicalStateThrough(boundary: bigint): MarketplaceProjectionState {
+    const rows = this.store.db.prepare(
+      `SELECT event_json FROM projector_canonical_events
+        WHERE key = ? AND orphaned_at IS NULL AND block_number <= ?
+        ORDER BY id ASC`,
+    ).all(this.key, Number(boundary)) as RawJournalEvent[];
+    const events = rows.map((row) => deserializeBigintAware<ObservationMarketplaceEvent>(row.event_json));
+    return reduceMarketplaceProjection(events, createMarketplaceProjectionState()).state;
+  }
+
+  /** True only for an event already retained as canonical with this exact block provenance. */
+  hasCanonicalEvent(event: ObservationMarketplaceEvent): boolean {
+    const row = this.store.db.prepare(
+      `SELECT 1 FROM projector_canonical_events
+        WHERE key = ? AND event_key = ? AND orphaned_at IS NULL`,
+    ).get(this.key, eventKey(event));
+    return row !== undefined;
+  }
+
+  /** Still-live availability actions whose exact original block hash has been displaced. */
+  activeAvailabilitiesForOrphanedBlocks(
+    orphanedBlockHashes: readonly `0x${string}`[],
+  ): Extract<ProjectedAnnouncement, { readonly action: 'available' }>[] {
+    const orphaned = new Set(orphanedBlockHashes.map((hash) => hash.toLowerCase()));
+    if (orphaned.size === 0) return [];
+    const rows = this.store.db.prepare(
+      `SELECT announcement_json FROM projector_availability_journal
+        WHERE key = ? AND retracted_at IS NULL`,
+    ).all(this.key) as RawAvailability[];
+    return rows
+      .map((row) => deserializeBigintAware<Extract<ProjectedAnnouncement, { readonly action: 'available' }>>(row.announcement_json))
+      .filter((announcement) => orphaned.has(announcement.derivation.blockHash.toLowerCase()));
+  }
+
+  /** Current local canonical availability view; historical archive entries remain untouched. */
+  readActiveAvailabilities(): Extract<ProjectedAnnouncement, { readonly action: 'available' }>[] {
+    const rows = this.store.db.prepare(
+      `SELECT announcement_json FROM projector_availability_journal
+        WHERE key = ? AND retracted_at IS NULL
+        ORDER BY announcement_id ASC`,
+    ).all(this.key) as RawAvailability[];
+    return rows.map((row) =>
+      deserializeBigintAware<Extract<ProjectedAnnouncement, { readonly action: 'available' }>>(row.announcement_json),
+    );
   }
 
   /**

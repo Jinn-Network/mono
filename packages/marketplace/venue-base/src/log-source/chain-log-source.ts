@@ -28,7 +28,11 @@ export interface ChainLogBatch {
   readonly cursor: ChainLogCursor;
   readonly finalizedCheckpoint: ChainLogCursor;
   readonly reorg?: {
+    /** Canonical state must be rebuilt from (and including) this finalized boundary. */
+    readonly canonicalRebuildBoundary: ChainLogCursor;
     readonly rolledBackTo: ChainLogCursor;
+    /** Complete prior canonical suffix, including empty blocks, captured before replacement RPC reads. */
+    readonly displacedBlocks: readonly ChainLogCursor[];
     readonly orphanedBlockHashes: readonly Hex[];
   };
 }
@@ -104,6 +108,22 @@ export function createChainLogSource(input: {
     return collected;
   }
 
+  /**
+   * `getLogs` omits empty blocks. Persisting only its output would make a later reorg appear to
+   * displace only blocks with marketplace activity, even though every old block hash above the
+   * finality boundary is evidence we must retain before the RPC exposes replacement hashes.
+   */
+  async function scanBlockHashes(fromBlock: bigint, toBlock: bigint): Promise<ChainLogCursor[]> {
+    const blocks: ChainLogCursor[] = [];
+    for (let blockNumber = fromBlock; blockNumber <= toBlock; blockNumber += 1n) {
+      // eslint-disable-next-line no-await-in-loop -- ordered provenance is durably sampled.
+      const hash = await hashAt(blockNumber);
+      if (hash === undefined) throw new Error(`missing canonical block hash at ${blockNumber}`);
+      blocks.push({ blockNumber, blockHash: hash });
+    }
+    return blocks;
+  }
+
   return {
     cursor: () => store.read(stream)?.live,
     finalizedCheckpoint: () => store.read(stream)?.finalized,
@@ -143,7 +163,12 @@ export function createChainLogSource(input: {
       if (persisted === undefined) {
         const start = options.startBlock ?? finalized.blockNumber;
         const logs = await fetchChunked(start, latest.blockNumber, finalized.blockNumber);
-        store.write(stream, input.chain.chainId, latest, finalized);
+        const scanned = await scanBlockHashes(start, latest.blockNumber);
+        input.state.transaction(() => {
+          store.recordScanned(stream, input.chain.chainId, scanned);
+          store.write(stream, input.chain.chainId, latest, finalized);
+          store.pruneThroughFinalized(stream, finalized.blockNumber);
+        });
         return { logs, cursor: latest, finalizedCheckpoint: finalized };
       }
 
@@ -153,15 +178,42 @@ export function createChainLogSource(input: {
         const rolledBackTo = persisted.finalized.blockNumber > finalized.blockNumber
           ? persisted.finalized
           : finalized;
-        const orphaned: ChainLogCursor[] = [{ ...persisted.live }];
-        store.recordOrphaned(input.chain.chainId, orphaned);
+        // Read the old suffix before querying/replacing any history. This includes empty blocks
+        // and remains valid after the provider has switched entirely to the replacement fork.
+        const priorSuffix = store.displacedSince(stream, rolledBackTo.blockNumber);
         const logs = await fetchChunked(rolledBackTo.blockNumber + 1n, latest.blockNumber, finalized.blockNumber);
-        store.write(stream, input.chain.chainId, latest, rolledBackTo);
+        const scanned = await scanBlockHashes(rolledBackTo.blockNumber + 1n, latest.blockNumber);
+        const replacementByHeight = new Map(
+          scanned.map((block) => [block.blockNumber, block.blockHash.toLowerCase()]),
+        );
+        // A rollback/replay starts from the finalized boundary, but only a prior block whose
+        // exact hash differs from the replacement chain is displaced. Keeping unchanged suffix
+        // blocks canonical avoids spurious retractions when a shallow fork begins near the tip.
+        const orphaned = priorSuffix.filter(
+          (block) => replacementByHeight.get(block.blockNumber) !== block.blockHash.toLowerCase(),
+        );
+        const fallback = orphaned.length === 0
+          && priorSuffix.length === 0
+          && persisted.live.blockNumber > rolledBackTo.blockNumber
+          ? [{ ...persisted.live }]
+          : orphaned;
+        input.state.transaction(() => {
+          store.recordOrphaned(input.chain.chainId, fallback);
+          store.markDisplaced(stream, fallback);
+          store.recordScanned(stream, input.chain.chainId, scanned);
+          store.write(stream, input.chain.chainId, latest, rolledBackTo);
+          store.pruneThroughFinalized(stream, rolledBackTo.blockNumber);
+        });
         return {
           logs,
           cursor: latest,
           finalizedCheckpoint: rolledBackTo,
-          reorg: { rolledBackTo, orphanedBlockHashes: orphaned.map((block) => block.blockHash) },
+          reorg: {
+            canonicalRebuildBoundary: rolledBackTo,
+            rolledBackTo,
+            displacedBlocks: fallback,
+            orphanedBlockHashes: fallback.map((block) => block.blockHash),
+          },
         };
       }
 
@@ -175,7 +227,12 @@ export function createChainLogSource(input: {
       );
       // The checkpoint is monotone: a provider that regresses its `finalized` tag never moves it back.
       const checkpoint = finalized.blockNumber > persisted.finalized.blockNumber ? finalized : persisted.finalized;
-      store.write(stream, input.chain.chainId, latest, checkpoint);
+      const scanned = await scanBlockHashes(persisted.live.blockNumber + 1n, latest.blockNumber);
+      input.state.transaction(() => {
+        store.recordScanned(stream, input.chain.chainId, scanned);
+        store.write(stream, input.chain.chainId, latest, checkpoint);
+        store.pruneThroughFinalized(stream, checkpoint.blockNumber);
+      });
       return { logs, cursor: latest, finalizedCheckpoint: checkpoint };
     },
   };

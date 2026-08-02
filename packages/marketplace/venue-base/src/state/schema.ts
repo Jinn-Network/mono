@@ -7,8 +7,24 @@
 // version 2): the durable, idempotent requester cancellation signal. Task 16 adds
 // `submission_scopes` and `attempt_deliveries` (schema version 3): the durable half of the
 // projector-backed `MarketplaceObservePort` -- linearizable requester-scope ownership and
-// recorded Delivery bytes.
-export const VENUE_STATE_SCHEMA_VERSION = 3 as const;
+// recorded Delivery bytes. Version 4 adds scanned block-number/hash history so reorg handling
+// can enumerate every displaced block, including blocks with no marketplace logs.
+export const VENUE_STATE_SCHEMA_VERSION = 4 as const;
+
+/** Additive v3 -> v4 migration; old venue state must retain every existing cursor/outbox row. */
+export const VENUE_STATE_V4_MIGRATION_SQL = `
+CREATE TABLE scanned_block_hashes (
+  stream TEXT NOT NULL,
+  chain_id INTEGER NOT NULL,
+  block_number INTEGER NOT NULL CHECK (block_number >= 0),
+  block_hash TEXT NOT NULL,
+  orphaned_at_ms INTEGER,
+  PRIMARY KEY (stream, block_number, block_hash)
+);
+CREATE INDEX scanned_block_hashes_active_range
+  ON scanned_block_hashes (stream, block_number)
+  WHERE orphaned_at_ms IS NULL;
+`;
 
 export const SCHEMA_SQL = `
 CREATE TABLE venue_state_metadata (
@@ -65,6 +81,23 @@ CREATE TABLE orphaned_blocks (
   observed_at_ms INTEGER NOT NULL,
   PRIMARY KEY (chain_id, block_hash)
 );
+
+-- Canonical block provenance sampled as the log cursor advances. \`getLogs\` cannot tell us the
+-- hash of an empty block, and after a fork the RPC exposes only replacement hashes; retaining
+-- this history is therefore the only way to enumerate the full displaced suffix. A later
+-- finalized-boundary prune may remove rows only at or below that boundary, where they can no
+-- longer be reorged. Orphaned rows remain independently auditable in \`orphaned_blocks\`.
+CREATE TABLE scanned_block_hashes (
+  stream TEXT NOT NULL,
+  chain_id INTEGER NOT NULL,
+  block_number INTEGER NOT NULL CHECK (block_number >= 0),
+  block_hash TEXT NOT NULL,
+  orphaned_at_ms INTEGER,
+  PRIMARY KEY (stream, block_number, block_hash)
+);
+CREATE INDEX scanned_block_hashes_active_range
+  ON scanned_block_hashes (stream, block_number)
+  WHERE orphaned_at_ms IS NULL;
 
 -- The transactional outbox (design §7 ruling 4). The idempotency key is the LOGICAL operation
 -- identity carried by the sealed Submission -- never a tx hash. A row is written in the same

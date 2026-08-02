@@ -19,7 +19,7 @@ import {
   type ChainLogSourceOptions,
   type VenueStateDatabase,
 } from '@jinn-network/marketplace-venue-base';
-import type { Address, PublicClient } from 'viem';
+import type { Address, Hex, PublicClient } from 'viem';
 
 export type { ChainLogSource, ChainLogSourceOptions } from '@jinn-network/marketplace-venue-base';
 
@@ -84,5 +84,19 @@ export function createFinalizedHeadReader(publicClient: PublicClient): () => Pro
   return async () => {
     const block = await publicClient.getBlock({ blockTag: 'finalized' });
     return block.number ?? 0n;
+  };
+}
+
+/**
+ * Read-only canonical block identity lookup for the projector's local reorg journal. This never
+ * advances `ChainLogSource`; it only compares retained pre-fork provenance with the chain that
+ * is now canonical at the same height.
+ */
+export function createCanonicalBlockHashReader(
+  publicClient: PublicClient,
+): (blockNumber: bigint) => Promise<Hex | undefined> {
+  return async (blockNumber) => {
+    const block = await publicClient.getBlock({ blockNumber });
+    return block.hash ?? undefined;
   };
 }

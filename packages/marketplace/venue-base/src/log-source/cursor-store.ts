@@ -15,6 +15,14 @@ export interface ChainLogCursor {
 export interface CursorStore {
   read(stream: string): { readonly live: ChainLogCursor; readonly finalized: ChainLogCursor } | undefined;
   write(stream: string, chainId: number, live: ChainLogCursor, finalized: ChainLogCursor): void;
+  /** Persist every scanned canonical block, including blocks which carried no relevant logs. */
+  recordScanned(stream: string, chainId: number, blocks: readonly ChainLogCursor[]): void;
+  /** The exact previously-canonical suffix beyond a reorg rebuild boundary. */
+  displacedSince(stream: string, boundary: bigint): readonly ChainLogCursor[];
+  /** Marks the prior suffix non-canonical without rewriting or deleting its provenance. */
+  markDisplaced(stream: string, blocks: readonly ChainLogCursor[]): void;
+  /** Never prune above this finalized boundary; a caller may omit pruning entirely. */
+  pruneThroughFinalized(stream: string, boundary: bigint): void;
   recordOrphaned(chainId: number, blocks: readonly ChainLogCursor[]): void;
   orphanedHashes(chainId: number): ReadonlySet<string>;
 }
@@ -51,6 +59,23 @@ export function createCursorStore(state: VenueStateDatabase): CursorStore {
   const orphanedHashesStmt = state.db.prepare(
     "SELECT block_hash AS blockHash FROM orphaned_blocks WHERE chain_id = ?",
   );
+  const recordScannedStmt = state.db.prepare(
+    "INSERT INTO scanned_block_hashes (stream, chain_id, block_number, block_hash, orphaned_at_ms)"
+    + " VALUES (@stream, @chainId, @blockNumber, @blockHash, NULL)"
+    + " ON CONFLICT (stream, block_number, block_hash) DO UPDATE SET orphaned_at_ms = NULL",
+  );
+  const displacedSinceStmt = state.db.prepare(
+    "SELECT block_number AS blockNumber, block_hash AS blockHash FROM scanned_block_hashes"
+    + " WHERE stream = ? AND block_number > ? AND orphaned_at_ms IS NULL"
+    + " ORDER BY block_number ASC",
+  );
+  const markDisplacedStmt = state.db.prepare(
+    "UPDATE scanned_block_hashes SET orphaned_at_ms = ?"
+    + " WHERE stream = ? AND block_number = ? AND block_hash = ? AND orphaned_at_ms IS NULL",
+  );
+  const pruneThroughFinalizedStmt = state.db.prepare(
+    "DELETE FROM scanned_block_hashes WHERE stream = ? AND block_number < ?",
+  );
 
   return {
     read(stream) {
@@ -71,6 +96,43 @@ export function createCursorStore(state: VenueStateDatabase): CursorStore {
         finalizedBlockHash: finalized.blockHash.toLowerCase(),
         updatedAtMs: Date.now(),
       });
+    },
+    recordScanned(stream, chainId, blocks) {
+      for (const block of blocks) {
+        recordScannedStmt.run({
+          stream,
+          chainId,
+          blockNumber: Number(block.blockNumber),
+          blockHash: block.blockHash.toLowerCase(),
+        });
+      }
+    },
+    displacedSince(stream, boundary) {
+      const rows = displacedSinceStmt.all(stream, Number(boundary)) as Array<{
+        blockNumber: number;
+        blockHash: string;
+      }>;
+      return rows.map((row) => ({
+        blockNumber: BigInt(row.blockNumber),
+        blockHash: row.blockHash as Hex,
+      }));
+    },
+    markDisplaced(stream, blocks) {
+      const observedAtMs = Date.now();
+      for (const block of blocks) {
+        markDisplacedStmt.run(
+          observedAtMs,
+          stream,
+          Number(block.blockNumber),
+          block.blockHash.toLowerCase(),
+        );
+      }
+    },
+    pruneThroughFinalized(stream, boundary) {
+      // A reorg may only affect blocks strictly above the finalized checkpoint. Keeping the
+      // boundary itself preserves the exact checkpoint provenance; older rows are no longer
+      // needed for suffix enumeration. `orphaned_blocks` remains the permanent audit trail.
+      pruneThroughFinalizedStmt.run(stream, Number(boundary));
     },
     recordOrphaned(chainId, blocks) {
       for (const block of blocks) {
