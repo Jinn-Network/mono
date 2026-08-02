@@ -79,6 +79,98 @@ function nodeHttpBindings(source: string): string[] {
   return statement?.[1]?.split(",").map((name) => name.trim()).filter(Boolean).sort() ?? [];
 }
 
+type LexicalToken = { readonly kind: "identifier" | "string" | "punctuation"; readonly value: string };
+
+function lexicalTokens(source: string): LexicalToken[] {
+  const tokens: LexicalToken[] = [];
+  for (let index = 0; index < source.length;) {
+    const character = source.charAt(index);
+    const next = source.charAt(index + 1);
+    if (/\s/u.test(character)) { index += 1; continue; }
+    if (character === "/" && next === "/") {
+      index += 2;
+      while (index < source.length && source.charAt(index) !== "\n" && source.charAt(index) !== "\r") index += 1;
+      continue;
+    }
+    if (character === "/" && next === "*") {
+      const close = source.indexOf("*/", index + 2);
+      index = close === -1 ? source.length : close + 2;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      const quote = character;
+      let value = "";
+      index += 1;
+      while (index < source.length && source.charAt(index) !== quote) {
+        if (source.charAt(index) === "\\") {
+          value += source.slice(index, index + 2);
+          index += 2;
+        } else {
+          value += source.charAt(index);
+          index += 1;
+        }
+      }
+      if (source.charAt(index) === quote) index += 1;
+      tokens.push({ kind: "string", value });
+      continue;
+    }
+    if (/[A-Za-z_$]/u.test(character)) {
+      const start = index;
+      index += 1;
+      while (index < source.length && /[A-Za-z0-9_$]/u.test(source.charAt(index))) index += 1;
+      tokens.push({ kind: "identifier", value: source.slice(start, index) });
+      continue;
+    }
+    tokens.push({ kind: "punctuation", value: character });
+    index += 1;
+  }
+  return tokens;
+}
+
+function memberEnd(tokens: readonly LexicalToken[], index: number, name: string): number | undefined {
+  if (tokens[index]?.value === "." && tokens[index + 1]?.kind === "identifier"
+    && tokens[index + 1]?.value === name) return index + 2;
+  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
+    && tokens[index + 2]?.kind === "identifier" && tokens[index + 2]?.value === name) return index + 3;
+  if (tokens[index]?.value === "[" && tokens[index + 1]?.kind === "string"
+    && tokens[index + 1]?.value === name && tokens[index + 2]?.value === "]") return index + 3;
+  if (tokens[index]?.value === "?" && tokens[index + 1]?.value === "."
+    && tokens[index + 2]?.value === "[" && tokens[index + 3]?.kind === "string"
+    && tokens[index + 3]?.value === name && tokens[index + 4]?.value === "]") return index + 5;
+  return undefined;
+}
+
+function reflectiveBuiltinLoaderUses(source: string): string[] {
+  const tokens = lexicalTokens(source);
+  const findings: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    let processEnd: number | undefined;
+    let label: string | undefined;
+    if (tokens[index]?.kind === "identifier" && tokens[index]?.value === "process"
+      && tokens[index - 1]?.value !== "." && tokens[index - 1]?.value !== "]") {
+      processEnd = index + 1;
+      label = "process";
+    } else if (tokens[index]?.kind === "identifier"
+      && (tokens[index]?.value === "globalThis" || tokens[index]?.value === "global")) {
+      processEnd = memberEnd(tokens, index + 1, "process");
+      label = tokens[index]?.value;
+    }
+    if (processEnd === undefined || label === undefined) continue;
+    const loaderEnd = memberEnd(tokens, processEnd, "getBuiltinModule");
+    if (loaderEnd !== undefined) {
+      findings.push(`${label}.process`.replace("process.process", "process") + ".getBuiltinModule");
+    }
+  }
+  return findings;
+}
+
+function hasDynamicModuleLoad(source: string): boolean {
+  const tokens = lexicalTokens(source);
+  return tokens.some((token, index) => token.kind === "identifier"
+    && (token.value === "import" || token.value === "require")
+    && tokens[index + 1]?.value === "(");
+}
+
 const files = productionFiles(sourceRoot);
 const sources = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
 
@@ -126,6 +218,21 @@ describe("the replay service is structurally incapable of egress", () => {
       'node:${"worker_threads"}',
     ]);
     expect(nodeHttpBindings(source)).toEqual(["createServer"]);
+
+    const reflective = [
+      'const direct = process.getBuiltinModule(`node:${"http"}`);',
+      'const optional = globalThis.process?.["getBuiltinModule"]("node:" + "http");',
+      'const bracketed = global["process"]["getBuiltinModule"](`node:${"http"}`);',
+      '// process.getBuiltinModule("node:http") stays a comment',
+    ].join("\n");
+    expect(reflectiveBuiltinLoaderUses(reflective)).toEqual([
+      "process.getBuiltinModule",
+      "globalThis.process.getBuiltinModule",
+      "global.process.getBuiltinModule",
+    ]);
+    expect(reflectiveBuiltinLoaderUses(
+      'const alias = process.getBuiltinModule; alias(`node:${"http"}`).request;',
+    )).toEqual(["process.getBuiltinModule"]);
   });
 
   test("imports no other node builtin or network client", () => {
@@ -136,6 +243,14 @@ describe("the replay service is structurally incapable of egress", () => {
     ]);
     const findings = [...sources.entries()].flatMap(([file, source]) =>
       specifiers(source).filter((specifier) => forbidden.has(specifier)).map((specifier) => `${file}:${specifier}`));
+    expect(findings).toEqual([]);
+  });
+
+  test("contains no dynamic, require, or reflective module loader in production source", () => {
+    const findings = [...sources.entries()].flatMap(([file, source]) => [
+      ...(hasDynamicModuleLoad(source) ? [`${file}:dynamic module loader`] : []),
+      ...reflectiveBuiltinLoaderUses(source).map((loader) => `${file}:${loader}`),
+    ]);
     expect(findings).toEqual([]);
   });
 

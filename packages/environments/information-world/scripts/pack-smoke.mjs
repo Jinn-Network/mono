@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -47,6 +48,102 @@ function capture(command, args, options = {}) {
   });
 }
 
+function relativeModuleSpecifiers(source) {
+  return [...source.matchAll(/\b(?:from|import)\s*(?:\(\s*)?["'](\.{1,2}\/[^"']+)["']/g)]
+    .map((match) => match[1]);
+}
+
+function packedRelativeModule(file, specifier, declarations) {
+  const target = join(dirname(file), specifier);
+  const candidates = declarations
+    ? [
+      ...(target.endsWith(".js") ? [`${target.slice(0, -3)}.d.ts`] : []),
+      ...(target.endsWith(".d.ts") ? [target] : []),
+      `${target}.d.ts`,
+      join(target, "index.d.ts"),
+    ]
+    : [target, `${target}.js`, join(target, "index.js")];
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+async function packedRelativeClosure(entrypoint, declarations) {
+  const discovered = new Set();
+  const pending = [entrypoint];
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (file === undefined || discovered.has(file)) continue;
+    discovered.add(file);
+    const source = await readFile(file, "utf8");
+    for (const specifier of relativeModuleSpecifiers(source)) {
+      const target = packedRelativeModule(file, specifier, declarations);
+      if (target === undefined) {
+        throw new Error(`unresolvable packed relative edge: ${file} -> ${specifier}`);
+      }
+      if (!discovered.has(target)) pending.push(target);
+    }
+  }
+  return [...discovered];
+}
+
+function packedGraphLeakFindings(files, entrypoint, phase) {
+  return files.flatMap((file) => {
+    const findings = [];
+    const path = file.slice(dirname(entrypoint).length + 1);
+    if (/(?:^|\/)fixtures(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: `${phase} fixture region` });
+    }
+    if (/(?:^|\/)testing(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: `${phase} testing region` });
+    }
+    return findings;
+  });
+}
+
+async function packedRootLeakFindings(runtimeEntrypoint, declarationEntrypoint) {
+  const runtimeFiles = await packedRelativeClosure(runtimeEntrypoint, false);
+  const declarationFiles = await packedRelativeClosure(declarationEntrypoint, true);
+  const findings = [
+    ...packedGraphLeakFindings(runtimeFiles, runtimeEntrypoint, "runtime"),
+    ...packedGraphLeakFindings(declarationFiles, declarationEntrypoint, "declaration"),
+  ];
+  for (const [phase, files] of [["runtime", runtimeFiles], ["declaration", declarationFiles]]) {
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      for (const module of ["node:fs", "node:fs/promises"]) {
+        if (source.includes(`"${module}"`) || source.includes(`'${module}'`)) {
+          findings.push({ file, reason: `${phase} ${module}` });
+        }
+      }
+      if (/['"]vitest['"]/u.test(source)) findings.push({ file, reason: `${phase} vitest` });
+    }
+  }
+  return findings;
+}
+
+async function assertPackedRootClosureCanary() {
+  const graph = join(temporaryRoot, "root-closure-canary");
+  await mkdir(graph);
+  await Promise.all([
+    writeFile(join(graph, "index.js"), 'export * from "./support.js";\n'),
+    writeFile(join(graph, "support.js"), 'export * from "./fixtures.js";\nexport * from "./testing.js";\n'),
+    writeFile(join(graph, "fixtures.js"), 'import { readFile } from "node:fs/promises";\nexport { readFile };\n'),
+    writeFile(join(graph, "testing.js"), 'import { test } from "vitest";\nexport { test };\n'),
+    writeFile(join(graph, "index.d.ts"), 'export * from "./support.js";\n'),
+    writeFile(join(graph, "support.d.ts"), 'export * from "./fixtures.js";\nexport * from "./testing.js";\n'),
+    writeFile(join(graph, "fixtures.d.ts"), 'import type { Stats } from "node:fs";\nexport type FixtureStats = Stats;\n'),
+    writeFile(join(graph, "testing.d.ts"), 'import type { TestContext } from "vitest";\nexport type FixtureTest = TestContext;\n'),
+  ]);
+  const reasons = (await packedRootLeakFindings(join(graph, "index.js"), join(graph, "index.d.ts")))
+    .map((finding) => finding.reason).sort();
+  const expected = [
+    'declaration fixture region', 'declaration node:fs', 'declaration testing region', 'declaration vitest',
+    'runtime fixture region', 'runtime node:fs/promises', 'runtime testing region', 'runtime vitest',
+  ];
+  if (JSON.stringify(reasons) !== JSON.stringify(expected)) {
+    throw new Error(`root-closure canary missed a transitive leak: ${JSON.stringify(reasons)}`);
+  }
+}
+
 try {
   await run("yarn", ["pack", "--out", archive], { cwd: packageRoot });
 
@@ -58,6 +155,10 @@ try {
     entry.includes(".test.") || entry.endsWith(".map") || entry.startsWith("package/src/"));
   if (leaked.length > 0) throw new Error(`tarball leaked entries: ${leaked.join(", ")}`);
 
+  // This writes and statically scans a temporary graph; it never imports or executes the
+  // mutation modules. A direct-root-only scan would miss both support-file leaks.
+  await assertPackedRootClosureCanary();
+
   await mkdir(consumer);
   await writeFile(
     join(consumer, "package.json"),
@@ -66,6 +167,8 @@ try {
       type: "module",
       dependencies: {
         "@jinn-network/information-world": `file:${archive}`,
+        "@types/node": "^22.0.0",
+        "typescript": "^5.9.3",
       },
     }),
   );
@@ -78,6 +181,37 @@ try {
   );
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "information-world");
+  const rootLeaks = await packedRootLeakFindings(
+    join(installedRoot, "dist", "index.js"),
+    join(installedRoot, "dist", "index.d.ts"),
+  );
+  if (rootLeaks.length > 0) {
+    throw new Error(`packed root entrypoint leaked: ${rootLeaks
+      .map(({ file, reason }) => `${file}: ${reason}`).join(", ")}`);
+  }
+  if (existsSync(join(consumer, "node_modules", "vitest"))) {
+    throw new Error("the root-only runtime and type consumer must not install Vitest");
+  }
+  await writeFile(
+    join(consumer, "root-types.ts"),
+    'import type * as InformationWorld from "@jinn-network/information-world";\n'
+      + 'export type RootEntrypoint = typeof InformationWorld;\n',
+  );
+  await writeFile(
+    join(consumer, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        noEmit: true,
+        strict: true,
+        target: "ES2022",
+      },
+      include: ["root-types.ts"],
+    }),
+  );
+  const tsc = join(consumer, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+  await run(tsc, ["--project", "tsconfig.json"], { cwd: consumer });
   const smokeScript = join(consumer, "smoke.mjs");
   await writeFile(
     smokeScript,
