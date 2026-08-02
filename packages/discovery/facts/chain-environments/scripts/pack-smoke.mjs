@@ -6,17 +6,18 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Cross-tree portal dependencies (§7.8): facts/chain-environments depends on
-// record-discovery-protocol + chain-environment-record. Protocol pulls trust-core;
-// chain-environment-record has NO Jinn dependency of its own, so unlike facts/benchmarking
-// this leaf needs no fourth archive.
+// record-discovery-protocol + chain-environment-record + information-world. Protocol pulls
+// trust-core; the two record packages have no Jinn production dependencies of their own.
 const protocolRoot = join(packageRoot, "..", "..", "protocol");
 const trustCoreRoot = join(packageRoot, "..", "..", "..", "trust", "core");
 const chainEnvironmentRecordRoot = join(packageRoot, "..", "..", "..", "environments", "chain-record");
+const informationWorldRoot = join(packageRoot, "..", "..", "..", "environments", "information-world");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-record-discovery-facts-chain-environments-"));
 const archive = join(temporaryRoot, "record-discovery-facts-chain-environments.tgz");
 const protocolArchive = join(temporaryRoot, "record-discovery-protocol.tgz");
 const trustCoreArchive = join(temporaryRoot, "trust-core.tgz");
 const chainEnvironmentRecordArchive = join(temporaryRoot, "chain-environment-record.tgz");
+const informationWorldArchive = join(temporaryRoot, "information-world.tgz");
 const consumer = join(temporaryRoot, "consumer");
 
 function run(command, args, options = {}) {
@@ -39,6 +40,7 @@ try {
   await packPortal(trustCoreRoot, trustCoreArchive);
   await packPortal(protocolRoot, protocolArchive);
   await packPortal(chainEnvironmentRecordRoot, chainEnvironmentRecordArchive);
+  await packPortal(informationWorldRoot, informationWorldArchive);
   await packPortal(packageRoot, archive);
 
   await mkdir(consumer);
@@ -51,6 +53,7 @@ try {
         "@jinn-network/trust-core": `file:${trustCoreArchive}`,
         "@jinn-network/record-discovery-protocol": `file:${protocolArchive}`,
         "@jinn-network/chain-environment-record": `file:${chainEnvironmentRecordArchive}`,
+        "@jinn-network/information-world": `file:${informationWorldArchive}`,
         "@jinn-network/record-discovery-facts-chain-environments": `file:${archive}`,
       },
     }),
@@ -77,7 +80,7 @@ import * as recordDiscoveryFactsChainEnvironments from "@jinn-network/record-dis
 if (typeof recordDiscoveryFactsChainEnvironments !== "object") throw new Error("root import failed");
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
-const expectedJinnDependencies = ["@jinn-network/chain-environment-record", "@jinn-network/record-discovery-protocol"];
+const expectedJinnDependencies = ["@jinn-network/chain-environment-record", "@jinn-network/information-world", "@jinn-network/record-discovery-protocol"];
 if (jinnDependencies.length !== expectedJinnDependencies.length
     || jinnDependencies.some((name) => !expectedJinnDependencies.includes(name))) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));
@@ -86,6 +89,7 @@ const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
 await readFile(${JSON.stringify(join(installedRoot, "profiles", "chain-environment.1.0.json"))});
 await readFile(${JSON.stringify(join(installedRoot, "profiles", "crypto-environment.1.0.json"))});
+await readFile(${JSON.stringify(join(installedRoot, "profiles", "information-world.1.0.json"))});
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
 console.log("Installed package imports, dependency boundary, and dist shape verified.");
 `,

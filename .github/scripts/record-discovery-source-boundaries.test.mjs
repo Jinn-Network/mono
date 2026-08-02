@@ -134,10 +134,10 @@ const FACTS_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-facts-chain-environments',
 ];
 // facts/chain-environments carries the one sanctioned edge between the discovery tree and the
-// chain-environment record-kind tree (discovery design §12): protocol + chain-environment-record
-// are allowed; no serve/client, no other facts/* leaf, no TEP, no evidence, no benchmarking, and
-// not the SWE environment-record package either — the chain kinds are siblings of it, not
-// extensions of it.
+// chain-environment and information-world record-kind trees (discovery design §12): protocol +
+// chain-environment-record + information-world are allowed; no serve/client, no other facts/*
+// leaf, no TEP, no evidence, no benchmarking, and not the SWE environment-record package either
+// — the chain kinds are siblings of it, not extensions of it.
 const FACTS_CHAIN_ENVIRONMENTS_FORBIDDEN_PACKAGES = [
   '@jinn-network/record-discovery-serve',
   '@jinn-network/record-discovery-client',
