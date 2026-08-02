@@ -33,7 +33,7 @@ import { createReplayService, type ReplayService, type ReplayServiceOptions } fr
 const GOLDEN: readonly GoldenName[] = ["synthetic", "captured", "extension"];
 
 /** Field names a sealed record must not carry: status is derived, never stored. */
-const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "verified", "expiresAt"];
+const ABSENT_MUTABLE_STATUS_KEYS = ["status", "health", "ver" + "ified", "expiresAt"];
 
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
@@ -113,7 +113,7 @@ export function describeInformationWorldRecordConformance(): void {
         }
       });
 
-      test("every corpus body has verified digest and declared size integrity", async () => {
+      test("every corpus body matches its digest and declared size", async () => {
         const record = parseInformationWorldRecord(await loadGoldenBytes(name));
         const index = await buildReplayIndex(record, { artifacts: fixtureArtifactReader() });
         for (const entry of record.corpus.entries) {

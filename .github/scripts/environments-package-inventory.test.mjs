@@ -98,18 +98,30 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   }],
   // `information-world` is tier 2 + tier 3 in one package (design §3, §4.4) and still takes
   // ZERO Jinn runtime dependencies: the record layer is pure, and the replay service's only
-  // non-relative import is `node:http`. Both Jinn entries are test-only — `evidence-protocol`
-  // is the seal-equivalence oracle (program §4 contract 3), and `chain-environment-record` is
-  // the composite whose composition block this package's routing input must accept without
-  // adaptation. The source-boundary guard enforces that neither reaches production source.
+  // non-relative import is `node:http`. All three Jinn entries are test-only —
+  // `evidence-protocol` is the seal-equivalence oracle (program §4 contract 3),
+  // `chain-environment-record` is the composite whose composition block this package's routing
+  // input must accept without adaptation, and `chain-environment-verification` owns the CE3
+  // origin-routing assessment exercised by the ownership test. The source-boundary guard
+  // enforces that none reaches production source.
   ['information-world', {
     dependencies: [],
     devDependencies: [
       '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
       '@jinn-network/evidence-protocol',
     ],
     optionalDependencies: [],
     peerDependencies: [],
+    // CE3's portal package resolves trust/core through its own manifest, but portal
+    // resolutions are local to the consuming package. Keep this install-graph resolution
+    // explicit without misrepresenting trust-core as a direct CE6 dependency.
+    resolutions: [
+      '@jinn-network/chain-environment-record',
+      '@jinn-network/chain-environment-verification',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/trust-core',
+    ],
   }],
 ]);
 
@@ -176,10 +188,11 @@ test('environments package Jinn dependencies and portal resolutions match the ap
         `${directory} has unapproved Jinn ${section}`);
     }
     const declared = DEPENDENCY_SECTIONS.flatMap((section) => jinnDependencyNames(manifest, section)).sort();
+    const expectedResolutions = approved.resolutions ?? declared;
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions).filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
-    for (const dependencyName of declared) {
+    assert.deepEqual(resolved, expectedResolutions, `${directory} has unmatched Jinn resolutions`);
+    for (const dependencyName of expectedResolutions) {
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
     }
