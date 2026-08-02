@@ -10,6 +10,12 @@ amends: "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md §
 relates-to: DR-2026-06-30 (tokenless, OLAS-native — the network's on-chain posture this DR builds on); docs/superpowers/specs/2026-07-25-evidence-layer-architecture.md (executable-architecture discipline, generalized); docs/superpowers/specs/2026-07-23-autopilot-oss-maintainer-product-design.md §6.7 (the extraction-gate precedent); docs/superpowers/prompts/2026-07-30-platform-boundary-design-prompt.md (the session brief); issue #2252 (vendored Autopilot removal)
 ---
 
+> **Historical snapshot (2026-07-30).** Package counts, paths, and dependency figures below record
+> the topology used to make this decision. They are not current inventory authority. Use the
+> [generated live platform topology](../../architecture/generated/platform-topology.md) for the
+> catalog-derived package set, release policy, runtime graph, public surfaces, ownership, and
+> transitions.
+
 ## Context
 
 The 2026-07 stack designs established a layered architecture whose governing ideas lived in
