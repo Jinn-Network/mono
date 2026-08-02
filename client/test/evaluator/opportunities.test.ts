@@ -13,6 +13,8 @@ const advertisedDelivery = computeRawCodecCid(deliveryBytes);
 function finalizedSolutionClaimed(operator: string) {
   return {
     source: "https://operator.example/.well-known/jinn-source",
+    sourceSequence: "0000000000000042",
+    sourceEntryDigest: `sha256:${"ab".repeat(32)}`,
     canonical: true,
     event: {
       event: "SolutionDeliveryClaimed",
@@ -46,6 +48,8 @@ describe("mapFinalizedSolutionDeliveryObservation", () => {
       kind: "opportunity",
       opportunity: expect.objectContaining({
         source: "https://operator.example/.well-known/jinn-source",
+        sourceSequence: "0000000000000042",
+        sourceEntryDigest: `sha256:${"ab".repeat(32)}`,
         canonical: true,
         finality: "finalized",
         taskId: 7n,
@@ -55,6 +59,7 @@ describe("mapFinalizedSolutionDeliveryObservation", () => {
         blockHash: `0x${"ee".repeat(32)}`,
         transactionHash: `0x${"ef".repeat(32)}`,
         logIndex: 4,
+        canonicalEventIdentity: `84532:0x${"ee".repeat(32)}:4`,
       }),
     });
   });

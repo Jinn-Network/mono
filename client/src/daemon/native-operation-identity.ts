@@ -96,6 +96,34 @@ export function evaluationId(input: {
   });
 }
 
+export function evaluationClaimOperationId(evaluation: NativeOperationId): NativeOperationId {
+  return digest({ v: 1, kind: 'evaluation-claim', evaluationId: evaluation });
+}
+
+export function evaluationBackendSubmissionOperationId(input: {
+  readonly evaluationId: NativeOperationId;
+  readonly attempt: string;
+}): NativeOperationId {
+  return digest({
+    v: 1,
+    kind: 'evaluation-backend-submit',
+    evaluationId: input.evaluationId,
+    attempt: requireNonEmpty(input.attempt, 'evaluation attempt'),
+  });
+}
+
+export function evaluationMarketplaceDeliveryOperationId(input: {
+  readonly evaluationAttempt: string;
+  readonly evaluationDeliveryDigest: `sha256:${string}`;
+}): NativeOperationId {
+  return digest({
+    v: 1,
+    kind: 'evaluation-marketplace-delivery',
+    evaluationAttempt: requireNonEmpty(input.evaluationAttempt, 'evaluationAttempt'),
+    evaluationDeliveryDigest: input.evaluationDeliveryDigest,
+  });
+}
+
 export function verdictSettlementId(input: {
   readonly evaluationAttempt: string;
   readonly evaluationDeliveryDigest: `sha256:${string}`;

@@ -5,6 +5,9 @@ import {
   engagementIdentityDocument,
   engagementId,
   evaluationId,
+  evaluationClaimOperationId,
+  evaluationBackendSubmissionOperationId,
+  evaluationMarketplaceDeliveryOperationId,
   publicationKey,
   solutionSettlementId,
   verdictSettlementId,
@@ -59,7 +62,19 @@ describe('native operation identities', () => {
       evaluationDeliveryDigest: `sha256:${'d'.repeat(64)}`,
       verdictCode: 1,
     });
-    expect(new Set([engagement, claim, backendSubmission, solution, evaluation, verdict]).size).toBe(6);
+    const evaluationClaim = evaluationClaimOperationId(evaluation);
+    const evaluationBackend = evaluationBackendSubmissionOperationId({
+      evaluationId: evaluation,
+      attempt: 'urn:uuid:22222222-2222-4222-8222-222222222222',
+    });
+    const evaluationDelivery = evaluationMarketplaceDeliveryOperationId({
+      evaluationAttempt: 'urn:uuid:22222222-2222-4222-8222-222222222222',
+      evaluationDeliveryDigest: `sha256:${'d'.repeat(64)}`,
+    });
+    expect(new Set([
+      engagement, claim, backendSubmission, solution, evaluation, evaluationClaim,
+      evaluationBackend, evaluationDelivery, verdict,
+    ]).size).toBe(9);
     expect(claim).toBe('sha256:1238bc787b25ad43ab898dd26e5c4b17d644a121869d670203ae9c99cb03173a');
     expect(solution).toBe('sha256:f0f3118e3a3022d1463559d93c08ed4884b7d570d2a09195172a0392fd723468');
     expect(evaluation).toBe('sha256:6c371f84fe63c6fc0891be0317282fde3e330e11d9a6ed64106fb8788302c49f');

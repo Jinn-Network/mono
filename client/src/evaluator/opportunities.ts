@@ -9,6 +9,8 @@ import {
 export interface FinalizedSolutionDeliveryObservation {
   /** Signed discovery source that supplied this exact chain observation. */
   readonly source: string;
+  readonly sourceSequence: string;
+  readonly sourceEntryDigest: `sha256:${string}`;
   /** The caller must establish canonicality before the evaluator sees the observation. */
   readonly canonical: true;
   readonly event: Extract<ObservationMarketplaceEvent, { event: "SolutionDeliveryClaimed" }>;
@@ -16,6 +18,8 @@ export interface FinalizedSolutionDeliveryObservation {
 
 export interface EvaluationOpportunity {
   readonly source: string;
+  readonly sourceSequence: string;
+  readonly sourceEntryDigest: `sha256:${string}`;
   readonly canonical: true;
   readonly finality: "finalized";
   readonly chainId: number;
@@ -30,6 +34,7 @@ export interface EvaluationOpportunity {
   readonly blockHash: `0x${string}`;
   readonly transactionHash: `0x${string}`;
   readonly logIndex: number;
+  readonly canonicalEventIdentity: string;
 }
 
 export type EvaluationOpportunityMapping =
@@ -74,6 +79,8 @@ export function mapFinalizedSolutionDeliveryObservation(
     kind: "opportunity",
     opportunity: {
       source: observation.source,
+      sourceSequence: observation.sourceSequence,
+      sourceEntryDigest: observation.sourceEntryDigest,
       canonical: true,
       finality: "finalized",
       chainId: derivation.chainId,
@@ -86,6 +93,7 @@ export function mapFinalizedSolutionDeliveryObservation(
       blockHash: derivation.blockHash,
       transactionHash: derivation.txHash,
       logIndex: derivation.logIndex,
+      canonicalEventIdentity: `${derivation.chainId}:${derivation.blockHash}:${derivation.logIndex}`,
     },
   };
 }

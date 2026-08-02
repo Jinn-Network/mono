@@ -10,7 +10,7 @@ import {
 } from './native-operation-identity.js';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
-export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 2 as const;
+export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 3 as const;
 
 export const NATIVE_OPERATOR_STATE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS native_operator_state_metadata (
@@ -547,10 +547,10 @@ export class NativeOperatorStateRepository {
        VALUES (1, ?, ?)`,
     ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, createdAt);
     const version = this.schemaVersion();
-    if (version === 1) {
+    if (version === 1 || version === 2) {
       this.store.db.prepare(
-        `UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = 1`,
-      ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION);
+        `UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = ?`,
+      ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, version);
     } else if (version !== NATIVE_OPERATOR_STATE_SCHEMA_VERSION) {
       throw new Error(`unsupported native operator state schema version ${version}`);
     }

@@ -53,7 +53,7 @@ describe('NativeOperatorStateRepository', () => {
        VALUES ('legacy', 84532, '0xlegacy', '1', 'legacy', '{}', 'claimed', 't', 't')`,
     ).run();
     const state = new NativeOperatorStateRepository(store, { now: () => new Date('2026-08-02T00:00:00Z') });
-    expect(state.schemaVersion()).toBe(2);
+    expect(state.schemaVersion()).toBe(3);
     expect(state.listEngagements()).toEqual([]);
     expect(store.db.prepare(`SELECT COUNT(*) AS count FROM engagement_ledger`).get()).toEqual({ count: 1 });
   });
