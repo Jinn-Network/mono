@@ -176,6 +176,7 @@ function backendCapabilities(): BackendCapabilities {
 interface CompositionHooks {
   onClaimBroadcast?: () => void;
   onMechDeliver?: () => void;
+  onDeliveryClassify?: () => void;
   onReadMechFacts?: () => void;
   onAwaitIndexed?: () => void;
   onSettled?: () => void;
@@ -267,7 +268,10 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
       // `classify()` below, without needing a real decodable `Deliver` event log.
       throw new Error('already delivered');
     },
-    classify: () => 'already-settled',
+    classify: () => {
+      hooks.onDeliveryClassify?.();
+      return 'already-settled';
+    },
   };
 
   return {
@@ -281,6 +285,7 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
     } satisfies PipelineConfig,
     pipelinePorts,
     venue: { safe: venueSafe } as unknown as BaseVenue,
+    deliveryBroadcaster: venueSafe,
     evidence: {
       runtime: {} as never,
       ports: {
@@ -439,6 +444,15 @@ describe('work loop', () => {
     });
     await loop.tick();
     expect(order).toEqual(['deliver', 'read-facts']);
+  });
+
+  it('supplies the delivery broadcaster error classifier to the real deliver leg', async () => {
+    const classify = vi.fn();
+    const { loop } = build({ composition: composition({ onDeliveryClassify: classify }) });
+
+    await loop.tick();
+
+    expect(classify).toHaveBeenCalledOnce();
   });
 
   it('awaits evidence indexing before recording settlement', async () => {
