@@ -72,6 +72,7 @@ function fixtures() {
     outcome: "fulfilled",
     createdAt: "2026-07-30T00:00:00Z",
   });
+  const deliveryEnvelopeBytes = new TextEncoder().encode("delivery-dsse-envelope");
   const requesterEnvelopeBytes = new TextEncoder().encode("requester-dsse-envelope");
   const admissionReceiptBytes = new TextEncoder().encode("admission-receipt-envelope");
   const byDigest = new Map([
@@ -80,14 +81,17 @@ function fixtures() {
     [documentDigest(resultBytes), resultBytes],
     [documentDigest(evidenceBytes), evidenceBytes],
     [spec.digest, spec.bytes],
+    [documentDigest(deliveryEnvelopeBytes), deliveryEnvelopeBytes],
     [documentDigest(requesterEnvelopeBytes), requesterEnvelopeBytes],
     [documentDigest(admissionReceiptBytes), admissionReceiptBytes],
   ]);
   return {
     deliveryBytes,
+    deliveryEnvelopeBytes,
     byDigest,
     references: {
       submission: { digest: documentDigest(submissionBytes) },
+      deliveryEnvelope: { digest: documentDigest(deliveryEnvelopeBytes) },
       requesterEnvelope: { digest: documentDigest(requesterEnvelopeBytes) },
       admissionReceipt: { digest: documentDigest(admissionReceiptBytes) },
     },
@@ -122,6 +126,7 @@ describe("acquireSubjectMaterial", () => {
     expect(material.requesterEnvelope.bytes).toEqual(f.byDigest.get(material.requesterEnvelope.digest));
     expect(material.admissionReceipt.bytes).toEqual(f.byDigest.get(material.admissionReceipt.digest));
     expect(material.delivery.bytes).toEqual(f.deliveryBytes);
+    expect(material.deliveryEnvelope.bytes).toEqual(f.deliveryEnvelopeBytes);
     expect(material.evidenceRecords).toHaveLength(1);
     expect(material.results).toHaveLength(1);
     expect(material.evaluationSpec.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
@@ -137,6 +142,35 @@ describe("acquireSubjectMaterial", () => {
         byDigest: async (digest) => f.byDigest.get(digest)!,
       },
     )).rejects.toMatchObject({ kind: "digest-mismatch" });
+  });
+
+  it("refuses a Delivery DSSE envelope whose retrieved bytes do not match its explicit digest", async () => {
+    const f = fixtures();
+    await expect(acquireSubjectMaterial(
+      opportunity(f.deliveryBytes),
+      f.references,
+      {
+        byCid: async () => f.deliveryBytes,
+        byDigest: async (digest) => digest === f.references.deliveryEnvelope.digest
+          ? new TextEncoder().encode("tampered delivery envelope")
+          : f.byDigest.get(digest)!,
+      },
+    )).rejects.toMatchObject({ kind: "digest-mismatch" });
+  });
+
+  it("refuses when the explicit Delivery DSSE envelope is unavailable", async () => {
+    const f = fixtures();
+    await expect(acquireSubjectMaterial(
+      opportunity(f.deliveryBytes),
+      f.references,
+      {
+        byCid: async () => f.deliveryBytes,
+        byDigest: async (digest) => {
+          if (digest === f.references.deliveryEnvelope.digest) throw new Error("not found");
+          return f.byDigest.get(digest)!;
+        },
+      },
+    )).rejects.toMatchObject({ kind: "unavailable" });
   });
 
   it("refuses a subject Task that declares no EvaluationSpec", async () => {

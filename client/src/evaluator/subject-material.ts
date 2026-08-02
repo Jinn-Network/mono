@@ -22,6 +22,8 @@ export interface FetchBytesByDigest {
 export interface SubjectMaterialReferences {
   /** The original exact requester Submission, anchored by the source association in later work. */
   readonly submission: { readonly digest: `sha256:${string}` };
+  /** The executor-signed DSSE envelope that authenticates the exact Delivery record. */
+  readonly deliveryEnvelope: { readonly digest: `sha256:${string}` };
   /** The requester-signed DSSE envelope that authenticates that Submission. */
   readonly requesterEnvelope: { readonly digest: `sha256:${string}` };
   /** The admission receipt envelope that authorized the Task/EvaluationSpec pair. */
@@ -40,6 +42,7 @@ export interface SubjectMaterial {
   readonly requesterEnvelope: ExactSubjectArtifact;
   readonly admissionReceipt: ExactSubjectArtifact;
   readonly delivery: ExactSubjectArtifact;
+  readonly deliveryEnvelope: ExactSubjectArtifact;
   readonly evidenceRecords: readonly ExactSubjectArtifact[];
   readonly results: readonly ExactSubjectArtifact[];
   readonly evaluationSpec: ExactSubjectArtifact;
@@ -178,6 +181,11 @@ export async function acquireSubjectMaterial(
 
   const submission = await fetchByDigest(fetcher, "submission", references.submission.digest);
   exactSubmission(submission);
+  const deliveryEnvelope = await fetchByDigest(
+    fetcher,
+    "delivery-envelope",
+    references.deliveryEnvelope.digest,
+  );
   const requesterEnvelope = await fetchByDigest(
     fetcher,
     "requester-envelope",
@@ -206,6 +214,7 @@ export async function acquireSubjectMaterial(
     requesterEnvelope,
     admissionReceipt,
     delivery,
+    deliveryEnvelope,
     evidenceRecords,
     results,
     evaluationSpec,
