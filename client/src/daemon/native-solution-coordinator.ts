@@ -3,7 +3,9 @@ import type {
   TwoPartyEngagement,
 } from '@jinn-network/task-execution-backend';
 import type { EvidenceRecordReference } from '@jinn-network/evidence-repository';
+import { EXECUTION_EVIDENCE_MEDIA_TYPE } from '@jinn-network/evidence-protocol';
 import {
+  DELIVERY_MEDIA_TYPE,
   DeliveryRecordSchema,
   SubmissionRecordSchema,
   documentDigest,
@@ -14,6 +16,7 @@ import {
   type DispatchContext,
   type ResourceDescriptor,
 } from '@jinn-network/task-execution-protocol';
+import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
 import {
   NativeOperatorStateRepository,
   NativeOperatorStateConflictError,
@@ -296,6 +299,7 @@ export class NativeSolutionCoordinator {
     const artifacts: Array<{
       role: 'output' | 'evidence' | 'delivery' | 'delivery-envelope';
       family: string;
+      mediaType: string;
       name?: string;
       digest: `sha256:${string}`;
       bytes: Uint8Array;
@@ -310,6 +314,7 @@ export class NativeSolutionCoordinator {
       artifacts.push({
         role: 'evidence',
         family: referenceValue.family,
+        mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE,
         digest: referenceValue.digest,
         bytes,
       });
@@ -324,15 +329,20 @@ export class NativeSolutionCoordinator {
       artifacts.push({
         role: 'output',
         family: output.mediaType ?? 'application/octet-stream',
+        mediaType: output.mediaType ?? 'application/octet-stream',
         name: output.name,
         digest,
         bytes,
       });
     }
-    artifacts.push({ role: 'delivery', family: 'delivery', digest: reference.digest, bytes: deliveryBytes });
+    artifacts.push({
+      role: 'delivery', family: 'delivery', mediaType: DELIVERY_MEDIA_TYPE,
+      digest: reference.digest, bytes: deliveryBytes,
+    });
     artifacts.push({
       role: 'delivery-envelope',
       family: 'delivery-envelope',
+      mediaType: DSSE_ENVELOPE_MEDIA_TYPE,
       digest: documentDigest(deliveryEnvelopeBytes),
       bytes: deliveryEnvelopeBytes,
     });

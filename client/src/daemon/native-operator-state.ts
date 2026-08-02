@@ -1,5 +1,11 @@
 import type { Store } from '../store/store.js';
-import { documentDigest, serializeCanonicalJson } from '@jinn-network/task-execution-protocol';
+import {
+  DELIVERY_MEDIA_TYPE,
+  documentDigest,
+  serializeCanonicalJson,
+} from '@jinn-network/task-execution-protocol';
+import { EXECUTION_EVIDENCE_MEDIA_TYPE } from '@jinn-network/evidence-protocol';
+import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
 import {
   backendSubmissionOperationId,
   claimOperationId,
@@ -10,7 +16,7 @@ import {
 } from './native-operation-identity.js';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 
-export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 4 as const;
+export const NATIVE_OPERATOR_STATE_SCHEMA_VERSION = 5 as const;
 
 export const NATIVE_OPERATOR_STATE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS native_operator_state_metadata (
@@ -145,6 +151,7 @@ CREATE TABLE IF NOT EXISTS native_solution_artifacts (
   engagement_id   TEXT NOT NULL REFERENCES native_engagements(engagement_id),
   role            TEXT NOT NULL,
   family          TEXT NOT NULL,
+  media_type      TEXT NOT NULL,
   name            TEXT NOT NULL,
   record_digest   TEXT NOT NULL,
   exact_bytes     BLOB NOT NULL,
@@ -261,6 +268,7 @@ export interface NativeSolutionExecutionRow {
 export interface NativeSolutionArtifactInput {
   readonly role: NativeSolutionArtifactRole;
   readonly family: string;
+  readonly mediaType: string;
   readonly name?: string;
   readonly digest: `sha256:${string}`;
   readonly bytes: Uint8Array;
@@ -392,6 +400,7 @@ interface RawSolutionArtifact {
   engagement_id: NativeOperationId;
   role: NativeSolutionArtifactRole;
   family: string;
+  media_type: string;
   name: string;
   record_digest: `sha256:${string}`;
   exact_bytes: Uint8Array;
@@ -489,6 +498,7 @@ function solutionArtifactRow(row: RawSolutionArtifact): NativeSolutionArtifactRo
     engagementId: row.engagement_id,
     role: row.role,
     family: row.family,
+    mediaType: row.media_type,
     name: row.name === '' ? null : row.name,
     digest: row.record_digest,
     bytes: exactBytes(row.exact_bytes),
@@ -553,13 +563,25 @@ export class NativeOperatorStateRepository {
   ) {
     this.now = input.now ?? (() => new Date());
     this.store.db.exec(NATIVE_OPERATOR_STATE_SCHEMA);
+    const artifactColumns = this.store.db.prepare(`PRAGMA table_info(native_solution_artifacts)`).all() as Array<{ name: string }>;
+    if (!artifactColumns.some(({ name }) => name === 'media_type')) {
+      this.store.db.exec(`ALTER TABLE native_solution_artifacts ADD COLUMN media_type TEXT NOT NULL DEFAULT ''`);
+      this.store.db.prepare(
+        `UPDATE native_solution_artifacts SET media_type = CASE role
+           WHEN 'delivery' THEN ?
+           WHEN 'delivery-envelope' THEN ?
+           WHEN 'evidence' THEN ?
+           ELSE family
+         END WHERE media_type = ''`,
+      ).run(DELIVERY_MEDIA_TYPE, DSSE_ENVELOPE_MEDIA_TYPE, EXECUTION_EVIDENCE_MEDIA_TYPE);
+    }
     const createdAt = this.timestamp();
     this.store.db.prepare(
       `INSERT OR IGNORE INTO native_operator_state_metadata (singleton, schema_version, created_at)
        VALUES (1, ?, ?)`,
     ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, createdAt);
     const version = this.schemaVersion();
-    if (version === 1 || version === 2 || version === 3) {
+    if (version === 1 || version === 2 || version === 3 || version === 4) {
       this.store.db.prepare(
         `UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1 AND schema_version = ?`,
       ).run(NATIVE_OPERATOR_STATE_SCHEMA_VERSION, version);
@@ -1197,6 +1219,7 @@ export class NativeOperatorStateRepository {
     const keys = new Set<string>();
     for (const artifact of input.artifacts) {
       if (artifact.family.length === 0) throw new TypeError('solution artifact family must not be empty');
+      if (artifact.mediaType.length === 0) throw new TypeError('solution artifact mediaType must not be empty');
       if (documentDigest(artifact.bytes) !== artifact.digest) {
         throw new NativeOperatorStateConflictError(`solution ${artifact.role} digest does not name its exact bytes`);
       }
@@ -1225,12 +1248,13 @@ export class NativeOperatorStateRepository {
       for (const artifact of input.artifacts) {
         this.store.db.prepare(
           `INSERT INTO native_solution_artifacts
-            (engagement_id, role, family, name, record_digest, exact_bytes, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            (engagement_id, role, family, media_type, name, record_digest, exact_bytes, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
           engagementIdValue,
           artifact.role,
           artifact.family,
+          artifact.mediaType,
           artifact.name ?? '',
           artifact.digest,
           Buffer.from(artifact.bytes),
@@ -1253,7 +1277,11 @@ export class NativeOperatorStateRepository {
           input.sourceId,
           artifact.role,
           artifact.digest,
-          detailJson({ family: artifact.family, ...(artifact.name === undefined ? {} : { name: artifact.name }) }),
+          detailJson({
+            family: artifact.family,
+            mediaType: artifact.mediaType,
+            ...(artifact.name === undefined ? {} : { name: artifact.name }),
+          }),
           now,
           now,
         );
@@ -1263,7 +1291,9 @@ export class NativeOperatorStateRepository {
       ).run(now, engagementIdValue);
       this.insertAudit(engagementIdValue, execution.operation_id, 'solution-ready', {
         deliveryDigest: deliveries[0]!.digest,
-        artifacts: input.artifacts.map(({ role, family, name, digest }) => ({ role, family, name, digest })),
+        artifacts: input.artifacts.map(({ role, family, mediaType, name, digest }) => ({
+          role, family, mediaType, name, digest,
+        })),
       }, now);
     })();
   }

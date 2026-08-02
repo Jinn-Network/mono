@@ -3,6 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordDigest } from '@jinn-network/trust-core';
+import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
+import {
+  SUBMISSION_MEDIA_TYPE,
+  TASK_MEDIA_TYPE,
+} from '@jinn-network/task-execution-protocol';
+import { EVALUATION_SPEC_MEDIA_TYPE } from '@jinn-network/task-execution-profiles';
 import { archivePagePath, WELL_KNOWN_PATH } from '@jinn-network/record-discovery-protocol';
 import { coldSync, createVerifyDriver, fetchHead, type SyncedEntry } from '@jinn-network/record-discovery-client';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
@@ -167,7 +173,24 @@ describe('native requester', () => {
     ));
     expect(record.status).toBe(200);
     expect(record.headers.get('cache-control')).toContain('immutable');
+    expect(record.headers.get('content-type')).toBe(SUBMISSION_MEDIA_TYPE);
     expect(recordDigest(new Uint8Array(await record.arrayBuffer()))).toBe(result.association.submissionDigest);
+
+    const contentTypes = await Promise.all([
+      [result.association.task.path, TASK_MEDIA_TYPE],
+      [result.association.evaluationSpec.path, EVALUATION_SPEC_MEDIA_TYPE],
+      [result.association.admissionReceipt.path, DSSE_ENVELOPE_MEDIA_TYPE],
+      [result.association.requesterEnvelope.path, DSSE_ENVELOPE_MEDIA_TYPE],
+    ].map(async ([path, expected]) => {
+      const response = await requester.handleDiscoveryRequest(new Request(`https://requester.test${path}`));
+      return [response.status, response.headers.get('content-type'), expected];
+    }));
+    expect(contentTypes).toEqual([
+      [200, TASK_MEDIA_TYPE, TASK_MEDIA_TYPE],
+      [200, EVALUATION_SPEC_MEDIA_TYPE, EVALUATION_SPEC_MEDIA_TYPE],
+      [200, DSSE_ENVELOPE_MEDIA_TYPE, DSSE_ENVELOPE_MEDIA_TYPE],
+      [200, DSSE_ENVELOPE_MEDIA_TYPE, DSSE_ENVELOPE_MEDIA_TYPE],
+    ]);
 
     await rm(stateDir, { recursive: true, force: true });
   });
@@ -345,10 +368,6 @@ describe('native requester', () => {
     expect(synced).toHaveLength(1);
     if (head.signature === undefined || synced[0]?.signature === undefined) throw new Error('source was not signed');
 
-    const decodeWireEnvelope = (envelope: { payloadType: string; payload: string; signatures: Array<{ keyid?: string; sig: string }> }) => ({
-      ...envelope,
-      payload: new TextDecoder().decode(Buffer.from(envelope.payload, 'base64')),
-    });
     let mark: { sequence: string; entry: string; issuedAt: string } | undefined;
     const verifier = createVerifyDriver({
       trust: {
@@ -363,7 +382,7 @@ describe('native requester', () => {
             null,
             pae,
             identities.requesterDiscovery.publicKey,
-            Buffer.from(new TextDecoder().decode(signature), 'base64'),
+            signature,
           ),
         },
         fresh: { isFresh: (refreshBy: string, now: Date) => new Date(refreshBy).getTime() > now.getTime() },
@@ -378,9 +397,9 @@ describe('native requester', () => {
     await expect(verifier.verifySource({
       source: { agent: REQUESTER_AGENT, name: 'requester' },
       head: head.head,
-      headSignature: decodeWireEnvelope(head.signature),
+      headSignature: head.signature,
       entries: (async function* () {
-        for (const item of synced) yield { entry: item.entry, signature: decodeWireEnvelope(item.signature!) };
+        for (const item of synced) yield { entry: item.entry, signature: item.signature! };
       })(),
       firstAdoption: true,
     })).resolves.toMatchObject({ status: 'ok' });

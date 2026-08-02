@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { DSSE_PAYLOAD_TYPE, TRUST_KEY_BINDING_MEDIA_TYPE } from "./identifiers.js";
+import {
+  DSSE_ENVELOPE_MEDIA_TYPE,
+  DSSE_PAYLOAD_TYPE,
+  TRUST_KEY_BINDING_MEDIA_TYPE,
+} from "./identifiers.js";
 import {
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
@@ -17,6 +21,11 @@ function ascii(bytes: Uint8Array, length?: number): string {
 }
 
 describe("dssePreAuthEncoding", () => {
+  test("keeps envelope and payload media types distinct", () => {
+    expect(DSSE_ENVELOPE_MEDIA_TYPE).toBe("application/vnd.dsse.envelope.v1+json");
+    expect(DSSE_PAYLOAD_TYPE).toBe("application/vnd.in-toto+json");
+  });
+
   test("begins with the DSSEv1 PAE prefix", () => {
     const payloadBytes = new TextEncoder().encode('{"hello":"world"}');
     const pae = dssePreAuthEncoding(DSSE_PAYLOAD_TYPE, payloadBytes);

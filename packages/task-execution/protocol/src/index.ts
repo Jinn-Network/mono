@@ -16,7 +16,14 @@ export { resourceDescriptorHasLocator } from "./descriptors.js";
 export type { EvidenceRecordFamily, EvidenceRecordReference, ResourceDescriptor } from "./descriptors.js";
 
 // --- identity: deterministic Attempt-URI derivation (§9.2, program §7.2) ---
-export { TEP_ATTEMPT_NAMESPACE, deriveAttemptUri, isValidUrnUuid } from "./identifiers.js";
+export {
+  DELIVERY_MEDIA_TYPE,
+  SUBMISSION_MEDIA_TYPE,
+  TASK_MEDIA_TYPE,
+  TEP_ATTEMPT_NAMESPACE,
+  deriveAttemptUri,
+  isValidUrnUuid,
+} from "./identifiers.js";
 
 // --- family schemas (zod) ---
 export {

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { DELIVERY_MEDIA_TYPE, documentDigest } from '@jinn-network/task-execution-protocol';
 import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
 import { publicationKey } from '../../src/daemon/native-operation-identity.js';
 
@@ -60,6 +60,7 @@ function artifact(bytes: Uint8Array, sequence = 1) {
       engagementId,
       role: 'delivery' as const,
       family: 'delivery',
+      mediaType: DELIVERY_MEDIA_TYPE,
       name: null,
       digest,
       bytes,
@@ -92,6 +93,7 @@ describe('native solution public source', () => {
       `https://operator.example/native/records/${documentDigest(firstBytes).slice(7)}`,
     ));
     expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe(DELIVERY_MEDIA_TYPE);
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firstBytes);
   });
 

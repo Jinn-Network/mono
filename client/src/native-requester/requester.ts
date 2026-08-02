@@ -25,12 +25,18 @@ import {
   verifyPredictionSnapshotFixture,
 } from '@jinn-network/task-admission';
 import {
+  SUBMISSION_MEDIA_TYPE,
+  TASK_MEDIA_TYPE,
   documentDigest,
   sealSubmission,
   sha256Hex,
 } from '@jinn-network/task-execution-protocol';
 import {
+  EVALUATION_SPEC_MEDIA_TYPE,
+} from '@jinn-network/task-execution-profiles';
+import {
   canonicalJsonBytes,
+  DSSE_ENVELOPE_MEDIA_TYPE,
   dssePreAuthEncoding,
   parseSignedRecordEnvelope,
   sealSignedRecord,
@@ -455,11 +461,13 @@ async function storeExactRecords(
     return written;
   }
   return {
-    evaluationSpec: await save(bytes.evaluationSpec, JSON_MEDIA_TYPE),
-    task: await save(bytes.task, JSON_MEDIA_TYPE),
-    admissionReceipt: await save(bytes.admissionReceipt, ADMISSION_RECEIPT_MEDIA_TYPE),
-    submission: await save(bytes.submission, JSON_MEDIA_TYPE),
-    requesterEnvelope: await save(bytes.requesterEnvelope, ADMISSION_RECEIPT_MEDIA_TYPE),
+    evaluationSpec: await save(bytes.evaluationSpec, EVALUATION_SPEC_MEDIA_TYPE),
+    task: await save(bytes.task, TASK_MEDIA_TYPE),
+    // These exact records are DSSE envelopes. Their signed payloadType and the admission
+    // annotation remain ADMISSION_RECEIPT_MEDIA_TYPE for protocol compatibility.
+    admissionReceipt: await save(bytes.admissionReceipt, DSSE_ENVELOPE_MEDIA_TYPE),
+    submission: await save(bytes.submission, SUBMISSION_MEDIA_TYPE),
+    requesterEnvelope: await save(bytes.requesterEnvelope, DSSE_ENVELOPE_MEDIA_TYPE),
   };
 }
 
@@ -619,7 +627,11 @@ async function appendRequesterSource(input: {
       announcements: [{
         announcementId: `native-requester-${association.chainId}-${association.taskId.toString(10)}-${association.taskDigest.slice(7, 23)}`,
         action: 'available',
-        record: { kind: RECORD_KINDS.submission, digest: association.submissionDigest, mediaType: JSON_MEDIA_TYPE },
+        record: {
+          kind: RECORD_KINDS.submission,
+          digest: association.submissionDigest,
+          mediaType: SUBMISSION_MEDIA_TYPE,
+        },
         locations: location(input.publicBaseUrl, association.submission.path),
         facts: await sourceFacts(
           input.state,

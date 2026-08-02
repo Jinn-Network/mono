@@ -1,6 +1,11 @@
 import { sha1 } from "@noble/hashes/legacy.js"; // @noble/hashes v2 exposes sha1 here; verified at install
 import { compareCodeUnitStrings } from "./order.js";
 
+/** Exact wire media types for the three sealed Task Execution Protocol records. */
+export const TASK_MEDIA_TYPE = "application/vnd.jinn.task-execution.task.v1+json" as const;
+export const SUBMISSION_MEDIA_TYPE = "application/vnd.jinn.task-execution.submission.v1+json" as const;
+export const DELIVERY_MEDIA_TYPE = "application/vnd.jinn.task-execution.delivery.v1+json" as const;
+
 // Fixed TEP Attempt-URI namespace: a v5 UUID over the RFC 4122 "URL" namespace
 // (6ba7b811-9dad-11d1-80b4-00c04fd430c8) and the name "jinn.network/task-execution/attempt".
 // EXPORTED (program §7.2): the marketplace binding consumes this constant; it never re-derives

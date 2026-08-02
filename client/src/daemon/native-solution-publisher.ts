@@ -69,7 +69,7 @@ export async function openNativeSolutionPublisher(input: {
         sourceId: value.publication.sourceId,
         recordDigest: value.publication.recordDigest,
         bytes: value.bytes,
-        mediaType: value.artifact.family,
+        mediaType: value.artifact.mediaType,
         timestamp: value.publication.createdAt,
         makeEntry: ({ sequence, previous, location }) => ({
           protocol: RECORD_DISCOVERY_VERSION,
@@ -83,7 +83,7 @@ export async function openNativeSolutionPublisher(input: {
             record: {
               kind: recordKind(value.publication.role),
               digest: value.publication.recordDigest,
-              mediaType: value.artifact.family,
+              mediaType: value.artifact.mediaType,
             },
             locations: [{ profile: LOCATION_PROFILE_HTTPS, locator: location }],
             facts: {

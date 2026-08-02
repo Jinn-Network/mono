@@ -1,4 +1,5 @@
 import type { EvidenceRecordReference } from "@jinn-network/evidence-repository";
+import { EXECUTION_EVIDENCE_MEDIA_TYPE } from "@jinn-network/evidence-protocol";
 import type { VerdictCode } from "@jinn-network/marketplace-binding";
 import type {
   CanonicalVerdictAttempt,
@@ -423,7 +424,7 @@ export class NativeEvaluatorCoordinator {
       artifacts.push({
         role: "evaluation-evidence",
         name: `evidence:${typed.family}`,
-        mediaType: typed.family,
+        mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE,
         digest: typed.digest,
         bytes,
       });

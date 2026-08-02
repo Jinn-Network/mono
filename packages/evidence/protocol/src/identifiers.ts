@@ -1,6 +1,10 @@
 export const EXECUTION_EVIDENCE_PROFILE_URI =
   "https://jinn.network/profiles/execution-evidence/1.0" as const;
 
+/** Exact wire media type for an ExecutionEvidenceDocument (the RO-Crate JSON-LD record). */
+export const EXECUTION_EVIDENCE_MEDIA_TYPE =
+  "application/vnd.jinn.execution-evidence.v1+json" as const;
+
 export const RESULT_EVALUATION_PREDICATE_TYPE =
   "https://jinn.network/attestations/result-evaluation/v1" as const;
 

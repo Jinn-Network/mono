@@ -1153,6 +1153,7 @@ function solutionValue(bytes: Uint8Array) {
       engagementId,
       role: 'delivery' as const,
       family: 'delivery',
+      mediaType: 'application/vnd.jinn.task-execution.delivery.v1+json',
       name: null,
       digest,
       bytes,

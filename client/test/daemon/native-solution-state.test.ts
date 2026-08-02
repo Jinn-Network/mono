@@ -4,9 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 import {
+  DELIVERY_MEDIA_TYPE,
   documentDigest,
   serializeCanonicalJson,
 } from '@jinn-network/task-execution-protocol';
+import { EXECUTION_EVIDENCE_MEDIA_TYPE } from '@jinn-network/evidence-protocol';
+import { DSSE_ENVELOPE_MEDIA_TYPE } from '@jinn-network/trust-core';
 import { Store } from '../../src/store/store.js';
 import {
   NATIVE_OPERATOR_STATE_SCHEMA_VERSION,
@@ -86,7 +89,7 @@ function finalizedClaim(dbPath = ':memory:') {
 }
 
 describe('native solution state', () => {
-  it.each([1, 2, 3])('opens a real on-disk v%s database additively and leaves claim rows intact', async (version) => {
+  it.each([1, 2, 3, 4])('opens a real on-disk v%s database additively and leaves claim rows intact', async (version) => {
     const root = await mkdtemp(join(tmpdir(), `jinn-native-state-v${version}-`));
     const dbPath = join(root, 'operator.sqlite');
     let openStore: Store | undefined;
@@ -100,6 +103,7 @@ describe('native solution state', () => {
           DROP TABLE native_solution_executions;
         `);
       else subject.store.db.exec('DROP TABLE native_solution_retries;');
+      if (version === 4) subject.store.db.exec('ALTER TABLE native_solution_artifacts DROP COLUMN media_type;');
       subject.store.db.prepare(
         'UPDATE native_operator_state_metadata SET schema_version = ? WHERE singleton = 1',
       ).run(version);
@@ -184,15 +188,18 @@ describe('native solution state', () => {
     subject.state.recordSolutionReady(subject.engagement.engagementId, {
       sourceId: 'urn:jinn:source:solver-records',
       artifacts: [
-        { role: 'output', family: 'task-output', name: 'prediction', digest: documentDigest(output), bytes: output },
-        { role: 'evidence', family: 'execution-evidence', digest: documentDigest(evidence), bytes: evidence },
-        { role: 'delivery', family: 'delivery', digest: documentDigest(delivery), bytes: delivery },
-        { role: 'delivery-envelope', family: 'delivery-envelope', digest: documentDigest(envelope), bytes: envelope },
+        { role: 'output', family: 'task-output', mediaType: 'application/json', name: 'prediction', digest: documentDigest(output), bytes: output },
+        { role: 'evidence', family: 'execution-evidence', mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE, digest: documentDigest(evidence), bytes: evidence },
+        { role: 'delivery', family: 'delivery', mediaType: DELIVERY_MEDIA_TYPE, digest: documentDigest(delivery), bytes: delivery },
+        { role: 'delivery-envelope', family: 'delivery-envelope', mediaType: DSSE_ENVELOPE_MEDIA_TYPE, digest: documentDigest(envelope), bytes: envelope },
       ],
     });
 
     expect(subject.state.getEngagement(subject.engagement.engagementId)).toMatchObject({ state: 'solution-ready' });
-    expect(subject.state.listSolutionArtifacts(subject.engagement.engagementId)).toHaveLength(4);
+    expect(subject.state.listSolutionArtifacts(subject.engagement.engagementId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'delivery', family: 'delivery', mediaType: DELIVERY_MEDIA_TYPE }),
+      expect.objectContaining({ role: 'evidence', family: 'execution-evidence', mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE }),
+    ]));
     const pending = subject.state.listPendingPublications();
     expect(pending).toHaveLength(4);
     expect(pending).toEqual(expect.arrayContaining([
@@ -238,6 +245,7 @@ describe('native solution state', () => {
       artifacts: [{
         role: 'delivery',
         family: 'delivery',
+        mediaType: DELIVERY_MEDIA_TYPE,
         digest: `sha256:${'f'.repeat(64)}`,
         bytes: new TextEncoder().encode('different bytes'),
       }],
