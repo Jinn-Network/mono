@@ -262,6 +262,61 @@ Reviewed base: `412a793f8b34b5687d8d5183fafb9b83c8469d40`. Code fix:
 - No npm publish, push, tag, deployment, pull request, live API mutation, or settings change was
   performed.
 
+## PR #2360 request-changes hardening round
+
+Reviewed base: `224d52fdf148f5873b0c13340468aab70cfdd074`. Verified code commit:
+`4e8b54bfd94c28c1e7010afba98fd77550c86f8b`. This round closed the request-changes findings and
+the independent follow-up review finding:
+
+- npm trusted-publisher registrations now require GitHub environment `npm-publish` and allowed
+  action `npm publish`; only the final canary publisher enters that environment, and it remains
+  disabled unless `PLATFORM_CANARY_PUBLISH_ENABLED=true`;
+- package-controlled build and receipt jobs have no OIDC or attestation authority; separate
+  download-only artifact and receipt attestation jobs receive those permissions and execute no
+  checked-out repository code;
+- completeness discovery independently scans every tracked or non-ignored untracked
+  `@jinn-network/*` manifest repository-wide, with only schema-validated, owned, reviewable
+  exclusions permitted; and
+- release-group classifications, dependency directions, membership, counts, order, tarball set,
+  trusted-publisher set, and generated views derive from the catalog instead of executable
+  topology constants; and
+- each release-group policy list exactly equals its member-policy union, flags agree with every
+  member, and a disabled or lane-ineligible group fails before packing, trusted-publisher
+  generation, provenance checks, or npm access.
+
+Fresh Node `v22.22.2` verification at the code commit produced:
+
+| Verification | Result |
+| --- | --- |
+| 25-file affected architecture, ownership, release, receipt, publisher, workflow, profile, fixture, and external-consumer selection | 336 passed, 0 failed |
+| Domain inventory/boundary plus historical architecture guards | 158 passed, 0 failed |
+| Eight-domain inventory, boundary, and packed-type matrix | 116 passed, 0 failed |
+| Launcher regression suite | 6 files; 32 passed, 0 failed |
+| Changed workflow lint | 2 clean, 0 errors |
+| Changed module syntax | 24 clean, 0 errors |
+| Changed JSON parsing | 3 clean, 0 errors |
+| Generated topology drift and diff whitespace | clean |
+
+The production dry-run path used a fresh temporary output root, not injected fakes. It built the
+catalog-selected `platform-v1` group in seven runtime waves, packed 50 tarballs at
+`0.1.0-canary.sha.4e8b54bfd94c28c1e7010afba98fd77550c86f8b`, generated 50 trusted-publisher
+registrations, installed all tarballs as direct dependencies in the clean consumer with scoped
+registry fallback unreachable, and created the exact-success verification receipt. It did not
+invoke npm publication.
+
+| Dry-run artifact | SHA-256 / integrity |
+| --- | --- |
+| Catalog | `66c5073652dcf8cee61907fb6ae1b612683dcda80982774692a144de9e38035b` |
+| Prepublication manifest | `12574833a7ff6672c31a64f948ae3465b0a89b176f88f4bea254399dbf1a916d` |
+| Public-surface manifest | `032862bdb60fa1dd6bc2de360909fc35e645c0742c7cd7a2b78a8fc85b2bc579` |
+| Profile manifest (508 documents) | `b369ccc7ebd357cd7886c3cab76563d3e142c6d2b005ba2ec110c618aea3b77f` |
+| Verification receipt | `469cfa9adcd8233ecabfc034eefc726b51ebf1ec651e75717a5f436627f07dd8` |
+| First tarball, `@jinn-network/evidence-protocol` | `sha512-Bhe4P7dDRFM5eAQvESioRBUYG/Jy++lIsG78tL37PBEteBAXbAF2uY5bf9+gi+5JskB6vJd1/+3IhBwa4apZvw==` |
+| Last tarball, `@jinn-network/marketplace-testing` | `sha512-DDQ5AhMyF59Eo1D2yByhsaVLWcoyA6dXcQLd5BnyhP3ViPTSuu72MDTgmUhDBOynPdlt7Yr1tuor+YJ7dsLDqw==` |
+
+No npm package, tag, hosted profile, trusted-publisher setting, deployment-environment setting,
+branch protection, or repository variable was changed by this hardening round.
+
 ## Remaining external blockers
 
 - GitHub-hosted OIDC provenance and an actual npm trusted-publisher run remain intentionally
