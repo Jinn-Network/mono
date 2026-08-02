@@ -21,7 +21,7 @@ were performed.
 The generated inventory contains 69 entries: 65 below `packages/**` and 4 adjacent entries. It
 records the exact 50-package `platform-v1` group, 7 disabled experimental-environment packages,
 8 other `packages/**` entries, 188 first-party runtime/optional/peer edges, seven `platform-v1`
-waves, 30 catalog-declared self-identifying public claims, 3,021 Task 6 ownership paths, and eight
+waves, 30 catalog-declared self-identifying public claims, 3,023 Task 6 ownership paths, and eight
 transitional/deprecated entries. Development dependencies never enter the graph or release order.
 
 Check mode regenerates into a fresh temporary directory and byte-compares both tracked files. It
@@ -91,5 +91,69 @@ failed while output was compact and passed after deterministic two-space formatt
   fail closed.
 - Stable npm publication remains intentionally unavailable. Completion of this task documents and
   enforces the blocker; it does not implement or verify the live `jinn.network` host.
-- The machine artifact is about 989 KB because it embeds exhaustive ownership evidence. Its stable
-  formatting and exact-file drift check make that size an intentional reviewability tradeoff.
+- The machine artifact is about 1.23 MB because it embeds 639 exact public assets plus exhaustive
+  ownership evidence. Its stable formatting and exact-file drift check make that size an
+  intentional reviewability tradeoff.
+
+## Independent-review fix round 1
+
+Reviewed base: `a393af416e63865b4a6133eda7f4496b334f6ef9`. Implementation commit:
+`cfe957d3d8cb8a82bdcfdf6849ae9a959a55ebfd`.
+
+### RED evidence
+
+The focused review-regression matrix was run before implementation with Node 22 over the new asset,
+catalog, generator, ownership, workflow, and documentation probes. Result: exit 1; 0 passed and 17
+failed.
+
+- The shared asset module did not exist, so exact non-self-identifying schema, fixture, conformance
+  source/packed-target, declared-root symlink, and nested-symlink probes failed.
+- The generated report had no `publicSurfaces.assets` collection.
+- Traversal, absolute, and backslash public roots were accepted (three missing rejections).
+- `repositoryCandidateFiles` did not exist; Task 6 still enumerated the raw live filesystem.
+- Generated check mode followed file and directory symlinks and did not distinguish real files,
+  directories, or unexpected non-file entries (five failed subtests).
+- The normal architecture-control workflow did not run generated drift checking.
+- The marketplace ground-truth section lacked a dated snapshot label and generated-topology link.
+
+### Fixes
+
+- Added one read-only public-surface authority that enumerates all catalog-declared schema, profile,
+  and fixture files plus each conformance export's first-party source and packed targets. Each of
+  the 639 generated assets records kind, package, package-relative source, repository path, export,
+  packed targets, and any self-identifying claim. The kind split is 23 conformance, 569 fixtures,
+  28 profiles, and 19 schemas.
+- Catalog loading now rejects non-normalized public roots. The shared walker uses `lstat` and
+  `realpath` containment to reject root/nested symlinks, special entries, and package/repository
+  escapes. Generator, publication-surface validation, profile-root input enumeration, public
+  artifact validation, and Task 6 conformance ownership reuse it. Profile serving retains fixture
+  non-remapping, fixture-over-schema/profile precedence, `.sha256` exclusion, and its established
+  served-path collision diagnostics.
+- Generated write/check mode requires a real output directory and real expected files, rejecting
+  missing entries, directories, symlinks, unexpected regular files, and unexpected non-file types
+  before byte comparison.
+- Task 6 now derives candidate files from `git ls-files --cached --others --exclude-standard -z` in
+  Git checkouts, with deterministic filesystem fallback for non-Git controlled fixtures. Ignored
+  machine files do not affect ownership bytes/counts; intended unignored new controls remain
+  visible and subject to CODEOWNERS.
+- The marketplace evidence section is labeled `Historical snapshot (2026-07-30)` and guarded. The
+  normal `platform-architecture-control` job now invokes `generate-architecture.mjs --check`.
+
+### GREEN verification
+
+- Full Task 6+7 adjacent matrix: 184 tests passed, 0 failed.
+- Generator write followed by `--check`: both tracked files byte-identical to temporary regeneration.
+- `/opt/homebrew/bin/actionlint .github/workflows/platform-architecture-control.yml`: exit 0.
+- Node syntax checks for every changed implementation module: exit 0.
+- Relative Markdown links: 9 checked across the two changed Markdown artifacts; all resolved.
+- Machine artifact: 639 exact assets; every catalog conformance export has a source/packed-target
+  entry; no absolute local paths or wall-clock timestamps.
+- `git diff --check`: exit 0.
+
+### Residual concerns
+
+- Non-Git fixture repositories intentionally use the deterministic filesystem fallback because Git
+  ignore semantics do not exist there. Real checkouts fail closed if Git candidate enumeration
+  fails instead of silently reintroducing raw-filesystem dependence.
+- Stable npm publication remains blocked on automated live `jinn.network` hosting verification;
+  this fix round does not change or weaken that external-state hold.
