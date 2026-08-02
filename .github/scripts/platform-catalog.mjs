@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 
+import { normalizePackageRelativePublicPath } from './public-surface-assets.mjs';
+
 export const PLATFORM_CATALOG_PATH = 'architecture/platform-packages.v1.json';
 export const PLATFORM_CATALOG_SCHEMA_PATH = 'architecture/platform-packages.schema.json';
 export const RUNTIME_DEPENDENCY_SECTIONS = [
@@ -514,6 +516,14 @@ function validatePackageShape(pkg, index, catalog, repoRoot) {
   requireObject(pkg.publicSurface, `${pkg.name}.publicSurface`);
   for (const field of PUBLIC_SURFACE_FIELDS) {
     requireStringArray(pkg.publicSurface[field], `${pkg.name}.publicSurface.${field}`);
+    if (field !== 'conformance') {
+      for (const [surfaceIndex, value] of pkg.publicSurface[field].entries()) {
+        normalizePackageRelativePublicPath(
+          value,
+          `${pkg.name}.publicSurface.${field}[${surfaceIndex}]`,
+        );
+      }
+    }
   }
   requireStringArray(pkg.supersedes, `${pkg.name}.supersedes`);
   requireStringArray(pkg.replacedBy, `${pkg.name}.replacedBy`);

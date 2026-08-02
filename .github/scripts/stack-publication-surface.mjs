@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, relative, sep } from 'node:path';
 
 import { loadCatalogPackages } from './platform-catalog.mjs';
+import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
 const PUBLICATION_KINDS = ['schemas', 'profiles', 'fixtures'];
 const DIRECTORY_KIND = new Map([
@@ -63,7 +64,22 @@ function packedPublicationDirectories(repoRoot, pkg, packedRoots) {
 
 export function publicationSurfaceViolations(repoRoot, { releaseGroup = 'platform-v1' } = {}) {
   const violations = [];
-  for (const pkg of loadCatalogPackages(repoRoot, { releaseGroup })) {
+  const packages = loadCatalogPackages(repoRoot, { releaseGroup });
+  const canEnumerate = packages.every((pkg) => (
+    PUBLICATION_KINDS.every((kind) => pkg.catalog.publicSurface[kind].every((path) => {
+      const absolute = join(repoRoot, pkg.directory, normalizePath(path));
+      return existsSync(absolute) && statSync(absolute).isDirectory();
+    }))
+      && pkg.catalog.publicSurface.conformance.every((key) => Object.hasOwn(pkg.manifest.exports ?? {}, key))
+  ));
+  if (canEnumerate) {
+    try {
+      enumeratePublicSurfaceAssets({ repoRoot, packages });
+    } catch (error) {
+      violations.push(error.message);
+    }
+  }
+  for (const pkg of packages) {
     const hasExplicitFiles = Array.isArray(pkg.manifest.files);
     if (!hasExplicitFiles) {
       violations.push(`${pkg.directory}: package.json must declare an explicit "files" allowlist`);

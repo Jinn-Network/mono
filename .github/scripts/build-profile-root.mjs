@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { catalogSha256 } from './build-prepublication-bundle.mjs';
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
 } from './platform-catalog.mjs';
-
-const PUBLIC_DOCUMENT_KINDS = ['schemas', 'profiles', 'fixtures'];
-const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
+import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
 const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
 
@@ -27,22 +25,6 @@ function mediaTypeFor(path) {
     if (path.endsWith(suffix)) return mediaType;
   }
   return 'application/octet-stream';
-}
-
-function walkFiles(directory, prefix, found) {
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue;
-    const child = join(directory, entry.name);
-    const id = `${prefix}/${entry.name}`;
-    if (entry.isDirectory()) walkFiles(child, id, found);
-    else if (entry.isFile()) found.push({ servedPath: id.split(sep).join('/'), absolutePath: child });
-  }
-  return found;
-}
-
-function inside(child, parent) {
-  const path = relative(parent, child);
-  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`));
 }
 
 // A document under fixtures/ is test data, not self-identity: fixture bodies legitimately
@@ -100,62 +82,51 @@ export function buildProfileRoot({
   }
   const packages = loadCatalogPackages(repoRoot, { releaseGroup });
   if (packages.length === 0) throw new Error(`release group ${releaseGroup} contains no catalog packages`);
+  const publicAssets = enumeratePublicSurfaceAssets({
+    repoRoot,
+    packages,
+    validateUniqueClaims: false,
+  });
   const claims = new Map();
   const documents = [];
   for (const pkg of packages) {
-    const visitedSources = new Set();
-    const declaredRoots = new Map(PUBLIC_DOCUMENT_KINDS.map((kind) => [
-      kind,
-      pkg.catalog.publicSurface[kind].map((source) => join(repoRoot, pkg.directory, source)),
-    ]));
-    const effectiveKindFor = (absolutePath) => PUBLIC_DOCUMENT_KIND_PRECEDENCE.find(
-      (kind) => declaredRoots.get(kind).some((root) => inside(absolutePath, root)),
-    );
-    for (const kind of PUBLIC_DOCUMENT_KINDS) {
-      for (const source of pkg.catalog.publicSurface[kind]) {
-        const absolute = join(repoRoot, pkg.directory, source);
-        if (!existsSync(absolute) || !statSync(absolute).isDirectory()) {
-          throw new Error(`${pkg.name} declares missing publicSurface.${kind} path ${source}`);
+    for (const asset of publicAssets.filter((entry) => (
+      entry.package === pkg.name && entry.kind !== 'conformance'
+    ))) {
+      const absolutePath = join(repoRoot, pkg.directory, asset.relativeSource);
+      // A `.sha256` sidecar (e.g. profile.sha256 next to profile.json) is not itself
+      // a self-identifying document -- it names no $id/profile of its own. Its sibling
+      // document can be served at a declared-identifier path that differs from its
+      // on-disk directory (see declaredIdentifier below), which would otherwise strand
+      // the sidecar under the old directory-derived path while the document it digests
+      // moves elsewhere -- a verifier resolving the document and reaching for the
+      // conventional adjacent .sha256 would 404. manifest.json's per-document sha256
+      // field is the digest surface for every served document, sidecar or not, so the
+      // sidecar file itself is simply not part of the served profile root.
+      if (asset.relativeSource.endsWith('.sha256')) continue;
+      const bytes = readFileSync(absolutePath);
+      const fixture = asset.kind === 'fixtures';
+      const fallbackPath = fixture
+        ? `${pkg.name}/${asset.relativeSource}`
+        : asset.relativeSource;
+      const servedPath = declaredIdentifier(asset.relativeSource, bytes, fixture) ?? fallbackPath;
+      const claimed = claims.get(servedPath);
+      if (claimed) {
+        if (claimed !== pkg.name) {
+          throw new Error(`${servedPath} is claimed by both ${claimed} and ${pkg.name}`);
         }
-        for (const file of walkFiles(absolute, source, [])) {
-          if (visitedSources.has(file.absolutePath)) continue;
-          visitedSources.add(file.absolutePath);
-          // A `.sha256` sidecar (e.g. profile.sha256 next to profile.json) is not itself
-          // a self-identifying document -- it names no $id/profile of its own. Its sibling
-          // document can be served at a declared-identifier path that differs from its
-          // on-disk directory (see declaredIdentifier below), which would otherwise strand
-          // the sidecar under the old directory-derived path while the document it digests
-          // moves elsewhere -- a verifier resolving the document and reaching for the
-          // conventional adjacent .sha256 would 404. manifest.json's per-document sha256
-          // field is the digest surface for every served document, sidecar or not, so the
-          // sidecar file itself is simply not part of the served profile root.
-          if (file.servedPath.endsWith('.sha256')) continue;
-          const bytes = readFileSync(file.absolutePath);
-          const effectiveKind = effectiveKindFor(file.absolutePath) ?? kind;
-          const fixture = effectiveKind === 'fixtures';
-          const fallbackPath = fixture
-            ? `${pkg.name}/${file.servedPath}`
-            : file.servedPath;
-          const servedPath = declaredIdentifier(file.servedPath, bytes, fixture) ?? fallbackPath;
-          const claimed = claims.get(servedPath);
-          if (claimed) {
-            if (claimed !== pkg.name) {
-              throw new Error(`${servedPath} is claimed by both ${claimed} and ${pkg.name}`);
-            }
-            throw new Error(`${servedPath} is claimed more than once by ${pkg.name}`);
-          }
-          claims.set(servedPath, pkg.name);
-          documents.push({
-            path: servedPath,
-            sha256: createHash('sha256').update(bytes).digest('hex'),
-            mediaType: mediaTypeFor(file.servedPath),
-            sourcePackage: pkg.name,
-          });
-          const target = join(outDir, ...servedPath.split('/'));
-          mkdirSync(dirname(target), { recursive: true });
-          copyFileSync(file.absolutePath, target);
-        }
+        throw new Error(`${servedPath} is claimed more than once by ${pkg.name}`);
       }
+      claims.set(servedPath, pkg.name);
+      documents.push({
+        path: servedPath,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        mediaType: mediaTypeFor(asset.relativeSource),
+        sourcePackage: pkg.name,
+      });
+      const target = join(outDir, ...servedPath.split('/'));
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(absolutePath, target);
     }
   }
   documents.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));

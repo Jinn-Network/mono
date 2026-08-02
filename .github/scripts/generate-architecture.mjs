@@ -3,6 +3,7 @@
 import {
   mkdtempSync,
   mkdirSync,
+  lstatSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -21,6 +22,7 @@ import {
 } from './platform-catalog.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 import { buildRegistrationList } from './stack-trusted-publishers.mjs';
+import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
 const GENERATED_DIRECTORY = 'architecture/generated';
 const GENERATED_FILES = ['platform-topology.md', 'platform-topology.v1.json'];
@@ -39,6 +41,7 @@ const LIVE_TOPOLOGY_DOCS = [
 ];
 const HISTORICAL_TOPOLOGY_DOCS = [
   'docs/superpowers/plans/2026-07-30-stack-publish-path.md',
+  'docs/superpowers/specs/2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md',
   'log/decisions/2026-07-30-platform-boundary-and-topology.md',
 ];
 const OBSOLETE_EVIDENCE_LINKS = [
@@ -49,67 +52,6 @@ const OBSOLETE_EVIDENCE_LINKS = [
 
 function sortStrings(values) {
   return [...values].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
-}
-
-function walkFiles(directory, prefix = '') {
-  const files = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
-    if (entry.name === 'node_modules') continue;
-    const absolutePath = join(directory, entry.name);
-    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) files.push(...walkFiles(absolutePath, relativePath));
-    else if (entry.isFile()) files.push({ absolutePath, relativePath });
-  }
-  return files.sort((left, right) => (
-    left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0
-  ));
-}
-
-function publicSelfIdentifyingClaims(repoRoot, packages) {
-  const claims = [];
-  const byIdentifier = new Map();
-  for (const pkg of packages) {
-    const visitedFiles = new Set();
-    for (const kind of ['schemas', 'profiles']) {
-      for (const root of pkg.catalog.publicSurface[kind]) {
-        const absoluteRoot = resolve(repoRoot, pkg.directory, root);
-        for (const file of walkFiles(absoluteRoot)) {
-          if (visitedFiles.has(file.absolutePath)) continue;
-          visitedFiles.add(file.absolutePath);
-          if (!file.relativePath.endsWith('.json')) continue;
-          let document;
-          try {
-            document = JSON.parse(readFileSync(file.absolutePath, 'utf8'));
-          } catch (error) {
-            throw new Error(
-              `${pkg.name}: malformed catalog-declared publicSurface.${kind} JSON ${root}/${file.relativePath}: ${error.message}`,
-            );
-          }
-          if (!document || typeof document !== 'object' || Array.isArray(document)) continue;
-          for (const field of ['$id', 'profile']) {
-            const identifier = document[field];
-            if (typeof identifier !== 'string' || !identifier.startsWith('https://jinn.network/')) continue;
-            const existing = byIdentifier.get(identifier);
-            const source = `${pkg.directory}/${root}/${file.relativePath}`;
-            if (existing) {
-              throw new Error(`duplicate public self-identifying claim ${identifier}: ${existing} and ${source}`);
-            }
-            byIdentifier.set(identifier, source);
-            claims.push({
-              field,
-              identifier,
-              kind,
-              package: pkg.name,
-              path: source,
-            });
-          }
-        }
-      }
-    }
-  }
-  return claims.sort((left, right) => (
-    left.identifier < right.identifier ? -1 : left.identifier > right.identifier ? 1 : 0
-  ));
 }
 
 function dependencyClosure(graph) {
@@ -196,6 +138,7 @@ export function buildArchitectureReport(repoRoot) {
     fixtures: publicSurface.fixtures,
     conformance: publicSurface.conformance,
   }));
+  const publicSurfaceAssets = enumeratePublicSurfaceAssets({ repoRoot: root, packages: hydrated });
   return {
     schemaVersion: 1,
     sources: {
@@ -241,7 +184,14 @@ export function buildArchitectureReport(repoRoot) {
     },
     publicSurfaces: {
       packages: publicSurfacePackages,
-      selfIdentifyingClaims: publicSelfIdentifyingClaims(root, hydrated),
+      assets: publicSurfaceAssets,
+      selfIdentifyingClaims: publicSurfaceAssets.filter(({ claim }) => claim !== null).map((asset) => ({
+        field: asset.claim.field,
+        identifier: asset.claim.identifier,
+        kind: asset.kind,
+        package: asset.package,
+        path: asset.path,
+      })).sort((left, right) => left.identifier.localeCompare(right.identifier)),
     },
     ownership: validateArchitectureControl({ repoRoot: root }),
     transitions: packageRecords.filter((pkg) => (
@@ -348,6 +298,14 @@ export function renderArchitectureMarkdown(report) {
       `| ${cell(pkg.name)} | ${pkg.releaseGroup} | ${cell(pkg.schemas)} | ${cell(pkg.profiles)} | ${cell(pkg.fixtures)} | ${cell(pkg.conformance)} |`
     )),
     '',
+    '### Exact public assets',
+    '',
+    '| Kind | Package | Source | Export | Packed targets | Self-identifying claim |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...report.publicSurfaces.assets.map((asset) => (
+      `| ${asset.kind} | ${cell(asset.package)} | ${cell(asset.path)} | ${cell(asset.export)} | ${cell(asset.packedTargets)} | ${cell(asset.claim?.identifier)} |`
+    )),
+    '',
     '### Self-identifying `jinn.network` claims',
     '',
     '| Identifier | Field | Kind | Package | Source |',
@@ -385,19 +343,50 @@ export function generateArchitectureArtifacts(repoRoot) {
   };
 }
 
-function unexpectedGeneratedFiles(outDir, expected) {
-  return readdirSync(outDir, { withFileTypes: true })
-    .filter((entry) => !entry.isFile() || !expected.has(entry.name))
-    .map(({ name }) => name)
-    .sort();
+function inspectGeneratedDirectory(outDir, expected, { requireExpected }) {
+  let directory;
+  try {
+    directory = lstatSync(outDir);
+  } catch {
+    throw new Error('generated architecture directory must be a real directory');
+  }
+  if (directory.isSymbolicLink() || !directory.isDirectory()) {
+    throw new Error('generated architecture directory must be a real directory');
+  }
+  const entries = new Map(readdirSync(outDir, { withFileTypes: true }).map((entry) => [entry.name, entry]));
+  for (const [name, entry] of [...entries].sort(([left], [right]) => left.localeCompare(right))) {
+    if (!expected.has(name)) {
+      if (entry.isSymbolicLink() || !entry.isFile()) {
+        throw new Error(`unexpected generated architecture entry ${name} must be a regular file`);
+      }
+      throw new Error(`unexpected generated architecture file: ${name}`);
+    }
+  }
+  for (const name of [...expected].sort()) {
+    const entry = entries.get(name);
+    if (!entry) {
+      if (requireExpected) throw new Error(`generated architecture entry ${name} is missing`);
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      throw new Error(`generated architecture entry ${name} must not be a symlink`);
+    }
+    if (!entry.isFile()) {
+      throw new Error(`generated architecture entry ${name} must be a regular file`);
+    }
+  }
 }
 
 export function writeGeneratedArchitecture({ repoRoot, outDir = resolve(repoRoot, GENERATED_DIRECTORY) }) {
   const output = resolve(outDir);
   const artifacts = generateArchitectureArtifacts(repoRoot);
-  mkdirSync(output, { recursive: true });
-  const unexpected = unexpectedGeneratedFiles(output, new Set(Object.keys(artifacts)));
-  if (unexpected.length > 0) throw new Error(`unexpected generated architecture file: ${unexpected[0]}`);
+  try {
+    lstatSync(output);
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    mkdirSync(output, { recursive: true });
+  }
+  inspectGeneratedDirectory(output, new Set(Object.keys(artifacts)), { requireExpected: false });
   for (const [filename, bytes] of Object.entries(artifacts)) {
     writeFileSync(join(output, filename), bytes, 'utf8');
   }
@@ -407,19 +396,12 @@ export function writeGeneratedArchitecture({ repoRoot, outDir = resolve(repoRoot
 export function checkGeneratedArchitecture({ repoRoot, trackedDir = resolve(repoRoot, GENERATED_DIRECTORY) }) {
   const tracked = resolve(trackedDir);
   const expectedNames = new Set(GENERATED_FILES);
-  const actualNames = readdirSync(tracked, { withFileTypes: true }).map(({ name }) => name).sort();
-  const unexpected = actualNames.filter((name) => !expectedNames.has(name));
-  if (unexpected.length > 0) throw new Error(`unexpected generated architecture file: ${unexpected[0]}`);
+  inspectGeneratedDirectory(tracked, expectedNames, { requireExpected: true });
   const temporary = mkdtempSync(join(tmpdir(), 'jinn-generated-architecture-check-'));
   try {
     writeGeneratedArchitecture({ repoRoot, outDir: temporary });
     for (const filename of GENERATED_FILES) {
-      let actual;
-      try {
-        actual = readFileSync(join(tracked, filename));
-      } catch {
-        throw new Error(`generated architecture drift: ${filename} is missing`);
-      }
+      const actual = readFileSync(join(tracked, filename));
       const expected = readFileSync(join(temporary, filename));
       if (!actual.equals(expected)) throw new Error(`generated architecture drift: ${filename}`);
     }

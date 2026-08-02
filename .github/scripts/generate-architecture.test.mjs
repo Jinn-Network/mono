@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -136,6 +143,48 @@ test('release, public-surface, ownership, and transition views reuse their canon
   assert.ok(report.publicSurfaces.selfIdentifyingClaims.every(({ identifier }) => (
     identifier.startsWith('https://jinn.network/')
   )));
+  assert.deepEqual(
+    report.publicSurfaces.assets.find(({ path }) => (
+      path === 'packages/benchmarking/records/schemas/benchmark.schema.json'
+    )),
+    {
+      claim: null,
+      export: null,
+      kind: 'schemas',
+      package: '@jinn-network/benchmarking-records',
+      packedTargets: [],
+      path: 'packages/benchmarking/records/schemas/benchmark.schema.json',
+      relativeSource: 'schemas/benchmark.schema.json',
+    },
+  );
+  assert.deepEqual(
+    report.publicSurfaces.assets.find(({ path }) => (
+      path === 'packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json'
+    )),
+    {
+      claim: null,
+      export: null,
+      kind: 'fixtures',
+      package: '@jinn-network/evidence-trajectory',
+      packedTargets: [],
+      path: 'packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json',
+      relativeSource: 'fixtures/derivation/execution-golden-base.json',
+    },
+  );
+  assert.deepEqual(
+    report.publicSurfaces.assets.find(({ path, export: exportKey }) => (
+      path === 'packages/evidence/trajectory/src/testing.ts' && exportKey === './testing'
+    )),
+    {
+      claim: null,
+      export: './testing',
+      kind: 'conformance',
+      package: '@jinn-network/evidence-trajectory',
+      packedTargets: ['./dist/testing.d.ts', './dist/testing.js'],
+      path: 'packages/evidence/trajectory/src/testing.ts',
+      relativeSource: 'src/testing.ts',
+    },
+  );
   assert.deepEqual(report.ownership, validateArchitectureControl({ repoRoot }));
   assert.equal(report.transitions.length, 8);
   assert.ok(report.transitions.every(({ transition }) => (
@@ -199,7 +248,8 @@ test('generated JSON and Markdown are deterministic, portable, and expose every 
   assert.match(first['platform-topology.md'], /^<!-- GENERATED FILE — DO NOT EDIT/mu);
   for (const heading of [
     '## Inventory', '## Runtime dependency topology', '## Release and trusted publishers',
-    '## Public surfaces and identity claims', '## Architecture-control ownership',
+    '## Public surfaces and identity claims', '### Exact public assets',
+    '## Architecture-control ownership',
     '## Transitional and deprecated entries',
   ]) assert.ok(first['platform-topology.md'].includes(heading), heading);
 });
@@ -234,7 +284,73 @@ test('check mode regenerates separately, byte-compares the exact tracked set, an
   }
 });
 
+test('check mode rejects missing, non-regular, and symlinked generated entries', async (t) => {
+  const { checkGeneratedArchitecture, writeGeneratedArchitecture } = await implementation;
+  const withTracked = async (callback) => {
+    const parent = mkdtempSync(join(tmpdir(), 'jinn-architecture-types-'));
+    const trackedDir = join(parent, 'generated');
+    try {
+      writeGeneratedArchitecture({ repoRoot, outDir: trackedDir });
+      await callback({ parent, trackedDir });
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
+  };
+
+  await t.test('missing expected file', () => withTracked(({ trackedDir }) => {
+    rmSync(join(trackedDir, 'platform-topology.md'));
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /generated architecture entry platform-topology\.md is missing/u,
+    );
+  }));
+
+  await t.test('directory in place of expected file', () => withTracked(({ trackedDir }) => {
+    rmSync(join(trackedDir, 'platform-topology.md'));
+    mkdirSync(join(trackedDir, 'platform-topology.md'));
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /generated architecture entry platform-topology\.md must be a regular file/u,
+    );
+  }));
+
+  await t.test('symlink in place of expected file', () => withTracked(({ parent, trackedDir }) => {
+    const path = join(trackedDir, 'platform-topology.md');
+    const target = join(parent, 'topology-target.md');
+    writeFileSync(target, readFileSync(path));
+    rmSync(path);
+    symlinkSync(target, path);
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /generated architecture entry platform-topology\.md must not be a symlink/u,
+    );
+  }));
+
+  await t.test('symlinked generated directory', () => withTracked(({ parent, trackedDir }) => {
+    const linked = join(parent, 'generated-link');
+    symlinkSync(trackedDir, linked);
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir: linked }),
+      /generated architecture directory must be a real directory/u,
+    );
+  }));
+
+  await t.test('unexpected non-file entry', () => withTracked(({ trackedDir }) => {
+    mkdirSync(join(trackedDir, 'unexpected'));
+    assert.throws(
+      () => checkGeneratedArchitecture({ repoRoot, trackedDir }),
+      /unexpected generated architecture entry unexpected must be a regular file/u,
+    );
+  }));
+});
+
 test('live documentation converges on generated truth while dated records remain labeled snapshots', async () => {
   const { architectureDocumentationViolations } = await implementation;
   assert.deepEqual(architectureDocumentationViolations(repoRoot), []);
+  const marketplace = readFileSync(
+    join(repoRoot, 'docs/superpowers/specs/2026-07-30-marketplace-surfaces-and-consumption-boundary-design.md'),
+    'utf8',
+  );
+  assert.match(marketplace, /Historical snapshot \(2026-07-30\)/u);
+  assert.match(marketplace, /architecture\/generated\/platform-topology\.md/u);
 });

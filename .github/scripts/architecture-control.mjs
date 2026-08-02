@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { loadPlatformCatalog } from './platform-catalog.mjs';
+import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
+
+export { resolveConformanceSources } from './public-surface-assets.mjs';
 
 export const REQUIRED_ARCHITECTURE_OWNERS = ['@oaksprout', '@ritsukai'];
 const USERNAME = /^@[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u;
@@ -128,70 +132,89 @@ function addPath(paths, repositoryPath, category, repoRoot, { mustExist = true }
   paths.set(normalized, categories);
 }
 
-function addTree(paths, repositoryPath, category, repoRoot) {
+function fallbackCandidateFiles(repoRoot, current = repoRoot, prefix = '') {
+  const files = [];
+  for (const entry of readdirSync(current, { withFileTypes: true }).sort((left, right) => (
+    left.name.localeCompare(right.name)
+  ))) {
+    if (entry.name === '.git') continue;
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    const absolute = resolve(current, entry.name);
+    if (entry.isDirectory()) files.push(...fallbackCandidateFiles(repoRoot, absolute, relativePath));
+    else if (entry.isFile()) files.push(relativePath);
+  }
+  return files;
+}
+
+export function repositoryCandidateFiles(repoRoot, { runGit } = {}) {
+  const root = resolve(repoRoot);
+  const invokeGit = runGit ?? ((args) => execFileSync('git', args, {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }));
+  let files;
+  try {
+    const output = invokeGit([
+      '-C', root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z',
+    ]);
+    files = String(output).split('\0').filter(Boolean);
+  } catch (error) {
+    if (existsSync(resolve(root, '.git'))) {
+      throw new Error(`cannot enumerate repository candidates with git: ${error.message}`);
+    }
+    files = fallbackCandidateFiles(root);
+  }
+  return [...new Set(files.map((path) => path.split('\\').join('/')))].sort();
+}
+
+function candidateInventory(files) {
+  const candidates = [...files].sort();
+  const directories = new Set();
+  for (const path of candidates) {
+    const parts = path.split('/');
+    for (let index = 1; index < parts.length; index += 1) {
+      directories.add(parts.slice(0, index).join('/'));
+    }
+  }
+  return { files: candidates, directories: [...directories].sort() };
+}
+
+function hasExcludedComponent(path, root) {
+  const relativePath = path === root ? '' : path.slice(root.length + 1);
+  return relativePath.split('/').some((component) => EXCLUDED_DIRECTORIES.has(component));
+}
+
+function addTree(paths, repositoryPath, category, repoRoot, inventory) {
   addPath(paths, repositoryPath, category, repoRoot);
   const normalized = repositoryPath.replace(/^\/+|\/+$/gu, '');
   const absolute = resolve(repoRoot, ...normalized.split('/'));
   if (!statSync(absolute).isDirectory()) return;
-  for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-    if (entry.isDirectory() && EXCLUDED_DIRECTORIES.has(entry.name)) continue;
-    const child = `${normalized}/${entry.name}`;
-    if (entry.isDirectory()) addTree(paths, child, category, repoRoot);
-    else if (entry.isFile()) addPath(paths, child, category, repoRoot);
-  }
-}
-
-function exportTargets(value) {
-  if (typeof value === 'string') return [value];
-  if (value && typeof value === 'object') return Object.values(value).flatMap(exportTargets);
-  return [];
-}
-
-function sourceCandidates(target) {
-  if (!target.startsWith('./dist/')) return [target];
-  const stem = target.slice('./dist/'.length).replace(/\.(?:d\.ts|js)$/u, '');
-  return [
-    `./src/${stem}.ts`,
-    `./src/${stem}.tsx`,
-    `./src/${stem}/index.ts`,
-    `./src/${stem}/index.tsx`,
-  ];
-}
-
-export function resolveConformanceSources(repoRoot, pkg, manifest, exportKey) {
-  const definition = manifest.exports?.[exportKey];
-  if (definition === undefined) throw new Error(`${pkg.name}: conformance export ${exportKey} is not declared in package.json exports`);
-  const packedTargets = [...new Set(exportTargets(definition))].sort();
-  if (packedTargets.length === 0) throw new Error(`${pkg.name}: conformance export ${exportKey} has no packed targets`);
-  const sources = [];
-  for (const target of packedTargets) {
-    const existing = sourceCandidates(target).find((candidate) => existsSync(resolve(
-      repoRoot,
-      ...normalizeRelative(pkg.path, candidate).split('/'),
-    )));
-    if (!existing) throw new Error(`${pkg.name}: conformance target ${target} has no first-party source`);
-    sources.push(existing);
-  }
-  return { packedTargets, sources: [...new Set(sources)].sort() };
-}
-
-function discoverSurfaceDirectories(repoRoot, packagePath, paths) {
-  const packageRoot = resolve(repoRoot, ...packagePath.split('/'));
-  const visit = (absolute) => {
-    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-      if (!entry.isDirectory() || EXCLUDED_DIRECTORIES.has(entry.name)) continue;
-      const child = resolve(absolute, entry.name);
-      const relativePath = relative(repoRoot, child).split('\\').join('/');
-      if (SURFACE_DIRECTORIES.has(entry.name) || entry.name.includes('conformance')) {
-        addTree(paths, relativePath, 'discoveredFirstPartySurfaces', repoRoot);
-      }
-      visit(child);
+  for (const directory of inventory.directories) {
+    if (directory.startsWith(`${normalized}/`) && !hasExcludedComponent(directory, normalized)) {
+      addPath(paths, directory, category, repoRoot);
     }
-  };
-  visit(packageRoot);
+  }
+  for (const file of inventory.files) {
+    if (file.startsWith(`${normalized}/`) && !hasExcludedComponent(file, normalized)) {
+      addPath(paths, file, category, repoRoot);
+    }
+  }
 }
 
-function discoverGeneratorSources(repoRoot, pkg, paths) {
+function discoverSurfaceDirectories(repoRoot, packagePath, paths, inventory) {
+  for (const directory of inventory.directories) {
+    if (!directory.startsWith(`${packagePath}/`) || hasExcludedComponent(directory, packagePath)) {
+      continue;
+    }
+    const name = directory.split('/').at(-1);
+    if (SURFACE_DIRECTORIES.has(name) || name.includes('conformance')) {
+      addTree(paths, directory, 'discoveredFirstPartySurfaces', repoRoot, inventory);
+    }
+  }
+}
+
+function discoverGeneratorSources(repoRoot, pkg, paths, inventory) {
   const manifestPath = resolve(repoRoot, ...pkg.path.split('/'), 'package.json');
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
   for (const command of Object.values(manifest.scripts ?? {})) {
@@ -200,34 +223,42 @@ function discoverGeneratorSources(repoRoot, pkg, paths) {
     )) {
       const candidate = normalizeRelative(pkg.path, match[1]);
       if (!candidate.split('/').some((component) => EXCLUDED_DIRECTORIES.has(component))
-        && existsSync(resolve(repoRoot, ...candidate.split('/')))) {
-        addTree(paths, dirname(candidate).split('\\').join('/'), 'generatorSources', repoRoot);
+        && inventory.files.includes(candidate)) {
+        addTree(
+          paths,
+          dirname(candidate).split('\\').join('/'),
+          'generatorSources',
+          repoRoot,
+          inventory,
+        );
       }
     }
   }
-  const packageRoot = resolve(repoRoot, ...pkg.path.split('/'));
-  const visit = (absolute) => {
-    for (const entry of readdirSync(absolute, { withFileTypes: true })) {
-      if (!entry.isDirectory() || EXCLUDED_DIRECTORIES.has(entry.name)) continue;
-      const child = resolve(absolute, entry.name);
-      if (entry.name === 'scripts') {
-        addTree(paths, relative(repoRoot, child).split('\\').join('/'), 'generatorSources', repoRoot);
-      } else {
-        visit(child);
-      }
+  for (const directory of inventory.directories) {
+    if (directory.startsWith(`${pkg.path}/`)
+      && directory.split('/').at(-1) === 'scripts'
+      && !hasExcludedComponent(directory, pkg.path)) {
+      addTree(paths, directory, 'generatorSources', repoRoot, inventory);
     }
-  };
-  visit(packageRoot);
+  }
 }
 
-export function enumerateArchitectureControlPaths(repoRoot, catalog) {
+export function enumerateArchitectureControlPaths(repoRoot, catalog, { candidateFiles } = {}) {
+  const inventory = candidateInventory(candidateFiles ?? repositoryCandidateFiles(repoRoot));
   const paths = new Map();
   for (const [path, category] of STATIC_CONTROL) addPath(paths, path, category, repoRoot);
   for (const gate of Object.values(catalog.gateDefinitions)) {
     addPath(paths, gate.path, 'requiredGates', repoRoot);
   }
-  for (const pkg of catalog.packages) {
-    const manifest = JSON.parse(readFileSync(resolve(repoRoot, ...pkg.path.split('/'), 'package.json'), 'utf8'));
+  const packages = catalog.packages.map((pkg) => ({
+    name: pkg.name,
+    directory: pkg.path,
+    catalog: pkg,
+    manifest: JSON.parse(readFileSync(resolve(repoRoot, ...pkg.path.split('/'), 'package.json'), 'utf8')),
+  }));
+  const publicAssets = enumeratePublicSurfaceAssets({ repoRoot, packages });
+  for (const hydrated of packages) {
+    const { catalog: pkg } = hydrated;
     addPath(paths, `${pkg.path}/package.json`, 'catalogManifests', repoRoot);
     for (const document of pkg.authority.documents) addPath(paths, document.path, 'authorityDocuments', repoRoot);
     if (pkg.authority.decisionRecord) addPath(paths, pkg.authority.decisionRecord.path, 'decisionRecords', repoRoot);
@@ -236,27 +267,41 @@ export function enumerateArchitectureControlPaths(repoRoot, catalog) {
     for (const [surface, values] of Object.entries(pkg.publicSurface)) {
       for (const value of values) {
         if (surface !== 'conformance') {
-          addTree(paths, normalizeRelative(pkg.path, value), 'catalogPublicSurfaces', repoRoot);
-          addTree(paths, normalizeRelative(pkg.path, value), 'generatedOutputSources', repoRoot);
+          addTree(
+            paths,
+            normalizeRelative(pkg.path, value),
+            'catalogPublicSurfaces',
+            repoRoot,
+            inventory,
+          );
+          addTree(
+            paths,
+            normalizeRelative(pkg.path, value),
+            'generatedOutputSources',
+            repoRoot,
+            inventory,
+          );
           continue;
         }
-        const resolved = resolveConformanceSources(repoRoot, pkg, manifest, value);
-        for (const source of resolved.sources) {
-          addPath(paths, normalizeRelative(pkg.path, source), 'catalogPublicSurfaces', repoRoot);
-          addPath(paths, normalizeRelative(pkg.path, source), 'conformanceSources', repoRoot);
-          addPath(paths, normalizeRelative(pkg.path, source), 'generatedOutputSources', repoRoot);
+        const assets = publicAssets.filter((asset) => (
+          asset.package === pkg.name && asset.kind === 'conformance' && asset.export === value
+        ));
+        for (const asset of assets) {
+          addPath(paths, asset.path, 'catalogPublicSurfaces', repoRoot);
+          addPath(paths, asset.path, 'conformanceSources', repoRoot);
+          addPath(paths, asset.path, 'generatedOutputSources', repoRoot);
         }
-        for (const target of resolved.packedTargets) {
+        for (const target of assets.flatMap(({ packedTargets }) => packedTargets)) {
           addPath(paths, normalizeRelative(pkg.path, target), 'conformancePackedTargets', repoRoot, { mustExist: false });
           addPath(paths, normalizeRelative(pkg.path, target), 'generatedOutputSources', repoRoot, { mustExist: false });
         }
       }
     }
-    discoverSurfaceDirectories(repoRoot, pkg.path, paths);
-    discoverGeneratorSources(repoRoot, pkg, paths);
+    discoverSurfaceDirectories(repoRoot, pkg.path, paths, inventory);
+    discoverGeneratorSources(repoRoot, pkg, paths, inventory);
   }
-  addTree(paths, '.github/scripts', 'generatorSources', repoRoot);
-  addTree(paths, '.github/workflows', 'generatorSources', repoRoot);
+  addTree(paths, '.github/scripts', 'generatorSources', repoRoot, inventory);
+  addTree(paths, '.github/workflows', 'generatorSources', repoRoot, inventory);
   return paths;
 }
 

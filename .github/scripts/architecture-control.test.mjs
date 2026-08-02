@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -101,6 +102,44 @@ test('enumerates an unreferenced catalog gate definition independently', async (
     const report = validateArchitectureControl({ repoRoot: root });
     const entry = report.paths.find((candidate) => candidate.path === '.github/workflows/unreferenced.yml');
     assert.ok(entry?.categories.includes('requiredGates'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Git candidate inventory excludes ignored machine files and includes intended untracked controls', async () => {
+  const { repositoryCandidateFiles, validateArchitectureControl } = await implementation;
+  const root = completeFixture();
+  try {
+    write(join(root, '.gitignore'), '**/.DS_Store\n');
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['add', '.'], { cwd: root });
+
+    const baseline = validateArchitectureControl({ repoRoot: root });
+    write(join(root, '.github/scripts/.DS_Store'), 'machine-local\n');
+    write(join(root, '.github/scripts/review-fixture-tool.mjs'), 'export {};\n');
+
+    const candidates = repositoryCandidateFiles(root);
+    assert.equal(candidates.includes('.github/scripts/.DS_Store'), false);
+    assert.equal(candidates.includes('.github/scripts/review-fixture-tool.mjs'), true);
+
+    rmSync(join(root, '.github/scripts/review-fixture-tool.mjs'));
+    assert.deepEqual(validateArchitectureControl({ repoRoot: root }), baseline);
+
+    write(join(root, '.github/scripts/review-fixture-tool.mjs'), 'export {};\n');
+    const withUntracked = validateArchitectureControl({ repoRoot: root });
+    assert.ok(withUntracked.paths.some(({ path }) => (
+      path === '.github/scripts/review-fixture-tool.mjs'
+    )));
+    const codeownersPath = join(root, '.github/CODEOWNERS');
+    write(
+      codeownersPath,
+      `${readFileSync(codeownersPath, 'utf8')}/.github/scripts/review-fixture-tool.mjs @attacker\n`,
+    );
+    assert.throws(
+      () => validateArchitectureControl({ repoRoot: root }),
+      /review-fixture-tool\.mjs: effective owners must be exactly/u,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

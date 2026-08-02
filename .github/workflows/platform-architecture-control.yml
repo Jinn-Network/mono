@@ -32,6 +32,7 @@ jobs:
             .github/scripts/architecture-control-workflow.test.mjs
           node .github/scripts/architecture-control.mjs \
             --out .architecture-control/coverage.json
+          node .github/scripts/generate-architecture.mjs --check
       - name: Upload deterministic ownership coverage
         uses: actions/upload-artifact@v4
         with:

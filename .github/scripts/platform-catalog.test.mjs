@@ -64,6 +64,28 @@ test('rejects catalog path/name drift from the package manifest', () => {
   }
 });
 
+test('public surface roots must be normalized package-relative paths', async (t) => {
+  for (const [name, value] of [
+    ['traversal', '../schemas'],
+    ['absolute', '/tmp/schemas'],
+    ['backslash', 'schemas\\nested'],
+  ]) {
+    await t.test(name, () => {
+      const catalog = fixtureCatalog();
+      catalog.packages[0].publicSurface.schemas = [value];
+      const root = fixtureRepo({ catalog });
+      try {
+        assert.throws(
+          () => loadPlatformCatalog(root),
+          /@jinn-network\/fixture-protocol\.publicSurface\.schemas\[0\].*normalized package-relative path/u,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test('applies the closed schema contract to top-level, package, and nested objects', async (t) => {
   const cases = [
     {
