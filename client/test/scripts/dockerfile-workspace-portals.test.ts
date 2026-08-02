@@ -35,6 +35,7 @@ const externalPortalPackages = Object.entries({
       name,
       repoPath: relative(repoRoot, packageRoot).split(sep).join('/'),
       publishFiles: packageManifest.files ?? [],
+      hasYarnConfig: existsSync(resolve(packageRoot, '.yarnrc.yml')),
     };
   });
 
@@ -168,7 +169,7 @@ describe('client Docker build context', () => {
     );
     const beforeBuild = dockerfilePrefixBefore('RUN yarn build');
 
-    for (const { name, repoPath } of externalPortalPackages) {
+    for (const { name, repoPath, hasYarnConfig } of externalPortalPackages) {
       expect(
         beforeInstall,
         `${name} package manifest must be copied before client yarn install`,
@@ -177,10 +178,12 @@ describe('client Docker build context', () => {
         beforeInstall,
         `${name} lockfile must be copied before client yarn install`,
       ).toContain(`${repoPath}/yarn.lock`);
-      expect(
-        beforeInstall,
-        `${name} Yarn config must be copied before client yarn install`,
-      ).toContain(`${repoPath}/.yarnrc.yml`);
+      if (hasYarnConfig) {
+        expect(
+          beforeInstall,
+          `${name} Yarn config must be copied before client yarn install`,
+        ).toContain(`${repoPath}/.yarnrc.yml`);
+      }
       expect(
         beforeBuild,
         `${name} TypeScript config must be copied before client yarn build`,
