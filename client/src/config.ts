@@ -35,6 +35,9 @@ import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migra
 // ── Schema ──────────────────────────────────────────────────────────────────
 
 const HarnessNameSchema = z.string().transform((name) => canonicalHarnessName(name));
+const NativeAddressSchema = z.string().regex(/^0x[0-9a-fA-F]{40}$/u, 'must be an EVM address');
+const NativeDigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u, 'must be a sha256 digest');
+const NativeWeiSchema = z.string().regex(/^\d+$/u, 'must be a decimal wei string');
 
 export const JinnConfigSchema = z.object({
   /**
@@ -540,6 +543,46 @@ export const JinnConfigSchema = z.object({
    */
   operator: z
     .object({
+      /** Explicit product boundary. Native never silently falls back to legacy. */
+      verticalMode: z.enum(['legacy', 'native-v1']).optional(),
+      /** Stable native deployment configuration. Private keys and tokens are env-only. */
+      native: z.object({
+        role: z.enum(['requester', 'solver', 'evaluator']),
+        publicBaseUrl: z.string().url(),
+        sources: z.array(z.object({
+          agent: z.string().min(1),
+          name: z.string().min(1),
+          baseUrl: z.string().url(),
+        })).min(1),
+        ipfs: z.object({ apiUrl: z.string().url() }),
+        chainId: z.literal(84532),
+        generation: z.literal('today'),
+        contracts: z.object({
+          taskCoordinator: NativeAddressSchema,
+          jinnRouter: NativeAddressSchema,
+          mechMarketplace: NativeAddressSchema,
+          activityChecker: NativeAddressSchema,
+        }),
+        transactionCaps: z.object({
+          createTaskMaxWei: NativeWeiSchema,
+          claimMaxWei: NativeWeiSchema,
+          solutionSettlementMaxWei: NativeWeiSchema,
+          evaluationClaimMaxWei: NativeWeiSchema,
+          verdictSettlementMaxWei: NativeWeiSchema,
+          escrowMaxWei: NativeWeiSchema,
+        }),
+        stateDir: z.string().min(1),
+        identityStorePath: z.string().min(1),
+        trustRootsPath: z.string().min(1),
+        evaluator: z.object({
+          deploymentModule: z.string().min(1),
+          moduleDigest: NativeDigestSchema,
+          signerHandle: z.string().min(1),
+          evaluationMethodDigest: NativeDigestSchema,
+        }),
+        finality: z.object({ confirmations: z.number().int().positive() }),
+        liveClosureReceiptPath: z.string().min(1),
+      }).optional(),
       publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()
