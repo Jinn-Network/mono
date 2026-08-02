@@ -64,6 +64,12 @@ const TASK_DIGEST = `sha256:${'1'.repeat(64)}` as const;
 const SUBMISSION_DIGEST = `sha256:${'2'.repeat(64)}` as const;
 const SOURCE_ENTRY = `sha256:${'6'.repeat(64)}` as const;
 const OPERATOR = 'urn:jinn:operator:solver-a';
+const REQUESTER_TERMS = {
+  solutionMaxDeliveryRateWei: 2n,
+  verdictMaxDeliveryRateWei: 3n,
+  responseTimeoutSeconds: 60n,
+  allowSolverSelfEvaluation: false,
+} as const;
 
 interface MatrixResult {
   readonly seed: string;
@@ -112,6 +118,7 @@ async function requesterRun(input: {
     loadRoles: async () => input.roles,
     creatorSafe: CREATOR,
     posting: {
+      terms: REQUESTER_TERMS,
       post: async () => {
         posts += 1;
         invoked = true;
@@ -125,6 +132,7 @@ async function requesterRun(input: {
       canonicalTaskCreated: async (expected: {
         chainId: number; coordinator: string; creator: string; taskId: bigint;
         taskDigest: `sha256:${string}`; txHash: `0x${string}`;
+        terms: typeof REQUESTER_TERMS; maxClaims: 1;
       }) => ({ canonical: true as const, ...expected }),
     },
     now: () => new Date('2026-08-02T12:00:00.000Z'),
@@ -149,6 +157,10 @@ async function requesterRun(input: {
       envelope: association.requesterEnvelopeDigest,
       receipt: association.admissionReceiptDigest,
       taskId: association.taskId.toString(10),
+      submissionUri: association.submissionUri,
+      nonce: association.nonce,
+      postingTerms: association.postingTerms,
+      intendedSpendWei: association.intendedSpendWei,
       source: {
         sequence: association.publication.sequence,
         entry: association.publication.entryDigest,

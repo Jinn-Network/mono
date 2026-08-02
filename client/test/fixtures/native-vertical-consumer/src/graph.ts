@@ -43,6 +43,7 @@ import { ConsumerState } from './state.js';
 const REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
 const DELIVERY_ENVELOPE_KIND = 'https://jinn.network/records/delivery-envelope/1.0';
 const VERDICT_MEDIA_TYPE = 'application/vnd.in-toto+json';
+const UINT256_MAX = (1n << 256n) - 1n;
 
 export class NativeGraphError extends Error {
   override readonly name = 'NativeGraphError';
@@ -71,6 +72,15 @@ export interface NativeGraphRoots {
     readonly taskDigest: `sha256:${string}`;
     readonly requesterEnvelopeDigest: `sha256:${string}`;
     readonly admissionReceiptDigest: `sha256:${string}`;
+    readonly submissionUri: `urn:uuid:${string}`;
+    readonly nonce: string;
+    readonly postingTerms: {
+      readonly solutionMaxDeliveryRateWei: string;
+      readonly verdictMaxDeliveryRateWei: string;
+      readonly responseTimeoutSeconds: string;
+      readonly allowSolverSelfEvaluation: false;
+    };
+    readonly intendedSpendWei: string;
     readonly chain: {
       readonly chainId: number;
       readonly coordinator: `0x${string}`;
@@ -212,6 +222,35 @@ function digestFact(value: unknown, label: string): `sha256:${string}` {
   return digest as `sha256:${string}`;
 }
 
+function uint256Fact(value: unknown, label: string): { readonly wire: string; readonly value: bigint } {
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    throw new NativeGraphError('public-record-fact-invalid', label);
+  }
+  const parsed = BigInt(value);
+  if (parsed > UINT256_MAX) throw new NativeGraphError('public-record-fact-invalid', label);
+  return { wire: value, value: parsed };
+}
+
+function postingTermsFact(value: unknown): NativeGraphRoots['requester']['postingTerms'] {
+  const terms = record(value);
+  const keys = [
+    'allowSolverSelfEvaluation',
+    'responseTimeoutSeconds',
+    'solutionMaxDeliveryRateWei',
+    'verdictMaxDeliveryRateWei',
+  ];
+  if (terms === undefined || Object.keys(terms).sort().join('|') !== keys.join('|')
+    || terms.allowSolverSelfEvaluation !== false) {
+    throw new NativeGraphError('public-record-fact-invalid', 'postingTerms');
+  }
+  return {
+    solutionMaxDeliveryRateWei: uint256Fact(terms.solutionMaxDeliveryRateWei, 'solutionMaxDeliveryRateWei').wire,
+    verdictMaxDeliveryRateWei: uint256Fact(terms.verdictMaxDeliveryRateWei, 'verdictMaxDeliveryRateWei').wire,
+    responseTimeoutSeconds: uint256Fact(terms.responseTimeoutSeconds, 'responseTimeoutSeconds').wire,
+    allowSolverSelfEvaluation: false,
+  };
+}
+
 function stableOperationId(value: Parameters<typeof serializeCanonicalJson>[0]): `sha256:${string}` {
   return documentDigest(serializeCanonicalJson(value));
 }
@@ -273,13 +312,31 @@ export function discoverNativeGraphRoots(input: {
     return candidate.announcement.record.kind === RECORD_KINDS.submission && association?.runId === input.runId;
   }), 'requester-root-ambiguous');
   const association = record(requesterMatch.facts[REQUESTER_ASSOCIATION_FACT])!;
+  const associationMembers = [
+    'admissionReceiptDigest', 'chainId', 'coordinator', 'intendedSpendWei', 'nonce',
+    'postingTerms', 'requesterEnvelopeDigest', 'runId', 'submission', 'taskDigest', 'taskId',
+  ];
+  if (Object.keys(association).sort().join('|') !== associationMembers.sort().join('|')) {
+    throw new NativeGraphError('public-record-fact-invalid', 'requester association members');
+  }
   const chainId = association.chainId;
   const coordinator = stringFact(association.coordinator, 'coordinator');
   if (!Number.isSafeInteger(chainId) || (chainId as number) < 0 || !/^0x[a-fA-F0-9]{40}$/u.test(coordinator)) {
     throw new NativeGraphError('public-record-fact-invalid', 'chain identity');
   }
   const taskDigest = digestFact(association.taskDigest, 'taskDigest');
-  const taskId = stringFact(association.taskId, 'taskId');
+  const taskId = uint256Fact(association.taskId, 'taskId').wire;
+  const submissionUri = stringFact(association.submission, 'submission');
+  const nonce = stringFact(association.nonce, 'nonce');
+  if (!/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(submissionUri)) {
+    throw new NativeGraphError('public-record-fact-invalid', 'submission');
+  }
+  const postingTerms = postingTermsFact(association.postingTerms);
+  const intendedSpend = uint256Fact(association.intendedSpendWei, 'intendedSpendWei');
+  if (intendedSpend.value !== BigInt(postingTerms.solutionMaxDeliveryRateWei)
+      + BigInt(postingTerms.verdictMaxDeliveryRateWei)) {
+    throw new NativeGraphError('public-record-fact-invalid', 'intendedSpendWei');
+  }
   const engagementId = deriveConsumerEngagementId({
     chainId: chainId as number,
     coordinator,
@@ -318,6 +375,10 @@ export function discoverNativeGraphRoots(input: {
       taskDigest,
       requesterEnvelopeDigest: digestFact(association.requesterEnvelopeDigest, 'requesterEnvelopeDigest'),
       admissionReceiptDigest: digestFact(association.admissionReceiptDigest, 'admissionReceiptDigest'),
+      submissionUri: submissionUri as `urn:uuid:${string}`,
+      nonce,
+      postingTerms,
+      intendedSpendWei: intendedSpend.wire,
       chain: {
         chainId: chainId as number,
         coordinator: coordinator as `0x${string}`,
@@ -525,6 +586,12 @@ export async function retrieveNativePublicGraph(input: {
   if (descriptorDigest(submissionDocument.task) !== input.roots.requester.taskDigest) {
     throw new NativeGraphError('submission-task-graph-mismatch');
   }
+  if (
+    submissionDocument.submission !== input.roots.requester.submissionUri
+    || submissionDocument.nonce !== input.roots.requester.nonce
+    || (submissionDocument.attempts?.maxTotal ?? 1) !== 1
+    || (submissionDocument.attempts?.maxConcurrent ?? 1) !== 1
+  ) throw new NativeGraphError('submission-association-graph-mismatch');
   if (annotationDigest(submissionDocument) !== input.roots.requester.admissionReceiptDigest) {
     throw new NativeGraphError('submission-admission-graph-mismatch');
   }

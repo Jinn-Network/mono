@@ -236,4 +236,30 @@ describe('NativeOperatorStateRepository', () => {
     expect(state.getOperation(admitted.claimOperationId)).toMatchObject({ status: 'failed-terminal' });
     expect(state.getEngagement(admitted.engagementId)).toMatchObject({ state: 'lost' });
   });
+
+  it('reports and releases only the exact scoped lease owned by the current worker', () => {
+    const store = new Store(':memory:');
+    const state = new NativeOperatorStateRepository(store, { now: () => new Date('2026-08-02T00:00:00Z') });
+    const lease = {
+      role: 'solver',
+      chainId: 84532,
+      coordinator: INPUT.coordinator,
+      operatorAgent: INPUT.operatorAgent,
+      ownerId: 'worker-a',
+    } as const;
+    state.acquireLease({ ...lease, ttlMs: 60_000 });
+
+    expect(state.ownsLease(lease)).toBe(true);
+    expect(state.ownsLease({ ...lease, ownerId: 'worker-b' })).toBe(false);
+    expect(state.ownsLease({ ...lease, operatorAgent: `${INPUT.operatorAgent}:other` })).toBe(false);
+    expect(state.releaseLease({ ...lease, ownerId: 'worker-b' })).toBe(false);
+    expect(state.ownsLease(lease)).toBe(true);
+    expect(state.releaseLease(lease)).toBe(true);
+    expect(state.ownsLease(lease)).toBe(false);
+    expect(state.releaseLease(lease)).toBe(false);
+
+    expect(() => state.acquireLease({ ...lease, ownerId: 'worker-b', ttlMs: 60_000 })).not.toThrow();
+    expect(state.ownsLease({ ...lease, ownerId: 'worker-b' })).toBe(true);
+    expect(state.releaseLease(lease)).toBe(false);
+  });
 });

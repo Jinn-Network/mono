@@ -78,6 +78,12 @@ const RUN_ID = 'public-golden-run';
 const REQUESTER_BASE = 'https://requester.example';
 const SOLVER_BASE = 'https://solver.example';
 const EVALUATOR_BASE = 'https://evaluator.example';
+const REQUESTER_TERMS = {
+  solutionMaxDeliveryRateWei: 2n,
+  verdictMaxDeliveryRateWei: 3n,
+  responseTimeoutSeconds: 60n,
+  allowSolverSelfEvaluation: false,
+} as const;
 const SOURCES = {
   requester: { agent: REQUESTER_AGENT, name: 'requester' },
   solver: { agent: SOLVER_AGENT, name: 'solver-records' },
@@ -165,6 +171,7 @@ describe('native public vertical consumer', () => {
       loadRoles: async () => roles(requesterKeys),
       creatorSafe: REQUESTER_ADDRESS,
       posting: {
+        terms: REQUESTER_TERMS,
         post: async () => ({ taskId: TASK_ID, txHash: `0x${'a'.repeat(64)}` }),
         recover: async () => null,
         canonicalTaskCreated: async (expected) => ({ canonical: true as const, ...expected }),

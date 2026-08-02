@@ -271,4 +271,34 @@ describe('NativeClaimCoordinator', () => {
     expect(admission).not.toHaveBeenCalled();
     expect(broadcast).not.toHaveBeenCalled();
   });
+
+  it('stops idempotently, loses ownership immediately, and permits a different worker to acquire the scope', async () => {
+    const subject = setup();
+    expect(await subject.coordinator.workerOwned()).toBe(true);
+
+    await subject.coordinator.stopWorker();
+    await subject.coordinator.stopWorker();
+    expect(await subject.coordinator.workerOwned()).toBe(false);
+    expect(() => subject.coordinator.renewWorker()).toThrow('has not acquired its worker lease');
+    await expect(subject.coordinator.process(
+      subject.item,
+      { taskBytes: new Uint8Array(), submissionBytes: new Uint8Array() },
+    )).rejects.toThrow('has not acquired its worker lease');
+
+    const replacement = new NativeClaimCoordinator({
+      state: subject.state,
+      chain: BASE_SEPOLIA_TODAY,
+      operatorAgent: OPERATOR,
+      admission: { evaluate: async () => accepted() },
+      claim: { priorityMech: BASE_SEPOLIA_TODAY.mechMarketplace, broadcast: subject.broadcast },
+      canonical: { read: async () => ({ kind: 'absent', checkedAtBlock: 9n }) },
+      worker: { ownerId: 'worker-b', ttlMs: 60_000 },
+    });
+    replacement.startWorker();
+    expect(await replacement.workerOwned()).toBe(true);
+
+    // A repeated stop by the old coordinator must not release the new worker's row.
+    await subject.coordinator.stopWorker();
+    expect(await replacement.workerOwned()).toBe(true);
+  });
 });

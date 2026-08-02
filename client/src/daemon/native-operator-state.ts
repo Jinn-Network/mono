@@ -1799,4 +1799,46 @@ export class NativeOperatorStateRepository {
     if (changed !== 1) throw new NativeWorkerLeaseError('native worker lease is expired or not owned by this worker');
     return { ownerId: input.ownerId, expiresAt };
   }
+
+  ownsLease(input: {
+    readonly role: string;
+    readonly chainId: number;
+    readonly coordinator: string;
+    readonly operatorAgent: string;
+    readonly ownerId: string;
+  }): boolean {
+    const now = this.timestamp();
+    const row = this.store.db.prepare(
+      `SELECT 1 AS owned FROM native_worker_leases
+        WHERE role = ? AND chain_id = ? AND coordinator = ? AND operator_agent = ?
+          AND owner_id = ? AND expires_at > ?`,
+    ).get(
+      input.role,
+      String(input.chainId),
+      canonicalAddress(input.coordinator),
+      input.operatorAgent,
+      input.ownerId,
+      now,
+    ) as { readonly owned: 1 } | undefined;
+    return row?.owned === 1;
+  }
+
+  releaseLease(input: {
+    readonly role: string;
+    readonly chainId: number;
+    readonly coordinator: string;
+    readonly operatorAgent: string;
+    readonly ownerId: string;
+  }): boolean {
+    return this.store.db.prepare(
+      `DELETE FROM native_worker_leases
+        WHERE role = ? AND chain_id = ? AND coordinator = ? AND operator_agent = ? AND owner_id = ?`,
+    ).run(
+      input.role,
+      String(input.chainId),
+      canonicalAddress(input.coordinator),
+      input.operatorAgent,
+      input.ownerId,
+    ).changes === 1;
+  }
 }

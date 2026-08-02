@@ -100,6 +100,29 @@ export class NativeClaimCoordinator {
     this.requireLiveWorker();
   }
 
+  async workerOwned(): Promise<boolean> {
+    if (!this.workerStarted) return false;
+    return this.input.state.ownsLease({
+      role: 'solver',
+      chainId: this.input.chain.chainId,
+      coordinator: this.input.chain.taskCoordinator,
+      operatorAgent: this.input.operatorAgent,
+      ownerId: this.input.worker.ownerId,
+    });
+  }
+
+  async stopWorker(): Promise<void> {
+    if (!this.workerStarted) return;
+    this.workerStarted = false;
+    this.input.state.releaseLease({
+      role: 'solver',
+      chainId: this.input.chain.chainId,
+      coordinator: this.input.chain.taskCoordinator,
+      operatorAgent: this.input.operatorAgent,
+      ownerId: this.input.worker.ownerId,
+    });
+  }
+
   async process(
     queued: NativeDiscoveryQueuedCard,
     documents: NativeSealedClaimDocuments,

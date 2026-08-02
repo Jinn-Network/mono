@@ -14,7 +14,12 @@ import {
   SubmissionRecordSchema,
 } from '@jinn-network/task-execution-protocol';
 import { EVALUATION_SPEC_MEDIA_TYPE } from '@jinn-network/task-execution-profiles';
-import { archivePagePath, WELL_KNOWN_PATH } from '@jinn-network/record-discovery-protocol';
+import {
+  archivePagePath,
+  sealJson,
+  WELL_KNOWN_PATH,
+  type AvailableAnnouncement,
+} from '@jinn-network/record-discovery-protocol';
 import { coldSync, createVerifyDriver, fetchHead, type SyncedEntry } from '@jinn-network/record-discovery-client';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
 import { createInMemoryPostingIntentStore } from '@jinn-network/marketplace-binding';
@@ -22,6 +27,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createNativeRequester,
   createNativeRequesterPostTask,
+  decodeNativeRequesterAnnouncement,
+  NATIVE_REQUESTER_ASSOCIATION_FACT,
   type NativeRequesterRoles,
   type NativeRequesterSubmissionVerifier,
   createNativeRequesterSubmissionResolver,
@@ -39,6 +46,12 @@ const CHAIN = {
 const CREATOR = '0x1111111111111111111111111111111111111111' as const;
 const TX_HASH = `0x${'ab'.repeat(32)}` as const;
 const REQUESTER_AGENT = 'urn:jinn:requester:test';
+const TERMS = {
+  solutionMaxDeliveryRateWei: 2n,
+  verdictMaxDeliveryRateWei: 3n,
+  responseTimeoutSeconds: 60n,
+  allowSolverSelfEvaluation: false,
+} as const;
 
 function roles(): NativeRequesterRoles & {
   readonly requesterSubmission: NativeRequesterSubmissionVerifier;
@@ -79,6 +92,7 @@ function fixture(input: {
   readonly readChain?: () => Promise<typeof CHAIN>;
   readonly post?: ReturnType<typeof vi.fn>;
   readonly recover?: ReturnType<typeof vi.fn>;
+  readonly terms?: typeof TERMS;
   readonly checkpoints?: (name: string) => Promise<void>;
 }) {
   const post = input.post ?? vi.fn(async () => ({ taskId: 17n, txHash: TX_HASH }));
@@ -93,6 +107,7 @@ function fixture(input: {
       loadRoles,
       creatorSafe: CREATOR,
       posting: {
+        terms: input.terms ?? TERMS,
         post,
         recover: input.recover ?? (async () => null),
         canonicalTaskCreated: async (expected) => ({
@@ -103,6 +118,8 @@ function fixture(input: {
           taskId: expected.taskId,
           taskDigest: expected.taskDigest,
           txHash: expected.txHash,
+          terms: expected.terms,
+          maxClaims: expected.maxClaims,
         }),
       },
       now: () => new Date('2026-08-02T12:00:00.000Z'),
@@ -160,6 +177,7 @@ describe('native requester', () => {
     ]);
     expect(post).toHaveBeenCalledOnce();
     const postInput = post.mock.calls[0]![0];
+    expect(postInput.terms).toEqual(TERMS);
     expect(SubmissionRecordSchema.parse(JSON.parse(new TextDecoder().decode(postInput.submissionBytes))).requester)
       .toBe(REQUESTER_AGENT);
     expect(recordDigest(postInput.taskBytes)).toBe(
@@ -169,6 +187,15 @@ describe('native requester', () => {
       'sha256:4e9b938d24e7752630f0fb27c2295781a7b5ecfcb130daa28d320bbedd96e962',
     );
     expect(result.association.taskId).toBe(17n);
+    expect(result.association.postingTerms).toEqual({
+      solutionMaxDeliveryRateWei: '2',
+      verdictMaxDeliveryRateWei: '3',
+      responseTimeoutSeconds: '60',
+      allowSolverSelfEvaluation: false,
+    });
+    expect(result.association.intendedSpendWei).toBe('5');
+    expect(result.association.submissionUri).toMatch(/^urn:uuid:/u);
+    expect(result.association.nonce).toMatch(/^[a-f0-9]{32}$/u);
     expect(result.association.submissionDigest).not.toBe(
       'sha256:5514ad79452da75e10978092ae46c2e90eaaa69b239fc459b70712e2f8aeaed',
     );
@@ -272,6 +299,60 @@ describe('native requester', () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  it('persists exact posting terms before broadcast and reuses them across recovery despite configuration drift', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-terms-recovery-'));
+    const identities = roles();
+    const firstTerms = TERMS;
+    const changedTerms = {
+      solutionMaxDeliveryRateWei: 200n,
+      verdictMaxDeliveryRateWei: 300n,
+      responseTimeoutSeconds: 600n,
+      allowSolverSelfEvaluation: false,
+    } as const;
+    const post = vi.fn(async (input) => {
+      expect(input.terms).toEqual(firstTerms);
+      throw new Error('wallet result unavailable');
+    });
+    const recover = vi.fn(async (draft) => {
+      expect(draft.terms).toEqual(firstTerms);
+      expect(draft.maxClaims).toBe(1);
+      return { taskId: 17n, txHash: TX_HASH };
+    });
+    const first = fixture({
+      stateDir,
+      terms: firstTerms,
+      post,
+      recover,
+      loadRoles: async () => identities,
+    }).requester;
+
+    await expect(first.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'terms-survive-restart',
+    })).rejects.toThrow(/wallet result unavailable/u);
+
+    const restarted = fixture({
+      stateDir,
+      terms: changedTerms,
+      post,
+      recover,
+      loadRoles: async () => identities,
+    }).requester;
+    const result = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'terms-survive-restart',
+    });
+
+    expect(result.association.postingTerms).toEqual({
+      solutionMaxDeliveryRateWei: '2',
+      verdictMaxDeliveryRateWei: '3',
+      responseTimeoutSeconds: '60',
+      allowSolverSelfEvaluation: false,
+    });
+    expect(result.association.intendedSpendWei).toBe('5');
+    expect(post).toHaveBeenCalledOnce();
+    expect(recover).toHaveBeenCalledOnce();
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
   it('resolves only an exact canonical association whose requester DSSE verifies with the B2 key', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-resolver-'));
     const identities = roles();
@@ -361,12 +442,7 @@ describe('native requester', () => {
     const pinned: Uint8Array[] = [];
     const broadcast = vi.fn(async () => ({ taskId: 18n, txHash: `0x${'cd'.repeat(32)}` as const }));
     const nativePost = createNativeRequesterPostTask({
-      terms: {
-        solutionMaxDeliveryRateWei: 2n,
-        verdictMaxDeliveryRateWei: 3n,
-        responseTimeoutSeconds: 60n,
-        allowSolverSelfEvaluation: false,
-      },
+      terms: TERMS,
       ports: {
         ipfs: { pin: async (bytes) => { pinned.push(bytes); } },
         intents: createInMemoryPostingIntentStore(),
@@ -374,6 +450,12 @@ describe('native requester', () => {
       },
     });
 
+    expect(nativePost.terms).toEqual(TERMS);
+    await expect(nativePost.post({
+      ...postInput,
+      terms: { ...TERMS, solutionMaxDeliveryRateWei: 4n },
+    })).rejects.toThrow(/terms.*differ/u);
+    expect(broadcast).not.toHaveBeenCalled();
     await expect(nativePost.post(postInput)).resolves.toEqual({ taskId: 18n, txHash: `0x${'cd'.repeat(32)}` });
     expect(pinned).toEqual([postInput.taskBytes, postInput.submissionBytes]);
     expect(broadcast).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -446,6 +528,163 @@ describe('native requester', () => {
       firstAdoption: true,
     })).resolves.toMatchObject({ status: 'ok' });
     expect(mark?.entry).toBe(result.association.publication.entryDigest);
+    expect(synced[0]!.entry.announcements[0]!.facts?.[NATIVE_REQUESTER_ASSOCIATION_FACT]).toEqual({
+      chainId: 84532,
+      coordinator: CHAIN.taskCoordinator,
+      taskId: '17',
+      taskDigest: result.association.taskDigest,
+      submission: result.association.submissionUri,
+      nonce: result.association.nonce,
+      postingTerms: {
+        solutionMaxDeliveryRateWei: '2',
+        verdictMaxDeliveryRateWei: '3',
+        responseTimeoutSeconds: '60',
+        allowSolverSelfEvaluation: false,
+      },
+      intendedSpendWei: '5',
+      admissionReceiptDigest: result.association.admissionReceiptDigest,
+      requesterEnvelopeDigest: result.association.requesterEnvelopeDigest,
+      runId: 'discovery-client-verifies',
+    });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('decodes a trust-gated requester announcement only when every exact Submission, posting-term, and canonical chain join matches', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-card-decoder-'));
+    const identities = roles();
+    const { requester, post } = fixture({ stateDir, loadRoles: async () => identities });
+    const result = await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-snapshot-v1', runId: 'decode-exact-card',
+    });
+    const entry = result.association.publication.entry;
+    const announcement = entry.announcements[0];
+    if (announcement?.action !== 'available') throw new Error('expected available requester announcement');
+    const headResponse = await requester.handleDiscoveryRequest(new Request(
+      'https://requester.test/sources/requester/head',
+    ));
+    const headSignature = JSON.parse(await headResponse.text());
+    const discovery = {
+      source: entry.source,
+      entry,
+      entryDigest: sealJson(entry).digest,
+      announcement,
+      signedHighWater: {
+        sequence: result.association.publication.head.sequence,
+        entry: result.association.publication.head.entry,
+        issuedAt: result.association.publication.head.issuedAt,
+        refreshBy: result.association.publication.head.refreshBy,
+        signature: headSignature,
+      },
+    } as const;
+    const canonical = {
+      canonical: true as const,
+      chainId: CHAIN.chainId,
+      coordinator: CHAIN.taskCoordinator,
+      creator: CREATOR,
+      taskId: 17n,
+      taskDigest: result.association.taskDigest,
+      txHash: TX_HASH,
+      terms: TERMS,
+      maxClaims: 1 as const,
+    };
+    const submissionBytes = post.mock.calls[0]![0].submissionBytes as Uint8Array;
+
+    await expect(decodeNativeRequesterAnnouncement({ discovery, canonicalTaskCreated: canonical, submissionBytes }))
+      .resolves.toMatchObject({
+        record: { kind: announcement.record.kind, digest: result.association.submissionDigest },
+        chain: {
+          taskId: 17n,
+          submission: result.association.submissionUri,
+          nonce: result.association.nonce,
+          intendedSpendWei: 5n,
+        },
+        derivationKind: 'chain',
+        discovery: {
+          source: entry.source,
+          sequence: entry.sequence,
+          entryDigest: result.association.publication.entryDigest,
+        },
+      });
+
+    const withAssociation = (change: (association: Record<string, unknown>) => void) => {
+      const changedEntry = structuredClone(entry);
+      const changedAnnouncement = changedEntry.announcements[0] as AvailableAnnouncement;
+      const facts = changedAnnouncement.facts as Record<string, unknown>;
+      const association = facts[NATIVE_REQUESTER_ASSOCIATION_FACT] as Record<string, unknown>;
+      change(association);
+      return {
+        ...discovery,
+        entry: changedEntry,
+        entryDigest: sealJson(changedEntry).digest,
+        announcement: changedAnnouncement,
+      };
+    };
+    const refusals = [
+      withAssociation((value) => { value.taskId = '18'; }),
+      withAssociation((value) => { value.coordinator = '0x2222222222222222222222222222222222222222'; }),
+      withAssociation((value) => { value.taskDigest = `sha256:${'0'.repeat(64)}`; }),
+      withAssociation((value) => { value.submission = 'urn:uuid:00000000-0000-4000-8000-000000000000'; }),
+      withAssociation((value) => { value.nonce = 'different'; }),
+      withAssociation((value) => { value.intendedSpendWei = '6'; }),
+      withAssociation((value) => {
+        (value.postingTerms as Record<string, unknown>).solutionMaxDeliveryRateWei = '3';
+      }),
+      withAssociation((value) => {
+        (value.postingTerms as Record<string, unknown>).allowSolverSelfEvaluation = true;
+      }),
+    ];
+    for (const refused of refusals) {
+      await expect(decodeNativeRequesterAnnouncement({
+        discovery: refused,
+        canonicalTaskCreated: canonical,
+        submissionBytes,
+      })).rejects.toThrow(/native requester association refused/u);
+    }
+
+    for (const invalid of ['-1', '01', '1.0', '+1', `${1n << 256n}`]) {
+      const malformed = withAssociation((value) => {
+        (value.postingTerms as Record<string, unknown>).verdictMaxDeliveryRateWei = invalid;
+      });
+      await expect(decodeNativeRequesterAnnouncement({
+        discovery: malformed, canonicalTaskCreated: canonical, submissionBytes,
+      })).rejects.toThrow(/native requester association refused/u);
+    }
+    const unsafeEntry = structuredClone(entry);
+    const unsafeAnnouncement = unsafeEntry.announcements[0] as AvailableAnnouncement;
+    const unsafeAssociation = (unsafeAnnouncement.facts as Record<string, unknown>)[NATIVE_REQUESTER_ASSOCIATION_FACT] as Record<string, unknown>;
+    (unsafeAssociation.postingTerms as Record<string, unknown>).responseTimeoutSeconds = Number.MAX_SAFE_INTEGER + 1;
+    const unsafeNumber = { ...discovery, entry: unsafeEntry, announcement: unsafeAnnouncement };
+    await expect(decodeNativeRequesterAnnouncement({
+      discovery: unsafeNumber, canonicalTaskCreated: canonical, submissionBytes,
+    })).rejects.toThrow(/native requester association refused/u);
+
+    await expect(decodeNativeRequesterAnnouncement({
+      discovery: { ...discovery, entryDigest: `sha256:${'f'.repeat(64)}` },
+      canonicalTaskCreated: canonical,
+      submissionBytes,
+    })).rejects.toThrow(/native requester association refused/u);
+    await expect(decodeNativeRequesterAnnouncement({
+      discovery: {
+        ...discovery,
+        signedHighWater: {
+          ...discovery.signedHighWater,
+          signature: { ...headSignature, signatures: [] },
+        },
+      },
+      canonicalTaskCreated: canonical,
+      submissionBytes,
+    })).rejects.toThrow(/native requester association refused/u);
+    await expect(decodeNativeRequesterAnnouncement({
+      discovery,
+      canonicalTaskCreated: { ...canonical, canonical: false } as never,
+      submissionBytes,
+    })).rejects.toThrow(/native requester association refused/u);
+    const tampered = submissionBytes.slice();
+    tampered[tampered.length - 2] = tampered[tampered.length - 2]! === 32 ? 33 : 32;
+    await expect(decodeNativeRequesterAnnouncement({
+      discovery, canonicalTaskCreated: canonical, submissionBytes: tampered,
+    })).rejects.toThrow(/native requester association refused/u);
+
     await rm(stateDir, { recursive: true, force: true });
   });
 });

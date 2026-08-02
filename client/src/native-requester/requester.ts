@@ -27,6 +27,7 @@ import {
 import {
   SUBMISSION_MEDIA_TYPE,
   TASK_MEDIA_TYPE,
+  SubmissionRecordSchema,
   documentDigest,
   sealSubmission,
   sha256Hex,
@@ -44,12 +45,16 @@ import {
 import {
   DISCOVERY_SIGNING_SCOPE,
   LOCATION_PROFILE_HTTPS,
+  MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   archivePagePath,
   formatOrigin,
   formatSequence,
   headPath,
+  parseAnnouncementEntry,
+  parseSourceHead,
+  parseWireDsseEnvelope,
   recordPath,
   sealJson,
   type AnnouncementEntry,
@@ -58,6 +63,8 @@ import {
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
 import { TASK_EXECUTION_FACTS_RECOMPUTE } from '@jinn-network/record-discovery-facts-task-execution';
+import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
+import type { NativeDiscoveryDecodeInput } from '../daemon/native-discovery.js';
 import { signAnnouncementEntry } from '@jinn-network/marketplace-projector';
 import {
   signHead,
@@ -71,8 +78,9 @@ import {
 
 const FIXTURE = 'prediction-snapshot-v1' as const;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
+export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
 const JSON_MEDIA_TYPE = 'application/json';
+const UINT256_MAX = (1n << 256n) - 1n;
 
 type Digest = `sha256:${string}`;
 type NativeRequesterRole = 'requester-submission' | 'admission' | 'requester-discovery';
@@ -107,6 +115,15 @@ export interface CanonicalTaskCreated {
   readonly taskId: bigint;
   readonly taskDigest: Digest;
   readonly txHash: `0x${string}`;
+  readonly terms: PostingTerms;
+  readonly maxClaims: 1;
+}
+
+export interface NativePostingTermsWire {
+  readonly solutionMaxDeliveryRateWei: string;
+  readonly verdictMaxDeliveryRateWei: string;
+  readonly responseTimeoutSeconds: string;
+  readonly allowSolverSelfEvaluation: false;
 }
 
 export interface NativeRequesterPostInput {
@@ -117,6 +134,7 @@ export interface NativeRequesterPostInput {
   readonly requesterEnvelopeBytes: Uint8Array;
   readonly chain: MarketplaceChainConfig;
   readonly creatorSafe: `0x${string}`;
+  readonly terms: PostingTerms;
 }
 
 interface NativeRequesterDraft {
@@ -129,6 +147,10 @@ interface NativeRequesterDraft {
   readonly taskDigest: Digest;
   readonly submissionDigest: Digest;
   readonly requesterEnvelopeDigest: Digest;
+  readonly submissionUri: `urn:uuid:${string}`;
+  readonly nonce: string;
+  readonly postingTerms: NativePostingTermsWire;
+  readonly intendedSpendWei: string;
   readonly artifacts: NativeRequesterArtifacts;
   readonly stage: 'prepared' | 'broadcasting' | 'broadcasted';
   readonly outcome?: StoredPostingOutcome;
@@ -171,6 +193,10 @@ export interface NativeRequesterAssociation {
   readonly submissionDigest: Digest;
   readonly requesterEnvelopeDigest: Digest;
   readonly admissionReceiptDigest: Digest;
+  readonly submissionUri: `urn:uuid:${string}`;
+  readonly nonce: string;
+  readonly postingTerms: NativePostingTermsWire;
+  readonly intendedSpendWei: string;
   readonly txHash: `0x${string}`;
   readonly submission: StoredExactRecord;
   readonly requesterEnvelope: StoredExactRecord;
@@ -204,6 +230,8 @@ export interface NativeRequesterDeps {
   readonly loadRoles: () => Promise<NativeRequesterRoles>;
   readonly creatorSafe: `0x${string}`;
   readonly posting: {
+    /** Current product configuration, snapshotted into the durable draft before broadcast. */
+    readonly terms: PostingTerms;
     /** Adapter around marketplace-binding's native `postTask`; no legacy adapter is admitted here. */
     readonly post: (input: NativeRequesterPostInput) => Promise<PostingOutcome>;
     /** Exact recovery scan for a draft left in `broadcasting` by a process death. */
@@ -212,6 +240,8 @@ export interface NativeRequesterDeps {
       readonly creatorSafe: `0x${string}`;
       readonly taskDigest: Digest;
       readonly submissionDigest: Digest;
+      readonly terms: PostingTerms;
+      readonly maxClaims: 1;
     }) => Promise<PostingOutcome | null>;
     /** Must read a canonical `TaskCreated`, never a receipt-only or projected fallback. */
     readonly canonicalTaskCreated: (expected: {
@@ -221,6 +251,8 @@ export interface NativeRequesterDeps {
       readonly taskId: bigint;
       readonly taskDigest: Digest;
       readonly txHash: `0x${string}`;
+      readonly terms: PostingTerms;
+      readonly maxClaims: 1;
     }) => Promise<CanonicalTaskCreated | null>;
   };
   readonly now: () => Date;
@@ -246,16 +278,22 @@ export interface NativeRequesterDeps {
 export function createNativeRequesterPostTask(input: {
   readonly terms: PostingTerms;
   readonly ports: PostingPorts;
-}): Pick<NativeRequesterDeps['posting'], 'post'> {
+}): Pick<NativeRequesterDeps['posting'], 'terms' | 'post'> {
   return {
-    post: async (request) => postTask(
-      request.taskBytes,
-      request.submissionBytes,
-      input.terms,
-      request.chain,
-      request.creatorSafe,
-      input.ports,
-    ),
+    terms: input.terms,
+    post: async (request) => {
+      if (!samePostingTerms(request.terms, input.terms)) {
+        throw new Error('native requester post adapter refuses terms that differ from its configured authority');
+      }
+      return postTask(
+        request.taskBytes,
+        request.submissionBytes,
+        request.terms,
+        request.chain,
+        request.creatorSafe,
+        input.ports,
+      );
+    },
   };
 }
 
@@ -298,8 +336,255 @@ export function verifyNativeRequesterSubmissionEnvelope(input: {
   }
 }
 
+function exactBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return Buffer.compare(Buffer.from(left), Buffer.from(right)) === 0;
+}
+
+function objectFact(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    failAssociation(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function digestFact(value: unknown, label: string): Digest {
+  if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value)) {
+    failAssociation(`${label} must be a sha256 digest`);
+  }
+  return value as Digest;
+}
+
+/**
+ * Turns one already trust-gated requester source item into the exact native marketplace card.
+ * Source/head cryptographic authority remains in `NativeDiscoveryConsumer.verify`; this pure join
+ * refuses any structural provenance, exact-record, posting-term, or canonical-chain divergence.
+ */
+export async function decodeNativeRequesterAnnouncement(input: {
+  readonly discovery: NativeDiscoveryDecodeInput;
+  readonly canonicalTaskCreated: CanonicalTaskCreated;
+  readonly submissionBytes: Uint8Array;
+}): Promise<AnnouncedSubmissionCard> {
+  try {
+    const { discovery, canonicalTaskCreated: canonical } = input;
+    const entry = parseAnnouncementEntry(discovery.entry);
+    const entryDigest = sealJson(entry).digest;
+    if (entryDigest !== discovery.entryDigest) failAssociation('entry digest does not name the sealed entry');
+    if (entry.source.agent !== discovery.source.agent || entry.source.name !== discovery.source.name) {
+      failAssociation('entry source does not match the verified source');
+    }
+    const matching = entry.announcements.filter((candidate) =>
+      candidate.action === 'available' && candidate.announcementId === discovery.announcement.announcementId,
+    );
+    if (matching.length !== 1 || !sameJson(matching[0], discovery.announcement)) {
+      failAssociation('announcement is not the exact available item in the verified entry');
+    }
+
+    const parsedEnvelope = parseWireDsseEnvelope(discovery.signedHighWater.signature);
+    if (parsedEnvelope.envelope.payloadType !== MEDIA_HEAD || parsedEnvelope.signatures.length === 0) {
+      failAssociation('signed high-water is unsigned or has the wrong payload type');
+    }
+    let headValue: unknown;
+    try {
+      headValue = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(parsedEnvelope.payloadBytes));
+    } catch {
+      failAssociation('signed high-water payload is not JSON');
+    }
+    const head = parseSourceHead(headValue);
+    if (!exactBytes(sealJson(head).bytes, parsedEnvelope.payloadBytes)) {
+      failAssociation('signed high-water payload is not canonical');
+    }
+    if (
+      head.origin !== formatOrigin(discovery.source.agent, discovery.source.name)
+      || head.sequence !== discovery.signedHighWater.sequence
+      || head.entry !== discovery.signedHighWater.entry
+      || head.issuedAt !== discovery.signedHighWater.issuedAt
+      || head.refreshBy !== discovery.signedHighWater.refreshBy
+      || head.sequence < entry.sequence
+      || (head.sequence === entry.sequence && head.entry !== entryDigest)
+    ) failAssociation('signed high-water does not cover this exact source entry');
+
+    const announcement = matching[0]!;
+    if (announcement.action !== 'available') failAssociation('announcement is not available');
+    if (announcement.record.kind !== RECORD_KINDS.submission || announcement.record.mediaType !== SUBMISSION_MEDIA_TYPE) {
+      failAssociation('available item is not a native Submission record');
+    }
+    if (rawDigest(input.submissionBytes) !== announcement.record.digest) {
+      failAssociation('advertised Submission digest does not match exact bytes');
+    }
+    let submission: ReturnType<typeof SubmissionRecordSchema.parse>;
+    try {
+      submission = SubmissionRecordSchema.parse(bytesToObject(input.submissionBytes, 'Submission'));
+    } catch {
+      failAssociation('exact Submission bytes do not parse');
+    }
+    if (!exactBytes(sealSubmission(submission), input.submissionBytes)) {
+      failAssociation('exact Submission bytes are not canonical');
+    }
+    if ((submission.attempts?.maxTotal ?? 1) !== 1 || (submission.attempts?.maxConcurrent ?? 1) !== 1) {
+      failAssociation('native requester Submission must carry today maxClaims=1');
+    }
+
+    const facts = objectFact(announcement.facts, 'announcement facts');
+    const association = objectFact(facts[NATIVE_REQUESTER_ASSOCIATION_FACT], 'requester association fact');
+    const expectedAssociationMembers = [
+      'admissionReceiptDigest',
+      'chainId',
+      'coordinator',
+      'intendedSpendWei',
+      'nonce',
+      'postingTerms',
+      'requesterEnvelopeDigest',
+      'runId',
+      'submission',
+      'taskDigest',
+      'taskId',
+    ];
+    if (Object.keys(association).sort().join('|') !== expectedAssociationMembers.sort().join('|')) {
+      failAssociation('requester association fact has missing or unexpected members');
+    }
+    if (canonical.canonical !== true || canonical.maxClaims !== 1) {
+      failAssociation('TaskCreated is not canonical today maxClaims=1');
+    }
+    if (!Number.isSafeInteger(association.chainId) || association.chainId !== canonical.chainId) {
+      failAssociation('chainId does not match canonical TaskCreated');
+    }
+    if (association.coordinator !== canonical.coordinator) {
+      failAssociation('coordinator does not match canonical TaskCreated');
+    }
+    const taskId = uint256Decimal(association.taskId, 'taskId');
+    if (taskId !== canonical.taskId) failAssociation('taskId does not match canonical TaskCreated');
+    const taskDigest = digestFact(association.taskDigest, 'taskDigest');
+    if (taskDigest !== canonical.taskDigest || facts.taskDigest !== taskDigest) {
+      failAssociation('Task digest does not match Submission facts and canonical TaskCreated');
+    }
+    const submissionTaskDigest = submission.task.digest?.sha256;
+    if (`sha256:${submissionTaskDigest}` !== taskDigest) failAssociation('Submission does not bind the canonical Task digest');
+    if (association.submission !== submission.submission) failAssociation('Submission URI does not match exact bytes');
+    if (typeof association.nonce !== 'string' || association.nonce.length === 0 || association.nonce !== submission.nonce) {
+      failAssociation('Submission nonce does not match exact bytes');
+    }
+    digestFact(association.admissionReceiptDigest, 'admissionReceiptDigest');
+    digestFact(association.requesterEnvelopeDigest, 'requesterEnvelopeDigest');
+    if (typeof association.runId !== 'string' || !RUN_ID_PATTERN.test(association.runId)) {
+      failAssociation('runId is not canonical');
+    }
+
+    const wireTerms = postingTermsFromWire(association.postingTerms);
+    const canonicalTermsWire = postingTermsWire(canonical.terms);
+    if (!sameJson(association.postingTerms, canonicalTermsWire) || !samePostingTerms(wireTerms, canonical.terms)) {
+      failAssociation('posting terms do not match canonical TaskCreated');
+    }
+    const intendedSpend = uint256Decimal(association.intendedSpendWei, 'intendedSpendWei');
+    if (intendedSpend !== wireTerms.solutionMaxDeliveryRateWei + wireTerms.verdictMaxDeliveryRateWei) {
+      failAssociation('intendedSpendWei is not the exact today maxClaims=1 sum');
+    }
+
+    return {
+      record: { kind: announcement.record.kind, digest: announcement.record.digest },
+      facts,
+      chain: {
+        taskId,
+        submission: submission.submission as `urn:uuid:${string}`,
+        nonce: submission.nonce,
+        intendedSpendWei: intendedSpend,
+      },
+      derivationKind: 'chain',
+      discovery: {
+        source: discovery.source,
+        sequence: entry.sequence,
+        entryDigest,
+        signedHighWater: discovery.signedHighWater,
+      },
+    };
+  } catch (error) {
+    if (error instanceof NativeRequesterAssociationError) throw error;
+    failAssociation(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function lowerAddress(address: string): string {
   return address.toLowerCase();
+}
+
+function failAssociation(reason: string): never {
+  throw new NativeRequesterAssociationError(reason);
+}
+
+function uint256Decimal(value: unknown, label: string): bigint {
+  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    failAssociation(`${label} must be a canonical unsigned decimal string`);
+  }
+  const parsed = BigInt(value);
+  if (parsed > UINT256_MAX) failAssociation(`${label} exceeds uint256`);
+  return parsed;
+}
+
+function postingTermsWire(terms: PostingTerms): NativePostingTermsWire {
+  const solution = terms.solutionMaxDeliveryRateWei;
+  const verdict = terms.verdictMaxDeliveryRateWei;
+  const timeout = terms.responseTimeoutSeconds;
+  for (const [label, value] of [
+    ['solutionMaxDeliveryRateWei', solution],
+    ['verdictMaxDeliveryRateWei', verdict],
+    ['responseTimeoutSeconds', timeout],
+  ] as const) {
+    if (value < 0n || value > UINT256_MAX) throw new RangeError(`native requester ${label} must fit uint256`);
+  }
+  if (terms.allowSolverSelfEvaluation) {
+    throw new Error('native requester golden posting terms require allowSolverSelfEvaluation=false');
+  }
+  if (solution + verdict > UINT256_MAX) throw new RangeError('native requester intended spend exceeds uint256');
+  return {
+    solutionMaxDeliveryRateWei: solution.toString(10),
+    verdictMaxDeliveryRateWei: verdict.toString(10),
+    responseTimeoutSeconds: timeout.toString(10),
+    allowSolverSelfEvaluation: false,
+  };
+}
+
+function postingTermsFromWire(value: unknown): PostingTerms {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    failAssociation('postingTerms must be an object');
+  }
+  const terms = value as Record<string, unknown>;
+  const exact = [
+    'allowSolverSelfEvaluation',
+    'responseTimeoutSeconds',
+    'solutionMaxDeliveryRateWei',
+    'verdictMaxDeliveryRateWei',
+  ];
+  if (Object.keys(terms).sort().join('|') !== exact.join('|')) {
+    failAssociation('postingTerms contains missing or unexpected members');
+  }
+  if (terms.allowSolverSelfEvaluation !== false) {
+    failAssociation('allowSolverSelfEvaluation must be false');
+  }
+  return {
+    solutionMaxDeliveryRateWei: uint256Decimal(terms.solutionMaxDeliveryRateWei, 'solutionMaxDeliveryRateWei'),
+    verdictMaxDeliveryRateWei: uint256Decimal(terms.verdictMaxDeliveryRateWei, 'verdictMaxDeliveryRateWei'),
+    responseTimeoutSeconds: uint256Decimal(terms.responseTimeoutSeconds, 'responseTimeoutSeconds'),
+    allowSolverSelfEvaluation: false,
+  };
+}
+
+function samePostingTerms(left: PostingTerms, right: PostingTerms): boolean {
+  return left.solutionMaxDeliveryRateWei === right.solutionMaxDeliveryRateWei
+    && left.verdictMaxDeliveryRateWei === right.verdictMaxDeliveryRateWei
+    && left.responseTimeoutSeconds === right.responseTimeoutSeconds
+    && left.allowSolverSelfEvaluation === right.allowSolverSelfEvaluation;
+}
+
+function intendedSpendWire(terms: PostingTerms): string {
+  const total = terms.solutionMaxDeliveryRateWei + terms.verdictMaxDeliveryRateWei;
+  if (total < 0n || total > UINT256_MAX) throw new RangeError('native requester intended spend must fit uint256');
+  return total.toString(10);
+}
+
+export class NativeRequesterAssociationError extends Error {
+  override readonly name = 'NativeRequesterAssociationError';
+  constructor(readonly reason: string) {
+    super(`native requester association refused: ${reason}`);
+  }
 }
 
 function assertBaseSepoliaTarget(network: string, actual: MarketplaceChainConfig): MarketplaceChainConfig {
@@ -507,6 +792,8 @@ async function sealRunBundle(input: {
   readonly admissionReceiptBytes: Uint8Array;
   readonly submissionBytes: Uint8Array;
   readonly requesterEnvelopeBytes: Uint8Array;
+  readonly submissionUri: `urn:uuid:${string}`;
+  readonly nonce: string;
 }> {
   // The B1 contract is verified before any use as a template. Its historic Submission/DSSE bytes
   // are not a replay source; only the pinned Task/EvaluationSpec contract is preserved.
@@ -549,6 +836,10 @@ async function sealRunBundle(input: {
     annotations,
   });
   const submissionDigest = rawDigest(submissionBytes);
+  const submission = SubmissionRecordSchema.parse(bytesToObject(submissionBytes, 'sealed Submission'));
+  if ((submission.attempts?.maxTotal ?? 1) !== 1 || (submission.attempts?.maxConcurrent ?? 1) !== 1) {
+    throw new Error('native requester golden Submission must have exactly one total/concurrent claim');
+  }
   await input.checkpoint?.('submission-sealed');
 
   const requesterRole = input.roles.get('requester-submission');
@@ -567,6 +858,8 @@ async function sealRunBundle(input: {
     admissionReceiptBytes,
     submissionBytes,
     requesterEnvelopeBytes,
+    submissionUri: submission.submission as `urn:uuid:${string}`,
+    nonce: submission.nonce,
   };
 }
 
@@ -593,7 +886,17 @@ function sourceDsseSigner(role: NativeRequesterIdentity) {
 async function sourceFacts(
   state: NativeRequesterState,
   submission: Uint8Array,
-  association: Pick<NativeRequesterAssociation, 'chainId' | 'coordinator' | 'taskId' | 'taskDigest' | 'requesterEnvelopeDigest' | 'admissionReceiptDigest'>,
+  association: Pick<NativeRequesterAssociation,
+    | 'chainId'
+    | 'coordinator'
+    | 'taskId'
+    | 'taskDigest'
+    | 'submissionUri'
+    | 'nonce'
+    | 'postingTerms'
+    | 'intendedSpendWei'
+    | 'requesterEnvelopeDigest'
+    | 'admissionReceiptDigest'>,
   runId: string,
 ): Promise<Record<string, unknown>> {
   const recompute = TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission);
@@ -605,11 +908,15 @@ async function sourceFacts(
     // A recomputer denotes an unavailable fact with `undefined`; an archive entry is sealed
     // JSON, so omit those fields instead of letting an implementation detail corrupt the page.
     ...Object.fromEntries(Object.entries(facts).filter(([, value]) => value !== undefined)),
-    [REQUESTER_ASSOCIATION_FACT]: {
+    [NATIVE_REQUESTER_ASSOCIATION_FACT]: {
       chainId: association.chainId,
       coordinator: association.coordinator,
       taskId: association.taskId.toString(10),
       taskDigest: association.taskDigest,
+      submission: association.submissionUri,
+      nonce: association.nonce,
+      postingTerms: association.postingTerms,
+      intendedSpendWei: association.intendedSpendWei,
       admissionReceiptDigest: association.admissionReceiptDigest,
       requesterEnvelopeDigest: association.requesterEnvelopeDigest,
       runId,
@@ -769,6 +1076,17 @@ export function createNativeRequesterSubmissionResolver(input: {
         || rawDigest(taskBytes) !== lookup.taskDigest
       ) return undefined;
 
+      const submission = SubmissionRecordSchema.parse(bytesToObject(submissionBytes, 'associated Submission'));
+      const terms = postingTermsFromWire(association.postingTerms);
+      if (
+        !exactBytes(sealSubmission(submission), submissionBytes)
+        || submission.submission !== association.submissionUri
+        || submission.nonce !== association.nonce
+        || (submission.attempts?.maxTotal ?? 1) !== 1
+        || (submission.attempts?.maxConcurrent ?? 1) !== 1
+        || intendedSpendWire(terms) !== association.intendedSpendWei
+      ) return undefined;
+
       if (!verifyNativeRequesterSubmissionEnvelope({
         envelopeBytes: requesterEnvelopeBytes,
         submissionBytes,
@@ -802,6 +1120,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
   ): Promise<NativeRequesterAssociation | undefined> {
     if (draft.outcome === undefined) return undefined;
     const outcome = asPostingOutcome(draft.outcome);
+    const durableTerms = postingTermsFromWire(draft.postingTerms);
     const canonical = await deps.posting.canonicalTaskCreated({
       chainId: chain.chainId,
       coordinator: chain.taskCoordinator,
@@ -809,6 +1128,8 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       taskId: outcome.taskId,
       taskDigest: draft.taskDigest,
       txHash: outcome.txHash,
+      terms: durableTerms,
+      maxClaims: 1,
     });
     if (
       canonical === null
@@ -819,6 +1140,8 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       || canonical.taskId !== outcome.taskId
       || canonical.taskDigest !== draft.taskDigest
       || canonical.txHash !== outcome.txHash
+      || canonical.maxClaims !== 1
+      || !samePostingTerms(canonical.terms, durableTerms)
     ) {
       throw new Error('native requester refuses non-canonical or mismatched TaskCreated association');
     }
@@ -833,6 +1156,10 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       if (
         existing.submissionDigest !== draft.submissionDigest
         || existing.requesterEnvelopeDigest !== draft.requesterEnvelopeDigest
+        || existing.submissionUri !== draft.submissionUri
+        || existing.nonce !== draft.nonce
+        || !sameJson(existing.postingTerms, draft.postingTerms)
+        || existing.intendedSpendWei !== draft.intendedSpendWei
       ) throw new Error('canonical TaskCreated is already associated with a different exact Submission graph');
       return appendRequesterSource({
         state,
@@ -853,6 +1180,10 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       submissionDigest: draft.submissionDigest,
       requesterEnvelopeDigest: draft.requesterEnvelopeDigest,
       admissionReceiptDigest: draft.artifacts.admissionReceipt.digest,
+      submissionUri: draft.submissionUri,
+      nonce: draft.nonce,
+      postingTerms: draft.postingTerms,
+      intendedSpendWei: draft.intendedSpendWei,
       txHash: canonical.txHash,
       submission: draft.artifacts.submission,
       requesterEnvelope: draft.artifacts.requesterEnvelope,
@@ -884,11 +1215,14 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     for (const draft of drafts) {
       let current = draft;
       if (current.stage === 'broadcasting' && current.outcome === undefined) {
+        const terms = postingTermsFromWire(current.postingTerms);
         const recovered = await deps.posting.recover({
           chain,
           creatorSafe: current.creatorSafe,
           taskDigest: current.taskDigest,
           submissionDigest: current.submissionDigest,
+          terms,
+          maxClaims: 1,
         });
         if (recovered === null) {
           throw new Error(`native requester has an unresolved broadcast for runId ${current.runId}; refusing new posts`);
@@ -906,6 +1240,8 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
       // This assertion is intentionally before role load, template signing, or post construction.
       const chain = assertBaseSepoliaTarget(input.network, await deps.readChain());
+      const configuredPostingTerms = postingTermsWire(deps.posting.terms);
+      const configuredIntendedSpend = intendedSpendWire(deps.posting.terms);
       const roles = await deps.loadRoles();
       // Resolve every prior broadcast before producing a new Submission. In particular, a retry
       // of the same run must return its durable canonical association rather than re-seal a
@@ -950,6 +1286,10 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         taskDigest,
         submissionDigest,
         requesterEnvelopeDigest: artifacts.requesterEnvelope.digest,
+        submissionUri: bundle.submissionUri,
+        nonce: bundle.nonce,
+        postingTerms: configuredPostingTerms,
+        intendedSpendWei: configuredIntendedSpend,
         artifacts,
         stage: 'prepared',
       };
@@ -971,6 +1311,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         requesterEnvelopeBytes: bundle.requesterEnvelopeBytes,
         chain,
         creatorSafe: deps.creatorSafe,
+        terms: postingTermsFromWire(durable.postingTerms),
       });
       durable = { ...durable, stage: 'broadcasted', outcome: asStoredOutcome(outcome) };
       await state.updateDraft(durable);

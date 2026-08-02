@@ -148,7 +148,11 @@ function commit(state: ConsumerState, entry: AnnouncementEntry): void {
   });
 }
 
-function seed(state: ConsumerState, missingRequesterLocation = false): void {
+function seed(
+  state: ConsumerState,
+  missingRequesterLocation = false,
+  associationOverrides: Record<string, unknown> = {},
+): void {
   commit(state, available({
     source: REQUESTER,
     missingLocation: missingRequesterLocation,
@@ -161,8 +165,18 @@ function seed(state: ConsumerState, missingRequesterLocation = false): void {
           runId: 'golden-run', chainId: 84532,
           coordinator: '0x1111111111111111111111111111111111111111', taskId: '7',
           taskDigest: DIGESTS.task,
+          submission: 'urn:uuid:00000000-0000-4000-8000-000000000001',
+          nonce: 'nonce',
+          postingTerms: {
+            solutionMaxDeliveryRateWei: '2',
+            verdictMaxDeliveryRateWei: '3',
+            responseTimeoutSeconds: '60',
+            allowSolverSelfEvaluation: false,
+          },
+          intendedSpendWei: '5',
           requesterEnvelopeDigest: DIGESTS.requesterEnvelope,
           admissionReceiptDigest: DIGESTS.receipt,
+          ...associationOverrides,
         },
       },
     }],
@@ -233,6 +247,13 @@ describe('native public graph discovery', () => {
       taskDigest: DIGESTS.task,
       requesterEnvelopeDigest: DIGESTS.requesterEnvelope,
       admissionReceiptDigest: DIGESTS.receipt,
+      submissionUri: 'urn:uuid:00000000-0000-4000-8000-000000000001',
+      nonce: 'nonce',
+      postingTerms: {
+        solutionMaxDeliveryRateWei: '2', verdictMaxDeliveryRateWei: '3',
+        responseTimeoutSeconds: '60', allowSolverSelfEvaluation: false,
+      },
+      intendedSpendWei: '5',
       chain: { chainId: 84532, taskId: '7' },
     });
     expect(graph.solution).toMatchObject({
@@ -249,6 +270,34 @@ describe('native public graph discovery', () => {
       deliveryEnvelope: { digest: DIGESTS.evaluationEnvelope },
       evidence: [{ digest: DIGESTS.evaluationEvidence }],
     });
+    consumer.close();
+  });
+
+  it.each([
+    [{ intendedSpendWei: '-1' }, 'negative spend'],
+    [{ intendedSpendWei: '6' }, 'wrong spend sum'],
+    [{ postingTerms: {
+      solutionMaxDeliveryRateWei: '02', verdictMaxDeliveryRateWei: '3',
+      responseTimeoutSeconds: '60', allowSolverSelfEvaluation: false,
+    } }, 'noncanonical term'],
+    [{ postingTerms: {
+      solutionMaxDeliveryRateWei: '2', verdictMaxDeliveryRateWei: '3',
+      responseTimeoutSeconds: '60', allowSolverSelfEvaluation: true,
+    } }, 'self evaluation'],
+    [{ intendedSpendWei: `${1n << 256n}` }, 'uint256 overflow'],
+  ] as const)('rejects requester association wire values that are %s', async (override) => {
+    const consumer = await state();
+    seed(consumer, false, override as Record<string, unknown>);
+    expect(() => discoverNativeGraphRoots({
+      state: consumer,
+      runId: 'golden-run',
+      sources: {
+        requester: { source: REQUESTER, publicBaseUrl: 'https://requester.example' },
+        solver: { source: SOLVER, publicBaseUrl: 'https://solver.example' },
+        evaluator: { source: EVALUATOR, publicBaseUrl: 'https://evaluator.example' },
+      },
+      actors: { solverAgent: SOLVER_AGENT, evaluatorAgent: EVALUATOR_AGENT },
+    })).toThrow(expect.objectContaining<Partial<NativeGraphError>>({ reason: 'public-record-fact-invalid' }));
     consumer.close();
   });
 
@@ -284,6 +333,22 @@ describe('native public graph discovery', () => {
     expect(graph.solution.evidence.map(({ bytes }) => bytes)).toEqual([f.bytes.solutionEvidence]);
     expect(graph.evaluation.evidence.map(({ bytes }) => bytes)).toEqual([f.bytes.evaluationEvidence]);
     for (const artifact of graph.all) expect(consumer.record(artifact.digest)).toEqual(artifact.bytes);
+    consumer.close();
+  });
+
+  it('rejects a signed association whose Submission URI or nonce differs from the exact public Submission', async () => {
+    const consumer = await state();
+    const f = retrievalFixture();
+    for (const requester of [
+      { ...f.roots.requester, submissionUri: 'urn:uuid:00000000-0000-4000-8000-000000000099' as const },
+      { ...f.roots.requester, nonce: 'different' },
+    ]) {
+      await expect(retrieveNativePublicGraph({
+        roots: { ...f.roots, requester },
+        state: consumer,
+        transports: f.transports,
+      })).rejects.toMatchObject<Partial<NativeGraphError>>({ reason: 'submission-association-graph-mismatch' });
+    }
     consumer.close();
   });
 
@@ -440,6 +505,13 @@ function retrievalFixture(options: { failure?:
       submission: located(requesterBase, submission, RECORD_KINDS.submission, SUBMISSION_MEDIA_TYPE),
       taskDigest: documentDigest(task), requesterEnvelopeDigest: documentDigest(requesterEnvelope),
       admissionReceiptDigest: documentDigest(admissionReceipt),
+      submissionUri: 'urn:uuid:00000000-0000-4000-8000-000000000001',
+      nonce: 'nonce',
+      postingTerms: {
+        solutionMaxDeliveryRateWei: '2', verdictMaxDeliveryRateWei: '3',
+        responseTimeoutSeconds: '60', allowSolverSelfEvaluation: false,
+      },
+      intendedSpendWei: '5',
       chain: { chainId: 84532, coordinator: '0x1111111111111111111111111111111111111111', taskId: '7' },
     },
     solution: {
