@@ -2610,19 +2610,65 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     readonly uri?: string;
     readonly digest?: Readonly<Record<string, string>>;
   }): Promise<Uint8Array> {
-    if (descriptor.uri?.startsWith("file:") !== true) {
-      throw new TaskExecutionError("result-unavailable", {
-        detail: "this local artifact descriptor has no file locator",
-      });
+    if (descriptor.uri?.startsWith("file:") === true) {
+      const bytes = new Uint8Array(readFileSync(new URL(descriptor.uri)));
+      const expected = descriptor.digest?.sha256;
+      if (expected !== undefined && sha256Hex(bytes) !== expected) {
+        throw new TaskExecutionError("content-corruption", {
+          detail: "local artifact bytes do not match the descriptor digest",
+        });
+      }
+      return bytes;
     }
-    const bytes = new Uint8Array(readFileSync(new URL(descriptor.uri)));
+
     const expected = descriptor.digest?.sha256;
-    if (expected !== undefined && sha256Hex(bytes) !== expected) {
-      throw new TaskExecutionError("content-corruption", {
-        detail: "local artifact bytes do not match the descriptor digest",
+    if (expected === undefined || !/^[0-9a-f]{64}$/u.test(expected)) {
+      throw new TaskExecutionError("result-unavailable", {
+        detail: "this local artifact descriptor has neither a file locator nor a valid sha256 digest",
       });
     }
-    return bytes;
+
+    for (const attempt of this.attempts.keys()) {
+      const harvested = this.journal(attempt).read().find((event) => event.type === "harvested");
+      if (harvested === undefined) continue;
+      const artifact = this.journaledHarvest(harvested).manifest.find(
+        (candidate) => String(candidate.sha256).replace(/^sha256:/u, "") === expected,
+      );
+      if (artifact === undefined) continue;
+      if (
+        artifact.path.startsWith("/")
+        || artifact.path.includes("\\")
+        || artifact.path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+      ) {
+        throw new TaskExecutionError("content-corruption", {
+          detail: "journaled artifact path is not a contained output path",
+        });
+      }
+      const out = realpathSync(this.paths(attempt).out);
+      const candidate = realpathSync(join(out, artifact.path));
+      if (!candidate.startsWith(`${out}/`)) {
+        throw new TaskExecutionError("content-corruption", {
+          detail: "journaled artifact path escaped the Attempt output directory",
+        });
+      }
+      const fd = openSync(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+      let bytes: Uint8Array;
+      try {
+        bytes = new Uint8Array(readFileSync(fd));
+      } finally {
+        closeSync(fd);
+      }
+      if (bytes.byteLength !== artifact.sizeBytes || sha256Hex(bytes) !== expected) {
+        throw new TaskExecutionError("content-corruption", {
+          detail: "harvested artifact bytes do not match the journaled digest and size",
+        });
+      }
+      return bytes;
+    }
+
+    throw new TaskExecutionError("result-unavailable", {
+      detail: `no harvested output is recorded for sha256:${expected}`,
+    });
   }
 
   // --- explicit conformance seam ---
