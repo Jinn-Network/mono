@@ -231,27 +231,18 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
     }
   });
 
-  test("two createBaseVenue calls against the same stateDbPath share the lock table", async () => {
+  test("refuses a second BaseVenue owner for an active state path, then releases it on close", () => {
     const chainA = buildScriptedChain();
     const chainB = buildScriptedChain();
     const venueA = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainA));
-    const venueB = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath }));
     try {
-      const refundA = (venueA.lifecycle as { refundUnusedTaskBudget?: (input: { taskId: bigint }) => Promise<void> })
-        .refundUnusedTaskBudget;
-      const refundB = (venueB.lifecycle as { refundUnusedTaskBudget?: (input: { taskId: bigint }) => Promise<void> })
-        .refundUnusedTaskBudget;
-      await Promise.all([refundA?.({ taskId: 1n }), refundB?.({ taskId: 2n })]);
+      expect(() =>
+        createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath })),
+      ).toThrow(/already owned/i);
     } finally {
       venueA.close();
-      venueB.close();
     }
-    const db = new Database(dbPath, { readonly: true });
-    try {
-      const rows = db.prepare("SELECT COUNT(*) AS n FROM tx_submissions").get() as { n: number };
-      expect(rows.n).toBeGreaterThan(0);
-    } finally {
-      db.close();
-    }
+    const replacement = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath }));
+    replacement.close();
   });
 });
