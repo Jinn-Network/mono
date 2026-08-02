@@ -144,6 +144,8 @@ test('artifacts build public/profile/pack outputs and attest every prepublicatio
   assert.match(artifacts, /build-platform-public-surface\.mjs/u);
   assert.match(artifacts, /build-profile-root\.mjs/u);
   assert.match(artifacts, /build-prepublication-bundle\.mjs/u);
+  assert.match(artifacts, /stack-trusted-publishers\.mjs/u);
+  assert.match(artifacts, /--out \.platform-verification\/trusted-publishers/u);
   assert.match(artifacts, /--source-sha "\$\{SOURCE_SHA\}"/u);
   assert.match(artifacts, /--catalog-digest "\$\{CATALOG_DIGEST\}"/u);
   assert.match(artifacts, /--lane "\$\{LANE\}"/u);
@@ -151,6 +153,8 @@ test('artifacts build public/profile/pack outputs and attest every prepublicatio
   assert.match(artifacts, /\.platform-verification\/pack\/tarballs\/\*\.tgz/u);
   assert.match(artifacts, /\.platform-verification\/public-surface-manifest\.json/u);
   assert.match(artifacts, /\.platform-verification\/profile-root\/\*\*/u);
+  assert.match(artifacts, /\.platform-verification\/trusted-publishers\/trusted-publishers\.json/u);
+  assert.match(artifacts, /\.platform-verification\/trusted-publishers\/trusted-publishers\.md/u);
   assert.match(artifacts, /uses: actions\/upload-artifact@v4/u);
   assert.match(
     artifacts,

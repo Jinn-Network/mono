@@ -134,6 +134,10 @@ jobs:
             --release-group platform-v1 \
             --lane "${LANE}" \
             --out .platform-verification/pack
+      - name: Generate trusted-publisher registration prerequisites
+        run: >-
+          node .github/scripts/stack-trusted-publishers.mjs
+          --out .platform-verification/trusted-publishers
       - name: Attest tarballs and public artifacts
         uses: actions/attest@v4
         with:
@@ -142,6 +146,8 @@ jobs:
             .platform-verification/pack/tarballs/*.tgz
             .platform-verification/public-surface-manifest.json
             .platform-verification/profile-root/**
+            .platform-verification/trusted-publishers/trusted-publishers.json
+            .platform-verification/trusted-publishers/trusted-publishers.md
       - name: Upload prepublication artifacts
         uses: actions/upload-artifact@v4
         with:
