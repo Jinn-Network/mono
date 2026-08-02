@@ -14,7 +14,11 @@ import { test } from 'node:test';
 
 import { canonicalJsonBytes } from './build-prepublication-bundle.mjs';
 import { buildProfileRoot } from './build-profile-root.mjs';
-import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import {
+  disableReleaseGroup,
+  fixtureCatalog,
+  fixtureRepo,
+} from './platform-catalog-test-fixture.mjs';
 import {
   createVerificationReceipt,
   verificationGateConclusionIds,
@@ -47,7 +51,11 @@ function successfulConclusions() {
   );
 }
 
-function publicationFixture({ platformPackageNames } = {}) {
+function publicationFixture({
+  platformPackageNames,
+  mutateCatalog,
+  allowIneligibleRegistrationFixture = false,
+} = {}) {
   const catalog = fixtureCatalog();
   if (platformPackageNames) {
     const selected = new Set(platformPackageNames);
@@ -56,6 +64,7 @@ function publicationFixture({ platformPackageNames } = {}) {
     ));
     catalog.releaseGroups['platform-v1'].expectedPackageCount = selected.size;
   }
+  mutateCatalog?.(catalog);
   const profilePackage = catalog.packages.find(({ name }) => name === '@jinn-network/fixture-protocol');
   profilePackage.publicSurface.schemas = ['schemas'];
   const repoRoot = fixtureRepo({ catalog });
@@ -130,7 +139,17 @@ function publicationFixture({ platformPackageNames } = {}) {
   const trustedPublishersRoot = join(verificationRoot, 'trusted-publishers');
   const trustedPublishersJsonPath = join(trustedPublishersRoot, 'trusted-publishers.json');
   const trustedPublishersMarkdownPath = join(trustedPublishersRoot, 'trusted-publishers.md');
-  const registrations = buildRegistrationList(repoRoot);
+  const registrations = allowIneligibleRegistrationFixture
+    ? packages.map(({ name: packageName }) => ({
+      package: packageName,
+      provider: 'GitHub Actions',
+      organization: 'Jinn-Network',
+      repository: 'mono',
+      workflow: 'stack-npm-publish.yml',
+      environment: 'npm-publish',
+      allowedActions: ['npm publish'],
+    }))
+    : buildRegistrationList(repoRoot);
   mkdirSync(trustedPublishersRoot);
   writeFileSync(trustedPublishersJsonPath, `${JSON.stringify(registrations, null, 2)}\n`, 'utf8');
   writeFileSync(trustedPublishersMarkdownPath, renderRegistrationMarkdown(registrations), 'utf8');
@@ -363,6 +382,23 @@ test('publishes a differently sized receipt only when registrations and tarballs
     assert.deepEqual(new Set(receipt.packageOrder), new Set(selected));
     assert.equal(receipt.trustedPublishers.registrationCount, selected.length);
     assert.equal(receipt.observedRegistry.length, selected.length);
+  } finally {
+    cleanup(fixture);
+  }
+});
+
+test('a fully disabled catalog group reaches no provenance or npm command', async () => {
+  const fixture = publicationFixture({
+    mutateCatalog: disableReleaseGroup,
+    allowIneligibleRegistrationFixture: true,
+  });
+  const fake = registryExec(fixture);
+  try {
+    await assert.rejects(
+      publishVerifiedPlatform(publisherArgs(fixture, { exec: fake.exec })),
+      /release group platform-v1 is not eligible for canary publication/u,
+    );
+    assert.deepEqual(fake.calls, []);
   } finally {
     cleanup(fixture);
   }

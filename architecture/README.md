@@ -33,7 +33,10 @@ architecture or release edge.
 Release membership and policy come only from the catalog. The generated
 [release view](./generated/platform-topology.md#release-and-trusted-publishers) shows each exact
 set, trusted-publisher inputs, canary eligibility, disabled groups, independent lines, and the
-stable-hosting blocker. A directory name is never release authority.
+stable-hosting blocker. A release group's declared policy set must exactly equal its member-policy
+union, and its publication flags must agree with every member. Canary packing, trusted-publisher
+generation, and registry access independently require a catalog-eligible canary group. A directory
+name is never release authority.
 
 ## Ownership and generated views
 

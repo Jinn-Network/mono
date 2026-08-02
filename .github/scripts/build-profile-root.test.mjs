@@ -736,15 +736,9 @@ test('the real repository produces a non-empty profile root', () => {
 test('the real core root serves trajectory identities and excludes the experimental environment surface', () => {
   const coreOut = mkdtempSync(join(tmpdir(), 'jinn-profile-core-out-'));
   const experimentalOut = mkdtempSync(join(tmpdir(), 'jinn-profile-experimental-out-'));
-  const experimentalPackages = new Set([
-    '@jinn-network/record-discovery-facts-environments',
-    '@jinn-network/environment-record',
-    '@jinn-network/environment-verification',
-    '@jinn-network/task-admission',
-    '@jinn-network/task-curation',
-    '@jinn-network/task-derivation',
-    '@jinn-network/task-posting',
-  ]);
+  const experimentalPackages = new Set(loadCatalogPackages(repoRoot, {
+    releaseGroup: 'experimental-environment-supply',
+  }).map(({ name }) => name));
   try {
     const core = buildProfileRoot({ repoRoot, outDir: coreOut, commit: SHA });
     const corePaths = new Set(core.documents.map((document) => document.path));

@@ -6,11 +6,13 @@ import { fileURLToPath } from 'node:url';
 
 import {
   loadCatalogPackages,
+  loadPublishableCatalogPackages,
   loadPlatformCatalog,
   validatePlatformCatalog,
 } from './platform-catalog.mjs';
 import {
   catalogSchema,
+  disableReleaseGroup,
   fixtureCatalog,
   fixtureRepo,
   packageEntry,
@@ -65,6 +67,50 @@ test('accepts an atomic platform membership change using only catalog data', () 
   const root = fixtureRepo({ catalog });
   try {
     assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('release publication flags cannot remain enabled for a mixed-policy member set', () => {
+  const catalog = fixtureCatalog();
+  catalog.releaseGroups['platform-v1'].publishPolicies.push('disabled');
+  catalog.packages.find(({ releaseGroup }) => releaseGroup === 'platform-v1').publishPolicy = 'disabled';
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.throws(
+      () => loadPlatformCatalog(root),
+      /releaseGroups\.platform-v1 publication flags must agree with every member publish policy/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a release group can be atomically disabled in catalog data', () => {
+  const catalog = disableReleaseGroup(fixtureCatalog());
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.doesNotThrow(() => loadPlatformCatalog(root));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stable publication eligibility requires every group member to permit stable publication', () => {
+  const catalog = fixtureCatalog();
+  const definition = catalog.releaseGroups['platform-v1'];
+  definition.publishPolicies = ['canary-and-stable'];
+  definition.stable = true;
+  for (const pkg of catalog.packages.filter(({ releaseGroup }) => releaseGroup === 'platform-v1')) {
+    pkg.publishPolicy = 'canary-and-stable';
+  }
+  const root = fixtureRepo({ catalog });
+  try {
+    assert.equal(
+      loadPublishableCatalogPackages(root, { releaseGroup: 'platform-v1', lane: 'stable' }).length,
+      definition.expectedPackageCount,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -475,19 +521,24 @@ test('release-group policy is catalog-authored and internally consistent', async
       pattern: /allows unknown dependency release group missing/u,
     },
     {
+      name: 'group policy list exceeds member policy union',
+      mutate(catalog) { catalog.releaseGroups['platform-v1'].publishPolicies.push('disabled'); },
+      pattern: /platform-v1\.publishPolicies must exactly equal member package policy union/u,
+    },
+    {
       name: 'stack publication flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].stackPublished = false; },
-      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
+      pattern: /platform-v1 publication flags must agree with every member publish policy/u,
     },
     {
       name: 'canary flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].canary = false; },
-      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
+      pattern: /platform-v1 publication flags must agree with every member publish policy/u,
     },
     {
       name: 'stable flag disagrees with policy',
       mutate(catalog) { catalog.releaseGroups['platform-v1'].stable = true; },
-      pattern: /platform-v1 publication flags must agree with publishPolicies/u,
+      pattern: /platform-v1 publication flags must agree with every member publish policy/u,
     },
     {
       name: 'member classification outside group policy',

@@ -6,7 +6,11 @@ import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { loadCatalogPackages, loadPlatformCatalog } from './platform-catalog.mjs';
-import { fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import {
+  disableReleaseGroup,
+  fixtureCatalog,
+  fixtureRepo,
+} from './platform-catalog-test-fixture.mjs';
 import { buildRegistrationList, renderRegistrationMarkdown } from './stack-trusted-publishers.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
@@ -18,6 +22,18 @@ test('controlled registrations select exactly the fixture catalog platform-v1 gr
     assert.deepEqual(
       buildRegistrationList(root).map((registration) => registration.package),
       loadCatalogPackages(root, { releaseGroup: 'platform-v1' }).map((pkg) => pkg.name).sort(),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('catalog-disabled platform groups cannot generate trusted-publisher registrations', () => {
+  const root = fixtureRepo({ catalog: disableReleaseGroup(fixtureCatalog()) });
+  try {
+    assert.throws(
+      () => buildRegistrationList(root),
+      /release group platform-v1 is not eligible for canary publication/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -53,7 +69,6 @@ test('registrations exclude every experimental, legacy, and product package', ()
   ));
   assert.ok(excluded.length > 0);
   assert.deepEqual(excluded.filter((pkg) => registered.has(pkg.name)).map((pkg) => pkg.name), []);
-  assert.equal(registered.has('@jinn-network/record-discovery-facts-environments'), false);
 });
 
 test('the markdown rendering requires the protected environment and publish-only action', () => {

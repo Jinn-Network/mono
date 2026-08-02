@@ -20,7 +20,7 @@ import {
   catalogSha256,
 } from './build-prepublication-bundle.mjs';
 import { createVerificationReceipt } from './platform-verification-receipt.mjs';
-import { loadCatalogPackages } from './platform-catalog.mjs';
+import { loadPublishableCatalogPackages } from './platform-catalog.mjs';
 import { renderRegistrationMarkdown } from './stack-trusted-publishers.mjs';
 
 export const NPM_REGISTRY = 'https://registry.npmjs.org/';
@@ -471,7 +471,8 @@ export async function publishVerifiedPlatform(options) {
     lane,
   });
   const { receipt } = validated;
-  const catalogNames = loadCatalogPackages(root, { releaseGroup }).map(({ name }) => name);
+  const catalogNames = loadPublishableCatalogPackages(root, { releaseGroup, lane })
+    .map(({ name }) => name);
   if (receipt.packageOrder.length !== receipt.tarballs.length
     || JSON.stringify([...receipt.packageOrder].sort()) !== JSON.stringify([...catalogNames].sort())) {
     throw new Error('verified canary publication package and tarball sets must match the catalog');

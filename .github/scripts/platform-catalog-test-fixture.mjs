@@ -183,6 +183,18 @@ export function fixtureCatalog() {
   };
 }
 
+export function disableReleaseGroup(catalog, releaseGroup = 'platform-v1') {
+  const definition = catalog.releaseGroups[releaseGroup];
+  definition.publishPolicies = ['disabled'];
+  definition.stackPublished = false;
+  definition.canary = false;
+  definition.stable = false;
+  for (const pkg of catalog.packages.filter((entry) => entry.releaseGroup === releaseGroup)) {
+    pkg.publishPolicy = 'disabled';
+  }
+  return catalog;
+}
+
 export function fixtureRepo({ catalog = fixtureCatalog(), manifests = {}, schema = catalogSchema } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'jinn-platform-catalog-'));
   writeJson(join(root, 'architecture/platform-packages.v1.json'), catalog);

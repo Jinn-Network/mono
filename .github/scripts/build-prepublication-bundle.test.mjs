@@ -9,7 +9,11 @@ import {
   buildPrepublicationBundle,
   canonicalJsonBytes,
 } from './build-prepublication-bundle.mjs';
-import { fixtureCatalog, fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import {
+  disableReleaseGroup,
+  fixtureCatalog,
+  fixtureRepo,
+} from './platform-catalog-test-fixture.mjs';
 import { loadCatalogPackages } from './platform-catalog.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -130,6 +134,31 @@ test('packs a differently sized release group using only its catalog-derived mem
     assert.deepEqual(new Set(manifest.packageOrder), selected);
     assert.equal(manifest.tarballs.length, selected.size);
     assert.equal(calls.filter(({ command, args }) => command === 'npm' && args[0] === 'pack').length, selected.size);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a catalog-disabled canary group fails before any package command', async () => {
+  const catalog = disableReleaseGroup(fixtureCatalog());
+  const root = fixtureRepo({ catalog });
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-prepublication-disabled-out-'));
+  const calls = [];
+  try {
+    await assert.rejects(
+      buildPrepublicationBundle({
+        repoRoot: root,
+        outDir,
+        sourceSha: SHA,
+        catalogDigest: digestCatalog(root),
+        releaseGroup: 'platform-v1',
+        lane: 'canary',
+        exec: fakePackExec(calls),
+      }),
+      /release group platform-v1 is not eligible for canary publication/u,
+    );
+    assert.deepEqual(calls, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });

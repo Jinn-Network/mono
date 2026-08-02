@@ -118,8 +118,6 @@ test('release, public-surface, ownership, and transition views reuse their canon
   assert.ok(report.publicSurfaces.packages.some(({ name, schemas }) => (
     name === '@jinn-network/evidence-trajectory' && schemas.includes('schemas')
   )));
-  assert.equal(report.release.platformV1.packages.includes('@jinn-network/environment-record'), false);
-  assert.equal(report.release.platformV1.packages.includes('@jinn-network/environment-verification'), false);
   assert.equal(new Set(report.publicSurfaces.selfIdentifyingClaims.map(({ identifier }) => identifier)).size,
     report.publicSurfaces.selfIdentifyingClaims.length);
   assert.ok(report.publicSurfaces.selfIdentifyingClaims.every(({ identifier }) => (

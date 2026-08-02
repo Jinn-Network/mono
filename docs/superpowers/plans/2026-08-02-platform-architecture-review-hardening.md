@@ -266,4 +266,3 @@ Push the exact reviewed commit to `codex/platform-architecture-convergence`, the
 - [ ] **Step 6: Stop at external-state gates**
 
 Do not enable canary publication or modify npm/GitHub settings. Report the remaining administrator actions: configure all npm trusted publishers for `npm-publish` + `npm publish`, protect the deployment environment, apply branch protection, and run the live audit.
-

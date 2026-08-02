@@ -19,8 +19,6 @@ test('the compatibility entry point selects only the controlled catalog platform
     assert.equal(found.length, expected.length);
     assert.deepEqual(found.map((pkg) => pkg.name), expected.map((pkg) => pkg.name));
     assert.deepEqual(Object.keys(found[0]).sort(), ['directory', 'manifest', 'manifestPath', 'name']);
-    assert.equal(found.some((pkg) => pkg.name === '@jinn-network/record-discovery-facts-environments'), false);
-    assert.equal(found.some((pkg) => pkg.name === '@jinn-network/core'), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -36,7 +34,6 @@ test('the real repository set is exactly the catalog-selected platform-v1 group'
   assert.equal(found.length, catalogPackages.length);
   assert.deepEqual(found.map((pkg) => pkg.name), catalogPackages.map((pkg) => pkg.name));
   assert.equal(new Set(found.map((pkg) => pkg.name)).size, found.length, 'package names must be unique');
-  assert.equal(found.some((pkg) => pkg.name === '@jinn-network/record-discovery-facts-environments'), false);
 });
 
 test('the graph keeps runtime in-set edges, ignores dev-only edges, and drops external edges', () => {

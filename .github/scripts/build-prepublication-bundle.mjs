@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
+  loadPublishableCatalogPackages,
 } from './platform-catalog.mjs';
 import { packWave } from './publish-stack-run.mjs';
 import { buildPublishPlan } from './publish-stack.mjs';
@@ -97,6 +98,9 @@ export async function buildPrepublicationBundle({
   const root = resolve(repoRoot);
   const output = resolve(outDir);
   requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup, lane });
+  const catalogPackages = lane === 'canary'
+    ? loadPublishableCatalogPackages(root, { releaseGroup, lane })
+    : loadCatalogPackages(root, { releaseGroup });
 
   const plan = buildPublishPlan({
     repoRoot: root,
@@ -106,7 +110,7 @@ export async function buildPrepublicationBundle({
     ...(lane === 'stable' ? { releaseTag: stableReleaseTag(root, releaseGroup) } : {}),
   });
   const packageOrder = plan.waves.flat().map(({ name }) => name);
-  const catalogNames = loadCatalogPackages(root, { releaseGroup }).map(({ name }) => name).sort();
+  const catalogNames = catalogPackages.map(({ name }) => name).sort();
   if (new Set(packageOrder).size !== packageOrder.length) {
     throw new Error(`${releaseGroup} prepublication plan contains duplicate packages`);
   }

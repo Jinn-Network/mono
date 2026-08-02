@@ -37,6 +37,8 @@ const PUBLISH_POLICIES = new Set([
   'private',
   'never',
 ]);
+const CANARY_PUBLISH_POLICIES = new Set(['canary-and-stable', 'canary-only']);
+const STABLE_PUBLISH_POLICIES = new Set(['canary-and-stable']);
 const AUTHORITY_STATUSES = new Set(['ratified', 'approved', 'proposed', 'draft', 'current', 'superseded']);
 const FORBIDDEN_CATALOG_PACKAGE_FIELDS = [
   'version',
@@ -436,15 +438,6 @@ function validateDefinitions(catalog, repoRoot) {
     for (const flag of ['stackPublished', 'canary', 'stable']) {
       if (typeof group[flag] !== 'boolean') throw new Error(`releaseGroups.${groupId}.${flag} must be boolean`);
     }
-    const canaryPolicy = group.publishPolicies.some((policy) => (
-      policy === 'canary-only' || policy === 'canary-and-stable'
-    ));
-    const stablePolicy = group.publishPolicies.includes('canary-and-stable');
-    if (group.stackPublished !== canaryPolicy || group.canary !== canaryPolicy || group.stable !== stablePolicy) {
-      throw new Error(
-        `releaseGroups.${groupId} publication flags must agree with publishPolicies`,
-      );
-    }
   }
   for (const tier of TIERS) {
     const key = String(tier);
@@ -564,6 +557,25 @@ function validateReleaseGroups(catalog) {
       throw new Error(
         `releaseGroups.${groupId}.requiredGateIds must exactly equal member package gate union; `
         + `declared ${groupGates.join(', ') || '<none>'}, members require ${memberGateUnion.join(', ') || '<none>'}`,
+      );
+    }
+    const memberPolicies = [...new Set(members.map(({ publishPolicy }) => publishPolicy))].sort();
+    const declaredPolicies = [...definition.publishPolicies].sort();
+    if (!schemaValueEquals(declaredPolicies, memberPolicies)) {
+      throw new Error(
+        `releaseGroups.${groupId}.publishPolicies must exactly equal member package policy union; `
+        + `declared ${declaredPolicies.join(', ') || '<none>'}, members use ${memberPolicies.join(', ') || '<none>'}`,
+      );
+    }
+    const canaryEligible = members.length > 0
+      && members.every(({ publishPolicy }) => CANARY_PUBLISH_POLICIES.has(publishPolicy));
+    const stableEligible = members.length > 0
+      && members.every(({ publishPolicy }) => STABLE_PUBLISH_POLICIES.has(publishPolicy));
+    if (definition.stackPublished !== canaryEligible
+      || definition.canary !== canaryEligible
+      || definition.stable !== stableEligible) {
+      throw new Error(
+        `releaseGroups.${groupId} publication flags must agree with every member publish policy`,
       );
     }
   }
@@ -736,4 +748,28 @@ export function loadCatalogPackages(repoRoot, { releaseGroup } = {}) {
       };
     })
     .sort((left, right) => (left.directory < right.directory ? -1 : left.directory > right.directory ? 1 : 0));
+}
+
+export function loadPublishableCatalogPackages(repoRoot, {
+  releaseGroup,
+  lane = 'canary',
+} = {}) {
+  if (typeof releaseGroup !== 'string' || releaseGroup === '') {
+    throw new Error('a release group is required for publication eligibility');
+  }
+  const catalog = loadPlatformCatalog(repoRoot);
+  const definition = catalog.releaseGroups[releaseGroup];
+  const allowedPolicies = lane === 'canary'
+    ? CANARY_PUBLISH_POLICIES
+    : lane === 'stable'
+      ? STABLE_PUBLISH_POLICIES
+      : null;
+  if (!allowedPolicies) throw new Error(`publication lane must be canary or stable, got ${lane}`);
+  const enabled = definition?.stackPublished === true && definition?.[lane] === true;
+  const members = catalog.packages.filter((pkg) => pkg.releaseGroup === releaseGroup);
+  if (!enabled || members.length === 0
+    || members.some(({ publishPolicy }) => !allowedPolicies.has(publishPolicy))) {
+    throw new Error(`release group ${releaseGroup} is not eligible for ${lane} publication`);
+  }
+  return loadCatalogPackages(repoRoot, { releaseGroup });
 }

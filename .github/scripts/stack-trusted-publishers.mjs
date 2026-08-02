@@ -3,12 +3,15 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { discoverStackPackages } from './stack-package-graph.mjs';
+import { loadPublishableCatalogPackages } from './platform-catalog.mjs';
 
 export const PUBLISHER_WORKFLOW = 'stack-npm-publish.yml';
 
 export function buildRegistrationList(repoRoot) {
-  return discoverStackPackages(repoRoot).map((pkg) => ({
+  return loadPublishableCatalogPackages(repoRoot, {
+    releaseGroup: 'platform-v1',
+    lane: 'canary',
+  }).map((pkg) => ({
     package: pkg.name,
     provider: 'GitHub Actions',
     organization: 'Jinn-Network',
