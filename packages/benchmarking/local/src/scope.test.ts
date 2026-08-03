@@ -111,4 +111,16 @@ describe("localReportedCost", () => {
     const cost = localReportedCost({ latencyFor: () => 1234 });
     expect(await cost.latencyFor(cell("a/arm/1"))).toBe(1234);
   });
+
+  test("reports nothing for a never-dispatched cell, whatever the host says", async () => {
+    // The Matrix schema refuses cost/latency lineage on an undispatched cell; a host that
+    // reports a flat per-cell figure must still produce a sealable Matrix.
+    const cost = localReportedCost({
+      costFor: () => ({ value: "1.50", unit: "USD" }),
+      latencyFor: () => 1234,
+    });
+    const undispatched = { ...cell("a/arm/1"), dispatches: 0 };
+    expect(await cost.costFor(undispatched)).toBeUndefined();
+    expect(await cost.latencyFor(undispatched)).toBeUndefined();
+  });
 });

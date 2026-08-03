@@ -157,6 +157,7 @@ function inScopeCells(): readonly InScopeCell[] {
  */
 function pinningEvidence(): Record<string, LocalCellPinningEvidence> {
   const honest = (model: typeof MODEL_A, loadout: typeof LOADOUT_A) => ({
+    dispatches: 1,
     admission: { ready: true },
     observations: axisObservationsFromRuntimeObservations([
       { kind: "resource", propertyId: runPinningPropertyId("harness"), value: JSON.stringify(HARNESS_PINNED) },
@@ -171,6 +172,7 @@ function pinningEvidence(): Record<string, LocalCellPinningEvidence> {
     // The candidate arm on task B actually ran the parent's loadout and model, under an
     // older harness build.
     [SWAPPED_CELL]: {
+      dispatches: 1,
       admission: { ready: true },
       observations: axisObservationsFromRuntimeObservations([
         { kind: "resource", propertyId: runPinningPropertyId("harness"), value: JSON.stringify(HARNESS_SWAPPED) },
@@ -182,20 +184,22 @@ function pinningEvidence(): Record<string, LocalCellPinningEvidence> {
 }
 
 async function assembleMiniature(
-  overrides: { isolationInventory?: readonly string[] } = {},
+  overrides: { isolationInventory?: readonly string[]; undispatched?: string } = {},
 ) {
   const bench = miniatureBenchmark();
   const run = miniatureRun(bench);
-  const cells = inScopeCells();
+  const cells = inScopeCells().filter((cell) => cell.cellKey !== overrides.undispatched);
   const evidence = pinningEvidence();
+  if (overrides.undispatched !== undefined) {
+    // The Run expected the cell; nothing was ever dispatched for it.
+    evidence[overrides.undispatched] = { dispatches: 0 };
+  }
   const ports = localAssemblyPorts({
     inputScope: { cellsForRun: () => cells },
     pinning: {
       submissionBaseline: run.policy.submissionBaseline as Record<string, unknown>,
       evidenceFor: (cellKey) => evidence[cellKey],
-      ...(overrides.isolationInventory === undefined
-        ? {}
-        : { isolationInventory: overrides.isolationInventory }),
+      isolationInventory: overrides.isolationInventory ?? ["unrestricted"],
     },
     admission: {
       receiptFor: () => ({ zeroReplayVariance: true, externalCapabilities: false }),
@@ -253,6 +257,23 @@ describe("miniature local Run (charter acceptance)", () => {
     for (const cellKey of cellKeys()) {
       expect(byCell.get(cellKey)!.verification.isolation, cellKey).toBe("match");
     }
+  });
+
+  test("an expected-but-never-dispatched cell reports isolation unverifiable", async () => {
+    const undispatched = `${TASK_B}/parent/1`;
+    const { byCell } = await assembleMiniature({ undispatched });
+    const cell = byCell.get(undispatched)!;
+    expect(cell.dispatches).toBe(0);
+    // Nothing executed, so no axis — vacuous ones included — can be said to have been honored.
+    expect(cell.verification).toEqual({
+      harness: "unverifiable",
+      model: "unverifiable",
+      loadout: "unverifiable",
+      isolation: "unverifiable",
+      checksFailed: [],
+    });
+    // Its siblings are unaffected.
+    expect(byCell.get(`${TASK_A}/parent/1`)!.verification.isolation).toBe("match");
   });
 
   test("isolation degrades to unverifiable when the venue admits more than one policy", async () => {

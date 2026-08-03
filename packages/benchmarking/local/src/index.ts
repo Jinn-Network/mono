@@ -12,10 +12,12 @@ export type { PinningAxis } from "./axes.js";
 export {
   corroborate,
   corroborationForAxis,
+  hasExecutionEvidence,
   localPinningObservation,
   LOCAL_AXIS_STRENGTH,
   pinningObservationForCell,
   pinningStatusForAxis,
+  requirementsDigest,
 } from "./pinning-bridge.js";
 export type {
   AxisAdmission,

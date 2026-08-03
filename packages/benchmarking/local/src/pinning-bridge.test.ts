@@ -4,11 +4,14 @@ import { describe, expect, test } from "vitest";
 import {
   corroborate,
   corroborationForAxis,
+  hasExecutionEvidence,
   localPinningObservation,
   LOCAL_AXIS_STRENGTH,
   pinningObservationForCell,
   pinningStatusForAxis,
+  requirementsDigest,
   type LocalCellPinningEvidence,
+  type LocalPinningVenue,
 } from "./pinning-bridge.js";
 
 const HARNESS = { id: "claude-code", version: "2.1.34" };
@@ -21,6 +24,9 @@ const PINNING = {
   loadout: LOADOUT,
   isolationPolicy: "unrestricted",
 };
+
+/** The inventory every launcher declares today. */
+const VENUE: LocalPinningVenue = { isolationInventory: ["unrestricted"] };
 
 const ADMITTED: LocalCellPinningEvidence = { admission: { ready: true } };
 
@@ -90,27 +96,57 @@ describe("corroborationForAxis", () => {
   });
 });
 
+describe("hasExecutionEvidence", () => {
+  test("an unknown or empty cell has none", () => {
+    expect(hasExecutionEvidence(undefined)).toBe(false);
+    expect(hasExecutionEvidence({})).toBe(false);
+  });
+
+  test("an explicit dispatch count is authoritative in both directions", () => {
+    expect(hasExecutionEvidence({ dispatches: 0 })).toBe(false);
+    expect(hasExecutionEvidence({ dispatches: 1 })).toBe(true);
+    // A declared zero-dispatch cell is not outvoted by a stray admission record.
+    expect(hasExecutionEvidence({ dispatches: 0, admission: { ready: true } })).toBe(false);
+  });
+
+  test("an admission attempt or a recorded observation counts", () => {
+    expect(hasExecutionEvidence({ admission: { ready: false } })).toBe(true);
+    expect(hasExecutionEvidence({
+      observations: [{ axis: "model", value: MODEL, source: "runtime-observation" }],
+    })).toBe(true);
+  });
+});
+
 describe("pinningStatusForAxis (identity design §7)", () => {
   test("an unpinned axis is unverifiable", () => {
-    expect(pinningStatusForAxis({ axis: "model", pinning: {}, evidence: ADMITTED }))
+    expect(pinningStatusForAxis({ axis: "model", pinning: {}, evidence: ADMITTED, venue: VENUE }))
       .toBe("unverifiable");
   });
 
   test("a null-filled core axis is unverifiable, not a vacuous match", () => {
-    expect(pinningStatusForAxis({ axis: "model", pinning: { model: null }, evidence: ADMITTED }))
-      .toBe("unverifiable");
+    expect(pinningStatusForAxis({
+      axis: "model",
+      pinning: { model: null },
+      evidence: ADMITTED,
+      venue: VENUE,
+    })).toBe("unverifiable");
   });
 
   test("an enforced axis matches on an accepted admission with no observation", () => {
     // The gate is the enforcement; the bridge must not fabricate an observation to reach it.
-    expect(pinningStatusForAxis({ axis: "harness", pinning: PINNING, evidence: ADMITTED }))
-      .toBe("match");
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: PINNING,
+      evidence: ADMITTED,
+      venue: VENUE,
+    })).toBe("match");
   });
 
   test("an enforced axis matches when the observation also corroborates", () => {
     expect(pinningStatusForAxis({
       axis: "loadout",
       pinning: PINNING,
+      venue: VENUE,
       evidence: {
         admission: { ready: true },
         observations: [{ axis: "loadout", value: LOADOUT, source: "materialization" }],
@@ -122,6 +158,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
     expect(pinningStatusForAxis({
       axis: "loadout",
       pinning: PINNING,
+      venue: VENUE,
       evidence: {
         admission: { ready: true },
         observations: [{
@@ -134,9 +171,14 @@ describe("pinningStatusForAxis (identity design §7)", () => {
   });
 
   test("absent admission evidence stays unverifiable", () => {
-    expect(pinningStatusForAxis({ axis: "harness", pinning: PINNING })).toBe("unverifiable");
-    expect(pinningStatusForAxis({ axis: "harness", pinning: PINNING, evidence: {} }))
+    expect(pinningStatusForAxis({ axis: "harness", pinning: PINNING, venue: VENUE }))
       .toBe("unverifiable");
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: PINNING,
+      evidence: {},
+      venue: VENUE,
+    })).toBe("unverifiable");
   });
 
   test("a rejected admission is unverifiable, not a mismatch", () => {
@@ -144,6 +186,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
     expect(pinningStatusForAxis({
       axis: "harness",
       pinning: PINNING,
+      venue: VENUE,
       evidence: { admission: { ready: false, detail: "harness digest mismatch" } },
     })).toBe("unverifiable");
   });
@@ -152,6 +195,7 @@ describe("pinningStatusForAxis (identity design §7)", () => {
     expect(pinningStatusForAxis({
       axis: "model",
       pinning: PINNING,
+      venue: VENUE,
       evidence: {
         admission: { ready: false, detail: "model pin mismatch" },
         observations: [{ axis: "model", value: { id: "other" }, source: "admission-probe" }],
@@ -164,16 +208,116 @@ describe("pinningStatusForAxis (identity design §7)", () => {
       axis: "harness",
       pinning: PINNING,
       evidence: ADMITTED,
+      venue: VENUE,
       strength: "attested",
     })).toBe("unverifiable");
     expect(pinningStatusForAxis({
       axis: "harness",
       pinning: PINNING,
+      venue: VENUE,
+      strength: "attested",
       evidence: {
         admission: { ready: true },
         observations: [{ axis: "harness", value: HARNESS, source: "runtime-observation" }],
       },
-      strength: "attested",
+    })).toBe("match");
+  });
+});
+
+describe("the admission receipt is bound to the pinning it was issued against", () => {
+  test("a receipt naming this exact pinning keeps its force", () => {
+    expect(pinningStatusForAxis({
+      axis: "model",
+      pinning: PINNING,
+      venue: VENUE,
+      evidence: {
+        admission: { ready: true, checkedRequirementsDigest: requirementsDigest(PINNING) },
+      },
+    })).toBe("match");
+  });
+
+  test("a receipt naming a different map costs every enforced axis its admission leg", () => {
+    const evidence: LocalCellPinningEvidence = {
+      admission: {
+        ready: true,
+        checkedRequirementsDigest: requirementsDigest({ model: { id: "someone-else" } }),
+      },
+    };
+    expect(pinningObservationForCell({ pinning: PINNING, evidence, venue: VENUE })).toEqual({
+      harness: "unverifiable",
+      model: "unverifiable",
+      loadout: "unverifiable",
+      // Isolation never rested on the run-pinning gate, and the cell has execution evidence.
+      isolation: "match",
+    });
+  });
+
+  test("a mis-bound receipt never suppresses affirmative mismatch evidence", () => {
+    // Downgrading an observed mismatch to `unverifiable` would hide a fact about the cell.
+    expect(pinningStatusForAxis({
+      axis: "model",
+      pinning: PINNING,
+      venue: VENUE,
+      evidence: {
+        admission: { ready: true, checkedRequirementsDigest: `sha256:${"9".repeat(64)}` },
+        observations: [{ axis: "model", value: { id: "other" }, source: "runtime-observation" }],
+      },
+    })).toBe("mismatch");
+  });
+
+  test("the digest is JCS-stable across key order", () => {
+    expect(requirementsDigest({ model: MODEL, harness: HARNESS }))
+      .toBe(requirementsDigest({ harness: HARNESS, model: MODEL }));
+  });
+});
+
+describe("an id-only harness pin is one the gate never inspects", () => {
+  test("it cannot reach match on an accepted admission", () => {
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: { harness: { id: "codex" } },
+      venue: VENUE,
+      evidence: ADMITTED,
+    })).toBe("unverifiable");
+  });
+
+  test("adding a version or a digest restores the enforced leg", () => {
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: { harness: { id: "codex", version: "1.0.0" } },
+      venue: VENUE,
+      evidence: ADMITTED,
+    })).toBe("match");
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: { harness: { id: "codex", digest: `sha256:${"f".repeat(64)}` } },
+      venue: VENUE,
+      evidence: ADMITTED,
+    })).toBe("match");
+  });
+
+  test("it still reports mismatch when an observation disagrees", () => {
+    expect(pinningStatusForAxis({
+      axis: "harness",
+      pinning: { harness: { id: "codex" } },
+      venue: VENUE,
+      evidence: {
+        admission: { ready: true },
+        observations: [{
+          axis: "harness",
+          value: { id: "claude-code" },
+          source: "runtime-observation",
+        }],
+      },
+    })).toBe("mismatch");
+  });
+
+  test("the rule is specific to harness; other axes are unaffected", () => {
+    expect(pinningStatusForAxis({
+      axis: "model",
+      pinning: { model: { id: "anthropic/claude-haiku-4-5" } },
+      venue: VENUE,
+      evidence: ADMITTED,
     })).toBe("match");
   });
 });
@@ -184,17 +328,59 @@ describe("the vacuous isolation axis", () => {
     expect(LOCAL_AXIS_STRENGTH.harness).toBe("enforced");
   });
 
-  test("matches when the pin equals the venue's sole inventory value", () => {
+  test("matches when the pin equals the sole inventory value and something ran", () => {
     // A vacuous match is still a match: the venue structurally could not have run anything
     // else. The vacuity is disclosed by the axis's strength, not by hiding the status.
-    expect(pinningStatusForAxis({ axis: "isolation", pinning: PINNING })).toBe("match");
-  });
-
-  test("needs no admission-gate result, because the gate never inspects it", () => {
     expect(pinningStatusForAxis({
       axis: "isolation",
       pinning: PINNING,
+      venue: VENUE,
+      evidence: ADMITTED,
+    })).toBe("match");
+  });
+
+  test("needs no admission-gate verdict, because the gate never inspects it", () => {
+    expect(pinningStatusForAxis({
+      axis: "isolation",
+      pinning: PINNING,
+      venue: VENUE,
       evidence: { admission: { ready: false, detail: "loadout digest mismatch" } },
+    })).toBe("match");
+  });
+
+  test("requires execution evidence: a cell with nothing recorded is unverifiable", () => {
+    // "The venue could not have run anything else" presupposes that the venue ran something.
+    expect(pinningStatusForAxis({ axis: "isolation", pinning: PINNING, venue: VENUE }))
+      .toBe("unverifiable");
+    expect(pinningStatusForAxis({
+      axis: "isolation",
+      pinning: PINNING,
+      venue: VENUE,
+      evidence: {},
+    })).toBe("unverifiable");
+  });
+
+  test("an expired, never-dispatched cell is unverifiable", () => {
+    expect(pinningStatusForAxis({
+      axis: "isolation",
+      pinning: PINNING,
+      venue: VENUE,
+      evidence: { dispatches: 0 },
+    })).toBe("unverifiable");
+  });
+
+  test("a recorded observation alone is enough execution evidence", () => {
+    expect(pinningStatusForAxis({
+      axis: "isolation",
+      pinning: PINNING,
+      venue: VENUE,
+      evidence: {
+        observations: [{
+          axis: "isolation",
+          value: "unrestricted",
+          source: "runtime-observation",
+        }],
+      },
     })).toBe("match");
   });
 
@@ -202,6 +388,7 @@ describe("the vacuous isolation axis", () => {
     expect(pinningStatusForAxis({
       axis: "isolation",
       pinning: PINNING,
+      evidence: ADMITTED,
       venue: { isolationInventory: ["unrestricted", "sandboxed"] },
     })).toBe("unverifiable");
   });
@@ -210,6 +397,8 @@ describe("the vacuous isolation axis", () => {
     expect(pinningStatusForAxis({
       axis: "isolation",
       pinning: { isolationPolicy: "sandboxed" },
+      evidence: ADMITTED,
+      venue: VENUE,
     })).toBe("unverifiable");
   });
 
@@ -217,6 +406,7 @@ describe("the vacuous isolation axis", () => {
     expect(pinningStatusForAxis({
       axis: "isolation",
       pinning: PINNING,
+      venue: VENUE,
       evidence: {
         observations: [{ axis: "isolation", value: "sandboxed", source: "runtime-observation" }],
       },
@@ -226,17 +416,19 @@ describe("the vacuous isolation axis", () => {
 
 describe("pinningObservationForCell", () => {
   test("reports every axis", () => {
-    expect(pinningObservationForCell({ pinning: PINNING, evidence: ADMITTED })).toEqual({
-      harness: "match",
-      model: "match",
-      loadout: "match",
-      isolation: "match",
-    });
+    expect(pinningObservationForCell({ pinning: PINNING, evidence: ADMITTED, venue: VENUE }))
+      .toEqual({
+        harness: "match",
+        model: "match",
+        loadout: "match",
+        isolation: "match",
+      });
   });
 
   test("degrades axis by axis rather than as a block", () => {
     expect(pinningObservationForCell({
       pinning: { harness: HARNESS, isolationPolicy: "unrestricted" },
+      venue: VENUE,
       evidence: {
         admission: { ready: true },
         observations: [{ axis: "harness", value: { id: "codex" }, source: "runtime-observation" }],
@@ -253,6 +445,7 @@ describe("pinningObservationForCell", () => {
 describe("localPinningObservation port", () => {
   const port = (evidence: Record<string, LocalCellPinningEvidence>) =>
     localPinningObservation({
+      isolationInventory: ["unrestricted"],
       submissionBaseline: { isolationPolicy: "unrestricted", harness: HARNESS },
       evidenceFor: (cellKey) => evidence[cellKey],
     });
@@ -286,17 +479,17 @@ describe("localPinningObservation port", () => {
     expect(observed.harness).toBe("mismatch");
   });
 
-  test("reports unverifiable for a cell with no evidence", async () => {
+  test("reports unverifiable on every axis for a cell with no evidence", async () => {
     const observed = await port({}).observe(null, {
       cellKey: "unknown/arm/1",
       arm: { armId: "arm", pinning: { model: MODEL } },
     });
+    // Including isolation: an unknown cell has no execution to characterize.
     expect(observed).toEqual({
       harness: "unverifiable",
       model: "unverifiable",
       loadout: "unverifiable",
-      // The baseline still pins isolation, and the venue inventory still admits one value.
-      isolation: "match",
+      isolation: "unverifiable",
     });
   });
 
@@ -318,6 +511,7 @@ describe("localPinningObservation port", () => {
 
   test("accepts an async evidence lookup", async () => {
     const bag = localPinningObservation({
+      isolationInventory: ["unrestricted"],
       evidenceFor: async () => ADMITTED,
     });
     expect(await bag.observe(null, {

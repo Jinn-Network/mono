@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: MIT
 
+import { documentDigest, serializeCanonicalJson } from "@jinn-network/benchmarking-records";
 import type { PinningObservation, PinningObservationPort } from "@jinn-network/benchmarking-run";
 import { effectiveRunPinning, pinnedValueForAxis, type PinningAxis } from "./axes.js";
+
+/**
+ * `sha256:<hex>` over the JCS bytes of a requirements map — the stack's sealing discipline,
+ * reused so a gate receipt and the pinning it was issued against are comparable byte-exactly.
+ */
+export function requirementsDigest(
+  pinning: Readonly<Record<string, unknown>>,
+): `sha256:${string}` {
+  return documentDigest(serializeCanonicalJson(pinning as never));
+}
 
 /**
  * The local backend's run-pinning admission result, mirrored structurally.
@@ -15,6 +26,15 @@ import { effectiveRunPinning, pinnedValueForAxis, type PinningAxis } from "./axe
 export interface LocalRunPinningCheck {
   readonly ready: boolean;
   readonly detail?: string;
+  /**
+   * `sha256:<hex>` over the JCS bytes of the requirements map the gate actually checked.
+   *
+   * Not part of the backend's shape today; it binds the gate result to a specific pinning
+   * map so a receipt cannot be reused against a different one. When it is present and
+   * disagrees with the pinning being graded, the gate result is about some other map and
+   * carries no weight here — the enforced axes lose their admission leg.
+   */
+  readonly checkedRequirementsDigest?: string;
 }
 
 /**
@@ -37,6 +57,28 @@ export interface LocalCellPinningEvidence {
   /** The admission gate's verdict for the accounted dispatch. Absent ⇒ nothing established. */
   readonly admission?: LocalRunPinningCheck;
   readonly observations?: readonly LocalAxisObservation[];
+  /**
+   * Dispatch count for the cell. A cell that was never dispatched executed nothing, so no
+   * axis — not even a vacuous one — can be said to have been honored on it.
+   */
+  readonly dispatches?: number;
+}
+
+/**
+ * Whether anything was executed for this cell at all: a dispatch, an admission attempt, or a
+ * recorded observation.
+ *
+ * The vacuous isolation axis needs this gate. Its match rests on "the venue could not have
+ * run anything else", which presupposes that the venue ran something. An expected-but-never-
+ * dispatched cell, or a cell the bridge knows nothing about, has no execution to characterize
+ * and reports `unverifiable`.
+ */
+export function hasExecutionEvidence(
+  evidence: LocalCellPinningEvidence | undefined,
+): boolean {
+  if (evidence === undefined) return false;
+  if (evidence.dispatches !== undefined) return evidence.dispatches > 0;
+  return evidence.admission !== undefined || (evidence.observations?.length ?? 0) > 0;
 }
 
 /**
@@ -144,25 +186,49 @@ export interface LocalPinningVenue {
    * declares exactly `["unrestricted"]`. A singleton inventory equal to the pin means the
    * venue structurally could not have run anything else, which is what makes the vacuous
    * axis's admission check honest; a wider inventory would make membership uninformative.
+   *
+   * Required, deliberately: there is no safe default. A host that omits its inventory must
+   * fail to compile rather than inherit someone else's assumption and get a silent `match`.
    */
-  readonly isolationInventory?: readonly string[];
+  readonly isolationInventory: readonly string[];
 }
 
-const DEFAULT_ISOLATION_INVENTORY: readonly string[] = ["unrestricted"];
+/**
+ * An id-only harness pin (`{id}` with neither `version` nor `digest`) is one the local
+ * admission gate never inspects — it compares versions and digests, never ids — so its
+ * acceptance says nothing about the harness that ran. Such a pin can never reach `match`
+ * here. (The gate's silence on id is an upstream defect, filed separately; this is the
+ * bridge-side refusal to launder it.)
+ */
+function isUninspectableHarnessPin(axis: PinningAxis, pinned: unknown): boolean {
+  if (axis !== "harness" || !isPlainObject(pinned)) return false;
+  return pinned["version"] === undefined && pinned["digest"] === undefined;
+}
 
 function admissionForAxis(
   axis: PinningAxis,
   pinned: unknown,
+  pinning: Readonly<Record<string, unknown>>,
   evidence: LocalCellPinningEvidence | undefined,
   venue: LocalPinningVenue,
 ): AxisAdmission {
   if (axis === "isolation") {
     // `verifyRunPinning` never inspects the isolation axis; the launcher inventory is the
-    // only admission boundary it has.
-    const inventory = venue.isolationInventory ?? DEFAULT_ISOLATION_INVENTORY;
+    // only admission boundary it has. The vacuous match additionally requires that something
+    // was actually executed for this cell.
+    if (!hasExecutionEvidence(evidence)) return "not-accepted";
+    const inventory = venue.isolationInventory;
     return inventory.length === 1 && inventory[0] === pinned ? "accepted" : "not-accepted";
   }
-  return evidence?.admission?.ready === true ? "accepted" : "not-accepted";
+  const admission = evidence?.admission;
+  if (admission?.ready !== true) return "not-accepted";
+  if (isUninspectableHarnessPin(axis, pinned)) return "not-accepted";
+  // A receipt that names a different requirements map is a receipt about a different cell.
+  if (
+    admission.checkedRequirementsDigest !== undefined
+    && admission.checkedRequirementsDigest !== requirementsDigest(pinning)
+  ) return "not-accepted";
+  return "accepted";
 }
 
 /**
@@ -181,11 +247,10 @@ export function pinningStatusForAxis(input: {
   readonly axis: PinningAxis;
   readonly pinning: Readonly<Record<string, unknown>>;
   readonly evidence?: LocalCellPinningEvidence;
-  readonly venue?: LocalPinningVenue;
+  readonly venue: LocalPinningVenue;
   readonly strength?: AxisStrength;
 }): PinningObservation[PinningAxis] {
-  const { axis, pinning } = input;
-  const venue = input.venue ?? {};
+  const { axis, pinning, venue } = input;
   const strength = input.strength ?? LOCAL_AXIS_STRENGTH[axis];
   const pinned = pinnedValueForAxis(pinning, axis);
   // An absent key and an explicit `null` both mean the requirements do not constrain the
@@ -201,7 +266,7 @@ export function pinningStatusForAxis(input: {
   if (strength === "attested") {
     return corroboration === "corroborates" ? "match" : "unverifiable";
   }
-  return admissionForAxis(axis, pinned, input.evidence, venue) === "accepted"
+  return admissionForAxis(axis, pinned, pinning, input.evidence, venue) === "accepted"
     ? "match"
     : "unverifiable";
 }
@@ -210,7 +275,7 @@ export function pinningStatusForAxis(input: {
 export function pinningObservationForCell(input: {
   readonly pinning: Readonly<Record<string, unknown>>;
   readonly evidence?: LocalCellPinningEvidence;
-  readonly venue?: LocalPinningVenue;
+  readonly venue: LocalPinningVenue;
 }): PinningObservation {
   return {
     harness: pinningStatusForAxis({ ...input, axis: "harness" }),

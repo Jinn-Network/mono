@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-import { PINNING_AXES, type PinningAxis } from "./axes.js";
+import { PINNING_AXES, REQUIREMENT_KEY_FOR_AXIS, type PinningAxis } from "./axes.js";
 import type { LocalAxisObservation } from "./pinning-bridge.js";
 
 /**
@@ -28,8 +28,14 @@ export interface LocalRuntimeObservationCapture {
  */
 export const RUN_PINNING_PROPERTY_PREFIX = "https://jinn.network/properties/run-pinning/";
 
+/**
+ * The IRI segment is the **requirements-vocabulary** key, not the Matrix axis name — so the
+ * isolation axis is published as `.../run-pinning/isolationPolicy`. Producers speak the
+ * requirements vocabulary; the Matrix name is a rendering concern on the far side of this
+ * package.
+ */
 export function runPinningPropertyId(axis: PinningAxis): string {
-  return `${RUN_PINNING_PROPERTY_PREFIX}${axis}`;
+  return `${RUN_PINNING_PROPERTY_PREFIX}${REQUIREMENT_KEY_FOR_AXIS[axis]}`;
 }
 
 const AXIS_BY_PROPERTY_ID = new Map<string, PinningAxis>(

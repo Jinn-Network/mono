@@ -73,6 +73,8 @@ const expected = [
   "pinningStatusForAxis",
   "corroborate",
   "corroborationForAxis",
+  "hasExecutionEvidence",
+  "requirementsDigest",
   "effectiveRunPinning",
   "pinnedValueForAxis",
   "axisObservationsFromRuntimeObservations",

@@ -88,15 +88,21 @@ export interface LocalCostInput {
  * Local-venue `CostSource`. The source is always `reported`: a local venue has no settlement
  * layer, so it can never produce a settled figure, and a reported figure must never be
  * dressed up as one.
+ *
+ * A never-dispatched cell reports neither cost nor latency, whatever the host says. It
+ * incurred none, and the Matrix schema refuses lineage on such a cell — so a host that
+ * reports a flat per-cell figure gets a valid Matrix instead of an unsealable one.
  */
 export function localReportedCost(input: LocalCostInput = {}): CostSource {
   return {
     async costFor(cell): Promise<CellCost | undefined> {
+      if (cell.dispatches <= 0) return undefined;
       const reported = await input.costFor?.(cell);
       if (reported === undefined) return undefined;
       return { value: reported.value, unit: reported.unit, source: "reported" };
     },
     async latencyFor(cell) {
+      if (cell.dispatches <= 0) return undefined;
       return input.latencyFor?.(cell);
     },
   };

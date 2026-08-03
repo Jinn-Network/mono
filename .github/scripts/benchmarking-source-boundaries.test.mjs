@@ -464,6 +464,73 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
   );
 });
 
+// The mirror is only safe while it stays faithful. `local` re-declares the backend's
+// `RunPinningCheck` rather than importing it (the tree-wide evidence/backend ban, plus the
+// symbol is not on the backend's public surface), so a field added or retyped upstream would
+// otherwise drift silently. Extra mirror-only fields are allowlisted by name so *those* are
+// a deliberate act too.
+const MIRROR_ONLY_RUN_PINNING_FIELDS = ['checkedRequirementsDigest'];
+
+function interfaceFields(path, name) {
+  const source = readFileSync(path, 'utf8');
+  const match = new RegExp(String.raw`\binterface\s+${name}\s*\{([\s\S]*?)\n\}`, 'u').exec(source);
+  assert.ok(match, `${relative(root, path)} no longer declares interface ${name}`);
+  return match[1]
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/u, '').trim())
+    .filter((line) => /^(?:readonly\s+)?[A-Za-z_$][\w$]*\??\s*:/u.test(line))
+    .map((line) => line.replace(/^readonly\s+/u, '').replace(/;\s*$/u, '').replace(/\s+/gu, ' '))
+    .sort();
+}
+
+test('the local run-pinning mirror stays faithful to the backend declaration', () => {
+  const backend = interfaceFields(
+    join(root, 'packages/task-execution/backend-local/assembly/src/pinning.ts'),
+    'RunPinningCheck',
+  );
+  const mirror = interfaceFields(
+    join(root, 'packages/benchmarking/local/src/pinning-bridge.ts'),
+    'LocalRunPinningCheck',
+  );
+  assert.ok(backend.length > 0, 'backend RunPinningCheck declares no fields');
+  const missing = backend.filter((field) => !mirror.includes(field));
+  assert.deepEqual(missing, [], 'benchmarking/local mirror has drifted from verifyRunPinning');
+  const extra = mirror
+    .filter((field) => !backend.includes(field))
+    .map((field) => field.split(/\??\s*:/u)[0])
+    .sort();
+  assert.deepEqual(extra, [...MIRROR_ONLY_RUN_PINNING_FIELDS].sort(),
+    'undeclared mirror-only field: add it to MIRROR_ONLY_RUN_PINNING_FIELDS deliberately');
+});
+
+test('the mirror-fidelity check detects an added and a retyped backend field', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-local-fidelity-'));
+  try {
+    const upstream = join(fixture, 'pinning.ts');
+    const downstream = join(fixture, 'bridge.ts');
+    writeFileSync(upstream, [
+      'export interface RunPinningCheck {',
+      '  readonly ready: boolean;',
+      '  readonly detail?: string;',
+      '  readonly probedAt?: string;',
+      '}',
+    ].join('\n'));
+    writeFileSync(downstream, [
+      'export interface LocalRunPinningCheck {',
+      '  readonly ready: boolean;',
+      '  readonly detail?: number;',
+      '}',
+    ].join('\n'));
+    const upstreamFields = interfaceFields(upstream, 'RunPinningCheck');
+    const mirrorFields = interfaceFields(downstream, 'LocalRunPinningCheck');
+    // The added field and the retyped field both surface as missing from the mirror.
+    assert.deepEqual(
+      upstreamFields.filter((field) => !mirrorFields.includes(field)),
+      ['detail?: string', 'probedAt?: string'],
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('the local bundle mirrors backend and evidence shapes instead of importing them', () => {
   // The bridge's premise is that it reads admission results and Runtime Observations as
   // injected values. If a future edit reached for the real types instead, the boundary would

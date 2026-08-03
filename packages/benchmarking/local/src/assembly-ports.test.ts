@@ -4,7 +4,10 @@ import type { RunRecord } from "@jinn-network/benchmarking-records";
 import { describe, expect, test } from "vitest";
 import { localAssemblyPorts } from "./assembly-ports.js";
 
-const MINIMAL = { inputScope: { cellsForRun: () => [] }, pinning: { evidenceFor: () => undefined } };
+const MINIMAL = {
+  inputScope: { cellsForRun: () => [] },
+  pinning: { isolationInventory: ["unrestricted"], evidenceFor: () => undefined },
+};
 
 describe("localAssemblyPorts", () => {
   test("wires every port the assembly procedure consumes", () => {
