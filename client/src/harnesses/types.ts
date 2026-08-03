@@ -8,6 +8,7 @@ import type { Task } from '../types/task.js';
 import type { OutputArtifact, RationaleEntry, Snapshot } from '../types/portfolio.js';
 import type { TrajectoryCollector } from '../trajectory/index.js';
 import type { ScopedSigner, ScopedRpc, ScopedSecrets } from './capability/index.js';
+import type { HashProfileId } from './hash-profile.js';
 
 export interface RuntimePlugin {
   name: string;
@@ -230,8 +231,19 @@ export interface Harness {
    * to the frozen-mode state digest. Use this for generated credentials,
    * binaries, or per-task config that a harness needs in ctx.implStateDir but
    * that is not part of its learning/code surface.
+   *
+   * Legacy surface: a harness with a registered public hash profile declares
+   * `freezeStateHashProfile` instead, and the profile wins.
    */
   freezeStateHashIgnore?: readonly string[];
+  /**
+   * The named hash profile this harness's `implStateDir` is digested under
+   * (`client/src/harnesses/hash-profile.ts`). A profile fixes the exclusion set
+   * AND enforces a top-level classification that fails closed, so the same tree
+   * cannot acquire two digests across the fence, the delivery envelope, and the
+   * status surface. Takes precedence over `freezeStateHashIgnore`.
+   */
+  freezeStateHashProfile?: HashProfileId;
   /**
    * Optional self-attribution: runtime plugins this harness bundles and runs
    * itself (not provided by the SolverNet's `runtimePlugins`), so they appear

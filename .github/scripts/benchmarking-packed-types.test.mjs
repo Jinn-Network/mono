@@ -17,6 +17,7 @@ const packages = [
   ['run', '@jinn-network/benchmarking-run'],
   ['interop', '@jinn-network/benchmarking-interop'],
   ['marketplace', '@jinn-network/benchmarking-marketplace'],
+  ['local', '@jinn-network/benchmarking-local'],
 ];
 
 const codeEntrypoints = [
@@ -26,6 +27,7 @@ const codeEntrypoints = [
   '@jinn-network/benchmarking-run',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-marketplace',
+  '@jinn-network/benchmarking-local',
 ];
 
 // Cross-tree Jinn dependency each *then-present* benchmarking package references, packed as a
@@ -33,7 +35,8 @@ const codeEntrypoints = [
 // precedent). M1 seeds task-execution-protocol; M2 (testing) adds task-execution-profiles; M3
 // (aggregate) adds trust-core; M4 (run) adds task-execution-backend; M5 (interop) reuses
 // protocol + profiles; M7 (marketplace) adds marketplace-binding/projector plus
-// discovery + trust-resolve transitives for binding/projector graphs.
+// discovery + trust-resolve transitives for binding/projector graphs. C4 (local) adds no
+// cross-tree package of its own: it imports records + run only.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],

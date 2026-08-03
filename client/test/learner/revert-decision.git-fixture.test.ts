@@ -4,13 +4,16 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hashImplStateDir } from '../../src/harnesses/freeze.js';
+import { LEARNER_PUBLIC_V1 } from '../../src/harnesses/hash-profile.js';
 import {
   decideRevert,
   DEFAULT_REVERT_POLICY,
   type CodeDigestAggregate,
 } from '../../src/learner/revert-decision.js';
 
-const IGNORE = ['.git'] as const;
+// Mirrors production's `codeDigestForCommit`, which hashes under the learner's
+// registered profile as of #2118 — not an ad hoc ignore list.
+const PROFILE = LEARNER_PUBLIC_V1;
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -23,7 +26,7 @@ async function codeDigestAt(repoDir: string, sha: string): Promise<string> {
     // `git archive <sha> | tar -x -C exportDir` — tree only, no .git.
     const tar = execFileSync('git', ['archive', sha], { cwd: repoDir, maxBuffer: 1 << 28 });
     execFileSync('tar', ['-x', '-C', exportDir], { input: tar });
-    const hex = await hashImplStateDir(exportDir, { ignoreRelPaths: IGNORE });
+    const hex = await hashImplStateDir(exportDir, { profile: PROFILE });
     return `sha256:${hex}`;
   } finally {
     await rm(exportDir, { recursive: true, force: true });

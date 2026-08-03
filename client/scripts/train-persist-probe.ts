@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '../src/types/task.js';
 import type { Harness, HarnessContext } from '../src/harnesses/types.js';
-import { hashImplStateDir } from '../src/harnesses/freeze.js';
+import { hashImplStateDir, harnessHashOptions } from '../src/harnesses/freeze.js';
 import { runHarnessWithFreezeFence } from '../src/daemon/freeze-fence.js';
 import { provisionWorkingDir } from '../src/harnesses/engine/packaging.js';
 import { TrajectoryCollector } from '../src/trajectory/index.js';
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
 
   const implStateDir = mkdtempSync(join(tmpdir(), 'jinn-persist-state-'));
   const workingDir = mkdtempSync(join(tmpdir(), 'jinn-persist-work-'));
-  const hashOpts = harness.freezeStateHashIgnore?.length ? { ignoreRelPaths: [...harness.freezeStateHashIgnore] } : undefined;
+  const hashOpts = harnessHashOptions(harness);
   const before = `sha256:${await hashImplStateDir(implStateDir, hashOpts)}`;
   console.log(`\ninstance: ${instanceId}\nimplStateDir before: ${before}`);
 
