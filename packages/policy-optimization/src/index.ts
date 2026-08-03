@@ -181,6 +181,87 @@ export {
   wavePlannedPayload,
 } from "./wave-journal.js";
 
+// --- product §6.3/§7.1: the frozen evidence bundle, exclusion-filtered at assembly (ruling R5) ---
+export {
+  assembleEvidenceBundle,
+  provenanceMatchesBundle,
+  recordListDigest,
+  type AssembleEvidenceBundleInput,
+  type AssembledEvidenceBundle,
+  type EvidenceBundleManifest,
+} from "./evidence-bundle/bundle.js";
+export {
+  assertValidBoundary,
+  assertValidRecordRefs,
+  boundaryIsEmpty,
+  heldOutBoundaryDigest,
+  partitionHeldOut,
+  scanLexical,
+  type EvidenceRecordRef,
+  type HeldOutBoundary,
+  type HeldOutHit,
+  type HeldOutPartition,
+} from "./evidence-bundle/held-out.js";
+
+// --- product §7.1/§7.2: the proposer contract and the deliberately-dumb reference proposer ---
+export type {
+  EvidenceBundleRef,
+  PolicyProposalRequest,
+  PolicyProposer,
+  ProposalBudget,
+} from "./proposers/contract.js";
+export {
+  createReferenceProposer,
+  enumerateReferenceCandidates,
+  enumerateRemovalSets,
+  REFERENCE_PROPOSER_ID,
+  skillNames,
+  type ReferenceProposal,
+  type ReferenceProposerInput,
+} from "./proposers/reference.js";
+
+// --- product §7.3/§7.4: admission ---
+export { admitCandidate, admittedTupleText } from "./admission/admit.js";
+export {
+  classifiedRoots,
+  classifyPayload,
+  isHostilePayloadClass,
+  payloadClassRank,
+  type PayloadClass,
+  type PayloadClassification,
+} from "./admission/payload-class.js";
+export {
+  admitToPopulation,
+  armIdForTuple,
+  EMPTY_POPULATION,
+  parseExactPopulation,
+  populationBytes,
+  populationDigest,
+  type AdmitToPopulationInput,
+  type Population,
+  type PopulationAdmission,
+  type PopulationEntry,
+} from "./admission/population.js";
+export {
+  appendAdmissionEvent,
+  candidateAdmittedPayload,
+  candidateRejectedPayload,
+} from "./admission/journal.js";
+export type {
+  AdmissionAccepted,
+  AdmissionCheck,
+  AdmissionCheckName,
+  AdmissionConsent,
+  AdmissionRejected,
+  AdmissionRequest,
+  AdmissionResult,
+  MaterializerPort,
+  SignatureOutcome,
+  SignaturePort,
+  SmokeCanaryOutcome,
+  SmokeCanaryPort,
+} from "./admission/types.js";
+
 export type {
   AdmittedCandidate,
   AllocationDecision,

@@ -77,6 +77,46 @@ export const CAMPAIGN_JOURNAL_EVENT_TYPES = [
   "closed",
 ] as const;
 
+/**
+ * The frozen evidence bundle's `formatToken` (product §7.1's `evidence` argument; substrate §5.1's
+ * `evidenceProvenance`).
+ *
+ * FINDING F-C7c-2 (README): neither design names a token for the bundle *document*. The substrate
+ * names its three members as the manifest's `evidenceProvenance` block, and the product names
+ * "frozen evidence bundle reference" as a proposer argument, but the thing the reference addresses
+ * has no declared identity. One is added here on C7a's precedent (F-C7a-1): the bundle is a
+ * host-persisted document this package seals, hands to proposers, and later re-checks a manifest
+ * against, and a versionless envelope has no way to refuse a future revision's bytes. Product
+ * convention, not a protocol surface.
+ */
+export const EVIDENCE_BUNDLE_FORMAT_TOKEN =
+  "network.jinn.policy-optimization.evidence-bundle/1.0" as const;
+
+/**
+ * Product §7.4's transfer security gradient, in escalating order of risk:
+ * "prompts < skills (injection surface) < hooks/tool configs (arbitrary code execution) < harness
+ * forks (their runtime)".
+ *
+ * The order is load-bearing, not decorative: `hostilePayloadClasses` is the tail of this list, so
+ * a class added in the middle is automatically non-hostile and a class added at the end is
+ * automatically hostile. Getting a new class silently classified as safe is the failure this
+ * ordering prevents.
+ */
+export const PAYLOAD_CLASSES = ["prompt", "skill", "hook-or-tool-config", "harness-code"] as const;
+
+/**
+ * The classes that are **code-execution consent** at admission for cross-operator candidates
+ * (§7.3, §7.4): "the smoke canary and every subsequent cell *run* the payload".
+ */
+export const HOSTILE_PAYLOAD_CLASSES = ["hook-or-tool-config", "harness-code"] as const;
+
+/** The population registry's file name inside a campaign directory. JSON, rewritten atomically. */
+export const CAMPAIGN_POPULATION_FILENAME = "population.json" as const;
+
+/** The population registry document's `formatToken`. Host-local state; see F-C7c-2's reasoning. */
+export const CAMPAIGN_POPULATION_FORMAT_TOKEN =
+  "network.jinn.policy-optimization.population/1.0" as const;
+
 /** The sealed campaign document's file name inside a campaign directory. */
 export const CAMPAIGN_DOCUMENT_FILENAME = "campaign.json" as const;
 

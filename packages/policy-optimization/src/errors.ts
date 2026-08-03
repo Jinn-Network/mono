@@ -36,7 +36,23 @@ export type PolicyOptimizationErrorCategory =
   /** Product §6.2 — the campaign names an allocation policy this package does not implement, or misparameterizes it. */
   | "allocation-policy"
   /** Product §6.3 — the promotion Run's preregistration, reveal, or flat-sampling discipline was violated. */
-  | "promotion-discipline";
+  | "promotion-discipline"
+  /** Product §6.3 / ruling R5 — the held-out boundary itself is malformed or absent. */
+  | "held-out-boundary"
+  /** Product §6.3 / ruling R5 — an excluded record or a lexical-scan hit reached something it must not. */
+  | "held-out-contamination"
+  /** Product §7.3 — the candidate manifest did not validate (substrate §5.3), or its bytes are not its sealed form. */
+  | "manifest-invalid"
+  /** Product §7.3 — the policy did not materialize digest-correct through the provisioner. */
+  | "materialization-mismatch"
+  /** Product §7.3 — the manifest's `evidenceProvenance` is not one this campaign issued. */
+  | "evidence-bundle-mismatch"
+  /** Product §7.3/§7.4 — a hostile payload class was proposed without the owner's admission-time consent. */
+  | "payload-consent-required"
+  /** Product §7.3 — the optional smoke canary did not complete. */
+  | "smoke-canary-failed"
+  /** Product §5.2/§7.3 — the population registry disagrees with itself about an arm. */
+  | "population-conflict";
 
 export interface PolicyOptimizationIssue {
   readonly path: string;

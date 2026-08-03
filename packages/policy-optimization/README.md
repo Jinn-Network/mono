@@ -14,8 +14,8 @@ Publication is disabled. Nothing in tiers 1–3 may reference this package, and 
 
 ## What is here now
 
-Sub-units **C7a — the core state layer**, **C7b — the wave engine**, and **C8 — the two observation
-adapters**:
+Sub-units **C7a — the core state layer**, **C7b — the wave engine**, **C7c — admission and
+proposers**, and **C8 — the two observation adapters**:
 
 | Surface | Design section | What it is |
 | --- | --- | --- |
@@ -27,8 +27,12 @@ adapters**:
 | The dev-wave allocator | §6.2 | A pure decision function: rows and Reports in, a journaled decision out. Three v0 policies. |
 | Promotion | §6.3 | One preregistered Run against the revealed committed Benchmark, flat, once. |
 | The two observation adapters | §8.2 | `curateAnnouncements` and `deriveOutcomeObservations` — the seven joins, fail-closed, with tuple derivation and verdict-record dedupe on the policy side. Their module headers carry their own reasoning. |
+| The evidence bundle | §6.3, §7.1 | A content-addressed manifest of digests only — saved query, snapshot receipt, exact ordered record list — **refused** rather than filtered when any record is inside the held-out boundary (ruling R5). Its provenance block is what a candidate manifest carries. |
+| The proposer contract | §7.1 | `PolicyProposer.propose({parents, evidence, objective, mutationSurface, budget}) → CandidateManifest[]`. Product-local; implementations are invisible to the campaign. |
+| The reference proposer | §7.2 | Deterministic skill ablation and recombination over the parent loadout. No model, no clock, no randomness. The replaceability falsifier, not a baseline. |
+| Admission | §7.3, §7.4 | Eleven individually-reported checks, injected ports, a payload-class consent gate, and a `tupleDigest`-keyed population with first-admitted attribution. |
 
-Admission and proposers (C7c) and the archive and CLI (C7d) build on these types. This package
+The archive and CLI (C7d) build on these types. This package
 implements **no execution, assembly, or aggregation machinery** — re-implementing any of it is
 forbidden duplication (§6.1), and statistics reach this product only as `benchmarking-aggregate`
 method-registry references (program ruling R3). The source-boundary guard enforces both.
@@ -227,7 +231,136 @@ methods go into the Run's `analysisPlan` with their parameters verbatim, so
 `benchmarking-aggregate` derives `preregistered: true` for the promotion Report and `false` for
 every development one.
 
+## Admission and proposers
+
+### The evidence bundle refuses; it does not filter
+
+Ruling R5 says the exclusion filter is wired into bundle assembly and "a passthrough is a blocker by
+definition". A filter that exists only as a helper the caller *may* call is a passthrough, so
+`assembleEvidenceBundle` **refuses** a record list containing anything inside the boundary, naming
+every offender. `partitionHeldOut` is exported for the caller that wants to drop excluded records at
+the query layer first, and assembly independently re-checks. The consequence is the point: there is
+no way to obtain a `CandidateEvidenceProvenance` from this package without naming a boundary, and
+C6's learner refuses to seal a manifest without provenance (F-C6-1) — so no candidate exists that
+was not proposed against a declared held-out boundary.
+
+Three axes are checked. Instance and repo are exact set membership. The third, `unattributable`, is
+the one a permissive implementation would omit: a record carrying neither an instance id nor a repo
+cannot be shown to be *outside* the boundary, and "could not check" is not "checked and clean". The
+bundle carries the boundary's digest and source reference and never its items — a bundle manifest is
+the document most likely to be handed to a proposer, and the items are the secret a committed
+Benchmark exists to keep.
+
+### The admission pipeline
+
+`admitCandidate` returns a result; it does not throw on rejection. A rejection is a product decision
+the campaign journals (`candidate-rejected`) and continues past. Malformed *inputs* still throw.
+
+| # | Check | Refusal category |
+| --- | --- | --- |
+| 1 | `manifest` — the bytes are the canonical sealed form and validate (substrate §5.3) | `manifest-invalid` |
+| 2 | `signature` — cross-operator candidates require a verified DSSE binding (substrate §5.2) | `manifest-invalid` |
+| 3 | `evidence-bundle` — the provenance matches a bundle this campaign issued (ruling R5) | `evidence-bundle-mismatch` |
+| 4 | `frozen-axes` — the tuple byte-shares every campaign `frozenAxes` value | `frozen-axis-disagreement` |
+| 5 | `mutation-surface` — mutable axes carry exact pins; no axis is unclassified | `constraint-shaped-pin`, `unclassified-axis` |
+| 6 | `materialization` — `assertMaterializable`, then the package digests to the tuple's pin | `materialization-mismatch` |
+| 7 | `mutable-paths` — ruling R2's additive per-file diff, when prefixes are declared | `mutation-surface` |
+| 8 | `lexical-scan` — no held-out identifier in the materialized bodies or the declared changes | `held-out-contamination` |
+| 9 | `payload-consent` — hostile classes need the owner's admission-time approval (§7.4) | `payload-consent-required` |
+| 10 | `smoke-canary` — the optional canary completes | `smoke-canary-failed` |
+| 11 | `population` — the arm is minted or joined, keyed by `tupleDigest` | `population-conflict` |
+
+Every check is reported whatever the outcome; a check never reached is `skipped` with a stated
+reason rather than omitted, so the report's shape does not depend on where it failed.
+
+**The order is a security property, not a performance one.** The canary runs the candidate's code
+(§7.4), so it sits behind the consent gate — an unconsented hostile payload is never executed to
+find out whether it works. The lexical scan sits behind materialization because it scans the
+*materialized bodies*; a scan of `declaredChanges.summary` alone would scan the one string a
+contaminated proposer controls entirely.
+
+Checks 4 and 5 call the wave engine's own `checkCandidateAgainstCampaign`, so the population and the
+arms cannot disagree about what the campaign requires: one rule, one implementation, run at both
+boundaries.
+
+### Population and attribution
+
+Membership is keyed by `tupleDigest` (§7.3). A second manifest proposing an already-admitted tuple
+joins the existing arm; `attribution` is written once by the first-admitted manifest and is never
+moved, because "later manifests are journaled against the same arm" is load-bearing for any future
+paid-proposal economics — and displacing attribution is exactly the move such economics would create
+an incentive for. Arm ids derive from the tuple digest (`arm-<first 12 hex>`) rather than from
+insertion order, so a resumed campaign and a re-derived one agree on the ids a Run's bytes were
+sealed over.
+
+### The reference proposer's enumeration
+
+Let `S` be the parent tree's skill names, sorted by UTF-16 code unit. In order, truncated at
+`budget.maxProposals`: every single ablation `S` minus one skill, then every pair `S` minus two, for
+each `i < j` in index order. Single removals come first because a budget affording only a few
+proposals should spend them on the smaller step. A variant whose tree digest equals the parent's, or
+repeats an earlier variant's, is dropped before sealing. A parent with no skills yields nothing,
+reported as an empty list rather than as an error. No model call, no network, no clock, no
+randomness — two hosts running it against one parent tree with one budget emit byte-identical
+manifests.
+
 ## Findings
+
+### C7c — admission and proposers
+
+- **F-C7c-1 (the held-out mirror-vs-port decision).** The shipped exclusion machinery is
+  `excludeHeldOutSlate` (instance) and `loadCapabilitySlateRepos` (repo), both in `client/` — tier 4
+  like this package but a different product, and denied by the source-boundary guard. Importing was
+  refused (the guard's stated rationale), and so was porting the *rule* as a host-supplied
+  predicate: that satisfies R5 on paper while letting a permissive host admit the slate, which is a
+  passthrough with extra steps. **Chosen: mirror the semantics, port the boundary.** The comparison
+  rules live in `evidence-bundle/held-out.ts` where this package's fixtures pin them; the boundary's
+  content arrives as a `HeldOutBoundary` value, so nothing is hardcoded and a committed Benchmark's
+  revealed items are a legal source alongside a slate artifact (§6.3). A drift note in that module
+  records exactly what would signal divergence: neither upstream normalizes, and neither does this.
+  The lexical scan has no upstream to mirror — the capability slate's lexical axis is
+  `attestation: "self-attested"`, a human's claim — so the rule is stated in full there instead.
+
+- **F-C7c-2 (two format tokens added).** Neither design names a token for the evidence-bundle
+  document or the population registry; both are host-persisted documents this package seals, hands
+  out, and re-reads across restarts, and a versionless envelope cannot refuse a future revision's
+  bytes. Added on C7a's precedent (F-C7a-1) as product conventions, not protocol surfaces.
+
+- **F-C7c-3 (the contract returns manifests, so payload bytes travel out of band).** §7.1's return
+  type is `CandidateManifest[]`, and a manifest names its loadout by digest. The bytes therefore
+  reach admission through the materializer port, not through the proposer's return value. This is
+  not a gap in the design — it is what §7.3's "materializes digest-correct through the provisioner"
+  is for — but it means a proposer emitting manifests for packages nobody can fetch produces
+  candidates that fail at check 6, which is the correct and legible failure.
+  `enumerateReferenceCandidates` returns the trees alongside the manifests for hosts that drive both
+  ends.
+
+- **F-C7c-4 (the payload-class map is this unit's, not the design's).** §7.4 lists the gradient by
+  example and never maps it onto `learner-public.v1`'s roots. The mapping is stated in full in
+  `admission/payload-class.ts` under two rules: executability decides (so `tests/` is
+  `hook-or-tool-config` — a learner-authored test is a script that runs during evaluation), and ties
+  go to the more hostile class. A tripwire test asserts the map covers exactly the profile's
+  classification, so a root added upstream fails here rather than defaulting. `harness-code` is
+  unreachable from inside a harness-state tree by construction and is reached instead by an
+  unrecognized *loadout kind* — a candidate proposing a runtime nobody has classified.
+
+- **F-C7c-5 (materialization is ported, and the check stays here).** C5's workspace machinery does
+  digest-correct materialization against a real filesystem, and the catalog would permit the
+  dependency. It was refused: the guard denies `task-execution-workspace` because "naming a concrete
+  backend is exactly what the injected-port posture exists to prevent", and admission runs against
+  whatever venue the campaign uses. So the port supplies **only the bytes** and may not report
+  success — a port returning a boolean "yes it matched" is the passthrough R5 warns about, one gate
+  over. Both substrate §4.2 controls (`assertMaterializable`, then `hashTreeLearnerPublicV1`) run
+  here, on the port's output. Running `assertMaterializable` again is not redundancy: the digest is
+  blind to `.git/`, so a smuggled `.git/hooks/post-checkout` digest-verifies perfectly, and a test
+  asserts that byte-equality directly. If the only refusal lived behind the port, a gate holding a
+  non-conforming materializer would admit the package and the canary would fire the hook.
+
+- **F-C7c-6 (`crossOperator` is declared, never inferred).** Whether a proposer is a stranger is a
+  fact about the operator's setup. A package that guessed would either nag an owner about their own
+  learner or wave a stranger's hooks through, and v0's bound on exposure is precisely the
+  closed-proposer setup (§7.4). Same-operator hostile payloads are admitted and the report says so,
+  naming the vacuity of isolation rather than implying a safety this venue does not have.
 
 ### C7b — the wave engine
 
@@ -331,7 +464,7 @@ The portal dependencies must be installed and built from source first, in depend
 ```
 task-execution/protocol -> task-execution/profiles -> task-execution/backend -> trust/core
   -> benchmarking/records -> benchmarking/run -> benchmarking/aggregate -> benchmarking/local
-  -> policy/identity
+  -> policy/identity -> policy/outcomes
 ```
 
 `yarn test` additionally needs the TEP conformance kit built (F-C7b-4): `evidence/protocol`,
