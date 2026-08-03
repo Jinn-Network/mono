@@ -16,6 +16,7 @@ const BENCHMARKING_PACKAGES = [
   ['run', '@jinn-network/benchmarking-run'],
   ['interop', '@jinn-network/benchmarking-interop'],
   ['marketplace', '@jinn-network/benchmarking-marketplace'],
+  ['local', '@jinn-network/benchmarking-local'],
 ];
 
 // Cross-tree Jinn dependencies live outside packages/benchmarking; map name -> absolute dir
@@ -112,6 +113,25 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/task-execution-backend',
       '@jinn-network/trust-core',
       '@jinn-network/trust-resolve',
+    ],
+    optionalDependencies: [], peerDependencies: [],
+  }],
+  // local (C4) deliberately declares NO backend and NO evidence dependency: the local venue's
+  // admission-check and runtime-observation shapes are mirrored structurally, not imported
+  // (policy identity design §2 precedent). task-execution-backend/protocol resolve only so
+  // benchmarking-run's own portal graph installs.
+  ['local', {
+    dependencies: [
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+    ],
+    devDependencies: [
+      '@jinn-network/benchmarking-testing',
+      '@jinn-network/task-execution-profiles',
+    ],
+    portalResolutions: [
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-protocol',
     ],
     optionalDependencies: [], peerDependencies: [],
   }],
