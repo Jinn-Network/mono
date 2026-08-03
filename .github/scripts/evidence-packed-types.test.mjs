@@ -31,6 +31,16 @@ const packages = [
 ];
 
 const trustCoreArchiveName = '@jinn-network/trust-core';
+const recordDiscoveryPackages = [
+  [
+    '@jinn-network/record-discovery-protocol',
+    join(root, 'packages', 'discovery', 'protocol'),
+  ],
+  [
+    '@jinn-network/record-discovery-serve',
+    join(root, 'packages', 'discovery', 'serve'),
+  ],
+];
 
 const codeEntrypoints = [
   '@jinn-network/evidence-protocol',
@@ -108,6 +118,10 @@ try {
 
   await run('corepack', ['yarn@4.13.0', 'install', '--immutable'], { cwd: trustCoreRoot });
   await run('corepack', ['yarn@4.13.0', 'build'], { cwd: trustCoreRoot });
+  for (const [, packageRoot] of recordDiscoveryPackages) {
+    await run('corepack', ['yarn@4.13.0', 'install', '--immutable'], { cwd: packageRoot });
+    await run('corepack', ['yarn@4.13.0', 'build'], { cwd: packageRoot });
+  }
   await mkdir(archivesRoot);
   const archives = new Map();
   const trustCorePacked = JSON.parse(await run(
@@ -119,6 +133,17 @@ try {
     throw new Error('npm pack returned an unexpected result for @jinn-network/trust-core');
   }
   archives.set(trustCoreArchiveName, join(archivesRoot, trustCorePacked[0].filename));
+  for (const [name, packageRoot] of recordDiscoveryPackages) {
+    const packed = JSON.parse(await run(
+      'npm',
+      ['pack', '--ignore-scripts', '--json', '--pack-destination', archivesRoot],
+      { cwd: packageRoot },
+    ));
+    if (packed.length !== 1 || typeof packed[0]?.filename !== 'string') {
+      throw new Error(`npm pack returned an unexpected result for ${name}`);
+    }
+    archives.set(name, join(archivesRoot, packed[0].filename));
+  }
   for (const [directory, name] of packages) {
     const packed = JSON.parse(await run(
       'npm',
@@ -138,6 +163,7 @@ try {
     dependencies: Object.fromEntries([
       ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
       [trustCoreArchiveName, `file:${archives.get(trustCoreArchiveName)}`],
+      ...recordDiscoveryPackages.map(([name]) => [name, `file:${archives.get(name)}`]),
       ['@types/better-sqlite3', '7.6.13'],
       ['@types/node', '^22.0.0'],
       ['typescript', '^5.9.3'],

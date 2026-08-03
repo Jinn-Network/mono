@@ -113,10 +113,11 @@ async function waitForHealth(baseUrl: string, timeoutMs: number): Promise<void> 
 const MAX_STARTUP_OUTPUT_CHARS = 16_384;
 
 /**
- * Watch the child process's combined stdout+stderr for Ponder's RPC diagnostic
- * retry log lines. When the retry delay doubles past 4s (retry_count >= 7, meaning
- * exponential backoff has reached 8s delay), the RPC is definitively unreachable
- * and we reject so the caller can fail fast rather than burning the full ready timeout.
+ * Watch the child process's combined stdout+stderr for terminal startup states
+ * that do not stop `ponder dev`: build failures and exhausted RPC diagnostics.
+ * When the retry delay doubles past 4s (retry_count >= 7, meaning exponential
+ * backoff has reached 8s delay), the RPC is definitively unreachable and we
+ * reject so the caller can fail fast rather than burning the full ready timeout.
  *
  * Ponder 0.16.x emits structured log lines like:
  *   WARN  Received JSON-RPC error action=rpc_diagnostic ... retry_count=7 retry_delay=8000
@@ -128,11 +129,21 @@ const MAX_STARTUP_OUTPUT_CHARS = 16_384;
  * Promise.race resolves to detach the data listeners — otherwise the listeners
  * accumulate across test invocations and Node emits MaxListenersExceededWarning.
  */
-function watchForRpcDiagnosticFailure(child: ChildProcess): { promise: Promise<never>; cancel: () => void } {
+function watchForStartupFailure(child: ChildProcess): { promise: Promise<never>; cancel: () => void } {
   let cleanup = (): void => {};
+  let recentOutput = '';
   const promise = new Promise<never>((_, reject) => {
     const onData = (chunk: Buffer | string): void => {
       const text = chunk.toString();
+      recentOutput = (recentOutput + text).slice(-8_192);
+      // `ponder dev` stays alive in watch mode after a compile failure, so the
+      // process-exit race cannot detect this condition. Fail immediately instead
+      // of waiting for the health timeout.
+      if (recentOutput.includes('Build failed') && /stage=(?:api|indexing)/u.test(recentOutput)) {
+        cleanup();
+        reject(new Error('Ponder build failed before becoming healthy.'));
+        return;
+      }
       // Match "retry_delay=NNNN" where NNNN >= 4000 during an rpc_diagnostic action.
       // This indicates the primary chain's RPC has failed all cheap retries.
       if (
@@ -284,21 +295,21 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
     );
   });
 
-  const rpcWatcher = watchForRpcDiagnosticFailure(child);
+  const startupWatcher = watchForStartupFailure(child);
   const healthyPromise = waitForHealth(baseUrl, readyTimeoutMs);
 
   try {
-    await Promise.race([healthyPromise, exitPromise, rpcWatcher.promise]);
+    await Promise.race([healthyPromise, exitPromise, startupWatcher.promise]);
   } catch (err) {
-    // Always detach RPC watcher listeners before throwing.
-    rpcWatcher.cancel();
+    // Always detach startup watcher listeners before throwing.
+    startupWatcher.cancel();
     await terminateChild(200);
     detachStartupCapture();
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`${message}\nPonder startup output (tail):\n${redactedStartupOutput()}`);
   }
-  // Detach RPC watcher listeners on the happy path so they don't accumulate.
-  rpcWatcher.cancel();
+  // Detach startup watcher listeners on the happy path so they don't accumulate.
+  startupWatcher.cancel();
   detachStartupCapture();
 
   let torn = false;

@@ -108,6 +108,11 @@ jobs:
       # Build the indexer (Ponder codegen) so the hermetic snapshot indexer
       # round-trip (test/hermetic/indexer-roundtrip.test.ts, run via
       # `yarn test:hermetic`) can spawn a real indexer against the snapshot chain.
+      - name: Build indexer local package dependencies
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+
       - name: Install indexer deps
         working-directory: packages/indexer
         run: yarn install --immutable
