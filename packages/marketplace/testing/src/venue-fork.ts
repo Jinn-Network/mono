@@ -65,6 +65,11 @@ const MOCK_MECH_DELIVER_ABI = [
 const SAFE_SINGLETON = "0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552" as Address;
 const SAFE_PROXY_FACTORY = "0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2" as Address;
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+const DEFAULT_FORK_RPC_URL = "https://sepolia.base.org";
+
+export function resolveForkRpcUrl(configured = process.env.JINN_MARKETPLACE_FORK_RPC_URL): string {
+  return configured?.trim() || DEFAULT_FORK_RPC_URL;
+}
 
 const SAFE_SETUP_ABI = [
   {
@@ -338,7 +343,7 @@ export async function withForkVenue<T>(options: {
     // Base documents this as its archive-capable Sepolia endpoint. The prior publicnode fallback
     // now rejects historical log reads without a personal token, which made the replay test
     // depend on a provider-specific account despite using only public testnet state.
-    process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://sepolia.base.org",
+    resolveForkRpcUrl(),
     "--port",
     String(port),
     "--silent",
