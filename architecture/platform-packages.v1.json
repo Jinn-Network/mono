@@ -156,7 +156,7 @@
       "stable": false
     },
     "experimental-environment-supply": {
-      "expectedPackageCount": 9,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "disabled"
       ],
@@ -378,6 +378,48 @@
       },
       "publicSurface": {
         "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/information-world",
+      "path": "packages/environments/information-world",
+      "domain": "environments",
+      "role": "sealed information-world record family and loopback replay capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
         "profiles": [],
         "fixtures": [
           "fixtures"
