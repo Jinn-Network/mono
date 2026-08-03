@@ -35,6 +35,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/chain-environment-record', join(root, 'packages', 'environments', 'chain-record')],
+  ['@jinn-network/information-world', join(root, 'packages', 'environments', 'information-world')],
 ]);
 
 const JINN_DEPENDENCY_GRAPH = new Map([
@@ -115,7 +116,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   // conformance driver, and `trust-core` is the usual shadow entry — protocol's own transitive
   // dependency needs a matching top-level override in every standalone per-package project.
   // chain-environment-record has NO Jinn dependency of its own, so no second shadow is needed.
-  ['facts/chain-environments', { dependencies: ['@jinn-network/chain-environment-record', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
+  ['facts/chain-environments', { dependencies: ['@jinn-network/chain-environment-record', '@jinn-network/information-world', '@jinn-network/record-discovery-protocol'], devDependencies: ['@jinn-network/record-discovery-testing', '@jinn-network/trust-core'], optionalDependencies: [], peerDependencies: [] }],
   // sources/evidence-journal's own source imports protocol + serve +
   // evidence-discovery + evidence-repository (plan Task 25; program §6/F7
   // widens the "one edge per discovery leaf meets a record-kind tree" rule

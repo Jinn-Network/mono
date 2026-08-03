@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-facts-chain-environments",
   "version": "0.1.0",
-  "description": "Facts profiles and record-fact recompute for the Jinn chain-environment and crypto-environment record kinds.",
+  "description": "Facts profiles and record-fact recompute for the Jinn chain-environment/1.0, crypto-environment/1.0, and information-world/1.0 record kinds.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@jinn-network/chain-environment-record": "0.1.0",
+    "@jinn-network/information-world": "0.1.0",
     "@jinn-network/record-discovery-protocol": "0.1.0"
   },
   "devDependencies": {
@@ -50,6 +51,7 @@
   },
   "resolutions": {
     "@jinn-network/chain-environment-record": "portal:../../../environments/chain-record",
+    "@jinn-network/information-world": "portal:../../../environments/information-world",
     "@jinn-network/record-discovery-protocol": "portal:../../protocol",
     "@jinn-network/record-discovery-testing": "portal:../../testing",
     "@jinn-network/trust-core": "portal:../../../trust/core"

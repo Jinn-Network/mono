@@ -1,0 +1,387 @@
+{
+  "version": "irk1",
+  "note": "Each group's requests must produce one key under the group's policy, and no two groups may produce the same key.",
+  "groups": [
+    {
+      "name": "header-order-and-ows",
+      "expectedKey": "irk1:ea17d030f8ffee26d1609211cee09db01665915b821ce5986e66800dcb7a8905",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools",
+          "headers": [
+            [
+              "accept",
+              "application/json"
+            ],
+            [
+              "content-type",
+              "application/json"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools",
+          "headers": [
+            [
+              "content-type",
+              "application/json"
+            ],
+            [
+              "accept",
+              "application/json"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools",
+          "headers": [
+            [
+              "Accept",
+              " application/json "
+            ],
+            [
+              "CONTENT-TYPE",
+              "application/json"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "undeclared-header-noise",
+      "expectedKey": "irk1:12203a3555e6f00bc88064a405fd138ba3bf09ff5b0ce1fc36a73de59cbfe85d",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/protocols"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/protocols",
+          "headers": [
+            [
+              "user-agent",
+              "solver/1.0"
+            ]
+          ]
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/protocols",
+          "headers": [
+            [
+              "accept-encoding",
+              "gzip, br"
+            ],
+            [
+              "traceparent",
+              "00-a-b-01"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "query-order",
+      "expectedKey": "irk1:fb6da8b0a3f56012f9c5320ed8ac47098a84439ca553bdd1f02ed58f55c85324",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools?chain=base&limit=50&sort=apy"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools?sort=apy&chain=base&limit=50"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools?limit=50&sort=apy&chain=base"
+        }
+      ]
+    },
+    {
+      "name": "origin-normalization",
+      "expectedKey": "irk1:48c5fbb2a14e1556638d23f86444686fbc3953fec3c75336f34c3039aefaccce",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/guide"
+        },
+        {
+          "method": "GET",
+          "url": "HTTPS://API.EXAMPLE.TEST/guide"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test:443/guide"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/guide#section"
+        }
+      ]
+    },
+    {
+      "name": "percent-encoding",
+      "expectedKey": "irk1:a3caa1e1877df53c0e7d6ace6609d13cf4acb0ad16abb02ac6b10af7e26798f5",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/a~b"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/a%7Eb"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/a%7eb"
+        }
+      ]
+    },
+    {
+      "name": "reserved-delimiter-stays-encoded",
+      "expectedKey": "irk1:66a1081e0e0c45017fb7a32cd0fd4ad7c99cc27942f72f306f31a58d33ea460e",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/a%2Fb"
+        }
+      ]
+    },
+    {
+      "name": "method-case-and-json-jcs-body",
+      "expectedKey": "irk1:a930b1bd193549f7cd8fe045cbe7205bc1cff06debd1c2d3ad3d1e501ee70613",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "https://api.example.test/query",
+          "body": "{\"a\":1,\"b\":2}"
+        },
+        {
+          "method": "post",
+          "url": "https://api.example.test/query",
+          "body": "{ \"b\": 2, \"a\": 1 }"
+        },
+        {
+          "method": "PoSt",
+          "url": "https://api.example.test/query",
+          "body": "{\"a\":1,\n\"b\":2}"
+        }
+      ]
+    },
+    {
+      "name": "json-jcs-ieee754-numbers",
+      "expectedKey": "irk1:1c471e9d3db11799570535f5d126c7ce3d2232888bd100f917f3255d2a569612",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "https://api.example.test/numbers",
+          "body": "{\"fraction\":1.25,\"large\":1e+30,\"small\":1e-7,\"zero\":-0}"
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/numbers",
+          "body": "{\"zero\":0,\"small\":0.0000001,\"large\":1e30,\"fraction\":1.250}"
+        }
+      ]
+    },
+    {
+      "name": "utf8-trim-empty-is-absent",
+      "expectedKey": "irk1:1881535d942f30b748831963abfcd0e9643e9f66442b30b9e40a0a2806b22522",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "utf8-trim"
+      },
+      "requests": [
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim"
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim",
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "url": "https://api.example.test/trim",
+          "body": " \t\n "
+        }
+      ]
+    },
+    {
+      "name": "trailing-slash-strip",
+      "expectedKey": "irk1:83f3b095b0779ab95379c1d5f6a956b07187b7f12839a1981844f48d92217876",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "strip",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools/"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/pools"
+        }
+      ]
+    },
+    {
+      "name": "plus-as-space",
+      "expectedKey": "irk1:2be112824955f27eb073a5b8eafb5f6e5298786393679143f1353f2d298dd66e",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "space",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "url": "https://api.example.test/search?q=usd+coin"
+        },
+        {
+          "method": "GET",
+          "url": "https://api.example.test/search?q=usd%20coin"
+        }
+      ]
+    }
+  ],
+  "refusals": [
+    {
+      "name": "raw-unicode-authority-before-idna",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "request": {
+        "method": "GET",
+        "url": "https://exämple.test/pools"
+      }
+    },
+    {
+      "name": "percent-encoded-authority-before-url-normalization",
+      "policy": {
+        "version": "irk1",
+        "headerSubset": [
+          "accept",
+          "content-type"
+        ],
+        "pathTrailingSlash": "preserve",
+        "plusInQuery": "literal",
+        "bodyCanonicalization": "json-jcs"
+      },
+      "request": {
+        "method": "GET",
+        "url": "https://exa%6dple.test/pools"
+      }
+    }
+  ]
+}

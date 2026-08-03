@@ -1,0 +1,60 @@
+{
+  "version": "adversarial-v1",
+  "cases": [
+    {
+      "name": "request-key-collision",
+      "stage": "seal",
+      "reason": "two entries resolve to one request key (§5.1 step 6)"
+    },
+    {
+      "name": "request-key-declared-mismatch",
+      "stage": "seal",
+      "reason": "a stored key that does not recompute from its own parts (CF6-5)"
+    },
+    {
+      "name": "policy-header-subset-unsorted",
+      "stage": "seal",
+      "reason": "the declared header subset must be strictly ascending"
+    },
+    {
+      "name": "policy-header-subset-credential",
+      "stage": "seal",
+      "reason": "a credential-bearing header must not key a sealed corpus (CF6-1)"
+    },
+    {
+      "name": "miss-policy-absent",
+      "stage": "seal",
+      "reason": "fail-closed is non-negotiable, so the miss response is required (§4.4)"
+    },
+    {
+      "name": "miss-policy-redirect",
+      "stage": "seal",
+      "reason": "a redirect miss points outside the sealed world (CF6-7)"
+    },
+    {
+      "name": "synthetic-claims-capture",
+      "stage": "seal",
+      "reason": "a synthetic corpus that claims capture provenance is false by construction (CF6-8)"
+    },
+    {
+      "name": "entry-origin-undeclared",
+      "stage": "seal",
+      "reason": "every entry origin must be declared in corpus.origins"
+    },
+    {
+      "name": "corpus-body-digest-mismatch",
+      "stage": "service",
+      "reason": "the record seals fine; the corpus does not materialize as it describes (§5.1 step 6)"
+    },
+    {
+      "name": "captured-provenance-unprovable",
+      "stage": "none",
+      "reason": "seals fine and is labeled a declaration; fidelity is never checked as a fact (§4.4)"
+    },
+    {
+      "name": "corpus-injected-instruction",
+      "stage": "none",
+      "reason": "seals fine and is served verbatim as data; nothing here interprets it (§8)"
+    }
+  ]
+}

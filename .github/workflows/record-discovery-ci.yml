@@ -517,10 +517,11 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Build cross-tree portal dependencies from source (trust-core, chain-environment-record)
+      - name: Build cross-tree portal dependencies from source (trust-core, chain-environment-record, information-world)
         run: |
           (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+          (cd packages/environments/information-world && yarn install --immutable && yarn build)
       - name: Restore Record Discovery Protocol distribution
         uses: actions/download-artifact@v4
         with:
@@ -692,5 +693,6 @@ jobs:
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/environments/record && yarn install --immutable && yarn build)
           (cd packages/environments/chain-record && yarn install --immutable && yarn build)
+          (cd packages/environments/information-world && yarn install --immutable && yarn build)
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/record-discovery-packed-types.test.mjs

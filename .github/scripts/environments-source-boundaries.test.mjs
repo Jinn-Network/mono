@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'environments');
-const environmentDirectories = ['record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction'];
+// This guard runs before the package test job, so the architecture job installs the package's
+// declared TypeScript compiler first. Resolving from that package, rather than this repository
+// script, keeps the policy pinned to the information-world toolchain.
+const informationWorldRequire = createRequire(join(packages, 'information-world', 'package.json'));
+const ts = informationWorldRequire('typescript');
+const environmentDirectories = [
+  'record', 'verification', 'chain-record', 'chain-verification', 'chain-extraction', 'information-world',
+];
 
 // `packages/environments/record` is tier 2: records and meaning, no behavior. It declares
 // ZERO Jinn runtime dependencies (design §3.3: zod + noble-class primitives only), so every
@@ -178,6 +186,37 @@ const VERIFICATION_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 const VERIFICATION_FOREIGN_PACKAGES = [
   ...ENVIRONMENTS_FOREIGN_PACKAGES.filter((entry) => entry !== '@jinn-network/trust-*'),
   '@jinn-network/trust-resolve',
+];
+// `packages/environments/information-world` is tier 2 + tier 3 in one package: the record
+// layer is pure, and the replay service is the tree's ONLY production transport surface.
+// Closure is a negative property, so this tree guard backs up the package-local closure test:
+// exactly one file may name `node:http`, and that one file may bind `createServer` only.
+const INFORMATION_WORLD_ALLOWED_EXTERNALS = ['@noble/hashes', 'zod'];
+const INFORMATION_WORLD_ALLOWED_DEPENDENCIES = ['@noble/hashes', 'zod'];
+const INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/evidence-protocol',
+  '@types/node', 'ajv', 'canonicalize', 'typescript', 'vitest',
+];
+const INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const INFORMATION_WORLD_TEST_ONLY_JINN_PACKAGES = [
+  '@jinn-network/chain-environment-record',
+  '@jinn-network/chain-environment-verification',
+  '@jinn-network/evidence-protocol',
+];
+const INFORMATION_WORLD_TRANSPORT_SOURCE = 'information-world/src/service.ts';
+const INFORMATION_WORLD_FILESYSTEM_SOURCES = [
+  'information-world/src/fixtures.ts',
+  'information-world/src/closure.test.ts',
+  'information-world/src/schema-parity.test.ts',
+];
+const INFORMATION_WORLD_FOREIGN_ROOTS = environmentDirectories
+  .filter((directory) => directory !== 'information-world')
+  .map((directory) => join(packages, directory));
+const TRANSPORT_MODULES = [
+  'node:https', 'node:net', 'node:tls', 'node:dns', 'node:dgram', 'node:http2',
+  'undici', 'axios', 'node-fetch', 'got', 'superagent', 'ws',
 ];
 // Finding F-C2-5: the staged-state file store is this tree's only production
 // filesystem surface. Its directory is an argument, not ambient authority --
@@ -367,6 +406,195 @@ function specifiers(source) {
   ].flatMap((pattern) => [...source.matchAll(pattern)].map((match) => match[1]));
 }
 
+function capabilityName(identifier) {
+  // `escapedText` is TypeScript's normalized spelling: pro\\u0063ess becomes `process`.
+  return String(identifier.escapedText);
+}
+
+// This is intentionally a capability inventory, not a source-level sandbox. The real egress
+// boundary is the Linux Docker execution profile. Here we make new module/global authority a
+// deliberate review event: production source may use only this already-audited ambient surface.
+const INFORMATION_WORLD_APPROVED_GLOBALS = new Set([
+  'Array', 'Error', 'JSON', 'Map', 'Number', 'Object', 'Promise', 'Reflect', 'RegExp', 'Set',
+  'String', 'Symbol', 'SyntaxError', 'TextDecoder', 'TextEncoder', 'TypeError', 'URL', 'Uint8Array',
+  'WeakMap', 'WeakSet',
+]);
+const INFORMATION_WORLD_APPROVED_MODULE_BINDINGS = new Set([
+  '@noble/hashes/sha2.js#sha256',
+  '@noble/hashes/utils.js#bytesToHex',
+  'zod#z',
+  'node:http#createServer',
+]);
+
+function capabilityCompilerOptions() {
+  return {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    strict: true,
+    skipLibCheck: true,
+    types: ['node'],
+    lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+  };
+}
+
+function capabilityProgram(sourceTexts) {
+  const options = capabilityCompilerOptions();
+  const host = ts.createCompilerHost(options, true);
+  const normalized = new Map([...sourceTexts.entries()].map(([file, source]) => [resolve(file), source]));
+  const baseGetSourceFile = host.getSourceFile.bind(host);
+  const baseReadFile = host.readFile.bind(host);
+  const baseFileExists = host.fileExists.bind(host);
+  host.getSourceFile = (file, languageVersion, onError, shouldCreateNewSourceFile) => {
+    const source = normalized.get(resolve(file));
+    return source === undefined
+      ? baseGetSourceFile(file, languageVersion, onError, shouldCreateNewSourceFile)
+      : ts.createSourceFile(file, source, languageVersion, true, ts.ScriptKind.TS);
+  };
+  host.readFile = (file) => normalized.get(resolve(file)) ?? baseReadFile(file);
+  host.fileExists = (file) => normalized.has(resolve(file)) || baseFileExists(file);
+  return ts.createProgram({ rootNames: [...normalized.keys()], options, host });
+}
+
+function importedBindings(declaration) {
+  if (declaration.importClause === undefined) return ['<side-effect>'];
+  const bindings = [];
+  if (declaration.importClause.name !== undefined) bindings.push('default');
+  const named = declaration.importClause.namedBindings;
+  if (named !== undefined) {
+    if (ts.isNamespaceImport(named)) bindings.push('*');
+    else bindings.push(...named.elements.map((entry) => capabilityName(entry.propertyName ?? entry.name)));
+  }
+  return bindings;
+}
+
+function isReferenceIdentifier(node) {
+  // TypeScript's broad `isExpression` helper also accepts identifier-shaped property and type
+  // names. Capability inventory is about value reads, so exclude those named positions first.
+  const parent = node.parent;
+  if ((ts.isPropertyAccessExpression(parent) || ts.isPropertyAssignment(parent)
+    || ts.isPropertyDeclaration(parent) || ts.isPropertySignature(parent)
+    || ts.isMethodDeclaration(parent) || ts.isMethodSignature(parent)
+    || ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent)) && parent.name === node) return false;
+  if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) return false;
+  if (ts.isImportSpecifier(parent) || ts.isImportClause(parent) || ts.isNamespaceImport(parent)
+    || ts.isImportEqualsDeclaration(parent) || ts.isExportSpecifier(parent)) return false;
+  if (ts.isTypeReferenceNode(parent) || ts.isExpressionWithTypeArguments(parent)
+    || ts.isQualifiedName(parent) || ts.isTypeQueryNode(parent)) return false;
+  return ts.isExpression(node);
+}
+
+function isDirectReflectOwnKeys(node) {
+  const property = node.parent;
+  return ts.isPropertyAccessExpression(property)
+    && property.expression === node
+    && capabilityName(property.name) === 'ownKeys'
+    && ts.isCallExpression(property.parent)
+    && property.parent.expression === property;
+}
+
+function canonicalSymbol(symbol, checker) {
+  return (symbol.flags & ts.SymbolFlags.Alias) !== 0 ? checker.getAliasedSymbol(symbol) : symbol;
+}
+
+function isDirectCreateServerCall(node, createServerSymbols, checker) {
+  const symbol = checker.getSymbolAtLocation(node);
+  return symbol !== undefined
+    && (createServerSymbols.has(symbol) || createServerSymbols.has(canonicalSymbol(symbol, checker)))
+    && ts.isCallExpression(node.parent)
+    && node.parent.expression === node;
+}
+
+/**
+ * Build a separately maintained inventory of the static module edges and ambient capabilities
+ * used by information-world production source. Unlike `closure.test.ts`, this does not attempt
+ * to reconstruct arbitrary property names or evaluator paths; runtime Docker isolation owns
+ * that guarantee. Its job is to make capability drift explicit and reviewable.
+ */
+function informationWorldCapabilityInventory(sourceTexts) {
+  const program = capabilityProgram(sourceTexts);
+  const checker = program.getTypeChecker();
+  const findings = [];
+  const moduleEdges = [];
+  const globalCapabilities = new Set();
+  const createServerSymbols = new Set();
+  const add = (kind, detail) => { findings.push(`${kind}:${detail}`); };
+
+  for (const [file] of sourceTexts) {
+    const source = program.getSourceFile(resolve(file));
+    if (source === undefined) {
+      add('program', `missing ${file}`);
+      continue;
+    }
+    for (const diagnostic of source.parseDiagnostics ?? []) {
+      add('parse', ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '));
+    }
+    const visit = (node) => {
+      if (ts.isImportDeclaration(node)) {
+        if (!ts.isStringLiteralLike(node.moduleSpecifier)) {
+          add('module', 'non-static import declaration');
+        } else {
+          for (const binding of importedBindings(node)) {
+            const edge = `${node.moduleSpecifier.text}#${binding}`;
+            moduleEdges.push(`${relative(root, file)} -> ${edge}`);
+            if (!node.moduleSpecifier.text.startsWith('.')
+              && !INFORMATION_WORLD_APPROVED_MODULE_BINDINGS.has(edge)) add('module', edge);
+          }
+          if (node.moduleSpecifier.text === 'node:http'
+            && file.endsWith('/service.ts')
+            && node.importClause?.namedBindings !== undefined
+            && ts.isNamedImports(node.importClause.namedBindings)) {
+            for (const binding of node.importClause.namedBindings.elements) {
+              if (capabilityName(binding.propertyName ?? binding.name) === 'createServer'
+                && capabilityName(binding.name) === 'createServer') {
+                const symbol = checker.getSymbolAtLocation(binding.name);
+                if (symbol !== undefined) {
+                  createServerSymbols.add(symbol);
+                  createServerSymbols.add(canonicalSymbol(symbol, checker));
+                }
+              }
+            }
+          }
+        }
+      } else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) {
+        if (!ts.isStringLiteralLike(node.moduleSpecifier)) add('module', 'non-static export declaration');
+        else if (!node.moduleSpecifier.text.startsWith('.')) add('module', `${node.moduleSpecifier.text}#export`);
+      } else if (ts.isImportEqualsDeclaration(node)) {
+        add('module', 'import equals');
+      } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+        add('module', 'dynamic import');
+      }
+
+      if (ts.isIdentifier(node) && isReferenceIdentifier(node)) {
+        const name = capabilityName(node);
+        const symbol = checker.getSymbolAtLocation(node);
+        if (symbol === undefined) {
+          add('ambient', `unresolved ${name}`);
+        } else if (createServerSymbols.has(symbol) || createServerSymbols.has(canonicalSymbol(symbol, checker))) {
+          if (!isDirectCreateServerCall(node, createServerSymbols, checker)) add('binding', 'node:http#createServer');
+        } else {
+          const declarations = symbol.getDeclarations() ?? [];
+          const ambient = declarations.some((declaration) => /(?:^|\/)lib\..*\.d\.ts$/u.test(declaration.getSourceFile().fileName)
+            || /(?:^|\/)@types\/node(?:\/|$)/u.test(declaration.getSourceFile().fileName));
+          if (ambient) {
+            const capability = name === 'Reflect' && isDirectReflectOwnKeys(node) ? 'Reflect.ownKeys' : name;
+            globalCapabilities.add(capability);
+            if ((name === 'Reflect' && capability !== 'Reflect.ownKeys')
+              || !INFORMATION_WORLD_APPROVED_GLOBALS.has(name)) add('ambient', capability);
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return {
+    findings: [...new Set(findings)].sort(),
+    moduleEdges: [...new Set(moduleEdges)].sort(),
+    globalCapabilities: [...globalCapabilities].sort(),
+  };
+}
+
 function inside(child, parent) {
   const path = relative(parent, child);
   return path === '' || (!path.startsWith('..') && !path.startsWith('/'));
@@ -401,6 +629,55 @@ function forbiddenImportsInFiles(sourceFiles, forbiddenPackages, forbiddenRoots 
   })).sort();
 }
 
+const SOURCE_MODULE_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts'];
+
+function sourceRelativeModule(file, specifier) {
+  const target = resolve(dirname(file), specifier);
+  const candidates = [
+    target,
+    ...SOURCE_MODULE_EXTENSIONS.map((extension) => `${sourceModuleStem(target)}${extension}`),
+    ...SOURCE_MODULE_EXTENSIONS.map((extension) => join(target, `index${extension}`)),
+  ];
+  return candidates.find((candidate) => existsSync(candidate) && lstatSync(candidate).isFile());
+}
+
+function sourceRelativeClosure(entrypoint) {
+  const discovered = new Set();
+  const pending = [entrypoint];
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (file === undefined || discovered.has(file)) continue;
+    discovered.add(file);
+    for (const specifier of specifiers(readFileSync(file, 'utf8')).filter((entry) => entry.startsWith('.'))) {
+      const target = sourceRelativeModule(file, specifier);
+      if (target === undefined) {
+        throw new Error(`unresolvable source relative edge: ${file} -> ${specifier}`);
+      }
+      if (!discovered.has(target)) pending.push(target);
+    }
+  }
+  return [...discovered];
+}
+
+function sourceEntrypointLeakFindings(entrypoint, testingEntry, fixtureEntry) {
+  return sourceRelativeClosure(entrypoint).flatMap((file) => {
+    const findings = [];
+    const path = relative(dirname(entrypoint), file);
+    if (file === testingEntry || /(?:^|\/)testing(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: 'testing region' });
+    }
+    if (file === fixtureEntry || /(?:^|\/)fixtures(?:\.|\/)/u.test(path)) {
+      findings.push({ file, reason: 'fixture region' });
+    }
+    for (const specifier of specifiers(readFileSync(file, 'utf8'))) {
+      if (specifier === 'node:fs' || specifier === 'node:fs/promises' || specifier === 'vitest') {
+        findings.push({ file, reason: specifier });
+      }
+    }
+    return findings;
+  });
+}
+
 function forbiddenImports(sourceRoot, forbiddenPackages, forbiddenRoots = []) {
   return forbiddenImportsInFiles(files(sourceRoot), forbiddenPackages, forbiddenRoots);
 }
@@ -432,6 +709,27 @@ test('the import scanner catches static, export, dynamic, require, and local-pat
     ].join('\n'));
     const findings = forbiddenImports(source, ['@jinn-network/'], [forbidden]);
     assert.equal(findings.length, 11);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the root-entrypoint closure canary follows relative source edges before judging a leak', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-information-world-root-closure-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    const entrypoint = join(source, 'index.ts');
+    const support = join(source, 'support.ts');
+    const fixtures = join(source, 'fixtures.ts');
+    const testing = join(source, 'testing.ts');
+    writeFileSync(entrypoint, 'export * from "./support.js";\n');
+    writeFileSync(support, 'export * from "./fixtures.js";\nexport * from "./testing.js";\n');
+    writeFileSync(fixtures, 'import { readFile } from "node:fs/promises";\nexport { readFile };\n');
+    writeFileSync(testing, 'import { test } from "vitest";\nexport { test };\n');
+
+    assert.deepEqual(
+      sourceEntrypointLeakFindings(entrypoint, testing, fixtures).map((finding) => finding.reason).sort(),
+      ['fixture region', 'node:fs/promises', 'testing region', 'vitest'],
+    );
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
@@ -656,6 +954,122 @@ test('environment-verification takes exactly its two approved package edges', ()
     [...new Set(externals)].sort().filter((name) => !VERIFICATION_ALLOWED_EXTERNALS.includes(name)),
     [],
     'environment-verification production source imports an unapproved external package',
+  );
+});
+
+test('information-world is pure except for one loopback server and fixture readers', () => {
+  const packageDirectory = join(packages, 'information-world');
+  const source = join(packageDirectory, 'src');
+  const testingEntry = join(source, 'testing.ts');
+  const fixtureLoaders = join(source, 'fixtures.ts');
+  const testRegex = /\.test\.[cm]?[jt]sx?$/u;
+
+  const allFiles = files(source);
+  const testingFiles = allFiles.filter((file) =>
+    file === testingEntry || file === fixtureLoaders || testRegex.test(file));
+  const productionFiles = allFiles.filter((file) => !testingFiles.includes(file));
+
+  // Production source has no Jinn package, no foreign tree by relative path, and no I/O
+  // except the one `node:http` admission below.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      productionFiles,
+      ['@jinn-network/', ...NODE_IO_MODULES, ...TRANSPORT_MODULES, 'vitest'],
+      [...FORBIDDEN_ROOTS, ...INFORMATION_WORLD_FOREIGN_ROOTS],
+    ).filter((finding) => finding !== `packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE} -> node:http`),
+    [],
+    'information-world production source must import no Jinn package or transport module other '
+      + 'than node:http in src/service.ts',
+  );
+
+  // This repository-level gate inventories parsed module and global capabilities. It is
+  // deliberately unlike the package-local deny-oriented closure visitor: Docker's
+  // network-denied execution profile, not either source policy, proves no external egress.
+  const productionSources = new Map(productionFiles.map((file) => [file, readFileSync(file, 'utf8')]));
+  assert.deepEqual(
+    forbiddenImportsInFiles(productionFiles, ['node:http']).map((finding) => finding.split(' ->')[0]),
+    [`packages/environments/${INFORMATION_WORLD_TRANSPORT_SOURCE}`],
+    'node:http is admitted in src/service.ts only',
+  );
+  assert.deepEqual(
+    informationWorldCapabilityInventory(productionSources).findings,
+    [],
+    'information-world production source must preserve its approved capability inventory',
+  );
+  const inventory = informationWorldCapabilityInventory(productionSources);
+  assert.deepEqual(inventory.moduleEdges.filter((edge) => !edge.includes(' -> .')),
+    [
+      'packages/environments/information-world/src/extensions.ts -> zod#z',
+      'packages/environments/information-world/src/hashing.ts -> @noble/hashes/sha2.js#sha256',
+      'packages/environments/information-world/src/hashing.ts -> @noble/hashes/utils.js#bytesToHex',
+      'packages/environments/information-world/src/request-key-policy.ts -> zod#z',
+      'packages/environments/information-world/src/schema.ts -> zod#z',
+      'packages/environments/information-world/src/sealing.ts -> zod#z',
+      'packages/environments/information-world/src/service.ts -> node:http#createServer',
+    ],
+    'production external module capabilities must remain the reviewed static inventory');
+  assert.deepEqual(inventory.globalCapabilities,
+    ['Array', 'Error', 'JSON', 'Map', 'Number', 'Object', 'Promise', 'Reflect.ownKeys', 'RegExp', 'Set',
+      'String', 'Symbol', 'SyntaxError', 'TextDecoder', 'TextEncoder', 'TypeError', 'URL', 'Uint8Array',
+      'WeakMap', 'WeakSet'],
+    'production ambient capabilities must remain the reviewed inventory');
+
+  const canaryFindings = (candidate) => informationWorldCapabilityInventory(
+    new Map([[join(source, 'candidate.ts'), candidate]]),
+  ).findings;
+  for (const [capabilityDrift, candidate] of [
+    ['new client module edge', 'import { request } from "node:https";'],
+    ['escaped ambient global', 'pro\\u0063ess.cwd();'],
+    ['direct evaluator global', 'Function("return 1")();'],
+    ['reflect capability alias', 'const own = Reflect.ownKeys; own({});'],
+    ['unexpected global capability', 'Deno.exit();'],
+  ]) {
+    assert.notDeepEqual(canaryFindings(candidate), [],
+      `capability inventory must reject ${capabilityDrift}`);
+  }
+
+  // Filesystem access belongs solely to the testing region and is named one file at a time.
+  const fsUsers = forbiddenImportsInFiles(allFiles, ['node:fs', 'node:fs/promises'])
+    .filter((finding) => !INFORMATION_WORLD_FILESYSTEM_SOURCES.some(
+      (allowed) => finding.startsWith(`packages/environments/${allowed} ->`)));
+  assert.deepEqual(fsUsers, [],
+    `only ${INFORMATION_WORLD_FILESYSTEM_SOURCES.join(' and ')} may touch the filesystem`);
+
+  // CE1, CE3, and evidence-protocol are test-only contract oracles. No other Jinn package,
+  // including a relative reach into an otherwise admitted package, crosses this boundary.
+  assert.deepEqual(
+    forbiddenImportsInFiles(
+      testingFiles,
+      ['@jinn-network/'],
+      [...FORBIDDEN_ROOTS, ...INFORMATION_WORLD_FOREIGN_ROOTS],
+    ).filter((finding) => !INFORMATION_WORLD_TEST_ONLY_JINN_PACKAGES.some(
+      (allowed) => finding.endsWith(`-> ${allowed}`))),
+    [],
+    'information-world testing files must not cross into foreign package roots',
+  );
+
+  assert.deepEqual(
+    sourceEntrypointLeakFindings(join(source, 'index.ts'), testingEntry, fixtureLoaders)
+      .map(({ file, reason }) => `${relative(root, file)} -> ${reason}`),
+    [],
+    'the root entrypoint must not reach testing, fixtures, filesystem, or Vitest through any '
+      + 'relative source edge',
+  );
+
+  const manifest = JSON.parse(readFileSync(join(packageDirectory, 'package.json'), 'utf8'));
+  assert.deepEqual(Object.keys(manifest.exports).sort(), ['.', './fixtures/*', './schemas/*', './testing']);
+  assert.deepEqual(Object.keys(manifest.dependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.devDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_DEV_DEPENDENCIES);
+  assert.deepEqual(Object.keys(manifest.peerDependencies ?? {}).sort(), INFORMATION_WORLD_ALLOWED_PEER_DEPENDENCIES);
+  assert.deepEqual(manifest.peerDependenciesMeta, { vitest: { optional: true } });
+
+  const externals = productionFiles.flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+    .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:')))
+    .map((specifier) => specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/'));
+  assert.deepEqual(
+    [...new Set(externals)].sort().filter((name) => !INFORMATION_WORLD_ALLOWED_EXTERNALS.includes(name)),
+    [],
+    'information-world production source imports an unapproved external package',
   );
 });
 
@@ -967,6 +1381,10 @@ test('environments source and docs make no unqualified determinism or verificati
     join(packages, 'chain-record', 'README.md'),
     join(packages, 'chain-record', 'schemas', 'chain-environment.schema.json'),
     join(packages, 'chain-record', 'schemas', 'crypto-environment.schema.json'),
+    ...files(join(packages, 'information-world', 'src'))
+      .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file)),
+    join(packages, 'information-world', 'README.md'),
+    join(packages, 'information-world', 'schemas', 'information-world.schema.json'),
   ].filter((file) => existsSync(file));
 
   const findings = candidates.flatMap((file) => readFileSync(file, 'utf8')
