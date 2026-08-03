@@ -13,6 +13,7 @@ import type { Task } from '../../../types/task.js';
 import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-rebench-v2-validated-pool.js';
 import { syntheticClaimBlocked } from '../../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
+import { LEARNER_PUBLIC_V1 } from '../../hash-profile.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
@@ -37,14 +38,21 @@ export class LearnerHarness implements Harness {
   readonly name: string;
   readonly version: string;
   /**
-   * Exclude `.git` from the freeze codeDigest. `implStateDir` is git-backed
+   * The learner's impl-state is digested under the `learner-public.v1` profile
+   * (#2118). The profile excludes `.git/` for the reason this harness has always
+   * excluded it — `implStateDir` is git-backed
    * (`plugins/learner/hooks/session-start` runs `git init`), so hashing `.git`
-   * would make a commit's codeDigest irreproducible from its tree — breaking
-   * the commit→codeDigest mapping the per-codeDigest revert selection relies on
-   * (#764). With `.git` ignored, `git archive <sha>` + re-hash reproduces the
-   * indexed codeDigest exactly.
+   * would make a commit's codeDigest irreproducible from its tree, breaking the
+   * commit→codeDigest mapping the per-codeDigest revert selection relies on
+   * (#764) — and additionally excludes the three roots the learner deliberately
+   * fills with operator-private material (`secrets/`, `transcripts/`,
+   * `operator-requests/`). One scheme now covers the freeze fence, the delivery
+   * `codeDigest`, and the daemon status surface.
+   *
+   * See docs/runbooks/learner-public-v1-digest-migration.md for the recorded
+   * digest break.
    */
-  readonly freezeStateHashIgnore = ['.git'] as const;
+  readonly freezeStateHashProfile = LEARNER_PUBLIC_V1;
   private readonly adapter: HarnessAdapter;
   private readonly pluginRoot: string;
   private readonly claudePath: string;

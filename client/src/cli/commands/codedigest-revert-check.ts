@@ -10,6 +10,7 @@ import { createDiscoveryAPI } from '../../discovery/factory.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import { DiscoveryUnavailableError } from '../../discovery/types.js';
 import { hashImplStateDir } from '../../harnesses/freeze.js';
+import { LEARNER_PUBLIC_V1 } from '../../harnesses/hash-profile.js';
 import {
   decideRevert,
   resolveRevertPolicy,
@@ -51,9 +52,14 @@ export function isValidCommitSha(sha: string): boolean {
 /**
  * Hash a commit's tree the way production stamps codeDigest: export the tree
  * with `git archive` (no `.git`) and re-hash with the same deterministic hasher
- * `hashImplStateDir` uses, ignoring `.git`. Returns the `sha256:`-prefixed
- * digest the indexer stores. Keeping this in TS means the Consolidator prompt
- * never reimplements the hasher (the single largest correctness risk, #764).
+ * `hashImplStateDir` uses, under the learner's `learner-public.v1` profile.
+ * Returns the `sha256:`-prefixed digest the indexer stores. Keeping this in TS
+ * means the Consolidator prompt never reimplements the hasher (the single
+ * largest correctness risk, #764).
+ *
+ * The profile is load-bearing here, not cosmetic: production stamps profile
+ * digests as of #2118, so a re-hash under any other exclusion set would never
+ * match an indexed digest and every revert lookup would miss.
  */
 export async function codeDigestForCommit(implStateDir: string, sha: string): Promise<string> {
   if (!isValidCommitSha(sha)) {
@@ -66,7 +72,7 @@ export async function codeDigestForCommit(implStateDir: string, sha: string): Pr
     // leading-dash value as an option (#764 M1, git argument-injection class).
     const tar = execFileSync('git', ['archive', '--', sha], { cwd: implStateDir, maxBuffer: 1 << 28 });
     execFileSync('tar', ['-x', '-C', exportDir], { input: tar });
-    const hex = await hashImplStateDir(exportDir, { ignoreRelPaths: ['.git'] });
+    const hex = await hashImplStateDir(exportDir, { profile: LEARNER_PUBLIC_V1 });
     return `sha256:${hex}`;
   } finally {
     rmSync(exportDir, { recursive: true, force: true });
