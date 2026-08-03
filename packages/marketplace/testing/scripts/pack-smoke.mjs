@@ -29,6 +29,7 @@ const dependencyChain = [
   ["@jinn-network/record-discovery-testing", join(packageRoot, "..", "..", "discovery", "testing")],
   ["@jinn-network/marketplace-binding", join(packageRoot, "..", "binding")],
   ["@jinn-network/marketplace-projector", join(packageRoot, "..", "projector")],
+  ["@jinn-network/marketplace-venue-base", join(packageRoot, "..", "venue-base")],
 ];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-marketplace-testing-"));
 const archivesRoot = join(temporaryRoot, "archives");
@@ -173,6 +174,7 @@ const expected = ${JSON.stringify(
         "@jinn-network/evidence-protocol",
         "@jinn-network/marketplace-binding",
         "@jinn-network/marketplace-projector",
+        "@jinn-network/marketplace-venue-base",
         "@jinn-network/record-discovery-testing",
         "@jinn-network/task-execution-testing",
         "@jinn-network/trust-testing",
