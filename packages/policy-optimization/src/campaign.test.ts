@@ -181,13 +181,23 @@ describe("validateCampaign — objective, budgets, allocation, stopping rule", (
     })).ok).toBe(true);
   });
 
-  it("refuses budgets that are not non-negative integers, and a hard cap under the evaluation budget", () => {
+  it("refuses budgets that are not positive integers, and a hard cap under the evaluation budget", () => {
     expect(codes(campaignWith({
       budgets: { proposal: { maxProposals: 1 }, evaluation: { maxCells: 1.5 }, hardCap: { maxCells: 10 } },
     })).length).toBeGreaterThan(0);
     expect(codes(campaignWith({
       budgets: { proposal: { maxProposals: 1 }, evaluation: { maxCells: 100 }, hardCap: { maxCells: 10 } },
     }))).toContain("invalid-document@budgets.hardCap.maxCells");
+  });
+
+  it("refuses a zero budget on any of the three — a campaign that can only stop is not a campaign", () => {
+    for (const budgets of [
+      { proposal: { maxProposals: 0 }, evaluation: { maxCells: 10 }, hardCap: { maxCells: 10 } },
+      { proposal: { maxProposals: 1 }, evaluation: { maxCells: 0 }, hardCap: { maxCells: 10 } },
+      { proposal: { maxProposals: 1 }, evaluation: { maxCells: 10 }, hardCap: { maxCells: 0 } },
+    ]) {
+      expect(codes(campaignWith({ budgets }))).not.toEqual([]);
+    }
   });
 
   it("requires an allocation policy and a stopping rule — exploration cannot run open-ended", () => {
@@ -297,6 +307,91 @@ describe("sealCampaign — the sealing-time seed check (product §5.1)", () => {
     expect(sealCampaign(campaign, [
       { kind: "candidate", digest: sealedManifest.digest, manifestBytes: sealedManifest.bytes },
     ]).digest).toMatch(/^sha256:/);
+  });
+});
+
+describe("sealCampaign — unclassified seed axes (BLOCKER-1, product §5.1)", () => {
+  // A `repository-work/1.0` tuple carries `effort` beside the four core axes (substrate §4.1
+  // step 2 admits every profile-declared requirementKey present in the effective requirements).
+  // An axis the campaign neither freezes nor mutates is checked by nothing.
+  const low = tupleWith({ effort: "low" });
+  const high = tupleWith({ effort: "high" });
+  const seedRefs = [
+    { kind: "tuple", digest: tupleDigest(low) },
+    { kind: "tuple", digest: tupleDigest(high) },
+  ] as const;
+  const resolved: SeedResolution[] = [
+    { kind: "tuple", digest: tupleDigest(low), tuple: low },
+    { kind: "tuple", digest: tupleDigest(high), tuple: high },
+  ];
+
+  it("refuses two seeds that differ only on a profile-declared axis the campaign never classified", () => {
+    const result = checkSeedAgreement(campaignWith({ seeds: [...seedRefs] }), resolved);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((entry) => `${entry.code}@${entry.path}`)).toEqual([
+        "unclassified-axis@seeds.0.effort",
+        "unclassified-axis@seeds.1.effort",
+      ]);
+    }
+    expect(() => sealCampaign(campaignWith({ seeds: [...seedRefs] }), resolved))
+      .toThrowError(/effort/);
+  });
+
+  it("refuses an extension axis carried by one seed and not the other", () => {
+    const bare = tupleWith();
+    const extended = tupleWith({ "com.example.axis": "x" });
+    const result = checkSeedAgreement(
+      campaignWith({
+        seeds: [
+          { kind: "tuple", digest: tupleDigest(bare) },
+          { kind: "tuple", digest: tupleDigest(extended) },
+        ],
+      }),
+      [
+        { kind: "tuple", digest: tupleDigest(bare), tuple: bare },
+        { kind: "tuple", digest: tupleDigest(extended), tuple: extended },
+      ],
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((entry) => `${entry.code}@${entry.path}`))
+        .toEqual(["unclassified-axis@seeds.1.com.example.axis"]);
+    }
+  });
+
+  it("seals once the declared axis is frozen and the seeds agree on it", () => {
+    // §5.1 says frozenAxes carries "every non-mutable axis", not every non-mutable CORE axis, so
+    // the schema must accept a profile-declared axis there. This is that positive control.
+    const campaign = campaignWith({
+      seeds: [{ kind: "tuple", digest: tupleDigest(low) }],
+      frozenAxes: { ...campaignWith().frozenAxes, effort: "low" },
+    });
+    expect(validateCampaign(campaign).ok).toBe(true);
+    expect(sealCampaign(campaign, [{ kind: "tuple", digest: tupleDigest(low), tuple: low }]).digest)
+      .toMatch(/^sha256:[0-9a-f]{64}$/);
+  });
+
+  it("refuses seeds that disagree on a frozen declared axis", () => {
+    const campaign = campaignWith({
+      seeds: [...seedRefs],
+      frozenAxes: { ...campaignWith().frozenAxes, effort: "low" },
+    });
+    const result = checkSeedAgreement(campaign, resolved);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.map((entry) => `${entry.code}@${entry.path}`))
+        .toEqual(["frozen-axis-disagreement@seeds.1.effort"]);
+    }
+  });
+
+  it("names moving the axis into the mutation surface as the other resolution", () => {
+    // v0 pins the mutation surface to `["loadout"]`, so freezing is the only route available today
+    // for a declared axis — but the refusal message must offer both, because the rule is about
+    // classification and a later v0+ campaign will legitimately take the other one.
+    const result = checkSeedAgreement(campaignWith({ seeds: [...seedRefs] }), resolved);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors[0]?.message).toMatch(/frozenAxes or to mutationSurface/);
   });
 });
 

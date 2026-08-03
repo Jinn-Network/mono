@@ -239,6 +239,43 @@ describe("appendCampaignEvent — idempotent replay and conflicting replay (prod
     }
   });
 
+  it("refuses a stale handle whose journal another writer has moved on (MAJOR-1)", () => {
+    const a = created();
+    const b = openCampaign(directory);
+    appendCampaignEvent(a, {
+      seq: 2, type: "candidate-admitted", recordedAt: "2026-08-03T01:00:00Z", payload: { a: 1 },
+    });
+    const afterA = readFileSync(join(directory, CAMPAIGN_JOURNAL_FILENAME), "utf8");
+
+    try {
+      appendCampaignEvent(b, {
+        seq: 2, type: "candidate-rejected", recordedAt: "2026-08-03T01:30:00Z", payload: { b: 1 },
+      });
+      throw new Error("expected a refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PolicyOptimizationError);
+      expect((error as PolicyOptimizationError).category).toBe("journal-conflict");
+    }
+
+    // The file is untouched and still opens: the stale write would otherwise have landed a line
+    // whose `previous` and `seq` both disagree with what precedes it, wedging every future open.
+    expect(readFileSync(join(directory, CAMPAIGN_JOURNAL_FILENAME), "utf8")).toBe(afterA);
+    const reopened = openCampaign(directory);
+    expect(reopened.state.entries).toBe(2);
+    expect(reopened.entries[1]?.type).toBe("candidate-admitted");
+  });
+
+  it("refuses a stale handle even when it would append a legal next sequence", () => {
+    const a = created();
+    const b = openCampaign(directory);
+    appendCampaignEvent(a, { seq: 2, type: "candidate-admitted", recordedAt: "2026-08-03T01:00:00Z" });
+    // B still believes it holds one entry, so its `seq` 2 looks like the next one to B alone.
+    expect(() => appendCampaignEvent(b, {
+      seq: 2, type: "candidate-admitted", recordedAt: "2026-08-03T02:00:00Z",
+    })).toThrowError(/journal on disk holds 2/);
+    expect(openCampaign(directory).state.entries).toBe(2);
+  });
+
   it("refuses a sequence gap", () => {
     const handle = created();
     expect(() => appendCampaignEvent(handle, {

@@ -17,6 +17,8 @@ export type PolicyOptimizationErrorCategory =
   | "constraint-shaped-pin"
   /** Product §5.1 — the mutation surface is not the v0 surface, or overlaps `frozenAxes`. */
   | "mutation-surface"
+  /** Product §5.1 — a seed carries an axis that is neither frozen nor mutable, so nothing checks it. */
+  | "unclassified-axis"
   /** Product §5.1 — a seed could not be resolved to the exact tuple its typed reference names. */
   | "seed-resolution"
   /** Product §6.3 — the promotion Benchmark is absent, not committed, revealed, or does not bind. */
