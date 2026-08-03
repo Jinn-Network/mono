@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **79** entries: **50** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **16** other entries below `packages/**`, and **5** adjacent entries.
+The catalog contains **80** entries: **50** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **17** other entries below `packages/**`, and **5** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -66,6 +66,7 @@ The catalog contains **79** entries: **50** `platform-v1` packages, **8** disabl
 | @jinn-network/marketplace-testing | packages/marketplace/testing | marketplace | — | platform-support | marketplace conformance kit | candidate | platform-v1 | canary-only | @jinn-network/evidence-protocol<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/record-discovery-testing<br>@jinn-network/task-execution-testing<br>@jinn-network/trust-testing<br>viem | — | vitest |
 | @jinn-network/marketplace-venue-base | packages/marketplace/venue-base | marketplace | 3 | platform | Base venue adapter | candidate | platform-v1 | canary-only | @jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-protocol<br>@types/better-sqlite3<br>better-sqlite3<br>viem | — | — |
 | @jinn-network/plugin | packages/plugin | legacy-plugin-stack | — | legacy | legacy extension contract | transitional | legacy-product-lines | independent | zod | — | vitest |
+| @jinn-network/policy-optimization | packages/policy-optimization | policy | 4 | product | policy optimization product | experimental | transitional-or-private | never | @jinn-network/benchmarking-records<br>@jinn-network/policy-identity<br>zod | — | — |
 | @jinn-network/policy-identity | packages/policy/identity | policy | 3 | platform | execution-policy identity and candidate manifest sealing | experimental | experimental-policy | disabled | @noble/curves<br>@noble/hashes | — | — |
 | @jinn-network/policy-outcomes | packages/policy/outcomes | policy | 3 | platform | policy-keyed outcomes projection | experimental | experimental-policy | disabled | @jinn-network/policy-identity<br>@noble/hashes<br>zod | — | — |
 | @jinn-network/sdk | packages/sdk | legacy-sdk | — | legacy | deprecated SolverNet SDK | deprecated | legacy-product-lines | independent | zod<br>zod-to-json-schema | — | — |
@@ -234,6 +235,8 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-client |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/trust-core |
+| @jinn-network/policy-optimization | runtime | @jinn-network/benchmarking-records |
+| @jinn-network/policy-optimization | runtime | @jinn-network/policy-identity |
 | @jinn-network/policy-outcomes | runtime | @jinn-network/policy-identity |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/trust-core |
@@ -383,7 +386,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | platform-v1 | 50 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
-| transitional-or-private | 8 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>task-supply-ci | private<br>never | false | false | false |
+| transitional-or-private | 9 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci | private<br>never | false | false | false |
 
 The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
@@ -500,6 +503,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/marketplace-testing | platform-v1 | — | — | fixtures | ./backend-conformance<br>./projector-conformance<br>./revised-contract-conformance<br>./venue-conformance |
 | @jinn-network/marketplace-venue-base | platform-v1 | — | — | — | — |
 | @jinn-network/plugin | legacy-product-lines | — | — | — | — |
+| @jinn-network/policy-optimization | transitional-or-private | — | — | — | — |
 | @jinn-network/policy-identity | experimental-policy | — | — | fixtures | — |
 | @jinn-network/policy-outcomes | experimental-policy | — | — | fixtures | — |
 | @jinn-network/sdk | legacy-product-lines | — | — | fixtures | — |
@@ -1422,24 +1426,24 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3480 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3491 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
-| authorityDocuments | 22 |
-| boundaryPolicies | 20 |
-| catalogManifests | 79 |
+| authorityDocuments | 23 |
+| boundaryPolicies | 21 |
+| catalogManifests | 80 |
 | catalogPublicSurfaces | 1238 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2773 |
+| discoveredFirstPartySurfaces | 2775 |
 | generatedOutputSources | 1294 |
-| generatorSources | 566 |
+| generatorSources | 573 |
 | marketplaceControl | 2 |
-| requiredGates | 19 |
+| requiredGates | 20 |
 | staticControl | 6 |
 
 ## Transitional and deprecated entries
