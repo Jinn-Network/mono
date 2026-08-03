@@ -35,6 +35,24 @@ fi
 git config user.name "claude-code-learner"
 git config user.email "claude-code-learner@local"
 
+# Candidate mode: the harness provisioned a writable copy of implStateDir before
+# this run started, and Improve / Memory consolidation write there instead of to
+# the live directory. Give it the same git backing so the promoter's per-change
+# commits and the consolidator's revert machinery work unchanged inside it.
+if [[ -n "${JINN_LEARNER_CANDIDATE_DIR:-}" ]]; then
+  mkdir -p "$JINN_LEARNER_CANDIDATE_DIR"
+  (
+    cd "$JINN_LEARNER_CANDIDATE_DIR"
+    if [[ ! -d .git ]]; then
+      git init --initial-branch=main --quiet
+      git commit --allow-empty -m "init candidateStateDir" --quiet
+    fi
+    git config user.name "claude-code-learner"
+    git config user.email "claude-code-learner@local"
+    echo "session-start: candidateStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))" >&2
+  )
+fi
+
 # Operational readiness goes to STDERR. Claude Code parses a SessionStart hook's
 # STDOUT as JSON for `hookSpecificOutput`; any stray stdout would break that parse,
 # so stdout below carries nothing but the additionalContext payload.
@@ -61,6 +79,11 @@ echo "session-start: implStateDir ready at $(pwd) (HEAD=$(git rev-parse HEAD))" 
 # implStateDir. `JINN_HARNESS_MODE` is set by the harness adapter (default train).
 if [[ "${JINN_HARNESS_MODE:-train}" == "frozen" ]]; then
   STEER="This is a FROZEN evaluation run. Before solving, CONSULT the accumulated learner knowledge under implStateDir (notes/, skills/, strategies/, patterns/, tests/) and apply any relevant strategy or pattern to this task. Then solve the task and call submit_typed_payload. Do NOT run the learn loop (no Orient/Improve/Memory phases) and do NOT create, edit, or commit anything under implStateDir — the harness verifies implStateDir is unchanged and will discard this run if it is modified."
+elif [[ "${JINN_HARNESS_MODE:-train}" == "candidate" ]]; then
+  # Candidate mode runs the FULL loop, but its write target is the candidate
+  # workspace, not the live directory. implStateDir is the policy being measured
+  # by this very run, so it carries frozen semantics and the same fence.
+  STEER="This is a CANDIDATE PROPOSAL run. Your FIRST action MUST be to invoke the learn skill (via the Skill tool) and run the full seven-phase loop end-to-end. Two rules override the skill's defaults: (1) implStateDir is READ-ONLY for this entire run — consult it freely, but do NOT create, edit, or commit anything under it; the harness verifies it is byte-identical afterwards and will discard the run if it is not. (2) The Improve and Memory consolidation phases write to the candidate workspace at \$JINN_LEARNER_CANDIDATE_DIR (bind it as stateDir) instead of implStateDir — it is a git-backed copy, so commit there exactly as you normally would. The Execute phase still performs the actual task work against implStateDir read-only and still calls submit_typed_payload. The result is a PROPOSAL that will be evaluated separately; do not adopt it yourself."
 else
   STEER="A seven-phase self-improvement loop is available as the learn skill (claude-code-learner:learn): Orient, Strategize, Plan, Execute, Debrief, Improve, then Memory consolidation. For this session your FIRST action MUST be to invoke the learn skill (via the Skill tool) and run the full loop end-to-end, instead of solving the task directly or selecting another skill first. The Execute phase still performs the actual task work and still calls submit_typed_payload; the surrounding phases capture reusable strategy and persist it to implStateDir so future runs improve. Do not skip the loop."
 fi

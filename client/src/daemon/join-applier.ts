@@ -1,12 +1,13 @@
 /**
  * Hot-apply a SolverNet join to the RUNNING daemon (#1037).
  *
- * Four subsystems consume `joinedSolverNets`. Two re-read their config object
- * live (the MechAdapter task-discovery cid array and the engine's
- * JoinedSolverNetsView); two are frozen at construction (the
- * HarnessReadinessRegistry cid→harness map and the SolverNetRegistry). This
- * applier mutates all four on the live instances so a join applied to a
- * running daemon takes effect within one claim poll — no restart.
+ * Five subsystems consume `joinedSolverNets`. Three re-read their config object
+ * live (the MechAdapter task-discovery cid array, the engine's
+ * JoinedSolverNetsView, and the learner's routing allowlist); two are frozen at
+ * construction (the HarnessReadinessRegistry cid→harness map and the
+ * SolverNetRegistry). This applier mutates all five on the live instances so a
+ * join applied to a running daemon takes effect within one claim poll — no
+ * restart.
  *
  * Wired in main.ts via `joinApplierHolder` (eager-register/late-populate,
  * mirroring harnessReadinessRegistryHolder). The join endpoint
@@ -26,6 +27,20 @@ export interface JoinApplierDeps {
   taskDiscovery: { solverNetManifestCids: string[] };
   /** The engine's mutable joined view. */
   view: JoinedSolverNetsView;
+  /**
+   * The learner harnesses' live routing allowlist — the same array object both
+   * `LearnerHarness` instances hold, so a push is visible to `supports()` on the
+   * next claim poll.
+   *
+   * `null` when the operator pinned an explicit `harness.routing.solverTypes`
+   * allowlist. That is a deliberate refusal, not an omission: at boot an
+   * explicit allowlist wins outright and joined nets are never folded into it,
+   * so widening it here would make the live routing disagree with the routing
+   * the same config produces after a restart. Silent divergence between those
+   * two is the exact failure the readiness map's (c) comment below was written
+   * about; one instance of it in this file is enough.
+   */
+  learnerRouting: { solverTypes: string[] } | null;
   /** The live readiness registry. */
   readiness: HarnessReadinessRegistry;
   /** The live SolverNet registry. */
@@ -53,6 +68,20 @@ export function createJoinApplier(deps: JoinApplierDeps): JoinApplier {
 
     // #547: an evaluator-role join enables the adapter's evaluation scan live.
     if (entry.roles.includes('evaluator')) deps.enableEvaluator?.();
+
+    // (a2) learner routing allowlist — solver role only, and only when routing
+    // is derived from joined nets (see `learnerRouting` on the deps type).
+    // Mirrors main.ts's boot derivation exactly, including the `contract` guard:
+    // an entry without a contract yields no SolverType, so boot skips it and so
+    // does this. Since C6 the learner claims only what it is routed to, which
+    // means without this push a hot join lands on every other surface and then
+    // finds no harness willing to claim the task.
+    if (deps.learnerRouting && entry.roles.includes('solver') && entry.contract) {
+      const solverType = `${entry.contract.id}.${entry.contract.version}`;
+      if (!deps.learnerRouting.solverTypes.includes(solverType)) {
+        deps.learnerRouting.solverTypes.push(solverType);
+      }
+    }
 
     // (b) engine eligibility view.
     deps.view.set(cid, { roles: entry.roles });

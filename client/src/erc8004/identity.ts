@@ -57,6 +57,7 @@ import {
   type WalletClient,
 } from 'viem';
 import type { EnvelopeRef } from '../corpus/types.js';
+import type { HarnessMode } from '../harnesses/types.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
 import {
   viemSendTransactionWithRetry,
@@ -369,6 +370,23 @@ export function codeDigestSha256ToBytes32(textual: string | null | undefined): H
     return ZERO_BYTES32;
   }
   return (`0x${hex}`) as Hex;
+}
+
+/**
+ * Project a runtime {@link HarnessMode} onto the two-valued executor mode the
+ * delivery envelope and the on-chain v2 payload carry.
+ *
+ * `candidate` reports **frozen**, and that is the honest reading rather than a
+ * convenience: a candidate-mode run's active `implStateDir` is fenced and
+ * verified byte-identical exactly as a frozen run's is, so the claim the
+ * envelope makes — the implementation state was locked during this run — is
+ * true. What candidate mode adds is a proposal written somewhere else entirely,
+ * a product-layer artifact the execution-mode flag has never described.
+ * Widening the on-chain enum to carry it would be a protocol change for a fact
+ * the protocol does not consume.
+ */
+export function protocolExecutorMode(mode: HarnessMode): 'train' | 'frozen' {
+  return mode === 'train' ? 'train' : 'frozen';
 }
 
 /** Convert a HarnessExecutionMode string to the v2 numeric flag. */

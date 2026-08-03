@@ -1077,6 +1077,7 @@ __metadata:
     "@jinn-network/marketplace-projector": "npm:0.1.0"
     "@jinn-network/marketplace-venue-base": "npm:0.1.0"
     "@jinn-network/plugin": "npm:0.1.2"
+    "@jinn-network/policy-identity": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-facts-task-execution": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
@@ -1398,6 +1399,15 @@ __metadata:
   peerDependenciesMeta:
     vitest:
       optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/policy-identity@portal:../packages/policy/identity::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@noble/curves": "npm:^2.0.0"
+    "@noble/hashes": "npm:^2.2.0"
   languageName: node
   linkType: soft
 

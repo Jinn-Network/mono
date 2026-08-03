@@ -82,6 +82,7 @@ import { createAutopilotGitHubAdoptionReceiptObserver } from './autopilot/github
 import { createJinnMonoGitHubAdoptionReadPort } from './autopilot/github-rest-adoption-read.js';
 import { createJoinApplier } from './daemon/join-applier.js';
 import { buildHarnesses } from './harnesses/impls/index.js';
+import { protocolExecutorMode } from './erc8004/identity.js';
 import {
   makeConfiguredSemanticEvaluatorRunnerResolver,
 } from './harnesses/impls/jinn-repo-evaluator/semantic-runner-resolver.js';
@@ -1526,6 +1527,35 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         }
       : undefined;
 
+  // Explicit learner routing (product design §10). The learner no longer wraps
+  // every SolverType by default. When the operator has not named an allowlist,
+  // derive it from the SolverNets they joined — that is the routing they already
+  // declared, so an existing deployment claims exactly what it joined rather
+  // than either everything (the retired default) or nothing (a silent stall).
+  const joinedSolverTypes = [
+    ...new Set(
+      Object.values(config.joinedSolverNets ?? {})
+        .filter((joined) => joined.roles.includes('solver') && joined.contract)
+        .map((joined) => `${joined.contract!.id}.${joined.contract!.version}`),
+    ),
+  ].sort();
+  // The array is deliberately mutable and shared by reference: both
+  // LearnerHarness instances hold this exact object, and `join-applier.ts`
+  // pushes onto it so a hot join reaches routing without a restart (#1037).
+  const operatorPinnedSolverTypes = config.harness.routing?.solverTypes;
+  const learnerRoutingSolverTypes: string[] = [...(operatorPinnedSolverTypes ?? joinedSolverTypes)];
+  const learnerRouting = {
+    solverTypes: learnerRoutingSolverTypes,
+    ...(config.harness.routing?.legacyDefaultRouting !== undefined
+      ? { legacyDefaultRouting: config.harness.routing.legacyDefaultRouting }
+      : {}),
+  };
+  console.log(
+    `[main] learner routing: ${learnerRouting.solverTypes.length > 0
+      ? learnerRouting.solverTypes.join(', ')
+      : '(none — this learner claims no SolverType)'}`,
+  );
+
   for (const impl of buildHarnesses({
     rpcUrl: config.rpcUrl,
     archiveRpcUrl: config.archiveRpcUrl,
@@ -1548,6 +1578,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       : {}),
     externalImpls,
     disabledNames: config.harnesses?.disabled,
+    learnerRouting,
+    ...(config.harness.candidate ? { learnerCandidate: config.harness.candidate } : {}),
     corpusEnv,
     hermesPath: config.hermesPath,
     hermesModel: config.hermesModel,
@@ -1741,7 +1773,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     signer: { address: agentEoaAddress, privateKey: agentPrivateKey },
     clientGitSha: buildInfo.clientGitSha,
     identityPublisher,
-    harnessMode: config.harness.mode,
+    // The capture envelope's `executor.mode` is the same two-valued protocol
+    // field the delivery envelope carries; candidate mode reports frozen.
+    harnessMode: protocolExecutorMode(config.harness.mode),
     scrubPipeline: sellerScrubPipeline,
   });
   capturePublishRef.current = liveCapturePublisher.publishCapture;
@@ -2446,6 +2480,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   joinApplierHolder.current = createJoinApplier({
     taskDiscovery,
     view: joinedSolverNetsView,
+    // A hot join widens derived routing, but never an operator-pinned
+    // allowlist — boot ignores joined nets entirely in that case, so widening
+    // it live would diverge from what a restart produces.
+    learnerRouting: operatorPinnedSolverTypes ? null : learnerRouting,
     readiness: harnessReadinessRegistry,
     registry: solverNetRegistry,
     config,
