@@ -1,0 +1,30 @@
+{
+  "note": "The canonicalizer's own golden case, exercising what the tuple and manifest fixtures do not: every JSON scalar type in one document, an empty-string member name, both signed integers around zero, the largest safe integer, arrays nested in objects nested in arrays, non-ASCII text beside a control character JSON must escape, and both halves of the UTF-16-versus-code-point ordering trap as member names. It exists because the tuple fixtures pin the canonicalizer only through the shapes a tuple happens to have, while canonicalJsonText is public surface that C2 and C7 will call on documents shaped like neither.",
+  "input": {
+    "zz￿": "code-unit-0xFFFF",
+    "nested": {
+      "b": [
+        1,
+        -1,
+        0
+      ],
+      "A": null,
+      "a": {
+        "deep": [
+          {
+            "z": true,
+            "y": false
+          }
+        ]
+      }
+    },
+    "": "the empty key is a legal I-JSON member name",
+    "large": 9007199254740991,
+    "zz𐀀": "surrogate-pair-key",
+    "unicode": "λ — 日本語 \u001f"
+  },
+  "expect": {
+    "canonical": "{\"\":\"the empty key is a legal I-JSON member name\",\"large\":9007199254740991,\"nested\":{\"A\":null,\"a\":{\"deep\":[{\"y\":false,\"z\":true}]},\"b\":[1,-1,0]},\"unicode\":\"λ — 日本語 \\u001f\",\"zz𐀀\":\"surrogate-pair-key\",\"zz￿\":\"code-unit-0xFFFF\"}",
+    "digest": "sha256:a2b913db61bf8feefbdbd770727cf261363a95c0a23e22c98643724010c91fd1"
+  }
+}

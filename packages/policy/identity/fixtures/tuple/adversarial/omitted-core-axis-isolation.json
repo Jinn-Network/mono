@@ -1,0 +1,10 @@
+{
+  "note": "The same rule on the axis most likely to be dropped in practice. `isolationPolicy` is vacuous today — every launcher offers `unrestricted` only (substrate §4.3) — so an implementer economizing on 'the axis that says nothing' would omit it. Vacuity is a statement about identity STRENGTH, never a licence to drop the key.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": null,
+    "loadout": null
+  },
+  "expect": { "ok": false, "code": "omitted-core-axis", "path": "isolationPolicy" }
+}

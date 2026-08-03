@@ -1,0 +1,29 @@
+{
+  "note": "Substrate §5.3 — the CHECKABLE form of the no-self-score rule. `The manifest carries no score and no self-assessment` (§5.1) cannot be enforced in general, but 'reject any unrecognized non-namespaced top-level field' can be, and it catches the obvious spellings: `score`, `confidence`, `rank`, `expectedPassRate`. A proposer cannot grade its own homework at the top level. What this does NOT catch is a score smuggled inside a namespaced extension — that is a consumer-MUST-IGNORE rule, stated in §5.3 and unenforceable here on purpose.",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "parents": [],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "evidenceProvenance": {
+      "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+      "snapshotReceipt": {
+        "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+        "sourceSet": { "id": "local-evidence-repository", "version": "1.0" },
+        "sources": [],
+        "evaluatedAt": "2026-08-03T12:00:00Z",
+        "reproducibility": "replayable"
+      },
+      "recordListDigest": "sha256:1f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7"
+    },
+    "declaredChanges": { "summary": "Better than the parent.", "touchedComponents": ["loadout"] },
+    "expectedPassRate": 0.91
+  },
+  "expect": { "ok": false, "code": "unrecognized-field", "path": "expectedPassRate" }
+}

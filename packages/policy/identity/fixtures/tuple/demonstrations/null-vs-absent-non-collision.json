@@ -1,0 +1,22 @@
+{
+  "note": "Substrate §8 — 'omitted-core-axis input (REJECTED, fail-closed) PLUS a non-collision demonstration that null and absent are distinct byte sequences'. The two are one fixture because they are one argument: the rejection is only safe if the two forms are genuinely different documents. If `null` and absent canonicalized alike, rejecting absence would be arbitrary; because they do not, rejecting absence is the only way to keep ONE identity per treatment. `nullForm` seals; `absentForm` is refused; the demonstration is that the byte sequences differ even at the substring level (`\"harness\":null` appears in one and in neither reading of the other).",
+  "nullForm": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": null,
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "absentForm": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": {
+    "nullCanonical": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":{\"id\":\"anthropic/claude-haiku-4-5\"}}",
+    "nullDigest": "sha256:7a4b22fade4f3f0a828dd03e7ebdbc05b164a88798edef21524bc3a14df5f6f8",
+    "absentRejection": { "ok": false, "code": "omitted-core-axis", "path": "harness" },
+    "rawCanonicalOfAbsentForm": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":{\"id\":\"anthropic/claude-haiku-4-5\"}}"
+  }
+}

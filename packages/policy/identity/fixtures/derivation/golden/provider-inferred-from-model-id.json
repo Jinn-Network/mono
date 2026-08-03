@@ -1,0 +1,83 @@
+{
+  "note": "Substrate §4.1 step 1, the `model` constraint's provider-inference leg — the one comparison in the whole merge whose outcome is decided by a lookup table rather than by equality. The Task constrains the provider; the Submission pins only a model id, and every shipped venue admits it because protocol's CONSTRAINT_MEMBERSHIP infers `anthropic` from the `claude-` prefix. A deriver missing that leg refuses a Submission the venue accepted, so the two disagree about which Submissions have a tuple at all — and no other fixture in this kit exercises the leg.",
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9XX0=",
+    "requirementKeys": [
+      {
+        "key": "effort",
+        "comparisonClass": "floor"
+      },
+      {
+        "key": "maxTokens",
+        "comparisonClass": "ceiling"
+      },
+      {
+        "key": "reviewDepth",
+        "comparisonClass": "exact"
+      }
+    ]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "digest": {
+        "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503"
+      }
+    },
+    "instructions": "Fix the failing test.",
+    "outputs": [
+      {
+        "name": "patch",
+        "mediaType": "text/x-diff",
+        "required": true
+      }
+    ],
+    "requirements": {
+      "model": {
+        "provider": "anthropic"
+      }
+    }
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c108",
+    "task": {
+      "digest": {
+        "sha256": "e8463890b463fdee45434f144aa3b54a170508ff8fe365abd7ed45df665a2625"
+      }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-provider-inference",
+    "nonce": "0000000000000008",
+    "deadline": "2026-08-10T00:00:00Z",
+    "requirements": {
+      "model": {
+        "id": "claude-haiku-4-5"
+      },
+      "isolationPolicy": "unrestricted"
+    }
+  },
+  "expect": {
+    "taskDigest": "sha256:e8463890b463fdee45434f144aa3b54a170508ff8fe365abd7ed45df665a2625",
+    "submissionDigest": "sha256:834ad4b1eca2ae58570d658fb858fdb022e7e356b1f7eb641fe6ab0ddb28c3f9",
+    "canonicalTuple": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":{\"id\":\"claude-haiku-4-5\"}}",
+    "tupleDigest": "sha256:2744c5cd4dd5541cd126bfbb016fe92f22c392d48e2eb2f57f0f0c89b4e17d53",
+    "absentTupleKeys": [
+      "effort",
+      "maxTokens",
+      "reviewDepth"
+    ],
+    "mustNotContain": [
+      "provider",
+      "anthropic"
+    ],
+    "runPinning": {
+      "model": {
+        "id": "claude-haiku-4-5"
+      },
+      "isolationPolicy": "unrestricted"
+    }
+  }
+}

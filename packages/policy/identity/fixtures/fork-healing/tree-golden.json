@@ -1,0 +1,24 @@
+{
+  "note": "THE fork-healing fixture (substrate §4.2, §8). This is byte-for-byte the tree C3's shipped regression suite pins (`client/test/harnesses/hash-profile.test.ts`), and `expect.digest` is C3's `FORK_HEALING_FIXTURE_DIGEST`. The two units reproduce the same constant from two independent implementations of `learner-public.v1`; that agreement is the cross-unit byte-match the program requires, and this file is one half of it. Contents are UTF-8 with LF endings and a trailing newline.",
+  "profile": "learner-public.v1",
+  "entries": [
+    { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+    { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+    { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+    { "path": ".git/HEAD", "kind": "file", "content": "ref: refs/heads/main\n" },
+    { "path": "operator-requests/req-1.json", "kind": "file", "content": "{\"id\":\"req-1\"}\n" },
+    { "path": "secrets/token", "kind": "file", "content": "sk-fixture\n" },
+    { "path": "transcripts/run-1/session.md", "kind": "file", "content": "transcript\n" }
+  ],
+  "expect": {
+    "digest": "90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8",
+    "contributingFiles": [
+      { "path": "notes/2026-08-03-note.md", "sha256": "d6de6053618973c2e7af46a5206073f4bffe35c2674ce997d3fbe32dfb6f2078" },
+      { "path": "policy.json", "sha256": "ef419f699076f8ad73068cf0004548fef901117e4a85c9dc9eee9828520f78d3" },
+      { "path": "skills/alpha/SKILL.md", "sha256": "a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7" }
+    ],
+    "outerInput": "notes/2026-08-03-note.md:d6de6053618973c2e7af46a5206073f4bffe35c2674ce997d3fbe32dfb6f2078\npolicy.json:ef419f699076f8ad73068cf0004548fef901117e4a85c9dc9eee9828520f78d3\nskills/alpha/SKILL.md:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7",
+    "materializable": false,
+    "materializationRefusalRoot": ".git"
+  }
+}

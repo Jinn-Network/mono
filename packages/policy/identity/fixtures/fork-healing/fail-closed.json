@@ -1,0 +1,87 @@
+{
+  "note": "The `learner-public.v1` fail-closed rules, one case each. Every case starts from `tree-without-excluded-roots.json` and adds exactly one violation, so the digest constant is never in doubt — only the classification is. Cross-checked against C3's shipped regression suite: the two implementations must refuse the same inputs, not merely agree on the accepted ones.",
+  "profile": "learner-public.v1",
+  "cases": [
+    {
+      "name": "unclassified-top-level-directory",
+      "why": "The classification table is exhaustive (spike §4.1). An unknown root fails closed rather than being hashed or ignored — hashing it would make the digest depend on files nobody agreed were public, and ignoring it would make the digest blind to them.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+        { "path": "scratch/notes.md", "kind": "file", "content": "unclassified\n" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "scratch" }
+    },
+    {
+      "name": "unclassified-top-level-file",
+      "why": "`policy.json` is the only classified top-level FILE. A stray `README.md` is not covered by the directory list and must not slip through on the grounds of looking harmless.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+        { "path": "README.md", "kind": "file", "content": "unclassified\n" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "README.md" }
+    },
+    {
+      "name": "allowed-directory-name-used-as-a-file",
+      "why": "Directory-ness is part of the classification, not just the name. `skills` is an allowed DIRECTORY; a regular file called `skills` is not an allowed top-level file. A profile that matched on name alone would admit an arbitrary blob under any of the thirteen directory names.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills", "kind": "file", "content": "not a directory\n" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "skills" }
+    },
+    {
+      "name": "symlink-at-the-top-level",
+      "why": "The profile fails closed on symlinks rather than following them. Following would let a package hash bytes that live outside the tree entirely — including inside an excluded root, which is how a `secrets/` file re-enters a 'public' digest.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+        { "path": "agents", "kind": "symlink" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "agents" }
+    },
+    {
+      "name": "symlink-nested-inside-a-contributing-root",
+      "why": "Same rule, one level down — the check is per entry, not per root. A profile that only screened top-level entries would admit `skills/alpha/link.md -> ../../secrets/token`.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+        { "path": "skills/alpha/link.md", "kind": "symlink" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "skills/alpha/link.md" }
+    },
+    {
+      "name": "special-file-inside-a-contributing-root",
+      "why": "A fifo, socket, or device node has no stable bytes to hash. Reading one can also block forever, which turns a digest computation into a hang.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "tools/pipe", "kind": "special" }
+      ],
+      "expect": { "ok": false, "code": "hash-profile-violation", "path": "tools/pipe" }
+    },
+    {
+      "name": "symlink-inside-an-excluded-root-is-skipped-not-refused",
+      "why": "The mirror image, and the case a naive fail-closed implementation gets wrong. Excluded roots hold arbitrary bytes — a real `.git/` routinely contains symlinks — so the subtree must be skipped BEFORE classification runs. An implementation that screens every entry and then excludes would refuse every real learner tree. Digest equals the golden constant; the package is still not materializable.",
+      "entries": [
+        { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+        { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+        { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" },
+        { "path": ".git/link", "kind": "symlink" },
+        { "path": "secrets/pipe", "kind": "special" },
+        { "path": "transcripts/weird!name", "kind": "file", "content": "anything\n" }
+      ],
+      "expect": {
+        "ok": true,
+        "digest": "90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8",
+        "materializable": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "name": "@jinn-network/policy-outcomes",
+  "version": "0.1.0",
+  "description": "Policy-keyed outcomes projection: folds observed verdicts into per-(execution-policy-tuple, bucket) rows.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/policy/outcomes"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./fixtures/*": "./fixtures/*"
+  },
+  "files": [
+    "dist/",
+    "fixtures/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/policy-identity": "0.1.0",
+    "@noble/hashes": "^2.2.0",
+    "zod": "4.4.3"
+  },
+  "resolutions": {
+    "@jinn-network/policy-identity": "portal:../identity"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}
