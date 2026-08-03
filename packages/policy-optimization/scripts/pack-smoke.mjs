@@ -10,12 +10,19 @@ const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-policy-optimization-"))
 const consumer = join(temporaryRoot, "consumer");
 
 // Cross-tree portal dependencies, packed locally so the consumer graph resolves end-to-end
-// without reaching the registry. `task-execution-protocol` is not a dependency of this package —
-// it is `benchmarking-records`' own runtime edge, and an unpacked transitive Jinn dependency
-// makes `npm install` reach for a registry version that does not exist.
+// without reaching the registry. `task-execution-protocol`, `-profiles`, and `trust-core` are not
+// dependencies of this package — they are `benchmarking-records`', `benchmarking-run`'s, and
+// `benchmarking-aggregate`'s own runtime edges, and an unpacked transitive Jinn dependency makes
+// `npm install` reach for a registry version that does not exist.
 const PORTAL_PACKAGES = [
   ["@jinn-network/task-execution-protocol", join(packagesRoot, "task-execution", "protocol"), "task-execution-protocol.tgz"],
+  ["@jinn-network/task-execution-profiles", join(packagesRoot, "task-execution", "profiles"), "task-execution-profiles.tgz"],
+  ["@jinn-network/task-execution-backend", join(packagesRoot, "task-execution", "backend"), "task-execution-backend.tgz"],
+  ["@jinn-network/trust-core", join(packagesRoot, "trust", "core"), "trust-core.tgz"],
   ["@jinn-network/benchmarking-records", join(packagesRoot, "benchmarking", "records"), "benchmarking-records.tgz"],
+  ["@jinn-network/benchmarking-run", join(packagesRoot, "benchmarking", "run"), "benchmarking-run.tgz"],
+  ["@jinn-network/benchmarking-aggregate", join(packagesRoot, "benchmarking", "aggregate"), "benchmarking-aggregate.tgz"],
+  ["@jinn-network/benchmarking-local", join(packagesRoot, "benchmarking", "local"), "benchmarking-local.tgz"],
   ["@jinn-network/policy-identity", join(packagesRoot, "policy", "identity"), "policy-identity.tgz"],
 ];
 
@@ -66,9 +73,14 @@ try {
     `
 import { readFile } from "node:fs/promises";
 import {
+  ALLOCATION_POLICY_REFS,
   CAMPAIGN_FORMAT_TOKEN,
   CAMPAIGN_JOURNAL_EVENT_TYPES,
+  NO_CELLS_COMMITTED,
+  STOPPING_RULE_REFS,
   V0_MUTATION_SURFACE,
+  committedCells,
+  decideAllocation,
   validateCampaign,
 } from "@jinn-network/policy-optimization";
 
@@ -80,9 +92,28 @@ if (CAMPAIGN_JOURNAL_EVENT_TYPES.length !== 11) throw new Error("journal event l
 const refused = validateCampaign({});
 if (refused.ok) throw new Error("an empty document must not validate");
 
+if (ALLOCATION_POLICY_REFS.join(",") !== "uniform/1.0,drop-bottom-k/1.0,informativeness/1.0") {
+  throw new Error("allocation policy list drifted");
+}
+if (STOPPING_RULE_REFS.join(",") !== "max-waves/1.0,budget-exhausted/1.0") {
+  throw new Error("stopping rule list drifted");
+}
+if (committedCells([]).total !== NO_CELLS_COMMITTED.total) throw new Error("cell accounting drifted");
+let allocationRefused = false;
+try { decideAllocation({ campaign: {}, waveNumber: 1, population: [], taskDigests: [] }); }
+catch { allocationRefused = true; }
+if (!allocationRefused) throw new Error("an allocation over an empty population must refuse");
+
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
-const expectedJinnDependencies = ["@jinn-network/benchmarking-records", "@jinn-network/policy-identity"];
+const expectedJinnDependencies = [
+  "@jinn-network/benchmarking-aggregate",
+  "@jinn-network/benchmarking-local",
+  "@jinn-network/benchmarking-records",
+  "@jinn-network/benchmarking-run",
+  "@jinn-network/policy-identity",
+  "@jinn-network/task-execution-backend",
+];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));
 }

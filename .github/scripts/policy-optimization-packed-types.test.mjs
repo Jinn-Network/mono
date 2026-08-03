@@ -20,12 +20,23 @@ const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 // Ordered: each entry's prepack build reads the already-built `dist/` of the ones before it.
-// `task-execution-protocol` is not this package's dependency -- it is `benchmarking-records`' own
-// runtime edge, and an unpacked transitive Jinn dependency makes `npm install` reach for a
+// `task-execution-protocol`, `-profiles`, and `trust-core` are not this package's dependencies --
+// they are `benchmarking-records`', `benchmarking-run`'s, and `benchmarking-aggregate`'s own
+// runtime edges, and an unpacked transitive Jinn dependency makes `npm install` reach for a
 // registry version that does not exist.
+//
+// `task-execution-testing` is deliberately absent: it is a devDependency, so no installer of this
+// package ever receives it, and packing it would drag the whole local-backend tree into a canary
+// whose subject is the product's public types.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
+  ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
+  ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
   ['@jinn-network/policy-identity', join(root, 'packages', 'policy', 'identity')],
 ];
 
@@ -127,6 +138,34 @@ try {
         '  CAMPAIGN_JOURNAL_FILENAME,',
         '  CORE_AXES,',
         '  V0_MUTATION_SURFACE,',
+        '  WAVE_DERIVATION_EXTENSION_KEY,',
+        '  buildWaveArms,',
+        '  assertArmsAgreeOnFrozenAxes,',
+        '  checkCandidateAgainstCampaign,',
+        '  ALLOCATION_POLICY_REFS,',
+        '  decideAllocation,',
+        '  compareExactDecimals,',
+        '  compareObservedRates,',
+        '  STOPPING_RULE_REFS,',
+        '  checkStoppingRule,',
+        '  committedCells,',
+        '  deriveWaveBenchmark,',
+        '  planWave,',
+        '  executeWave,',
+        '  assembleWaveMatrix,',
+        '  objectiveMethod,',
+        '  produceWaveReport,',
+        '  checkPromotionReveal,',
+        '  objectiveAnalysisPlan,',
+        '  planPromotionRun,',
+        '  appendWaveEvent,',
+        '  wavePlannedPayload,',
+        '  runSealedPayload,',
+        '  promotionRunSealedPayload,',
+        '  allocationDecidedPayload,',
+        '  matrixAssembledPayload,',
+        '  reportRecordedPayload,',
+        '  NO_CELLS_COMMITTED,',
         '} from "@jinn-network/policy-optimization";',
         'import type {',
         '  CampaignDocument, CampaignTarget, CampaignObjective, CampaignBudgets,',
@@ -136,7 +175,35 @@ try {
         '  CampaignLifecycleState, CreateCampaignInput, AppendOptions,',
         '  ExploringEntryAdmission, ExploringEntryInput, ExploringEntryRefusal,',
         '  ExploringEntryResult, PolicyOptimizationErrorCategory, PolicyOptimizationIssue,',
+        '  AdmittedCandidate, AllocationDecision, AllocationInput, AllocationInputRefs,',
+        '  AllocationPolicyRef, AssembleWaveInput, CommittedCells, DerivedWaveBenchmark,',
+        '  DroppedTask, ExecuteWaveInput, OutcomesProjectionRow, PlanPromotionRunInput,',
+        '  PlanWaveInput, PlannedPromotion, PromotionAdmission, PromotionReveal, PrunedCandidate,',
+        '  RateBound, StoppingRuleResult, TaskInformativenessRow, WaveArm, WaveAssemblyVenue,',
+        '  WaveCellEvidence, WaveCellEvidencePort, WaveDispatch, WaveExecution, WaveLaunchOptions,',
+        '  WavePlan, WaveReportInput, WaveReportRow, WaveRunSettings, WaveVerdictRule,',
         '} from "@jinn-network/policy-optimization";',
+        '',
+        'export type PolicyOptimizationWaveSurface = [',
+        '  typeof buildWaveArms, typeof assertArmsAgreeOnFrozenAxes,',
+        '  typeof checkCandidateAgainstCampaign, typeof ALLOCATION_POLICY_REFS,',
+        '  typeof decideAllocation, typeof compareExactDecimals, typeof compareObservedRates,',
+        '  typeof STOPPING_RULE_REFS, typeof checkStoppingRule, typeof committedCells,',
+        '  typeof deriveWaveBenchmark, typeof planWave, typeof executeWave,',
+        '  typeof assembleWaveMatrix, typeof objectiveMethod, typeof produceWaveReport,',
+        '  typeof checkPromotionReveal, typeof objectiveAnalysisPlan, typeof planPromotionRun,',
+        '  typeof appendWaveEvent, typeof wavePlannedPayload, typeof runSealedPayload,',
+        '  typeof promotionRunSealedPayload, typeof allocationDecidedPayload,',
+        '  typeof matrixAssembledPayload, typeof reportRecordedPayload,',
+        '  typeof NO_CELLS_COMMITTED, typeof WAVE_DERIVATION_EXTENSION_KEY,',
+        '  AdmittedCandidate, AllocationDecision, AllocationInput, AllocationInputRefs,',
+        '  AllocationPolicyRef, AssembleWaveInput, CommittedCells, DerivedWaveBenchmark,',
+        '  DroppedTask, ExecuteWaveInput, OutcomesProjectionRow, PlanPromotionRunInput,',
+        '  PlanWaveInput, PlannedPromotion, PromotionAdmission, PromotionReveal, PrunedCandidate,',
+        '  RateBound, StoppingRuleResult, TaskInformativenessRow, WaveArm, WaveAssemblyVenue,',
+        '  WaveCellEvidence, WaveCellEvidencePort, WaveDispatch, WaveExecution, WaveLaunchOptions,',
+        '  WavePlan, WaveReportInput, WaveReportRow, WaveRunSettings, WaveVerdictRule,',
+        '];',
         '',
         'export type PolicyOptimizationSurface = [',
         '  typeof validateCampaign, typeof sealCampaign, typeof parseExactCampaign,',

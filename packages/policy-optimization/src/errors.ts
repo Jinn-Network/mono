@@ -26,7 +26,15 @@ export type PolicyOptimizationErrorCategory =
   /** Product §5.2 — the journal on disk is not a well-formed, unbroken chain. */
   | "journal-integrity"
   /** Product §5.2 — the appended event is illegal in the campaign's derived lifecycle phase. */
-  | "lifecycle-violation";
+  | "lifecycle-violation"
+  /** Product §6.1 — the wave's arms, Benchmark, or Run could not be composed from the inputs. */
+  | "wave-composition"
+  /** Product §5.1 — the wave would spend past `budgets.evaluation` or `budgets.hardCap`. */
+  | "budget-exceeded"
+  /** Product §6.2 — the campaign names an allocation policy this package does not implement, or misparameterizes it. */
+  | "allocation-policy"
+  /** Product §6.3 — the promotion Run's preregistration, reveal, or flat-sampling discipline was violated. */
+  | "promotion-discipline";
 
 export interface PolicyOptimizationIssue {
   readonly path: string;

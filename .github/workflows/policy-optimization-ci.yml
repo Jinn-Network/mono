@@ -44,8 +44,29 @@ jobs:
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
           (cd packages/policy/identity && yarn install --immutable && yarn build)
+      # Test-only. The wave engine's tests dispatch against the TEP conformance kit's in-memory
+      # fake, and that kit carries the local backend's conformance slice as runtime dependencies
+      # (FINDING F-C7b-4) — so consuming `createInMemoryBackend` means building this whole tail.
+      # None of it is a dependency of the product, and none of it is packed.
+      - name: Build the TEP conformance kit (test-only)
+        run: |
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/task-execution/testing && yarn install --immutable && yarn build)
       - name: Verify Policy Optimization
         working-directory: packages/policy-optimization
         run: |
@@ -96,7 +117,13 @@ jobs:
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
           (cd packages/policy/identity && yarn install --immutable && yarn build)
       - name: Compile the packed public entrypoint consumer
         run: node .github/scripts/policy-optimization-packed-types.test.mjs

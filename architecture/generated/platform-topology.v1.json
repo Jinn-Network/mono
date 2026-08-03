@@ -707,12 +707,32 @@
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/benchmarking-aggregate"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-local"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
       },
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/policy-identity"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend"
       },
       {
         "from": "@jinn-network/policy-outcomes",
@@ -1543,7 +1563,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2775,
+      "discoveredFirstPartySurfaces": 2776,
       "generatedOutputSources": 1294,
       "generatorSources": 573,
       "marketplaceControl": 2,
@@ -31413,6 +31433,16 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/src/testing/wave-fixtures.ts"
+      },
+      {
+        "categories": [
           "catalogPublicSurfaces",
           "discoveredFirstPartySurfaces",
           "generatedOutputSources"
@@ -41571,8 +41601,12 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/benchmarking-aggregate",
+          "@jinn-network/benchmarking-local",
           "@jinn-network/benchmarking-records",
+          "@jinn-network/benchmarking-run",
           "@jinn-network/policy-identity",
+          "@jinn-network/task-execution-backend",
           "zod"
         ]
       },

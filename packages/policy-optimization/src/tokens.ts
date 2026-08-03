@@ -28,6 +28,19 @@ export const CAMPAIGN_JOURNAL_ENTRY_FORMAT_TOKEN =
   "network.jinn.policy-optimization.campaign-journal-entry/1.0" as const;
 
 /**
+ * The namespaced extension key (TEP §21.3) a **derived wave Benchmark** carries.
+ *
+ * §6.2's task selection can only be expressed as a Benchmark restricted to the selected items
+ * (records §7.3: a Run's cell set is the full cartesian product of its Benchmark's items). The
+ * restriction inherits the parent's `name` and `version`, so without this key two different item
+ * sets would circulate under one label with nothing on either record to distinguish them. It names
+ * the parent slate, the campaign, and the wave — enough for a reader who resolved a Run's Benchmark
+ * to see what it is.
+ */
+export const WAVE_DERIVATION_EXTENSION_KEY =
+  "network.jinn.policy-optimization.wave-derivation" as const;
+
+/**
  * Product §5.1 — the v0 mutation surface. Harness and model are frozen per campaign;
  * `isolationPolicy` is excluded because the axis is vacuous (substrate §4.3), and an axis nobody
  * can vary is not a search dimension.

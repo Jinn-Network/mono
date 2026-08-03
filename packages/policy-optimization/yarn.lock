@@ -14,6 +14,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@jinn-network/benchmarking-aggregate@portal:../benchmarking/aggregate::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-aggregate@portal:../benchmarking/aggregate::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/benchmarking-local@portal:../benchmarking/local::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-local@portal:../benchmarking/local::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/benchmarking-run": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/benchmarking-records@portal:../benchmarking/records::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/benchmarking-records@portal:../benchmarking/records::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
@@ -21,6 +39,67 @@ __metadata:
     "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/benchmarking-run@portal:../benchmarking/run::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-run@portal:../benchmarking/run::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-discovery@portal:../evidence/discovery::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-discovery@portal:../evidence/discovery::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-protocol@portal:../evidence/protocol::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-protocol@portal:../evidence/protocol::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/evidence-repository@portal:../evidence/repository::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/evidence-repository@portal:../evidence/repository::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/execution-recorder@portal:../evidence/execution-recorder::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/execution-recorder@portal:../evidence/execution-recorder::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-protocol": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
   languageName: node
   linkType: soft
 
@@ -37,8 +116,13 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/policy-optimization@workspace:."
   dependencies:
+    "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
+    "@jinn-network/benchmarking-local": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/benchmarking-run": "npm:0.1.0"
     "@jinn-network/policy-identity": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-testing": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
@@ -46,10 +130,103 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@jinn-network/task-execution-backend-local@portal:../task-execution/backend-local/assembly::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-backend-local@portal:../task-execution/backend-local/assembly::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/evidence-discovery": "npm:0.1.0"
+    "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/execution-recorder": "npm:0.1.0"
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-backend@portal:../task-execution/backend::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-backend@portal:../task-execution/backend::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-launchers@portal:../task-execution/backend-local/launchers::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-launchers@portal:../task-execution/backend-local/launchers::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-profiles@portal:../task-execution/profiles::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-profiles@portal:../task-execution/profiles::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@noble/hashes": "npm:2.2.0"
+    ajv: "npm:8.17.1"
+    safe-regex: "npm:2.1.1"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
 "@jinn-network/task-execution-protocol@portal:../task-execution/protocol::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
   version: 0.0.0-use.local
   resolution: "@jinn-network/task-execution-protocol@portal:../task-execution/protocol::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
   dependencies:
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-supervisor@portal:../task-execution/backend-local/supervisor::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-supervisor@portal:../task-execution/backend-local/supervisor::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-testing@portal:../task-execution/testing::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-testing@portal:../task-execution/testing::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-backend": "npm:0.1.0"
+    "@jinn-network/task-execution-backend-local": "npm:0.1.0"
+    "@jinn-network/task-execution-launchers": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+    "@jinn-network/task-execution-supervisor": "npm:0.1.0"
+    "@jinn-network/task-execution-workspace": "npm:0.1.0"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
+  languageName: node
+  linkType: soft
+
+"@jinn-network/task-execution-workspace@portal:../task-execution/backend-local/workspace::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/task-execution-workspace@portal:../task-execution/backend-local/workspace::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/task-execution-profiles": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/trust-core@portal:../trust/core::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/trust-core@portal:../trust/core::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
     zod: "npm:4.4.3"
   languageName: node
@@ -319,6 +496,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ajv@npm:8.17.1":
+  version: 8.17.1
+  resolution: "ajv@npm:8.17.1"
+  dependencies:
+    fast-deep-equal: "npm:^3.1.3"
+    fast-uri: "npm:^3.0.1"
+    json-schema-traverse: "npm:^1.0.0"
+    require-from-string: "npm:^2.0.2"
+  checksum: 10c0/ec3ba10a573c6b60f94639ffc53526275917a2df6810e4ab5a6b959d87459f9ef3f00d5e7865b82677cb7d21590355b34da14d1d0b9c32d75f95a187e76fff35
+  languageName: node
+  linkType: hard
+
 "assertion-error@npm:^2.0.1":
   version: 2.0.1
   resolution: "assertion-error@npm:2.0.1"
@@ -391,6 +580,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fast-deep-equal@npm:^3.1.3":
+  version: 3.1.3
+  resolution: "fast-deep-equal@npm:3.1.3"
+  checksum: 10c0/40dedc862eb8992c54579c66d914635afbec43350afbbe991235fdcb4e3a8d5af1b23ae7e79bef7d4882d0ecee06c3197488026998fb19f72dc95acff1d1b1d0
+  languageName: node
+  linkType: hard
+
+"fast-uri@npm:^3.0.1":
+  version: 3.1.5
+  resolution: "fast-uri@npm:3.1.5"
+  checksum: 10c0/2bf60eb800dd610c65e17be436425dcb21c92aff3a87d442a8bccab0b7b071e88cf1a5d7d1ea946370b937e6fc0375c405c0296c10587e57de4f78be4646d1d0
+  languageName: node
+  linkType: hard
+
 "fdir@npm:^6.5.0":
   version: 6.5.0
   resolution: "fdir@npm:6.5.0"
@@ -433,6 +636,13 @@ __metadata:
   version: 4.0.0
   resolution: "isexe@npm:4.0.0"
   checksum: 10c0/5884815115bceac452877659a9c7726382531592f43dc29e5d48b7c4100661aed54018cb90bd36cb2eaeba521092570769167acbb95c18d39afdccbcca06c5ce
+  languageName: node
+  linkType: hard
+
+"json-schema-traverse@npm:^1.0.0":
+  version: 1.0.0
+  resolution: "json-schema-traverse@npm:1.0.0"
+  checksum: 10c0/71e30015d7f3d6dc1c316d6298047c8ef98a06d31ad064919976583eb61e1018a60a0067338f0f79cabc00d84af3fcc489bd48ce8a46ea165d9541ba17fb30c6
   languageName: node
   linkType: hard
 
@@ -667,6 +877,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"regexp-tree@npm:~0.1.1":
+  version: 0.1.27
+  resolution: "regexp-tree@npm:0.1.27"
+  bin:
+    regexp-tree: bin/regexp-tree
+  checksum: 10c0/f636f44b4a0d93d7d6926585ecd81f63e4ce2ac895bc417b2ead0874cd36b337dcc3d0fedc63f69bf5aaeaa4340f36ca7e750c9687cceaf8087374e5284e843c
+  languageName: node
+  linkType: hard
+
+"require-from-string@npm:^2.0.2":
+  version: 2.0.2
+  resolution: "require-from-string@npm:2.0.2"
+  checksum: 10c0/aaa267e0c5b022fc5fd4eef49d8285086b15f2a1c54b28240fdf03599cbd9c26049fee3eab894f2e1f6ca65e513b030a7c264201e3f005601e80c49fb2937ce2
+  languageName: node
+  linkType: hard
+
 "rolldown@npm:~1.2.0":
   version: 1.2.2
   resolution: "rolldown@npm:1.2.2"
@@ -719,6 +945,15 @@ __metadata:
   bin:
     rolldown: ./bin/cli.mjs
   checksum: 10c0/78a804b9d0947d0569aac5f78ae789b107d097ef94df2ee04b0d89621ca0b62f5336037e6fc1e24209ece2f1d7cbf0d66b27db10b8022684eaf5bea89b9aa97e
+  languageName: node
+  linkType: hard
+
+"safe-regex@npm:2.1.1":
+  version: 2.1.1
+  resolution: "safe-regex@npm:2.1.1"
+  dependencies:
+    regexp-tree: "npm:~0.1.1"
+  checksum: 10c0/53eb5d3ecf4b3c0954dff465eb179af4d2f5f77f74ba7b57489adbc4fa44454c3d391f37379cd28722d9ac6fa5b70be3f4645d4bd25df395fd99b934f6ec9265
   languageName: node
   linkType: hard
 

@@ -6,9 +6,14 @@
 // default. A new Jinn edge fails here until it is added deliberately.
 //
 // 1. **The dependency allow-list.** `policy-identity`, `policy-outcomes`, `benchmarking-records`,
-//    `benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`. Marketplace packages,
+//    `benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`, plus the
+//    `task-execution-backend` **contract** (the injected backend's type — the product names the
+//    contract and never a binding) and `task-execution-testing` (dev-only: the TEP conformance
+//    kit's in-memory fake, which the wave engine's tests dispatch against). Marketplace packages,
 //    every other product, and the client are denied outright: v0 executes on the local venue and
 //    consumes the marketplace read-only through the §8.2 adapters' injected ports (design §11).
+//    `task-execution-backend-local` stays denied: naming a concrete backend is exactly what the
+//    injected-port posture exists to prevent.
 // 2. **`evidence-retrieval` is mirrors-only.** Its envelope shapes (`QuerySnapshotReceipt` and
 //    friends) are mirrored where needed, never imported — the substrate §2 rule this product
 //    inherits along with the manifest's `evidenceProvenance` block.
@@ -34,6 +39,8 @@ const ALLOWED_JINN_PACKAGES = [
   '@jinn-network/benchmarking-run',
   '@jinn-network/policy-identity',
   '@jinn-network/policy-outcomes',
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-testing',
 ];
 
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so
@@ -42,6 +49,11 @@ const EXPLICITLY_DENIED = [
   '@jinn-network/benchmarking-marketplace',
   '@jinn-network/marketplace-*',
   '@jinn-network/evidence-retrieval',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-protocol',
   '@jinn-network/autopilot',
   '@jinn-network/client',
   '@jinn-network/operator-spa',
@@ -219,7 +231,14 @@ test('policy-optimization actually imports the dependencies it declares (positiv
   // an absent edge is not the same claim as an audited one.
   if (!existsSync(sourceRoot)) return;
   const imported = new Set(files(sourceRoot).flatMap((file) => specifiers(readFileSync(file, 'utf8'))));
-  for (const name of ['@jinn-network/policy-identity', '@jinn-network/benchmarking-records']) {
+  for (const name of [
+    '@jinn-network/policy-identity',
+    '@jinn-network/benchmarking-records',
+    '@jinn-network/benchmarking-run',
+    '@jinn-network/benchmarking-local',
+    '@jinn-network/benchmarking-aggregate',
+    '@jinn-network/task-execution-backend',
+  ]) {
     assert.ok(imported.has(name), `expected at least one import of ${name}`);
   }
 });
