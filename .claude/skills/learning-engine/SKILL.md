@@ -18,7 +18,7 @@ Also invoke proactively when the user is about to crank one half of a learning l
 Valid inputs:
 
 - A growth attempt described against GROWTH.md's eight hyperparameters.
-- A SWE harness change or learning-roadmap move (defer to [`spec/2026-05-28-harness-as-policy-learning-architecture.md`](../../../spec/2026-05-28-harness-as-policy-learning-architecture.md) for the canonical SWE-side L0–L5 ladder).
+- A SWE harness change or learning-roadmap move (defer to [`docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md`](../../../docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md) as the current SWE-side design authority; [`spec/2026-05-28-harness-as-policy-learning-architecture.md`](../../../spec/2026-05-28-harness-as-policy-learning-architecture.md) for the L0–L5 ladder it composes).
 - A business process — hiring pipeline (policy = sourcing channel + screener + rubric), product feature iteration (policy = spec + experiment + metric), sales motion (policy = ICP + outreach script + qualifier).
 - A personal practice — a routine, a study habit, a workout split.
 - Any feedback loop the user describes informally.
