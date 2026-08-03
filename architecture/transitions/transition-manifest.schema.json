@@ -62,13 +62,20 @@
     "usageSignal": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "source", "zeroDefinition"],
+      "required": ["name", "sourceFile", "sourceDescription", "zeroDefinition"],
       "properties": {
         "name": {
           "type": "string",
           "minLength": 1
         },
-        "source": {
+        "sourceFile": {
+          "description": "Repository-relative path to the file that backs this signal with a durable runtime counter, or null when the signal is a static architecture inventory rather than a runtime counter.",
+          "anyOf": [
+            { "$ref": "#/$defs/repoPath" },
+            { "type": "null" }
+          ]
+        },
+        "sourceDescription": {
           "type": "string",
           "minLength": 1
         },

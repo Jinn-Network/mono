@@ -22,8 +22,9 @@
         "assertion": "Exactly one operator product graph is selected and native mode cannot load legacy restoration, work-loop, or compatibility composition."
       },
       "usageSignal": {
-        "name": "operator_vertical_mode",
-        "source": "durable client/src/daemon/phase-d-transition-usage.ts counters exposed by GET /v1/status",
+        "name": "legacy-operator-composition",
+        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counters exposed by GET /v1/status, incremented at client/src/daemon/daemon.ts:336 when the daemon selects legacy vertical mode",
         "zeroDefinition": "No production instance selects the legacy graph during the approved observation window."
       },
       "migration": {
@@ -62,8 +63,9 @@
         "assertion": "Only the frozen legacy client import allowlist may import marketplace-pipeline."
       },
       "usageSignal": {
-        "name": "marketplace_pipeline_invocations",
-        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented at the legacy runPipeline call",
+        "name": "marketplace-pipeline-invocation",
+        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at the legacy runPipeline call (client/src/daemon/work-loop.ts:466)",
         "zeroDefinition": "No production runPipeline invocation occurs during the approved observation window."
       },
       "migration": {
@@ -103,8 +105,9 @@
         "assertion": "Legacy synthesis remains confined to the two declared bridge entry points and carries derivationKind legacy."
       },
       "usageSignal": {
-        "name": "legacy_synthesized_submission_cards",
-        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented at legacy Task/Submission synthesis",
+        "name": "legacy-task-submission-synthesis",
+        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented at legacy Task/Submission synthesis (client/src/daemon/bridge-legacy-delivery.ts:126)",
         "zeroDefinition": "No synthesized legacy Task or Submission card is produced during the approved observation window."
       },
       "migration": {
@@ -142,8 +145,9 @@
         "assertion": "Native daemon construction rejects the legacy restoration and compatibility components."
       },
       "usageSignal": {
-        "name": "legacy_evaluator_components_loaded",
-        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented when the legacy delivery watcher is loaded",
+        "name": "legacy-evaluator-delivery-watcher-loaded",
+        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "durable counter exposed by GET /v1/status and instrumented when the legacy delivery watcher is loaded (client/src/daemon/daemon.ts:337)",
         "zeroDefinition": "No legacy delivery watcher or evaluator component is loaded during the approved observation window."
       },
       "migration": {
@@ -182,8 +186,9 @@
         "assertion": "Native code cannot import marketplace-pipeline wiring or configuration types."
       },
       "usageSignal": {
-        "name": "legacy_wiring_config_fields",
-        "source": "accepted configuration parse diagnostics persisted by client/src/daemon/phase-d-transition-usage.ts and exposed by GET /v1/status",
+        "name": "legacy-wiring-config-field",
+        "sourceFile": "client/src/compatibility/phase-d-transition-usage.ts",
+        "sourceDescription": "accepted configuration parse diagnostics exposed by GET /v1/status and instrumented in client/src/config.ts:1480",
         "zeroDefinition": "No accepted production configuration supplies a legacy wiring, model, plugin, or credential field."
       },
       "migration": {
@@ -223,7 +228,8 @@
       },
       "usageSignal": {
         "name": "legacy_taskengine_carve_runtime_references",
-        "source": "architecture consumer inventory",
+        "sourceFile": null,
+        "sourceDescription": "architecture consumer inventory",
         "zeroDefinition": "No runtime source outside marketplace-pipeline references a TaskEngine carve constant."
       },
       "migration": {
@@ -260,7 +266,8 @@
       },
       "usageSignal": {
         "name": "direct_posttask_external_consumers",
-        "source": "architecture import and call inventory",
+        "sourceFile": null,
+        "sourceDescription": "architecture import and call inventory",
         "zeroDefinition": "No non-binding product or native source imports or invokes marketplace-binding postTask."
       },
       "migration": {

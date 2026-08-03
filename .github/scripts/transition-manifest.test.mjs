@@ -21,7 +21,8 @@ function transition(overrides = {}) {
     },
     usageSignal: {
       name: 'marketplace_pipeline_invocations',
-      source: 'operator health diagnostics',
+      sourceFile: null,
+      sourceDescription: 'operator health diagnostics',
       zeroDefinition: 'No production invocation during the approved observation window.',
     },
     migration: {
@@ -95,6 +96,20 @@ test('only deleted transitions may have an empty consumer inventory', () => {
     consumers: [],
   })] }), { repoRoot });
   assert.ok(errors.some((error) => error.includes('must be non-empty until the transition is deleted')));
+});
+
+test('validator rejects a usageSignal file reference that does not exist in the repository', () => {
+  const errors = validateTransitionManifest(manifest({
+    transitions: [transition({
+      usageSignal: {
+        name: 'marketplace_pipeline_invocations',
+        sourceFile: 'client/src/daemon/phase-d-transition-usage.ts',
+        sourceDescription: 'durable counter exposed by GET /v1/status',
+        zeroDefinition: 'No production invocation during the approved observation window.',
+      },
+    })],
+  }), { repoRoot });
+  assert.ok(errors.some((error) => error.includes('usageSignal.sourceFile does not exist')));
 });
 
 test('the repository Phase D manifest validates as the machine-readable deletion authority', () => {
