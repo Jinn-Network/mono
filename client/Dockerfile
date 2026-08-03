@@ -51,8 +51,8 @@ COPY packages/marketplace/binding/package.json packages/marketplace/binding/yarn
 COPY packages/task-execution/backend-local/supervisor/package.json packages/task-execution/backend-local/supervisor/yarn.lock packages/task-execution/backend-local/supervisor/.yarnrc.yml ./packages/task-execution/backend-local/supervisor/
 COPY packages/task-execution/backend-local/workspace/package.json packages/task-execution/backend-local/workspace/yarn.lock packages/task-execution/backend-local/workspace/.yarnrc.yml ./packages/task-execution/backend-local/workspace/
 COPY packages/task-execution/backend-local/launchers/package.json packages/task-execution/backend-local/launchers/yarn.lock packages/task-execution/backend-local/launchers/.yarnrc.yml ./packages/task-execution/backend-local/launchers/
-COPY packages/task-execution/evaluation-harness/package.json packages/task-execution/evaluation-harness/yarn.lock ./packages/task-execution/evaluation-harness/
-COPY packages/task-execution/evaluator-adapters/package.json packages/task-execution/evaluator-adapters/yarn.lock ./packages/task-execution/evaluator-adapters/
+COPY packages/task-execution/evaluation-harness/package.json packages/task-execution/evaluation-harness/yarn.lock packages/task-execution/evaluation-harness/.yarnrc.yml ./packages/task-execution/evaluation-harness/
+COPY packages/task-execution/evaluator-adapters/package.json packages/task-execution/evaluator-adapters/yarn.lock packages/task-execution/evaluator-adapters/.yarnrc.yml ./packages/task-execution/evaluator-adapters/
 COPY packages/task-execution/backend-local/assembly/package.json packages/task-execution/backend-local/assembly/yarn.lock packages/task-execution/backend-local/assembly/.yarnrc.yml ./packages/task-execution/backend-local/assembly/
 COPY packages/marketplace/pipeline/package.json packages/marketplace/pipeline/yarn.lock packages/marketplace/pipeline/.yarnrc.yml ./packages/marketplace/pipeline/
 COPY packages/discovery/protocol/package.json packages/discovery/protocol/yarn.lock packages/discovery/protocol/.yarnrc.yml ./packages/discovery/protocol/
