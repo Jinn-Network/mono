@@ -237,6 +237,46 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  local:
+    needs: [records, testing, run]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Build cross-tree portal dependencies from source (§7.8)
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/testing && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+      - name: Verify Benchmarking Local
+        working-directory: packages/benchmarking/local
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmarking Local distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarking-local-dist
+          path: packages/benchmarking/local/dist
+          if-no-files-found: error
+          retention-days: 1
+
   testing:
     needs: [records, aggregate]
     runs-on: ubuntu-latest
@@ -275,7 +315,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, records, testing, aggregate, run, interop, marketplace]
+    needs: [architecture, records, testing, aggregate, run, interop, marketplace, local]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -288,6 +328,7 @@ jobs:
           RUN_RESULT: ${{ needs.run.result }}
           INTEROP_RESULT: ${{ needs.interop.result }}
           MARKETPLACE_RESULT: ${{ needs.marketplace.result }}
+          LOCAL_RESULT: ${{ needs.local.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
@@ -296,7 +337,8 @@ jobs:
             "$AGGREGATE_RESULT" \
             "$RUN_RESULT" \
             "$INTEROP_RESULT" \
-            "$MARKETPLACE_RESULT"; do
+            "$MARKETPLACE_RESULT" \
+            "$LOCAL_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -328,6 +370,8 @@ jobs:
           cp -R .benchmarking-dist/benchmarking-interop-dist/. packages/benchmarking/interop/dist/
           mkdir -p packages/benchmarking/marketplace/dist
           cp -R .benchmarking-dist/benchmarking-marketplace-dist/. packages/benchmarking/marketplace/dist/
+          mkdir -p packages/benchmarking/local/dist
+          cp -R .benchmarking-dist/benchmarking-local-dist/. packages/benchmarking/local/dist/
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
