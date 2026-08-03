@@ -132,7 +132,7 @@ record kind):
 
 | Field | Content |
 | --- | --- |
-| `target` | `taskProfile`; `developmentBenchmark` (Benchmark record digest); `promotionBenchmark` (**committed** Benchmark record digest, §6.3); optional `trainingEvidence` (saved-query reference for proposer input) |
+| `target` | `taskProfile`; `developmentBenchmark` (Benchmark record digest); `promotionBenchmark` (**committed** Benchmark record digest, §6.3); optional `trainingEvidence` (saved-query reference for proposer input). *(Amended 2026-08-03, C7b review M4: the development and promotion Benchmarks must be **item-disjoint** — item digests are public even on a committed record, so the check runs at sealing and at `EXPLORING`-entry without any reveal; a promotion gate sharing items with the dev slate is contaminated item-by-item by every dev wave.)* |
 | `seeds[]` | initial policy tuples or candidate-manifest digests |
 | `mutationSurface` | which tuple axes candidates may vary; **v0: `["loadout"]`** — harness and model frozen per campaign, isolation excluded as vacuous |
 | `frozenAxes` | **explicit byte-exact values for every non-mutable axis.** All seeds and every admitted candidate MUST byte-share these values — checked at campaign sealing (seeds that disagree make the document invalid) and again at admission (§7.3). Frozen and mutable axes are exact pins, never constraint-shaped values (substrate §4.1 rule 4) |
