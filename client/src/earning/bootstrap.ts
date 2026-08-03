@@ -2024,9 +2024,11 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: creating service through Safe`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.serviceManager, value: '0', data: createData },
-    ]);
+    const result = await executeSafeTxBatch(
+      safe,
+      [{ to: this.config.serviceManager, value: '0', data: createData }],
+      { publicClient: this.publicClient, from: getAddress(svc.agent_address) as Address },
+    );
 
     const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
     if (receipt.status !== 'success') {
@@ -2083,10 +2085,14 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: activating service ${serviceId}`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.olasToken, value: '0', data: approveData },
-      { to: this.config.serviceManager, value: '1', data: activateData },
-    ]);
+    const result = await executeSafeTxBatch(
+      safe,
+      [
+        { to: this.config.olasToken, value: '0', data: approveData },
+        { to: this.config.serviceManager, value: '1', data: activateData },
+      ],
+      { publicClient: this.publicClient, from: getAddress(svc.agent_address) as Address },
+    );
 
     const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
     if (receipt.status !== 'success') {
@@ -2133,10 +2139,14 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: registering agent ${svc.agent_address} for service ${serviceId}`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.olasToken, value: '0', data: approveData },
-      { to: this.config.serviceManager, value: '1', data: registerData },
-    ]);
+    const result = await executeSafeTxBatch(
+      safe,
+      [
+        { to: this.config.olasToken, value: '0', data: approveData },
+        { to: this.config.serviceManager, value: '1', data: registerData },
+      ],
+      { publicClient: this.publicClient, from: getAddress(svc.agent_address) as Address },
+    );
 
     const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
     if (receipt.status !== 'success') {
@@ -2187,9 +2197,11 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: deploying service ${serviceId}`);
-    const result = await executeSafeTxBatch(safe, [
-      { to: this.config.serviceManager, value: '0', data: deployData },
-    ]);
+    const result = await executeSafeTxBatch(
+      safe,
+      [{ to: this.config.serviceManager, value: '0', data: deployData }],
+      { publicClient: this.publicClient, from: getAddress(svc.agent_address) as Address },
+    );
 
     const receipt = await waitForTransactionReceiptWithRetry(this.publicClient, result.hash as Hex);
     if (receipt.status !== 'success') {
@@ -2232,9 +2244,11 @@ export class FleetBootstrapper {
     }) as Hex;
 
     console.error(`[fleet-bootstrap] Service ${index}: approving service ${serviceId} NFT for staking`);
-    const approveResult = await executeSafeTxBatch(safe, [
-      { to: this.config.serviceRegistry, value: '0', data: approveData },
-    ]);
+    const approveResult = await executeSafeTxBatch(
+      safe,
+      [{ to: this.config.serviceRegistry, value: '0', data: approveData }],
+      { publicClient: this.publicClient, from: getAddress(svc.agent_address) as Address },
+    );
 
     await this.waitForSuccessfulTx(approveResult.hash, `approve service ${serviceId} NFT`);
     console.error(`[fleet-bootstrap] Service ${index}: approve tx confirmed (${approveResult.hash})`);

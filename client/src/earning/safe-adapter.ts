@@ -21,6 +21,7 @@ import {
   type Address,
   type Chain,
   type Hex,
+  type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
@@ -177,39 +178,92 @@ export async function initDeployedSafe(opts: {
   });
 }
 
+export interface ExecuteSafeTxBatchOptions {
+  /** Public client used to resolve chain id / pending nonce / gas fees. */
+  publicClient: PublicClient;
+  /** Agent EOA that signs and broadcasts the Safe's `execTransaction` wrapper. */
+  from: Address;
+  /** Defaults to the module-wide default ledger (see `tx-retry.ts`) when omitted. */
+  ledger?: TxSubmissionLedger;
+  chainId?: number;
+}
+
 /**
  * Build + sign + execute a batch of calls through a deployed Safe.
  * For 1-of-1 Safes the signer is the sole owner, so sign + execute in one shot.
+ *
+ * Issue #525/#562/#897: this used to hand off to the Safe SDK's own
+ * `executeTransaction` with no pinned nonce, letting the SDK's internal viem
+ * client auto-fill the nonce from the `pending` transaction count. Two
+ * concurrent batches from the same agent EOA (e.g. two bootstrap steps racing
+ * under the shared master signer) would both read the same pending nonce and
+ * collide. Routes through the same `withNonceLedger` + shared per-EOA
+ * `withEoaBroadcastLock` critical section as `executeSafeTxDirect`, so both
+ * paths -- and venue-base's own broadcaster, once `setDefaultEoaBroadcastLock`
+ * is installed -- serialize against each other.
  */
 export async function executeSafeTxBatch(
   safe: SafeInstance,
   transactions: MetaTransactionData[],
+  options: ExecuteSafeTxBatchOptions,
 ): Promise<TransactionResult> {
-  return withRecoverableRetry(
-    async () => {
-      const safeTx = await safe.createTransaction({ transactions });
-      const signedTx = await safe.signTransaction(safeTx);
-
-      try {
-        return await safe.executeTransaction(signedTx);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!message.includes('GS013')) {
-          throw err;
-        }
-
-        // Safe SDK gas estimation intermittently fails on certain inner calls
-        // (notably staking approve+stake batches) even when the transaction itself succeeds.
-        return safe.executeTransaction(signedTx, {
-          gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT,
-        });
-      }
-    },
+  return withNonceLedger(
     {
-      onRetry: ({ attempt, message }) => {
-        console.error(`[safe-adapter] executeSafeTxBatch retry ${attempt}: ${message}`);
-      },
+      publicClient: options.publicClient,
+      ledger: options.ledger,
+      from: options.from,
+      chainId: options.chainId,
     },
+    (nonceLedger) => withRecoverableRetry(
+      async (attemptIndex) => {
+        const safeTx = await safe.createTransaction({ transactions });
+        const signedTx = await safe.signTransaction(safeTx);
+        const feeResult = await nonceLedger.feeResultForAttempt(attemptIndex, {
+          forceEstimate: true,
+        });
+        const txOptions: Record<string, unknown> = {
+          nonce: nonceLedger.nonce,
+          ...feeResult.overrides,
+        };
+
+        const execute = async (execOptions: Record<string, unknown>) => {
+          const result = await safe.executeTransaction(signedTx, execOptions);
+          await nonceLedger.recordSubmitted({
+            hash: result.hash as Hex,
+            logicalTx: 'safe.executeTransaction.batch',
+            fees: feeResult.snapshot,
+          });
+          return result;
+        };
+
+        try {
+          return await execute(txOptions);
+        } catch (err) {
+          // Issue #562: a daemon respawn (or, now that the nonce is pinned, a
+          // genuine race that the shared lock did not fully absorb) can leave
+          // the pinned value behind the RPC's pending nonce -- refresh so the
+          // next retry attempt submits with the fresh value.
+          if (isNonceTooLowError(err)) {
+            const refreshed = await nonceLedger.refreshNonce();
+            console.error(`[safe-adapter] executeSafeTxBatch refreshed pinned nonce -> ${refreshed}`);
+          }
+
+          const message = err instanceof Error ? err.message : String(err);
+          if (!message.includes('GS013')) {
+            throw err;
+          }
+
+          // Safe SDK gas estimation intermittently fails on certain inner calls
+          // (notably staking approve+stake batches) even when the transaction itself succeeds.
+          return execute({ ...txOptions, gasLimit: SAFE_EXECUTION_FALLBACK_GAS_LIMIT });
+        }
+      },
+      {
+        onRetry: ({ attempt, message }) => {
+          console.error(`[safe-adapter] executeSafeTxBatch retry ${attempt}: ${message}`);
+        },
+      },
+    ),
   );
 }
 
