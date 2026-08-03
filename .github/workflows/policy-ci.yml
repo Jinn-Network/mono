@@ -28,6 +28,8 @@ jobs:
         run: node --test .github/scripts/policy-source-boundaries.test.mjs
       - name: Verify policy-identity's purity and no-record contract
         run: node --test .github/scripts/policy-identity-guards.test.mjs
+      - name: Verify policy-outcomes' projection-never-record contract
+        run: node --test .github/scripts/policy-outcomes-guards.test.mjs
 
   identity:
     needs: [architecture]
@@ -68,8 +70,41 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  verify:
+  outcomes:
     needs: [architecture, identity]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # Cross-tree (in-tree, same monorepo, not the same yarn project) portal dependency: outcomes
+      # resolves `@jinn-network/policy-identity` via `portal:../identity`, which needs identity's
+      # own install + build to have already produced `dist/`.
+      - name: Build policy-identity portal dependency from source
+        run: (cd packages/policy/identity && yarn install --immutable && yarn build)
+      - name: Verify Policy Outcomes
+        working-directory: packages/policy/outcomes
+        run: |
+          yarn install
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Policy Outcomes distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: policy-outcomes-dist
+          path: packages/policy/outcomes/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, identity, outcomes]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -77,10 +112,12 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           IDENTITY_RESULT: ${{ needs.identity.result }}
+          OUTCOMES_RESULT: ${{ needs.outcomes.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
-            "$IDENTITY_RESULT"; do
+            "$IDENTITY_RESULT" \
+            "$OUTCOMES_RESULT"; do
             test "$result" = "success"
           done
       - uses: actions/checkout@v4
@@ -100,5 +137,7 @@ jobs:
         run: |
           mkdir -p packages/policy/identity/dist
           cp -R .policy-dist/policy-identity-dist/. packages/policy/identity/dist/
+          mkdir -p packages/policy/outcomes/dist
+          cp -R .policy-dist/policy-outcomes-dist/. packages/policy/outcomes/dist/
       - name: Compile packed public entrypoint consumers
         run: node .github/scripts/policy-packed-types.test.mjs

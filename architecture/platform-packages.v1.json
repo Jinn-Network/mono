@@ -160,7 +160,7 @@
       "stable": false
     },
     "experimental-policy": {
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 2,
       "publishPolicies": [
         "disabled"
       ],
@@ -3451,6 +3451,48 @@
           {
             "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md",
             "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-policy",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-outcomes",
+      "path": "packages/policy/outcomes",
+      "domain": "policy",
+      "role": "policy-keyed outcomes projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",
+            "status": "approved"
           }
         ],
         "decisionRecord": null

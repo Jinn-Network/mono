@@ -17,10 +17,12 @@ const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'policy');
 const policyDirectories = ['identity', 'outcomes'];
 
-// Substrate §2: the policy packages import protocol/record layers only, and today import no Jinn
-// package at all. Everything with fetch capability, chain access, storage, a backend, or an
-// application surface is forbidden outright — a pure projection/identity package that acquires
-// one of these has stopped being one.
+// Substrate §2: the policy packages import protocol/record layers only. `identity` imports no
+// Jinn package at all; `outcomes` imports exactly `@jinn-network/policy-identity` (carved out
+// below via `assertBoundary`'s `allowed` parameter — see the reconciliation note on `zod`).
+// Everything with fetch capability, chain access, storage, a backend, or an application surface
+// is forbidden outright — a pure projection/identity package that acquires one of these has
+// stopped being one.
 const POLICY_FOREIGN_PACKAGES = [
   '@jinn-network/core',
   '@jinn-network/plugin',
@@ -51,8 +53,21 @@ const POLICY_FOREIGN_PACKAGES = [
   'better-sqlite3',
   'kubo-rpc-client',
   'dockerode',
-  'zod',
+  // RECONCILIATION NOTE (C1/C2 merge): `zod` is deliberately NOT banned here, unlike an earlier
+  // draft of this file. `identity` hand-rolls its own validation and has no need of it, but
+  // `outcomes` uses `zod` as a real production dependency for its observation/row schemas —
+  // exactly the same choice `@jinn-network/task-curation` (its template package, program §1 C2)
+  // makes. `zod` carries no ambient authority (no clock, no network, no filesystem, no
+  // randomness), so banning it tree-wide would have blocked a legitimate, already-precedented
+  // choice for no purity benefit. Per-package Jinn-family and capability-package bans still apply
+  // to both directories identically below.
 ];
+
+// Every Jinn package NOT on this per-directory allow-list is forbidden for that directory. Both
+// entries are drawn from `policy-package-inventory.test.mjs`'s approved dependency graph, so a
+// change there is a design question, not a silent widening here.
+const IDENTITY_ALLOWED_JINN = [];
+const OUTCOMES_ALLOWED_JINN = ['@jinn-network/policy-identity'];
 
 // Relative-path escapes into the legacy tree and the sibling package trees are caught the same
 // way a package-name ban would not catch them.
@@ -219,16 +234,36 @@ test('the comment and literal stripper keeps prose from tripping either sweep', 
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('policy source boundaries hold: no Jinn package, no capability package, no path escape', () => {
+test('policy source boundaries hold: per-directory Jinn allow-list, no capability package, no path escape', () => {
+  const allowedByDirectory = { identity: IDENTITY_ALLOWED_JINN, outcomes: OUTCOMES_ALLOWED_JINN };
   for (const directory of policyDirectories) {
     const source = join(packages, directory, 'src');
     if (!existsSync(source)) continue;
+    const allowed = allowedByDirectory[directory] ?? [];
+    const forbiddenPackages = [
+      ...POLICY_FOREIGN_PACKAGES,
+      // Every OTHER policy package's own name is foreign to a directory unless allow-listed --
+      // this is what stops `outcomes` silently reaching for `identity`'s siblings later, and
+      // stops `identity` reaching for `outcomes`.
+      ...policyDirectories
+        .map((sibling) => `@jinn-network/policy-${sibling}`)
+        .filter((name) => !allowed.includes(name)),
+    ];
     assert.deepEqual(
-      forbiddenImportsInFiles(productionFiles(source), POLICY_FOREIGN_PACKAGES, FORBIDDEN_ROOTS),
+      forbiddenImportsInFiles(productionFiles(source), forbiddenPackages, FORBIDDEN_ROOTS),
       [],
       `${directory} crosses a policy architecture boundary`,
     );
   }
+});
+
+test('outcomes actually imports its one approved Jinn dependency (positive control)', () => {
+  // Without this, the boundary test above could pass vacuously if the dependency were silently
+  // dropped -- an absent edge is not the same claim as an audited one.
+  const production = productionFiles(join(packages, 'outcomes', 'src'));
+  const importsIdentity = production.some((file) =>
+    specifiers(readFileSync(file, 'utf8')).includes('@jinn-network/policy-identity'));
+  assert.ok(importsIdentity, 'expected at least one production import of @jinn-network/policy-identity');
 });
 
 test('the foreign list bans by exact name and by wildcard family', () => {

@@ -17,16 +17,18 @@ const temporaryRoot = await mkdtemp(join(tmpdir(), 'jinn-policy-packed-types-'))
 const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
-// C2 (`@jinn-network/policy-outcomes`) appends its row here as it lands.
 const packages = [
   ['identity', '@jinn-network/policy-identity'],
+  ['outcomes', '@jinn-network/policy-outcomes'],
 ];
 
 const codeEntrypoints = [
   '@jinn-network/policy-identity',
+  '@jinn-network/policy-outcomes',
 ];
 
-// The policy tree depends on no Jinn package (substrate §2), so there is no cross-tree pack list.
+// The policy tree depends on no Jinn package outside itself (substrate §2: `outcomes` -> `identity`
+// only, both in-tree), so there is no cross-tree pack list.
 const CROSS_TREE_PACKAGES = [];
 
 function run(command, args, options = {}) {
@@ -61,6 +63,9 @@ async function packOne(directory, name) {
 try {
   await mkdir(archivesRoot);
   const archives = new Map();
+  // Sequential, not Promise.all: `outcomes`' prepack build reads `identity`'s already-built
+  // dist/ through its portal resolution, so identity must finish packing (and therefore
+  // building) before outcomes' own pack runs.
   for (const [directory, name] of packages) {
     archives.set(name, await packOne(join(policyRoot, directory), name));
   }
@@ -90,9 +95,9 @@ try {
       + `export type PolicyEntrypoints = [\n${codeEntrypoints
         .map((_, index) => `  typeof Entry${index},`)
         .join('\n')}\n];\n`
-      // The namespace imports above prove the entrypoint resolves; the frozen C1 surface is
-      // additionally named symbol-by-symbol, so a rename in the packed `.d.ts` is a compile error
-      // here rather than a silently-narrower public surface for every downstream unit.
+      // The namespace imports above prove each entrypoint resolves; both frozen surfaces are
+      // additionally named symbol-by-symbol, so a rename in either packed `.d.ts` is a compile
+      // error here rather than a silently-narrower public surface for every downstream unit.
       + [
         '',
         'import {',
@@ -157,6 +162,33 @@ try {
         '  CandidateManifest, DsseEnvelope, ExecutionPolicyTuple, PolicyParentRef,',
         '  RequirementEntries, ResolvedTaskProfile, SealedDocument, SealedSubmissionDoc,',
         '  SealedTaskDoc, TreeEntry, ValidationResult,',
+        '];',
+        '',
+        'import {',
+        '  projectPolicyOutcomes,',
+        '  foldPolicyOutcomes,',
+        '  serializePolicyOutcomesProjection,',
+        '  parsePolicyOutcomesProjection,',
+        '  POLICY_OUTCOMES_PROJECTION_FORMAT,',
+        // `tupleDigest`/`canonicalTupleBytes`/`canonicalTupleText` are re-exported from
+        // `@jinn-network/policy-outcomes` too (F-C2-1 closure: they are now imported straight
+        // through from `@jinn-network/policy-identity`, not a package-local reimplementation).
+        '  tupleDigest as outcomesTupleDigest,',
+        '  PolicyOutcomesInputError,',
+        '} from "@jinn-network/policy-outcomes";',
+        'import type {',
+        '  PolicyOutcomeObservation,',
+        '  PolicyOutcomesRow,',
+        '  PolicyOutcomesProjection,',
+        '  PerAxisStatus,',
+        '} from "@jinn-network/policy-outcomes";',
+        '',
+        'export type PolicyOutcomesSurface = [',
+        '  typeof projectPolicyOutcomes, typeof foldPolicyOutcomes,',
+        '  typeof serializePolicyOutcomesProjection, typeof parsePolicyOutcomesProjection,',
+        '  typeof POLICY_OUTCOMES_PROJECTION_FORMAT, typeof outcomesTupleDigest,',
+        '  typeof PolicyOutcomesInputError,',
+        '  PolicyOutcomeObservation, PolicyOutcomesRow, PolicyOutcomesProjection, PerAxisStatus,',
         '];',
         '',
       ].join('\n'),

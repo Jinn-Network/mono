@@ -15,17 +15,18 @@ const DEPENDENCY_SECTIONS = [
   'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies',
 ];
 
-// C2 (`@jinn-network/policy-outcomes`) appends its row here as it lands.
 const POLICY_PACKAGES = [
   ['identity', '@jinn-network/policy-identity'],
+  ['outcomes', '@jinn-network/policy-outcomes'],
 ];
 
-// Substrate §2: both policy packages are pure and depend on protocol/record layers only, and
-// `identity` in fact depends on NO Jinn package — the requirements-merge semantics are
+// Substrate §2: both policy packages are pure and depend on protocol/record layers only.
+// `identity` depends on NO Jinn package at runtime — the requirements-merge semantics are
 // reproduced in-package (`src/merge.ts`, pinned against drift by
 // `policy-identity-guards.test.mjs`) and the evidence-retrieval envelope shapes are mirrored,
-// never imported. An empty graph is the assertion that "pure substrate" holds at the dependency
-// layer too. C2's `outcomes` will carry exactly one edge, to `identity`.
+// never imported. `outcomes` carries exactly one edge, to `identity`, for the tuple type and
+// digest (substrate §2: "outcomes imports identity for the tuple type and digest — one
+// direction, declared").
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['identity', {
     dependencies: [],
@@ -38,6 +39,10 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     // production files only, so the distinction is enforced and not merely intended.
     devDependencies: ['@jinn-network/task-execution-protocol'],
     optionalDependencies: [], peerDependencies: [],
+  }],
+  ['outcomes', {
+    dependencies: ['@jinn-network/policy-identity'],
+    devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
 ]);
 
