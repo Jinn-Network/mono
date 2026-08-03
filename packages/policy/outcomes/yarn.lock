@@ -18,6 +18,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/policy-identity@portal:../identity::locator=%40jinn-network%2Fpolicy-outcomes%40workspace%3A."
   dependencies:
+    "@noble/curves": "npm:^2.0.0"
     "@noble/hashes": "npm:^2.2.0"
   languageName: node
   linkType: soft
@@ -42,7 +43,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@noble/hashes@npm:^2.2.0":
+"@noble/curves@npm:^2.0.0":
+  version: 2.2.0
+  resolution: "@noble/curves@npm:2.2.0"
+  dependencies:
+    "@noble/hashes": "npm:2.2.0"
+  checksum: 10c0/e545d3bb03ebedd5c04c2cab81342d64f5ce8a4c1019cfe207f3dc69174bc0ad7cfb50effc31bfa8616b8340900f445dd053da7454190428857c4eedd3b51413
+  languageName: node
+  linkType: hard
+
+"@noble/hashes@npm:2.2.0, @noble/hashes@npm:^2.2.0":
   version: 2.2.0
   resolution: "@noble/hashes@npm:2.2.0"
   checksum: 10c0/cad8630c504d6b9271984f685cd0af9101b40988fc2dfbe17ccdf068a9941f95cc5c9957d89e9ca4b7ca94c15cb35f93510c5d53a09fbcc83ee503b93d0a1034

@@ -119,29 +119,30 @@ incremental fold).
 Every ambiguity or interface-availability gap this package hit, with a proposed disposition.
 None was resolved by silent improvisation.
 
-### F-C2-1 — `tupleDigest`/`canonicalTupleBytes` are not yet exported by `@jinn-network/policy-identity`
+### F-C2-1 — `tupleDigest`/`canonicalTupleBytes` were not yet exported by `@jinn-network/policy-identity` (CLOSED)
 
 Substrate §2 declares the dependency direction: "outcomes imports identity for the tuple type
-**and digest** — one direction, declared." At the time this package was written,
-`@jinn-network/policy-identity` ships only C1's conformance kit (program §1 C1 "Produces"; see
-`packages/policy/identity/README.md` "Handover") — its public surface exports the frozen type and
-token vocabulary only (`ExecutionPolicyTuple`, `CORE_AXES`, `EXECUTION_TUPLE_FORMAT_TOKEN`), not
-yet `canonicalTupleBytes`/`tupleDigest`. Per program rule R1, C2 builds against C1's kit, not its
-implementation.
+**and digest** — one direction, declared." At the time this package was first written,
+`@jinn-network/policy-identity` shipped only C1's conformance kit (program §1 C1 "Produces") — its
+public surface exported the frozen type and token vocabulary only, not yet
+`canonicalTupleBytes`/`tupleDigest`. Per program rule R1, C2 built against C1's kit, not its
+implementation, and `src/tuple-support.ts` locally reimplemented the same normative procedure
+(substrate §4.1 step 5), pinned for byte-for-byte parity against C1's own committed golden
+fixtures.
 
-**Proposed disposition:** `src/tuple-support.ts` implements the same normative procedure
-(substrate §4.1 step 5: I-JSON, JCS, UTF-16 code-unit member ordering, sha256) locally, pinned for
-byte-for-byte parity against C1's own committed golden fixtures
-(`packages/policy/identity/fixtures/tuple/golden/*.json`, exercised in
-`src/tuple-support.test.ts`). This is not a novel duplication of business logic: unlike
-`deriveExecutionTuple` (C1's actual hard problem), canonicalizing an already-constructed tuple has
-no implementation-defined behavior, and every sealing package in this stack
-(`packages/environments/record/src/canonical.ts`, `packages/benchmarking/records/src/canonical.ts`,
-C1's own `fixtures/reference/canonical.ts`) independently implements the identical rule rather
-than importing a shared canonicalizer. **Follow-up:** once C1 ships `canonicalTupleBytes`/
-`tupleDigest` from its public surface, delete `src/tuple-support.ts`'s canonicalization internals
-and import them directly; `denormalizeAxes` and `assertValidTuple`'s core-axis check may still be
-package-local (they are policy-outcomes-specific row-shaping, not C1's surface).
+**Closed at the C1/C2 reconciliation** (once C1's implementation landed, exporting the real
+surface — 8788c47a2): `src/tuple-support.ts` is deleted. `canonicalTupleBytes`, `canonicalTupleText`,
+and `tupleDigest` are now imported directly from `@jinn-network/policy-identity` and re-exported
+as a pass-through from this package's `src/index.ts` for existing consumers. `denormalizeAxes`
+(the one piece with no identity counterpart — it is outcomes-specific row-shaping, not identity's
+concern) survives, moved to `src/axes.ts`, and now delegates its validation to identity's own
+`assertValidTuple` rather than a local reimplementation. `src/axes.test.ts` carries the
+cross-package smoke assertion: it asserts this package's re-exports are identity's exact function
+references (`toBe`, not just behavioral agreement), plus a parity check against a sample of
+identity's golden fixtures as a belt-and-suspenders sanity check. The exhaustive canonicalization
+adversarial suite (omitted axes, key ordering, extension keys, negative zero, unpaired surrogates,
+...) now lives entirely in identity's own 229-test conformance kit; re-asserting all of it here
+would have been redundant, not additive.
 
 ### F-C2-2 — whether `ref.record` is guaranteed source-invariant for the same underlying verdict is outside this package's boundary
 

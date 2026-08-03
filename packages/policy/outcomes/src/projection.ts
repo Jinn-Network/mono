@@ -1,4 +1,4 @@
-import type { JsonValue } from "@jinn-network/policy-identity";
+import { tupleDigest, type JsonValue } from "@jinn-network/policy-identity";
 import {
   parsePolicyOutcomeObservation,
   type Instant,
@@ -14,7 +14,7 @@ import {
   policyOutcomesRowKey,
   refDedupeKey,
 } from "./schema.js";
-import { denormalizeAxes, tupleDigest } from "./tuple-support.js";
+import { denormalizeAxes } from "./axes.js";
 
 /**
  * Which population a row aggregates. Benchmark-pinned attempts are hammered at one tuple by a

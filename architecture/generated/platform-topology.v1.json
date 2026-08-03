@@ -2,9 +2,9 @@
   "counts": {
     "adjacentEntries": 5,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 77,
-    "otherPackagesRootEntries": 15,
-    "packagesRootEntries": 72,
+    "inventory": 78,
+    "otherPackagesRootEntries": 16,
+    "packagesRootEntries": 73,
     "platformV1": 49
   },
   "graph": {
@@ -695,6 +695,11 @@
         "to": "@jinn-network/trust-core"
       },
       {
+        "from": "@jinn-network/policy-outcomes",
+        "kind": "runtime",
+        "to": "@jinn-network/policy-identity"
+      },
+      {
         "from": "@jinn-network/record-discovery-client",
         "kind": "runtime",
         "to": "@jinn-network/record-discovery-protocol"
@@ -1108,6 +1113,7 @@
       "@jinn-network/plugin",
       "@jinn-network/plugin-runtime",
       "@jinn-network/policy-identity",
+      "@jinn-network/policy-outcomes",
       "@jinn-network/record-discovery-client",
       "@jinn-network/record-discovery-facts-benchmarking",
       "@jinn-network/record-discovery-facts-chain-environments",
@@ -1499,17 +1505,17 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 21,
+      "authorityDocuments": 22,
       "boundaryPolicies": 20,
-      "catalogManifests": 77,
-      "catalogPublicSurfaces": 1234,
+      "catalogManifests": 78,
+      "catalogPublicSurfaces": 1238,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2768,
-      "generatedOutputSources": 1290,
-      "generatorSources": 559,
+      "discoveredFirstPartySurfaces": 2772,
+      "generatedOutputSources": 1294,
+      "generatorSources": 563,
       "marketplaceControl": 2,
       "requiredGates": 19,
       "staticControl": 6
@@ -2120,6 +2126,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/policy-identity-guards.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-outcomes-guards.test.mjs"
       },
       {
         "categories": [
@@ -15916,6 +15932,16 @@
           "@ritsukai"
         ],
         "path": "docs/2026-07-23-jinn-mono-architecture-map.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
       },
       {
         "categories": [
@@ -32167,6 +32193,94 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/policy/outcomes/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/fixtures/observations-golden.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/fixtures/observations-manipulation.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/fixtures/projection-golden.json"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/outcomes/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/sdk/fixtures"
       },
       {
@@ -41259,6 +41373,46 @@
     },
     {
       "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/policy-identity",
+          "@noble/hashes",
+          "zod"
+        ]
+      },
+      "domain": "policy",
+      "name": "@jinn-network/policy-outcomes",
+      "ownerGroup": "architecture-control",
+      "path": "packages/policy/outcomes",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-policy",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "role": "policy-keyed outcomes projection",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
         "kind": "workflow",
         "path": ".github/workflows/sdk-ci.yml"
       },
@@ -47444,6 +47598,33 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
+        "package": "@jinn-network/policy-outcomes",
+        "packedTargets": [],
+        "path": "packages/policy/outcomes/fixtures/observations-golden.json",
+        "relativeSource": "fixtures/observations-golden.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-outcomes",
+        "packedTargets": [],
+        "path": "packages/policy/outcomes/fixtures/observations-manipulation.json",
+        "relativeSource": "fixtures/observations-manipulation.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-outcomes",
+        "packedTargets": [],
+        "path": "packages/policy/outcomes/fixtures/projection-golden.json",
+        "relativeSource": "fixtures/projection-golden.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
         "package": "@jinn-network/sdk",
         "packedTargets": [],
         "path": "packages/sdk/fixtures/autopilot/correlation-failure.json",
@@ -50615,6 +50796,17 @@
         "fixtures": [
           "fixtures"
         ],
+        "name": "@jinn-network/policy-outcomes",
+        "path": "packages/policy/outcomes",
+        "profiles": [],
+        "releaseGroup": "experimental-policy",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "name": "@jinn-network/sdk",
         "path": "packages/sdk",
         "profiles": [],
@@ -51775,9 +51967,10 @@
         "platform-v1"
       ],
       "canary": false,
-      "expectedPackageCount": 1,
+      "expectedPackageCount": 2,
       "packages": [
-        "@jinn-network/policy-identity"
+        "@jinn-network/policy-identity",
+        "@jinn-network/policy-outcomes"
       ],
       "publishPolicies": [
         "disabled"

@@ -6,7 +6,7 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **77** entries: **49** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **15** other entries below `packages/**`, and **5** adjacent entries.
+The catalog contains **78** entries: **49** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **16** other entries below `packages/**`, and **5** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -66,6 +66,7 @@ The catalog contains **77** entries: **49** `platform-v1` packages, **8** disabl
 | @jinn-network/marketplace-venue-base | packages/marketplace/venue-base | marketplace | 3 | platform | Base venue adapter | candidate | platform-v1 | canary-only | @jinn-network/marketplace-binding<br>@jinn-network/marketplace-projector<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-protocol<br>@types/better-sqlite3<br>better-sqlite3<br>viem | — | — |
 | @jinn-network/plugin | packages/plugin | legacy-plugin-stack | — | legacy | legacy extension contract | transitional | legacy-product-lines | independent | zod | — | vitest |
 | @jinn-network/policy-identity | packages/policy/identity | policy | 3 | platform | execution-policy identity and candidate manifest sealing | experimental | experimental-policy | disabled | @noble/curves<br>@noble/hashes | — | — |
+| @jinn-network/policy-outcomes | packages/policy/outcomes | policy | 3 | platform | policy-keyed outcomes projection | experimental | experimental-policy | disabled | @jinn-network/policy-identity<br>@noble/hashes<br>zod | — | — |
 | @jinn-network/sdk | packages/sdk | legacy-sdk | — | legacy | deprecated SolverNet SDK | deprecated | legacy-product-lines | independent | zod<br>zod-to-json-schema | — | — |
 | @jinn-network/task-execution-backend | packages/task-execution/backend | task-execution | 3 | platform | backend contract | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol | — | — |
 | @jinn-network/task-execution-backend-local | packages/task-execution/backend-local/assembly | task-execution | 3 | platform | local backend assembly | candidate | platform-v1 | canary-only | @jinn-network/evidence-discovery<br>@jinn-network/evidence-repository<br>@jinn-network/execution-recorder<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | — |
@@ -230,6 +231,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-client |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/plugin-runtime | runtime | @jinn-network/trust-core |
+| @jinn-network/policy-outcomes | runtime | @jinn-network/policy-identity |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-client | runtime | @jinn-network/trust-core |
 | @jinn-network/record-discovery-facts-benchmarking | runtime | @jinn-network/benchmarking-records |
@@ -373,7 +375,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | Release group | Packages | Required gates | Publish policies | Stack published | Canary | Stable |
 | --- | ---: | --- | --- | --- | --- | --- |
 | experimental-environment-supply | 8 | environments-ci<br>record-discovery-ci | disabled | false | false | false |
-| experimental-policy | 1 | policy-ci | disabled | false | false | false |
+| experimental-policy | 2 | policy-ci | disabled | false | false | false |
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | platform-v1 | 49 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
@@ -493,6 +495,7 @@ The exact 49-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/marketplace-venue-base | platform-v1 | — | — | — | — |
 | @jinn-network/plugin | legacy-product-lines | — | — | — | — |
 | @jinn-network/policy-identity | experimental-policy | — | — | fixtures | — |
+| @jinn-network/policy-outcomes | experimental-policy | — | — | fixtures | — |
 | @jinn-network/sdk | legacy-product-lines | — | — | fixtures | — |
 | @jinn-network/task-execution-backend | platform-v1 | — | — | — | — |
 | @jinn-network/task-execution-backend-local | platform-v1 | — | — | — | — |
@@ -1086,6 +1089,9 @@ The exact 49-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/tuple/golden/key-order-variance.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/tuple/golden/null-axes.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/tuple/golden/utf16-code-unit-ordering.json | — | — | — |
+| fixtures | @jinn-network/policy-outcomes | packages/policy/outcomes/fixtures/observations-golden.json | — | — | — |
+| fixtures | @jinn-network/policy-outcomes | packages/policy/outcomes/fixtures/observations-manipulation.json | — | — | — |
+| fixtures | @jinn-network/policy-outcomes | packages/policy/outcomes/fixtures/projection-golden.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/correlation-failure.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/correlation-mismatch.json | — | — | — |
 | fixtures | @jinn-network/sdk | packages/sdk/fixtures/autopilot/delivery-contradiction.json | — | — | — |
@@ -1410,22 +1416,22 @@ The exact 49-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3465 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3475 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
-| authorityDocuments | 21 |
+| authorityDocuments | 22 |
 | boundaryPolicies | 20 |
-| catalogManifests | 77 |
-| catalogPublicSurfaces | 1234 |
+| catalogManifests | 78 |
+| catalogPublicSurfaces | 1238 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2768 |
-| generatedOutputSources | 1290 |
-| generatorSources | 559 |
+| discoveredFirstPartySurfaces | 2772 |
+| generatedOutputSources | 1294 |
+| generatorSources | 563 |
 | marketplaceControl | 2 |
 | requiredGates | 19 |
 | staticControl | 6 |

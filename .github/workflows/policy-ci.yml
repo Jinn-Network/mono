@@ -90,7 +90,7 @@ jobs:
       - name: Verify Policy Outcomes
         working-directory: packages/policy/outcomes
         run: |
-          yarn install
+          yarn install --immutable
           yarn typecheck
           yarn test
           yarn build

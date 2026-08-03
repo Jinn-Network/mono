@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AxisFidelityStatus, ExecutionPolicyTuple } from "@jinn-network/policy-identity";
+import { assertValidTuple, type AxisFidelityStatus, type ExecutionPolicyTuple } from "@jinn-network/policy-identity";
 import {
   AxisFidelityStatusSchema,
   FreeTextSchema,
@@ -11,7 +11,6 @@ import {
   issueText,
   refDedupeKey,
 } from "./schema.js";
-import { assertValidTuple } from "./tuple-support.js";
 
 export { PolicyOutcomesInputError } from "./schema.js";
 
