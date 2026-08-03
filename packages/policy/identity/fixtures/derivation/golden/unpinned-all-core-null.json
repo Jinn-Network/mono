@@ -1,0 +1,37 @@
+{
+  "note": "The other end of the range: a Task and a Submission that pin nothing at all. Every core axis null-fills, and the tuple still has a stable identity — 'unpinned' is a treatment, not the absence of one. This is the fixture that catches a deriver which returns early, returns `undefined`, or omits the core block when the effective requirements are empty. The profile declares `effort` and neither document sets it, so the declared-but-unset rule also applies here with an empty requirement map.",
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+    "digest": "sha256:5c47b10f5902e4c5810559b404d1b785b0cd5d5bec802b2e6086898ca7109f96",
+    "requirementKeys": [{ "key": "effort", "comparisonClass": "floor" }]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/example-domain/1.0",
+      "digest": { "sha256": "5c47b10f5902e4c5810559b404d1b785b0cd5d5bec802b2e6086898ca7109f96" }
+    },
+    "instructions": "Answer the question.",
+    "outputs": [{ "name": "answer", "mediaType": "text/plain", "required": true }]
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c102",
+    "task": {
+      "digest": { "sha256": "161200a7ae9c776a0c8a1abd46ab72ad0b4783082acd291997197d3e14650e6e" }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-unpinned-1",
+    "nonce": "0000000000000002",
+    "deadline": "2026-08-10T00:00:00Z"
+  },
+  "expect": {
+    "taskDigest": "sha256:161200a7ae9c776a0c8a1abd46ab72ad0b4783082acd291997197d3e14650e6e",
+    "submissionDigest": "sha256:001d9a90ec9a0a148e7056b6cf1e6c3dd0135750d87e98ba025366847f1736fb",
+    "canonicalTuple": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":null,\"loadout\":null,\"model\":null}",
+    "tupleDigest": "sha256:b2f937873c3af86625d381f2deadcaee88c6984b40ff8c38146b4e3919ad382e",
+    "absentTupleKeys": ["effort"],
+    "mustNotContain": ["effort"],
+    "runPinning": {}
+  }
+}

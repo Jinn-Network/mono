@@ -1,0 +1,88 @@
+{
+  "note": "THE derivation-equivalence fixture (substrate §8): a sealed (Task, Submission) pair from which two independent implementations MUST derive byte-identical tuples. It is the fixture that backs the 'derived, never authored' premise, and it carries all three of §8's named sub-cases in one document so they cannot drift apart.",
+  "cases": {
+    "declaredButUnsetProfileKey": "The profile declares `reviewDepth` in `requirementKeys`, but neither document sets it. It MUST be OMITTED from the tuple, never null-filled — only the four core axes are null-filled (§4.1 step 2). A deriver that null-fills every declared key produces a different digest for every task family, and the populations never join.",
+    "excludedForeignKeys": "`maxAttemptDurationMs` (Task side) and `network.example.customKey` (Submission side) are present in the effective requirements but are neither core axes nor profile-declared, so both are EXCLUDED. The priced consequence, stated in §4.1: two Submissions differing only on an excluded key share one tupleDigest. A family that needs an extra axis to be treatment-distinguishing must DECLARE it.",
+    "enrichmentBan": "`venueKnowledge` below is what a local venue actually knows at execution time — the harness binary digest. §4.1 step 3 forbids adding it: 'a venue that knows the harness binary digest does not add it to a value the requirements carried as {id, version}'. The expected canonical bytes contain no harness digest; `expect.mustNotContain` pins the exact string so a deriver that enriches fails on the substring as well as on the digest.",
+    "constraintTightening": "The Task constrains `model` to `{provider: anthropic}`; the Submission pins `{provider: anthropic, id: claude-haiku-4-5}`. The merge's winning value is the SUBMISSION's, byte-exactly — not the Task's constraint and not a synthesized union. §4.1 step 1: 'the winning value per key is the merge result, never either source alone'.",
+    "floorTightening": "The Task sets `effort: medium` (a `floor` class key declared by the profile); the Submission tightens to `high`. Same rule: the merge result, `high`, is what enters the tuple."
+  },
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
+    "digest": "sha256:797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503",
+    "requirementKeys": [
+      { "key": "effort", "comparisonClass": "floor" },
+      { "key": "maxTokens", "comparisonClass": "ceiling" },
+      { "key": "reviewDepth", "comparisonClass": "exact" }
+    ]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503" }
+    },
+    "instructions": "Fix the failing test in the repository and leave the working tree clean.",
+    "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }],
+    "requirements": {
+      "model": { "provider": "anthropic" },
+      "effort": "medium",
+      "maxAttemptDurationMs": 600000
+    }
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c101",
+    "task": {
+      "digest": { "sha256": "d42da8ab68d514689a3aafcab7aedb309afa429dc1cb449dcb12f8b2f0e65dfd" }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-equivalence-1",
+    "nonce": "0000000000000001",
+    "deadline": "2026-08-10T00:00:00Z",
+    "requirements": {
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+      "loadout": {
+        "kind": "jinn.skill.v1",
+        "name": "alpha",
+        "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7"
+      },
+      "isolationPolicy": "unrestricted",
+      "effort": "high",
+      "maxTokens": 120000,
+      "network.example.customKey": "not a declared requirement key"
+    }
+  },
+  "venueKnowledge": {
+    "harnessBinaryDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "resolvedModelId": "claude-haiku-4-5-20251001",
+    "observedIsolation": "unrestricted"
+  },
+  "expect": {
+    "taskDigest": "sha256:d42da8ab68d514689a3aafcab7aedb309afa429dc1cb449dcb12f8b2f0e65dfd",
+    "submissionDigest": "sha256:2e938173d6108125d8fbc8d05bda4ddcea218f4ee8123bb747ccec05dcb251da",
+    "canonicalTuple": "{\"effort\":\"high\",\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7\",\"kind\":\"jinn.skill.v1\",\"name\":\"alpha\"},\"maxTokens\":120000,\"model\":{\"id\":\"claude-haiku-4-5\",\"provider\":\"anthropic\"}}",
+    "tupleDigest": "sha256:99aad34b38ddf833570e2cba7ee9be94b3e717f6851ffe6efcf77e0ebb5928c3",
+    "absentTupleKeys": ["reviewDepth", "maxAttemptDurationMs", "network.example.customKey"],
+    "mustNotContain": [
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "claude-haiku-4-5-20251001",
+      "reviewDepth",
+      "maxAttemptDurationMs",
+      "customKey"
+    ],
+    "runPinning": {
+      "effort": "high",
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "isolationPolicy": "unrestricted",
+      "loadout": {
+        "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7",
+        "kind": "jinn.skill.v1",
+        "name": "alpha"
+      },
+      "maxTokens": 120000,
+      "model": { "id": "claude-haiku-4-5", "provider": "anthropic" }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "note": "Substrate §4.1 step 4 — a constraint-shaped value (`model: {provider}`, legal per profiles §5.1) enters BYTE-EXACTLY. The resulting tuple identifies a declared configuration FAMILY, not a point; nothing resolves the constraint to a concrete model id, and no consumer may treat this digest as naming one model. The row's `axes` field (§6.1) is what exposes the constraint shape downstream.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": { "provider": "anthropic" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": {
+    "canonical": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":{\"provider\":\"anthropic\"}}",
+    "digest": "sha256:a480a507e3219863e33dc578568ef67fba70b10e81ae6337c7e6fc031ee79c43",
+    "runPinning": {
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "isolationPolicy": "unrestricted",
+      "model": { "provider": "anthropic" }
+    }
+  }
+}

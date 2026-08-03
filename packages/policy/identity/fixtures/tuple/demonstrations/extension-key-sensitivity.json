@@ -1,0 +1,23 @@
+{
+  "note": "Substrate §8 — 'extension-key stripping (must change digest — byte identity is identity)'. The attack this closes: a relay that normalizes away axes it does not recognize would map two genuinely different treatments onto one digest, and every pass rate keyed on that digest would silently pool two populations. `withExtension` is `tuple/golden/extension-axis.json`; `stripped` is the same tuple with the profile-declared `effort` axis removed. Both are VALID tuples — the point is not that one is rejected, it is that they are different identities.",
+  "withExtension": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted",
+    "effort": "high"
+  },
+  "stripped": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": {
+    "digestsDiffer": true,
+    "withExtensionDigest": "sha256:a819100c1b623a660092431133cdd00da2182923ceec9001de3c9b7c7f84be99",
+    "strippedDigest": "sha256:9e03801ac823221a13bf667a470e78a622cced7c247a2ce682e22bae83607740"
+  }
+}

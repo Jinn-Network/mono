@@ -1,0 +1,30 @@
+{
+  "note": "Substrate §5.1 — parent references are TYPED so consumers know how to dereference each. An untyped or wrongly-typed reference is not a lineage edge a consumer can follow: `kind: \"manifest\"` is not a value in the discriminator, and guessing (try the candidate resolver, fall back to the tuple resolver) is how a lineage graph acquires edges nobody asserted.",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "parents": [
+      { "kind": "manifest", "digest": "sha256:2c90270f1c5afb29879f768aeb2173c0a371fedfa98f1aaf2371ab095f4aff83" }
+    ],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "evidenceProvenance": {
+      "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+      "snapshotReceipt": {
+        "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+        "sourceSet": { "id": "local-evidence-repository", "version": "1.0" },
+        "sources": [],
+        "evaluatedAt": "2026-08-03T12:00:00Z",
+        "reproducibility": "replayable"
+      },
+      "recordListDigest": "sha256:1f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7"
+    },
+    "declaredChanges": { "summary": "Ablate one skill.", "touchedComponents": ["loadout"] }
+  },
+  "expect": { "ok": false, "code": "malformed-parent", "path": "parents.0.kind" }
+}

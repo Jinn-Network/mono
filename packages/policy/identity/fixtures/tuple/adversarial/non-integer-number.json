@@ -1,0 +1,12 @@
+{
+  "note": "I-JSON: sealed families admit only exact integers; fractional quantities are strings. A float here would serialize through a language-dependent shortest-round-trip algorithm, and two honest derivers on two runtimes could emit different bytes for the same value.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": null,
+    "model": null,
+    "loadout": null,
+    "isolationPolicy": "unrestricted",
+    "temperature": 0.7
+  },
+  "expect": { "ok": false, "code": "invalid-document", "path": "temperature" }
+}

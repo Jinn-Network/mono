@@ -1,0 +1,33 @@
+{
+  "note": "Substrate §4.1 step 1 — the merge decides, and when it refuses there is NO tuple. A deriver that fell back to the Submission's value here would mint an identity for a treatment the Task never admitted, and a campaign comparing arms would be comparing one legal arm against one illegal one. Fail closed; the caller sees `requirement-conflict`, not a tuple.",
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
+    "digest": "sha256:797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503",
+    "requirementKeys": [
+      { "key": "effort", "comparisonClass": "floor" },
+      { "key": "maxTokens", "comparisonClass": "ceiling" },
+      { "key": "reviewDepth", "comparisonClass": "exact" }
+    ]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503" }
+    },
+    "instructions": "Fix the failing test.",
+    "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }],
+    "requirements": { "model": { "provider": "anthropic" } }
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c103",
+    "task": { "digest": { "sha256": "0000000000000000000000000000000000000000000000000000000000000000" } },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-model-conflict",
+    "nonce": "0000000000000003",
+    "deadline": "2026-08-10T00:00:00Z",
+    "requirements": { "model": { "provider": "openai" } }
+  },
+  "expect": { "ok": false, "code": "requirement-conflict", "path": "requirements.model" }
+}

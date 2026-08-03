@@ -1,0 +1,12 @@
+{
+  "note": "`JSON.parse(\"-0\")` yields -0, a DISTINCT JavaScript value that serializes as \"0\". Left unchecked, two distinct tuples seal to identical bytes — a digest collision reachable from ordinary JSON input, with no attacker cleverness required.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": null,
+    "model": null,
+    "loadout": null,
+    "isolationPolicy": "unrestricted",
+    "retryBudget": -0
+  },
+  "expect": { "ok": false, "code": "invalid-document", "path": "retryBudget" }
+}

@@ -1,0 +1,11 @@
+{
+  // The published build is `src/` only. `src/conformance.ts` (the kit's swap point) and
+  // `src/fixtures.ts` (the fixture loader — the one place this package touches a filesystem)
+  // are test-time entries and are deliberately not part of the package's runtime surface.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["src/**/*.test.ts", "src/conformance.ts", "src/fixtures.ts"]
+}

@@ -1,0 +1,66 @@
+{
+  "note": "Substrate §5.1 — the smallest conforming candidate manifest. `parents` is EMPTY, which is the seed case: a candidate that derives from nothing is legal and must not be rejected for having no lineage. `compatibility` is absent (optional). `declaredChanges.touchedComponents` is empty because a seed changes nothing relative to a parent it does not have. Note what is NOT here: no score, no confidence, no self-assessment of any kind (§5.1). Whether this candidate is better is established exclusively by subsequent evaluation records.",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "provider": "anthropic",
+        "id": "claude-haiku-4-5"
+      },
+      "loadout": {
+        "kind": "jinn.harness-state.v1",
+        "name": "learner-alpha",
+        "digest": "sha256:90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8"
+      },
+      "isolationPolicy": "unrestricted",
+      "effort": "high"
+    },
+    "parents": [],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "evidenceProvenance": {
+      "savedQueryDigest": "sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d",
+      "snapshotReceipt": {
+        "savedQueryDigest": "sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d",
+        "sourceSet": {
+          "id": "local-evidence-repository",
+          "version": "1.0"
+        },
+        "sources": [
+          {
+            "source": {
+              "id": "local-evidence-repository",
+              "version": "1.0"
+            },
+            "checkpoint": {
+              "source": {
+                "id": "local-evidence-repository",
+                "version": "1.0"
+              },
+              "value": {
+                "cursor": "0000000000000117"
+              },
+              "replayable": true
+            }
+          }
+        ],
+        "evaluatedAt": "2026-08-03T12:00:00Z",
+        "reproducibility": "replayable"
+      },
+      "recordListDigest": "sha256:97b38c002087ff9f583f548835e129262dd06dbbe5549399809de16ea7c01e61"
+    },
+    "declaredChanges": {
+      "summary": "Seed candidate: the operator's current learner state, proposed unchanged.",
+      "touchedComponents": []
+    }
+  },
+  "expect": {
+    "ok": true,
+    "digest": "sha256:204ae2614e99d30353bb614f43d35c93b23093833594817f35802c27295849af",
+    "canonical": "{\"declaredChanges\":{\"summary\":\"Seed candidate: the operator's current learner state, proposed unchanged.\",\"touchedComponents\":[]},\"evidenceProvenance\":{\"recordListDigest\":\"sha256:97b38c002087ff9f583f548835e129262dd06dbbe5549399809de16ea7c01e61\",\"savedQueryDigest\":\"sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d\",\"snapshotReceipt\":{\"evaluatedAt\":\"2026-08-03T12:00:00Z\",\"reproducibility\":\"replayable\",\"savedQueryDigest\":\"sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d\",\"sourceSet\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"},\"sources\":[{\"checkpoint\":{\"replayable\":true,\"source\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"},\"value\":{\"cursor\":\"0000000000000117\"}},\"source\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"}}]}},\"formatToken\":\"network.jinn.policy.candidate/1.0\",\"parents\":[],\"policy\":{\"effort\":\"high\",\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8\",\"kind\":\"jinn.harness-state.v1\",\"name\":\"learner-alpha\"},\"model\":{\"id\":\"claude-haiku-4-5\",\"provider\":\"anthropic\"}},\"proposer\":\"urn:jinn:agent:policy-c1-kit-reference-proposer\"}"
+  }
+}

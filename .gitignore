@@ -70,6 +70,9 @@ packages/environments/*/.yarn/install-state.gz
 packages/marketplace/*/dist/
 packages/marketplace/*/.yarn/cache/
 packages/marketplace/*/.yarn/install-state.gz
+packages/policy/*/dist/
+packages/policy/*/.yarn/cache/
+packages/policy/*/.yarn/install-state.gz
 packages/task-supply/*/node_modules/
 packages/task-supply/*/dist/
 packages/task-supply/*/.yarn/cache/

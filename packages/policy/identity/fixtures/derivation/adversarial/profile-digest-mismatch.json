@@ -1,0 +1,27 @@
+{
+  "note": "The quietest way to make two honest derivers disagree: hand them the same (Task, Submission) pair and DIFFERENT revisions of the pinned profile. `requirementKeys` decides the tuple's key set, so a newer patch of the same profile URI that adds one key produces a different digest for identical execution. profiles §6.2 already forbids validating against a cached document whose digest differs from the pin; this fixture makes the derivation honor the same rule. A deriver that trusts whatever profile it was handed passes every other fixture in this kit and still forks the identity space in production.",
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "requirementKeys": [{ "key": "effort", "comparisonClass": "floor" }]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503" }
+    },
+    "instructions": "Fix the failing test.",
+    "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c106",
+    "task": { "digest": { "sha256": "0000000000000000000000000000000000000000000000000000000000000000" } },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-profile-mismatch",
+    "nonce": "0000000000000006",
+    "deadline": "2026-08-10T00:00:00Z"
+  },
+  "expect": { "ok": false, "code": "invalid-document", "path": "task.profile.digest.sha256" }
+}
