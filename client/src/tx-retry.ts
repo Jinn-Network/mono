@@ -420,26 +420,86 @@ export interface WithNonceLedgerArgs {
   staleAfterMs?: number;
 }
 
-// ── Per-EOA broadcast serialization (issue #525 nonce-collision) ─────────────
+// ── Per-EOA broadcast serialization (issue #525/#562/#897 nonce-collision) ──
 //
-// Multiple daemon subsystems broadcast transactions from the SAME agent EOA:
-//   - executeSafeTransaction (creator / claim / deliver loops, Safe-mediated)
-//   - IdentityPublisher.setMetadata (launch + per-execution anchors)
-//   - eviction-recovery distributor.reStake
+// Multiple daemon/CLI subsystems broadcast transactions from the SAME agent EOA:
+//   - venue-base's `createSafeBroadcaster` (creator / claim / deliver loops,
+//     Safe-mediated) — holds venue-base's own durable, SQLite-backed
+//     `BroadcastLock`, keyed on `(chainId, sender)`, that ALSO excludes other
+//     processes sharing the same state file.
+//   - IdentityPublisher.setMetadata (launch + per-execution anchors),
+//     eviction-recovery distributor.reStake, and the rest of this module's
+//     `withNonceLedger` / `viemSendTransactionWithRetry` callers — go through
+//     `withEoaBroadcastLock` below.
 //
 // Each independently reads the EOA's `pending` transaction count to choose a
 // nonce. When two run concurrently they read the SAME pending nonce, assign it
 // to two different transactions, and the second to land reverts "nonce too
-// low". The per-Safe lock in adapters/mech/safe.ts only serializes Safe txs
-// sharing one Safe — it does not cover the EOA shared across these distinct
-// broadcast mechanisms.
+// low" (or silently replaces the first). Left on its own, `withEoaBroadcastLock`
+// only serializes calls THROUGH THIS MODULE against each other — it has no way
+// to see venue-base's SQLite lock, so a venue-base Safe broadcast and an
+// EOA-direct `setMetadata` could still race.
 //
-// This per-EOA mutex serializes the nonce-read → broadcast → record critical
-// section across ALL broadcasters that route through `withNonceLedger`
-// (executeSafeTransaction and viemSendTransactionWithRetry). It is keyed by the
-// lowercased `from` address so two different EOAs never block each other, and
-// it tolerates the `fn` rejecting (the lock is always released in `finally`).
-const eoaBroadcastLocks = new Map<string, Promise<unknown>>();
+// `setDefaultEoaBroadcastLock` closes that gap: the composition root that
+// builds a venue also builds this module's default lock as a thin adapter over
+// that SAME `BroadcastLock` instance (bound to the composition's one chainId),
+// so both domains funnel through one lock. Hosts that never install one (unit
+// tests, one-shot CLI verbs with no venue-base state to borrow a lock from)
+// fall back to the plain in-process queue below — identical to this module's
+// pre-existing behavior, so single-path callers see no change (issue #525's
+// original fix, kept as the default).
+export interface EoaBroadcastLock {
+  withSender<T>(from: Address, fn: () => Promise<T>): Promise<T>;
+}
+
+function createInProcessEoaBroadcastLock(): EoaBroadcastLock {
+  // In-process-only queue, keyed by the lowercased `from` address so two
+  // different EOAs never block each other. Tolerates `fn` rejecting (the lock
+  // is always released in `finally`), and cannot see any lock outside this
+  // module instance — that is exactly the gap `setDefaultEoaBroadcastLock`
+  // exists to close for hosts that have a durable, cross-domain lock to share.
+  const locks = new Map<string, Promise<unknown>>();
+  return {
+    async withSender<T>(from: Address, fn: () => Promise<T>): Promise<T> {
+      const key = from.toLowerCase();
+      // Chain onto any in-flight broadcast for this EOA. We await the prior
+      // promise's settlement (success OR failure) before proceeding, so a
+      // failed predecessor never deadlocks its successors.
+      const prior = locks.get(key) ?? Promise.resolve();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      // The stored promise resolves when THIS holder releases — successors await it.
+      locks.set(key, gate);
+      await prior.catch(() => { /* predecessor failure must not block the queue */ });
+      try {
+        return await fn();
+      } finally {
+        release();
+        // Clean up the map entry if we are the tail of the queue, so the Map
+        // does not grow unbounded across many EOAs over a long-lived daemon.
+        if (locks.get(key) === gate) {
+          locks.delete(key);
+        }
+      }
+    },
+  };
+}
+
+let defaultEoaBroadcastLock: EoaBroadcastLock = createInProcessEoaBroadcastLock();
+
+/**
+ * Install the process-wide default `EoaBroadcastLock` that `withEoaBroadcastLock`
+ * (and therefore `withNonceLedger`) delegates to. The composition root calls this
+ * once, right after building its venue, with an adapter over that venue's own
+ * `BroadcastLock` — see `client/src/daemon/composition-root.ts`.
+ */
+export function setDefaultEoaBroadcastLock(lock: EoaBroadcastLock): void {
+  defaultEoaBroadcastLock = lock;
+}
+
+export function getDefaultEoaBroadcastLock(): EoaBroadcastLock {
+  return defaultEoaBroadcastLock;
+}
 
 /**
  * Run `fn` while holding an exclusive per-EOA broadcast lock. Concurrent calls
@@ -447,6 +507,8 @@ const eoaBroadcastLocks = new Map<string, Promise<unknown>>();
  * proceed in parallel. The returned promise resolves/rejects with `fn`'s
  * result, and the lock is released whether `fn` succeeds or throws.
  *
+ * Delegates to the installed default lock (see `setDefaultEoaBroadcastLock`) —
+ * an in-process-only queue unless a host has wired in something durable.
  * Exported for tests and for non-ledger broadcast paths that still need to
  * share the EOA serialization (e.g. a raw `writeContract` that opts in).
  */
@@ -454,26 +516,7 @@ export async function withEoaBroadcastLock<T>(
   from: Address,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const key = from.toLowerCase();
-  // Chain onto any in-flight broadcast for this EOA. We await the prior
-  // promise's settlement (success OR failure) before proceeding, so a failed
-  // predecessor never deadlocks its successors.
-  const prior = eoaBroadcastLocks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  // The stored promise resolves when THIS holder releases — successors await it.
-  eoaBroadcastLocks.set(key, gate);
-  await prior.catch(() => { /* predecessor failure must not block the queue */ });
-  try {
-    return await fn();
-  } finally {
-    release();
-    // Clean up the map entry if we are the tail of the queue, so the Map does
-    // not grow unbounded across many EOAs over a long-lived daemon.
-    if (eoaBroadcastLocks.get(key) === gate) {
-      eoaBroadcastLocks.delete(key);
-    }
-  }
+  return defaultEoaBroadcastLock.withSender(from, fn);
 }
 
 export function createMemoryTxSubmissionLedger(): TxSubmissionLedger {

@@ -160,6 +160,7 @@ import type { JinnConfig } from '../config.js';
 import type { ClaimPolicyConfig } from '../config/shape-v2.js';
 import { toPipelineWiring } from '../config/shape-v2.js';
 import type { VenueBroadcaster } from '../adapters/mech/safe.js';
+import { setDefaultEoaBroadcastLock } from '../tx-retry.js';
 import type { Store } from '../store/store.js';
 import { fetchRawBytesFromIpfs } from '../adapters/mech/ipfs.js';
 import { getTaskCidDigest } from '../adapters/mech/contracts.js';
@@ -1131,6 +1132,19 @@ export async function buildOperatorComposition(
       return projectorParts.observations();
     },
     ...(input.venueLogSource === undefined ? {} : { logSource: input.venueLogSource }),
+  });
+
+  // Issue #525/#562/#897 (funds-correctness): install this composition's venue lock as the
+  // process-wide default for `client/src/tx-retry.ts`'s `withEoaBroadcastLock` /
+  // `withNonceLedger` — the EOA-direct broadcast path (IdentityPublisher.setMetadata,
+  // eviction-recovery reStake, ValidationRegistry/ReputationRegistry writes, `executeSafeTxBatch`
+  // /`executeSafeTxDirect`). Without this, that path only ever serialized against ITSELF (an
+  // in-process `Map`), never against `venue.safe`'s own durable, cross-process SQLite lock — so a
+  // venue-base Safe broadcast and a same-EOA `setMetadata` could still both read the same
+  // `pending` nonce and collide. Bound to this composition's one `chainId`; a daemon process
+  // only ever composes one chain, so this closure is exact, not an approximation.
+  setDefaultEoaBroadcastLock({
+    withSender: (sender, fn) => venue.broadcastLock.withSender(input.chain.chainId, sender, fn),
   });
 
   const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
