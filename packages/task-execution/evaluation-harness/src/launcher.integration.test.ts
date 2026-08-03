@@ -38,6 +38,7 @@ import {
   sealDelivery,
   sealSubmission,
   sealTask,
+  type ProtocolObservation,
 } from "@jinn-network/task-execution-protocol";
 import {
   harvest,
@@ -640,7 +641,7 @@ describe("evaluationLauncher", () => {
       terminal: true,
     });
     expect(
-      snapshot.observations.every((observation) =>
+      snapshot.observations.every((observation: ProtocolObservation) =>
         !observation.type.includes("evaluation.attempt")
       ),
     ).toBe(true);

@@ -191,7 +191,10 @@ describe.runIf(linux)("Linux native custody shim", () => {
       const meta = join(root, "meta"); const secrets = join(root, "secrets");
       mkdirSync(meta, { recursive: true }); mkdirSync(secrets, { recursive: true });
       spawnShim({ attemptId: `attempt-hostile-${index}`, nonce: "nonce-good", metaDir: meta, secretsDir: secrets }, {
-        argv: [process.execPath, "-e", "setTimeout(()=>process.exit(0),100)"], env: {}, cwd: root,
+        // Keep the leader alive long enough for a loaded CI runner to signal the shim after its
+        // fingerprint is published. The command must still be rejected and the leader must exit
+        // naturally, so extending this window does not weaken the hostile-document assertion.
+        argv: [process.execPath, "-e", "setTimeout(()=>process.exit(0),1000)"], env: {}, cwd: root,
       });
       const fingerprint = await waitFor(() => readShimFingerprint(meta) ?? undefined, `ready fingerprint ${index}`);
       writeFileSync(join(meta, "cancellation-command.json"), document);
@@ -199,7 +202,7 @@ describe.runIf(linux)("Linux native custody shim", () => {
       const outcome = await waitFor(() => readOutcome(meta, "nonce-good") ?? undefined, `natural hostile outcome ${index}`);
       expect({ attemptId: outcome.attemptId, nonce: outcome.nonce, exitCode: outcome.exitCode, termSignal: outcome.termSignal }).toEqual({ attemptId: `attempt-hostile-${index}`, nonce: "nonce-good", exitCode: 0, termSignal: null });
     }
-  }, 15_000);
+  }, 20_000);
 
   it("forwards a declared secret as its verified attempt-local absolute path without reading its bytes", async () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-linux-native-secret-"));
