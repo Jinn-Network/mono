@@ -46,7 +46,10 @@ afterEach(async () => {
     await backend.shutdown();
   }));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
+// The backend's fail-closed native-shim readiness window is ten seconds. Cleanup must be able to
+// observe that terminal classification on a loaded hosted runner instead of Vitest aborting the
+// hook at the same boundary and leaking the temporary state root.
+}, 30_000);
 
 function taskBytes(): Uint8Array {
   return sealTask({
