@@ -6,7 +6,7 @@ import { test } from 'node:test';
 
 const root = resolve(import.meta.dirname, '../..');
 const packages = join(root, 'packages', 'benchmarking');
-const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'interop', 'marketplace'];
+const benchmarkingDirectories = ['records', 'testing', 'aggregate', 'run', 'interop', 'marketplace', 'local'];
 
 // The whole benchmarking tree is forbidden to import any evidence-tree package, the two
 // I/O-free evidence producer packages, any record-discovery package, and — critically — every
@@ -115,6 +115,24 @@ const MARKETPLACE_FORBIDDEN_EXTRA = [
   '@jinn-network/benchmarking-testing',
   '@jinn-network/marketplace-pipeline',
   '@jinn-network/marketplace-testing',
+  '@jinn-network/task-execution-testing',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-supervisor',
+];
+
+// local (C4) is the local-venue port bundle. It carries the treatment-fidelity bridge, which
+// reads local admission-gate results and Evidence Runtime Observations — and reads them as
+// *injected values*, never by importing the backend or an evidence package. Those shapes are
+// mirrored structurally (policy identity design §2 precedent), so the tree-wide evidence ban
+// stands unweakened and the concrete local backend is banned here explicitly. The bundle
+// imports records + run only; sibling benchmarking packages stay out.
+const LOCAL_FORBIDDEN_EXTRA = [
+  '@jinn-network/benchmarking-aggregate',
+  '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-marketplace',
+  '@jinn-network/benchmarking-testing',
   '@jinn-network/task-execution-testing',
   '@jinn-network/task-execution-backend-local',
   '@jinn-network/task-execution-workspace',
@@ -437,6 +455,35 @@ test('benchmarking source boundaries remain one-way across the approved graph', 
     marketplaceForeign,
     FORBIDDEN_ROOTS,
   );
+  // local imports records + run only; never a concrete backend, never an evidence package,
+  // never a marketplace package, never a sibling benchmarking package.
+  assertBoundary(
+    join(packages, 'local', 'src'),
+    [...BENCHMARKING_FOREIGN_PACKAGES, ...LOCAL_FORBIDDEN_EXTRA],
+    [...FORBIDDEN_ROOTS, join(root, 'packages', 'task-execution', 'backend-local')],
+  );
+});
+
+test('the local bundle mirrors backend and evidence shapes instead of importing them', () => {
+  // The bridge's premise is that it reads admission results and Runtime Observations as
+  // injected values. If a future edit reached for the real types instead, the boundary would
+  // silently become a backend dependency — so the ban is asserted directly, on both the
+  // package name and a relative-path escape into the backend-local tree.
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-benchmarking-local-mirror-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    const file = join(source, 'source.ts');
+    writeFileSync(file, [
+      'import type { RunPinningCheck } from "@jinn-network/task-execution-backend-local";',
+      'import type { RuntimeObservationCapture } from "@jinn-network/execution-recorder";',
+      'import type { EvidenceRepository } from "@jinn-network/evidence-repository";',
+    ].join('\n'));
+    assert.equal(
+      forbiddenImportsInFiles([file], [...BENCHMARKING_FOREIGN_PACKAGES, ...LOCAL_FORBIDDEN_EXTRA]).length,
+      3,
+    );
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('locale-sensitive API detection catches member calls, optional chaining, and Intl', () => {
