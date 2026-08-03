@@ -118,5 +118,5 @@ test('the repository Phase D manifest validates as the machine-readable deletion
     'utf8',
   ));
   assert.deepEqual(validateTransitionManifest(actual, { repoRoot }), []);
-  assert.equal(actual.transitions.length, 7);
+  assert.equal(actual.transitions.length, 8);
 });

@@ -13,6 +13,7 @@ const EXPECTED_TRANSITIONS = [
   'direct-public-posttask-composition',
   'legacy-evaluator-delivery-watcher',
   'legacy-operator-composition',
+  'legacy-task-run-store-coupling',
   'legacy-task-submission-synthesis',
   'legacy-taskengine-carve',
   'legacy-wiring-config',
@@ -122,6 +123,36 @@ test('TaskEngine carve is present only while its transition remains active', () 
   const references = containing(sourceFiles(pipelineRoot), 'TASK_ENGINE_CARVE');
   if (deleted('legacy-taskengine-carve')) assert.deepEqual(references, []);
   else assert.ok(references.length > 0);
+});
+
+test('legacy task_runs store coupling stays confined to its declared inventory and native production imports the legacy store', () => {
+  const importsTaskRunPersistence = (path) => (
+    /^import\s*\{[^}]*\bTaskRunPersistence\b[^}]*\}\s*from/mu.test(readFileSync(path, 'utf8'))
+  );
+  const importers = sourceFiles(resolve(root, 'client/src'))
+    .filter((path) => !path.endsWith('.test.ts'))
+    .filter(importsTaskRunPersistence)
+    .map((path) => relative(root, path))
+    .sort();
+  assert.deepEqual(importers, [
+    'client/src/adapters/mech/adapter.ts',
+    'client/src/cli/commands/backfill-failed-deliveries.ts',
+    'client/src/daemon/delivery-watcher.ts',
+    'client/src/daemon/work-loop-corpus.ts',
+    'client/src/harnesses/engine/backfill-failed-deliveries.ts',
+    'client/src/harnesses/engine/engine.ts',
+    'client/src/store/store.ts',
+  ], 'a new TaskRunPersistence import means a new consumer of the legacy task_runs store that must be ledgered');
+
+  const nativeEvaluator = readFileSync(resolve(root, 'client/src/daemon/native-evaluator-production.ts'), 'utf8');
+  const nativeSolver = readFileSync(resolve(root, 'client/src/daemon/native-solver-production.ts'), 'utf8');
+  if (deleted('legacy-task-run-store-coupling')) {
+    assert.doesNotMatch(nativeEvaluator, /from '\.\.\/store\/store\.js'/u);
+    assert.doesNotMatch(nativeSolver, /from '\.\.\/store\/store\.js'/u);
+  } else {
+    assert.match(nativeEvaluator, /from '\.\.\/store\/store\.js'/u);
+    assert.match(nativeSolver, /from '\.\.\/store\/store\.js'/u);
+  }
 });
 
 test('marketplace-binding is the only capability package that composes its low-level postTask primitive', () => {

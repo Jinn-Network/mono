@@ -299,6 +299,54 @@
       },
       "targetPullRequest": "Completed by Phase C4",
       "status": "deleted"
+    },
+    {
+      "id": "legacy-task-run-store-coupling",
+      "owner": "client native production store coupling",
+      "entryPoints": [
+        "client/src/store/store.ts",
+        "client/src/harnesses/engine/persistence.ts",
+        "client/src/daemon/native-evaluator-production.ts",
+        "client/src/daemon/native-solver-production.ts"
+      ],
+      "replacement": "A native-owned store that does not create the legacy task_runs schema.",
+      "consumers": [
+        "client/src/adapters/mech/adapter.ts",
+        "client/src/api/gather-status.ts",
+        "client/src/cli/commands/backfill-failed-deliveries.ts",
+        "client/src/daemon/delivery-watcher.ts",
+        "client/src/daemon/work-loop-corpus.ts",
+        "client/src/harnesses/engine/backfill-failed-deliveries.ts",
+        "client/src/harnesses/engine/engine.ts"
+      ],
+      "defaultMode": "not-applicable",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "No production file outside the declared entry points and consumer inventory imports TaskRunPersistence."
+      },
+      "usageSignal": {
+        "name": "legacy_task_run_store_coupling_consumers",
+        "sourceFile": null,
+        "sourceDescription": "architecture import inventory (static audit); no durable runtime counter exists yet because both legacy and native production paths currently construct client/src/store/store.ts unconditionally, so there is no legacy/native toggle to count",
+        "zeroDefinition": "No native production module (directly or transitively) constructs client/src/store/store.ts or imports TaskRunPersistence; native evaluator and solver production own a store that does not create the legacy task_runs schema."
+      },
+      "migration": {
+        "description": "Introduce a native-owned store (or a schema split) that does not create task_runs, and repoint client/src/daemon/native-evaluator-production.ts and client/src/daemon/native-solver-production.ts to it. The legacy Store class keeps serving its declared legacy consumers (engine.ts, work-loop-corpus.ts, delivery-watcher.ts, adapters/mech/adapter.ts, gather-status.ts, the backfill-failed-deliveries pair) until their own Phase D transitions delete them.",
+        "compatibility": "The legacy task_runs schema and TaskRunPersistence remain frozen and available to the declared legacy consumers throughout Phase C/D1-D4; only the native production entry points are expected to stop depending on them."
+      },
+      "sunsetCondition": {
+        "description": "Native evaluator and solver production construct a store that does not create the legacy task_runs schema, and no native production path depends on TaskRunPersistence.",
+        "evidence": [
+          "native-evaluator-production.ts and native-solver-production.ts import a native-owned store instead of client/src/store/store.ts",
+          "zero TaskRunPersistence imports outside the declared legacy consumer inventory"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D1 native store decoupling",
+      "status": "planned"
     }
   ]
 }
