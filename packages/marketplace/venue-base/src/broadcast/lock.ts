@@ -43,6 +43,13 @@ export function createBroadcastLock(
   const release = state.db.prepare(
     "DELETE FROM broadcast_locks WHERE chain_id = ? AND sender = ? AND holder = ?",
   );
+  // Renewal is scoped to (chain_id, sender, holder): a holder whose row was
+  // already stolen (different `holder` now on the row) simply renews zero
+  // rows -- a silent no-op, never a steal-back.
+  const renew = state.db.prepare(
+    "UPDATE broadcast_locks SET expires_at_ms = @expiresAtMs"
+    + " WHERE chain_id = @chainId AND sender = @sender AND holder = @holder",
+  );
 
   async function acquireLease(chainId: number, sender: Address): Promise<void> {
     for (;;) {
@@ -59,6 +66,27 @@ export function createBroadcastLock(
     }
   }
 
+  // Renew from a timer while the critical section is open (D0a round-1
+  // review): a fixed lease acquired once silently lapses mutual exclusion
+  // for any critical section that outlives `leaseMs` (P2's multi-attempt
+  // `executeSafeTxBatch` retry/backoff can plausibly exceed it). Renew at
+  // half the lease window so there is always a full half-lease of slack
+  // before the row would actually go stale.
+  function startRenewal(chainId: number, sender: Address): () => void {
+    const renewIntervalMs = Math.max(1, Math.floor(leaseMs / 2));
+    const timer = setInterval(() => {
+      renew.run({
+        chainId,
+        sender: sender.toLowerCase(),
+        holder: holderId,
+        expiresAtMs: now() + leaseMs,
+      });
+    }, renewIntervalMs);
+    // Never keep the process alive solely to renew a lease.
+    if (typeof timer === "object" && "unref" in timer) timer.unref();
+    return () => clearInterval(timer);
+  }
+
   return {
     async withSender<T>(chainId: number, sender: Address, fn: () => Promise<T>): Promise<T> {
       const key = `${chainId}:${sender.toLowerCase()}`;
@@ -69,9 +97,11 @@ export function createBroadcastLock(
       await prior.catch(() => undefined);
       try {
         await acquireLease(chainId, sender);
+        const stopRenewal = startRenewal(chainId, sender);
         try {
           return await fn();
         } finally {
+          stopRenewal();
           release.run(chainId, sender.toLowerCase(), holderId);
         }
       } finally {

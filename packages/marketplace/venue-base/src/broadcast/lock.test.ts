@@ -127,6 +127,49 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
     }
   });
 
+  // D0a round-1 review (important finding): the lease is acquired once and
+  // never renewed, so mutual exclusion silently lapses for any critical
+  // section that runs longer than `leaseMs` -- exactly the shape
+  // `executeSafeTxBatch` now holds this lock across (retries + backoff can
+  // plausibly exceed 60s). A live holder must keep its lease alive for as
+  // long as its critical section is actually open.
+  test("a slow critical section renews its lease so a second process cannot steal it mid-flight", async () => {
+    const otherState = openVenueState(dbPath);
+    try {
+      const lockA = createBroadcastLock(state, { holderId: "holder-a", leaseMs: 30 });
+      const lockB = createBroadcastLock(otherState, { holderId: "holder-b", leaseMs: 30 });
+
+      const order: string[] = [];
+      let releaseFirst!: () => void;
+      const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const first = lockA.withSender(84532, SENDER, async () => {
+        order.push("a-start");
+        await firstGate;
+        order.push("a-end");
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(order).toEqual(["a-start"]);
+
+      // Without renewal, this 30ms lease is trivially stealable well before
+      // `first` releases -- a slow critical section (P2's multi-attempt
+      // `executeSafeTxBatch`) must keep it alive underneath itself.
+      const second = lockB.withSender(84532, SENDER, async () => {
+        order.push("b-start");
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(order).toEqual(["a-start"]);
+
+      releaseFirst();
+      await Promise.all([first, second]);
+      expect(order).toEqual(["a-start", "a-end", "b-start"]);
+    } finally {
+      otherState.close();
+    }
+  });
+
   test("an expired lease is stealable so a crashed holder never wedges the sender", async () => {
     let now = 1_000;
     const lock = createBroadcastLock(state, {
