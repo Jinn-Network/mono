@@ -675,7 +675,7 @@ describe("evaluationLauncher", () => {
     await expect(readFile(join(paths!.secrets, "evaluator-agent-key.pem")))
       .rejects.toThrow();
     expect(await textFiles(root)).not.toContain("PRIVATE KEY");
-  }, 30_000);
+  });
 
   test("reuses the backend seal-once Delivery checkpoint after a scripted crash", async () => {
     const root = await mkdtemp(
@@ -731,5 +731,5 @@ describe("evaluationLauncher", () => {
       name: "verdict",
       digest: { sha256: sha256(verdictBytes).slice("sha256:".length) },
     }]);
-  }, 30_000);
+  });
 });
