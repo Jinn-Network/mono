@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile as readFileAsync, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,12 +27,16 @@ const PORTAL_PACKAGES = [
   ["@jinn-network/policy-outcomes", join(packagesRoot, "policy", "outcomes"), "policy-outcomes.tgz"],
 ];
 
+/** Resolves with the child's stdout when `stdio: "pipe"` is requested, and with `""` otherwise. */
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", ...options });
+    const chunks = [];
+    child.stdout?.on("data", (chunk) => chunks.push(chunk));
+    child.stderr?.on("data", (chunk) => process.stderr.write(chunk));
     child.once("error", reject);
     child.once("exit", (code) => {
-      if (code === 0) resolve();
+      if (code === 0) resolve(Buffer.concat(chunks).toString("utf8"));
       else reject(new Error(`${command} exited with ${code}`));
     });
   });
@@ -148,6 +152,25 @@ console.log("Installed package imports and dependency boundary verified.");
   if (distFiles.some((name) => name.includes(".test."))) {
     throw new Error("test output leaked into dist");
   }
+
+  // C7d: the `optimize` verb tree ships as this package's own bin. A `bin` entry pointing at a file
+  // the tarball does not carry installs as a dangling symlink and fails on first use, which is the
+  // one failure mode `yarn test` cannot see.
+  const installedManifest = JSON.parse(await readFileAsync(join(installedRoot, "package.json"), "utf8"));
+  const binTarget = installedManifest.bin?.["policy-optimization"];
+  if (typeof binTarget !== "string") throw new Error("the policy-optimization bin entry is missing");
+  const binPath = join(installedRoot, binTarget);
+  await access(binPath);
+  const binSource = await readFileAsync(binPath, "utf8");
+  if (!binSource.startsWith("#!/usr/bin/env node")) {
+    throw new Error("the packed bin lost its shebang");
+  }
+  // Run it: the verb tree must be reachable from the installed tree, not only present in it.
+  const usage = await run(process.execPath, [binPath], { cwd: temporaryRoot, stdio: "pipe" });
+  if (!usage.includes("optimize campaign create") || !usage.includes("optimize policy rollback")) {
+    throw new Error("the packed bin does not expose the optimize verb tree");
+  }
+  console.log("Installed bin resolves, keeps its shebang, and exposes the optimize verb tree.");
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

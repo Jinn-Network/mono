@@ -15,6 +15,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "policy-optimization": "./dist/cli/bin.js"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

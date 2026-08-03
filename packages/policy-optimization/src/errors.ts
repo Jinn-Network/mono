@@ -36,7 +36,11 @@ export type PolicyOptimizationErrorCategory =
   /** Product §6.2 — the campaign names an allocation policy this package does not implement, or misparameterizes it. */
   | "allocation-policy"
   /** Product §6.3 — the promotion Run's preregistration, reveal, or flat-sampling discipline was violated. */
-  | "promotion-discipline";
+  | "promotion-discipline"
+  /** Product §8.3 — the archive's inputs cannot be projected (a self-parent, a duplicate, an unorderable value). */
+  | "archive-derivation"
+  /** Product §9/§7.4 — an adoption was refused: an unapproved payload class, or nothing to roll back to. */
+  | "adoption-gate";
 
 export interface PolicyOptimizationIssue {
   readonly path: string;

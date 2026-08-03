@@ -181,6 +181,12 @@ export {
   wavePlannedPayload,
 } from "./wave-journal.js";
 
+// --- product §8.3/§9: the archive and adoption (C7d) ---
+export * from "./archive/index.js";
+
+// --- program §1 C7d: the `optimize` verb tree, as this package's own bin ---
+export { runCli, USAGE, type CliContext, type CliResult } from "./cli/index.js";
+
 export type {
   AdmittedCandidate,
   AllocationDecision,

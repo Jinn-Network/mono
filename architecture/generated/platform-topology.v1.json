@@ -1573,7 +1573,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2786,
+      "discoveredFirstPartySurfaces": 2787,
       "generatedOutputSources": 1294,
       "generatorSources": 573,
       "marketplaceControl": 2,
@@ -31530,6 +31530,16 @@
           "@ritsukai"
         ],
         "path": "packages/policy-optimization/src/testing"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/src/testing/archive-fixtures.ts"
       },
       {
         "categories": [
