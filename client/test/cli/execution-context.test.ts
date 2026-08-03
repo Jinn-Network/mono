@@ -3,18 +3,24 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createCliReadOnlySignerContext,
+  createCliSignerContext,
   pickPrimaryMechService,
 } from '../../src/cli/execution-context.js';
 import type { ServiceState } from '../../src/earning/types.js';
 import { FleetStateStore, STATE_FILE } from '../../src/earning/store.js';
 import { encryptMnemonic } from '../../src/earning/wallet.js';
+import {
+  __setExecSyncForTesting,
+  __resetExecSyncForTesting,
+} from '../../src/lifecycle/process-discovery.js';
 
 function svc(partial: Partial<ServiceState> & Pick<ServiceState, 'index' | 'step'>): ServiceState {
   return {
@@ -102,5 +108,105 @@ describe('createCliReadOnlySignerContext', () => {
     expect(invalidState.ok).toBe(false);
     expect(readFileSync(invalidStatePath, 'utf8')).toBe(invalidBefore);
     expect(readdirSync(earningDir)).toEqual(filesBefore);
+  });
+});
+
+// D0a review (round 1), critical finding: `buildCliSignerContext` (shared by
+// `createCliSignerContext`, `createCliReadOnlySignerContext`, and
+// `createCliExecutionContext`) must refuse when a live `jinn run` daemon is
+// detected against the target earning directory -- every context it returns
+// hands the caller live signer key material (`masterWallet` / `mnemonic`)
+// that downstream code (e.g. `jinn claim-rewards` via `runRewardClaimOnce`)
+// signs Safe / EOA writes with, with no cross-process lock against the
+// daemon signing from the same keys. Previously the guard was wired only
+// into `createCliExecutionContext`, leaving `createCliSignerContext` (and
+// `jinn claim-rewards`, which uses it directly) unguarded.
+describe('buildCliSignerContext daemon guard (D0a round 1)', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'jinn-signer-ctx-daemon-guard-'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    __resetExecSyncForTesting();
+  });
+
+  function makeConfig(earningDir: string): string {
+    const path = join(root, 'config.json');
+    writeFileSync(path, JSON.stringify({
+      network: 'testnet',
+      earningDir,
+      rpcUrl: 'http://127.0.0.1:1',
+    }));
+    return path;
+  }
+
+  it('createCliSignerContext refuses when a live jinn daemon is detected', async () => {
+    const earningDir = join(root, 'earning');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(
+      'test test test test test test test test test test test junk',
+      'test-password',
+    ));
+    writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
+    __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+
+    try {
+      const result = await createCliSignerContext({
+        argv: ['--config', makeConfig(earningDir)],
+        env: { JINN_PASSWORD: 'test-password' },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.envelope.code).toBe('invalid_invocation');
+        expect(result.envelope.message).toContain('987654');
+      }
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('createCliReadOnlySignerContext refuses when a live jinn daemon is detected', async () => {
+    const earningDir = join(root, 'earning-ro');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(
+      'test test test test test test test test test test test junk',
+      'test-password',
+    ));
+    writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
+    __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
+
+    try {
+      const result = await createCliReadOnlySignerContext({
+        argv: ['--config', makeConfig(earningDir)],
+        env: { JINN_PASSWORD: 'test-password' },
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.envelope.code).toBe('invalid_invocation');
+        expect(result.envelope.message).toContain('987654');
+      }
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it('does not block when no daemon is running', async () => {
+    const earningDir = join(root, 'earning-clean');
+    const store = new FleetStateStore(earningDir);
+    await store.saveMnemonicKeystore(await encryptMnemonic(
+      'test test test test test test test test test test test junk',
+      'test-password',
+    ));
+    // No daemon.pid file at all -- proves the guard is not blocking unconditionally.
+    const result = await createCliSignerContext({
+      argv: ['--config', makeConfig(earningDir)],
+      env: { JINN_PASSWORD: 'test-password' },
+    });
+    expect(result.ok).toBe(true);
   });
 });

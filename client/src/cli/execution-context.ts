@@ -74,6 +74,27 @@ async function buildCliSignerContext(
   }
 
   const config = loadConfig(mergeArgvForConfig(opts.argv));
+
+  // D0a P3 (#525/#562/#897): every context built from this shared function
+  // hands the caller live signer key material (`masterWallet`, and
+  // `mnemonic` for deriving per-agent signers) that downstream code signs
+  // Safe / EOA writes with — with no cross-process lock against a
+  // concurrently running `jinn run` daemon signing from the same keys. Guard
+  // once, here, rather than per verb: `createCliExecutionContext` used to
+  // check this itself (after decrypting the mnemonic and loading fleet
+  // state), which left `createCliSignerContext` callers (`jinn claim-rewards`)
+  // unguarded — see the finding this comment replaces.
+  const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env });
+  if (daemonGuard.blocked) {
+    return {
+      ok: false,
+      envelope: daemonGuardEnvelope(
+        daemonGuard,
+        'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+      ),
+    };
+  }
+
   const networkChain: NetworkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const chainConfig = getChainConfig(networkChain, {
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -183,18 +204,10 @@ export async function createCliExecutionContext(
     };
   }
 
-  // D0a P3 (#525/#562/#897): this verb signs Safe writes below via
-  // `createDirectSafeBroadcaster` with the same agent EOA a running daemon
-  // uses, and (unlike the daemon's own in-process broadcasts) has no
-  // cross-process lock to prevent a nonce collision with it.
-  const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env: opts.env });
-  if (daemonGuard.blocked) {
-    return {
-      ok: false,
-      envelope: daemonGuardEnvelope(daemonGuard, 'jinn tasks submit --id x --description "…" --solver-net prediction --yes'),
-    };
-  }
-
+  // D0a P3 (#525/#562/#897): the daemon guard for this verb's signing runs
+  // in `buildCliSignerContext` (above, via `base`) — it covers the
+  // `createDirectSafeBroadcaster` write below too, since that broadcaster
+  // signs with the same agent EOA derived from `base.ctx.mnemonic`.
   const jinnStore = new Store(config.dbPath);
   const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
   const marketplaceAddress = chainConfig.mechMarketplace as `0x${string}`;
