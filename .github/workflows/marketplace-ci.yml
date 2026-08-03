@@ -229,6 +229,7 @@ jobs:
         run: |
           (cd packages/marketplace/binding && yarn install --immutable)
           (cd packages/marketplace/projector && yarn install --immutable)
+          (cd packages/marketplace/testing && yarn install --immutable)
       - name: Verify Marketplace Venue Base
         working-directory: packages/marketplace/venue-base
         run: |

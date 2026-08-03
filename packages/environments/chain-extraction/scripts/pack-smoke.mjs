@@ -93,13 +93,12 @@ try {
       "@jinn-network/trust-core": "file:./trust-core.tgz",
     },
   }));
-  await writeFile(join(consumer, ".yarnrc.yml"), [
-    "nodeLinker: node-modules",
-    "enableGlobalCache: false",
-  ].join("\n") + "\n");
-  // This is the consumer's first install, so no lockfile can exist yet. CI makes
-  // Yarn installs immutable by default; opt out only for this generated fixture.
-  await run("corepack", ["yarn@4.13.0", "install", "--no-immutable"], { cwd: consumer });
+  // Yarn's optional-platform resolver can reject Rolldown's Android binding while
+  // installing this Linux-only generated consumer. npm's legacy peer resolver keeps
+  // the local tarball graph deterministic; the packed imports below remain the oracle.
+  await run("npm", [
+    "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",
+  ], { cwd: consumer });
   await writeFile(join(consumer, "packed-imports.test.mjs"), `
 import assert from "node:assert/strict";
 import {

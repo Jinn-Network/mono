@@ -62,7 +62,7 @@ jobs:
       # dependency, matching benchmarking-ci.yml.
       - name: Build cross-tree portal dependencies from source
         run: |
-          for pkg in trust/core discovery/protocol discovery/client \
+          for pkg in trust/core discovery/protocol discovery/client discovery/serve \
                      evidence/protocol evidence/derivation evidence/repository evidence/discovery \
                      evidence/catalog-sqlite evidence/execution-recorder \
                      evidence/local-runtime evidence/trajectory evidence/trace-decode evidence/retrieval; do

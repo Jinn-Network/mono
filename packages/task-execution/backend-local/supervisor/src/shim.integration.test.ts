@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +20,10 @@ const waitForJson = async (path: string): Promise<Record<string, unknown>> => {
   }
   throw new Error("shim did not write outcome.json");
 };
+const waitForExit = async (child: ChildProcess): Promise<void> => {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await once(child, "exit");
+};
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 it("runs the real shim with fork-time attempt tags and records a natural exit 0", async () => {
@@ -27,11 +33,12 @@ it("runs the real shim with fork-time attempt tags and records a natural exit 0"
   const secretsDir = join(root, "secrets");
   mkdirSync(metaDir, { recursive: true });
   mkdirSync(secretsDir, { recursive: true });
-  spawnShim(
+  const child = spawnShim(
     { attemptId: "attempt-1", nonce: "nonce-1", metaDir, secretsDir, heartbeatMs: 5 },
     { argv: [process.execPath, "-e", "if (!process.env.JINN_ATTEMPT_ID || !process.env.JINN_ATTEMPT_NONCE) process.exit(17)"], env: {}, cwd: root },
   );
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  await waitForExit(child);
   expect(outcome).toMatchObject({ attemptId: "attempt-1", nonce: "nonce-1", exitCode: 0, termSignal: null });
 });
 
@@ -42,7 +49,7 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   const secretsDir = join(root, "secrets");
   mkdirSync(metaDir, { recursive: true });
   mkdirSync(secretsDir, { recursive: true });
-  spawnShim(
+  const child = spawnShim(
     { attemptId: "attempt-2", nonce: "nonce-2", metaDir, secretsDir },
     { argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 40)"], env: {}, cwd: root },
   );
@@ -51,6 +58,7 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   // signal trap survives and continues to record the harness's natural result.
   process.kill(Number(fingerprint["pid"]), "SIGTERM");
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  await waitForExit(child);
   expect(outcome).toMatchObject({ exitCode: 0, termSignal: null });
 });
 
@@ -61,7 +69,7 @@ it("relays a nonce-bound cancellation command from the shim to the harness subtr
   const secretsDir = join(root, "secrets");
   mkdirSync(metaDir, { recursive: true });
   mkdirSync(secretsDir, { recursive: true });
-  spawnShim(
+  const child = spawnShim(
     { attemptId: "attempt-3", nonce: "nonce-3", metaDir, secretsDir },
     { argv: [process.execPath, "-e", "setInterval(() => {}, 1_000)"], env: {}, cwd: root },
   );
@@ -73,6 +81,7 @@ it("relays a nonce-bound cancellation command from the shim to the harness subtr
   });
   expect(requestShimCancellation(metaDir, readShimFingerprint(metaDir)!)).toBe(true);
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  await waitForExit(child);
   expect(outcome).toMatchObject({ attemptId: "attempt-3", nonce: "nonce-3", termSignal: "SIGTERM" });
   expect(Number(fingerprint["pid"])).toBeGreaterThan(0);
 });
@@ -84,11 +93,12 @@ it("substitutes a declared secret reference with its absolute attempt-local path
   mkdirSync(metaDir, { recursive: true }); mkdirSync(secretsDir, { recursive: true });
   const bytes = Buffer.from([0, 255, 10, 32]);
   writeFileSync(join(secretsDir, "credential"), bytes, { mode: 0o600 });
-  spawnShim(
+  const child = spawnShim(
     { attemptId: "attempt-secret-path", nonce: "nonce-secret-path", metaDir, secretsDir },
     { argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},process.env.CREDENTIAL_PATH)`], env: { CREDENTIAL_PATH: "secrets/credential" }, cwd: root },
   );
   await waitForJson(join(metaDir, "outcome.json"));
+  await waitForExit(child);
   expect(readFileSync(seen, "utf8")).toBe(realpathSync(join(secretsDir, "credential")));
   expect(readFileSync(join(secretsDir, "credential"))).toEqual(bytes);
 });
@@ -99,11 +109,12 @@ it("round-trips an escaped binary-safe nonce through fingerprint and outcome whi
   const metaDir = join(root, "meta"); const secretsDir = join(root, "secrets"); const seen = join(root, "nonce-env");
   mkdirSync(metaDir, { recursive: true }); mkdirSync(secretsDir, { recursive: true });
   const nonce = "nul-\u0000-quote-\"-slash-\\-control-\u0001-supplementary-😀";
-  spawnShim(
+  const child = spawnShim(
     { attemptId: "attempt-nonce-binary", nonce, metaDir, secretsDir },
     { argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},process.env.JINN_ATTEMPT_NONCE)`], env: {}, cwd: root },
   );
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
+  await waitForExit(child);
   const fingerprint = await waitForJson(join(metaDir, "shim.json"));
   expect(outcome["nonce"]).toBe(nonce);
   expect(fingerprint["nonce"]).toBe(nonce);
