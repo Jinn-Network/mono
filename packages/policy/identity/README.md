@@ -1,9 +1,10 @@
 # `@jinn-network/policy-identity`
 
-> **This package is currently a KIT, not an implementation.** It ships the frozen type
-> vocabulary, the format tokens, the complete conformance fixture set, a naive reference
-> implementation, and the test suite that gates both. C1's implementation lands next and must
-> byte-match every fixture here. See *Handover* below.
+> **Kit and implementation, in one package.** It ships the frozen type vocabulary, the format
+> tokens, the complete conformance fixture set, the production implementation under `src/`, and a
+> naive reference implementation under `fixtures/reference/`. The same suite gates both: `yarn
+> test` runs it against the shipped code, `yarn test:conformance:reference` runs the identical
+> assertions against the reference. See *The conformance kit* below.
 
 > Phase A/C maturity: experimental, `experimental-policy` release group, publication disabled.
 
@@ -17,9 +18,10 @@ Authority:
 Canonicalize, digest, seal, and validate two documents:
 
 - **The execution-policy tuple** — one canonical, *derived* identity for "the configuration that
-  ran". It is a total function of exactly one input pair, the sealed Task and the sealed
-  Submission: effective-requirements merge → closed key rule → byte-exact copy → canonicalize.
-  Two honest derivers holding those documents must produce identical bytes.
+  ran". It is a total function of exactly one input triple, the sealed Task, the sealed
+  Submission, and the resolved task profile the Task pins by digest: profile pin-check →
+  effective-requirements merge → closed key rule → byte-exact copy → canonicalize. Two honest
+  derivers holding those documents must produce identical bytes.
 - **The candidate manifest** — a sealed, attributable identity for "the configuration someone
   proposes": typed parent lineage, proposer, frozen evidence provenance, declared changes. It
   carries **no score and no self-assessment**; whether the candidate is better is established
@@ -55,29 +57,47 @@ execution — it only says what was *requested*.
 ## The conformance kit
 
 `src/conformance.ts` is the single swap point. Every test imports what it exercises from there
-and nowhere else. It re-exports `fixtures/reference/` today; when the implementation lands, one
-edit repoints it at `./index.js` and the whole suite runs unchanged.
+and nowhere else, so the same 165 assertions run against either implementation without a line of
+test code changing:
 
-Two mutation checks were run against the kit to confirm it bites rather than merely passes:
+| Command | Gates |
+| --- | --- |
+| `yarn test` | `src/` — the shipped implementation (`CONFORMANCE_TARGET = "implementation"`) |
+| `yarn test:conformance:reference` | `fixtures/reference/` — the naive reference deriver |
+
+Both are green, and both run in CI. The reference stays in the tree permanently: substrate §8
+requires the derivation-equivalence fixture to be satisfied by **two structurally different
+implementations**, and a kit provable only by the code it gates proves nothing.
+`src/merge-parity.test.ts` additionally imports the reference's class maps directly.
+
+Three mutation checks confirm the kit bites rather than merely passes:
 
 | Mutation | Result |
 | --- | --- |
 | Sort object members by Unicode **code point** instead of UTF-16 code unit | 3 failures, all in `tuple/golden/utf16-code-unit-ordering` |
 | Null-fill declared-but-unset profile `requirementKeys` instead of omitting them | 8 failures across the derivation family |
+| Code-point sort in the **implementation** while the reference is untouched | 3 failures under `yarn test`, 0 under `yarn test:conformance:reference` — which is what proves the swap point is real |
 
-## Handover — what C1's implementer adds
+## Layout
 
-1. `src/canonical.ts`, `src/tuple.ts`, `src/derive.ts`, `src/manifest.ts`, `src/dsse.ts`,
-   `src/hash-profile.ts` — the real implementation, written **without reading**
-   `fixtures/reference/` first. Structural difference is the point; a transcription proves
-   nothing.
-2. Export the frozen surface from `src/index.ts`.
-3. Repoint `src/conformance.ts` at `./index.js` and flip `CONFORMANCE_TARGET`.
-4. Add the guard trio (package-inventory, source-boundary allowlist, packed-types) plus the
-   source-scanning purity guard, and the catalog entry — per program §Global constraints, in the
-   same PR.
-5. Do **not** edit a fixture to make the implementation pass. A fixture that is wrong is a
-   finding routed to the coordinator; a fixture that is inconvenient is a fixture doing its job.
+| Path | Contents |
+| --- | --- |
+| `src/canonical.ts` | I-JSON + JCS canonicalization, one recursive writer with path-tracked refusals |
+| `src/digest.ts` | sha256 and the bare-versus-prefixed digest spellings (F9) |
+| `src/merge.ts` | `CORE_KEY_CLASSES` (F2's pin) and the tighten-only requirements merge |
+| `src/tuple.ts` | tuple validation, canonical bytes, digest, the expression rule |
+| `src/derive.ts` | `deriveExecutionTuple` — the §4.1 total function in five stages |
+| `src/manifest.ts` | candidate-manifest validation, sealing, exact-bytes parsing |
+| `src/dsse.ts` | the DSSE in-toto Statement binding |
+| `src/hash-profile.ts` | `learner-public.v1` and the fail-closed materialization rule |
+
+The merge is **reproduced**, not imported: this package depends on no Jinn package, and
+`.github/scripts/policy-identity-guards.test.mjs` pins its class map, membership registry, and
+effort ordinals against `packages/task-execution/protocol/src/requirements.ts` so the two cannot
+drift apart silently.
+
+**Do not edit a fixture to make an implementation pass.** A fixture that is wrong is a finding
+routed to the coordinator; a fixture that is inconvenient is a fixture doing its job.
 
 ## Findings
 
@@ -105,6 +125,10 @@ The kit implements the three-argument form. All derivation fixtures carry the pr
 so a two-argument implementation that resolves internally can be adapted with a thin binding in
 `conformance.ts` without touching a fixture.
 
+**Disposition taken:** substrate §4.1 was amended in place ("input triple", with the pin-check
+stated normatively) and the program's C1 charter follows it. `src/derive.ts` runs the pin-check as
+stage 0, before anything reads `requirementKeys`.
+
 ### F2 — the core-axis comparison-class map is unpinned, and the shipped venues disagree
 
 §4.1 step 1 says "`mergeRequirements` semantics" without naming the core-key class map. Two
@@ -128,6 +152,13 @@ consequence, `model`, is `constraint` in both maps.
 pins the marketplace spelling, which cites profiles §5/§5.1 with its rationale), and both venues
 migrate to it. The kit ships a tripwire test that fails the day a membership test is registered
 for another core key — the day the two maps genuinely would fork.
+
+**Disposition taken (C1):** `src/merge.ts` exports `CORE_KEY_CLASSES` with the marketplace
+spelling. The tripwire now exists on both sides — `src/merge-parity.test.ts` inside the package,
+and `.github/scripts/policy-identity-guards.test.mjs` at the tree level, which reads protocol's
+`CONSTRAINT_MEMBERSHIP` and fails if any key other than `model` is ever registered. Migrating the
+two venues onto the exported constant is a separate, cross-tree change and is **not** done here:
+it edits `platform-v1` packages, which is outside C1's file scope.
 
 ### F3 — `isolationPolicy` versus the core `isolation` key family
 

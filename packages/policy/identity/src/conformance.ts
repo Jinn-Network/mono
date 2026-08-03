@@ -4,10 +4,12 @@
  * THE CONFORMANCE ENTRY — the single swap point of this kit.
  *
  * Every test in `src/*.test.ts` imports the functions under test from **here and nowhere else**.
- * Today this module re-exports the kit's naive reference implementation
- * (`fixtures/reference/`). When C1's real implementation lands, one edit repoints these bindings
- * at `./index.js`, the whole suite runs unchanged, and any byte-level disagreement between the
- * two implementations surfaces as a failing fixture rather than as a code review opinion.
+ * The kit shipped pointed at its naive reference implementation (`fixtures/reference/`); C1's
+ * implementation landed and this module now re-exports `./index.js`, with the whole suite running
+ * unchanged. The reference stays in the tree — `merge-parity.test.ts` still imports it directly,
+ * and `yarn test:conformance:reference` runs the entire suite against it — so any byte-level
+ * disagreement between the two implementations surfaces as a failing fixture rather than as a
+ * code review opinion.
  *
  * **Do not** widen this file into an adapter. If the implementation needs a shim to satisfy a
  * binding below, that is a frozen-interface change and a program event (program §7 R1), not a
@@ -39,12 +41,12 @@ export {
   compareCodeUnitStrings,
   sha256Hex,
   prefixedDigest,
-} from "../fixtures/reference/index.js";
+} from "./index.js";
 
-export type { DsseEnvelope } from "../fixtures/reference/dsse.js";
+export type { DsseEnvelope } from "./dsse.js";
 
 /**
  * Names the implementation the suite is currently gating. Asserted by `conformance.test.ts` so
  * the swap is a deliberate, visible edit rather than something that happens by accident.
  */
-export const CONFORMANCE_TARGET: "reference" | "implementation" = "reference";
+export const CONFORMANCE_TARGET: "reference" | "implementation" = "implementation";
