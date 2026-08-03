@@ -27,7 +27,7 @@ import {
 } from '../../src/harnesses/hash-profile.js';
 import { runHarnessWithFreezeFence } from '../../src/daemon/freeze-fence.js';
 import { DEFAULT_HARNESS } from '../../src/harnesses/engine/registry.js';
-import { HERMES_AGENT_HARNESS } from '../../src/harnesses/names.js';
+import { CODEX_HARNESS, HERMES_AGENT_HARNESS } from '../../src/harnesses/names.js';
 import { LearnerHarness } from '../../src/harnesses/impls/learner/index.js';
 import type { HarnessAdapter, TaskSessionInputs } from '../../src/harnesses/impls/learner/types.js';
 import type { Harness, HarnessContext, Solution } from '../../src/harnesses/types.js';
@@ -211,6 +211,23 @@ describe('learner-public.v1 fail-closed classification', () => {
     }
   });
 
+  it('refuses a top-level directory named for an allowed file', async () => {
+    // `policy.json` is classified as an allowed top-level FILE only. A
+    // directory by that name is not an allowed top-level directory, so it
+    // fails closed — the mirror image of "allows a regular file only where
+    // the table names a file" above.
+    const dir = await tmp('policy-json-dir-');
+    try {
+      await mkdir(join(dir, 'policy.json'), { recursive: true });
+      await writeFile(join(dir, 'policy.json', 'nested.txt'), 'x\n', 'utf8');
+      await expect(hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).rejects.toThrow(
+        HashProfileViolationError,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('refuses a symlink at the top level rather than following it', async () => {
     const dir = await buildForkHealingFixture({ withIgnoredRoots: false });
     try {
@@ -261,12 +278,100 @@ describe('learner-public.v1 fail-closed classification', () => {
   });
 });
 
+describe('learner-public.v1 ignore precedes classification', () => {
+  it('silently ignores a top-level FILE named for an excluded root', async () => {
+    // `secrets` is an excluded root, and `shouldIgnore` matches on relPath
+    // alone before depth-0 classification ever runs — so a top-level regular
+    // *file* called `secrets` is ignored the same as the directory would be,
+    // even though `secrets` is not in `allowedFiles` and a same-named file
+    // would otherwise fail closed as unclassified. This is pinned as current
+    // deliberate behavior, not implied by the spike table alone.
+    const withFile = await tmp('secrets-file-');
+    const withoutFile = await tmp('secrets-file-baseline-');
+    try {
+      await write(withFile, 'notes/a.md', 'a\n');
+      await writeFile(join(withFile, 'secrets'), 'not a directory\n', 'utf8');
+      await write(withoutFile, 'notes/a.md', 'a\n');
+      const withDigest = await hashImplStateDir(withFile, { profile: LEARNER_PUBLIC_V1 });
+      const withoutDigest = await hashImplStateDir(withoutFile, { profile: LEARNER_PUBLIC_V1 });
+      expect(withDigest).toBe(withoutDigest);
+    } finally {
+      await rm(withFile, { recursive: true, force: true });
+      await rm(withoutFile, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('fork-healing fixture digest constant', () => {
   it('hashes the stated fixture tree to the recorded constant', async () => {
     const dir = await buildForkHealingFixture({ withIgnoredRoots: true });
     try {
       expect(await hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).toBe(
         FORK_HEALING_FIXTURE_DIGEST,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('learner-public.v1 code-unit sort order', () => {
+  // DEEP review finding: `localeCompare` resolves against the host's LANG via
+  // ICU, so the same tree hashed the same profile on two machines with
+  // different locales could disagree on entry order and therefore on the
+  // digest. Code-unit (`<`/`>`) comparison is locale-independent and is the
+  // one order reproducible from the profile's published description alone.
+  it('sorts entries by UTF-16 code unit, not locale collation', async () => {
+    const dir = await tmp('code-unit-sort-');
+    try {
+      await write(dir, 'notes/Bravo.md', 'B\n');
+      await write(dir, 'notes/alpha.md', 'a\n');
+      // Code-unit order: 'B' (U+0042) < 'a' (U+0061), so "Bravo.md" sorts
+      // before "alpha.md" — the reverse of case-insensitive locale collation,
+      // which would place "alpha.md" first on primary-letter comparison.
+      expect(await hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).toBe(
+        'a3d6b71dea3ca7dc352679fb91219370aa32d19b906c829739bb20dac5aa0340',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is independent of host locale collation (ICU en_US would sort ä before z)', async () => {
+    const dir = await tmp('locale-independent-');
+    try {
+      await write(dir, 'skills/ä.md', 'a-umlaut\n');
+      await write(dir, 'skills/z.md', 'zed\n');
+      // Code-unit order: 'z' (U+007A) < 'ä' (U+00E4), so "z.md" sorts before
+      // "ä.md" here. An ICU en_US collator (localeCompare's default) treats
+      // "ä" as a variant of "a" and would sort it before "z", producing a
+      // different digest. Pinning code-unit order means this digest does not
+      // depend on the operator's `LANG`.
+      expect(await hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).toBe(
+        '8263413c2426c54b9af3b62e9809dd5724490aa6bbba1e839c9873a84827f3de',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('learner-public.v1 control-character refusal', () => {
+  it('refuses a control character in a path component', async () => {
+    const dir = await tmp('control-char-');
+    try {
+      await mkdir(join(dir, 'skills'), { recursive: true });
+      // POSIX allows any byte except NUL and `/` in a filename. A literal LF
+      // inside a path component would otherwise forge the LF-joined
+      // "<relPath>:<fileHash>" combining format, merging two entries into one
+      // line. Written directly via fs, not the `write()` helper, because the
+      // helper splits on `/` and this control character is not a separator.
+      await writeFile(join(dir, 'skills', 'bad\nname.md'), 'x\n', 'utf8');
+      await expect(hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).rejects.toThrow(
+        HashProfileViolationError,
+      );
+      await expect(hashImplStateDir(dir, { profile: LEARNER_PUBLIC_V1 })).rejects.toThrow(
+        /control character/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -322,6 +427,12 @@ describe('one scheme, three uses', () => {
 
   it('the shipped learner harness declares the profile the status surface resolves', () => {
     const learner = new LearnerHarness({ adapter: new NoOpAdapter() });
+    expect(learner.freezeStateHashProfile).toBe(LEARNER_PUBLIC_V1);
+    expect(hashProfileForHarness(learner.name)).toBe(learner.freezeStateHashProfile);
+  });
+
+  it('agrees with a constructed codex learner instance, same as claude-code', () => {
+    const learner = new LearnerHarness({ adapter: new NoOpAdapter(), name: CODEX_HARNESS });
     expect(learner.freezeStateHashProfile).toBe(LEARNER_PUBLIC_V1);
     expect(hashProfileForHarness(learner.name)).toBe(learner.freezeStateHashProfile);
   });

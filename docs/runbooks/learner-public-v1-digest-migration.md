@@ -27,9 +27,13 @@ of exactly `['.git']`, and three surfaces disagreed about even that:
 From this version, all of them hash under one **named profile**,
 `learner-public.v1`:
 
-- **Algorithm (unchanged):** walk the tree, sha256 each regular file, sort
-  entries by relative path, join `"<relpath>:<filehash>"` with LF, sha256 the
-  result. 64 lowercase hex characters.
+- **Algorithm (vs pre-migration: same walk, same sha256, same joining rule;
+  the entry order is now pinned to code-unit sort where it previously
+  followed host-locale collation, and control characters in path components
+  now fail closed):** walk the tree, sha256 each regular file, sort entries
+  by relative path in UTF-16 code-unit order (never locale collation), join
+  `"<relpath>:<filehash>"` with LF, sha256 the result. 64 lowercase hex
+  characters. Path components containing control characters fail closed.
 - **Excluded roots (canonical order):** `.git`, `operator-requests`, `secrets`,
   `transcripts`. Their contents contribute nothing to the digest at any depth.
 - **Everything else is classified, and unclassified fails closed.** The
@@ -38,7 +42,8 @@ From this version, all of them hash under one **named profile**,
   `strategies/`, `tests/`, `tools/`, `tunables/` may contribute as
   directories; `policy.json` may contribute as a file. Any other top-level
   path, and any symlink or special file anywhere in the tree, raises
-  `HashProfileViolationError` instead of being silently skipped.
+  `HashProfileViolationError` outside an excluded root instead of being
+  silently skipped (inside an excluded root, nothing is classified at all).
 
 The three surfaces are now one scheme with three uses: freeze-fence identity,
 on-chain `codeDigest`, and (per the policy-identity design) `jinn.harness-state.v1`
@@ -71,18 +76,28 @@ Two digests for one tree is not a cosmetic problem.
   rewritten, invalidated, or re-anchored. Every pre-migration digest still
   correctly names the tree that produced it under the scheme in force at the
   time.
-- **They are permanently non-joining.** A pre-migration digest and a
-  post-migration digest of the same tree are different strings, and no
-  procedure converts between them — the excluded bytes are gone from the
-  input. Pre-migration digests are a closed legacy population: joinable to each
-  other, never to anything produced from here on. Any query, corpus join, or
-  revert lookup that spans the boundary returns nothing rather than something
-  wrong.
+- **They are permanently non-joining, for any tree an excluded root touches.**
+  For any tree containing at least one excluded root (which includes every
+  real learner tree — the learner writes `transcripts/` and
+  `operator-requests/` as part of its loop), pre- and post-migration digests
+  are different strings and no procedure converts between them. A tree
+  containing none of the excluded roots hashes identically under both
+  schemes; joins across the boundary must therefore be keyed on the producing
+  client version (see Version boundary), never inferred from digest equality
+  or shape. Pre-migration digests are a closed legacy population: joinable to
+  each other, never to anything produced from here on. Any query, corpus
+  join, or revert lookup that spans the boundary returns nothing rather than
+  something wrong.
 - **The hash algorithm.** Same walk, same sha256, same combining rule. Only the
   input set changed.
 - **Harnesses without a registered public profile.** `hermes-agent` keeps its
   own declared ignore list and its own digests; the learner profile is not
-  inherited. A future harness profile is a new registered id.
+  inherited. A future harness profile is a new registered id. Note the
+  unhealed remainder: hermes-agent's status-panel digest is still computed
+  unfiltered (no registered profile, and the status surface does not consult
+  its legacy ignore list), so its fence/delivery digests and its status
+  digest continue to disagree — the same fork this migration heals for the
+  learner. Healing it is a future registered profile, not this change.
 - **On-chain contracts, agent identities, staking, and fleet state.** Untouched.
 
 ## Operator action required

@@ -116,6 +116,13 @@ export async function hashImplStateDir(
       const full = join(currentPath, item);
       const relPath = normalizeRelPath(relative(dirPath, full));
       if (shouldIgnore(relPath, ignored)) continue;
+      // A control character in a path component could forge the LF-joined
+      // "<relPath>:<fileHash>" combining format (a "\n" inside a path merges
+      // two entries into one line). Refusal is digest-neutral for every
+      // legitimate tree; fail closed under a profile.
+      if (profile && /[\u0000-\u001f\u007f]/u.test(item)) {
+        throw new HashProfileViolationError(profile.id, relPath, 'control character in path component');
+      }
       // Under a profile, lstat: a symlink must fail closed rather than be
       // followed into whatever it points at (spike §4.1).
       const s = profile ? await lstat(full) : await stat(full);
@@ -142,7 +149,12 @@ export async function hashImplStateDir(
 
   await walk(dirPath, 0);
 
-  entries.sort((a, b) => a.relPath.localeCompare(b.relPath));
+  // UTF-16 code-unit order, never localeCompare: the default collator resolves
+  // from the host locale (LANG), so the same tree would hash to different
+  // values on different machines — and ICU order is not what an independent
+  // implementation infers from "sort by relative path". Code-unit comparison
+  // is the one order reproducible from the profile's published description.
+  entries.sort((a, b) => (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0));
   const combined = entries.map((e) => `${e.relPath}:${e.fileHash}`).join('\n');
   return createHash('sha256').update(combined).digest('hex');
 }
