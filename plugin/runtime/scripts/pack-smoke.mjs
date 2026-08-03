@@ -30,6 +30,11 @@ const portals = [
     archive: "record-discovery-protocol.tgz",
   },
   {
+    name: "@jinn-network/record-discovery-serve",
+    root: join(repoRoot, "packages", "discovery", "serve"),
+    archive: "record-discovery-serve.tgz",
+  },
+  {
     name: "@jinn-network/evidence-repository",
     root: join(repoRoot, "packages", "evidence", "repository"),
     archive: "evidence-repository.tgz",

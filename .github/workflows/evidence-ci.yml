@@ -663,6 +663,7 @@ jobs:
           path: packages/evidence/catalog-sqlite/dist
       - name: Build Record Discovery bridge dependencies from source
         run: |
+          (cd packages/trust/core && yarn install --immutable && yarn build)
           (cd packages/discovery/protocol && yarn install --immutable && yarn build)
           (cd packages/discovery/serve && yarn install --immutable && yarn build)
           (cd packages/discovery/sources/evidence-journal && yarn install --immutable && yarn build)

@@ -90,7 +90,7 @@ try {
   }));
   // Yarn's optional-platform resolver can reject Rolldown's Android binding while
   // installing this Linux-only generated consumer. npm's legacy peer resolver keeps
-  // the local tarball graph deterministic; the packed imports below remain the oracle.
+  // the local tarball graph repeatable; the packed imports below remain the oracle.
   await run("npm", [
     "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",
   ], { cwd: consumer });
