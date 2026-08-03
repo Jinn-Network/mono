@@ -73,6 +73,10 @@
       "kind": "workflow",
       "path": ".github/workflows/policy-ci.yml"
     },
+    "policy-optimization-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/policy-optimization-ci.yml"
+    },
     "autopilot-ci": {
       "kind": "workflow",
       "path": ".github/workflows/autopilot-board-painter.yml"
@@ -229,7 +233,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 8,
+      "expectedPackageCount": 9,
       "publishPolicies": [
         "private",
         "never"
@@ -242,6 +246,7 @@
         "indexer-ci",
         "indexer-enrichment-ci",
         "plugin-tree-ci",
+        "policy-optimization-ci",
         "task-supply-ci"
       ],
       "allowedClassifications": [
@@ -252,6 +257,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-policy",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1",
@@ -3557,6 +3563,46 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-optimization",
+      "path": "packages/policy-optimization",
+      "domain": "policy",
+      "role": "policy optimization product",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-optimization-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-optimization-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],

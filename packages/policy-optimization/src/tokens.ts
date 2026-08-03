@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: MIT
+
+/**
+ * Format tokens, the closed vocabularies, and the on-disk names of the campaign state layer.
+ *
+ * Authority: `docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md` ("the
+ * product design"), §5.1 and §5.2.
+ *
+ * These are **product-convention format tokens**, not record kinds and not media types (product
+ * design §5.1: "a product convention, not a record kind"). Nothing in this package publishes a
+ * schema, registers a media type, or claims a tier-2 surface.
+ */
+
+/** Product §5.1 — the campaign document's `formatToken`. */
+export const CAMPAIGN_FORMAT_TOKEN = "network.jinn.policy-optimization.campaign/1.0" as const;
+
+/**
+ * The journal entry envelope's `formatToken`.
+ *
+ * FINDING F-C7a-1 (README): the product design names the campaign document's token and the
+ * journal's event list, but no token for the journal entries themselves. One is added here rather
+ * than left implicit — the journal is a host-persisted document this package both writes and
+ * re-reads across restarts, and a versionless envelope has no way to refuse a future revision's
+ * bytes. It is host-local state, never network truth (§5.2), so the addition is a product
+ * convention and not a protocol surface.
+ */
+export const CAMPAIGN_JOURNAL_ENTRY_FORMAT_TOKEN =
+  "network.jinn.policy-optimization.campaign-journal-entry/1.0" as const;
+
+/**
+ * Product §5.1 — the v0 mutation surface. Harness and model are frozen per campaign;
+ * `isolationPolicy` is excluded because the axis is vacuous (substrate §4.3), and an axis nobody
+ * can vary is not a search dimension.
+ */
+export const V0_MUTATION_SURFACE = ["loadout"] as const;
+
+/**
+ * Substrate §4.1 — the four core axes, mirrored (not imported as a value) so this package can
+ * state the "every core axis is either frozen or mutable" rule. Pinned against
+ * `@jinn-network/policy-identity`'s `CORE_AXES` by a test, so a drift fails rather than splitting
+ * the rule across two lists.
+ */
+export const CORE_AXES = ["harness", "model", "loadout", "isolationPolicy"] as const;
+
+/** Product §5.2 — the lifecycle, in order. */
+export const CAMPAIGN_LIFECYCLE_PHASES = ["DRAFT", "EXPLORING", "CONFIRMING", "CLOSED"] as const;
+
+/**
+ * Product §5.2 — the journal's event list, verbatim and closed. An event type not on this list is
+ * refused: the journal is the non-derivable ordering of product decisions, and an unrecognized
+ * decision kind is exactly the thing a reader cannot reconstruct from records.
+ */
+export const CAMPAIGN_JOURNAL_EVENT_TYPES = [
+  "created",
+  "candidate-admitted",
+  "candidate-rejected",
+  "wave-planned",
+  "allocation-decided",
+  "run-sealed",
+  "matrix-assembled",
+  "report-recorded",
+  "frontier-updated",
+  "promotion-run-sealed",
+  "closed",
+] as const;
+
+/** The sealed campaign document's file name inside a campaign directory. */
+export const CAMPAIGN_DOCUMENT_FILENAME = "campaign.json" as const;
+
+/** The append-only journal's file name inside a campaign directory. JSON Lines, one entry per line. */
+export const CAMPAIGN_JOURNAL_FILENAME = "journal.jsonl" as const;
