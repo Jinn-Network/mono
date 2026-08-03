@@ -39,6 +39,7 @@ import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
 import { hashImplStateDir } from './harnesses/freeze.js';
+import { hashProfileForHarness } from './harnesses/hash-profile.js';
 import { readModeState } from './harnesses/mode-state.js';
 import { attachAgentWs, updateAgentClaudePath } from './agent/agent-ws.js';
 import { createSetupModeController } from './setup-mode.js';
@@ -624,7 +625,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           const implStateDir = join(config.engine.implStateDirRoot, harnessStateDirName(defaultHarness));
           let codeDigest = '';
           try {
-            codeDigest = await hashImplStateDir(implStateDir);
+            // #2118: the status surface joins the harness's hash profile, so
+            // the digest the operator reads is the digest the fence enforces
+            // and the delivery envelope carries. Harnesses with no registered
+            // public profile keep the historical unfiltered hash here.
+            const profile = hashProfileForHarness(defaultHarness);
+            codeDigest = await hashImplStateDir(implStateDir, profile ? { profile } : {});
           } catch {
             // implStateDir may not exist yet on first boot. Surface as empty
             // rather than 500ing — the panel renders "—" gracefully.
