@@ -39,11 +39,22 @@ __metadata:
   dependencies:
     "@jinn-network/benchmarking-records": "npm:0.1.0"
     "@jinn-network/policy-identity": "npm:0.1.0"
+    "@jinn-network/policy-outcomes": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
     zod: "npm:4.4.3"
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/policy-outcomes@portal:../policy/outcomes::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/policy-outcomes@portal:../policy/outcomes::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A."
+  dependencies:
+    "@jinn-network/policy-identity": "npm:0.1.0"
+    "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
   linkType: soft
 
 "@jinn-network/task-execution-protocol@portal:../task-execution/protocol::locator=%40jinn-network%2Fpolicy-optimization%40workspace%3A.":

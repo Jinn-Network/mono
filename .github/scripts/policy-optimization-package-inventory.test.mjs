@@ -31,14 +31,19 @@ const PRODUCT_PACKAGES = [
 // - `benchmarking-records` supplies the committed-benchmark machinery the `DRAFT -> EXPLORING`
 //   gate runs on (§6.3) and the calendar-strict RFC 3339 comparison the journal orders by.
 //
-// Later sub-units add `benchmarking-run`, `benchmarking-local`, `benchmarking-aggregate`, and
-// `policy-outcomes`. Each addition edits this map in the PR that needs it, so the graph is never
+// Later sub-units add `benchmarking-run`, `benchmarking-local`, and `benchmarking-aggregate`.
+// `policy-outcomes` is added here by sub-unit C8 (the two observation adapters, program §1 C8):
+// the policy-outcomes adapter's output type (`PolicyOutcomeObservation`/`PolicyOutcomeInputRef`/
+// `PerAxisStatus`) is imported directly rather than mirrored, unlike the discovery/marketplace/
+// task-supply shapes those adapters otherwise mirror (source-boundary guard denies those three
+// trees outright). Each addition edits this map in the PR that needs it, so the graph is never
 // wider than the code.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['.', {
     dependencies: [
       '@jinn-network/benchmarking-records',
       '@jinn-network/policy-identity',
+      '@jinn-network/policy-outcomes',
     ],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
     // `benchmarking-records` is itself a portal whose own runtime edge to
@@ -51,6 +56,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/policy-identity', join(root, 'packages', 'policy', 'identity')],
+  ['@jinn-network/policy-outcomes', join(root, 'packages', 'policy', 'outcomes')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
 ]);
 
