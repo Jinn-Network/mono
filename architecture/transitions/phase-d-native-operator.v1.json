@@ -13,8 +13,10 @@
       ],
       "replacement": "The native production deployment selected by the explicit native-v1 operator mode.",
       "consumers": [
-        "legacy operator daemon",
-        "operator configuration"
+        "client/src/daemon/native-vertical-config.ts",
+        "client/src/index.ts",
+        "client/src/main.ts",
+        "client/src/native-main.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -55,7 +57,10 @@
       ],
       "replacement": "Native tier-4 claim policy plus marketplace binding and task-execution backend capabilities.",
       "consumers": [
-        "legacy client work loop"
+        "client/src/config/shape-v2.ts",
+        "client/src/daemon/composition-root.ts",
+        "client/src/daemon/engagement-ledger.ts",
+        "client/src/main.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -96,8 +101,10 @@
       ],
       "replacement": "Native exact Task and Submission records obtained through verified Record Discovery entries.",
       "consumers": [
-        "legacy projector enrichment",
-        "legacy worker delivery bridge"
+        "client/src/adapters/mech/adapter.ts",
+        "client/src/daemon/archive-subscription.ts",
+        "client/src/daemon/composition-root.ts",
+        "client/src/daemon/work-loop-corpus.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -137,7 +144,8 @@
       ],
       "replacement": "Native evaluator composition and its durable evaluation, publication, and verdict-settlement sagas.",
       "consumers": [
-        "legacy operator daemon"
+        "client/src/index.ts",
+        "client/src/main.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -177,8 +185,11 @@
       ],
       "replacement": "NativeTier4ClaimPolicy and injected native capability, model, harness, plugin, and credential ports.",
       "consumers": [
-        "legacy configuration parser",
-        "legacy marketplace pipeline"
+        "client/src/api/claim-policy-endpoints.ts",
+        "client/src/config.ts",
+        "client/src/daemon/composition-root.ts",
+        "client/src/daemon/engagement-ledger.ts",
+        "client/src/daemon/work-loop.ts"
       ],
       "defaultMode": "legacy",
       "noNewUseGuard": {
@@ -218,8 +229,9 @@
       ],
       "replacement": "Native task-execution backend and product-owned durable operation state.",
       "consumers": [
-        "legacy documentation",
-        "legacy pipeline tests"
+        "packages/marketplace/pipeline/src/carve.test.ts",
+        "packages/marketplace/pipeline/src/carve.ts",
+        "packages/marketplace/pipeline/src/index.test.ts"
       ],
       "defaultMode": "not-applicable",
       "noNewUseGuard": {
