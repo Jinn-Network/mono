@@ -337,6 +337,11 @@ jobs:
           # Anvil fork startup/state behavior is not stable across Foundry releases. Keep the
           # marketplace fork gate on the same snapshot-compatible build used by the repository.
           version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
+      - name: Build Hardhat contract artifacts used by the fork fixture
+        working-directory: contracts
+        run: |
+          yarn install --immutable
+          yarn compile
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)

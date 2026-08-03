@@ -79,7 +79,15 @@ function barrier(): {
 
 afterEach(async () => {
   await Promise.all(backends.splice(0).map((backend) => backend.shutdown()));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // A just-reaped shim can briefly finish closing its heartbeat/cancellation file while the
+  // assertion-owning backend has already drained. Retry only the disposable temp-root cleanup;
+  // the journal immutability assertion above remains strict and is never retried.
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 async function stateRoot(name: string): Promise<string> {
