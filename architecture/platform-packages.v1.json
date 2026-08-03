@@ -69,6 +69,10 @@
       "kind": "workflow",
       "path": ".github/workflows/task-supply-ci.yml"
     },
+    "policy-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/policy-ci.yml"
+    },
     "autopilot-ci": {
       "kind": "workflow",
       "path": ".github/workflows/autopilot-board-painter.yml"
@@ -149,6 +153,25 @@
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
         "experimental-task-supply",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "experimental-policy": {
+      "expectedPackageCount": 1,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-policy",
         "platform-v1"
       ],
       "stackPublished": false,
@@ -3402,6 +3425,45 @@
       "boundaryPolicy": {
         "kind": "source-boundary",
         "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-identity",
+      "path": "packages/policy/identity",
+      "domain": "policy",
+      "role": "execution-policy identity and candidate manifest sealing",
+      "tier": 3,
+      "tierReason": "A pure identity/canonicalization substrate over protocol-layer shapes: it derives, seals, and validates two format-token documents, defines no record kind, and is imported by no tier-1 or tier-2 package.",
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-policy",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
       },
       "publicSurface": {
         "schemas": [],

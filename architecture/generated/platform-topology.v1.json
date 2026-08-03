@@ -2,9 +2,9 @@
   "counts": {
     "adjacentEntries": 5,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 76,
-    "otherPackagesRootEntries": 14,
-    "packagesRootEntries": 71,
+    "inventory": 77,
+    "otherPackagesRootEntries": 15,
+    "packagesRootEntries": 72,
     "platformV1": 49
   },
   "graph": {
@@ -1107,6 +1107,7 @@
       "@jinn-network/operator-spa",
       "@jinn-network/plugin",
       "@jinn-network/plugin-runtime",
+      "@jinn-network/policy-identity",
       "@jinn-network/record-discovery-client",
       "@jinn-network/record-discovery-facts-benchmarking",
       "@jinn-network/record-discovery-facts-chain-environments",
@@ -1498,19 +1499,19 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 20,
-      "boundaryPolicies": 19,
-      "catalogManifests": 76,
-      "catalogPublicSurfaces": 1157,
+      "authorityDocuments": 21,
+      "boundaryPolicies": 20,
+      "catalogManifests": 77,
+      "catalogPublicSurfaces": 1225,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2691,
-      "generatedOutputSources": 1213,
-      "generatorSources": 551,
+      "discoveredFirstPartySurfaces": 2759,
+      "generatedOutputSources": 1281,
+      "generatorSources": 559,
       "marketplaceControl": 2,
-      "requiredGates": 18,
+      "requiredGates": 19,
       "staticControl": 6
     },
     "paths": [
@@ -2109,6 +2110,47 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/plugin-tree-symbol-authority.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-identity-guards.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -2926,6 +2968,17 @@
           "@ritsukai"
         ],
         "path": ".github/workflows/plugin-tree-ci.yml"
+      },
+      {
+        "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/policy-ci.yml"
       },
       {
         "categories": [
@@ -16043,6 +16096,16 @@
           "@ritsukai"
         ],
         "path": "docs/superpowers/specs/2026-08-03-phase-c-capability-boundaries.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md"
       },
       {
         "categories": [
@@ -31140,6 +31203,862 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/policy/identity/fixtures"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/effort-floor-violated.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/harness-conflict.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/model-constraint-violated.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/profile-declares-format-token.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/profile-digest-mismatch.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/golden/equivalence-primary.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/derivation/golden/unpinned-all-core-null.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse/adversarial/wrong-predicate-type.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse/adversarial/wrong-subject.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/dsse/golden/valid-statement.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/fork-healing"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/fork-healing/fail-closed.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/fork-healing/smuggled-git-hooks.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/fork-healing/tree-golden.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/fork-healing/tree-without-excluded-roots.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/duplicate-parents.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/malformed-parent-digest.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/malformed-parent-kind.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/missing-provenance.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/policy-omits-core-axis.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/provenance-names-two-queries.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/unrecognized-top-level-field.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/golden/extension-bearing.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/golden/minimal.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/manifest/golden/multi-parent.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/README.md"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/canonical.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/conformance.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/derive.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/dsse.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/errors.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/hash-profile.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/hashing.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/index.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/manifest.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/merge.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/reference/tuple.ts"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/negative-zero.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/non-integer-number.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/omitted-core-axis-harness.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/omitted-core-axis-isolation.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/tuple-is-array.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/unpaired-surrogate.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/wrong-format-token.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/digest-substitution.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/extension-key-sensitivity.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/null-vs-absent-non-collision.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/all-axes.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/constraint-shaped-value.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/extension-axis.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/key-order-variance.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/null-axes.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/fixtures/tuple/golden/utf16-code-unit-ordering.json"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy/identity/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/sdk/fixtures"
       },
       {
@@ -40193,6 +41112,45 @@
     },
     {
       "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@noble/curves",
+          "@noble/hashes"
+        ]
+      },
+      "domain": "policy",
+      "name": "@jinn-network/policy-identity",
+      "ownerGroup": "architecture-control",
+      "path": "packages/policy/identity",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "disabled",
+      "releaseGroup": "experimental-policy",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "role": "execution-policy identity and candidate manifest sealing",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 3,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
         "kind": "workflow",
         "path": ".github/workflows/sdk-ci.yml"
       },
@@ -45856,6 +46814,474 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/effort-floor-violated.json",
+        "relativeSource": "fixtures/derivation/adversarial/effort-floor-violated.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/harness-conflict.json",
+        "relativeSource": "fixtures/derivation/adversarial/harness-conflict.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/model-constraint-violated.json",
+        "relativeSource": "fixtures/derivation/adversarial/model-constraint-violated.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/profile-declares-format-token.json",
+        "relativeSource": "fixtures/derivation/adversarial/profile-declares-format-token.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/adversarial/profile-digest-mismatch.json",
+        "relativeSource": "fixtures/derivation/adversarial/profile-digest-mismatch.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/golden/equivalence-primary.json",
+        "relativeSource": "fixtures/derivation/golden/equivalence-primary.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/derivation/golden/unpinned-all-core-null.json",
+        "relativeSource": "fixtures/derivation/golden/unpinned-all-core-null.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/dsse/adversarial/wrong-predicate-type.json",
+        "relativeSource": "fixtures/dsse/adversarial/wrong-predicate-type.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/dsse/adversarial/wrong-subject.json",
+        "relativeSource": "fixtures/dsse/adversarial/wrong-subject.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/dsse/golden/valid-statement.json",
+        "relativeSource": "fixtures/dsse/golden/valid-statement.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/fork-healing/fail-closed.json",
+        "relativeSource": "fixtures/fork-healing/fail-closed.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/fork-healing/smuggled-git-hooks.json",
+        "relativeSource": "fixtures/fork-healing/smuggled-git-hooks.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/fork-healing/tree-golden.json",
+        "relativeSource": "fixtures/fork-healing/tree-golden.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/fork-healing/tree-without-excluded-roots.json",
+        "relativeSource": "fixtures/fork-healing/tree-without-excluded-roots.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/duplicate-parents.json",
+        "relativeSource": "fixtures/manifest/adversarial/duplicate-parents.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/malformed-parent-digest.json",
+        "relativeSource": "fixtures/manifest/adversarial/malformed-parent-digest.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/malformed-parent-kind.json",
+        "relativeSource": "fixtures/manifest/adversarial/malformed-parent-kind.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/missing-provenance.json",
+        "relativeSource": "fixtures/manifest/adversarial/missing-provenance.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/policy-omits-core-axis.json",
+        "relativeSource": "fixtures/manifest/adversarial/policy-omits-core-axis.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/provenance-names-two-queries.json",
+        "relativeSource": "fixtures/manifest/adversarial/provenance-names-two-queries.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/adversarial/unrecognized-top-level-field.json",
+        "relativeSource": "fixtures/manifest/adversarial/unrecognized-top-level-field.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/golden/extension-bearing.json",
+        "relativeSource": "fixtures/manifest/golden/extension-bearing.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/golden/minimal.json",
+        "relativeSource": "fixtures/manifest/golden/minimal.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/manifest/golden/multi-parent.json",
+        "relativeSource": "fixtures/manifest/golden/multi-parent.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/README.md",
+        "relativeSource": "fixtures/README.md"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/canonical.ts",
+        "relativeSource": "fixtures/reference/canonical.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/conformance.ts",
+        "relativeSource": "fixtures/reference/conformance.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/derive.ts",
+        "relativeSource": "fixtures/reference/derive.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/dsse.ts",
+        "relativeSource": "fixtures/reference/dsse.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/errors.ts",
+        "relativeSource": "fixtures/reference/errors.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/hash-profile.ts",
+        "relativeSource": "fixtures/reference/hash-profile.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/hashing.ts",
+        "relativeSource": "fixtures/reference/hashing.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/index.ts",
+        "relativeSource": "fixtures/reference/index.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/manifest.ts",
+        "relativeSource": "fixtures/reference/manifest.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/merge.ts",
+        "relativeSource": "fixtures/reference/merge.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/reference/tuple.ts",
+        "relativeSource": "fixtures/reference/tuple.ts"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/negative-zero.json",
+        "relativeSource": "fixtures/tuple/adversarial/negative-zero.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/non-integer-number.json",
+        "relativeSource": "fixtures/tuple/adversarial/non-integer-number.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/omitted-core-axis-harness.json",
+        "relativeSource": "fixtures/tuple/adversarial/omitted-core-axis-harness.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/omitted-core-axis-isolation.json",
+        "relativeSource": "fixtures/tuple/adversarial/omitted-core-axis-isolation.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/tuple-is-array.json",
+        "relativeSource": "fixtures/tuple/adversarial/tuple-is-array.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/unpaired-surrogate.json",
+        "relativeSource": "fixtures/tuple/adversarial/unpaired-surrogate.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/adversarial/wrong-format-token.json",
+        "relativeSource": "fixtures/tuple/adversarial/wrong-format-token.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/digest-substitution.json",
+        "relativeSource": "fixtures/tuple/demonstrations/digest-substitution.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/extension-key-sensitivity.json",
+        "relativeSource": "fixtures/tuple/demonstrations/extension-key-sensitivity.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/demonstrations/null-vs-absent-non-collision.json",
+        "relativeSource": "fixtures/tuple/demonstrations/null-vs-absent-non-collision.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/all-axes.json",
+        "relativeSource": "fixtures/tuple/golden/all-axes.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/constraint-shaped-value.json",
+        "relativeSource": "fixtures/tuple/golden/constraint-shaped-value.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/extension-axis.json",
+        "relativeSource": "fixtures/tuple/golden/extension-axis.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/key-order-variance.json",
+        "relativeSource": "fixtures/tuple/golden/key-order-variance.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/null-axes.json",
+        "relativeSource": "fixtures/tuple/golden/null-axes.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
+        "package": "@jinn-network/policy-identity",
+        "packedTargets": [],
+        "path": "packages/policy/identity/fixtures/tuple/golden/utf16-code-unit-ordering.json",
+        "relativeSource": "fixtures/tuple/golden/utf16-code-unit-ordering.json"
+      },
+      {
+        "claim": null,
+        "export": null,
+        "kind": "fixtures",
         "package": "@jinn-network/sdk",
         "packedTargets": [],
         "path": "packages/sdk/fixtures/autopilot/correlation-failure.json",
@@ -49016,6 +50442,17 @@
         "fixtures": [
           "fixtures"
         ],
+        "name": "@jinn-network/policy-identity",
+        "path": "packages/policy/identity",
+        "profiles": [],
+        "releaseGroup": "experimental-policy",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [
+          "fixtures"
+        ],
         "name": "@jinn-network/sdk",
         "path": "packages/sdk",
         "profiles": [],
@@ -50163,6 +51600,28 @@
       "requiredGateIds": [
         "environments-ci",
         "record-discovery-ci"
+      ],
+      "stable": false,
+      "stackPublished": false
+    },
+    "experimental-policy": {
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-policy",
+        "platform-v1"
+      ],
+      "canary": false,
+      "expectedPackageCount": 1,
+      "packages": [
+        "@jinn-network/policy-identity"
+      ],
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "policy-ci"
       ],
       "stable": false,
       "stackPublished": false
