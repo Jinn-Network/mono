@@ -12,16 +12,19 @@ import {
   createFilePostingIntentStore,
   createRegistryPinPort,
   executeSafeTransaction,
-  recoverPostingIntents,
+  makeMarketplaceBackend,
   rawCodecCidFromSha256Digest,
-  scanForOnChainMatch,
   type MarketplaceChainConfig,
+  type MarketplaceObservePort,
+  type PostingIntentStore,
   type PostingOutcome,
   type PostingTerms,
 } from '@jinn-network/marketplace-binding';
 import {
   createBaseVenue,
   createChainLogSource,
+  createProjectorObservePort,
+  createSqlitePostingIntentStore,
   DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS,
   encodePreValidatedSignature,
   openVenueState,
@@ -562,19 +565,10 @@ function createRequesterReads(input: {
         };
         const before = await intents.lookup(key);
         if (before?.resolved !== undefined) return before.resolved;
-        const pending = await intents.scanPending();
-        if (pending.length === 0) return null;
-        const oldest = Math.min(...pending.map(({ createdAt }) => Date.parse(createdAt)));
-        if (!Number.isFinite(oldest)) throw new Error('native posting intent has an invalid creation time');
-        const lowerTime = BigInt(Math.max(0, Math.floor(oldest / 1_000) - 900));
-        const fromBlock = await blockAtOrBefore(input.publicClient, lowerTime);
-        await recoverPostingIntents(intents, scanForOnChainMatch(
-          input.publicClient as Parameters<typeof scanForOnChainMatch>[0], {
-          chain,
-          fromBlock,
-          },
-        ));
-        return (await intents.lookup(key))?.resolved ?? null;
+        // `TaskCreated` anchors only creator + Task digest. It cannot prove which Submission
+        // landed, even when a scan finds one result, so a legacy unresolved file WAL remains an
+        // explicit operator-reconciliation hold and is never auto-completed here.
+        return null;
       },
       canonicalTaskCreated: (expected) => canonicalTodayTaskCreated(input.publicClient, chain, expected),
     },
@@ -1082,7 +1076,10 @@ function venuePrimitives(input: {
 function requesterVenue(input: {
   readonly config: NativeInfrastructureFactoryInput;
   readonly publicClient: PublicClient;
-}): NativeReadOnlyVenuePrimitives {
+}): NativeReadOnlyVenuePrimitives & {
+  readonly intents: PostingIntentStore;
+  readonly observe: MarketplaceObservePort;
+} {
   const state = openVenueState(join(input.config.stateDir, 'requester-venue.sqlite'));
   try {
     const chain = marketplaceChain(input.config);
@@ -1096,13 +1093,23 @@ function requesterVenue(input: {
       state,
       addresses: [chain.jinnRouter, chain.taskCoordinator, chain.mechMarketplace],
     });
-    return venuePrimitives({
+    const observe = createProjectorObservePort({
+      chain,
+      state,
+      logSource,
+      observations: async () => [],
+    });
+    return {
+      ...venuePrimitives({
       logSource,
       publicClient: input.publicClient,
       closeOwned() {
         try { logSource.close(); } finally { state.close(); }
       },
-    });
+      }),
+      intents: createSqlitePostingIntentStore(state),
+      observe,
+    };
   } catch (cause) {
     state.close();
     throw cause;
@@ -1273,22 +1280,29 @@ export async function createNativeInfrastructure(
       if (input.role === 'requester') {
         if (requester === undefined) throw new Error('native requester read owner is unavailable');
         const venue = requesterVenue({ config: input, publicClient });
+        const terms = postingTerms(input);
+        const posting = {
+          ipfs: pin,
+          intents: venue.intents,
+          safe: {
+            broadcastCreateTask: (request: Parameters<typeof requesterPostingOutcome>[0]['request']) => requesterPostingOutcome({
+              publicClient,
+              walletClient,
+              config: input,
+              request,
+            }),
+          },
+        };
         const session: NativeWriteSession = {
           writes: {
             role: 'requester',
-            postingTerms: postingTerms(input),
-            postingPorts: {
-              ipfs: pin,
-              intents: requester.intents,
-              safe: {
-                broadcastCreateTask: (request) => requesterPostingOutcome({
-                  publicClient,
-                  walletClient,
-                  config: input,
-                  request,
-                }),
-              },
-            },
+            postingTerms: terms,
+            requesterBackend: makeMarketplaceBackend(marketplaceChain(input), {
+              creatorSafe: input.safeAddress,
+              terms,
+              posting,
+              observe: venue.observe,
+            }),
           },
           venue,
           close: venue.close,

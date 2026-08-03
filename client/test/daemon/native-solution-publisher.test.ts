@@ -1,4 +1,4 @@
-import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,6 +76,35 @@ function artifact(bytes: Uint8Array, sequence = 1) {
 }
 
 describe('native solution public source', () => {
+  it('preserves the frozen pre-C6 signed page and head byte digests', async () => {
+    const stateRoot = await root();
+    const publisher = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+    });
+    closers.push(() => publisher.close());
+    const published = await publisher.publish(artifact(new TextEncoder().encode('{"delivery":1}'), 1));
+    const pageBytes = await readFile(join(
+      stateRoot,
+      'public',
+      'sources',
+      'solver-records',
+      'entries',
+      published.sequence,
+    ));
+    const headBytes = await readFile(join(stateRoot, 'public', 'sources', 'solver-records', 'head'));
+
+    expect({
+      page: createHash('sha256').update(pageBytes).digest('hex'),
+      head: createHash('sha256').update(headBytes).digest('hex'),
+    }).toEqual({
+      page: '88d2cd998efbf2e3174b14a7a6b297a9ed477104d67ad3f4c236660f738b3d4e',
+      head: 'ce12ad73a8031ba4006359414c572550d603b6605f726610abb87c7be1557320',
+    });
+  });
+
   it('serves exact records and advances one signed append-only solver-records source', async () => {
     const stateRoot = await root();
     const publisher = await openNativeSolutionPublisher({
@@ -252,6 +281,45 @@ describe('native solution public source', () => {
     await expect(reopened.publish(firstValue)).resolves.toMatchObject({ sequence: '0000000000000001' });
     await expect(reopened.publish(artifact(new TextEncoder().encode('{"delivery":2}'), 2)))
       .resolves.toMatchObject({ sequence: '0000000000000002' });
+  });
+
+  it('adapts the pre-C6 v1 append journal without changing its frozen signed bytes', async () => {
+    const stateRoot = await root();
+    const first = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+      faults: { afterJournalBeforePage: () => { throw new Error('legacy-journal-fixture'); } },
+    });
+    const firstValue = artifact(new TextEncoder().encode('{"delivery":1}'), 1);
+    await expect(first.publish(firstValue)).rejects.toThrow('legacy-journal-fixture');
+    await first.close();
+
+    const journalPath = join(stateRoot, 'append-journal.json');
+    const current = JSON.parse(await readFile(journalPath, 'utf8')) as Record<string, unknown>;
+    const { intent: _intent, ...legacyMirror } = current;
+    await writeFile(journalPath, `${JSON.stringify({ ...legacyMirror, version: 1 })}\n`);
+
+    const reopened = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+    });
+    closers.push(() => reopened.close());
+    await expect(reopened.publish(firstValue)).resolves.toMatchObject({ sequence: '0000000000000001' });
+
+    const pageBytes = await readFile(join(
+      stateRoot,
+      'public',
+      'sources',
+      'solver-records',
+      'entries',
+      '0000000000000001',
+    ));
+    expect(createHash('sha256').update(pageBytes).digest('hex'))
+      .toBe('88d2cd998efbf2e3174b14a7a6b297a9ed477104d67ad3f4c236660f738b3d4e');
   });
 
   it('takes over only an expired matching owner lease whose PID is dead', async () => {

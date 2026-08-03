@@ -7,7 +7,6 @@
  * autoload before harness submit on subsequent runs.
  */
 import { computeRawCodecCid } from '@jinn-network/marketplace-binding';
-import type { SubmissionFacts } from '@jinn-network/marketplace-pipeline';
 import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import { sha256Hex } from '@jinn-network/task-execution-protocol';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
@@ -25,6 +24,7 @@ import {
   isBridgedTepDeliveryBytes,
   legacyRestorationResultFromDelivery,
 } from './bridge-legacy-delivery.js';
+import type { SubmissionFacts } from './native-submission-facts.js';
 
 function envelopeCidFromSignedEnvelope(envelope: ReturnType<typeof SignedEnvelopeSchema.parse>): string {
   const jcsBytes = new TextEncoder().encode(canonicalJson(envelope));

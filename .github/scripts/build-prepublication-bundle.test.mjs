@@ -155,9 +155,9 @@ test('packs the executable native role closure while keeping experimental depend
     assert.equal(manifest.selection.kind, 'native-vertical-runtime-closure');
     for (const name of [
       '@jinn-network/task-admission',
-      '@jinn-network/task-derivation',
-      '@jinn-network/task-posting',
     ]) assert.ok(manifest.packageOrder.includes(name), name);
+    assert.equal(manifest.packageOrder.includes('@jinn-network/task-derivation'), false);
+    assert.equal(manifest.packageOrder.includes('@jinn-network/task-posting'), false);
     assert.ok(manifest.selection.closureOnlyPackages.includes('@jinn-network/environment-record'));
     assert.equal(manifest.packageOrder.includes('@jinn-network/task-curation'), false);
     assert.equal(manifest.packageOrder.includes('@jinn-network/chain-scenarios'), false);

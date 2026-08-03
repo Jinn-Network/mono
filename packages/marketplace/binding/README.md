@@ -8,7 +8,7 @@ contracts unchanged; `revised` targets the specified contract revision, built la
 See the design: `docs/superpowers/specs/2026-07-28-marketplace-binding-design.md`. Implementation
 plan: `docs/superpowers/plans/2026-07-28-marketplace-binding.md`.
 
-## Scope landed so far (M0 + M1)
+## Current capability boundary
 
 - The `ContractGeneration = "today" | "revised"` seam and the deployed today-mode address config
   (`src/generation.ts`, `src/addresses.ts`, design §5.4).
@@ -22,9 +22,31 @@ plan: `docs/superpowers/plans/2026-07-28-marketplace-binding.md`.
   (`src/two-party-engagement.ts`) — the exact shape the pipeline will hand to the embedded local
   backend's assembly `submit` once that package lands (plan Finding F1; see below).
 
-Document translation, posting, claiming, delivery convergence, the evaluation leg, and the
-requester-facing `TaskExecutionBackend` implementation are later milestones (M2+), not in this
-package yet.
+- Task/Submission validation and translation, posting-command preparation, the posting-intent WAL,
+  chain observation ports, and the requester-facing `TaskExecutionBackend` implementation.
+- `MarketplaceRequesterBackend.post(taskBytes, submissionBytes)` returns the exact durable
+  `PostingOutcome`; `submit` is the unchanged generic two-argument backend seam.
+- `MarketplaceRequesterBackend.recoverPosting()` atomically joins an exact resolved posting WAL
+  row back to its requester/idempotency scope. Requester scope is logical idempotency authority;
+  the WAL remains the sole transaction authority.
+
+The backend accepts exact Task and Submission bytes plus configured binding mechanics. It does not
+own pricing, approval, campaign, scheduling, key-loading, public discovery, delivery adoption, or
+requester settlement policy. Those remain product responsibilities.
+
+### Phase C requester recovery invariant
+
+The requester scope binds requester, idempotency key, exact Task and Submission digests, creator,
+venue namespace, posting-intent key, and the canonical posting-command digest. The posting command
+also freezes chain, router, Safe, all commercial terms, calldata, and value. Reusing a logical
+scope or WAL identity with different exact bytes is a conflict.
+
+A pending scope completes automatically only from the matching **resolved WAL row**, read and
+copied in the same venue-state transaction. A `TaskCreated` event anchors creator and Task but not
+Submission, so chain-only matches are diagnostic evidence and remain broadcast-uncertain—even a
+singleton match. The backend never rebroadcasts that uncertainty automatically. Legacy pending
+scope rows without the Phase C join fields are marked `legacy-scope-unrecoverable` and require
+explicit operator reconciliation.
 
 ## The two-party engagement entry (Finding F1)
 
@@ -53,7 +75,7 @@ application because the requester on-ramp is binding-tree work (verified-environ
   nonce sequence is not raced. Today-mode `createTask` is a plain `payable` function keyed on
   `msg.sender`, so it is not Safe-gated. **Safe-routing arrives with the work client** — the
   marketplace consumption-boundary design owns posting mechanics, and this adapter is the piece a
-  posting application swaps out at that client's mint.
+  requester backend composition supplies.
 - `createFilePostingIntentStore(dir)` — the durable WAL: the claim writes the whole record to a
   sibling temp, fsyncs it, and `link`s it into place, so the record name is created atomically
   **and never exists half-written**; resolution is temp-file plus `rename`; owner tokens are
@@ -82,7 +104,7 @@ application because the requester on-ramp is binding-tree work (verified-environ
   time, so an out-of-bounds value posts fine and then makes every claim revert with the escrow
   locked.
 
-## Finding F-C5-7 — the recovery scan could adopt a prior post for the same Task
+## Finding F-C5-7 — TaskCreated cannot prove a requester submission
 
 Filed at implementation time per supply program §5 contract 1 (a design defect found while
 building is filed, never absorbed silently). The plan's Task A4 and design §8 D7 specify the log
@@ -94,16 +116,11 @@ broadcast crashed, the scan found exactly **one** match (the first, already-adop
 it with no ambiguity report, and told the poster its second post had landed under a taskId
 belonging to a different Submission. The second post never happened.
 
-**Disposition, implemented here:** bound each intent's scan below by its own claim time. A match
-whose block timestamp precedes `intent.createdAt` (less `claimSkewSeconds`, default 900) is not
-adopted; if that leaves nothing, the scan reports through `onStaleMatch` and returns `null`, so
-the intent stays uncertain and surfaced rather than silently mis-resolved. The requester already
-knows the claim time, so this costs one `getBlock` per candidate and no surface change.
-
-**Residual, owned by the design:** the bound separates a re-post from an *older* post, not two
-posts of the same Task inside one skew window. Closing that needs the submission digest on-chain
-(revised mode anchors it) or a `claimedAtBlock` leg on the intent — both are design-side changes
-to a frozen surface, not adapter-side.
+**Phase C disposition:** the bounded scan is retained for diagnostics, but no chain-only match is
+adopted as a WAL outcome. Exact automatic completion requires an already-resolved WAL (or a future
+local transaction proof bound to the exact command digest and canonical receipt). Closing the
+wallet-accepted-but-unrecorded window requires a future on-chain Submission/operation anchor or a
+persisted exact signed outer transaction identity; the current contract cannot prove it.
 
 ## A note on the package.json dependency graph
 

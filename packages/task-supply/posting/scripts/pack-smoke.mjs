@@ -5,10 +5,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-// Cross-tree portal dependencies: pack every dependency this package resolves via a portal
-// locally too — including the transitive ones (trust-core under trust/resolve, evidence-protocol
-// under environments/record, task-admission under task-derivation) — so the consumer graph
-// resolves end-to-end without reaching the npm registry.
+// Cross-tree portal dependencies: pack the production closure this package resolves locally so
+// the consumer graph resolves end-to-end without reaching the npm registry. Task derivation is a
+// compile-time fixture only and is deliberately absent from this packed runtime closure.
 const packageRoots = [
   ["@jinn-network/evidence-protocol", join(packageRoot, "..", "..", "evidence", "protocol"), "evidence-protocol.tgz"],
   ["@jinn-network/trust-core", join(packageRoot, "..", "..", "trust", "core"), "trust-core.tgz"],
@@ -16,9 +15,6 @@ const packageRoots = [
   ["@jinn-network/task-execution-protocol", join(packageRoot, "..", "..", "task-execution", "protocol"), "task-execution-protocol.tgz"],
   ["@jinn-network/task-execution-profiles", join(packageRoot, "..", "..", "task-execution", "profiles"), "task-execution-profiles.tgz"],
   ["@jinn-network/task-execution-backend", join(packageRoot, "..", "..", "task-execution", "backend"), "task-execution-backend.tgz"],
-  ["@jinn-network/environment-record", join(packageRoot, "..", "..", "environments", "record"), "environment-record.tgz"],
-  ["@jinn-network/task-admission", join(packageRoot, "..", "admission"), "task-admission.tgz"],
-  ["@jinn-network/task-derivation", join(packageRoot, "..", "derivation"), "task-derivation.tgz"],
   ["@jinn-network/marketplace-binding", join(packageRoot, "..", "..", "marketplace", "binding"), "marketplace-binding.tgz"],
   ["@jinn-network/task-posting", packageRoot, "task-posting.tgz"],
 ];
@@ -56,12 +52,9 @@ try {
     JSON.stringify({
       private: true,
       type: "module",
-      dependencies: Object.fromEntries([
-        ...[...archives].map(([name, archive]) => [name, `file:${archive}`]),
-        // task-derivation's `./testing` entrypoint declares vitest as an optional peer; npm
-        // resolves the peer graph for every installed package, so supply it here.
-        ["vitest", "^4.1.8"],
-      ]),
+      dependencies: Object.fromEntries(
+        [...archives].map(([name, archive]) => [name, `file:${archive}`]),
+      ),
     }),
   );
   await run(
@@ -116,7 +109,6 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expectedJinnDependencies = [
   "@jinn-network/marketplace-binding",
-  "@jinn-network/task-derivation",
   "@jinn-network/task-execution-protocol",
 ];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {

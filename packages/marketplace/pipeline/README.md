@@ -1,13 +1,16 @@
-# @jinn-network/marketplace-pipeline
+# @jinn-network/marketplace-pipeline (deprecated)
 
-The daemon's marketplace application: the pluggable operator claim predicate, execution wiring
+This package is the frozen legacy daemon marketplace application: the pluggable operator claim predicate, execution wiring
 (work-kind → harness/model/plugins/credential config), spend/AI-unit self-protection caps, the
 two-party engagement composition of the marketplace binding's venue verbs with an embedded
 `TaskExecutionBackend` peer (ruling §7.18), and the §9 TaskEngine carve disposition as
 documentation-as-code — a composition LIBRARY proven by tests, not a live daemon cutover.
 
-See the design: `docs/superpowers/specs/2026-07-28-marketplace-binding-design.md` §7/§9.
-Implementation plan: `docs/superpowers/plans/2026-07-28-marketplace-binding.md` Milestone M6.
+Native mode does not enter this pipeline. New product code keeps claim, spend, capability,
+harness, model, credential and prioritisation choices in tier-4 composition, using neutral
+preclaim helpers from `@jinn-network/task-execution-backend` and transaction mechanics from
+`@jinn-network/marketplace-binding`. The package remains independently publishable only while
+the explicit legacy operator loop imports it; Phase D deletes it when that consumer reaches zero.
 
 ## Public surface
 
@@ -22,7 +25,7 @@ dependency edge and packed-type closure; concrete assembly construction stays at
 `@jinn-network/task-execution-testing` is a dev-only dependency for the in-memory fake backend
 in unit tests.
 
-## Status
+## Transition status
 
-Milestone M6 complete (plan M6.1–M6.3). Live `client/src/daemon/*` cutover remains out of scope
-(migration-mechanics session).
+All root exports are deprecated and behavior-frozen. CI rejects new client consumers outside the
+explicit legacy allowlist and rejects new runtime exports. See DR-2026-08-03.

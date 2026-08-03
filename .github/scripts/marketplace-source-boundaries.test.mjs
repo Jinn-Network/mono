@@ -13,6 +13,13 @@ const APPLICATION_AND_LEGACY_ROOTS = [
     .map((d) => join(root, 'packages', d)),
 ];
 
+const LEGACY_PIPELINE_CLIENT_IMPORTS = [
+  'client/src/config/shape-v2.ts',
+  'client/src/daemon/composition-root.ts',
+  'client/src/daemon/engagement-ledger.ts',
+  'client/src/daemon/work-loop.ts',
+];
+
 // binding implements the requester-facing TaskExecutionBackend as a peer (ruling §7.18): it may
 // consume task-execution-{protocol,backend,profiles} and trust-{core,resolve}, never
 // -supervisor/-workspace/-launchers/-backend-local (the embedder-only assembly seam), never a
@@ -180,6 +187,7 @@ function files(directory) {
   if (!existsSync(directory)) return [];
   if (lstatSync(directory).isFile()) return /\.(?:[cm]?[jt]sx?)$/.test(directory) ? [directory] : [];
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && (entry.name === 'node_modules' || entry.name === 'dist')) return [];
     const path = join(directory, entry.name);
     return entry.isDirectory() ? files(path) : /\.(?:[cm]?[jt]sx?)$/.test(entry.name) ? [path] : [];
   });
@@ -299,6 +307,17 @@ test('marketplace-pipeline production source stays within its architecture bound
     forbiddenImportsInFiles(productionFiles, PIPELINE_FORBIDDEN_PACKAGES, APPLICATION_AND_LEGACY_ROOTS),
     [],
     'packages/marketplace/pipeline/src crosses a marketplace architecture boundary',
+  );
+});
+
+test('marketplace-pipeline has only the frozen legacy client import allowlist', () => {
+  assert.deepEqual(
+    files(join(root, 'client', 'src'))
+      .filter((file) => readFileSync(file, 'utf8').includes('@jinn-network/marketplace-pipeline'))
+      .map((file) => relative(root, file))
+      .sort(),
+    LEGACY_PIPELINE_CLIENT_IMPORTS,
+    'native and new client code must compose task-execution/backend and marketplace-binding directly',
   );
 });
 

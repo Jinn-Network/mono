@@ -114,7 +114,7 @@ describe.each([
     expect(await store.lookup(intent("8"))).toBeUndefined();
   });
 
-  test("scanPending returns unresolved intents with their tokens, and recovery adopts a match", async () => {
+  test("scanPending returns unresolved intents with their tokens, and chain diagnostics never adopt a match", async () => {
     const store = make();
     const claimed = await store.claim(intent("7"));
     if (claimed.kind !== "owner") throw new Error("expected owner");
@@ -123,9 +123,9 @@ describe.each([
     expect(pending[0]?.ownerToken).toBe(claimed.ownerToken);
 
     const uncertain = await recoverPostingIntents(store, async () => OUTCOME);
-    expect(uncertain).toEqual([]);
-    expect(await store.lookup(intent("7"))).toMatchObject({ resolved: OUTCOME });
-    expect(await store.scanPending()).toEqual([]);
+    expect(uncertain).toHaveLength(1);
+    expect((await store.lookup(intent("7")))?.resolved).toBeUndefined();
+    expect(await store.scanPending()).toHaveLength(1);
   });
 
   test("a scan with no match leaves the intent uncertain and unresolved", async () => {

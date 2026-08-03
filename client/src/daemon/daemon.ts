@@ -41,6 +41,10 @@ import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
 import type { NativeOperatorHost } from './native-operator-host.js';
 import type { OperatorVerticalMode } from './native-vertical-mode.js';
+import {
+  configurePhaseDTransitionUsage,
+  recordPhaseDTransitionUse,
+} from './phase-d-transition-usage.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 
@@ -315,6 +319,9 @@ export class Daemon {
   private corpus?: Corpus;
 
   constructor(private readonly config: DaemonConfig) {
+    configurePhaseDTransitionUsage(
+      config.dbPath === ':memory:' ? undefined : `${config.dbPath}.phase-d-transition-usage.v1.json`,
+    );
     const verticalMode = config.verticalMode ?? 'legacy';
     if (verticalMode === 'native-v1') {
       if (!config.nativeHost) throw new Error('native-v1 daemon requires a native operator host');
@@ -324,6 +331,10 @@ export class Daemon {
       this.nativeHost = config.nativeHost;
     } else if (!config.restorationEngine) {
       throw new Error('legacy daemon requires a restoration engine');
+    }
+    if (verticalMode === 'legacy') {
+      recordPhaseDTransitionUse('legacy-operator-composition');
+      recordPhaseDTransitionUse('legacy-evaluator-delivery-watcher-loaded');
     }
     if (config.store) {
       this.store = config.store;

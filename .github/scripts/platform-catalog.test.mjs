@@ -817,26 +817,28 @@ test('the canonical repository catalog validates its topology without a second m
   assert.doesNotThrow(() => validatePlatformCatalog(catalog, { repoRoot }));
 });
 
-test('native task-supply canary promotion is narrow and preserves the experimental environment dependency', () => {
+test('task-supply and environment packages remain disabled and provisionally classified', () => {
   const catalog = loadPlatformCatalog(repoRoot);
   const promoted = catalog.packages
-    .filter(({ releaseGroup }) => releaseGroup === 'native-task-supply-canary')
+    .filter(({ releaseGroup }) => releaseGroup === 'experimental-task-supply')
     .map(({ name }) => name)
     .sort();
   assert.deepEqual(promoted, [
+    '@jinn-network/chain-scenarios',
     '@jinn-network/task-admission',
+    '@jinn-network/task-curation',
     '@jinn-network/task-derivation',
     '@jinn-network/task-posting',
   ]);
   for (const pkg of catalog.packages.filter(({ name }) => promoted.includes(name))) {
-    assert.equal(pkg.stability, 'candidate');
-    assert.equal(pkg.publishPolicy, 'canary-only');
+    assert.equal(pkg.publishPolicy, 'disabled');
   }
+  assert.equal(catalog.packages.find(({ name }) => name === '@jinn-network/task-admission')?.stability, 'candidate');
   const environmentRecord = catalog.packages.find(({ name }) => name === '@jinn-network/environment-record');
   assert.equal(environmentRecord?.releaseGroup, 'experimental-environment-supply');
   assert.equal(environmentRecord?.publishPolicy, 'disabled');
   assert.deepEqual(
-    catalog.releaseGroups['native-task-supply-canary'].allowedDependencyReleaseGroups,
-    ['experimental-environment-supply', 'native-task-supply-canary', 'platform-v1'],
+    catalog.releaseGroups['experimental-task-supply'].allowedDependencyReleaseGroups,
+    ['experimental-environment-supply', 'experimental-task-supply', 'platform-v1'],
   );
 });

@@ -2,7 +2,6 @@ import {
   decodeRawCodecCidDigestHex,
   deriveMarketplaceAttemptUri,
 } from '@jinn-network/marketplace-binding';
-import type { NativeDiscoveryCardProvenance } from '@jinn-network/marketplace-pipeline';
 import { recordPath } from '@jinn-network/record-discovery-protocol';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
 import {
@@ -27,6 +26,7 @@ import type { NativeEvaluatorOpportunitySource } from './native-evaluator-compos
 import type { NativeInfrastructurePrimitives } from './native-infrastructure-bundle.js';
 import type { NativeOperatorConfig } from './native-product-config.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
+import type { NativeDiscoveryCardProvenance } from './native-submission-facts.js';
 
 const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;

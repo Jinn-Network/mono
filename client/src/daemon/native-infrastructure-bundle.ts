@@ -4,8 +4,8 @@ import { pathToFileURL } from 'node:url';
 import type { EvidenceRecordReference } from '@jinn-network/evidence-repository';
 import type {
   MarketplaceChainConfig,
+  MarketplaceRequesterBackend,
   PostingOutcome,
-  PostingPorts,
   PostingTerms,
   SettlementPorts,
 } from '@jinn-network/marketplace-binding';
@@ -191,7 +191,7 @@ export interface NativeEvaluatorReadPrimitives {
 export interface NativeRequesterWritePrimitives {
   readonly role: 'requester';
   readonly postingTerms: PostingTerms;
-  readonly postingPorts: PostingPorts;
+  readonly requesterBackend: Pick<MarketplaceRequesterBackend, 'post' | 'recoverPosting'>;
 }
 
 export interface NativeSolverWritePrimitives {

@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
+  DISCOVERY_SIGNING_SCOPE,
   LOCATION_PROFILE_HTTPS,
   MEDIA_ENTRY,
   MEDIA_HEAD,
@@ -12,25 +13,35 @@ import {
   formatSequence,
   headPath,
   parseSourceHead,
+  recordDigest,
   recordPath,
   sealJson,
   type AnnouncementEntry,
+  type Announcement,
   type SourceHead,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
 import {
-  signHead,
-  writeRecord,
+  createDurableSourceWriter,
   writeWellKnownDocument,
   type ArchivePage,
+  type CasSnapshot,
+  type CasWriteResult,
+  type DurableSourceAppendIntent,
+  type DurableSourceReceipt,
+  type DurableSourceSigner,
+  type DurableSourceState,
   type DsseEnvelope,
+  type ReadableImmutableBlobStore,
+  type SourceAppendIntentStore,
+  type SourceStateStore,
+  type SourceWriterFaultBoundary,
 } from '@jinn-network/record-discovery-serve';
 import {
   createArchiveHttpHandler,
   createFsBlobStore,
   type ArchiveHttpHandler,
 } from '@jinn-network/record-discovery-transport-http';
-import { signAnnouncementEntry } from '@jinn-network/marketplace-projector';
 
 const JSON_MEDIA_TYPE = 'application/json';
 const HEAD_MEDIA_TYPE = 'application/vnd.jinn.record-discovery.head.v1+json';
@@ -84,7 +95,7 @@ interface SourceState {
   readonly published: Readonly<Record<string, NativeSignedSourceReceipt>>;
 }
 
-interface AppendJournal {
+interface AppendJournalV1 {
   readonly version: 1;
   readonly source: SourceIdentity;
   readonly signerKeyId: string;
@@ -96,6 +107,22 @@ interface AppendJournal {
   readonly pageBytes: string;
   readonly headBytes: string;
 }
+
+interface AppendJournalV2 {
+  readonly version: 2;
+  readonly source: SourceIdentity;
+  readonly signerKeyId: string;
+  readonly publicationKey: string;
+  readonly recordDigest: `sha256:${string}`;
+  readonly previousLast?: LastSourcePosition;
+  readonly receipt: NativeSignedSourceReceipt;
+  readonly page: string;
+  readonly pageBytes: string;
+  readonly headBytes: string;
+  readonly intent: DurableSourceAppendIntent;
+}
+
+type AppendJournal = AppendJournalV1 | AppendJournalV2;
 
 interface OwnerLease {
   readonly version: 1;
@@ -308,36 +335,49 @@ function parseAndVerifyHead(input: {
   return head;
 }
 
-async function putExact(store: ReturnType<typeof createFsBlobStore>, path: string, bytes: Uint8Array, mediaType: string): Promise<void> {
-  const existing = await store.get(path);
-  if (existing !== undefined && !sameBytes(existing.bytes, bytes)) {
-    throw new NativeSignedSourceIntegrityError(`immutable source path ${path} conflicts with recovered bytes`);
-  }
-  if (existing === undefined) await store.put(path, bytes, mediaType);
+interface ReconstructedHistory {
+  readonly durable: DurableSourceState;
+  readonly legacyPublished: Readonly<Record<string, NativeSignedSourceReceipt>>;
+  readonly lastTimestamp?: string;
 }
 
-async function validateCommittedHistory(input: {
+async function reconstructCommittedHistory(input: {
   readonly store: ReturnType<typeof createFsBlobStore>;
-  readonly state: SourceState;
+  readonly source: SourceIdentity;
+  readonly signerKeyId: string;
+  readonly last?: LastSourcePosition;
+  readonly expectedPublished?: Readonly<Record<string, NativeSignedSourceReceipt>>;
   readonly signer: NativeSignedSourceSigner;
   readonly skipHead?: boolean;
-}): Promise<void> {
-  if (input.state.last === undefined) {
-    if (!input.skipHead && await input.store.get(headPath(input.state.source.name)) !== undefined) {
+}): Promise<ReconstructedHistory> {
+  if (input.last === undefined) {
+    if (!input.skipHead && await input.store.get(headPath(input.source.name)) !== undefined) {
       throw new NativeSignedSourceIntegrityError('public signed head exists without committed source state or append journal');
     }
-    return;
+    const durable: DurableSourceState = {
+      version: 1,
+      source: input.source,
+      signerKeyId: input.signerKeyId,
+      last: null,
+      announcements: {},
+    };
+    if (input.expectedPublished !== undefined && Object.keys(input.expectedPublished).length !== 0) {
+      throw new NativeSignedSourceIntegrityError('source state has receipts without a committed archive tip');
+    }
+    return { durable, legacyPublished: {} };
   }
   let previousPage: string | null = null;
   let previousEntry: `sha256:${string}` | null = null;
+  let lastTimestamp: string | undefined;
   const authenticated = new Map<string, NativeSignedSourceReceipt>();
-  for (let number = 1n; number <= BigInt(input.state.last.page); number += 1n) {
+  const announcements: Record<string, DurableSourceState['announcements'][string]> = {};
+  for (let number = 1n; number <= BigInt(input.last.page); number += 1n) {
     const page = formatSequence(number);
-    const stored = await input.store.get(archivePagePath(input.state.source.name, page));
+    const stored = await input.store.get(archivePagePath(input.source.name, page));
     if (stored === undefined) throw new NativeSignedSourceIntegrityError(`committed archive page ${page} is missing`);
     const verified = parseAndVerifyPage({
       bytes: stored.bytes,
-      source: input.state.source,
+      source: input.source,
       signer: input.signer,
       expectedPage: page,
       previousPage,
@@ -345,19 +385,45 @@ async function validateCommittedHistory(input: {
     });
     previousPage = page;
     previousEntry = verified.entryDigest;
+    lastTimestamp = verified.entry.timestamp;
     const announcement = verified.entry.announcements[0];
     if (verified.entry.announcements.length !== 1 || announcement === undefined) {
       throw new NativeSignedSourceIntegrityError('owned archive entry has unexpected announcement cardinality');
     }
+    let receipt: DurableSourceReceipt;
+    let fingerprint: `sha256:${string}`;
     if (announcement.action === 'available') {
       if (announcement.locations?.length !== 1) {
         throw new NativeSignedSourceIntegrityError('owned available announcement has no unique exact location');
+      }
+      const path = recordPath(announcement.record.digest);
+      const storedRecord = await input.store.get(path);
+      if (storedRecord === undefined || recordDigest(storedRecord.bytes) !== announcement.record.digest) {
+        throw new NativeSignedSourceIntegrityError('owned available announcement exact record is missing');
+      }
+      if (announcement.record.mediaType !== undefined && storedRecord.contentType !== announcement.record.mediaType) {
+        throw new NativeSignedSourceIntegrityError('owned available announcement media type conflicts with exact record storage');
       }
       authenticated.set(announcement.announcementId, {
         location: announcement.locations[0]!.locator,
         sequence: verified.entry.sequence,
         entryDigest: verified.entryDigest,
       });
+      fingerprint = sealJson({
+        source: input.source,
+        timestamp: verified.entry.timestamp,
+        announcement,
+        recordContentType: storedRecord.contentType,
+      }).digest;
+      receipt = {
+        source: input.source,
+        announcementId: announcement.announcementId,
+        fingerprint,
+        sequence: verified.entry.sequence,
+        entryDigest: verified.entryDigest,
+        page,
+        record: { digest: announcement.record.digest, path, contentType: storedRecord.contentType },
+      };
     } else {
       const target = authenticated.get(announcement.retracts);
       if (target === undefined) {
@@ -368,24 +434,56 @@ async function validateCommittedHistory(input: {
         sequence: verified.entry.sequence,
         entryDigest: verified.entryDigest,
       });
+      fingerprint = sealJson({
+        source: input.source,
+        timestamp: verified.entry.timestamp,
+        announcement,
+        recordContentType: null,
+      }).digest;
+      receipt = {
+        source: input.source,
+        announcementId: announcement.announcementId,
+        fingerprint,
+        sequence: verified.entry.sequence,
+        entryDigest: verified.entryDigest,
+        page,
+      };
     }
+    announcements[announcement.announcementId] = {
+      action: announcement.action,
+      fingerprint,
+      receipt,
+    };
   }
-  if (previousEntry !== input.state.last.entryDigest || previousPage !== input.state.last.page) {
+  if (previousEntry !== input.last.entryDigest || previousPage !== input.last.page) {
     throw new NativeSignedSourceIntegrityError('committed state does not equal the authenticated archive tip');
   }
-  if (!sameJson(Object.fromEntries(authenticated), input.state.published)) {
+  const legacyPublished = Object.fromEntries(authenticated);
+  if (input.expectedPublished !== undefined && !sameJson(legacyPublished, input.expectedPublished)) {
     throw new NativeSignedSourceIntegrityError('unsigned source state does not match authenticated archive receipts');
   }
-  if (input.skipHead) return;
-  const storedHead = await input.store.get(headPath(input.state.source.name));
-  if (storedHead === undefined) throw new NativeSignedSourceIntegrityError('committed signed source head is missing');
-  parseAndVerifyHead({
-    bytes: storedHead.bytes,
-    source: input.state.source,
-    signer: input.signer,
-    sequence: input.state.last.sequence,
-    entryDigest: input.state.last.entryDigest,
-  });
+  if (!input.skipHead) {
+    const storedHead = await input.store.get(headPath(input.source.name));
+    if (storedHead === undefined) throw new NativeSignedSourceIntegrityError('committed signed source head is missing');
+    parseAndVerifyHead({
+      bytes: storedHead.bytes,
+      source: input.source,
+      signer: input.signer,
+      sequence: input.last.sequence,
+      entryDigest: input.last.entryDigest,
+    });
+  }
+  return {
+    durable: {
+      version: 1,
+      source: input.source,
+      signerKeyId: input.signerKeyId,
+      last: input.last,
+      announcements,
+    },
+    legacyPublished,
+    ...(lastTimestamp === undefined ? {} : { lastTimestamp }),
+  };
 }
 
 async function invokeFault(faults: NativeSignedSourceFaults | undefined, boundary: NativeSignedSourceFaultBoundary): Promise<void> {
@@ -395,6 +493,412 @@ async function invokeFault(faults: NativeSignedSourceFaults | undefined, boundar
         : boundary === 'after-head-before-state' ? faults?.afterHeadBeforeState
           : faults?.afterStateBeforeJournalClear;
   await hook?.();
+}
+
+async function readJsonSnapshot<T>(path: string): Promise<CasSnapshot<T> | undefined> {
+  try {
+    const bytes = new Uint8Array(await readFile(path));
+    return {
+      revision: createHash('sha256').update(bytes).digest('hex'),
+      value: JSON.parse(new TextDecoder().decode(bytes)) as T,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function writeJsonSnapshot<T>(path: string, value: T): Promise<CasSnapshot<T>> {
+  await writeJson(path, value);
+  const snapshot = await readJsonSnapshot<T>(path);
+  if (snapshot === undefined) throw new NativeSignedSourceIntegrityError(`durable JSON write disappeared: ${path}`);
+  return snapshot;
+}
+
+function sameDurableState(left: DurableSourceState, right: DurableSourceState): boolean {
+  return sealJson(left).digest === sealJson(right).digest;
+}
+
+function assertDurableOwnership(
+  value: DurableSourceState | DurableSourceAppendIntent,
+  source: SourceIdentity,
+  signerKeyId: string,
+): void {
+  if (!sourceMatches(value.source, source) || value.signerKeyId !== signerKeyId) {
+    throw new NativeSignedSourceIntegrityError('generic source writer state belongs to a different source/key identity');
+  }
+}
+
+function createNativeBlobStore(
+  store: ReturnType<typeof createFsBlobStore>,
+): ReadableImmutableBlobStore {
+  return store;
+}
+
+function createNativeSourceStateStore(input: {
+  readonly statePath: string;
+  readonly journalPath: string;
+  readonly source: SourceIdentity;
+  readonly signer: NativeSignedSourceSigner;
+  readonly store: ReturnType<typeof createFsBlobStore>;
+}): SourceStateStore {
+  return {
+    async read() {
+      const snapshot = await readJsonSnapshot<SourceState>(input.statePath);
+      if (snapshot === undefined) return undefined;
+      const state = snapshot.value;
+      if (state.version !== 2
+        || !sourceMatches(state.source, input.source)
+        || state.signerKeyId !== input.signer.keyId) {
+        throw new NativeSignedSourceIntegrityError('signed source state belongs to a different source/key identity');
+      }
+      const pending = await readJson<AppendJournal>(input.journalPath);
+      const reconstructed = await reconstructCommittedHistory({
+        store: input.store,
+        source: input.source,
+        signerKeyId: input.signer.keyId,
+        last: state.last,
+        expectedPublished: state.published,
+        signer: input.signer,
+        skipHead: pending !== undefined,
+      });
+      return { revision: snapshot.revision, value: reconstructed.durable };
+    },
+    async compareAndSwap(_sourceId, expectedRevision, next): Promise<CasWriteResult> {
+      assertDurableOwnership(next, input.source, input.signer.keyId);
+      const current = await readJsonSnapshot<SourceState>(input.statePath);
+      if ((current?.revision ?? null) !== expectedRevision) return { ok: false };
+      const reconstructed = await reconstructCommittedHistory({
+        store: input.store,
+        source: input.source,
+        signerKeyId: input.signer.keyId,
+        ...(next.last === null ? {} : { last: next.last }),
+        signer: input.signer,
+      });
+      if (!sameDurableState(reconstructed.durable, next)) {
+        throw new NativeSignedSourceIntegrityError('generic next state does not equal the authenticated public archive');
+      }
+      const legacy: SourceState = {
+        version: 2,
+        source: input.source,
+        signerKeyId: input.signer.keyId,
+        ...(next.last === null ? {} : { last: next.last }),
+        published: reconstructed.legacyPublished,
+      };
+      const written = await writeJsonSnapshot(input.statePath, legacy);
+      return { ok: true, revision: written.revision };
+    },
+  };
+}
+
+function decodeJournalPage(journal: Pick<AppendJournal, 'pageBytes'>): ArchivePage {
+  try {
+    return JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(decodeBase64(journal.pageBytes))) as ArchivePage;
+  } catch (error) {
+    throw new NativeSignedSourceIntegrityError(`append journal page is invalid JSON: ${String(error)}`);
+  }
+}
+
+function nativeReceiptFromIntent(
+  intent: DurableSourceAppendIntent,
+  baseUrl: string,
+): { readonly receipt: NativeSignedSourceReceipt; readonly recordDigest: `sha256:${string}` } {
+  const page = JSON.parse(new TextDecoder().decode(decodeBase64(intent.page.bytesBase64))) as ArchivePage;
+  const announcement = page.entries[0]?.entry.announcements[0];
+  if (announcement === undefined || announcement.announcementId !== intent.announcementId) {
+    throw new NativeSignedSourceIntegrityError('generic append intent has no matching announcement');
+  }
+  const record = announcement.action === 'available'
+    ? intent.record
+    : intent.nextState.announcements[announcement.retracts]?.receipt.record;
+  if (record === null || record === undefined) {
+    throw new NativeSignedSourceIntegrityError('generic append intent cannot resolve its exact record location');
+  }
+  return {
+    receipt: {
+      location: `${baseUrl}${record.path}`,
+      sequence: intent.receipt.sequence,
+      entryDigest: intent.receipt.entryDigest,
+    },
+    recordDigest: record.digest,
+  };
+}
+
+function journalV2FromIntent(
+  intent: DurableSourceAppendIntent,
+  baseUrl: string,
+): AppendJournalV2 {
+  const native = nativeReceiptFromIntent(intent, baseUrl);
+  return {
+    version: 2,
+    source: intent.source,
+    signerKeyId: intent.signerKeyId,
+    publicationKey: intent.announcementId,
+    recordDigest: native.recordDigest,
+    ...(intent.previousPosition === null ? {} : { previousLast: intent.previousPosition }),
+    receipt: native.receipt,
+    page: intent.receipt.page,
+    pageBytes: intent.page.bytesBase64,
+    headBytes: intent.head.bytesBase64,
+    intent,
+  };
+}
+
+function assertJournalV2Mirror(journal: AppendJournalV2, baseUrl: string): void {
+  const expected = journalV2FromIntent(journal.intent, baseUrl);
+  if (!sameJson(journal, expected)) {
+    throw new NativeSignedSourceIntegrityError('append journal compatibility mirror conflicts with its generic intent');
+  }
+}
+
+async function legacyJournalIntent(input: {
+  readonly journal: AppendJournalV1;
+  readonly statePath: string;
+  readonly source: SourceIdentity;
+  readonly signer: NativeSignedSourceSigner;
+  readonly store: ReturnType<typeof createFsBlobStore>;
+}): Promise<DurableSourceAppendIntent> {
+  const journal = input.journal;
+  if (!sourceMatches(journal.source, input.source)
+    || journal.signerKeyId !== input.signer.keyId
+    || journal.receipt.sequence !== journal.page
+    || journal.publicationKey.length === 0) {
+    throw new NativeSignedSourceIntegrityError('legacy append journal does not continue the owned source identity');
+  }
+  const previous = await reconstructCommittedHistory({
+    store: input.store,
+    source: input.source,
+    signerKeyId: input.signer.keyId,
+    ...(journal.previousLast === undefined ? {} : { last: journal.previousLast }),
+    signer: input.signer,
+    skipHead: true,
+  });
+  const pageBytes = decodeBase64(journal.pageBytes);
+  const verified = parseAndVerifyPage({
+    bytes: pageBytes,
+    source: input.source,
+    signer: input.signer,
+    expectedPage: journal.page,
+    previousPage: journal.previousLast?.page ?? null,
+    previousEntry: journal.previousLast?.entryDigest ?? null,
+  });
+  if (verified.entryDigest !== journal.receipt.entryDigest) {
+    throw new NativeSignedSourceIntegrityError('legacy append journal entry digest does not match its receipt');
+  }
+  const page = decodeJournalPage(journal);
+  const announcement = page.entries[0]?.entry.announcements[0];
+  if (page.entries.length !== 1
+    || announcement === undefined
+    || announcement.announcementId !== journal.publicationKey) {
+    throw new NativeSignedSourceIntegrityError('legacy append journal has no exact operation announcement');
+  }
+
+  const headBytes = decodeBase64(journal.headBytes);
+  parseAndVerifyHead({
+    bytes: headBytes,
+    source: input.source,
+    signer: input.signer,
+    sequence: journal.page,
+    entryDigest: verified.entryDigest,
+  });
+
+  const recordPathValue = recordPath(journal.recordDigest);
+  const storedRecord = await input.store.get(recordPathValue);
+  if (storedRecord === undefined || recordDigest(storedRecord.bytes) !== journal.recordDigest) {
+    throw new NativeSignedSourceIntegrityError('legacy append journal exact record is missing');
+  }
+  let durableRecord: NonNullable<DurableSourceReceipt['record']> | null = null;
+  let expectedLocation: string;
+  if (announcement.action === 'available') {
+    if (announcement.record.digest !== journal.recordDigest || announcement.locations?.length !== 1) {
+      throw new NativeSignedSourceIntegrityError('legacy available journal does not bind one exact record and location');
+    }
+    if (announcement.record.mediaType !== undefined && announcement.record.mediaType !== storedRecord.contentType) {
+      throw new NativeSignedSourceIntegrityError('legacy available journal media type conflicts with exact record storage');
+    }
+    durableRecord = {
+      digest: journal.recordDigest,
+      path: recordPathValue,
+      contentType: storedRecord.contentType,
+    };
+    expectedLocation = announcement.locations[0]!.locator;
+  } else {
+    const target = previous.durable.announcements[announcement.retracts];
+    const targetLegacy = previous.legacyPublished[announcement.retracts];
+    if (target?.action !== 'available'
+      || target.receipt.record?.digest !== journal.recordDigest
+      || targetLegacy === undefined) {
+      throw new NativeSignedSourceIntegrityError('legacy withdrawal journal does not retract an owned availability');
+    }
+    expectedLocation = targetLegacy.location;
+  }
+  if (!sameJson(journal.receipt, {
+    location: expectedLocation,
+    sequence: journal.page,
+    entryDigest: verified.entryDigest,
+  })) {
+    throw new NativeSignedSourceIntegrityError('legacy append journal receipt conflicts with its signed announcement');
+  }
+
+  const fingerprint = sealJson({
+    source: input.source,
+    timestamp: verified.entry.timestamp,
+    announcement,
+    recordContentType: durableRecord?.contentType ?? null,
+  }).digest;
+  const receipt: DurableSourceReceipt = {
+    source: input.source,
+    announcementId: announcement.announcementId,
+    fingerprint,
+    sequence: verified.entry.sequence,
+    entryDigest: verified.entryDigest,
+    page: journal.page,
+    ...(durableRecord === null ? {} : { record: durableRecord }),
+  };
+  const nextState: DurableSourceState = {
+    ...previous.durable,
+    last: { sequence: journal.page, entryDigest: verified.entryDigest, page: journal.page },
+    announcements: {
+      ...previous.durable.announcements,
+      [announcement.announcementId]: { action: announcement.action, fingerprint, receipt },
+    },
+  };
+
+  const currentState = await readJsonSnapshot<SourceState>(input.statePath);
+  if (currentState !== undefined) {
+    const current = currentState.value;
+    const reconstructed = await reconstructCommittedHistory({
+      store: input.store,
+      source: input.source,
+      signerKeyId: input.signer.keyId,
+      last: current.last,
+      expectedPublished: current.published,
+      signer: input.signer,
+      skipHead: true,
+    });
+    if (!sameDurableState(reconstructed.durable, previous.durable)
+      && !sameDurableState(reconstructed.durable, nextState)) {
+      throw new NativeSignedSourceIntegrityError('legacy append journal conflicts with current committed source state');
+    }
+  }
+
+  const existingHead = await input.store.get(headPath(input.source.name));
+  let expectedHeadDigest: `sha256:${string}` | null = null;
+  if (existingHead !== undefined && !sameBytes(existingHead.bytes, headBytes)) {
+    if (journal.previousLast === undefined) {
+      throw new NativeSignedSourceIntegrityError('legacy recovered head conflicts with both journal and genesis');
+    }
+    parseAndVerifyHead({
+      bytes: existingHead.bytes,
+      source: input.source,
+      signer: input.signer,
+      sequence: journal.previousLast.sequence,
+      entryDigest: journal.previousLast.entryDigest,
+    });
+    expectedHeadDigest = recordDigest(existingHead.bytes);
+  }
+
+  return {
+    version: 1,
+    source: input.source,
+    signerKeyId: input.signer.keyId,
+    announcementId: announcement.announcementId,
+    fingerprint,
+    expectedStateRevision: currentState?.revision ?? null,
+    previousStateDigest: currentState === undefined ? null : sealJson(previous.durable).digest,
+    previousPosition: journal.previousLast ?? null,
+    expectedHeadDigest,
+    previousHeadIssuedAt: previous.lastTimestamp ?? null,
+    record: durableRecord,
+    page: {
+      path: archivePagePath(input.source.name, journal.page),
+      contentType: JSON_MEDIA_TYPE,
+      digest: recordDigest(pageBytes),
+      bytesBase64: journal.pageBytes,
+    },
+    head: {
+      path: headPath(input.source.name),
+      contentType: HEAD_MEDIA_TYPE,
+      digest: recordDigest(headBytes),
+      bytesBase64: journal.headBytes,
+    },
+    nextState,
+    receipt,
+  };
+}
+
+function createNativeIntentStore(input: {
+  readonly journalPath: string;
+  readonly statePath: string;
+  readonly baseUrl: string;
+  readonly source: SourceIdentity;
+  readonly signer: NativeSignedSourceSigner;
+  readonly store: ReturnType<typeof createFsBlobStore>;
+}): SourceAppendIntentStore {
+  return {
+    async read() {
+      const snapshot = await readJsonSnapshot<AppendJournal>(input.journalPath);
+      if (snapshot === undefined) return undefined;
+      if (snapshot.value.version === 2) {
+        assertJournalV2Mirror(snapshot.value, input.baseUrl);
+        assertDurableOwnership(snapshot.value.intent, input.source, input.signer.keyId);
+        return { revision: snapshot.revision, value: snapshot.value.intent };
+      }
+      return {
+        revision: snapshot.revision,
+        value: await legacyJournalIntent({
+          journal: snapshot.value,
+          statePath: input.statePath,
+          source: input.source,
+          signer: input.signer,
+          store: input.store,
+        }),
+      };
+    },
+    async compareAndSwap(_sourceId, expectedRevision, next): Promise<CasWriteResult> {
+      const current = await readJsonSnapshot<AppendJournal>(input.journalPath);
+      if ((current?.revision ?? null) !== expectedRevision) return { ok: false };
+      if (next === undefined) {
+        if (current !== undefined) await unlink(input.journalPath);
+        return { ok: true, revision: `deleted:${current?.revision ?? 'absent'}` };
+      }
+      assertDurableOwnership(next, input.source, input.signer.keyId);
+      const journal = journalV2FromIntent(next, input.baseUrl);
+      const written = await writeJsonSnapshot(input.journalPath, journal);
+      return { ok: true, revision: written.revision };
+    },
+  };
+}
+
+function createNativeDurableSigner(signer: NativeSignedSourceSigner): DurableSourceSigner {
+  return {
+    scope: DISCOVERY_SIGNING_SCOPE,
+    keyId: signer.keyId,
+    async sign(pae) {
+      return [{ keyid: signer.keyId, sig: signer.sign(pae) }];
+    },
+    verify: (pae, signature) => signer.verify(pae, signature),
+  };
+}
+
+function sourceWriterFaults(faults: NativeSignedSourceFaults | undefined): {
+  at(boundary: SourceWriterFaultBoundary): Promise<void>;
+} | undefined {
+  if (faults === undefined) return undefined;
+  return {
+    async at(boundary) {
+      const legacyBoundary: NativeSignedSourceFaultBoundary = boundary === 'after-record-before-intent'
+        ? 'after-record-before-journal'
+        : boundary === 'after-intent-before-page'
+          ? 'after-journal-before-page'
+          : boundary === 'after-page-before-head'
+            ? 'after-page-before-head'
+            : boundary === 'after-head-before-state'
+              ? 'after-head-before-state'
+              : 'after-state-before-journal-clear';
+      await invokeFault(faults, legacyBoundary);
+    },
+  };
 }
 
 export interface NativeSignedSourcePublisher {
@@ -407,11 +911,9 @@ export interface NativeSignedSourcePublisher {
     readonly bytes: Uint8Array;
     readonly mediaType: string;
     readonly timestamp: string;
-    makeEntry(input: {
-      readonly sequence: string;
-      readonly previous: `sha256:${string}` | null;
+    makeAnnouncement(input: {
       readonly location: string;
-    }): AnnouncementEntry;
+    }): Announcement;
   }): Promise<NativeSignedSourceReceipt>;
   close(): Promise<void>;
 }
@@ -448,7 +950,7 @@ export async function openNativeSignedSource(input: {
   const store = createFsBlobStore(join(input.rootDir, 'public'));
   try {
     const loaded = await readJson<SourceState | SourceStateV1>(statePath);
-    let state: SourceState = loaded === undefined
+    const state: SourceState = loaded === undefined
       ? { version: 2, source: input.source, signerKeyId: input.signer.keyId, published: {} }
       : loaded.version === 1
         ? { ...loaded, version: 2, signerKeyId: input.signer.keyId }
@@ -458,188 +960,90 @@ export async function openNativeSignedSource(input: {
       || state.signerKeyId !== input.signer.keyId) {
       throw input.ownershipError('signed source state belongs to a different source/key identity');
     }
-    const journal = await readJson<AppendJournal>(journalPath);
-    if (journal === undefined) {
-      await validateCommittedHistory({ store, state, signer: input.signer });
-      if (loaded?.version === 1) await writeJson(statePath, state);
-    } else {
-      if (journal.version !== 1
-        || !sourceMatches(journal.source, input.source)
-        || journal.signerKeyId !== input.signer.keyId
-        || journal.receipt.sequence !== journal.page) {
-        throw new NativeSignedSourceIntegrityError('append journal does not continue the authenticated committed source state');
-      }
-      const alreadyCommitted = state.published[journal.publicationKey];
-      if (alreadyCommitted !== undefined) {
-        if (!sameJson(alreadyCommitted, journal.receipt)
-          || state.last?.sequence !== journal.page
-          || state.last.entryDigest !== journal.receipt.entryDigest) {
-          throw new NativeSignedSourceIntegrityError('committed source state conflicts with its pending append journal');
-        }
-      } else if (!sameJson(journal.previousLast, state.last)) {
-        throw new NativeSignedSourceIntegrityError('append journal does not continue the authenticated committed source state');
-      }
-      await validateCommittedHistory({ store, state: alreadyCommitted === undefined ? state : {
-        ...state,
-        last: journal.previousLast,
-        published: Object.fromEntries(Object.entries(state.published).filter(([key]) => key !== journal.publicationKey)),
-      }, signer: input.signer, skipHead: true });
-      const pageBytes = decodeBase64(journal.pageBytes);
-      const headBytes = decodeBase64(journal.headBytes);
-      const verified = parseAndVerifyPage({
-        bytes: pageBytes,
-        source: input.source,
-        signer: input.signer,
-        expectedPage: journal.page,
-        previousPage: journal.previousLast?.page ?? null,
-        previousEntry: journal.previousLast?.entryDigest ?? null,
-      });
-      if (verified.entryDigest !== journal.receipt.entryDigest) {
-        throw new NativeSignedSourceIntegrityError('append journal entry digest does not match its receipt');
-      }
-      parseAndVerifyHead({
-        bytes: headBytes,
-        source: input.source,
-        signer: input.signer,
-        sequence: journal.page,
-        entryDigest: verified.entryDigest,
-      });
-      const record = await store.get(recordPath(journal.recordDigest));
-      const observedRecordDigest = record === undefined
-        ? undefined
-        : `sha256:${createHash('sha256').update(record.bytes).digest('hex')}`;
-      if (record === undefined || observedRecordDigest !== journal.recordDigest) {
-        throw new NativeSignedSourceIntegrityError('append journal exact record is missing');
-      }
-      await putExact(store, archivePagePath(input.source.name, journal.page), pageBytes, JSON_MEDIA_TYPE);
-      const existingHead = await store.get(headPath(input.source.name));
-      if (existingHead !== undefined && !sameBytes(existingHead.bytes, headBytes)) {
-        if (journal.previousLast === undefined) {
-          throw new NativeSignedSourceIntegrityError('recovered head conflicts with both journal and genesis');
-        }
-        parseAndVerifyHead({
-          bytes: existingHead.bytes,
-          source: input.source,
-          signer: input.signer,
-          sequence: journal.previousLast.sequence,
-          entryDigest: journal.previousLast.entryDigest,
-        });
-      }
-      await store.put(headPath(input.source.name), headBytes, HEAD_MEDIA_TYPE);
+    const pendingJournal = await readJson<AppendJournal>(journalPath);
+    await reconstructCommittedHistory({
+      store,
+      source: input.source,
+      signerKeyId: input.signer.keyId,
+      last: state.last,
+      expectedPublished: state.published,
+      signer: input.signer,
+      skipHead: pendingJournal !== undefined,
+    });
+    if (loaded?.version === 1) await writeJson(statePath, state);
+
+    let closed = false;
+    let append = Promise.resolve();
+    const sourceId = formatOrigin(input.source.agent, input.source.name);
+    const states = createNativeSourceStateStore({
+      statePath,
+      journalPath,
+      source: input.source,
+      signer: input.signer,
+      store,
+    });
+    const intents = createNativeIntentStore({
+      journalPath,
+      statePath,
+      baseUrl,
+      source: input.source,
+      signer: input.signer,
+      store,
+    });
+    const durableFaults = sourceWriterFaults(input.faults);
+    const durable = createDurableSourceWriter({
+      source: input.source,
+      signer: createNativeDurableSigner(input.signer),
+      blobs: createNativeBlobStore(store),
+      states,
+      intents,
+      ...(durableFaults === undefined ? {} : { faults: durableFaults }),
+    });
+
+    async function syncWellKnown(): Promise<void> {
+      const committed = await durable.readState();
+      if (committed?.last === null || committed === undefined) return;
       await writeWellKnownDocument(store, {
         protocol: RECORD_DISCOVERY_VERSION,
         sources: [{
           agent: input.source.agent,
           name: input.source.name,
           headPath: headPath(input.source.name),
-          archiveRoot: archivePagePath(input.source.name, journal.page),
+          archiveRoot: archivePagePath(input.source.name, committed.last.page),
         }],
       });
-      if (alreadyCommitted === undefined) {
-        state = {
-          ...state,
-          last: { sequence: journal.page, entryDigest: verified.entryDigest, page: journal.page },
-          published: { ...state.published, [journal.publicationKey]: journal.receipt },
-        };
-        await writeJson(statePath, state);
-      }
-      await unlink(journalPath);
     }
 
-    let closed = false;
-    let append = Promise.resolve();
-    const sourceId = formatOrigin(input.source.agent, input.source.name);
-    const entrySigner = {
-      scope: 'jinn:discovery-announcements' as const,
-      sign: async (pae: Uint8Array) => [{ keyid: input.signer.keyId, sig: input.signer.sign(pae) }],
-    };
-    const headSigner = {
-      sign: async (pae: Uint8Array) => [{ keyid: input.signer.keyId, sig: input.signer.sign(pae) }],
-    };
+    await durable.recover();
+    await syncWellKnown();
+
     const publish: NativeSignedSourcePublisher['publish'] = async (value) => {
       let resolve!: (receipt: NativeSignedSourceReceipt) => void;
       let reject!: (error: unknown) => void;
       const response = new Promise<NativeSignedSourceReceipt>((res, rej) => { resolve = res; reject = rej; });
       append = append.then(async () => {
         if (closed) throw input.ownershipError('native signed source publisher is closed');
-        const existing = state.published[value.publicationKey];
-        if (existing !== undefined) { resolve(existing); return; }
         if (value.sourceId !== sourceId) throw new Error('publication source does not equal the owned source identity');
-        const written = await writeRecord(store, value.bytes, value.mediaType);
-        if (written.digest !== value.recordDigest) throw new Error('public record write returned a different digest');
-        await invokeFault(input.faults, 'after-record-before-journal');
-        const sequence = formatSequence(state.last === undefined ? 1n : BigInt(state.last.sequence) + 1n);
-        const receipt: NativeSignedSourceReceipt = {
-          location: `${baseUrl}${written.path}`,
-          sequence,
-          entryDigest: `sha256:${'0'.repeat(64)}`,
-        };
-        const entry = value.makeEntry({
-          sequence,
-          previous: state.last?.entryDigest ?? null,
-          location: receipt.location,
-        });
-        if (!sourceMatches(entry.source, input.source)
-          || entry.sequence !== sequence
-          || entry.previous !== (state.last?.entryDigest ?? null)) {
-          throw new NativeSignedSourceIntegrityError('caller-built announcement does not continue the owned source');
+        if (recordDigest(value.bytes) !== value.recordDigest) {
+          throw new NativeSignedSourceIntegrityError('publication exact bytes do not match the declared record digest');
         }
-        const entryDigest = sealJson(entry).digest;
-        const signedEntry = await signAnnouncementEntry(entry, entrySigner);
-        const page: ArchivePage = {
-          protocol: RECORD_DISCOVERY_VERSION,
-          source: input.source.name,
-          page: sequence,
-          prevArchive: state.last?.page ?? null,
-          entries: [{ entry, signature: signedEntry }],
-        };
-        const pageBytes = sealJson(page).bytes;
-        const head: SourceHead = {
-          protocol: RECORD_DISCOVERY_VERSION,
-          origin: sourceId,
-          sequence,
-          entry: entryDigest,
-          issuedAt: value.timestamp,
-          refreshBy: new Date(Date.parse(value.timestamp) + 24 * 60 * 60 * 1000).toISOString(),
-        };
-        const headBytes = sealJson(await signHead(head, headSigner)).bytes;
-        const exactReceipt = { ...receipt, entryDigest };
-        const journal: AppendJournal = {
-          version: 1,
-          source: input.source,
-          signerKeyId: input.signer.keyId,
-          publicationKey: value.publicationKey,
-          recordDigest: value.recordDigest,
-          ...(state.last === undefined ? {} : { previousLast: state.last }),
-          receipt: exactReceipt,
-          page: sequence,
-          pageBytes: Buffer.from(pageBytes).toString('base64'),
-          headBytes: Buffer.from(headBytes).toString('base64'),
-        };
-        await writeJson(journalPath, journal);
-        await invokeFault(input.faults, 'after-journal-before-page');
-        await putExact(store, archivePagePath(input.source.name, sequence), pageBytes, JSON_MEDIA_TYPE);
-        await invokeFault(input.faults, 'after-page-before-head');
-        await store.put(headPath(input.source.name), headBytes, HEAD_MEDIA_TYPE);
-        await writeWellKnownDocument(store, {
-          protocol: RECORD_DISCOVERY_VERSION,
-          sources: [{
-            agent: input.source.agent,
-            name: input.source.name,
-            headPath: headPath(input.source.name),
-            archiveRoot: archivePagePath(input.source.name, sequence),
-          }],
+        const location = `${baseUrl}${recordPath(value.recordDigest)}`;
+        const announcement = value.makeAnnouncement({ location });
+        if (announcement.announcementId !== value.publicationKey) {
+          throw new NativeSignedSourceIntegrityError('publication key does not equal the signed announcement identity');
+        }
+        if (announcement.action === 'available' && announcement.record.digest !== value.recordDigest) {
+          throw new NativeSignedSourceIntegrityError('available announcement does not name the exact publication record');
+        }
+        const receipt = await durable.append({
+          announcement,
+          timestamp: value.timestamp,
+          ...(announcement.action === 'available'
+            ? { record: { bytes: value.bytes, contentType: value.mediaType } }
+            : {}),
         });
-        await invokeFault(input.faults, 'after-head-before-state');
-        state = {
-          ...state,
-          last: { sequence, entryDigest, page: sequence },
-          published: { ...state.published, [value.publicationKey]: exactReceipt },
-        };
-        await writeJson(statePath, state);
-        await invokeFault(input.faults, 'after-state-before-journal-clear');
-        await unlink(journalPath);
-        resolve(exactReceipt);
+        await syncWellKnown();
+        resolve({ location, sequence: receipt.sequence, entryDigest: receipt.entryDigest });
       }).catch(reject);
       return response;
     };

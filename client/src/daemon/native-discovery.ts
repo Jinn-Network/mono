@@ -26,8 +26,8 @@ import {
   type SyncedHead,
   type Transport,
 } from '@jinn-network/record-discovery-client';
-import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import type { Store } from '../store/store.js';
+import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
 
 const BIGINT_TAG = '$bigint';
 

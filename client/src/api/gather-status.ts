@@ -68,6 +68,7 @@ import type {
   HarnessReadinessSnapshot,
   JoinedHarnessSpec,
 } from '../harnesses/readiness-registry.js';
+import { phaseDTransitionUsageDiagnostics } from '../daemon/phase-d-transition-usage.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -727,6 +728,7 @@ export async function gatherGatheredStatusRaw(
     latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
+    phaseDTransitionUsage: phaseDTransitionUsageDiagnostics(),
     passwordRotationAt: resolvePasswordRotationAt(status?.passwordRotation),
     dbPath: store.path,
     earningDir: status?.earningDir,

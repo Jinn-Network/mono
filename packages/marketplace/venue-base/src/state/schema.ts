@@ -9,7 +9,7 @@
 // projector-backed `MarketplaceObservePort` -- linearizable requester-scope ownership and
 // recorded Delivery bytes. Version 4 adds scanned block-number/hash history so reorg handling
 // can enumerate every displaced block, including blocks with no marketplace logs.
-export const VENUE_STATE_SCHEMA_VERSION = 4 as const;
+export const VENUE_STATE_SCHEMA_VERSION = 5 as const;
 
 /** Additive v3 -> v4 migration; old venue state must retain every existing cursor/outbox row. */
 export const VENUE_STATE_V4_MIGRATION_SQL = `
@@ -24,6 +24,28 @@ CREATE TABLE scanned_block_hashes (
 CREATE INDEX scanned_block_hashes_active_range
   ON scanned_block_hashes (stream, block_number)
   WHERE orphaned_at_ms IS NULL;
+`;
+
+/** Additive v4 -> v5 migration. Unresolved legacy scopes are retained but fail closed. */
+export const VENUE_STATE_V5_MIGRATION_SQL = `
+ALTER TABLE posting_intents ADD COLUMN venue_namespace TEXT;
+ALTER TABLE posting_intents ADD COLUMN command_digest TEXT;
+ALTER TABLE posting_intents ADD COLUMN command_json TEXT;
+ALTER TABLE posting_intents ADD COLUMN legacy_unrecoverable INTEGER NOT NULL DEFAULT 0
+  CHECK (legacy_unrecoverable IN (0, 1));
+UPDATE posting_intents
+SET legacy_unrecoverable = 1
+WHERE resolved_tx_hash IS NULL;
+ALTER TABLE submission_scopes ADD COLUMN task_digest TEXT;
+ALTER TABLE submission_scopes ADD COLUMN creator_safe TEXT;
+ALTER TABLE submission_scopes ADD COLUMN venue_namespace TEXT;
+ALTER TABLE submission_scopes ADD COLUMN command_digest TEXT;
+ALTER TABLE submission_scopes ADD COLUMN posting_intent_key TEXT;
+ALTER TABLE submission_scopes ADD COLUMN legacy_scope_unrecoverable INTEGER NOT NULL DEFAULT 0
+  CHECK (legacy_scope_unrecoverable IN (0, 1));
+UPDATE submission_scopes
+SET legacy_scope_unrecoverable = 1
+WHERE resolved_at_ms IS NULL;
 `;
 
 export const SCHEMA_SQL = `
@@ -110,6 +132,11 @@ CREATE TABLE posting_intents (
   idempotency_key TEXT NOT NULL,
   owner_token TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  venue_namespace TEXT,
+  command_digest TEXT,
+  command_json TEXT,
+  legacy_unrecoverable INTEGER NOT NULL DEFAULT 0
+    CHECK (legacy_unrecoverable IN (0, 1)),
   resolved_task_id TEXT,
   resolved_tx_hash TEXT,
   PRIMARY KEY (creator_safe, task_cid_digest, submission_digest),
@@ -156,6 +183,13 @@ CREATE TABLE submission_scopes (
   resolved_tx_hash TEXT,
   engagement_attempt TEXT,
   dispatch_context_json TEXT,
+  task_digest TEXT NOT NULL,
+  creator_safe TEXT NOT NULL,
+  venue_namespace TEXT NOT NULL,
+  command_digest TEXT NOT NULL,
+  posting_intent_key TEXT NOT NULL,
+  legacy_scope_unrecoverable INTEGER NOT NULL DEFAULT 0
+    CHECK (legacy_scope_unrecoverable IN (0, 1)),
   PRIMARY KEY (requester, idempotency_key)
 );
 

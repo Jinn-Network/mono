@@ -448,8 +448,8 @@ test('task-supply source boundaries remain one-way across the approved graph', (
     chainScenariosForbiddenPackages(),
     [...FORBIDDEN_ROOTS, join(root, 'packages', 'environments', 'chain-verification')],
   );
-  // posting imports the marketplace binding (posting mechanics + D7 on-ramp adapters), the
-  // protocol package that owns Submission sealing, and task-derivation for types only.
+  // posting imports the marketplace requester backend and the protocol package that owns
+  // Submission sealing. Task derivation is permitted only in a compile-time test fixture.
   assertBoundary(
     join(packages, 'posting', 'src'),
     postingForbiddenPackages(),
@@ -498,17 +498,29 @@ test('chain-scenarios reaches task-admission for types only (design §3: admissi
       + 'calls admission through an injected port, never directly (program ruling R4)');
 });
 
-test('task-posting reaches task-derivation for types only (supply plan finding F-C5-5)', () => {
+test('task-posting reaches task-derivation only from its compile-time structural fixture', () => {
   const production = files(join(packages, 'posting', 'src'))
     .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
-  const valueImports = production.flatMap((file) => {
+  const imports = production.flatMap((file) => {
     const source = readFileSync(file, 'utf8');
-    return [...source.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+["']@jinn-network\/task-derivation["']/gmu)]
+    return [...source.matchAll(/^\s*import\s+[^;]*?from\s+["']@jinn-network\/task-derivation["']/gmu)]
       .map((match) => `${relative(root, file)} -> ${match[0].trim()}`);
   });
-  assert.deepEqual(valueImports, [],
-    'posting may import @jinn-network/task-derivation with `import type` only: design §3.3 has no '
-      + 'runtime posting -> derivation edge');
+  assert.deepEqual(imports, [],
+    'posting production code has no dependency on @jinn-network/task-derivation');
+
+  const structuralFixture = readFileSync(join(packages, 'posting', 'src', 'pool-shape.test.ts'), 'utf8');
+  assert.match(structuralFixture,
+    /^import type \{ SupplyPool \} from "@jinn-network\/task-derivation";/mu,
+    'the sole task-derivation edge must remain an explicitly type-only structural fixture');
+});
+
+test('task-posting exposes the requester backend and no raw posting-operation ports', () => {
+  const execution = readFileSync(join(packages, 'posting', 'src', 'execute.ts'), 'utf8');
+  const publicIndex = readFileSync(join(packages, 'posting', 'src', 'index.ts'), 'utf8');
+  assert.match(execution, /readonly backend: MarketplaceRequesterBackend;/u);
+  assert.doesNotMatch(execution, /\bPostTaskFn\b|readonly postTask:|readonly ports:|readonly chain:/u);
+  assert.doesNotMatch(publicIndex, /\bPostTaskFn\b/u);
 });
 
 test('derivation\'s task-execution carve-out admits exactly two packages and bans the rest', () => {

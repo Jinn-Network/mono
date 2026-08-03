@@ -10,7 +10,6 @@ import {
   MEDIA_ENTRY,
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
-  dssePreAuthEncoding,
   formatOrigin,
   formatSequence,
   sealJson,
@@ -27,12 +26,13 @@ import {
 import { documentDigest } from "@jinn-network/task-execution-protocol";
 import {
   maintainHead,
+  signAnnouncementEntry,
   writeArchivePages,
   writeRecord,
   type BlobStore,
   type Clock,
   type DsseEnvelope,
-  type DsseSigner,
+  type ScopedDiscoverySigner,
   type SignedEntry,
 } from "@jinn-network/record-discovery-serve";
 import type { DerivationAnnotation } from "./derivation.js";
@@ -42,9 +42,8 @@ import {
   type MarketplaceProjectionTransition,
 } from "./observe.js";
 
-export interface ScopedDiscoverySigner extends DsseSigner {
-  readonly scope: typeof DISCOVERY_SIGNING_SCOPE;
-}
+export { signAnnouncementEntry };
+export type { ScopedDiscoverySigner };
 
 export type AnnouncementRecordRole =
   | "submission"
@@ -136,33 +135,6 @@ export interface AnnouncementProjectionResult {
   readonly refusals: Array<VerdictObservationRefusal | AnnouncementMaterialRefusal>;
   readonly head?: SourceHead;
   readonly headEnvelope?: DsseEnvelope;
-}
-
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
-export async function signAnnouncementEntry(
-  entry: AnnouncementEntry,
-  signer: ScopedDiscoverySigner,
-): Promise<DsseEnvelope> {
-  if (signer.scope !== DISCOVERY_SIGNING_SCOPE) {
-    throw new Error(
-      `announcement signer must be bound to DISCOVERY_SIGNING_SCOPE "${DISCOVERY_SIGNING_SCOPE}"`,
-    );
-  }
-  const { bytes } = sealJson(entry);
-  const signatures = await signer.sign(dssePreAuthEncoding(MEDIA_ENTRY, bytes));
-  return {
-    payloadType: MEDIA_ENTRY,
-    payload: encodeBase64(bytes),
-    signatures: signatures.map((signature) => ({
-      ...(signature.keyid === undefined ? {} : { keyid: signature.keyid }),
-      sig: encodeBase64(signature.sig),
-    })),
-  };
 }
 
 function taskKey(event: ObservationMarketplaceEvent, taskId: bigint): string {

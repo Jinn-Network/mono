@@ -5,12 +5,12 @@ import {
   sealSubmission,
   sealTask,
 } from '@jinn-network/task-execution-protocol';
+import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import {
   PREDICTION_FORECAST_PROFILE_URI,
   buildPredictionForecastProfile,
   sealTaskProfile,
 } from '@jinn-network/task-execution-profiles';
-import { RECORD_KINDS_SUBMISSION } from '@jinn-network/marketplace-pipeline';
 import {
   evaluateNativeClaim,
   type NativeClaimEvaluationInput,
@@ -101,7 +101,7 @@ function input(overrides: Partial<NativeClaimEvaluationInput> = {}): NativeClaim
   const docs = documents();
   return {
     card: {
-      record: { kind: RECORD_KINDS_SUBMISSION, digest: documentDigest(docs.submissionBytes) },
+      record: { kind: RECORD_KINDS.submission, digest: documentDigest(docs.submissionBytes) },
       facts: {
         taskDigest: documentDigest(docs.taskBytes),
         taskProfileUri: PREDICTION_FORECAST_PROFILE_URI,
@@ -196,7 +196,7 @@ describe('evaluateNativeClaim', () => {
       submissionBytes: docs.submissionBytes,
       card: {
         ...input().card,
-        record: { kind: RECORD_KINDS_SUBMISSION, digest: documentDigest(docs.submissionBytes) },
+        record: { kind: RECORD_KINDS.submission, digest: documentDigest(docs.submissionBytes) },
         facts: {
           ...input().card.facts,
           taskDigest: documentDigest(docs.taskBytes),

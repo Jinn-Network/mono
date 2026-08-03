@@ -1,5 +1,4 @@
 import {
-  RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   type SourceIdentity,
   type WithdrawnAnnouncement,
@@ -82,13 +81,7 @@ export async function openNativeSolutionPublisher(input: {
         bytes: value.bytes,
         mediaType: value.artifact.mediaType,
         timestamp: value.publication.createdAt,
-        makeEntry: ({ sequence, previous, location }) => ({
-          protocol: RECORD_DISCOVERY_VERSION,
-          source: input.source,
-          sequence,
-          previous,
-          timestamp: value.publication.createdAt,
-          announcements: [{
+        makeAnnouncement: ({ location }) => ({
             announcementId: value.publication.publicationKey,
             action: 'available',
             record: {
@@ -104,7 +97,6 @@ export async function openNativeSolutionPublisher(input: {
               settlementDeclarationKey: input.settlementDeclarationKey,
               ...(value.artifact.name === null ? {} : { name: value.artifact.name }),
             },
-          }],
         }),
       });
     },
@@ -116,18 +108,11 @@ export async function openNativeSolutionPublisher(input: {
         bytes: value.bytes,
         mediaType: value.mediaType,
         timestamp: value.timestamp,
-        makeEntry: ({ sequence, previous }) => ({
-          protocol: RECORD_DISCOVERY_VERSION,
-          source: input.source,
-          sequence,
-          previous,
-          timestamp: value.timestamp,
-          announcements: [{
+        makeAnnouncement: () => ({
             announcementId: value.withdrawalKey,
             action: 'withdrawn',
             retracts: value.targetAnnouncementId,
             reason: value.reason,
-          }],
         }),
       });
       return { sequence: receipt.sequence, entryDigest: receipt.entryDigest };

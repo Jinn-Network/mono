@@ -32,6 +32,7 @@ import {
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
+import { recordPhaseDTransitionUse } from './daemon/phase-d-transition-usage.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -1445,6 +1446,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
   // providers per issue #911.
   const parsed = result.data;
+  const usesLegacyWiring = (parsed.executionWiring ?? []).some((entry) => (
+    entry.harness.length > 0
+    || entry.model.length > 0
+    || entry.plugins.length > 0
+    || entry.credentialRef.length > 0
+    || entry.legacyManifestDigest !== undefined
+  ));
+  if (usesLegacyWiring) recordPhaseDTransitionUse('legacy-wiring-config-field');
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
     : DEFAULT_MAINNET_RPC_URLS;

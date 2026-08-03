@@ -31,7 +31,14 @@ import {
 import { TaskExecutionError, type DeliveryRef, type ObservationCursor, type ObservationSnapshot, type ReconciliationReport, type SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { MarketplaceChainConfig } from "./addresses.js";
 import { deriveMarketplaceAttemptUri } from "./attempt-uri.js";
-import type { MarketplaceObservePort, RecordSubmissionInput, SubmissionScopeOwnerToken, SubmissionScopeRecord } from "./backend-ports.js";
+import type { PostingIntentKey, PostingIntentStore } from "./broadcast-intent.js";
+import type {
+  ClaimSubmissionScopeInput,
+  MarketplaceObservePort,
+  RecordSubmissionInput,
+  SubmissionScopeOwnerToken,
+  SubmissionScopeRecord,
+} from "./backend-ports.js";
 
 type AttemptUri = `urn:uuid:${string}`;
 
@@ -59,12 +66,13 @@ export interface InMemoryMarketplaceObserveStore extends MarketplaceObservePort 
 }
 
 /** Builds the reference in-memory `MarketplaceObservePort` (see module doc for the self-claim caveat). */
-export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainConfig): InMemoryMarketplaceObserveStore {
+export function createInMemoryMarketplaceObserveStore(
+  config: MarketplaceChainConfig,
+  options: { readonly intents?: PostingIntentStore } = {},
+): InMemoryMarketplaceObserveStore {
   const scopeDelimiter = "\u001f";
   const scopes = new Map<string, SubmissionScopeRecord>();
-  const pendingScopes = new Map<string, SubmissionScopeRecord & {
-    readonly requester: string;
-    readonly idempotencyKey: string;
+  const pendingScopes = new Map<string, ClaimSubmissionScopeInput & {
     readonly ownerToken: SubmissionScopeOwnerToken;
   }>();
   const attemptMeta = new Map<AttemptUri, AttemptMeta>();
@@ -103,7 +111,7 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
     throw new TaskExecutionError("attempt-not-found", { detail: `no Attempt or Submission for ref "${ref}"` });
   }
 
-  return {
+  const api: InMemoryMarketplaceObserveStore = {
     scopes,
 
     async claimSubmissionScope(input) {
@@ -125,6 +133,81 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
       return { kind: "owner" as const, ownerToken };
     },
 
+    async readSubmissionScope(requester, idempotencyKey) {
+      const key = `${requester}${scopeDelimiter}${idempotencyKey}`;
+      return scopes.get(key) ?? pendingScopes.get(key);
+    },
+
+    async scanPendingSubmissionScopes() {
+      return [...pendingScopes.values()].map(({ ownerToken: _ownerToken, ...scope }) => scope);
+    },
+
+    async reclaimSubmissionScope(input) {
+      const key = `${input.requester}${scopeDelimiter}${input.idempotencyKey}`;
+      const completed = scopes.get(key);
+      if (completed !== undefined) {
+        return bytesEqual(completed.submissionBytes, input.submissionBytes)
+          ? { kind: "resolved" as const, record: completed }
+          : { kind: "conflict" as const };
+      }
+      const pending = pendingScopes.get(key);
+      if (
+        pending === undefined
+        || !bytesEqual(pending.submissionBytes, input.submissionBytes)
+        || pending.digest !== input.digest
+        || pending.taskDigest !== input.taskDigest
+        || pending.creatorSafe.toLowerCase() !== input.creatorSafe.toLowerCase()
+        || pending.venueNamespace !== input.venueNamespace
+        || pending.commandDigest !== input.commandDigest
+        || pending.postingIntentKey !== input.postingIntentKey
+      ) {
+        return { kind: "conflict" as const };
+      }
+      const ownerToken = `submission-scope-owner:${crypto.randomUUID()}` as SubmissionScopeOwnerToken;
+      pendingScopes.set(key, { ...pending, ownerToken });
+      return { kind: "owner" as const, ownerToken };
+    },
+
+    async resolveRecoveredSubmissionScope(input) {
+      const key = `${input.requester}${scopeDelimiter}${input.idempotencyKey}`;
+      const completed = scopes.get(key);
+      if (completed !== undefined) {
+        return "already-resolved" as const;
+      }
+      const pending = pendingScopes.get(key);
+      if (
+        pending === undefined
+        || !bytesEqual(pending.submissionBytes, input.submissionBytes)
+        || pending.digest !== input.digest
+        || pending.taskDigest !== input.taskDigest
+        || pending.creatorSafe.toLowerCase() !== input.creatorSafe.toLowerCase()
+        || pending.venueNamespace !== input.venueNamespace
+        || pending.commandDigest !== input.commandDigest
+        || pending.postingIntentKey !== input.postingIntentKey
+      ) {
+        return "conflict" as const;
+      }
+      if (options.intents === undefined) return "no-intent" as const;
+      const intentKey: PostingIntentKey = {
+        creatorSafe: input.creatorSafe,
+        taskCidDigest: input.taskDigest,
+        submissionDigest: input.digest,
+        venueNamespace: input.venueNamespace,
+        commandDigest: input.commandDigest,
+      };
+      const intent = await options.intents.lookup(intentKey);
+      if (intent === undefined) return "no-intent" as const;
+      if (intent.resolved === undefined) return "pending-intent" as const;
+      await api.resolveSubmissionScope({
+        taskDigest: input.taskDigest,
+        submissionDigest: input.digest,
+        submissionBytes: input.submissionBytes,
+        submission: JSON.parse(new TextDecoder().decode(input.submissionBytes)),
+        outcome: intent.resolved,
+      }, pending.ownerToken);
+      return "resolved" as const;
+    },
+
     async resolveSubmissionScope(input: RecordSubmissionInput, ownerToken: SubmissionScopeOwnerToken): Promise<void> {
       const submission = input.submission as SubmissionRecord;
       const submissionUri = submission.submission as SubmissionUri;
@@ -140,6 +223,12 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
         submissionUri,
         digest: input.submissionDigest,
         submissionBytes: input.submissionBytes,
+        taskDigest: input.taskDigest,
+        creatorSafe: pending.creatorSafe,
+        venueNamespace: pending.venueNamespace,
+        commandDigest: pending.commandDigest,
+        postingIntentKey: pending.postingIntentKey,
+        outcome: input.outcome,
       };
       scopes.set(key, completed);
       pendingScopes.delete(key);
@@ -262,4 +351,5 @@ export function createInMemoryMarketplaceObserveStore(config: MarketplaceChainCo
       return bytes;
     },
   };
+  return api;
 }

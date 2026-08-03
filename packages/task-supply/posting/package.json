@@ -37,11 +37,10 @@
   },
   "dependencies": {
     "@jinn-network/marketplace-binding": "0.1.0",
-    "@jinn-network/task-derivation": "0.1.0",
-    "@jinn-network/task-execution-protocol": "0.1.0",
-    "viem": "^2.0.0"
+    "@jinn-network/task-execution-protocol": "0.1.0"
   },
   "devDependencies": {
+    "@jinn-network/task-derivation": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-profiles": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",

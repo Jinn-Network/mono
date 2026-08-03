@@ -53,14 +53,11 @@
  * fakes and pass; that does not mean the loop works end-to-end against a live projector yet.
  */
 import {
-  mapAnnouncedSubmissionToFacts,
   resolveWiringEntry,
   runPipeline,
-  type AnnouncedSubmissionCard,
   type ExecutionWiringEntry,
   type PipelinePorts,
   type PipelineRunOutcome,
-  type SubmissionFacts,
 } from '@jinn-network/marketplace-pipeline';
 import { computeRawCodecCid, deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 import { deliverToMarketplace } from '@jinn-network/marketplace-venue-base';
@@ -87,6 +84,12 @@ import {
   persistWorkLoopDeliveredCorpus,
   wrapBackendWithWorkLoopCorpus,
 } from './work-loop-corpus.js';
+import {
+  mapAnnouncedSubmissionToFacts,
+  type AnnouncedSubmissionCard,
+  type SubmissionFacts,
+} from './native-submission-facts.js';
+import { recordPhaseDTransitionUse } from './phase-d-transition-usage.js';
 
 export type { AnnouncedSubmissionCard };
 
@@ -460,6 +463,7 @@ export class WorkLoop {
       facts,
       getRequestId: () => claimedRequestId,
     });
+    recordPhaseDTransitionUse('marketplace-pipeline-invocation');
     const result = await runPipeline(
       { facts, taskBytes, submissionBytes },
       this.config.composition.pipelineConfig,

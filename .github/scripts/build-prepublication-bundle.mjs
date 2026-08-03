@@ -176,14 +176,14 @@ export async function buildNativeVerticalPrepublicationBundle({
 }) {
   const root = resolve(repoRoot);
   const output = resolve(outDir);
-  const releaseGroup = 'native-task-supply-canary';
-  requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup, lane });
+  const releaseGroup = 'native-vertical-runtime-closure';
+  const versionAuthorityGroup = 'platform-v1';
+  requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup: versionAuthorityGroup, lane });
   if (lane !== 'canary') throw new Error('native vertical role closure is canary-only');
 
   const allPackages = loadCatalogPackages(root);
-  const promotedPackages = loadCatalogPackages(root, { releaseGroup });
-  const promotedNames = new Set(promotedPackages.map(({ name }) => name));
-  const selectedNames = nativeVerticalRuntimePackageNames(root, allPackages, [...promotedNames]);
+  const promotedNames = new Set();
+  const selectedNames = nativeVerticalRuntimePackageNames(root, allPackages, []);
   const byName = new Map(allPackages.map((pkg) => [pkg.name, pkg]));
   const selected = selectedNames.map((name) => byName.get(name));
   if (selected.some((pkg) => pkg === undefined)) {
@@ -193,7 +193,7 @@ export async function buildNativeVerticalPrepublicationBundle({
     repoRoot: root,
     mode: lane,
     sha: sourceSha,
-    releaseGroup,
+    releaseGroup: versionAuthorityGroup,
   });
   const waves = topologicalWaves(buildDependencyGraph(selected)).map((wave) => wave.map((name) => {
     const pkg = byName.get(name);

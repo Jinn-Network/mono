@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-facts-environments",
   "version": "0.1.0",
-  "description": "Facts-profile document and record-fact recompute for the Jinn environment record kind.",
+  "description": "Experimental, publication-disabled facts profile and recompute for the Jinn environment record kind.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {

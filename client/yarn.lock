@@ -1224,6 +1224,8 @@ __metadata:
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
     better-sqlite3: "npm:13.0.1"
   languageName: node
   linkType: soft
@@ -1463,6 +1465,7 @@ __metadata:
   resolution: "@jinn-network/task-admission@portal:../packages/task-supply/admission::locator=%40jinn-network%2Fclient%40workspace%3A."
   dependencies:
     "@jinn-network/environment-record": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     zod: "npm:4.4.3"
   peerDependencies:

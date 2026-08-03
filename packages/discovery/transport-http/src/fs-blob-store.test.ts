@@ -66,6 +66,28 @@ describe("createFsBlobStore", () => {
     expect(new TextDecoder().decode(read!.bytes)).toBe("same-bytes");
   });
 
+  it("atomically creates or confirms the same immutable archive path under concurrency", async () => {
+    const store = createFsBlobStore(root);
+    const path = "/sources/feed/archive/0000000000000001";
+    const bytes = encoder.encode("same-page");
+    await Promise.all(Array.from({ length: 16 }, () => store.putImmutable(path, bytes, "application/json")));
+    expect(await store.get(path)).toEqual({ bytes, contentType: "application/json" });
+  });
+
+  it("never overwrites an immutable archive winner during a concurrent collision", async () => {
+    const store = createFsBlobStore(root);
+    const path = "/sources/feed/archive/0000000000000001";
+    const candidates = [encoder.encode("page-a"), encoder.encode("page-b")];
+    const results = await Promise.allSettled(candidates.map((bytes) => (
+      store.putImmutable(path, bytes, "application/json")
+    )));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const stored = await store.get(path);
+    expect(candidates.some((candidate) => stored !== undefined && Buffer.from(candidate).equals(Buffer.from(stored.bytes))))
+      .toBe(true);
+  });
+
   it("refuses to overwrite a digest path with different bytes", async () => {
     const store = createFsBlobStore(root);
     const digest = recordDigest(encoder.encode("original"));

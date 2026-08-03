@@ -1,7 +1,7 @@
 # `@jinn-network/record-discovery-source-evidence-journal`
 
-The deterministic **published-source wrapper** that re-seals the frozen evidence journal and
-catalog into one Jinn Record Discovery Protocol v1 chain (design §11:
+The deterministic **local-to-public adapter** that projects the permanent local evidence
+journal/outbox into one Jinn Record Discovery Protocol v1 source chain (design §11:
 `docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md`; plan Task 25:
 `docs/superpowers/plans/2026-07-28-record-discovery.md`).
 
@@ -16,9 +16,10 @@ this package **is** that projection. It reads two frozen evidence surfaces:
   carries the `available | withdrawn` union, for **withdrawals**
   (`RecordLocationWithdrawal {sourceId, announcementId, retractsAnnouncementId}`).
 
-...and merges both into ONE re-sealed, DSSE-signable Announcement Entry chain of its own —
-it never signs journal bytes as-is, and it makes **zero changes** to the frozen evidence
-contracts.
+...and merges both into ONE re-sealed, DSSE-signable Announcement Entry chain of its own. It
+never signs journal bytes as-is, never recanonicalizes evidence records, and makes **zero
+changes** to the frozen evidence contracts. Record Discovery is the public plane; evidence
+discovery remains the private local catalog and publication outbox.
 
 ## The pinned §11 field-map
 
@@ -31,24 +32,32 @@ contracts.
 | journal `predecessorDigest` | **not** reused — `previous` chains over the RE-SEALED projected entries |
 | evidence withdrawal | `action: "withdrawn"`, `reason: "delisted"` always (the evidence layer has no substrate; it never emits `reorged`) |
 
-`src/project.ts` holds the pure, I/O-free field-map functions. `src/reconcile.ts` sequences and
-chains them into a merged `AnnouncementEntry[]` (see its top comment for the sequence-assignment
-implementer finding: a single monotonic counter, not a literal `revision - offset` formula
-re-applied forever, because that formula cannot survive withdrawal interleaving in one shared
-gap-free sequence space — see plan Task 25 / design §11). `src/publish.ts` signs and writes the
-result through `@jinn-network/record-discovery-serve`'s toolkit (archive pages + head
-maintenance), never signing journal bytes as-is. The wrapper emits no facts card in v1 (design
-§11; enriching output with `facts/evidence` cards is a named follow-up).
+`src/project.ts` holds the pure, I/O-free field-map functions. The compatibility
+`src/reconcile.ts` and `src/publish.ts` APIs remain for existing callers. New runtime hosts use
+`createEvidenceJournalDurableBridge`, which persists the available cursor, withdrawal cursor,
+the exact pending projected command, and its timestamp. Source sequence, previous-entry linkage,
+signed bytes, pages, heads, and append recovery remain exclusively owned by
+`@jinn-network/record-discovery-serve`'s `DurableSourceWriter`.
+
+The bridge reads one fixed publication strategy per public source identity before it touches
+writer state. Before creating a new claim, a read-only preflight rejects any pre-existing writer
+state or append intent; the rejected attempt creates no ownership record, so retries remain
+fail-closed before writer recovery can mutate source blobs or state. An already-owned
+strategy retains normal append-intent recovery. Another strategy for the same identity fails
+closed. After a crash it replays the
+persisted command with the same `announcementId`, original record digest, exact record bytes, and
+timestamp; the writer's publication-key idempotency prevents a duplicate source entry. Available
+announcements are read from the filesystem journal. Withdrawals are a separately injected local
+source and are projected as `reason: "delisted"` without deleting original bytes or history.
 
 ## Frozen-contract boundary
 
-Zero edits to `packages/evidence/discovery` or `packages/evidence/repository`. `AnnouncementJournalEntryV1`
-is internal to evidence-discovery's journal module (not re-exported through its package `exports`
-map), so `src/ports.ts` declares its own structurally-identical `EvidenceJournalEntry` port shape
-instead of importing it — the same precedent `record-discovery-serve`'s `head.ts` uses for
-`DsseEnvelope` relative to `trust-core`. Translating a real
-`FilesystemEvidenceAnnouncementJournal`'s `.read()` output into that port shape (recovering each
-entry's `revision`) is host assembly, out of this package's scope.
+The adapter owns no filesystem, signer, blob store, repository, transport, or clock. The optional
+host in `@jinn-network/evidence-local-runtime` supplies its real
+`FilesystemEvidenceAnnouncementJournal`, exact-byte repository, durable JSON state stores,
+source writer, signer, blob store, withdrawal source, and clock through a structurally injected
+factory. This package is intentionally not a normal dependency of evidence-local-runtime, so
+ordinary native-role dependency closure does not load the optional bridge.
 
 ## Development
 

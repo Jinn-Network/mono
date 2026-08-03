@@ -50,6 +50,10 @@ import {
   createAnnouncementAwareRepository,
   recoverPendingPublications,
 } from "./publication.js";
+import {
+  openEvidenceJournalPublicDiscovery,
+  publicDiscoveryRuntimeError,
+} from "./public-discovery.js";
 import type {
   LocalEvidenceRuntime,
   LocalEvidenceRuntimeStatus,
@@ -365,6 +369,34 @@ async function openLocalEvidenceRuntimeWithDependencies(
       repositoryId: marker.repositoryId,
       signal: options.signal,
     });
+    const publicDiscovery = options.publicDiscovery === undefined
+      ? undefined
+      : openEvidenceJournalPublicDiscovery({
+          stateDir: paths.publicDiscoveryDir,
+          source: options.publicDiscovery.source,
+          evidenceSourceId: marker.sourceId,
+          journal,
+          repository: filesystemRepository,
+          signer: options.publicDiscovery.signer,
+          blobs: options.publicDiscovery.blobs,
+          bridgeFactory: options.publicDiscovery.bridgeFactory,
+          ...(options.publicDiscovery.withdrawals === undefined
+            ? {}
+            : { withdrawals: options.publicDiscovery.withdrawals }),
+          ...(options.publicDiscovery.now === undefined
+            ? {}
+            : { now: options.publicDiscovery.now }),
+          ...(options.publicDiscovery.refreshWithinMs === undefined
+            ? {}
+            : { refreshWithinMs: options.publicDiscovery.refreshWithinMs }),
+        });
+    if (publicDiscovery !== undefined) {
+      try {
+        await publicDiscovery.sync();
+      } catch (error) {
+        throw publicDiscoveryRuntimeError(error);
+      }
+    }
 
     let state: LocalRuntimeLifecycleState = "rebuilding";
     let rebuildRunning = false;
@@ -605,12 +637,15 @@ async function openLocalEvidenceRuntimeWithDependencies(
     const runtime: LocalEvidenceRuntime = {
       repository,
       catalog: readerProxy.reader,
+      ...(publicDiscovery === undefined ? {} : { publicDiscovery }),
       async sync(operationOptions) {
         assertReadable();
         assertLocalRuntimeOperationActive(operationOptions);
         try {
           const captured = await journal!.getHighWaterCursor(operationOptions);
-          return await active!.worker.syncTo(captured, operationOptions);
+          const report = await active!.worker.syncTo(captured, operationOptions);
+          await publicDiscovery?.sync();
+          return report;
         } catch (error) {
           throw runtimeOperationError(error, "Local evidence synchronization");
         }

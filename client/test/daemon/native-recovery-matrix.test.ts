@@ -110,6 +110,8 @@ async function requesterRun(input: {
   let invoked = false;
   let posts = 0;
   let recoveries = 0;
+  let postingEffects = 0;
+  let durableOutcome: { readonly taskId: bigint; readonly txHash: `0x${string}` } | undefined;
   const deps = {
     stateDir: input.stateDir,
     requesterAgent: 'urn:jinn:requester:B800',
@@ -127,11 +129,17 @@ async function requesterRun(input: {
     creatorSafe: CREATOR,
     posting: {
       terms: REQUESTER_TERMS,
+      recoverPosting: async () => ({
+        resolvedScopes: [], uncertainScopes: [], retryableScopes: [], conflicts: [],
+      }),
       post: async () => {
         posts += 1;
+        if (durableOutcome !== undefined) return durableOutcome;
+        postingEffects += 1;
         invoked = true;
+        durableOutcome = { taskId: 17n, txHash: TX };
         if (input.recover) throw new Error('wallet response lost');
-        return { taskId: 17n, txHash: TX };
+        return durableOutcome;
       },
       recover: async () => {
         recoveries += 1;
@@ -177,7 +185,7 @@ async function requesterRun(input: {
     operationIds: [`post:${association.taskDigest}:${association.submissionDigest}`],
     sourceHead: association.publication.entryDigest,
     invocations: { post: posts, recover: recoveries },
-    effects: { posting: 1, signedSourceEntries: 1 },
+    effects: { posting: postingEffects, signedSourceEntries: 1 },
   };
 }
 
@@ -1328,7 +1336,8 @@ describe('Phase B seeded native recovery matrix', () => {
       const requesterRecovered = await requesterRun({ stateDir: requesterRecoveryRoot, roles, recover: true });
       expect(requesterRecovered.graphRoot).toBe(requesterOracle.graphRoot);
       expect(requesterRecovered.operationIds).toEqual(requesterOracle.operationIds);
-      expect(requesterRecovered.invocations.post).toBe(requesterOracle.invocations.post);
+      expect(requesterOracle.invocations).toEqual({ post: 1, recover: 0 });
+      expect(requesterRecovered.invocations).toEqual({ post: 2, recover: 0 });
       expect(requesterRecovered.effects).toEqual(requesterOracle.effects);
       results.push(requesterRecovered);
 

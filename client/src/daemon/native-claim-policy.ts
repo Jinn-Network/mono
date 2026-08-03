@@ -3,14 +3,11 @@ import type {
   TaskExecutionBackend,
 } from '@jinn-network/task-execution-backend';
 import {
-  mapAnnouncedSubmissionToFacts,
-  RECORD_KINDS_SUBMISSION,
   validateRequirementsAgainstRunPinning,
   verifyPreclaim,
-  type AnnouncedSubmissionCard,
-  type SubmissionFacts,
-} from '@jinn-network/marketplace-pipeline';
+} from '@jinn-network/task-execution-backend';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
+import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import {
   documentDigest,
   serializeCanonicalJson,
@@ -18,6 +15,11 @@ import {
   TaskSpecificationSchema,
 } from '@jinn-network/task-execution-protocol';
 import { PREDICTION_FORECAST_PROFILE_URI } from '@jinn-network/task-execution-profiles';
+import {
+  mapAnnouncedSubmissionToFacts,
+  type AnnouncedSubmissionCard,
+  type SubmissionFacts,
+} from './native-submission-facts.js';
 
 export const PHASE_B_NATIVE_PROFILE_ALLOWLIST = [PREDICTION_FORECAST_PROFILE_URI] as const;
 
@@ -281,7 +283,13 @@ async function evaluateCapability(
     return { ok: false, reason: 'profile-mismatch', retryable: false, backend: backendCapabilities, launcher };
   }
 
-  const preclaim = await verifyPreclaim(facts, input.backend, backendCapabilities);
+  const preclaim = await verifyPreclaim({
+    taskProfile: facts.profileUri,
+    requirements: facts.requirements,
+    ...(facts.runPinning?.isolationPolicy === undefined
+      ? {}
+      : { requestedIsolationPolicy: facts.runPinning.isolationPolicy }),
+  }, input.backend, backendCapabilities);
   if (!preclaim.ok) {
     const retryable = preclaim.reason === 'preflight-not-ready';
     return {
@@ -313,7 +321,7 @@ export async function evaluateNativeClaim(input: NativeClaimEvaluationInput): Pr
   if (input.card.discovery === undefined) {
     return refused('unverified-source', false, noCapability, basePolicy);
   }
-  if (input.card.record.kind !== RECORD_KINDS_SUBMISSION) {
+  if (input.card.record.kind !== RECORD_KINDS.submission) {
     return refused('sealed-document-mismatch', false, noCapability, basePolicy);
   }
 

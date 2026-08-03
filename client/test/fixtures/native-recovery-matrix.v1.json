@@ -3,7 +3,7 @@
   "seeds": [
     {
       "seed": "B800", "boundary": "posting-wallet-return-uncertain", "rail": "requester",
-      "expected": { "finalState": "published", "operationCount": 1, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "post": [1], "recover": [1] }, "effects": { "posting": 1, "signedSourceEntries": 1 } }
+      "expected": { "finalState": "published", "operationCount": 1, "root": "recovered-equals-uninterrupted", "permittedInvocations": { "post": [2], "recover": [0] }, "effects": { "posting": 1, "signedSourceEntries": 1 } }
     },
     {
       "seed": "B801", "boundary": "claim-wallet-return-uncertain", "rail": "solver",

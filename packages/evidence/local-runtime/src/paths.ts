@@ -31,6 +31,7 @@ export interface LocalRuntimePaths {
   readonly generationsDir: string;
   readonly catalogPointerPath: string;
   readonly operationsDir: string;
+  readonly publicDiscoveryDir: string;
   readonly lockPath: string;
   readonly operationsDatabasePath: string;
 }
@@ -214,12 +215,14 @@ export async function prepareRuntimePaths(
   const catalogDir = join(rootDir, "catalog");
   const generationsDir = join(catalogDir, "generations");
   const operationsDir = join(rootDir, "operations");
+  const publicDiscoveryDir = join(rootDir, "public-discovery");
   for (const path of [
     repositoryDir,
     announcementsDir,
     catalogDir,
     generationsDir,
     operationsDir,
+    publicDiscoveryDir,
   ]) {
     await secureDirectory(path);
   }
@@ -232,6 +235,7 @@ export async function prepareRuntimePaths(
     generationsDir,
     catalogPointerPath: join(catalogDir, "current.json"),
     operationsDir,
+    publicDiscoveryDir,
     lockPath: join(rootDir, "runtime.lock"),
     operationsDatabasePath: join(operationsDir, "runtime.sqlite"),
   };

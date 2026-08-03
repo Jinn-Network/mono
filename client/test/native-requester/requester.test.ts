@@ -1,5 +1,5 @@
 import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,13 +17,18 @@ import {
 import { EVALUATION_SPEC_MEDIA_TYPE } from '@jinn-network/task-execution-profiles';
 import {
   archivePagePath,
+  headPath,
   sealJson,
   WELL_KNOWN_PATH,
   type AvailableAnnouncement,
 } from '@jinn-network/record-discovery-protocol';
 import { coldSync, createVerifyDriver, fetchHead, type SyncedEntry } from '@jinn-network/record-discovery-client';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
-import { createInMemoryPostingIntentStore } from '@jinn-network/marketplace-binding';
+import {
+  createInMemoryMarketplaceObserveStore,
+  createInMemoryPostingIntentStore,
+  makeMarketplaceBackend,
+} from '@jinn-network/marketplace-binding';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createNativeRequester,
@@ -100,8 +105,10 @@ function fixture(input: {
   readonly readChain?: () => Promise<typeof CHAIN>;
   readonly post?: ReturnType<typeof vi.fn>;
   readonly recover?: ReturnType<typeof vi.fn>;
+  readonly recoverPosting?: ReturnType<typeof vi.fn>;
   readonly terms?: typeof TERMS;
   readonly checkpoints?: (name: string) => Promise<void>;
+  readonly now?: () => Date;
 }) {
   const post = input.post ?? vi.fn(async () => ({ taskId: 17n, txHash: TX_HASH }));
   const readChain = input.readChain ?? vi.fn(async () => CHAIN);
@@ -119,6 +126,9 @@ function fixture(input: {
       posting: {
         terms: input.terms ?? TERMS,
         post,
+        recoverPosting: input.recoverPosting ?? (async () => ({
+          resolvedScopes: [], uncertainScopes: [], retryableScopes: [], conflicts: [],
+        })),
         recover: input.recover ?? (async () => null),
         canonicalTaskCreated: async (expected) => ({
           canonical: true as const,
@@ -132,7 +142,7 @@ function fixture(input: {
           maxClaims: expected.maxClaims,
         }),
       },
-      now: () => new Date('2026-08-02T12:00:00.000Z'),
+      now: input.now ?? (() => new Date('2026-08-02T12:00:00.000Z')),
       ...(input.checkpoints === undefined ? {} : { checkpoints: input.checkpoints }),
     }),
     post,
@@ -161,6 +171,46 @@ describe('native requester', () => {
     await rm(stateDir, { recursive: true, force: true });
   });
 
+  it('fails closed on uncertain requester-backend recovery before loading product keys or posting', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-recovery-gate-'));
+    const loadRoles = vi.fn(async () => roles());
+    const post = vi.fn();
+    const recoverPosting = vi.fn(async () => ({
+      resolvedScopes: [],
+      uncertainScopes: ['urn:uuid:11111111-1111-1111-1111-111111111111'] as const,
+      retryableScopes: [],
+      conflicts: [],
+    }));
+    const requester = fixture({ stateDir, loadRoles, post, recoverPosting }).requester;
+
+    await expect(requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'blocked-uncertain',
+    })).rejects.toThrow(/posting recovery is not closed.*uncertain/u);
+    expect(recoverPosting).toHaveBeenCalledOnce();
+    expect(loadRoles).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('does not admit unrelated new work while a retryable requester scope remains after local reconciliation', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-retryable-gate-'));
+    const post = vi.fn();
+    const recoverPosting = vi.fn(async () => ({
+      resolvedScopes: [],
+      uncertainScopes: [],
+      retryableScopes: ['urn:uuid:22222222-2222-2222-2222-222222222222'] as const,
+      conflicts: [],
+    }));
+    const requester = fixture({ stateDir, post, recoverPosting }).requester;
+
+    await expect(requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'blocked-retryable',
+    })).rejects.toThrow(/posting recovery is not closed.*retryable/u);
+    expect(recoverPosting).toHaveBeenCalledTimes(2);
+    expect(post).not.toHaveBeenCalled();
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
   it('uses B1 as a Task/EvaluationSpec template but seals run-specific receipt, Submission, and requester DSSE in order before a canonical post', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-order-'));
     const order: string[] = [];
@@ -183,6 +233,7 @@ describe('native requester', () => {
       'before-broadcast',
       'after-broadcast',
       'canonical-associated',
+      'source-intent-durable',
       'source-announced',
     ]);
     expect(post).toHaveBeenCalledOnce();
@@ -274,12 +325,15 @@ describe('native requester', () => {
   it('recovers wallet-return uncertainty before any rebroadcast and announces the same sealed bundle once', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-wallet-uncertain-'));
     const identities = roles();
-    let invoked = false;
+    let backendCalls = 0;
     const post = vi.fn(async () => {
-      invoked = true;
-      throw new Error('wallet result lost after invocation');
+      backendCalls += 1;
+      if (backendCalls === 1) throw new Error('wallet result lost after invocation');
+      // The shared requester backend replays its resolved WAL outcome; this second operation
+      // call does not authorize a second wallet broadcast.
+      return { taskId: 17n, txHash: TX_HASH };
     });
-    const recover = vi.fn(async () => invoked ? ({ taskId: 17n, txHash: TX_HASH }) : null);
+    const recover = vi.fn(async () => null);
     const first = fixture({
       stateDir,
       post,
@@ -303,14 +357,187 @@ describe('native requester', () => {
       network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'wallet-uncertain',
     });
 
-    expect(post).toHaveBeenCalledOnce();
-    expect(recover).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(recover).not.toHaveBeenCalled();
     expect(recovered.reused).toBe(true);
     expect(replay.association).toEqual(recovered.association);
     expect(recovered.association.publication).toMatchObject({
       state: 'published',
       sequence: '0000000000000001',
     });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('adopts a pending requester v1 publication through the generic writer without changing its signed page or head', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-v1-source-'));
+    const identities = roles();
+    const first = fixture({ stateDir, loadRoles: async () => identities }).requester;
+    const initial = await first.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'v1-source-recovery',
+    });
+    const pagePath = join(stateDir, 'discovery', archivePagePath('requester', initial.association.publication.page));
+    const publicHeadPath = join(stateDir, 'discovery', headPath('requester'));
+    const originalPage = new Uint8Array(await readFile(pagePath));
+    const originalHead = new Uint8Array(await readFile(publicHeadPath));
+
+    const associationName = (await readdir(join(stateDir, 'associations')))[0]!;
+    const associationPath = join(stateDir, 'associations', associationName);
+    const stored = JSON.parse(await readFile(associationPath, 'utf8')) as {
+      publication: Record<string, unknown>;
+    };
+    stored.publication.state = 'pending';
+    delete stored.publication.writerIntent;
+    await writeFile(associationPath, `${JSON.stringify(stored)}\n`, 'utf8');
+    await unlink(join(stateDir, 'requester-source.json'));
+
+    const restarted = fixture({ stateDir, loadRoles: async () => identities }).requester;
+    const recovered = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'v1-source-recovery',
+    });
+    expect(recovered.association.publication.state).toBe('published');
+    expect(new Uint8Array(await readFile(pagePath))).toEqual(originalPage);
+    expect(new Uint8Array(await readFile(publicHeadPath))).toEqual(originalHead);
+    const source = JSON.parse(await readFile(join(stateDir, 'requester-source.json'), 'utf8')) as {
+      version: number;
+      last?: { sequence?: string; entryDigest?: string; page?: string };
+    };
+    expect(source).toMatchObject({
+      version: 1,
+      last: {
+        sequence: initial.association.publication.sequence,
+        entryDigest: initial.association.publication.entryDigest,
+        page: initial.association.publication.page,
+      },
+    });
+    expect(source).not.toHaveProperty('durable');
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('recovers the source-global frozen intent after restart without re-signing it', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-global-intent-'));
+    const identities = roles();
+    const first = fixture({
+      stateDir,
+      loadRoles: async () => identities,
+      checkpoints: async (name) => {
+        if (name === 'source-intent-durable') throw new Error('simulated death after source-global intent');
+      },
+    }).requester;
+    await expect(first.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'global-intent-restart',
+    })).rejects.toThrow(/after source-global intent/u);
+
+    const pendingState = JSON.parse(await readFile(join(stateDir, 'requester-source.json'), 'utf8')) as {
+      pending?: {
+        intent: {
+          page: { bytesBase64: string; path: string };
+          head: { bytesBase64: string; path: string };
+        };
+      };
+    };
+    expect(pendingState.pending).toBeDefined();
+    const frozenPage = new Uint8Array(Buffer.from(pendingState.pending!.intent.page.bytesBase64, 'base64'));
+    const frozenHead = new Uint8Array(Buffer.from(pendingState.pending!.intent.head.bytesBase64, 'base64'));
+
+    const restarted = fixture({ stateDir, loadRoles: async () => identities }).requester;
+    const recovered = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'global-intent-restart',
+    });
+    expect(recovered.association.publication.state).toBe('published');
+    expect(new Uint8Array(await readFile(join(stateDir, 'discovery', pendingState.pending!.intent.page.path))))
+      .toEqual(frozenPage);
+    expect(new Uint8Array(await readFile(join(stateDir, 'discovery', pendingState.pending!.intent.head.path))))
+      .toEqual(frozenHead);
+    const committed = JSON.parse(await readFile(join(stateDir, 'requester-source.json'), 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(committed).sort()).toEqual(['last', 'version']);
+    expect(committed).not.toHaveProperty('pending');
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('continues the generic source from the sole v1 requester-source position', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-source-chain-'));
+    const identities = roles();
+    let posted = 16n;
+    let sourceTime = new Date('2026-08-02T12:00:00.000Z');
+    const post = vi.fn(async () => ({ taskId: ++posted, txHash: TX_HASH }));
+    const requester = fixture({
+      stateDir,
+      loadRoles: async () => identities,
+      post,
+      now: () => sourceTime,
+    }).requester;
+    const first = await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'source-chain-one',
+    });
+    sourceTime = new Date('2026-08-02T12:01:00.000Z');
+    const second = await requester.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'source-chain-two',
+    });
+
+    expect(first.association.publication.sequence).toBe('0000000000000001');
+    expect(second.association.publication).toMatchObject({
+      state: 'published',
+      sequence: '0000000000000002',
+      page: '0000000000000002',
+    });
+    expect(second.association.publication.entry.previous).toBe(first.association.publication.entryDigest);
+    const source = JSON.parse(await readFile(join(stateDir, 'requester-source.json'), 'utf8')) as Record<string, unknown>;
+    expect(source).toEqual({
+      version: 1,
+      last: {
+        sequence: second.association.publication.sequence,
+        entryDigest: second.association.publication.entryDigest,
+        page: second.association.publication.page,
+        head: second.association.publication.head,
+      },
+    });
+    await rm(stateDir, { recursive: true, force: true });
+  });
+
+  it('linearizes concurrent announcements in one source-global slot and continues after restart', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-native-requester-source-concurrent-'));
+    const identities = roles();
+    const outcomes = new Map<string, { taskId: bigint; txHash: typeof TX_HASH }>();
+    let nextTaskId = 30n;
+    const post = vi.fn(async (request: { submissionBytes: Uint8Array }) => {
+      const digest = recordDigest(request.submissionBytes);
+      let outcome = outcomes.get(digest);
+      if (outcome === undefined) {
+        outcome = { taskId: nextTaskId++, txHash: TX_HASH };
+        outcomes.set(digest, outcome);
+      }
+      return outcome;
+    });
+    const shared = {
+      stateDir,
+      loadRoles: async () => identities,
+      post,
+      // The source lease must advance equal wall-clock values itself.
+      now: () => new Date('2026-08-02T12:00:00.000Z'),
+    };
+    const requesterA = fixture(shared).requester;
+    const requesterB = fixture(shared).requester;
+    const concurrent = await Promise.all([
+      requesterA.request({ network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'concurrent-a' }),
+      requesterB.request({ network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'concurrent-b' }),
+    ]);
+    const ordered = concurrent.map((result) => result.association.publication).sort((left, right) => (
+      left.sequence < right.sequence ? -1 : 1
+    ));
+    expect(ordered.map((publication) => publication.sequence)).toEqual([
+      '0000000000000001', '0000000000000002',
+    ]);
+    expect(ordered[1]!.entry.previous).toBe(ordered[0]!.entryDigest);
+
+    const restarted = fixture(shared).requester;
+    const third = await restarted.request({
+      network: 'base-sepolia', fixture: 'prediction-forecast-golden.json', runId: 'concurrent-after-restart',
+    });
+    expect(third.association.publication.sequence).toBe('0000000000000003');
+    expect(third.association.publication.entry.previous).toBe(ordered[1]!.entryDigest);
+    const source = JSON.parse(await readFile(join(stateDir, 'requester-source.json'), 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(source).sort()).toEqual(['last', 'version']);
+    expect(source).not.toHaveProperty('pending');
     await rm(stateDir, { recursive: true, force: true });
   });
 
@@ -324,9 +551,12 @@ describe('native requester', () => {
       responseTimeoutSeconds: 600n,
       allowSolverSelfEvaluation: false,
     } as const;
+    let backendCalls = 0;
     const post = vi.fn(async (input) => {
       expect(input.terms).toEqual(firstTerms);
-      throw new Error('wallet result unavailable');
+      backendCalls += 1;
+      if (backendCalls === 1) throw new Error('wallet result unavailable');
+      return { taskId: 17n, txHash: TX_HASH };
     });
     const recover = vi.fn(async (draft) => {
       expect(draft.terms).toEqual(firstTerms);
@@ -363,8 +593,8 @@ describe('native requester', () => {
       allowSolverSelfEvaluation: false,
     });
     expect(result.association.intendedSpendWei).toBe('5');
-    expect(post).toHaveBeenCalledOnce();
-    expect(recover).toHaveBeenCalledOnce();
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(recover).not.toHaveBeenCalled();
     await rm(stateDir, { recursive: true, force: true });
   });
 
@@ -456,13 +686,20 @@ describe('native requester', () => {
     const postInput = post.mock.calls[0]![0];
     const pinned: Uint8Array[] = [];
     const broadcast = vi.fn(async () => ({ taskId: 18n, txHash: `0x${'cd'.repeat(32)}` as const }));
-    const nativePost = createNativeRequesterPostTask({
+    const intents = createInMemoryPostingIntentStore();
+    const backend = makeMarketplaceBackend(CHAIN, {
+      creatorSafe: CREATOR,
       terms: TERMS,
-      ports: {
+      posting: {
         ipfs: { pin: async (bytes) => { pinned.push(bytes); } },
-        intents: createInMemoryPostingIntentStore(),
+        intents,
         safe: { broadcastCreateTask: broadcast },
       },
+      observe: createInMemoryMarketplaceObserveStore(CHAIN, { intents }),
+    });
+    const nativePost = createNativeRequesterPostTask({
+      terms: TERMS,
+      backend,
     });
 
     expect(nativePost.terms).toEqual(TERMS);

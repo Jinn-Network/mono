@@ -26,6 +26,11 @@ const APPLICATION_AND_LEGACY_ROOTS = [
 // and `@jinn-network/execution-recorder` below (program §7.7) — every other tree/package here
 // stays forbidden everywhere, assembly included.
 const TASK_EXECUTION_FOREIGN_PACKAGES = [
+  '@jinn-network/marketplace-binding',
+  '@jinn-network/marketplace-pipeline',
+  '@jinn-network/marketplace-projector',
+  '@jinn-network/marketplace-testing',
+  '@jinn-network/marketplace-venue-base',
   '@jinn-network/evidence-protocol',
   '@jinn-network/evidence-repository',
   '@jinn-network/evidence-repository-oci',

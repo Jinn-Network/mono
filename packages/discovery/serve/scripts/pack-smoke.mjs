@@ -71,6 +71,12 @@ import { readFile, readdir } from "node:fs/promises";
 import * as recordDiscoveryServe from "@jinn-network/record-discovery-serve";
 
 if (typeof recordDiscoveryServe !== "object") throw new Error("root import failed");
+if (typeof recordDiscoveryServe.createDurableSourceWriter !== "function") {
+  throw new Error("durable source writer root export missing");
+}
+if (typeof recordDiscoveryServe.signAnnouncementEntry !== "function") {
+  throw new Error("announcement signing root export missing");
+}
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/record-discovery-protocol"];

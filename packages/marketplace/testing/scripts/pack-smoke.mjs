@@ -73,8 +73,12 @@ function assertArchiveShape(entries) {
     "package/dist/named-check-fixtures.js",
     "package/dist/projector-conformance.d.ts",
     "package/dist/projector-conformance.js",
+    "package/fixtures/manifest.sha256.json",
+    "package/fixtures/projector/golden-events/revised-cross-batch-flow-2026-08-03.json",
     "package/fixtures/projector/golden-events/revised-cross-batch-flow.json",
+    "package/fixtures/projector/golden-events/revised-task-created-2026-08-03.json",
     "package/fixtures/projector/golden-events/revised-task-created.json",
+    "package/fixtures/projector/reorg-scenarios/revised-task-created-reorg-2026-08-03.json",
     "package/fixtures/projector/reorg-scenarios/revised-task-created-reorg.json",
   ]) {
     if (!entries.includes(required)) {
@@ -117,7 +121,11 @@ try {
       },
     }),
   );
-  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
+  await run(
+    "npm",
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"],
+    { cwd: consumer },
+  );
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "marketplace-testing");
 
@@ -155,6 +163,10 @@ import "@jinn-network/marketplace-testing/named-check-fixtures";
 import "@jinn-network/marketplace-testing/projector-conformance";
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+if (packageJson.peerDependencies?.vitest !== "^4.1.8"
+    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
+  throw new Error("packed optional Vitest peer contract changed");
+}
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expected = ${JSON.stringify(
       [

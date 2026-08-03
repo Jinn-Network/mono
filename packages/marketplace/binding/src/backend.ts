@@ -29,7 +29,12 @@ import {
   type ValidationResult,
 } from "@jinn-network/task-execution-protocol";
 import type { MarketplaceChainConfig } from "./addresses.js";
-import { BroadcastUncertainError } from "./broadcast-intent.js";
+import {
+  BroadcastUncertainError,
+  postingIntentKeyOf,
+  type PostingIntentKey,
+  type PostingOutcome,
+} from "./broadcast-intent.js";
 import { assertIJsonUnicode } from "./canonical-json.js";
 import { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabilities.js";
 import { honorOrRejectToday } from "./honor-or-reject.js";
@@ -37,8 +42,12 @@ import {
   closeSubmission as closeMarketplaceSubmission,
   signalCancel,
 } from "./lifecycle.js";
-import { postTask } from "./posting.js";
-import type { MarketplaceBackendPorts, SubmissionScopeRecord } from "./backend-ports.js";
+import { postTask, preparePostingCommand } from "./posting.js";
+import type {
+  ClaimSubmissionScopeInput,
+  MarketplaceBackendPorts,
+  SubmissionScopeRecord,
+} from "./backend-ports.js";
 
 type AttemptUri = `urn:uuid:${string}`;
 
@@ -49,6 +58,19 @@ export interface MarketplaceTestableBackend extends TaskExecutionBackend {
   simulateReconciliation(ref: SubmissionUri | AttemptUri, outcome: ReconciliationReport): void;
   /** Marketplace requester close, distinct from standard Attempt cancellation (program §7.54). */
   closeSubmission?(taskId: bigint): Promise<void>;
+}
+
+export interface RequesterPostingRecoveryReport {
+  readonly resolvedScopes: readonly SubmissionUri[];
+  readonly uncertainScopes: readonly SubmissionUri[];
+  readonly retryableScopes: readonly SubmissionUri[];
+  readonly conflicts: readonly SubmissionUri[];
+}
+
+/** Outcome-bearing requester surface; `submit` remains the stable generic backend seam. */
+export interface MarketplaceRequesterBackend extends MarketplaceTestableBackend {
+  post(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<PostingOutcome>;
+  recoverPosting(): Promise<RequesterPostingRecoveryReport>;
 }
 
 function decodeJson(bytes: Uint8Array): unknown {
@@ -138,7 +160,7 @@ function admitCanonicalDocument<T>(
 export function makeMarketplaceBackend(
   config: MarketplaceChainConfig,
   ports: MarketplaceBackendPorts,
-): MarketplaceTestableBackend {
+): MarketplaceRequesterBackend {
   async function capabilities(): Promise<BackendCapabilities> {
     return marketplaceCapabilities({ cancel: ports.lifecycle !== undefined });
   }
@@ -284,14 +306,27 @@ export function makeMarketplaceBackend(
     // This claim is deliberately after the pure admission/requirements checks but before every
     // external effect. It is the durable linearization point for TEP §12.2; the posting-intent
     // WAL remains the recovery record for the resulting chain broadcast.
-    const scope: SubmissionScopeRecord & { requester: string; idempotencyKey: string } = {
+    const command = preparePostingCommand(taskBytes, submissionBytes, ports.terms, config, ports.creatorSafe);
+    const intentKey: PostingIntentKey = {
+      creatorSafe: ports.creatorSafe,
+      taskCidDigest: taskDigest,
+      submissionDigest,
+      venueNamespace: command.venueNamespace,
+      commandDigest: command.commandDigest,
+    };
+    const scope: ClaimSubmissionScopeInput = {
       requester: submission.requester,
       idempotencyKey: submission.idempotencyKey,
       submissionUri: submission.submission as SubmissionUri,
       digest: submissionDigest,
       submissionBytes,
+      taskDigest,
+      creatorSafe: ports.creatorSafe,
+      venueNamespace: command.venueNamespace,
+      commandDigest: command.commandDigest,
+      postingIntentKey: postingIntentKeyOf(intentKey),
     };
-    const scopeClaim = await ports.observe.claimSubmissionScope(scope);
+    let scopeClaim = await ports.observe.claimSubmissionScope(scope);
     if (scopeClaim.kind === "resolved") {
       return {
         accepted: true,
@@ -308,13 +343,37 @@ export function makeMarketplaceBackend(
       };
     }
     if (scopeClaim.kind === "pending") {
-      return {
-        accepted: false,
-        error: new TaskExecutionError("backend-unavailable", {
-          detail: `idempotencyKey "${submission.idempotencyKey}" is pending under its durable requester-scope owner`,
-          retryable: true,
-        }),
-      };
+      const recovered = await ports.observe.resolveRecoveredSubmissionScope(scope);
+      if (recovered === "resolved" || recovered === "already-resolved") {
+        scopeClaim = await ports.observe.claimSubmissionScope(scope);
+      } else if (recovered === "no-intent") {
+        // The scope was durable before `postTask` could claim its WAL. Replacing that dead scope
+        // owner is safe because the next step still has to claim and fence the sole WAL authority.
+        scopeClaim = await ports.observe.reclaimSubmissionScope(scope);
+      } else if (recovered === "conflict" || recovered === "legacy-scope-unrecoverable") {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("submission-conflict", {
+            detail: `idempotencyKey "${submission.idempotencyKey}" is bound to a different or legacy-unrecoverable posting operation`,
+          }),
+        };
+      }
+      if (scopeClaim.kind === "resolved") {
+        return {
+          accepted: true,
+          submission: scopeClaim.record.submissionUri,
+          digest: scopeClaim.record.digest,
+        };
+      }
+      if (scopeClaim.kind !== "owner") {
+        return {
+          accepted: false,
+          error: new TaskExecutionError("backend-unavailable", {
+            detail: `idempotencyKey "${submission.idempotencyKey}" is pending under its durable requester-scope owner`,
+            retryable: true,
+          }),
+        };
+      }
     }
 
     let outcome;
@@ -341,6 +400,75 @@ export function makeMarketplaceBackend(
     }, scopeClaim.ownerToken);
 
     return { accepted: true, submission: submission.submission as SubmissionUri, digest: submissionDigest };
+  }
+
+  async function post(taskBytes: Uint8Array, submissionBytes: Uint8Array): Promise<PostingOutcome> {
+    const ack = await submit(taskBytes, submissionBytes);
+    if (!ack.accepted) throw ack.error;
+    const submission = decodeJson(submissionBytes) as SubmissionRecord;
+    const scope = await ports.observe.readSubmissionScope(submission.requester, submission.idempotencyKey);
+    if (scope?.outcome === undefined) {
+      throw new TaskExecutionError("backend-unavailable", {
+        detail: `Submission "${submission.submission}" is accepted but has no recoverable posting outcome`,
+        retryable: true,
+      });
+    }
+    return scope.outcome;
+  }
+
+  async function recoverPosting(): Promise<RequesterPostingRecoveryReport> {
+    const resolvedScopes: SubmissionUri[] = [];
+    const uncertainScopes: SubmissionUri[] = [];
+    const retryableScopes: SubmissionUri[] = [];
+    const conflicts: SubmissionUri[] = [];
+    for (const scope of await ports.observe.scanPendingSubmissionScopes()) {
+      if (
+        ("legacyScopeUnrecoverable" in scope && scope.legacyScopeUnrecoverable === true)
+        || scope.taskDigest === undefined
+        || scope.creatorSafe === undefined
+        || scope.venueNamespace === undefined
+        || scope.commandDigest === undefined
+        || scope.postingIntentKey === undefined
+      ) {
+        conflicts.push(scope.submissionUri);
+        continue;
+      }
+      const key: PostingIntentKey = {
+        creatorSafe: scope.creatorSafe,
+        taskCidDigest: scope.taskDigest,
+        submissionDigest: scope.digest,
+        venueNamespace: scope.venueNamespace,
+        commandDigest: scope.commandDigest,
+      };
+      if (postingIntentKeyOf(key) !== scope.postingIntentKey) {
+        conflicts.push(scope.submissionUri);
+        continue;
+      }
+      // The port reads and joins the WAL inside one durable transaction. A TaskCreated scan
+      // cannot prove the Submission digest and is never accepted by this boundary.
+      const resolution = await ports.observe.resolveRecoveredSubmissionScope({
+        ...scope,
+        taskDigest: scope.taskDigest,
+        creatorSafe: scope.creatorSafe,
+        venueNamespace: scope.venueNamespace,
+        commandDigest: scope.commandDigest,
+        postingIntentKey: scope.postingIntentKey,
+      });
+      if (resolution === "no-intent") {
+        retryableScopes.push(scope.submissionUri);
+        continue;
+      }
+      if (resolution === "pending-intent") {
+        uncertainScopes.push(scope.submissionUri);
+        continue;
+      }
+      if (resolution === "resolved" || resolution === "already-resolved") {
+        resolvedScopes.push(scope.submissionUri);
+      } else {
+        conflicts.push(scope.submissionUri);
+      }
+    }
+    return { resolvedScopes, uncertainScopes, retryableScopes, conflicts };
   }
 
   async function observe(ref: SubmissionUri | AttemptUri): Promise<ObservationSnapshot> {
@@ -408,6 +536,8 @@ export function makeMarketplaceBackend(
   return {
     capabilities,
     submit,
+    post,
+    recoverPosting,
     observe,
     recover,
     deliveries,

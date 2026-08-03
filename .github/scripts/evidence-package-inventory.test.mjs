@@ -39,7 +39,23 @@ const JINN_DEPENDENCY_GRAPH = new Map([
   ['attestation-issuer', { dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['derivation', { dependencies: ['@jinn-network/evidence-protocol'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['publication', { dependencies: ['@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
-  ['local-runtime', { dependencies: ['@jinn-network/evidence-catalog-sqlite', '@jinn-network/evidence-discovery', '@jinn-network/evidence-protocol', '@jinn-network/evidence-repository'], devDependencies: ['@jinn-network/execution-recorder'], optionalDependencies: [], peerDependencies: [] }],
+  ['local-runtime', {
+    dependencies: [
+      '@jinn-network/evidence-catalog-sqlite',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/record-discovery-protocol',
+      '@jinn-network/record-discovery-serve',
+    ],
+    devDependencies: [
+      '@jinn-network/execution-recorder',
+      '@jinn-network/record-discovery-source-evidence-journal',
+    ],
+    optionalDependencies: [],
+    peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/trust-core'],
+  }],
   ['execution-recorder-bridge', { dependencies: ['@jinn-network/evidence-repository', '@jinn-network/execution-recorder'], devDependencies: ['@jinn-network/evidence-protocol'], optionalDependencies: [], peerDependencies: [] }],
   ['retrieval', {
     dependencies: [
@@ -109,6 +125,14 @@ function jinnDependencyNames(manifest, section) {
 function expectedPortal(directory, dependencyName) {
   if (dependencyName === '@jinn-network/trust-core') {
     return 'portal:../../trust/core';
+  }
+  const recordDiscoveryDirectory = new Map([
+    ['@jinn-network/record-discovery-protocol', '../../discovery/protocol'],
+    ['@jinn-network/record-discovery-serve', '../../discovery/serve'],
+    ['@jinn-network/record-discovery-source-evidence-journal', '../../discovery/sources/evidence-journal'],
+  ]).get(dependencyName);
+  if (recordDiscoveryDirectory !== undefined) {
+    return `portal:${recordDiscoveryDirectory}`;
   }
   const target = EVIDENCE_PACKAGES.find(([, name]) => name === dependencyName);
   assert.ok(target, `${directory} declares unknown Jinn dependency ${dependencyName}`);

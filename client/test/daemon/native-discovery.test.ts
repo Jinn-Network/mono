@@ -7,13 +7,13 @@ import {
   type AnnouncementEntry,
   type SourceHead,
 } from '@jinn-network/record-discovery-protocol';
-import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import { Store } from '../../src/store/store.js';
 import {
   NativeDiscoverySyncError,
   createNativeDiscoveryConsumer,
   type NativeDiscoverySource,
 } from '../../src/daemon/native-discovery.js';
+import type { AnnouncedSubmissionCard } from '../../src/daemon/native-submission-facts.js';
 
 const AGENT = 'did:key:zNativeRequester';
 const SOURCE_NAME = 'requester';

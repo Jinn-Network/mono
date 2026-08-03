@@ -20,6 +20,10 @@ See the design: `docs/superpowers/specs/2026-07-27-task-execution-protocol-and-s
 - **Supporting types** — `SubmissionAck`, `ObservationSnapshot`, `ObservationCursor`,
   `ReconciliationReport` (`matching | absent | contradictory`), `CancelAck`
   (terminal-state-aware), `DeliveryRef`, `PreflightRequest` / `PreflightReport`.
+- **Policy-neutral preclaim helpers** — `validateRequirementsAgainstRunPinning` and
+  `verifyPreclaim` establish only whether a backend can honor a requested profile, requirements,
+  isolation pin and preflight. Product claim, spend and prioritisation policy stays above this
+  package.
 - **`TaskExecutionError`** — carries a §13 category (imported from `task-execution-protocol`;
   the enum has exactly one source), a `retryable` flag, optional `detail`, and namespaced native
   annotations. The error-category enum lives in `protocol`; this class is the one place the

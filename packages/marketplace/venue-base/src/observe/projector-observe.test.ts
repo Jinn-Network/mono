@@ -216,6 +216,11 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
       submissionUri: SUBMISSION_A,
       digest: documentDigest(submissionBytes),
       submissionBytes,
+      taskDigest: TASK_DIGEST,
+      creatorSafe: "0x1111111111111111111111111111111111111111",
+      venueNamespace: "test:venue",
+      commandDigest: `sha256:${"d".repeat(64)}`,
+      postingIntentKey: `0x1111111111111111111111111111111111111111|${TASK_DIGEST}|${documentDigest(submissionBytes)}`,
     });
     if (claim.kind !== "owner") throw new Error("expected owner");
     const engagement: TwoPartyEngagement = {
@@ -264,6 +269,11 @@ describe("createProjectorObservePort (design §7, Task 16 -- retires the in-memo
         submissionUri: input.submission,
         digest: documentDigest(submissionBytes),
         submissionBytes,
+        taskDigest: TASK_DIGEST,
+        creatorSafe: "0x1111111111111111111111111111111111111111",
+        venueNamespace: "test:venue",
+        commandDigest: `sha256:${"d".repeat(64)}`,
+        postingIntentKey: `0x1111111111111111111111111111111111111111|${TASK_DIGEST}|${documentDigest(submissionBytes)}`,
       });
       if (claim.kind !== "owner") throw new Error("expected owner");
       await port.resolveSubmissionScope({

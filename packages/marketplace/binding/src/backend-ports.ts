@@ -23,7 +23,37 @@ export interface SubmissionScopeRecord {
   readonly submissionUri: SubmissionUri;
   readonly digest: `sha256:${string}`;
   readonly submissionBytes: Uint8Array;
+  /** Present for Phase C scopes. Absent only on pre-v5 durable rows. */
+  readonly taskDigest?: `sha256:${string}`;
+  /** Present for Phase C scopes. Absent only on pre-v5 durable rows. */
+  readonly creatorSafe?: Address;
+  /** Exact venue namespace and command digest bound before any external effect. */
+  readonly venueNamespace?: string;
+  readonly commandDigest?: `sha256:${string}`;
+  /** Stable textual form of the full Phase C posting WAL key. */
+  readonly postingIntentKey?: string;
+  /** The exact WAL outcome adopted by this logical requester scope. */
+  readonly outcome?: PostingOutcome;
+  /** A pre-v5 unresolved row cannot be joined safely to a posting intent. */
+  readonly legacyScopeUnrecoverable?: true;
 }
+
+export interface ClaimSubmissionScopeInput {
+  readonly submissionUri: SubmissionUri;
+  readonly digest: `sha256:${string}`;
+  readonly submissionBytes: Uint8Array;
+  readonly requester: string;
+  readonly idempotencyKey: string;
+  readonly taskDigest: `sha256:${string}`;
+  readonly creatorSafe: Address;
+  readonly venueNamespace: string;
+  readonly commandDigest: `sha256:${string}`;
+  readonly postingIntentKey: string;
+}
+
+export interface PendingSubmissionScopeRecord extends ClaimSubmissionScopeInput {}
+
+export interface ResolveRecoveredSubmissionScopeInput extends ClaimSubmissionScopeInput {}
 
 declare const submissionScopeOwnerTokenBrand: unique symbol;
 /** Durable, unguessable authority held only by the atomically accepted requester-scope owner. */
@@ -36,6 +66,14 @@ export type SubmissionScopeClaim =
   | { readonly kind: "pending" }
   | { readonly kind: "resolved"; readonly record: SubmissionScopeRecord }
   | { readonly kind: "conflict" };
+
+export type RecoveredSubmissionScopeResolution =
+  | "resolved"
+  | "already-resolved"
+  | "no-intent"
+  | "pending-intent"
+  | "conflict"
+  | "legacy-scope-unrecoverable";
 
 export interface RecordSubmissionInput {
   readonly taskDigest: `sha256:${string}`;
@@ -63,10 +101,28 @@ export interface MarketplaceObservePort {
    * Linearizable requester/idempotency ownership. The exact Submission bytes and digest are
    * bound before callers may upload, create a posting intent, or exercise wallet authority.
    */
-  claimSubmissionScope(input: SubmissionScopeRecord & {
+  claimSubmissionScope(input: ClaimSubmissionScopeInput): Promise<SubmissionScopeClaim>;
+  /** Read without claiming; used by the outcome-bearing requester API after a generic submit. */
+  readSubmissionScope(requester: string, idempotencyKey: string): Promise<SubmissionScopeRecord | undefined>;
+  /** Enumerate unresolved logical scopes so a restarted backend can join resolved WAL outcomes. */
+  scanPendingSubmissionScopes(): Promise<readonly (PendingSubmissionScopeRecord | (SubmissionScopeRecord & {
     readonly requester: string;
     readonly idempotencyKey: string;
-  }): Promise<SubmissionScopeClaim>;
+    readonly legacyScopeUnrecoverable: true;
+  }))[]>;
+  /**
+   * Replace a dead logical-scope owner only after the backend proved that no matching posting WAL
+   * exists. This never authorizes a broadcast; `postTask` must still claim and fence the WAL.
+   */
+  reclaimSubmissionScope(input: ClaimSubmissionScopeInput): Promise<SubmissionScopeClaim>;
+  /**
+   * Join an already-resolved WAL outcome to the exact pending logical scope after restart. The
+   * durable implementation must read the WAL and update the scope atomically; callers never
+   * supply an outcome as evidence.
+   */
+  resolveRecoveredSubmissionScope(
+    input: ResolveRecoveredSubmissionScopeInput,
+  ): Promise<RecoveredSubmissionScopeResolution>;
   /** Only the owner returned by `claimSubmissionScope` may publish the durable completion. */
   resolveSubmissionScope(input: RecordSubmissionInput, ownerToken: SubmissionScopeOwnerToken): Promise<void>;
   observe(ref: SubmissionUri | AttemptUri): Promise<ObservationSnapshot>;

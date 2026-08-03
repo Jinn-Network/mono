@@ -1,5 +1,4 @@
 import {
-  RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
@@ -72,13 +71,7 @@ export async function openNativeEvaluatorPublisher(input: {
         bytes: value.artifact.bytes,
         mediaType: value.artifact.mediaType,
         timestamp: value.publication.createdAt,
-        makeEntry: ({ sequence, previous, location }) => ({
-          protocol: RECORD_DISCOVERY_VERSION,
-          source: input.source,
-          sequence,
-          previous,
-          timestamp: value.publication.createdAt,
-          announcements: [{
+        makeAnnouncement: ({ location }) => ({
             announcementId: value.publication.publicationKey,
             action: 'available',
             record: {
@@ -92,7 +85,6 @@ export async function openNativeEvaluatorPublisher(input: {
               role: value.publication.role,
               name: value.artifact.name,
             },
-          }],
         }),
       });
     },

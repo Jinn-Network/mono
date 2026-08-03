@@ -1,5 +1,10 @@
 # `@jinn-network/evidence-discovery`
 
+This is permanent **local evidence catalog and publication-outbox infrastructure**. It is not a
+public network discovery plane. Record Discovery is the sole public plane: external consumers use
+`@jinn-network/record-discovery-client` and retrieve the exact locations carried by verified
+Announcement Entries. The npm name stays unchanged in Phase C for compatibility.
+
 `@jinn-network/evidence-discovery` combines the discovery-layer APIs that
 operate over validated Evidence Protocol records.
 

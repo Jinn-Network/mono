@@ -3,7 +3,6 @@ import '@jinn-network/evidence-protocol';
 import '@jinn-network/evidence-publication';
 import '@jinn-network/evidence-repository';
 import '@jinn-network/marketplace-binding';
-import '@jinn-network/marketplace-pipeline';
 import '@jinn-network/marketplace-projector';
 import '@jinn-network/marketplace-venue-base';
 import '@jinn-network/record-discovery-client';

@@ -1,4 +1,4 @@
-import type { BlobStore } from "@jinn-network/record-discovery-serve";
+import type { ReadableImmutableBlobStore } from "@jinn-network/record-discovery-serve";
 
 // Injected ports for the HTTP adapter tree. `serve` declares the WRITE
 // side of blob storage (`BlobStore.put`) because writing the static
@@ -13,7 +13,7 @@ export interface BlobReader {
 }
 
 /** A blob store that both writes (serve's port) and reads (this package's handler). */
-export type ReadWriteBlobStore = BlobStore & BlobReader;
+export type ReadWriteBlobStore = ReadableImmutableBlobStore & BlobReader;
 
 /**
  * The subset of the Node 22 global `fetch` this package uses, declared as

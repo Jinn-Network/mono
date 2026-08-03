@@ -5,28 +5,16 @@
 // standing policy flag that pre-approves with THE SAME fields in a log line, so a standing policy
 // is never quieter than a hand-approved one (visible-money-actions).
 //
-// Everything that touches the chain is injected. `postTask` is a parameter, not an import edge in
-// disguise: it is the marketplace binding's today, the work client's at its mint (README, F7).
+// Everything that touches the chain is injected. The requester backend is the sole posting and
+// recovery authority; this package retains only selection, terms, approval, batching and logging.
 import {
   BroadcastUncertainError,
   postingEscrowValueWei,
-  type MarketplaceChainConfig,
+  type MarketplaceRequesterBackend,
   type PostingOutcome,
-  type PostingPorts,
-  type PostingTerms,
 } from "@jinn-network/marketplace-binding";
 import { buildDispatchSubmission } from "./dispatch-submission.js";
 import type { PostingPlan, PostingPlanEntry, PostingPoolEntry } from "./types.js";
-
-/** The posting core's shape. Swapped, not wrapped, when the work client mints (F7). */
-export type PostTaskFn = (
-  taskBytes: Uint8Array,
-  submissionBytes: Uint8Array,
-  terms: PostingTerms,
-  config: MarketplaceChainConfig,
-  creatorSafe: `0x${string}`,
-  ports: PostingPorts,
-) => Promise<PostingOutcome>;
 
 /** Shows the operator what is about to be spent. Rendering is the host's job, not this package's. */
 export interface PostingRenderPort {
@@ -60,9 +48,11 @@ export interface PostingLogPort {
 export interface PostingDeps {
   /** Task digest -> pool entry. The plan carries digests; the bytes are read here. */
   readonly entries: ReadonlyMap<string, PostingPoolEntry>;
-  readonly chain: MarketplaceChainConfig;
-  readonly ports: PostingPorts;
-  readonly postTask: PostTaskFn;
+  /**
+   * Sole authority for requester scope, posting WAL and recovered outcome reconciliation.
+   * The host composes it with the same creator and terms used to construct the plan.
+   */
+  readonly backend: MarketplaceRequesterBackend;
   readonly render: PostingRenderPort;
   readonly approval: PostingApprovalPort;
   readonly log: PostingLogPort;
@@ -116,9 +106,9 @@ interface PreparedEntry {
  * loop would only mean earlier entries were already posted and escrowed when it fired.
  *
  * The escrow re-derivation is the same class of check as the `maxClaims` gate one layer down:
- * `postTask` computes the real `msg.value` from the terms and the sealed `attempts.maxTotal`, so a
- * plan carrying an understated `escrowValueWei` would render, log, and total a number that is not
- * what the chain is sent.
+ * the requester backend computes the real `msg.value` from its configured terms and the sealed
+ * `attempts.maxTotal`. A plan carrying an understated `escrowValueWei` would render, log, and
+ * total a number that is not what the chain is sent.
  */
 function prepareBatch(deps: PostingDeps, plan: PostingPlan): readonly PreparedEntry[] {
   const expectedEscrowValueWei = postingEscrowValueWei(plan.terms);
@@ -141,6 +131,24 @@ function prepareBatch(deps: PostingDeps, plan: PostingPlan): readonly PreparedEn
     }
     return { planEntry, entry, submissionBytes: buildDispatchSubmission(entry, planEntry, plan) };
   });
+}
+
+function uncertainOperationDetail(error: unknown): string | undefined {
+  if (error instanceof BroadcastUncertainError) return error.message;
+  // MarketplaceRequesterBackend exposes operational failures through TaskExecutionBackend's
+  // error contract. Avoid a second runtime package edge just to recognize the generic shape.
+  if (
+    error instanceof Error
+    && error.name === "TaskExecutionError"
+    && "category" in error
+    && error.category === "backend-unavailable"
+    && "retryable" in error
+    && error.retryable === true
+  ) {
+    const detail = "detail" in error ? error.detail : undefined;
+    return typeof detail === "string" ? detail : error.message;
+  }
+  return undefined;
 }
 
 export async function executePosting(
@@ -177,22 +185,16 @@ export async function executePosting(
     try {
       // eslint-disable-next-line no-await-in-loop -- posts are sequential: one requester, one
       // nonce sequence, and one escrow balance draining as the batch proceeds.
-      outcome = await deps.postTask(
-        entry.taskBytes,
-        submissionBytes,
-        plan.terms,
-        deps.chain,
-        plan.creatorSafe,
-        deps.ports,
-      );
+      outcome = await deps.backend.post(entry.taskBytes, submissionBytes);
     } catch (error) {
-      if (error instanceof BroadcastUncertainError) {
-        // Never retried here: an uncertain broadcast is resolved by `recoverPostingIntents`
-        // against the chain, not by posting again.
-        uncertain.push({ taskDigest: planEntry.taskDigest, detail: error.message });
+      const detail = uncertainOperationDetail(error);
+      if (detail !== undefined) {
+        // Never retried here: the requester backend resolves uncertain work through
+        // `recoverPosting()` and canonical evidence, not by posting again.
+        uncertain.push({ taskDigest: planEntry.taskDigest, detail });
         deps.log.record({
           event: "posting.uncertain",
-          fields: { taskDigest: planEntry.taskDigest, detail: error.message },
+          fields: { taskDigest: planEntry.taskDigest, detail },
         });
         continue;
       }

@@ -63,6 +63,20 @@ describe("venue state database", () => {
       "INSERT INTO posting_intents (creator_safe, task_cid_digest, submission_digest, idempotency_key, owner_token, created_at)"
       + " VALUES (?,?,?,?,?,?)",
     ).run("0xsafe", "sha256:aa", "sha256:bb", "idempotency", "owner", "2026-08-02T00:00:00Z");
+    // Reconstruct the actual v3 column shape; merely downgrading the metadata on a current
+    // schema would test an impossible duplicate-column state rather than the migration.
+    old.db.exec(`
+      ALTER TABLE posting_intents DROP COLUMN venue_namespace;
+      ALTER TABLE posting_intents DROP COLUMN command_digest;
+      ALTER TABLE posting_intents DROP COLUMN command_json;
+      ALTER TABLE posting_intents DROP COLUMN legacy_unrecoverable;
+      ALTER TABLE submission_scopes DROP COLUMN task_digest;
+      ALTER TABLE submission_scopes DROP COLUMN creator_safe;
+      ALTER TABLE submission_scopes DROP COLUMN venue_namespace;
+      ALTER TABLE submission_scopes DROP COLUMN command_digest;
+      ALTER TABLE submission_scopes DROP COLUMN posting_intent_key;
+      ALTER TABLE submission_scopes DROP COLUMN legacy_scope_unrecoverable;
+    `);
     old.db.exec("DROP TABLE scanned_block_hashes");
     old.db.prepare("UPDATE venue_state_metadata SET schema_version = 3 WHERE singleton = 1").run();
     old.close();

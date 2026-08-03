@@ -161,9 +161,10 @@ function validateBundle(repoRoot, manifestPath) {
       ))) {
       throw new Error('native vertical role roots do not match the checked-in runtime imports');
     }
-    const promoted = new Set(loadCatalogPackages(repoRoot, {
-      releaseGroup: 'native-task-supply-canary',
-    }).map(({ name }) => name));
+    // Phase C removed the task-supply publication canary. The packed native bundle is now the
+    // executable role closure only; disabled experimental packages are included solely when a
+    // role actually depends on them.
+    const promoted = new Set();
     const selected = new Set(nativeVerticalRuntimePackageNames(
       repoRoot,
       allCatalogPackages,

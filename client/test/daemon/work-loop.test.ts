@@ -16,6 +16,7 @@ import {
   serializeCanonicalJson,
   sha256Hex,
 } from '@jinn-network/task-execution-protocol';
+import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import {
   TaskExecutionError,
   type BackendCapabilities,
@@ -28,9 +29,7 @@ import {
   keccakEvidenceHash,
 } from '@jinn-network/marketplace-binding';
 import {
-  RECORD_KINDS_SUBMISSION,
   takeEveryRunnable,
-  type AnnouncedSubmissionCard,
   type ExecutionWiringEntry,
   type PipelineConfig,
   type PipelinePorts,
@@ -41,6 +40,10 @@ import { EngagementLedger } from '../../src/daemon/engagement-ledger.js';
 import { WorkLoop, type WorkLoopConfig } from '../../src/daemon/work-loop.js';
 import type { ClaimGate } from '../../src/daemon/claim-gate.js';
 import type { OperatorComposition } from '../../src/daemon/composition-root.js';
+import {
+  LEGACY_SUBMISSION_RECORD_KIND,
+  type AnnouncedSubmissionCard,
+} from '../../src/daemon/native-submission-facts.js';
 
 const PROFILE_URI = 'https://jinn.network/task-profiles/repository-work/1.0';
 const WORK_KIND = 'repo-fix';
@@ -108,7 +111,7 @@ function goldenDelivery(): Uint8Array {
 
 function card(): AnnouncedSubmissionCard {
   return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: `sha256:${'d'.repeat(64)}` },
+    record: { kind: RECORD_KINDS.submission, digest: `sha256:${'d'.repeat(64)}` },
     facts: {
       taskDigest: TASK_DIGEST,
       taskProfileUri: PROFILE_URI,
@@ -131,7 +134,7 @@ const LEGACY_MANIFEST_DIGEST = `0x${'e'.repeat(64)}`;
 
 function legacyCard(): AnnouncedSubmissionCard {
   return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: `sha256:${'d'.repeat(64)}` },
+    record: { kind: LEGACY_SUBMISSION_RECORD_KIND, digest: `sha256:${'d'.repeat(64)}` },
     facts: {
       taskDigest: TASK_DIGEST,
       taskProfileUri: PROFILE_URI,

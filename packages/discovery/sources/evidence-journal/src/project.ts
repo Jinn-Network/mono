@@ -49,7 +49,13 @@ export function projectLocation(location: PublishedEvidenceLocation): PublishedL
  * emits no facts card in v1 (design §11, plan Out-of-scope).
  */
 export function projectAvailableAnnouncement(entry: EvidenceJournalEntry): AvailableAnnouncement {
-  const { announcement } = entry;
+  return projectAvailableEvidenceAnnouncement(entry.announcement);
+}
+
+/** Public journal batch shape -> exact discovery announcement, preserving announcement identity. */
+export function projectAvailableEvidenceAnnouncement(
+  announcement: EvidenceJournalEntry["announcement"],
+): AvailableAnnouncement {
   const location = announcement.publishedLocation;
   return {
     announcementId: announcement.announcementId,

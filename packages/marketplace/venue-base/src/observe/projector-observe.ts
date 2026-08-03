@@ -86,6 +86,10 @@ export function createProjectorObservePort(input: CreateProjectorObservePortInpu
 
   return {
     claimSubmissionScope: store.claimSubmissionScope,
+    readSubmissionScope: store.readSubmissionScope,
+    scanPendingSubmissionScopes: store.scanPendingSubmissionScopes,
+    reclaimSubmissionScope: store.reclaimSubmissionScope,
+    resolveRecoveredSubmissionScope: store.resolveRecoveredSubmissionScope,
     resolveSubmissionScope: store.resolveSubmissionScope,
     recordDelivery: store.recordDelivery,
     deliveries: store.deliveries,

@@ -180,6 +180,9 @@ describe('native public vertical consumer', () => {
       creatorSafe: REQUESTER_ADDRESS,
       posting: {
         terms: REQUESTER_TERMS,
+        recoverPosting: async () => ({
+          resolvedScopes: [], uncertainScopes: [], retryableScopes: [], conflicts: [],
+        }),
         post: async () => ({ taskId: TASK_ID, txHash: `0x${'a'.repeat(64)}` }),
         recover: async () => null,
         canonicalTaskCreated: async (expected) => ({ canonical: true as const, ...expected }),

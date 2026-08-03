@@ -154,7 +154,6 @@ __metadata:
     "@jinn-network/trust-resolve": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
-    viem: "npm:^2.0.0"
     vitest: "npm:^4.1.8"
   languageName: unknown
   linkType: soft

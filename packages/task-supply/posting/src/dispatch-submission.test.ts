@@ -144,7 +144,7 @@ describe("buildDispatchSubmission digest discipline", () => {
 // F-C5-1's disposition in full: half B seals `attempts.maxTotal` explicitly AND re-parses its own
 // sealed bytes to assert agreement. Comparing the two in-memory numbers the plan already holds is
 // a tautology -- it cannot see a sealing layer that drops, renames, or coerces the field, which is
-// exactly the case where `postTask` falls back to `?? 1` and escrows for one claim while the
+// exactly the case where the requester backend falls back to `?? 1` and escrows for one claim while the
 // surfaced plan said N.
 describe("assertSealedMaxClaimsAgreement", () => {
   function seal(document: Record<string, unknown>): Uint8Array {

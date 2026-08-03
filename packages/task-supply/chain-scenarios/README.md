@@ -1,5 +1,9 @@
 # @jinn-network/chain-scenarios
 
+> Phase C maturity: experimental and publication disabled. Scenario fixtures do not ratify the
+> task-supply or environment authorities they exercise; graduation requires an independent product
+> consumer and approved chain/environment authority.
+
 ## What this package does
 
 Scenario templates plus parameters plus one verified composite environment record become

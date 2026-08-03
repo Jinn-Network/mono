@@ -2,20 +2,20 @@
  * Feature-disabled native requester vertical.
  *
  * This is deliberately a product seam, not a second marketplace implementation: B1 owns the
- * deterministic public prediction contract, marketplace-binding owns the actual `postTask` WAL,
+ * deterministic public prediction contract, marketplace-binding owns the requester posting WAL,
  * and discovery owns record/head/archive layout. The runner owns only the requester-specific
  * durable association from a canonical today-mode `TaskCreated` to the exact Submission graph.
  */
-import { mkdir, open, readFile, readdir, rename, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises';
 import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   BASE_SEPOLIA_TODAY,
-  postTask,
   type MarketplaceChainConfig,
+  type MarketplaceRequesterBackend,
   type PostingOutcome,
-  type PostingPorts,
   type PostingTerms,
+  type RequesterPostingRecoveryReport,
 } from '@jinn-network/marketplace-binding';
 import {
   admitPredictionSnapshot,
@@ -45,6 +45,7 @@ import {
 import {
   DISCOVERY_SIGNING_SCOPE,
   LOCATION_PROFILE_HTTPS,
+  MEDIA_ENTRY,
   MEDIA_HEAD,
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
@@ -55,6 +56,7 @@ import {
   parseAnnouncementEntry,
   parseSourceHead,
   parseWireDsseEnvelope,
+  recordDigest,
   recordPath,
   sealJson,
   type AnnouncementEntry,
@@ -63,18 +65,31 @@ import {
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
 import { TASK_EXECUTION_FACTS_RECOMPUTE } from '@jinn-network/record-discovery-facts-task-execution';
-import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import type { NativeDiscoveryDecodeInput } from '../daemon/native-discovery.js';
-import { signAnnouncementEntry } from '@jinn-network/marketplace-projector';
+import type { AnnouncedSubmissionCard } from '../daemon/native-submission-facts.js';
 import {
-  signHead,
+  createDurableSourceWriter,
   writeRecord,
   writeWellKnownDocument,
+  type ArchivePage,
+  type CasSnapshot,
+  type CasWriteResult,
+  type DurableSourceAppendIntent,
+  type DurableSourceReceipt,
+  type DurableSourceSigner,
+  type DurableSourceState,
+  type ReadableImmutableBlobStore,
+  type SourceAppendIntentStore,
+  type SourceStateStore,
 } from '@jinn-network/record-discovery-serve';
 import {
   createArchiveHttpHandler,
   createFsBlobStore,
 } from '@jinn-network/record-discovery-transport-http';
+import {
+  adaptRequesterSourceV1Publication,
+  freezeRequesterSourceV1Intent,
+} from './requester-source-writer-adapter.js';
 
 // Public, stable product fixture name. The admission package may retain its
 // internal snapshot fixture directory; that storage detail must not leak into
@@ -82,7 +97,6 @@ import {
 const FIXTURE = 'prediction-forecast-golden.json' as const;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
-const JSON_MEDIA_TYPE = 'application/json';
 const UINT256_MAX = (1n << 256n) - 1n;
 
 type Digest = `sha256:${string}`;
@@ -90,6 +104,7 @@ type NativeRequesterRole = 'requester-submission' | 'admission' | 'requester-dis
 
 export interface NativeRequesterIdentity {
   readonly keyId: string;
+  readonly publicKey: KeyObject;
   sign(payload: Uint8Array): Uint8Array;
 }
 
@@ -149,7 +164,7 @@ export interface NativeRequesterPostInput {
   readonly terms: PostingTerms;
 }
 
-interface NativeRequesterDraft {
+interface NativeRequesterDraftV1 {
   readonly version: 1;
   readonly key: string;
   readonly runId: string;
@@ -168,6 +183,13 @@ interface NativeRequesterDraft {
   readonly stage: 'prepared' | 'broadcasting' | 'broadcasted';
   readonly outcome?: StoredPostingOutcome;
 }
+
+/** Phase C product-only draft: broadcast ownership lives exclusively in marketplace binding. */
+interface NativeRequesterDraftV2 extends Omit<NativeRequesterDraftV1, 'version' | 'stage'> {
+  readonly version: 2;
+}
+
+type NativeRequesterDraft = NativeRequesterDraftV1 | NativeRequesterDraftV2;
 
 interface NativeRequesterArtifacts {
   readonly evaluationSpec: StoredExactRecord;
@@ -195,6 +217,8 @@ interface PublicationIntent {
   readonly entryDigest: Digest;
   readonly head: SourceHead;
   readonly announcementId: string;
+  /** Frozen generic append transaction, persisted inside the existing association authority. */
+  readonly writerIntent?: DurableSourceAppendIntent;
 }
 
 export interface NativeRequesterAssociation {
@@ -233,6 +257,12 @@ interface SourceState {
     readonly page: string;
     readonly head: SourceHead;
   };
+  /** Present only while the one source-global append transaction is in flight. */
+  readonly pending?: {
+    readonly version: 1;
+    readonly associationKey: string;
+    readonly intent: DurableSourceAppendIntent;
+  };
 }
 
 export interface NativeRequesterDeps {
@@ -251,8 +281,10 @@ export interface NativeRequesterDeps {
   readonly posting: {
     /** Current product configuration, snapshotted into the durable draft before broadcast. */
     readonly terms: PostingTerms;
-    /** Adapter around marketplace-binding's native `postTask`; no legacy adapter is admitted here. */
+    /** Outcome-bearing shared requester operation; no direct venue posting port is admitted here. */
     readonly post: (input: NativeRequesterPostInput) => Promise<PostingOutcome>;
+    /** Reconciles the requester-scope/WAL join before any new product work is admitted. */
+    readonly recoverPosting: () => Promise<RequesterPostingRecoveryReport>;
     /** Exact recovery scan for a draft left in `broadcasting` by a process death. */
     readonly recover: (draft: {
       readonly chain: MarketplaceChainConfig;
@@ -286,34 +318,44 @@ export interface NativeRequesterDeps {
     | 'before-broadcast'
     | 'after-broadcast'
     | 'canonical-associated'
+    | 'source-intent-durable'
     | 'source-announced') => Promise<void>;
 }
 
 /**
- * The production posting adapter: B3's only broadcast operation is marketplace-binding's native
- * `postTask`, which owns its own durable posting-intent WAL and Safe broadcast fence. The caller
- * still supplies those infrastructure ports; the feature-disabled CLI never instantiates this.
+ * The production posting adapter: B3 delegates exact Task/Submission posting to the shared
+ * marketplace requester backend, which owns scope/WAL recovery and the Safe broadcast fence.
  */
 export function createNativeRequesterPostTask(input: {
   readonly terms: PostingTerms;
-  readonly ports: PostingPorts;
-}): Pick<NativeRequesterDeps['posting'], 'terms' | 'post'> {
+  readonly backend: Pick<MarketplaceRequesterBackend, 'post' | 'recoverPosting'>;
+}): Pick<NativeRequesterDeps['posting'], 'terms' | 'post' | 'recoverPosting'> {
   return {
     terms: input.terms,
+    recoverPosting: () => input.backend.recoverPosting(),
     post: async (request) => {
       if (!samePostingTerms(request.terms, input.terms)) {
         throw new Error('native requester post adapter refuses terms that differ from its configured authority');
       }
-      return postTask(
-        request.taskBytes,
-        request.submissionBytes,
-        request.terms,
-        request.chain,
-        request.creatorSafe,
-        input.ports,
-      );
+      return input.backend.post(request.taskBytes, request.submissionBytes);
     },
   };
+}
+
+function assertPostingRecoverySafe(
+  report: RequesterPostingRecoveryReport,
+  options: { readonly allowRetryable: boolean },
+): void {
+  const unsafe = report.uncertainScopes.length > 0
+    || report.conflicts.length > 0
+    || (!options.allowRetryable && report.retryableScopes.length > 0);
+  if (unsafe) {
+    throw new Error(
+      'native requester posting recovery is not closed: '
+      + `${report.uncertainScopes.length} uncertain, ${report.retryableScopes.length} retryable, `
+      + `${report.conflicts.length} conflicting scope(s)`,
+    );
+  }
 }
 
 export interface NativeRequesterResult {
@@ -722,12 +764,26 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   }
 }
 
+async function readJsonSnapshot<T>(path: string): Promise<CasSnapshot<T> | undefined> {
+  try {
+    const bytes = new Uint8Array(await readFile(path));
+    return {
+      revision: recordDigest(bytes),
+      value: JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as T,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
   return Buffer.from(canonicalJsonBytes(left)).equals(Buffer.from(canonicalJsonBytes(right)));
 }
 
 class NativeRequesterState {
   readonly records;
+  private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(private readonly root: string) {
     this.records = createFsBlobStore(join(root, 'discovery'));
@@ -738,6 +794,8 @@ class NativeRequesterState {
   private associationsDir(): string { return join(this.root, 'associations'); }
   private associationPath(key: string): string { return join(this.associationsDir(), `${key}.json`); }
   private sourcePath(): string { return join(this.root, 'requester-source.json'); }
+  private sourceCasLockPath(): string { return join(this.root, 'requester-source.cas.lock'); }
+  private sourceOwnerLockPath(): string { return join(this.root, 'requester-source.owner.lock'); }
 
   async readDraft(key: string): Promise<NativeRequesterDraft | undefined> {
     return readJson<NativeRequesterDraft>(this.draftPath(key));
@@ -746,7 +804,7 @@ class NativeRequesterState {
   async putDraft(draft: NativeRequesterDraft): Promise<NativeRequesterDraft> {
     const existing = await this.readDraft(draft.key);
     if (existing !== undefined) {
-      if (!sameJson(existing, draft) && existing.stage === 'prepared') {
+      if (!sameJson(existing, draft) && existing.outcome === undefined) {
         throw new Error(`native requester draft ${draft.key} conflicts with different exact record bytes`);
       }
       return existing;
@@ -780,12 +838,92 @@ class NativeRequesterState {
     await writeJsonAtomic(this.associationPath(key), stored);
   }
 
+  async readAssociationSnapshot(key: string): Promise<CasSnapshot<NativeRequesterAssociation> | undefined> {
+    const snapshot = await readJsonSnapshot<StoredAssociation>(this.associationPath(key));
+    return snapshot === undefined
+      ? undefined
+      : { revision: snapshot.revision, value: toAssociation(snapshot.value) };
+  }
+
   async readSource(): Promise<SourceState> {
     return (await readJson<SourceState>(this.sourcePath())) ?? { version: 1 };
   }
 
   async writeSource(source: SourceState): Promise<void> {
     await writeJsonAtomic(this.sourcePath(), source);
+  }
+
+  async readSourceSnapshot(): Promise<CasSnapshot<SourceState> | undefined> {
+    return readJsonSnapshot<SourceState>(this.sourcePath());
+  }
+
+  private async withFileLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+    const token = crypto.randomUUID();
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    for (let attempt = 0; attempt < 2_500; attempt += 1) {
+      try {
+        await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+        handle = await open(path, 'wx', 0o600);
+        await handle.writeFile(`${JSON.stringify({ version: 1, pid: process.pid, token })}\n`, 'utf8');
+        await handle.sync();
+        break;
+      } catch (error) {
+        await handle?.close().catch(() => undefined);
+        handle = undefined;
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        let stale = false;
+        try {
+          const owner = JSON.parse(await readFile(path, 'utf8')) as { pid?: unknown };
+          if (typeof owner.pid === 'number' && Number.isInteger(owner.pid)) {
+            try { process.kill(owner.pid, 0); } catch (killError) {
+              stale = (killError as NodeJS.ErrnoException).code === 'ESRCH';
+            }
+          } else {
+            stale = Date.now() - (await stat(path)).mtimeMs > 30_000;
+          }
+        } catch (readError) {
+          if ((readError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          stale = Date.now() - (await stat(path)).mtimeMs > 30_000;
+        }
+        if (stale) {
+          await unlink(path).catch((unlinkError) => {
+            if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
+          });
+          continue;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      }
+    }
+    if (handle === undefined) throw new Error(`requester source lock ${path} could not be acquired`);
+    try {
+      return await operation();
+    } finally {
+      await handle.close().catch(() => undefined);
+      try {
+        const owner = JSON.parse(await readFile(path, 'utf8')) as { token?: unknown };
+        if (owner.token === token) await unlink(path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+  }
+
+  /** Serializes each CAS section across requester processes. */
+  async mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.mutationTail;
+    let release!: () => void;
+    this.mutationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await this.withFileLock(this.sourceCasLockPath(), operation);
+    } finally {
+      release();
+    }
+  }
+
+  /** One source-global publisher lease; product association files never grant sequence authority. */
+  async withSourceLease<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withFileLock(this.sourceOwnerLockPath(), operation);
   }
 }
 
@@ -924,15 +1062,424 @@ function location(base: string, path: string): PublishedLocation[] {
   return [{ profile: LOCATION_PROFILE_HTTPS, locator: `${base.replace(/\/+$/u, '')}${path}` }];
 }
 
-function discoverySigner(role: NativeRequesterIdentity) {
+function durableRequesterSigner(role: NativeRequesterIdentity): DurableSourceSigner {
   return {
     scope: DISCOVERY_SIGNING_SCOPE,
-    sign: async (pae: Uint8Array) => [{ keyid: role.keyId, sig: role.sign(pae) }],
-  } as const;
+    keyId: role.keyId,
+    sign: async (pae) => [{ keyid: role.keyId, sig: role.sign(pae) }],
+    verify: (pae, signature) => cryptoVerify(null, pae, role.publicKey, signature),
+  };
 }
 
-function sourceDsseSigner(role: NativeRequesterIdentity) {
-  return { sign: async (pae: Uint8Array) => [{ keyid: role.keyId, sig: role.sign(pae) }] };
+function decodeBase64(value: string): Uint8Array {
+  return new Uint8Array(Buffer.from(value, 'base64'));
+}
+
+function sourceMatches(left: SourceIdentity, right: SourceIdentity): boolean {
+  return left.agent === right.agent && left.name === right.name;
+}
+
+async function assertRequesterEnvelope(input: {
+  readonly envelope: unknown;
+  readonly payloadType: string;
+  readonly payload: Uint8Array;
+  readonly signer: DurableSourceSigner;
+  readonly label: string;
+}): Promise<void> {
+  const parsed = parseWireDsseEnvelope(input.envelope);
+  if (parsed.envelope.payloadType !== input.payloadType || !exactBytes(parsed.payloadBytes, input.payload)) {
+    throw new Error(`${input.label} does not carry the exact expected payload`);
+  }
+  const pae = dssePreAuthEncoding(input.payloadType, input.payload);
+  let verified = false;
+  for (const signature of parsed.signatures) {
+    if (signature.keyid === input.signer.keyId
+      && await input.signer.verify(pae, signature.signatureBytes)) verified = true;
+  }
+  if (!verified) {
+    throw new Error(`${input.label} is not signed by the requester source identity`);
+  }
+}
+
+interface ReconstructedRequesterHistory {
+  readonly durable: DurableSourceState;
+  readonly lastHead?: SourceHead;
+  readonly lastTimestamp?: string;
+}
+
+async function reconstructRequesterHistory(input: {
+  readonly records: ReturnType<typeof createFsBlobStore>;
+  readonly source: SourceIdentity;
+  readonly signer: DurableSourceSigner;
+  readonly last?: {
+    readonly sequence: string;
+    readonly entryDigest: Digest;
+    readonly page: string;
+    readonly head?: SourceHead;
+  };
+  readonly skipHead?: boolean;
+}): Promise<ReconstructedRequesterHistory> {
+  if (input.last === undefined) {
+    if (!input.skipHead && await input.records.get(headPath(input.source.name)) !== undefined) {
+      throw new Error('requester source has a public head without committed requester-source state');
+    }
+    return {
+      durable: {
+        version: 1,
+        source: input.source,
+        signerKeyId: input.signer.keyId,
+        last: null,
+        announcements: {},
+      },
+    };
+  }
+
+  let previousPage: string | null = null;
+  let previousEntry: Digest | null = null;
+  let lastTimestamp: string | undefined;
+  const announcements: Record<string, DurableSourceState['announcements'][string]> = {};
+  for (let ordinal = 1n; ordinal <= BigInt(input.last.page); ordinal += 1n) {
+    const pageName = formatSequence(ordinal);
+    const stored = await input.records.get(archivePagePath(input.source.name, pageName));
+    if (stored === undefined) throw new Error(`requester source archive page ${pageName} is missing`);
+    const page = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(stored.bytes)) as ArchivePage;
+    if (!exactBytes(sealJson(page).bytes, stored.bytes)
+      || page.protocol !== RECORD_DISCOVERY_VERSION
+      || page.source !== input.source.name
+      || page.page !== pageName
+      || page.prevArchive !== previousPage
+      || page.entries.length !== 1) {
+      throw new Error(`requester source archive page ${pageName} is not the exact owned chain page`);
+    }
+    const signed = page.entries[0]!;
+    const entry = parseAnnouncementEntry(signed.entry);
+    const entryBytes = sealJson(entry).bytes;
+    const entryDigest = sealJson(entry).digest;
+    if (entry.source.agent !== input.source.agent
+      || entry.source.name !== input.source.name
+      || entry.sequence !== pageName
+      || entry.previous !== previousEntry
+      || entry.announcements.length !== 1
+      || signed.signature === undefined) {
+      throw new Error(`requester source archive page ${pageName} breaks source continuity`);
+    }
+    await assertRequesterEnvelope({
+      envelope: signed.signature,
+      payloadType: MEDIA_ENTRY,
+      payload: entryBytes,
+      signer: input.signer,
+      label: `requester source entry ${pageName}`,
+    });
+    const announcement = entry.announcements[0]!;
+    lastTimestamp = entry.timestamp;
+    if (announcement.action !== 'available') {
+      throw new Error('requester source v1 history may contain only available announcements');
+    }
+    const record = await input.records.get(recordPath(announcement.record.digest));
+    if (record === undefined
+      || recordDigest(record.bytes) !== announcement.record.digest
+      || (announcement.record.mediaType !== undefined && announcement.record.mediaType !== record.contentType)) {
+      throw new Error(`requester source announcement ${announcement.announcementId} has no exact record`);
+    }
+    const fingerprint = sealJson({
+      source: input.source,
+      timestamp: entry.timestamp,
+      announcement,
+      recordContentType: record.contentType,
+    }).digest;
+    const receipt: DurableSourceReceipt = {
+      source: input.source,
+      announcementId: announcement.announcementId,
+      fingerprint,
+      sequence: entry.sequence,
+      entryDigest,
+      page: pageName,
+      record: { digest: announcement.record.digest, path: recordPath(announcement.record.digest), contentType: record.contentType },
+    };
+    announcements[announcement.announcementId] = { action: 'available', fingerprint, receipt };
+    previousPage = pageName;
+    previousEntry = entryDigest;
+  }
+  if (previousPage !== input.last.page || previousEntry !== input.last.entryDigest) {
+    throw new Error('requester-source state does not equal the authenticated archive tip');
+  }
+  if (input.skipHead) {
+    return {
+      durable: {
+        version: 1,
+        source: input.source,
+        signerKeyId: input.signer.keyId,
+        last: { sequence: input.last.sequence, entryDigest: input.last.entryDigest, page: input.last.page },
+        announcements,
+      },
+      ...(input.last.head === undefined ? {} : { lastHead: input.last.head }),
+      ...(lastTimestamp === undefined ? {} : { lastTimestamp }),
+    };
+  }
+  const storedHead = await input.records.get(headPath(input.source.name));
+  if (storedHead === undefined) throw new Error('requester source committed state has no public head');
+  const parsedHeadEnvelope = parseWireDsseEnvelope(JSON.parse(new TextDecoder().decode(storedHead.bytes)));
+  const head = parseSourceHead(JSON.parse(new TextDecoder().decode(parsedHeadEnvelope.payloadBytes)));
+  if (!exactBytes(sealJson(head).bytes, parsedHeadEnvelope.payloadBytes)
+    || (input.last.head !== undefined && !sameJson(head, input.last.head))
+    || head.origin !== formatOrigin(input.source.agent, input.source.name)
+    || head.sequence !== input.last.sequence
+    || head.entry !== input.last.entryDigest) {
+    throw new Error('requester source public head does not equal requester-source state');
+  }
+  await assertRequesterEnvelope({
+    envelope: parsedHeadEnvelope.envelope,
+    payloadType: MEDIA_HEAD,
+    payload: parsedHeadEnvelope.payloadBytes,
+    signer: input.signer,
+    label: 'requester source head',
+  });
+  return {
+    durable: {
+      version: 1,
+      source: input.source,
+      signerKeyId: input.signer.keyId,
+      last: { sequence: input.last.sequence, entryDigest: input.last.entryDigest, page: input.last.page },
+      announcements,
+    },
+    lastHead: head,
+    ...(lastTimestamp === undefined ? {} : { lastTimestamp }),
+  };
+}
+
+function requesterBlobStore(records: ReturnType<typeof createFsBlobStore>): ReadableImmutableBlobStore {
+  return records;
+}
+
+function sameDurableState(left: DurableSourceState, right: DurableSourceState): boolean {
+  return sealJson(left).digest === sealJson(right).digest;
+}
+
+function assertDurableRequesterOwnership(
+  value: DurableSourceState | DurableSourceAppendIntent,
+  source: SourceIdentity,
+  signer: DurableSourceSigner,
+): void {
+  if (!sourceMatches(value.source, source) || value.signerKeyId !== signer.keyId) {
+    throw new Error('requester generic source state belongs to another source or signer');
+  }
+}
+
+function publicationFromWriterIntent(intent: DurableSourceAppendIntent): PublicationIntent {
+  const pageBytes = decodeBase64(intent.page.bytesBase64);
+  const page = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(pageBytes)) as ArchivePage;
+  const entry = page.entries[0]?.entry;
+  if (page.entries.length !== 1 || entry === undefined
+    || page.page !== intent.receipt.page
+    || entry.announcements.length !== 1
+    || entry.announcements[0]!.announcementId !== intent.announcementId) {
+    throw new Error('requester generic append intent cannot be mirrored as a v1 publication');
+  }
+  const parsedHead = parseWireDsseEnvelope(JSON.parse(
+    new TextDecoder('utf-8', { fatal: true }).decode(decodeBase64(intent.head.bytesBase64)),
+  ));
+  const head = parseSourceHead(JSON.parse(new TextDecoder().decode(parsedHead.payloadBytes)));
+  return {
+    state: 'pending',
+    sequence: entry.sequence,
+    page: page.page,
+    entry,
+    entryDigest: intent.receipt.entryDigest,
+    head,
+    announcementId: intent.announcementId,
+    writerIntent: intent,
+  };
+}
+
+function logicalSourceRevision(snapshot: CasSnapshot<SourceState> | undefined): string | null {
+  if (snapshot === undefined) return null;
+  return snapshot.value.pending === undefined
+    ? snapshot.revision
+    : snapshot.value.pending.intent.expectedStateRevision;
+}
+
+function createRequesterSourceStateStore(input: {
+  readonly state: NativeRequesterState;
+  readonly source: SourceIdentity;
+  readonly signer: DurableSourceSigner;
+}): SourceStateStore {
+  return {
+    async read() {
+      const snapshot = await input.state.readSourceSnapshot();
+      if (snapshot === undefined) return undefined;
+      if (snapshot.value.version !== 1) throw new Error('unsupported requester-source state version');
+      const reconstructed = await reconstructRequesterHistory({
+        records: input.state.records,
+        source: input.source,
+        signer: input.signer,
+        ...(snapshot.value.last === undefined ? {} : { last: snapshot.value.last }),
+        skipHead: snapshot.value.pending !== undefined,
+      });
+      const revision = logicalSourceRevision(snapshot);
+      if (revision === null) return undefined;
+      return { revision, value: reconstructed.durable };
+    },
+    async compareAndSwap(_sourceId, expectedRevision, next): Promise<CasWriteResult> {
+      assertDurableRequesterOwnership(next, input.source, input.signer);
+      return input.state.mutate(async () => {
+        const current = await input.state.readSourceSnapshot();
+        if (logicalSourceRevision(current) !== expectedRevision) return { ok: false };
+        const reconstructed = await reconstructRequesterHistory({
+          records: input.state.records,
+          source: input.source,
+          signer: input.signer,
+          ...(next.last === null ? {} : { last: next.last }),
+        });
+        if (!sameDurableState(reconstructed.durable, next) || reconstructed.lastHead === undefined) {
+          throw new Error('requester generic next state does not equal the signed public source');
+        }
+        const legacy: SourceState = {
+          version: 1,
+          last: {
+            sequence: next.last!.sequence,
+            entryDigest: next.last!.entryDigest,
+            page: next.last!.page,
+            head: reconstructed.lastHead,
+          },
+          ...(current?.value.pending === undefined ? {} : { pending: current.value.pending }),
+        };
+        await input.state.writeSource(legacy);
+        const written = await input.state.readSourceSnapshot();
+        if (written === undefined) throw new Error('requester-source state disappeared after commit');
+        return { ok: true, revision: logicalSourceRevision(written)! };
+      });
+    },
+  };
+}
+
+async function legacyRequesterWriterIntent(input: {
+  readonly state: NativeRequesterState;
+  readonly source: SourceIdentity;
+  readonly signer: DurableSourceSigner;
+  readonly publication: PublicationIntent;
+  readonly recordBytes: Uint8Array;
+  readonly recordContentType: string;
+}): Promise<DurableSourceAppendIntent> {
+  const previousPosition = input.publication.entry.previous === null
+    ? null
+    : {
+      sequence: formatSequence(BigInt(input.publication.sequence) - 1n),
+      entryDigest: input.publication.entry.previous,
+      page: formatSequence(BigInt(input.publication.page) - 1n),
+    };
+  const previous = await reconstructRequesterHistory({
+    records: input.state.records,
+    source: input.source,
+    signer: input.signer,
+    ...(previousPosition === null ? {} : { last: previousPosition }),
+    skipHead: true,
+  });
+  const sourceSnapshot = await input.state.readSourceSnapshot();
+  const currentHead = await input.state.records.get(headPath(input.source.name));
+  return freezeRequesterSourceV1Intent({
+    source: input.source,
+    signer: input.signer,
+    publication: input.publication,
+    recordBytes: input.recordBytes,
+    recordContentType: input.recordContentType,
+    previousState: previous.durable,
+    expectedStateRevision: logicalSourceRevision(sourceSnapshot),
+    previousStateDigest: sourceSnapshot === undefined ? null : sealJson(previous.durable).digest,
+    previousPosition,
+    expectedHeadDigest: currentHead === undefined ? null : recordDigest(currentHead.bytes),
+    previousHeadIssuedAt: previous.lastTimestamp ?? null,
+  });
+}
+
+function createRequesterSourceIntentStore(input: {
+  readonly state: NativeRequesterState;
+  readonly associationKey: string;
+  readonly source: SourceIdentity;
+  readonly signer: DurableSourceSigner;
+  readonly checkpoint?: NativeRequesterDeps['checkpoints'];
+}): SourceAppendIntentStore {
+  const store: SourceAppendIntentStore = {
+    async read() {
+      const sourceSnapshot = await input.state.readSourceSnapshot();
+      if (sourceSnapshot?.value.pending !== undefined) {
+        const pending = sourceSnapshot.value.pending;
+        assertDurableRequesterOwnership(pending.intent, input.source, input.signer);
+        return { revision: sourceSnapshot.revision, value: pending.intent };
+      }
+      const association = await input.state.readAssociationSnapshot(input.associationKey);
+      if (association === undefined || association.value.publication.state === 'published') return undefined;
+      const publication = association.value.publication;
+      if (publication.sequence === '') return undefined;
+      const record = await input.state.records.get(association.value.submission.path);
+      if (record === undefined) throw new Error('requester source legacy intent record is missing');
+      const intent = publication.writerIntent ?? await legacyRequesterWriterIntent({
+          state: input.state,
+          source: input.source,
+          signer: input.signer,
+          publication,
+          recordBytes: record.bytes,
+          recordContentType: record.contentType,
+        });
+      assertDurableRequesterOwnership(intent, input.source, input.signer);
+      await store.compareAndSwap(formatOrigin(input.source.agent, input.source.name), null, intent);
+      const migrated = await input.state.readSourceSnapshot();
+      if (migrated?.value.pending === undefined) {
+        throw new Error('requester source legacy intent could not acquire the source-global slot');
+      }
+      return { revision: migrated.revision, value: migrated.value.pending.intent };
+    },
+    async compareAndSwap(_sourceId, expectedRevision, next): Promise<CasWriteResult> {
+      return input.state.mutate(async () => {
+        const sourceSnapshot = await input.state.readSourceSnapshot();
+        const currentRevision = sourceSnapshot?.value.pending === undefined ? null : sourceSnapshot.revision;
+        if (currentRevision !== expectedRevision) return { ok: false };
+        if (next === undefined) {
+          const pending = sourceSnapshot?.value.pending;
+          if (pending === undefined) return { ok: true, revision: `cleared:${expectedRevision ?? 'absent'}` };
+          if (sourceSnapshot === undefined) throw new Error('requester source pending intent has no source state');
+          const association = await input.state.readAssociationSnapshot(pending.associationKey);
+          if (association === undefined) throw new Error('requester source pending association disappeared');
+          const mirrored = association.value.publication.sequence === ''
+            ? publicationFromWriterIntent(pending.intent)
+            : association.value.publication;
+          const { writerIntent: _committedIntent, ...legacyPublication } = mirrored;
+          await input.state.writeAssociation(pending.associationKey, {
+            ...association.value,
+            publication: { ...legacyPublication, state: 'published' },
+          });
+          const committed: SourceState = {
+            version: 1,
+            ...(sourceSnapshot.value.last === undefined ? {} : { last: sourceSnapshot.value.last }),
+          };
+          await input.state.writeSource(committed);
+        } else {
+          assertDurableRequesterOwnership(next, input.source, input.signer);
+          const association = await input.state.readAssociationSnapshot(input.associationKey);
+          if (association === undefined || association.value.publication.state === 'published') {
+            throw new Error('requester source association cannot claim a new source-global intent');
+          }
+          const pending: NonNullable<SourceState['pending']> = {
+            version: 1,
+            associationKey: input.associationKey,
+            intent: next,
+          };
+          await input.state.writeSource({
+            version: 1,
+            ...(sourceSnapshot?.value.last === undefined ? {} : { last: sourceSnapshot.value.last }),
+            pending,
+          });
+          await input.state.writeAssociation(input.associationKey, {
+            ...association.value,
+            publication: publicationFromWriterIntent(next),
+          });
+          await input.checkpoint?.('source-intent-durable');
+        }
+        const written = await input.state.readSourceSnapshot();
+        return { ok: true, revision: written?.revision ?? `cleared:${expectedRevision ?? 'absent'}` };
+      });
+    },
+  };
+  return store;
 }
 
 async function sourceFacts(
@@ -988,98 +1535,97 @@ async function appendRequesterSource(input: {
   readonly source: SourceIdentity;
   readonly role: NativeRequesterIdentity;
   readonly publicBaseUrl: string;
-  readonly now: Date;
+  readonly now: () => Date;
   readonly association: NativeRequesterAssociation;
   readonly runId: string;
+  readonly checkpoint?: NativeRequesterDeps['checkpoints'];
 }): Promise<NativeRequesterAssociation> {
-  if (input.association.publication.state === 'published') return input.association;
-  let association = input.association;
-  let publication = association.publication;
-
-  if (publication.sequence === '') {
-    const sourceState = await input.state.readSource();
-    const sequence = formatSequence(sourceState.last === undefined ? 1n : BigInt(sourceState.last.sequence) + 1n);
-    const previous = sourceState.last?.entryDigest ?? null;
-    const page = sequence;
-    const issuedAt = input.now.toISOString();
-    const entry: AnnouncementEntry = {
+  return input.state.withSourceLease(async () => {
+  async function writeDiscoveryIndex(): Promise<void> {
+    const committed = await input.state.readSource();
+    const page = committed.last?.page ?? formatSequence(1n);
+    await writeWellKnownDocument(input.state.records, {
       protocol: RECORD_DISCOVERY_VERSION,
+      sources: [{
+        agent: input.source.agent,
+        name: input.source.name,
+        headPath: headPath(input.source.name),
+        archiveRoot: archivePagePath(input.source.name, page),
+      }],
+    });
+  }
+  if (input.association.publication.state === 'published') {
+    await writeDiscoveryIndex();
+    return input.association;
+  }
+  const key = associationKey(input.association);
+  const submissionRecord = await input.state.records.get(input.association.submission.path);
+  if (submissionRecord === undefined) throw new Error('requester source exact Submission record is missing');
+  const signer = durableRequesterSigner(input.role);
+  const writer = createDurableSourceWriter({
+    source: input.source,
+    signer,
+    blobs: requesterBlobStore(input.state.records),
+    states: createRequesterSourceStateStore({
+      state: input.state,
       source: input.source,
-      sequence,
-      previous,
-      timestamp: issuedAt,
-      announcements: [{
-        announcementId: `native-requester-${association.chainId}-${association.taskId.toString(10)}-${association.taskDigest.slice(7, 23)}`,
-        action: 'available',
+      signer,
+    }),
+    intents: createRequesterSourceIntentStore({
+      state: input.state,
+      associationKey: key,
+      source: input.source,
+      signer,
+      ...(input.checkpoint === undefined ? {} : { checkpoint: input.checkpoint }),
+    }),
+  });
+  await writer.recover();
+  const currentAssociation = await input.state.readAssociation(key);
+  if (currentAssociation === undefined) throw new Error('requester source association disappeared before append');
+  if (currentAssociation.publication.state === 'published') {
+    await writeDiscoveryIndex();
+    return currentAssociation;
+  }
+  const publication = currentAssociation.publication;
+  const committed = await input.state.readSource();
+  const requestedTimestamp = input.now().getTime();
+  const previousTimestamp = committed.last === undefined ? Number.NEGATIVE_INFINITY : new Date(committed.last.head.issuedAt).getTime();
+  const timestamp = new Date(Math.max(requestedTimestamp, previousTimestamp + 1)).toISOString();
+  const command = publication.sequence === ''
+    ? {
+      announcement: {
+        announcementId: `native-requester-${input.association.chainId}-${input.association.taskId.toString(10)}-${input.association.taskDigest.slice(7, 23)}`,
+        action: 'available' as const,
         record: {
           kind: RECORD_KINDS.submission,
-          digest: association.submissionDigest,
+          digest: input.association.submissionDigest,
           mediaType: SUBMISSION_MEDIA_TYPE,
         },
-        locations: location(input.publicBaseUrl, association.submission.path),
+        locations: location(input.publicBaseUrl, input.association.submission.path),
         facts: await sourceFacts(
           input.state,
-          (await input.state.records.get(association.submission.path))!.bytes,
-          association,
+          submissionRecord.bytes,
+          currentAssociation,
           input.runId,
         ),
-      }],
-    };
-    const entryDigest = sealJson(entry).digest;
-    const head: SourceHead = {
-      protocol: RECORD_DISCOVERY_VERSION,
-      origin: formatOrigin(input.source.agent, input.source.name),
-      sequence,
-      entry: entryDigest,
-      issuedAt,
-      refreshBy: new Date(input.now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-    };
-    publication = {
-      state: 'pending',
-      sequence,
-      page,
-      entry,
-      entryDigest,
-      head,
-      announcementId: entry.announcements[0]!.announcementId,
-    };
-    association = { ...association, publication };
+      },
+      timestamp,
+      record: { bytes: submissionRecord.bytes, contentType: submissionRecord.contentType },
+    }
+    : adaptRequesterSourceV1Publication({
+      source: input.source,
+      publication,
+      recordBytes: submissionRecord.bytes,
+      recordContentType: submissionRecord.contentType,
+    });
+  await writer.append(command);
+  await writeDiscoveryIndex();
+  const association = await input.state.readAssociation(key);
+  if (association === undefined || association.publication.state !== 'published') {
+    throw new Error('requester durable source writer did not complete the existing association intent');
   }
-
-  // Persist the append intent before touching the archive. A restart reuses this exact timestamp,
-  // entry, signature, page and head instead of creating a second public announcement.
-  await input.state.writeAssociation(
-    associationKey(association),
-    association,
-  );
-  const signer = discoverySigner(input.role);
-  const signedEntry = await signAnnouncementEntry(publication.entry, signer);
-  const pageBytes = sealJson({
-    protocol: RECORD_DISCOVERY_VERSION,
-    source: input.source.name,
-    page: publication.page,
-    prevArchive: publication.entry.previous === null ? null : formatSequence(BigInt(publication.sequence) - 1n),
-    entries: [{ entry: publication.entry, signature: signedEntry }],
-  }).bytes;
-  await input.state.records.put(archivePagePath(input.source.name, publication.page), pageBytes, JSON_MEDIA_TYPE);
-  const headEnvelope = await signHead(publication.head, sourceDsseSigner(input.role));
-  await input.state.records.put(headPath(input.source.name), sealJson(headEnvelope).bytes, 'application/vnd.jinn.record-discovery.head.v1+json');
-  await writeWellKnownDocument(input.state.records, {
-    protocol: RECORD_DISCOVERY_VERSION,
-    sources: [{
-      agent: input.source.agent,
-      name: input.source.name,
-      headPath: headPath(input.source.name),
-      archiveRoot: archivePagePath(input.source.name, publication.page),
-    }],
-  });
-  await input.state.writeSource({
-    version: 1,
-    last: { sequence: publication.sequence, entryDigest: publication.entryDigest, page: publication.page, head: publication.head },
-  });
-  association = { ...association, publication: { ...publication, state: 'published' } };
-  await input.state.writeAssociation(associationKey(association), association);
   return association;
+  });
 }
 
 async function readExactRecord(
@@ -1228,9 +1774,10 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         source,
         role: roles.get('requester-discovery'),
         publicBaseUrl: deps.publicBaseUrl,
-        now: deps.now(),
+        now: deps.now,
         association: existing,
         runId: draft.runId,
+        ...(deps.checkpoints === undefined ? {} : { checkpoint: deps.checkpoints }),
       });
     }
     const association: NativeRequesterAssociation = {
@@ -1266,9 +1813,10 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       source,
       role: roles.get('requester-discovery'),
       publicBaseUrl: deps.publicBaseUrl,
-      now: deps.now(),
+      now: deps.now,
       association,
       runId: draft.runId,
+      ...(deps.checkpoints === undefined ? {} : { checkpoint: deps.checkpoints }),
     });
     await deps.checkpoints?.('source-announced');
     return published;
@@ -1278,7 +1826,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
     const drafts = await state.allDrafts();
     for (const draft of drafts) {
       let current = draft;
-      if (current.stage === 'broadcasting' && current.outcome === undefined) {
+      if (current.version === 1 && current.stage === 'broadcasting' && current.outcome === undefined) {
         const terms = postingTermsFromWire(current.postingTerms);
         const recovered = await deps.posting.recover({
           chain,
@@ -1289,9 +1837,39 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
           maxClaims: 1,
         });
         if (recovered === null) {
-          throw new Error(`native requester has an unresolved broadcast for runId ${current.runId}; refusing new posts`);
+          throw new Error(
+            `native requester has a legacy broadcast-uncertain operation for runId ${current.runId}; `
+            + 'TaskCreated does not prove the Submission, so explicit operator reconciliation is required',
+          );
         }
         current = { ...current, stage: 'broadcasted', outcome: asStoredOutcome(recovered) };
+        await state.updateDraft(current);
+      }
+      if (current.outcome === undefined) {
+        const [taskBytes, evaluationSpecBytes, admissionReceiptBytes, submissionBytes, requesterEnvelopeBytes] = await Promise.all([
+          readExactRecord(state, current.artifacts.task),
+          readExactRecord(state, current.artifacts.evaluationSpec),
+          readExactRecord(state, current.artifacts.admissionReceipt),
+          readExactRecord(state, current.artifacts.submission),
+          readExactRecord(state, current.artifacts.requesterEnvelope),
+        ]);
+        if (
+          taskBytes === undefined || evaluationSpecBytes === undefined || admissionReceiptBytes === undefined
+          || submissionBytes === undefined || requesterEnvelopeBytes === undefined
+        ) throw new Error(`native requester draft ${current.runId} lost an exact product artifact`);
+        const outcome = await deps.posting.post({
+          taskBytes,
+          evaluationSpecBytes,
+          admissionReceiptBytes,
+          submissionBytes,
+          requesterEnvelopeBytes,
+          chain,
+          creatorSafe: current.creatorSafe,
+          terms: postingTermsFromWire(current.postingTerms),
+        });
+        current = current.version === 1
+          ? { ...current, stage: 'broadcasted', outcome: asStoredOutcome(outcome) }
+          : { ...current, outcome: asStoredOutcome(outcome) };
         await state.updateDraft(current);
       }
       if (current.outcome !== undefined) await canonicalAssociation(current, chain, roles);
@@ -1301,14 +1879,19 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
   return {
     async reconcile(): Promise<void> {
       const chain = assertBaseSepoliaTarget('base-sepolia', await deps.readChain());
+      assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: true });
       const roles = await deps.loadRoles();
       await reconcile(chain, roles);
+      assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: false });
     },
     async request(input): Promise<NativeRequesterResult> {
       assertRunId(input.runId);
       if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
       // This assertion is intentionally before role load, template signing, or post construction.
       const chain = assertBaseSepoliaTarget(input.network, await deps.readChain());
+      // Complete the reusable requester-scope/WAL recovery pass before loading product keys or
+      // sealing a new Submission. Uncertain/conflicting scopes are never bypassed by product state.
+      assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: true });
       const authorityTime = await deps.authorityTime();
       if (authorityTime.chainId !== 84532
         || authorityTime.finalized !== true
@@ -1324,6 +1907,9 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       // of the same run must return its durable canonical association rather than re-seal a
       // receipt with a newly loaded key and accidentally mint another Submission identity.
       await reconcile(chain, roles);
+      // A retryable no-intent scope may have been completed by the matching durable local draft.
+      // Any unresolved scope after that pass blocks admission of an unrelated new bundle.
+      assertPostingRecoverySafe(await deps.posting.recoverPosting(), { allowRetryable: false });
       const priorForRun = (await state.allDrafts()).find((draft) => (
         draft.runId === input.runId
         && draft.chainId === chain.chainId
@@ -1356,7 +1942,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       const taskDigest = artifacts.task.digest;
       const submissionDigest = artifacts.submission.digest;
       const draft: NativeRequesterDraft = {
-        version: 1,
+        version: 2,
         key: draftKey({ chainId: chain.chainId, coordinator: chain.taskCoordinator, taskDigest, submissionDigest }),
         runId: input.runId,
         chainId: chain.chainId,
@@ -1371,7 +1957,6 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         intendedSpendWei: configuredIntendedSpend,
         authorityTime,
         artifacts,
-        stage: 'prepared',
       };
       let durable = await state.putDraft(draft);
       await deps.checkpoints?.('draft-durable');
@@ -1381,8 +1966,6 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         return { association, reused: true };
       }
       await deps.checkpoints?.('before-broadcast');
-      durable = { ...durable, stage: 'broadcasting' };
-      await state.updateDraft(durable);
       const outcome = await deps.posting.post({
         taskBytes: bundle.taskBytes,
         evaluationSpecBytes: bundle.evaluationSpecBytes,
@@ -1393,7 +1976,9 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         creatorSafe: deps.creatorSafe,
         terms: postingTermsFromWire(durable.postingTerms),
       });
-      durable = { ...durable, stage: 'broadcasted', outcome: asStoredOutcome(outcome) };
+      durable = durable.version === 1
+        ? { ...durable, stage: 'broadcasted', outcome: asStoredOutcome(outcome) }
+        : { ...durable, outcome: asStoredOutcome(outcome) };
       await state.updateDraft(durable);
       await deps.checkpoints?.('after-broadcast');
       const association = await canonicalAssociation(durable, chain, roles);

@@ -2,16 +2,39 @@
 import type {
   CatalogRecordProjection,
   EvidenceCatalogReader,
+  EvidenceRecordAnnouncementSource,
 } from "@jinn-network/evidence-discovery";
 import type { ConformanceDiagnostic } from "@jinn-network/evidence-protocol";
 import type {
   EvidenceRecordReference,
   EvidenceRepository,
 } from "@jinn-network/evidence-repository";
+import type { SourceIdentity } from "@jinn-network/record-discovery-protocol";
+import type {
+  DurableSourceSigner,
+  ReadableImmutableBlobStore,
+} from "@jinn-network/record-discovery-serve";
+import type {
+  EvidenceJournalPublicDiscoveryBridgeFactory,
+  LocalPublicDiscoveryBridge,
+} from "./public-discovery.js";
+
+export interface LocalEvidencePublicDiscoveryOptions {
+  readonly source: SourceIdentity;
+  readonly signer: DurableSourceSigner;
+  readonly blobs: ReadableImmutableBlobStore;
+  /** Explicit adapter factory; the ordinary local-runtime dependency closure does not include it. */
+  readonly bridgeFactory: EvidenceJournalPublicDiscoveryBridgeFactory;
+  readonly withdrawals?: EvidenceRecordAnnouncementSource;
+  readonly now?: () => Date;
+  readonly refreshWithinMs?: number;
+}
 
 export interface OpenLocalEvidenceRuntimeOptions {
   readonly rootDir: string;
   readonly signal?: AbortSignal;
+  /** Explicit optional local-journal -> sole public Record Discovery source composition. */
+  readonly publicDiscovery?: LocalEvidencePublicDiscoveryOptions;
 }
 
 export type LocalRuntimeLifecycleState =
@@ -101,6 +124,7 @@ export interface LocalEvidenceRuntimeStatus {
 export interface LocalEvidenceRuntime {
   readonly repository: EvidenceRepository;
   readonly catalog: EvidenceCatalogReader;
+  readonly publicDiscovery?: LocalPublicDiscoveryBridge;
   sync(options?: LocalRuntimeOperationOptions): Promise<LocalEvidenceSyncReport>;
   awaitIndexed(
     reference: EvidenceRecordReference,

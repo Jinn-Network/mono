@@ -291,7 +291,7 @@ async function buildRequesterHost(input: {
     loadRoles: async () => requesterRolePort,
     creatorSafe: config.safeAddress as `0x${string}`,
     posting: {
-      ...createNativeRequesterPostTask({ terms: writes.postingTerms, ports: writes.postingPorts }),
+      ...createNativeRequesterPostTask({ terms: writes.postingTerms, backend: writes.requesterBackend }),
       recover: input.infrastructure.requester.recoverPosting,
       canonicalTaskCreated: input.infrastructure.requester.canonicalTaskCreated,
     },

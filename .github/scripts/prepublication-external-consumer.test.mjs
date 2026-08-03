@@ -364,11 +364,20 @@ test('native role closures come from executable fixture manifests and include on
   const packages = loadCatalogPackages(repoRoot);
   const roles = deriveNativeVerticalRoleClosures(repoRoot, packages);
   assert.deepEqual(Object.keys(roles), ['requester', 'operator', 'evaluator', 'consumer']);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(roles).map(([role, value]) => [role, value.closure.length])),
+    { requester: 14, operator: 23, evaluator: 26, consumer: 9 },
+  );
+  assert.equal(
+    new Set(Object.values(roles).flatMap(({ closure }) => closure)).size,
+    29,
+    'native role union must exclude the legacy marketplace pipeline',
+  );
+  assert.equal(roles.operator.closure.includes('@jinn-network/marketplace-pipeline'), false);
   assert.equal(roles.requester.roots.includes('@jinn-network/task-derivation'), false);
   assert.equal(roles.requester.roots.includes('@jinn-network/task-posting'), false);
   assert.ok(roles.requester.closure.includes('@jinn-network/environment-record'));
-  const promoted = loadCatalogPackages(repoRoot, { releaseGroup: 'native-task-supply-canary' })
-    .map(({ name }) => name);
+  const promoted = [];
   const packed = nativeVerticalRuntimePackageNames(repoRoot, packages, promoted);
   for (const name of promoted) assert.ok(packed.includes(name), name);
   assert.equal(packed.includes('@jinn-network/task-curation'), false);

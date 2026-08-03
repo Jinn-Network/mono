@@ -4,3 +4,4 @@ export * from "./ports.js";
 export * from "./project.js";
 export * from "./reconcile.js";
 export * from "./publish.js";
+export * from "./bridge.js";

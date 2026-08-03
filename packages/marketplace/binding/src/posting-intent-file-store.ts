@@ -27,6 +27,7 @@
 // broadcast-intent.ts's header).
 import { link, mkdir, open, readFile, readdir, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { postingIntentsEqual } from "./broadcast-intent.js";
 import type {
   OwnedPostingIntentRecord,
   PostingIntent,
@@ -49,6 +50,10 @@ interface StoredRecord {
   readonly submissionDigest: `sha256:${string}`;
   readonly idempotencyKey: string;
   readonly createdAt: string;
+  readonly version?: 2;
+  readonly venueNamespace?: string;
+  readonly commandDigest?: `sha256:${string}`;
+  readonly command?: PostingIntent["command"];
   readonly ownerToken: string;
   readonly resolved?: { readonly taskId: string; readonly txHash: `0x${string}` };
 }
@@ -91,6 +96,10 @@ function toOwnedRecord(stored: StoredRecord): OwnedPostingIntentRecord {
     submissionDigest: stored.submissionDigest,
     idempotencyKey: stored.idempotencyKey,
     createdAt: stored.createdAt,
+    ...(stored.version === undefined ? {} : { version: stored.version }),
+    ...(stored.venueNamespace === undefined ? {} : { venueNamespace: stored.venueNamespace }),
+    ...(stored.commandDigest === undefined ? {} : { commandDigest: stored.commandDigest }),
+    ...(stored.command === undefined ? {} : { command: stored.command }),
     ownerToken: stored.ownerToken as PostingOwnerToken,
     ...(stored.resolved === undefined
       ? {}
@@ -236,6 +245,10 @@ export function createFilePostingIntentStore(
         submissionDigest: intent.submissionDigest,
         idempotencyKey: intent.idempotencyKey,
         createdAt: intent.createdAt,
+        ...(intent.version === undefined ? {} : { version: intent.version }),
+        ...(intent.venueNamespace === undefined ? {} : { venueNamespace: intent.venueNamespace }),
+        ...(intent.commandDigest === undefined ? {} : { commandDigest: intent.commandDigest }),
+        ...(intent.command === undefined ? {} : { command: intent.command }),
         ownerToken: `posting-owner:${crypto.randomUUID()}`,
       };
 
@@ -251,6 +264,9 @@ export function createFilePostingIntentStore(
           `posting intent record ${name} existed when this claim was made and vanished before it `
             + "could be read -- another writer is mutating this store's directory",
         );
+      }
+      if (!postingIntentsEqual(toOwnedRecord(existing), intent)) {
+        return { kind: "conflict", existing: toOwnedRecord(existing) };
       }
       if (existing.resolved !== undefined) {
         return {

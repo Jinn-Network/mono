@@ -97,7 +97,9 @@ try {
     "nodeLinker: node-modules",
     "enableGlobalCache: false",
   ].join("\n") + "\n");
-  await run("corepack", ["yarn@4.13.0", "install"], { cwd: consumer });
+  // This is the consumer's first install, so no lockfile can exist yet. CI makes
+  // Yarn installs immutable by default; opt out only for this generated fixture.
+  await run("corepack", ["yarn@4.13.0", "install", "--no-immutable"], { cwd: consumer });
   await writeFile(join(consumer, "packed-imports.test.mjs"), `
 import assert from "node:assert/strict";
 import {

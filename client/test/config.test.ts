@@ -11,6 +11,7 @@ import {
   migrateLegacySolverNets,
   backfillJoinedProviders,
 } from '../src/config.js';
+import { phaseDTransitionUsageSnapshot } from '../src/daemon/phase-d-transition-usage.js';
 
 /**
  * Issue #911 — ≥5 distinct free RPC providers default per supported chain.
@@ -1722,5 +1723,34 @@ describe('engine.knowledgeAutoload (#1393)', () => {
     process.env['JINN_ENGINE_KNOWLEDGE_AUTOLOAD'] = 'true';
     const config = loadConfig(await writeConfig({ engine: { knowledgeAutoload: false } }));
     expect(config.engine.knowledgeAutoload).toBe(true);
+  });
+});
+
+describe('Phase D legacy wiring diagnostics', () => {
+  it('records an accepted legacy wiring/model/plugin/credential configuration', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'jinn-config-phase-d-'));
+    const configPath = path.join(directory, 'config.json');
+    try {
+      await writeFile(configPath, JSON.stringify({
+        configShapeVersion: 2,
+        dbPath: ':memory:',
+        executionWiring: [{
+          workKind: 'prediction.v1',
+          harness: 'claude-code',
+          model: 'claude-haiku-4-5-20251001',
+          plugins: ['learner'],
+          credentialRef: 'anthropic-default',
+          isolationPolicy: 'process',
+        }],
+      }));
+      const before = phaseDTransitionUsageSnapshot()
+        .find((row) => row.signal === 'legacy-wiring-config-field')?.count ?? 0;
+      loadConfig(configPath);
+      const after = phaseDTransitionUsageSnapshot()
+        .find((row) => row.signal === 'legacy-wiring-config-field')?.count ?? 0;
+      expect(after).toBe(before + 1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

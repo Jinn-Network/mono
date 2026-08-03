@@ -158,6 +158,11 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
         submissionUri: "urn:uuid:00000000-0000-0000-0000-000000000002" as `urn:uuid:${string}`,
         digest: `sha256:${"c".repeat(64)}` as `sha256:${string}`,
         submissionBytes: new Uint8Array([1, 2, 3]),
+        taskDigest: `sha256:${"a".repeat(64)}` as `sha256:${string}`,
+        creatorSafe: SAFE,
+        venueNamespace: "test:venue",
+        commandDigest: `sha256:${"d".repeat(64)}`,
+        postingIntentKey: `${SAFE.toLowerCase()}|sha256:${"a".repeat(64)}|sha256:${"c".repeat(64)}`,
       });
     } finally {
       venue.close();

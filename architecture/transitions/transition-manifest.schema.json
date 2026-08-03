@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jinn.network/architecture/transition-manifest.schema.json",
+  "title": "Jinn Phase D transition manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "phase",
+    "defaultPolicy",
+    "transitions"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "phase": {
+      "type": "string",
+      "minLength": 1
+    },
+    "defaultPolicy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transitions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/transition"
+      }
+    }
+  },
+  "$defs": {
+    "repoPath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "nonEmptyStringList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "guard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "assertion"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath"
+        },
+        "assertion": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "usageSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "source", "zeroDefinition"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zeroDefinition": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "compatibility"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "compatibility": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sunsetCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "evidence"],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        }
+      }
+    },
+    "deletionTest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "command"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/repoPath"
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "owner",
+        "entryPoints",
+        "replacement",
+        "consumers",
+        "defaultMode",
+        "noNewUseGuard",
+        "usageSignal",
+        "migration",
+        "sunsetCondition",
+        "deletionTest",
+        "targetPullRequest",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entryPoints": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "replacement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "consumers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "defaultMode": {
+          "enum": ["legacy", "native", "explicit-only", "not-applicable"]
+        },
+        "noNewUseGuard": {
+          "$ref": "#/$defs/guard"
+        },
+        "usageSignal": {
+          "$ref": "#/$defs/usageSignal"
+        },
+        "migration": {
+          "$ref": "#/$defs/migration"
+        },
+        "sunsetCondition": {
+          "$ref": "#/$defs/sunsetCondition"
+        },
+        "deletionTest": {
+          "$ref": "#/$defs/deletionTest"
+        },
+        "targetPullRequest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": ["planned", "migrating", "ready-for-deletion", "deleted", "blocked"]
+        }
+      }
+    }
+  }
+}

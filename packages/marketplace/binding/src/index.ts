@@ -90,6 +90,8 @@ export type { HonorOrRejectResult } from "./honor-or-reject.js";
 export {
   BroadcastUncertainError,
   createInMemoryPostingIntentStore,
+  postingIntentKeyOf,
+  postingIntentsEqual,
   recoverPostingIntents,
 } from "./broadcast-intent.js";
 export { createFilePostingIntentStore } from "./posting-intent-file-store.js";
@@ -110,8 +112,14 @@ export type {
 } from "./broadcast-intent.js";
 
 // --- today-mode posting + digest-join (§6.1; M2.3) ---
-export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
-export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
+export {
+  MARKETPLACE_MANIFEST_DIGEST_SENTINEL,
+  encodeCreateTaskCalldata,
+  postTask,
+  postingCommandDigestOf,
+  preparePostingCommand,
+} from "./posting.js";
+export type { PostingPorts, PostingTerms, PreparedPostingCommand, SafeBroadcastPort } from "./posting.js";
 
 // --- requester on-ramp defaults (supply design §8 D7; finding F2) ---
 export {
@@ -126,12 +134,20 @@ export { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabil
 
 // --- the requester-facing TaskExecutionBackend (§13, Finding F2; M2.4) ---
 export { makeMarketplaceBackend } from "./backend.js";
-export type { MarketplaceTestableBackend } from "./backend.js";
 export type {
+  MarketplaceRequesterBackend,
+  MarketplaceTestableBackend,
+  RequesterPostingRecoveryReport,
+} from "./backend.js";
+export type {
+  ClaimSubmissionScopeInput,
   MarketplaceBackendPorts,
   MarketplaceLifecyclePorts,
   MarketplaceObservePort,
+  PendingSubmissionScopeRecord,
   RecordSubmissionInput,
+  RecoveredSubmissionScopeResolution,
+  ResolveRecoveredSubmissionScopeInput,
   SubmissionScopeClaim,
   SubmissionScopeOwnerToken,
   SubmissionScopeRecord,
