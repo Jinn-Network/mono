@@ -20,7 +20,15 @@
  * `checkPidfileLiveness` and blocks whenever that classifier would refuse
  * (a confirmed-alive jinn daemon, or a pid we cannot conclusively rule out —
  * EPERM / unknown errno — fails closed for the same reason the `jinn run`
- * startup gate does).
+ * startup gate does), PLUS one deliberate inversion: `checkPidfileLiveness`'s
+ * `self-or-pid1-container` branch (`decision: 'unlink-stale'`) is correct
+ * for `jinn run`'s OWN startup gate -- a fresh container always precedes the
+ * pid-1 daemon writing its own current pidfile, so a pid-1 record there is
+ * necessarily stale. It is NOT correct here: this guard runs from a
+ * *separate* CLI process, potentially inside the SAME live container, where
+ * pid 1 in the pidfile means the daemon it must not race is alive right now.
+ * This guard treats that branch as blocking rather than reusing the
+ * run-gate's "safe to reclaim" verb.
  */
 
 import { join } from 'node:path';
@@ -30,14 +38,25 @@ import type { BuildEnvelopeInput } from '../errors/envelope.js';
 /** Explicit opt-out for operators who have verified concurrent broadcast is safe. */
 export const DAEMON_GUARD_OPT_OUT_ENV = 'JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON';
 
-export type DaemonGuardReason = 'not-running' | 'alive' | 'eperm' | 'unknown' | 'opted-out';
+export type DaemonGuardReason =
+  | 'not-running'
+  | 'alive'
+  | 'eperm'
+  | 'unknown'
+  | 'opted-out'
+  | 'pid1-container';
 
 // Discriminated on `blocked` so `if (result.blocked)` narrows callers to the
 // variant that actually carries a confirmed/suspected-alive pid, without a
 // separate type assertion at every call site.
 export type DaemonGuardResult =
   | { blocked: false; pid: null; pidfilePath: string; reason: 'not-running' | 'opted-out' }
-  | { blocked: true; pid: number | null; pidfilePath: string; reason: 'alive' | 'eperm' | 'unknown' };
+  | {
+      blocked: true;
+      pid: number | null;
+      pidfilePath: string;
+      reason: 'alive' | 'eperm' | 'unknown' | 'pid1-container';
+    };
 
 export interface CheckDaemonGuardOptions {
   earningDir: string;
@@ -68,6 +87,14 @@ export function checkDaemonGuard(options: CheckDaemonGuardOptions): DaemonGuardR
   const liveness = checkPidfileLiveness({ pidPath });
   if (liveness.decision === 'refuse') {
     return { blocked: true, pid: liveness.pid, pidfilePath: liveness.pidfilePath, reason: liveness.reason };
+  }
+  if (liveness.decision === 'unlink-stale' && liveness.reason === 'self-or-pid1-container') {
+    return {
+      blocked: true,
+      pid: liveness.pid,
+      pidfilePath: liveness.pidfilePath,
+      reason: 'pid1-container',
+    };
   }
   return { blocked: false, pid: null, pidfilePath: pidPath, reason: 'not-running' };
 }

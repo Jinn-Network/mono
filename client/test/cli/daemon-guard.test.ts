@@ -94,6 +94,22 @@ describe('checkDaemonGuard', () => {
     }
   });
 
+  // D0a round-1 review (important finding): a recorded pid of 1 is the
+  // documented containerized-deployment shape (Railway) -- inside the LIVE
+  // container the daemon IS pid 1. `checkPidfileLiveness` classifies this
+  // `unlink-stale` because that verb is correct for `jinn run`'s OWN startup
+  // gate (a fresh container always precedes the pid-1 daemon writing its
+  // own current pidfile). Reusing that same verb here made the guard fail
+  // OPEN for every broadcasting CLI verb run inside that live container.
+  it('blocks when the recorded pid is 1 (containerized daemon, #649 self-or-pid1-container branch)', () => {
+    writeFileSync(join(tmp, 'daemon.pid'), '1\n', 'utf-8');
+    const result = checkDaemonGuard({ earningDir: tmp, env: {} });
+    expect(result.blocked).toBe(true);
+    if (result.blocked) {
+      expect(result.pid).toBe(1);
+    }
+  });
+
   it('is opted out via the explicit env var even when a daemon is alive', () => {
     writeFileSync(join(tmp, 'daemon.pid'), '987654\n', 'utf-8');
     __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
