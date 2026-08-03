@@ -30,6 +30,10 @@ import {
   type PolicyOptimizationIssue,
   type ValidationResult,
 } from "./errors.js";
+import {
+  checkBenchmarkDisjointness,
+  type CampaignBenchmarkBytes,
+} from "./benchmark-disjointness.js";
 import { assertExactPin, axisValuesByteShare, isExactPin } from "./frozen-axes.js";
 import { CAMPAIGN_FORMAT_TOKEN, CORE_AXES, V0_MUTATION_SURFACE } from "./tokens.js";
 import type { CampaignDocument, PolicyRef, SealedCampaign, SeedResolution } from "./types.js";
@@ -335,9 +339,24 @@ export function checkSeedAgreement(
 export function sealCampaign(
   campaign: CampaignDocument,
   seedResolutions: readonly SeedResolution[],
+  benchmarks?: CampaignBenchmarkBytes,
 ): SealedCampaign {
   const validated = validateCampaign(campaign);
   if (!validated.ok) refuseAll(validated.errors);
+  // Review disposition M4. Optional here and mandatory at `DRAFT -> EXPLORING`, for the same
+  // reason the seed check takes referents: the document carries digests, so a sealer that does not
+  // hold the two slates' bytes cannot run this. One that does should not have to wait for the
+  // gate to tell it the campaign was never viable.
+  if (benchmarks !== undefined) {
+    const disjointness = checkBenchmarkDisjointness(validated.value.target, benchmarks);
+    if (!disjointness.ok) {
+      refuseAll([issue(
+        disjointness.reason === "shared-items" ? "benchmark-overlap" : "invalid-document",
+        "target.promotionBenchmark",
+        disjointness.detail,
+      )]);
+    }
+  }
   for (const [axis, value] of Object.entries(validated.value.frozenAxes)) {
     assertExactPin(axis, value, childPath("frozenAxes", axis));
   }
