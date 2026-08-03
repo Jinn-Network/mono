@@ -72,9 +72,18 @@ function writeTypedPayload(workingDir: string, payload: Record<string, unknown>)
 }
 
 describe('swe-rebench-v2 solver round-trip via LearnerHarness', () => {
-  it('claude-code-learner.supports() claims swe-rebench-v2.v1 restoration', () => {
+  it('claude-code-learner.supports() claims swe-rebench-v2.v1 restoration when routed to it', () => {
     const adapter = new NoOpHarnessAdapter();
-    const harness = new LearnerHarness({ adapter, pluginRoot: '/tmp/plugin-root' });
+    // C6: routing is explicit now — the learner claims the SolverTypes its
+    // configuration names and nothing else (product design §10). This test used
+    // to construct the harness with no routing at all and rely on the retired
+    // wrap-every-SolverType default; the allowlist below is what a deployment
+    // that wants the learner on swe-rebench-v2 actually configures.
+    const harness = new LearnerHarness({
+      adapter,
+      pluginRoot: '/tmp/plugin-root',
+      routing: { solverTypes: ['swe-rebench-v2.v1'] },
+    });
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'restoration' })).toBe(true);
     // Evaluation goes to the dedicated SweRebenchV2EvaluatorHarness, not the learner.
     expect(harness.supports({ solverType: 'swe-rebench-v2.v1', role: 'evaluation' })).toBe(false);

@@ -386,7 +386,31 @@ export const JinnConfigSchema = z.object({
    */
   harness: z
     .object({
-      mode: z.enum(['train', 'frozen']).default('train'),
+      mode: z.enum(['train', 'frozen', 'candidate']).default('train'),
+      /**
+       * Explicit `supports()` routing for the learner harnesses (policy
+       * optimization product design §10). `solverTypes` names what this
+       * operator's learner claims; absent or empty means it claims nothing.
+       * `legacyDefaultRouting` restores the deprecated wrap-every-SolverType
+       * posture (equivalently: `JINN_LEARNER_DEFAULT_ROUTING=1`).
+       */
+      routing: z
+        .object({
+          solverTypes: z.array(z.string()).optional(),
+          legacyDefaultRouting: z.boolean().optional(),
+        })
+        .optional(),
+      /**
+       * Candidate-mode settings. `proposerAgentIri` attributes the sealed
+       * candidate manifest to this operator; without it the run emits a
+       * candidate tree but refuses to seal an unattributable proposal.
+       */
+      candidate: z
+        .object({
+          workspaceRoot: z.string().optional(),
+          proposerAgentIri: z.string().optional(),
+        })
+        .optional(),
     })
     .default({ mode: 'train' }),
 

@@ -14,11 +14,20 @@ import { vettedPoolRefSemanticsMismatch } from '../../../solver-types/_swe-reben
 import { syntheticClaimBlocked } from '../../../solver-types/_swe-rebench-v2-synthetic-claim.js';
 import { CLAUDE_CODE_HARNESS, CODEX_HARNESS, canonicalHarnessName } from '../../names.js';
 import { LEARNER_PUBLIC_V1 } from '../../hash-profile.js';
+import { harnessHashOptions } from '../../freeze.js';
 import type {
   HarnessAdapter,
   TaskSessionInputs,
   LearnerHarnessConfig,
 } from './types.js';
+import {
+  CANDIDATE_DIR_ENV,
+  emitCandidate,
+  provisionCandidateWorkspace,
+  type LearnerCandidateConfig,
+  type ProvisionedCandidate,
+} from './candidate.js';
+import { routingSupports, type LearnerRoutingConfig } from './routing.js';
 import { resolvePluginRoot } from './plugin-path.js';
 import { digestDirectory } from '../../../plugins/digest.js';
 import { findSolverPluginManifest } from '../../../plugins/manifest.js';
@@ -59,11 +68,15 @@ export class LearnerHarness implements Harness {
   private readonly codexPath: string | undefined;
   private readonly codexDoctorTimeoutMs: number | undefined;
   private readonly runtimeMode: 'bare' | 'container' | 'docker-compose';
+  private readonly routing: LearnerRoutingConfig | undefined;
+  private readonly candidateConfig: LearnerCandidateConfig;
   /** Memoized #1035 attribution descriptors (built lazily on first request). */
   private attributionPluginsCache: RuntimePlugin[] | undefined;
 
   constructor(config: LearnerHarnessConfig) {
     this.adapter = config.adapter;
+    this.routing = config.routing;
+    this.candidateConfig = config.candidate ?? {};
     this.name = config.name ?? CLAUDE_CODE_HARNESS;
     this.version = config.version ?? '0.1.0-shim';
     this.pluginRoot = config.pluginRoot ?? resolvePluginRoot();
@@ -249,30 +262,24 @@ export class LearnerHarness implements Harness {
     return { ready: true };
   }
 
+  /**
+   * Routing is explicit: this harness claims the SolverTypes its configuration
+   * names, and nothing else.
+   *
+   * The former posture — return `true` for every non-evaluation SolverType, with
+   * a two-item blocklist bolted on — was self-documented architectural debt. It
+   * is retired here because it collides with controlled arms: a campaign cannot
+   * compare policies on a route the learner claims regardless of what anyone
+   * configured, and an unconfigured learner quietly wrapping the whole network
+   * is not a policy anybody pinned (product design §10).
+   *
+   * The old behaviour survives behind `JINN_LEARNER_DEFAULT_ROUTING` so existing
+   * deployments keep working while they migrate to an explicit allowlist. See
+   * `routing.ts` for the two-item blocklist that holds in *both* modes and for
+   * the conditions under which it can finally be deleted.
+   */
   supports(spec: { solverType: string; role?: 'restoration' | 'evaluation' }): boolean {
-    if (spec.role === 'evaluation') return false;
-    // These SolverTypes have first-party restoration Harnesses that return
-    // typed solutionPayload objects. The learner emits phase artifacts for its
-    // own pipeline; letting it claim these specialist tasks can run Claude but
-    // fail packaging when the phase artifacts are absent.
-    //
-    // Architectural debt: this blocklist is the symptom — the learner can't
-    // currently handle prediction.v1 / prediction.apy.v0 generically because
-    // jinn-prediction-plugin lacks a submission-shape skill the way
-    // swe-rebench-v2-runtime has plan/SKILL.md. Once that plugin gets a
-    // submission skill and the harvest's prediction.v1 special-path
-    // (harvest.ts ~520) is migrated to the generic .execute/solution-payload.json
-    // path, this whole branch can be deleted.
-    //
-    // Related: jinn-mono-kzlj (deferred — Prediction frozen per
-    // DR-2026-05-11-a). kzlj is scoped to prediction.v1; the prediction.apy.v0
-    // path needs the same migration when the apy SolverNet's freeze lifts
-    // (file a sibling bead when that happens). Reopen kzlj + file the apy
-    // analogue when the freezes lift.
-    if (spec.solverType === 'prediction.v1' || spec.solverType === 'prediction.apy.v0') {
-      return false;
-    }
-    return true;
+    return routingSupports(this.routing, spec, this.name);
   }
 
   /**
@@ -297,8 +304,63 @@ export class LearnerHarness implements Harness {
     return { ok: true };
   }
 
+  /**
+   * Candidate mode's write target: a copy of the ACTIVE state the plugin's
+   * Improve and Consolidate phases mutate instead of the live directory. The
+   * active directory itself stays byte-identical, enforced by the freeze-fence
+   * (which takes its non-train branch for candidate mode).
+   */
+  private async provisionCandidate(ctx: HarnessContext): Promise<ProvisionedCandidate> {
+    const workspaceRoot = this.candidateConfig.workspaceRoot
+      ?? join(ctx.implStateDir, '..', 'candidates');
+    return await provisionCandidateWorkspace({
+      activeDir: ctx.implStateDir,
+      workspaceRoot,
+      runId: ctx.requestId ?? ctx.task.id,
+      hashOpts: harnessHashOptions(this) ?? {},
+    });
+  }
+
+  /** Seal the proposal. Never throws — a failed emission must not fail the solve. */
+  private async emitCandidateManifest(
+    ctx: HarnessContext,
+    provisioned: ProvisionedCandidate,
+  ): Promise<void> {
+    try {
+      const emission = await emitCandidate({
+        provisioned,
+        workingDir: ctx.workingDir,
+        axes: {
+          harness: this.name,
+          model: ctx.solverNet?.model ?? null,
+          // Every launcher supports exactly one isolation policy, so this axis
+          // is `vacuous` in the substrate's §4.3 sense — agreement on it asserts
+          // nothing. It is still pinned, so the tuple is honest about what ran.
+          isolationPolicy: 'unrestricted',
+        },
+        config: this.candidateConfig,
+        hashOpts: harnessHashOptions(this) ?? {},
+      });
+      if (emission.error) {
+        console.warn(
+          `[learner:${this.name}] candidate ${emission.runId}: tree emitted, manifest refused — ${emission.error}`,
+        );
+      } else {
+        console.log(
+          `[learner:${this.name}] candidate ${emission.runId}: ${emission.manifestDigest} ` +
+            `(parent tree ${emission.parentTreeDigest.slice(0, 12)} → candidate tree ${emission.candidateTreeDigest.slice(0, 12)})`,
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[learner:${this.name}] candidate emission failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async run(ctx: HarnessContext): Promise<Solution> {
     const window = ctx.task.window ?? { startTs: 0, endTs: 0 };
+    const candidate = ctx.mode === 'candidate' ? await this.provisionCandidate(ctx) : undefined;
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
@@ -316,14 +378,21 @@ export class LearnerHarness implements Harness {
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
       mode: ctx.mode,
+      ...(candidate ? { adapterEnv: { [CANDIDATE_DIR_ENV]: candidate.treeDir } } : {}),
     };
 
     await this.adapter.runTask(inputs, this.pluginRoot);
 
+    // Seal the proposal before harvesting. `declaredChanges` is read from the
+    // phase artifacts the plugin just wrote, so everything the manifest needs
+    // already exists — and sealing here means a harvest failure costs the
+    // delivery, not the candidate.
+    if (candidate) await this.emitCandidateManifest(ctx, candidate);
+
     // Frozen mode skips the learning phases (improve, memory-consolidation), so
     // harvest must not require their artifacts — solve-only requires none. Train
-    // mode (undefined → 'full') is unchanged, so the daemon's normal restoration
-    // runs are unaffected.
+    // and candidate mode (undefined → 'full') both run them; candidate mode only
+    // changes WHERE they write, not whether they run.
     const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
     const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task);
     return {

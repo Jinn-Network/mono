@@ -26,6 +26,26 @@ export interface RuntimePlugin {
 
 // ── HarnessContext ────────────────────────────────────────────────────────
 
+/**
+ * Harness execution mode.
+ *
+ *  - `train`    — the harness may mutate `implStateDir` in place. Normal
+ *                 learning mode; no fence overhead.
+ *  - `frozen`   — `implStateDir` is read-only for the whole run. The
+ *                 freeze-fence hashes before and after and rejects the envelope
+ *                 on any difference.
+ *  - `candidate` — the harness runs as a *proposer* (policy-optimization product
+ *                 design §10). The ACTIVE `implStateDir` gets frozen semantics —
+ *                 it is the policy under evaluation — while the harness's
+ *                 self-improvement phases write to a provisioned candidate
+ *                 workspace and the run emits a sealed candidate manifest.
+ *
+ * The freeze-fence branches on `train` versus everything else, so `candidate`
+ * inherits frozen enforcement by construction rather than by a second
+ * implementation that could drift from it.
+ */
+export type HarnessMode = 'train' | 'frozen' | 'candidate';
+
 export interface HarnessContext {
   task: Task;
   /** On-chain / persisted request id for this run. May differ from task.id. */
@@ -75,9 +95,9 @@ export interface HarnessContext {
   secrets?: ScopedSecrets;
   /**
    * Harness execution mode. See @jinn-network/sdk/harness HarnessContext.mode
-   * for full documentation.
+   * for full documentation, and {@link HarnessMode} for what `candidate` adds.
    */
-  mode: 'train' | 'frozen';
+  mode: HarnessMode;
 }
 
 // ── Solution ─────────────────────────────────────────────────────────
