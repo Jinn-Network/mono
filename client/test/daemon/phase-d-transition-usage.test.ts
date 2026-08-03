@@ -8,7 +8,7 @@ import {
   phaseDTransitionUsageDiagnostics,
   phaseDTransitionUsageSnapshot,
   recordPhaseDTransitionUse,
-} from '../../src/daemon/phase-d-transition-usage.js';
+} from '../../src/compatibility/phase-d-transition-usage.js';
 
 describe('Phase D transition usage diagnostics', () => {
   it('records monotonic counts and preserves the first-observation time', () => {

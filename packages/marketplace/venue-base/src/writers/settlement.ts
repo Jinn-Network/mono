@@ -311,16 +311,31 @@ async function readTodaySettlementTransaction(
   input: SettlementWriterInput,
   requestId: Hex,
 ): Promise<{ readonly txHash?: Hex }> {
-  const events = await input.publicClient.getContractEvents({
-    address: input.chain.jinnRouter,
-    abi: JINN_ROUTER_V3_ABI,
-    eventName: "SolutionDeliveryClaimed",
-    args: { requestId },
-    fromBlock: 0n,
-    toBlock: "latest",
-  });
-  const txHash = events.at(-1)?.transactionHash;
-  return txHash === undefined ? {} : { txHash };
+  const latest = await input.publicClient.getBlockNumber();
+  const fromBlock = latest > DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS
+    ? latest - DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS
+    : 0n;
+  const logs = await input.logSource.logsInRange(fromBlock, latest);
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const log = logs[index]!;
+    if (log.address.toLowerCase() !== input.chain.jinnRouter.toLowerCase()) continue;
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_V3_ABI,
+        data: log.data,
+        topics: log.topics as [Hex, ...Hex[]],
+        strict: true,
+      });
+      if (decoded.eventName !== "SolutionDeliveryClaimed") continue;
+      const decodedRequestId = (decoded.args as unknown as { requestId: Hex }).requestId;
+      if (decodedRequestId.toLowerCase() === requestId.toLowerCase()) {
+        return { txHash: log.transactionHash };
+      }
+    } catch {
+      // Not the requested V3 settlement event; the bounded router range contains other events.
+    }
+  }
+  return {};
 }
 
 function decodeClaimedRequestIdFromLogs(logs: readonly Log[]): Hex | undefined {

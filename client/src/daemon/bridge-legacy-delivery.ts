@@ -24,7 +24,7 @@ import {
   LEGACY_SUBMISSION_RECORD_KIND,
   type AnnouncedSubmissionCard,
 } from './native-submission-facts.js';
-import { recordPhaseDTransitionUse } from './phase-d-transition-usage.js';
+import { recordPhaseDTransitionUse } from '../compatibility/phase-d-transition-usage.js';
 
 export const LEGACY_ENVELOPE_EXTENSION_KEY =
   'https://jinn.network/bridge/legacy-execution-envelope/1.0';

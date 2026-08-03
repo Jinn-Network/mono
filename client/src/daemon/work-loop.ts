@@ -89,7 +89,7 @@ import {
   type AnnouncedSubmissionCard,
   type SubmissionFacts,
 } from './native-submission-facts.js';
-import { recordPhaseDTransitionUse } from './phase-d-transition-usage.js';
+import { recordPhaseDTransitionUse } from '../compatibility/phase-d-transition-usage.js';
 
 export type { AnnouncedSubmissionCard };
 

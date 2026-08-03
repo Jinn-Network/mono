@@ -335,7 +335,10 @@ export async function withForkVenue<T>(options: {
   const rpcUrl = `http://127.0.0.1:${port}`;
   const anvil = spawn("anvil", [
     "--fork-url",
-    process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://base-sepolia.publicnode.com",
+    // Base documents this as its archive-capable Sepolia endpoint. The prior publicnode fallback
+    // now rejects historical log reads without a personal token, which made the replay test
+    // depend on a provider-specific account despite using only public testnet state.
+    process.env.JINN_MARKETPLACE_FORK_RPC_URL ?? "https://sepolia.base.org",
     "--port",
     String(port),
     "--silent",

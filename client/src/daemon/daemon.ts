@@ -44,7 +44,7 @@ import type { OperatorVerticalMode } from './native-vertical-mode.js';
 import {
   configurePhaseDTransitionUsage,
   recordPhaseDTransitionUse,
-} from './phase-d-transition-usage.js';
+} from '../compatibility/phase-d-transition-usage.js';
 
 type Corpus = CoreCorpus<SignedEnvelope>;
 

@@ -68,7 +68,7 @@ import type {
   HarnessReadinessSnapshot,
   JoinedHarnessSpec,
 } from '../harnesses/readiness-registry.js';
-import { phaseDTransitionUsageDiagnostics } from '../daemon/phase-d-transition-usage.js';
+import { phaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {

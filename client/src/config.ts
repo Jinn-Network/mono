@@ -32,7 +32,7 @@ import {
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
-import { recordPhaseDTransitionUse } from './daemon/phase-d-transition-usage.js';
+import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 

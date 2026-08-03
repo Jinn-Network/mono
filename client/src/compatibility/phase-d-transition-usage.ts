@@ -9,7 +9,7 @@ import {
 import { dirname } from 'node:path';
 
 /**
- * Durable, monotonic diagnostics for Phase D deletion gates.
+ * Durable, monotonic compatibility diagnostics for Phase D deletion gates.
  *
  * These counters are observations, never authorization: they cannot select a product graph,
  * change a claim decision, or permit deletion. Phase D still requires the manifest's external

@@ -333,6 +333,10 @@ jobs:
           corepack prepare yarn@4.13.0 --activate
       - name: Install Foundry (Anvil)
         uses: foundry-rs/foundry-toolchain@v1
+        with:
+          # Anvil fork startup/state behavior is not stable across Foundry releases. Keep the
+          # marketplace fork gate on the same snapshot-compatible build used by the repository.
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
       - name: Build cross-tree portal dependencies from source (§7.8)
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)

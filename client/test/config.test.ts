@@ -11,7 +11,7 @@ import {
   migrateLegacySolverNets,
   backfillJoinedProviders,
 } from '../src/config.js';
-import { phaseDTransitionUsageSnapshot } from '../src/daemon/phase-d-transition-usage.js';
+import { phaseDTransitionUsageSnapshot } from '../src/compatibility/phase-d-transition-usage.js';
 
 /**
  * Issue #911 — ≥5 distinct free RPC providers default per supported chain.

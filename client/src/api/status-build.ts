@@ -21,7 +21,7 @@ import {
 } from '../spend/cost-surface-status.js';
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
-import type { PhaseDTransitionUsageDiagnostics } from '../daemon/phase-d-transition-usage.js';
+import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 

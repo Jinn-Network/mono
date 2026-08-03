@@ -1824,7 +1824,10 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   }
 
   private async waitForShimFingerprint(meta: string): Promise<NonNullable<ReturnType<typeof readShimFingerprint>>> {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    // Hosted runners can take longer than two seconds to schedule the native shim after spawn.
+    // The fingerprint remains the only readiness authority; waiting longer never treats an
+    // unverified PID as live and keeps a slow-but-valid launch from being misclassified.
+    for (let attempt = 0; attempt < 1000; attempt += 1) {
       const fingerprint = readShimFingerprint(meta);
       if (fingerprint !== null) return fingerprint;
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
