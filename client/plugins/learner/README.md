@@ -49,9 +49,34 @@ The orchestrator skill expects these as session inputs (typically via the harnes
 
 The plugin does not interpret `goal.kind` semantically. Domain-specific behavior (e.g. how to forecast a prediction market, how to rebalance a portfolio) belongs in domain-specific plugins loaded alongside this one, OR in the harness adapter / harvester layer.
 
+## Modes
+
+`JINN_HARNESS_MODE` selects one of three modes. It decides where the self-improving phases write — see the "Write target" section of `skills/learn/SKILL.md`.
+
+| Mode | Improve / Memory consolidation | Write target | `implStateDir` |
+| --- | --- | --- | --- |
+| `train` | run | `implStateDir` | read-write |
+| `frozen` | skipped | *nothing* | read-only, fenced |
+| `candidate` | run | `$JINN_LEARNER_CANDIDATE_DIR` | read-only, fenced |
+
+**Candidate mode** is the plugin acting as a *proposer* rather than as its own adopter. The run executes the active policy, then writes everything it would have changed into a provisioned copy, and the harness seals that copy as a candidate manifest — a proposal that a separate evaluation decides on. The active directory is verified byte-identical afterwards; a run that touched it is discarded. Authority: `docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md` §10.
+
+### Deprecation: inline self-mutation
+
+`train` mode's in-place mutation of `implStateDir` is a **compatibility mode**. It gives fast local adaptation with no identity boundary: the policy that produced a result and the policy that replaced it are the same directory, so nothing downstream can tell them apart, and there is no proposal for anyone to evaluate or roll back to.
+
+Product design §10 retires it once the first optimization campaign completes end-to-end. Campaign evaluation never depends on it. Operators who want the same cadence get it back as provisional self-adoption of their own candidates with rollback — same speed, with an identity boundary. Until then:
+
+- `JINN_LEARNER_INLINE_MUTATION=0` disables inline mutation.
+- No new behaviour should be built on `train`-mode in-place writes.
+
 ## Optional environment
 
 - `LEARNER_PHASE_RANGE=pre-execute|post-execute|full` — limits which phases run. Used by harnesses that wrap a domain-specialist Execute path between meta-pre and meta-post passes.
+- `JINN_HARNESS_MODE=train|frozen|candidate` — see "Modes" above. Set by the harness adapter; defaults to `train`.
+- `JINN_LEARNER_CANDIDATE_DIR` — candidate mode's write target, set by the harness. The session-start hook git-initializes it.
+- `JINN_LEARNER_INLINE_MUTATION=0` — opt out of the deprecated inline self-mutation described above.
+- `JINN_LEARNER_DEFAULT_ROUTING=1` — daemon-side compatibility flag restoring the retired "claim every SolverType" routing. Deprecated; configure `harness.routing.solverTypes` instead.
 
 ## Spec
 

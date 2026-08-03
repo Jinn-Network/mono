@@ -13,9 +13,30 @@ You are running one goal end-to-end through a seven-phase learning loop. This si
 - `goal` — `{ id, description, kind?, deadline?, spec? }`. Free-form payload describing what to achieve. The plugin reads `description` to know the task and may organize prior runs by `kind` if present. The plugin does not interpret `kind` semantically; it is an opaque string used for organizing artifacts.
 - `workingDir` — ephemeral path; the harness harvests it for delivery when this skill returns.
 - `implStateDir` — the agent's persistent self-state. Git-backed by the SessionStart hook. Mutations here persist across runs and constitute "learning."
+- `candidateStateDir` — set only in `candidate` mode, from the `JINN_LEARNER_CANDIDATE_DIR` env var. A writable copy of `implStateDir` made before this run started, and the sole write target of Improve and Memory consolidation in that mode. Also git-backed.
 - `msUntilDeadline` — function returning remaining time.
-- `mode` — `train` or `frozen`. Default to `train` if absent. In `frozen` mode, the learning loop must not mutate `implStateDir`.
+- `mode` — `train`, `frozen`, or `candidate`. Default to `train` if absent. See "Write target" below.
 - An abort signal that fires at the goal's deadline (if any).
+
+### Write target
+
+One rule decides where every self-improving phase writes. Bind it once, at the top of the run, and pass it down:
+
+| `mode` | `stateDir` (the write target) | `implStateDir` |
+| --- | --- | --- |
+| `train` | `implStateDir` | read-write |
+| `frozen` | *nothing is written* | read-only |
+| `candidate` | `candidateStateDir` | **read-only** |
+
+`candidate` mode exists because a run cannot both *be* the policy under measurement and *change* it. Orient, Strategize, Plan, Execute, and Debrief are unchanged in candidate mode — they run against `implStateDir`, read-only, because that directory is the policy being evaluated. Improve and Memory consolidation still run, but everything they would have written to `implStateDir` goes to `candidateStateDir` instead, and the harness seals the result as a *proposal* for separate evaluation. The harness verifies `implStateDir` is byte-identical after the run and discards the run if it is not — the same fence `frozen` mode uses.
+
+```bash
+case "${JINN_HARNESS_MODE:-train}" in
+  candidate) STATE_DIR="$JINN_LEARNER_CANDIDATE_DIR" ;;
+  frozen)    STATE_DIR="" ;;
+  *)         STATE_DIR="$IMPL_STATE_DIR" ;;
+esac
+```
 
 The session-start hook (`hooks/session-start`) has already initialized `implStateDir` as a git repo with the `claude-code-learner` author identity.
 
@@ -75,13 +96,14 @@ EOF
 
 - `full` (or unset) — run all seven phases (sections 3–9), then verify and return (sections 10–11).
 - `pre-execute` — run only sections 3–5 (Orient, Strategize, Plan), then return. The harness's specialist wrapper will run Execute itself and invoke this skill again with `post-execute`.
-- `post-execute` — run section 7 (Debrief), plus sections 8–9 (Improve, Memory consolidation) only when `mode = train`. The harness's specialist wrapper has already populated `workingDir/.execute/` from a domain-specialist Execute path before invoking this pass.
+- `post-execute` — run section 7 (Debrief), plus sections 8–9 (Improve, Memory consolidation) when `mode = train` or `mode = candidate`. The harness's specialist wrapper has already populated `workingDir/.execute/` from a domain-specialist Execute path before invoking this pass.
 
 This protocol exists so the harness's first-match wrapper can wrap domain-specialist Execute paths in the learning envelope without the specialist needing to know about the wrapper.
 
-Mode controls whether the self-improving phases are allowed:
+Mode controls whether the self-improving phases are allowed, and where they write:
 
-- `mode = train` — run Improve and Memory consolidation when phase-range includes sections 8–9.
+- `mode = train` — run Improve and Memory consolidation when phase-range includes sections 8–9. Write target is `implStateDir`.
+- `mode = candidate` — run the same phases, on the same schedule, with `stateDir = candidateStateDir` as the write target. `implStateDir` is read-only for the whole run. Everything sections 8–9 require is still required.
 - `mode = frozen` — run Orient, Strategize, Plan, Execute, and Debrief only. Skip Improve and Memory consolidation, do not mutate `implStateDir`, and return with no `.improve/` or `.memory-consolidation/` requirement. The daemon enforces this with a freeze fence and rejects any envelope that mutates the frozen implementation state.
 
 For each section below, in order:
@@ -180,7 +202,7 @@ After it returns, verify both files exist:
 - `workingDir/.strategize/strategy.json`
 - `workingDir/.strategize/constitution.json`
 
-If either is missing, write `workingDir/.errors/strategize.json` with the failure context and abort the pipeline. In `train` mode, still run section 9, Memory consolidation, before returning. In `frozen` mode, return without running section 9.
+If either is missing, write `workingDir/.errors/strategize.json` with the failure context and abort the pipeline. In `train` and `candidate` mode, still run section 9, Memory consolidation, before returning. In `frozen` mode, return without running section 9.
 
 After Strategize, read `workingDir/.strategize/constitution.json`. If the harness exposes an OTel tracer, emit the constitution fields as attributes on a state-transition span (the harness defines the span name). Otherwise the file itself is the constitution record; Debrief reads it from there.
 
@@ -258,7 +280,7 @@ When a step fails its success signal or a worker returns without expected output
 - **continue** — accept partial; advance.
 - **retry-step** — dispatch a fresh worker for the same step. Cap at 2 retries unless step `abortCondition` says otherwise.
 - **replan** — archive the current plan and re-run section 5 (Plan), then continue Execute on the new plan. Concretely: rename `workingDir/.plan/plan.json` to `workingDir/.plan/plan-v<N>.json` where N is the next unused integer (start at 1), write `workingDir/.plan/replan-context.json` with `{ failedStepId, blockers, partialOutputs[] }`, then re-dispatch the planner subagent (section 5). The new `plan.json` is grounded in what's now in `workingDir/` (including the archived prior plans, the execute log up to the failure, and the replan-context). Continue Execute on the new `plan.json`.
-- **abort** — write `workingDir/.errors/execute.json` with failure context; exit Execute. Continue to Debrief and, in `train` mode only, Improve / Memory consolidation. Abort here is not a pipeline-level abort.
+- **abort** — write `workingDir/.errors/execute.json` with failure context; exit Execute. Continue to Debrief and, in `train` and `candidate` mode only, Improve / Memory consolidation. Abort here is not a pipeline-level abort.
 
 Explain your judgment in `workingDir/.execute/log.jsonl`.
 
@@ -317,16 +339,16 @@ outputPath           = workingDir/.debrief/analysis.json
 msUntilDeadline      = <current value>
 ```
 
-After it returns, verify `workingDir/.debrief/analysis.json` exists. If not, write `workingDir/.errors/debrief.json` and abort the pipeline. In `train` mode, still run section 9 before returning. In `frozen` mode, return without running section 9.
+After it returns, verify `workingDir/.debrief/analysis.json` exists. If not, write `workingDir/.errors/debrief.json` and abort the pipeline. In `train` and `candidate` mode, still run section 9 before returning. In `frozen` mode, return without running section 9.
 
 Append a JSONL entry to `workingDir/.coordinator/log.jsonl`:
 `{ ts, phase, status, summary }`.
 
 ## 8. Improve
 
-Purpose: mutate `implStateDir`, commit each accepted mutation as a separate git commit. Changes take effect NEXT run.
+Purpose: mutate `stateDir`, commit each accepted mutation as a separate git commit. Changes take effect NEXT run (in `candidate` mode, only if the proposal is later adopted).
 
-Run this section only when `mode = train`. If `mode = frozen`, skip it entirely and append a coordinator log entry noting `{ phase: "improve", status: "skipped", summary: "mode=frozen" }`.
+Run this section when `mode = train` or `mode = candidate`. If `mode = frozen`, skip it entirely and append a coordinator log entry noting `{ phase: "improve", status: "skipped", summary: "mode=frozen" }`.
 
 Dispatch a promoter subagent. Use the uniform dispatch shape with these role-specific inputs:
 
@@ -334,30 +356,34 @@ Dispatch a promoter subagent. Use the uniform dispatch shape with these role-spe
 prompt body        = ${PLUGIN_ROOT}/skills/learn/promoter-prompt.md
 goal               = <copy of goal>
 analysisPath       = workingDir/.debrief/analysis.json
-policyPath         = implStateDir/policy.json (or null)
-implStateDir       = <path, read-write for the promoter>
+policyPath         = stateDir/policy.json (or null)
+stateDir           = <the write target from "Write target": implStateDir in train mode,
+                      candidateStateDir in candidate mode — read-write for the promoter>
+implStateDir       = <path, READ-ONLY in candidate mode; the same path as stateDir in train mode>
 workingDir         = <path>
 outputDir          = workingDir/.improve/
 msUntilDeadline    = <current value>
 ```
 
-The promoter writes mutations directly into `implStateDir`, commits each as a separate git commit (the session-start hook configured the author identity already), and writes one `promotion_record` per mutation under `workingDir/.improve/promotions/`.
+The promoter writes mutations directly into `stateDir`, commits each as a separate git commit (the session-start hook configured the author identity already), and writes one `promotion_record` per mutation under `workingDir/.improve/promotions/`.
+
+In `candidate` mode, pass `implStateDir` only so the promoter can *read* the policy it is proposing a change to. It must not be the promoter's write target, and the harness verifies afterwards that it was not written.
 
 After it returns, read `workingDir/.improve/summary.json`. Verify:
-- `implStateDirShaAfter` matches `git -C <implStateDir> rev-parse HEAD`
+- `implStateDirShaAfter` matches `git -C <stateDir> rev-parse HEAD` (the field name is historical; it always refers to the write target's HEAD)
 - One `promotion_record` per accepted change
 - Operator-access requests under `workingDir/.operator-requests/` if any
 
-If anything is inconsistent, write `workingDir/.errors/improve.json` and abort the pipeline, then still run section 9 before returning. This section only runs in `train` mode.
+If anything is inconsistent, write `workingDir/.errors/improve.json` and abort the pipeline, then still run section 9 before returning. This section does not run in `frozen` mode.
 
 Append a JSONL entry to `workingDir/.coordinator/log.jsonl`:
 `{ ts, phase, status, summary }`.
 
 ## 9. Memory consolidation
 
-Purpose: curate `implStateDir` (prune unused, revert regressions) and `workingDir` (set public/private boundary); commit durable curation as one separate commit.
+Purpose: curate `stateDir` (prune unused, revert regressions) and `workingDir` (set public/private boundary); commit durable curation as one separate commit.
 
-Run this section only when `mode = train`. If `mode = frozen`, skip it entirely and append a coordinator log entry noting `{ phase: "memory-consolidation", status: "skipped", summary: "mode=frozen" }`. Do not create durable commits or modify `implStateDir` in frozen mode.
+Run this section when `mode = train` or `mode = candidate`. If `mode = frozen`, skip it entirely and append a coordinator log entry noting `{ phase: "memory-consolidation", status: "skipped", summary: "mode=frozen" }`. Do not create durable commits or modify `implStateDir` in frozen mode.
 
 Dispatch a consolidator subagent. Use the uniform dispatch shape with these role-specific inputs:
 
@@ -367,16 +393,18 @@ goal                 = <copy of goal>
 analysisPath         = workingDir/.debrief/analysis.json
 improveSummaryPath   = workingDir/.improve/summary.json
 improvePromotionsDir = workingDir/.improve/promotions/
-policyPath           = implStateDir/policy.json (or null)
-implStateDir         = <path, read-write>
+policyPath           = stateDir/policy.json (or null)
+stateDir             = <the write target from "Write target": implStateDir in train mode,
+                        candidateStateDir in candidate mode — read-write>
+implStateDir         = <path, READ-ONLY in candidate mode; the same path as stateDir in train mode>
 workingDir           = <path, read-write>
 outputPath           = workingDir/.memory-consolidation/consolidation_record.json
 msUntilDeadline      = <current value>
 ```
 
-The consolidator does both workstreams (durable + ephemeral), writes a single git commit on `implStateDir` for the durable curation, and produces the `consolidation_record`.
+The consolidator does both workstreams (durable + ephemeral), writes a single git commit on `stateDir` for the durable curation, and produces the `consolidation_record`.
 
-After it returns, verify the `consolidation_record` exists. If the consolidator made a commit, `implStateDirShaAfter` must match `git -C <implStateDir> rev-parse HEAD`. If no commit was made (empty curation set), `implStateDirShaAfter` must equal `implStateDirShaBefore` and HEAD remains at that sha.
+After it returns, verify the `consolidation_record` exists. If the consolidator made a commit, `implStateDirShaAfter` must match `git -C <stateDir> rev-parse HEAD`. If no commit was made (empty curation set), `implStateDirShaAfter` must equal `implStateDirShaBefore` and HEAD remains at that sha.
 
 Append a JSONL entry to `workingDir/.coordinator/log.jsonl`:
 `{ ts, phase, status, summary }`.
@@ -393,18 +421,20 @@ Before returning, assert each primary artifact exists:
 - `workingDir/.improve/summary.json`
 - `workingDir/.memory-consolidation/consolidation_record.json`
 
-When `mode = frozen`, do not require `workingDir/.improve/summary.json` or `workingDir/.memory-consolidation/consolidation_record.json`; those phases are skipped by contract.
+When `mode = frozen`, do not require `workingDir/.improve/summary.json` or `workingDir/.memory-consolidation/consolidation_record.json`; those phases are skipped by contract. When `mode = candidate`, both are required exactly as in `train` — the phases ran, they simply wrote elsewhere.
+
+When `mode = candidate`, additionally assert that `git -C "$IMPL_STATE_DIR" rev-parse HEAD` still equals the `implStateDirShaAtStart` recorded in `workingDir/.coordinator/boot.json`. If it does not, some phase wrote to the policy under evaluation: write `workingDir/.errors/candidate.json` naming what changed and return. The harness's freeze fence will reject the run anyway; catching it here makes the cause legible instead of surfacing as a bare hash mismatch.
 
 Do NOT include any goal-kind-specific assertions. The harness owns goal-kind enforcement (e.g. domain-specific solution payloads). The plugin verifies only its own seven generic phase artifacts.
 
-When the pipeline finishes — whether all sections completed cleanly, an abort signal fired, or a section reported failure — return. Never modify anything outside `implStateDir/**` or `workingDir/**`.
+When the pipeline finishes — whether all sections completed cleanly, an abort signal fired, or a section reported failure — return. Never modify anything outside `stateDir/**` or `workingDir/**`.
 
 ## 11. Failure handling
 
 - **Within Execute (section 6):** that section judges `continue / retry-step / replan / abort` per its own rules.
-- **Execute reporting `abort` is not a pipeline-level abort** — continue to Debrief and, in `train` mode only, Improve / Memory consolidation so partial work is analyzed and curated. The Execute section writes `workingDir/.errors/execute.json` itself.
-- **Other sections:** if a section reports a hard problem, write `workingDir/.errors/<phase>.json` and abort the pipeline. In `train` mode, still run section 9 (Memory consolidation) so partial work gets curated. In `frozen` mode, do not run section 9.
-- **Abort signal fired (deadline reached):** stop the current section cleanly, write `workingDir/.errors/abort.json`, and return. In `train` mode, run section 9 first if there is enough time and doing so does not violate the abort signal. In `frozen` mode, do not run section 9.
+- **Execute reporting `abort` is not a pipeline-level abort** — continue to Debrief and, in `train` and `candidate` mode only, Improve / Memory consolidation so partial work is analyzed and curated. The Execute section writes `workingDir/.errors/execute.json` itself.
+- **Other sections:** if a section reports a hard problem, write `workingDir/.errors/<phase>.json` and abort the pipeline. In `train` and `candidate` mode, still run section 9 (Memory consolidation) so partial work gets curated. In `frozen` mode, do not run section 9.
+- **Abort signal fired (deadline reached):** stop the current section cleanly, write `workingDir/.errors/abort.json`, and return. In `train` and `candidate` mode, run section 9 first if there is enough time and doing so does not violate the abort signal. In `frozen` mode, do not run section 9.
 
 ## Cross-reference
 
