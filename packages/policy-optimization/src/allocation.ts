@@ -193,6 +193,17 @@ function sortedUnique(values: readonly string[]): readonly string[] {
   return [...new Set(values)].sort(compareCodeUnitStrings);
 }
 
+/**
+ * A Task digest in benchmarking's spelling: bare lowercase hex.
+ *
+ * Exported so a caller can see the normalization rather than guess at it. See M-C7b-3: the
+ * supply side (curation rows, announcement refs) spells the same digest `sha256:<hex>`, and a
+ * join that did not reconcile the two would match nothing and quietly select every task.
+ */
+export function bareTaskDigest(digest: string): string {
+  return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
+}
+
 /** The most recent Report row per tuple, by wave number then Report digest (deterministic). */
 function latestReportRows(rows: readonly WaveReportRow[]): Map<string, WaveReportRow> {
   const latest = new Map<string, WaveReportRow>();
@@ -303,7 +314,10 @@ function selectInformativeTasks(input: AllocationInput): {
   const lower = rateParameter(parameters, "lower", undefined);
   const upper = rateParameter(parameters, "upper", undefined);
   const rows = (input.informativeness ?? []).filter((row) => row.bucket === "benchmark");
-  const byTask = new Map(rows.map((row) => [row.taskDigest, row] as const));
+  // M-C7b-3: the rows spell a Task digest `sha256:<hex>` (curation's and the announcement
+  // stream's spelling); `taskDigests` is bare lowercase hex (a Benchmark item's, records §6.1).
+  // The join normalizes rather than requiring the caller to re-spell one side.
+  const byTask = new Map(rows.map((row) => [bareTaskDigest(row.taskDigest), row] as const));
   const notes: string[] = [];
   const dropped: DroppedTask[] = [];
   const kept: string[] = [];
@@ -403,8 +417,8 @@ export function decideAllocation(input: AllocationInput): AllocationDecision {
 
   const inputs: AllocationInputRefs = {
     reports: sortedUnique((input.reports ?? []).map((row) => row.reportDigest)),
-    outcomes: sortedUnique((input.outcomes ?? []).map((row) => row.rowRef)),
-    informativeness: sortedUnique((input.informativeness ?? []).map((row) => row.rowRef)),
+    outcomes: sortedUnique((input.outcomes ?? []).flatMap((row) => [...row.inputRefs])),
+    informativeness: sortedUnique((input.informativeness ?? []).flatMap((row) => [...row.inputRefs])),
   };
 
   return {

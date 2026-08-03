@@ -24,6 +24,7 @@ const PORTAL_PACKAGES = [
   ["@jinn-network/benchmarking-aggregate", join(packagesRoot, "benchmarking", "aggregate"), "benchmarking-aggregate.tgz"],
   ["@jinn-network/benchmarking-local", join(packagesRoot, "benchmarking", "local"), "benchmarking-local.tgz"],
   ["@jinn-network/policy-identity", join(packagesRoot, "policy", "identity"), "policy-identity.tgz"],
+  ["@jinn-network/policy-outcomes", join(packagesRoot, "policy", "outcomes"), "policy-outcomes.tgz"],
 ];
 
 function run(command, args, options = {}) {
@@ -80,7 +81,9 @@ import {
   STOPPING_RULE_REFS,
   V0_MUTATION_SURFACE,
   committedCells,
+  curateAnnouncements,
   decideAllocation,
+  deriveOutcomeObservations,
   validateCampaign,
 } from "@jinn-network/policy-optimization";
 
@@ -104,6 +107,24 @@ try { decideAllocation({ campaign: {}, waveNumber: 1, population: [], taskDigest
 catch { allocationRefused = true; }
 if (!allocationRefused) throw new Error("an allocation over an empty population must refuse");
 
+// The two observation adapters (product §8.2; program §1 C8) must be reachable post-pack, and
+// must still refuse a record missing its required joins (fail-closed, not a lucky default).
+const curated = curateAnnouncements([{
+  record: { kind: "https://jinn.network/records/delivery/1.0", digest: "sha256:" + "0".repeat(64) },
+  provenance: {
+    source: { agent: "urn:jinn:agent:smoke", name: "smoke-source" },
+    entry: "sha256:" + "1".repeat(64),
+    announcementId: "smoke-1",
+  },
+  entryTimestamp: "2026-08-03T00:00:00Z",
+  attemptUri: "urn:uuid:smoke",
+}]);
+if (curated.observations.length !== 0 || curated.refusals.length !== 1) {
+  throw new Error("curation adapter fail-closed smoke check drifted");
+}
+const outcomes = deriveOutcomeObservations([]);
+if (outcomes.observations.length !== 0) throw new Error("outcomes adapter smoke check drifted");
+
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expectedJinnDependencies = [
@@ -112,6 +133,7 @@ const expectedJinnDependencies = [
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
   "@jinn-network/policy-identity",
+  "@jinn-network/policy-outcomes",
   "@jinn-network/task-execution-backend",
 ];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {

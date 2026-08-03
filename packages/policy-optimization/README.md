@@ -14,7 +14,8 @@ Publication is disabled. Nothing in tiers 1–3 may reference this package, and 
 
 ## What is here now
 
-Sub-units **C7a — the core state layer** and **C7b — the wave engine**:
+Sub-units **C7a — the core state layer**, **C7b — the wave engine**, and **C8 — the two observation
+adapters**:
 
 | Surface | Design section | What it is |
 | --- | --- | --- |
@@ -25,6 +26,7 @@ Sub-units **C7a — the core state layer** and **C7b — the wave engine**:
 | Wave execution and assembly | §6.1 | Dispatch through the injected `TaskExecutionBackend`, then a Matrix assembled over the local venue's ports with per-axis treatment-fidelity verification. |
 | The dev-wave allocator | §6.2 | A pure decision function: rows and Reports in, a journaled decision out. Three v0 policies. |
 | Promotion | §6.3 | One preregistered Run against the revealed committed Benchmark, flat, once. |
+| The two observation adapters | §8.2 | `curateAnnouncements` and `deriveOutcomeObservations` — the seven joins, fail-closed, with tuple derivation and verdict-record dedupe on the policy side. Their module headers carry their own reasoning. |
 
 Admission and proposers (C7c) and the archive and CLI (C7d) build on these types. This package
 implements **no execution, assembly, or aggregation machinery** — re-implementing any of it is
@@ -177,10 +179,30 @@ refused rather than treated as uniform.
 | `drop-bottom-k/1.0` | `k`, `minCandidates?` (2), `replicates?` | Ranks arms by the campaign's **first** objective method's per-arm value as the Report sealed it, prunes the bottom `k`, floors at `minCandidates`. A candidate with no Report row is retained unranked. Ties break on the outcomes projection's organic bucket, then on `tupleDigest`. |
 | `informativeness/1.0` | `minVerdicts`, `lower`, `upper`, `replicates?` | Drops tasks whose observed benchmark-bucket rate sits at or outside the caller-supplied bounds over at least `minVerdicts` verdicts. No default threshold exists. When every task looks saturated the whole slate is kept and the note says so. |
 
-Every decision carries `inputs` — the Report digests and row references it read — and that block is
-journaled with the decision (§6.2), so survivorship is post-hoc auditable. The organic bucket is
-manipulable and is used only as a tie-break; §6.2's hazard is real and is exercised by a test rather
-than only described.
+Every decision carries `inputs` — the Report digests and the verdict-record digests behind every row
+it read — and that block is journaled with the decision (§6.2), so survivorship is post-hoc
+auditable. The organic bucket is manipulable and is used only as a tie-break; §6.2's hazard is real
+and is exercised by a test rather than only described.
+
+### The adapter seam
+
+The allocator's three row types are **mirrors**, because the adapters that produce them (§8.2) were
+a parallel unit. `src/adapter-allocation-seam.test.ts` is the join: announcement fixtures →
+`curateAnnouncements` / `deriveOutcomeObservations` (the real adapters) → `projectPolicyOutcomes`
+(the real fold) → the mirrored ports → `decideAllocation`. It asserts the load-bearing equality
+directly — the tuple the adapter derives digests to the policy the campaign admitted — because
+nothing else coordinates the deriver, the projection's row key, and the allocator's population key.
+
+Three mirror deltas were found and fixed **on the mirror side**, never in C8's adapters:
+
+| Delta | What was wrong | Fix |
+| --- | --- | --- |
+| **M-C7b-1** | The rows carried one synthetic `rowRef`; the real rows carry `inputRefs[]` — every announcement folded in, "mandatory, per design finding F6". | `inputRefs: readonly string[]` (the refs' `record` digests). `AllocationInputRefs` is now the union of those, so the journal's audit trail points at digests a third party can resolve. |
+| **M-C7b-2** | The curation half cannot reach its real fold: C8 mirrors `@jinn-network/task-curation`'s observation type rather than importing it, and the source boundary denies that tree. | Stated, not worked around. The seam test folds informativeness rows from the real adapter's real observations using `CurationRow.passRate`'s own `(pass, pass+fail)` definition. Re-deciding C8's dependency boundary is not this unit's call. |
+| **M-C7b-3** | The two sides spell a Task digest differently: benchmarking uses bare lowercase hex (Benchmark items, `cellKey` segments), the supply side uses `sha256:<hex>`. The join silently matched nothing and selected every task. | The row keeps the producer's spelling; the allocator normalizes at the join via the exported `bareTaskDigest`. |
+
+`WaveReportRow` needed no correction: no adapter produces it — a Report is read into rows by
+whoever holds the sealed Report, and the product still never parses a `results` block itself.
 
 Nothing here computes a statistic. Report values are ordered as exact decimals through
 `benchmarking-records`' `parseExactDecimal`/`scaleDecimal`; observed rates are ordered by exact

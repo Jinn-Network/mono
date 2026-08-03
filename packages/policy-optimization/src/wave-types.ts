@@ -219,8 +219,17 @@ export interface WaveReportRow {
  * is journaled.
  */
 export interface OutcomesProjectionRow {
-  /** A reference the row can be re-derived from — an input-ref digest, not the row's content. */
-  readonly rowRef: string;
+  /**
+   * The verdict-record digests the row was folded from — `PolicyOutcomesRow.inputRefs[].record`,
+   * verbatim.
+   *
+   * A list, not one synthetic id (mirror delta M-C7b-1, corrected against C8's real output): a
+   * projection row is an aggregate over many announcements and the real row carries every one of
+   * them, "mandatory, per design finding F6: manipulation cannot be prevented here, so it is made
+   * visible and the row re-derivable". A single id would have made the journal's audit trail point
+   * at something no third party could resolve.
+   */
+  readonly inputRefs: readonly string[];
   readonly tupleDigest: string;
   readonly bucket: "benchmark" | "organic";
   /** `num` = pass, `den` = pass + fail, over decision-grade verdicts. Exact, never a float. */
@@ -236,7 +245,17 @@ export interface OutcomesProjectionRow {
  * curation's own `compareRateTo` does. No default threshold exists there and none is invented here.
  */
 export interface TaskInformativenessRow {
-  readonly rowRef: string;
+  /** `CurationRow.inputRefs[].record`, verbatim — same correction as above (M-C7b-1). */
+  readonly inputRefs: readonly string[];
+  /**
+   * The **prefixed** `sha256:<hex>` spelling, as curation and the announcement stream emit it.
+   *
+   * Mirror delta M-C7b-3: benchmarking spells a Task digest as bare lowercase hex (a Benchmark
+   * item's `task.digest.sha256`, and every `cellKey` segment), while the supply side spells it
+   * `sha256:<hex>`. The row keeps the producer's spelling and the allocator normalizes at the
+   * join — the alternative, requiring the caller to re-spell it, is a translation step that
+   * silently matches nothing the first time somebody forgets it.
+   */
   readonly taskDigest: string;
   readonly bucket: "benchmark" | "organic";
   readonly passRate: { readonly num: number; readonly den: number };

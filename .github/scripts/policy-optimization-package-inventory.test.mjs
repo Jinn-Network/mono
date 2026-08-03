@@ -39,8 +39,12 @@ const PRODUCT_PACKAGES = [
 // - `task-execution-backend` is the **contract** the injected backend satisfies — a type, never a
 //   binding. `task-execution-testing` is dev-only: the conformance kit's in-memory fake.
 //
-// A later sub-unit adds `policy-outcomes`. Each addition edits this map in the PR that needs it,
-// so the graph is never wider than the code.
+// `policy-outcomes` is added by sub-unit C8 (the two observation adapters, program §1 C8):
+// the policy-outcomes adapter's output type (`PolicyOutcomeObservation`/`PolicyOutcomeInputRef`/
+// `PerAxisStatus`) is imported directly rather than mirrored, unlike the discovery/marketplace/
+// task-supply shapes those adapters otherwise mirror (source-boundary guard denies those three
+// trees outright). Each addition edits this map in the PR that needs it, so the graph is never
+// wider than the code.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['.', {
     dependencies: [
@@ -49,6 +53,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/benchmarking-records',
       '@jinn-network/benchmarking-run',
       '@jinn-network/policy-identity',
+      '@jinn-network/policy-outcomes',
       '@jinn-network/task-execution-backend',
     ],
     devDependencies: ['@jinn-network/task-execution-testing'],
@@ -88,6 +93,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/policy-identity', join(root, 'packages', 'policy', 'identity')],
+  ['@jinn-network/policy-outcomes', join(root, 'packages', 'policy', 'outcomes')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
   ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],

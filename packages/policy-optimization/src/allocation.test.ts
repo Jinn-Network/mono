@@ -162,7 +162,7 @@ describe("drop-bottom-k/1.0", () => {
       reportRow(THIRD, "0.9000", `sha256:${"1".repeat(64)}`),
     ];
     const organic = (candidate: AdmittedCandidate, num: number, den: number) => ({
-      rowRef: `sha256:${candidate.tupleDigest.slice(-64)}`,
+      inputRefs: [`sha256:${candidate.tupleDigest.slice(-64)}`],
       tupleDigest: candidate.tupleDigest,
       bucket: "organic" as const,
       passRate: { num, den },
@@ -215,7 +215,7 @@ describe("informativeness/1.0", () => {
   };
 
   const row = (taskDigest: string, num: number, den: number) => ({
-    rowRef: `sha256:${taskDigest}`,
+    inputRefs: [`sha256:${taskDigest}`],
     taskDigest,
     bucket: "benchmark" as const,
     passRate: { num, den },

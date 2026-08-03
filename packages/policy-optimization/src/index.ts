@@ -87,6 +87,31 @@ export {
   type CreateCampaignInput,
 } from "./journal-store.js";
 
+// --- product §8.2: the two observation adapters (substrate §6.3) ---
+export {
+  type AdapterInputRef,
+  type AdapterRefusal,
+  type AdapterRefusalReason,
+  type AnnouncedVerdict,
+  type MirroredProvenance,
+  type MirroredRecordRef,
+  type MirroredSourceIdentity,
+  type ObservedVerdict as AdapterObservedVerdict,
+} from "./adapters/types.js";
+export {
+  curateAnnouncements,
+  type CurationAdapterResult,
+  type CurationInputRef,
+  type CurationObservation,
+} from "./adapters/curation-adapter.js";
+export {
+  deriveOutcomeObservations,
+  type AnnouncedPolicyVerdict,
+  type DivergentRecordDigestGroup,
+  type OutcomesAdapterResult,
+  type PolicyFidelityEvidence,
+} from "./adapters/outcomes-adapter.js";
+
 // --- product §6.1: arms, from admitted candidates ---
 export {
   assertArmsAgreeOnFrozenAxes,
@@ -97,6 +122,7 @@ export {
 // --- product §6.2: the dev-wave allocator (pure) ---
 export {
   ALLOCATION_POLICY_REFS,
+  bareTaskDigest,
   compareExactDecimals,
   compareObservedRates,
   decideAllocation,

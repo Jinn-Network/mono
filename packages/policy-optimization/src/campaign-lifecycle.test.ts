@@ -429,7 +429,7 @@ async function runMiniatureCampaign(): Promise<RunOutcome> {
     taskDigests: DEV.record.items.map(itemTaskDigest),
     reports: reportRows(devPlan, { digest: devReportDigest, record: devReport.record }),
     outcomes: POPULATION.map((candidate) => ({
-      rowRef: `sha256:${candidate.tupleDigest.slice(-64)}`,
+      inputRefs: [`sha256:${candidate.tupleDigest.slice(-64)}`],
       tupleDigest: candidate.tupleDigest,
       bucket: "organic" as const,
       passRate: { num: 1, den: 2 },

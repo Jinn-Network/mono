@@ -41,6 +41,7 @@
     "@jinn-network/benchmarking-records": "0.1.0",
     "@jinn-network/benchmarking-run": "0.1.0",
     "@jinn-network/policy-identity": "0.1.0",
+    "@jinn-network/policy-outcomes": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "zod": "4.4.3"
   },
@@ -54,6 +55,7 @@
     "@jinn-network/evidence-repository": "portal:../evidence/repository",
     "@jinn-network/execution-recorder": "portal:../evidence/execution-recorder",
     "@jinn-network/policy-identity": "portal:../policy/identity",
+    "@jinn-network/policy-outcomes": "portal:../policy/outcomes",
     "@jinn-network/task-execution-backend": "portal:../task-execution/backend",
     "@jinn-network/task-execution-backend-local": "portal:../task-execution/backend-local/assembly",
     "@jinn-network/task-execution-launchers": "portal:../task-execution/backend-local/launchers",

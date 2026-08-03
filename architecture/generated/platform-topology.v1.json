@@ -737,6 +737,11 @@
       {
         "from": "@jinn-network/policy-optimization",
         "kind": "runtime",
+        "to": "@jinn-network/policy-outcomes"
+      },
+      {
+        "from": "@jinn-network/policy-optimization",
+        "kind": "runtime",
         "to": "@jinn-network/task-execution-backend"
       },
       {
@@ -1568,7 +1573,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2779,
+      "discoveredFirstPartySurfaces": 2786,
       "generatedOutputSources": 1294,
       "generatorSources": 573,
       "marketplaceControl": 2,
@@ -31408,6 +31413,76 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters/curation-conflict.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters/curation-golden.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters/outcomes-divergent-digest.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters/outcomes-golden.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/adapters/outcomes-reannouncement.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -41642,6 +41717,7 @@
           "@jinn-network/benchmarking-records",
           "@jinn-network/benchmarking-run",
           "@jinn-network/policy-identity",
+          "@jinn-network/policy-outcomes",
           "@jinn-network/task-execution-backend",
           "zod"
         ]
