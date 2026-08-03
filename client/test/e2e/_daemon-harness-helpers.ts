@@ -59,6 +59,7 @@ import {
 import { Daemon } from '../../src/daemon/daemon.js';
 import { signedEnvelopeJsonFromDeliveryOrRaw } from '../../src/daemon/bridge-legacy-delivery.js';
 import { MechAdapter } from '../../src/adapters/mech/adapter.js';
+import { createDirectSafeBroadcaster } from '../../src/adapters/mech/direct-safe-broadcaster.js';
 import { getMechDeliveryRate, getTimeoutBounds } from '../../src/adapters/mech/contracts.js';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { buildHarnesses } from '../../src/harnesses/impls/index.js';
@@ -1280,6 +1281,7 @@ export async function startDaemon(
       activityChecker: v3Env.activityCheckerAddress,
       generation: 'today',
     };
+    const venueStartBlock = await agentClients.publicClient.getBlockNumber();
 
     // This full-loop fixture covers the explicit legacy bridge composition. Its delivery signer is
     // test-only and remains confined to that legacy path; production startup supplies no such
@@ -1319,6 +1321,7 @@ export async function startDaemon(
       stateRoot: join(fixture.implStateRoot, `${label}-backend`),
       evidenceRoot: join(fixture.implStateRoot, `${label}-evidence`),
       venueStateDbPath: join(fixture.implStateRoot, `${label}-venue.db`),
+      venueLogSource: { startBlock: venueStartBlock, finalityDepthFallback: 0n },
       profileStore,
       legacyDeliverySigningKey,
       legacyBridgeSigner,
@@ -1333,12 +1336,16 @@ export async function startDaemon(
       // yet") on stdout so a stalled projector is diagnosable instead of silently ticking.
       logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
     });
-    // Finding E16 / the C2 ruling: no process-global broadcaster — this daemon's ONE Safe
-    // broadcaster (built above, bound to `operator.safeAddress`) is threaded explicitly to the
-    // legacy `mechAdapter` too, before `daemon.start()`. `deliveryDeps` below is constructed
-    // AFTER this point so it picks the same instance up directly in its object literal.
-    mechAdapter.setBroadcaster(composition.broadcaster);
   }
+
+  // The composition owns the durable venue broadcaster when enabled. Standalone harnesses own a
+  // one-shot direct broadcaster instead, matching the explicit host boundary used by CLI verbs.
+  const broadcaster = composition?.broadcaster ?? createDirectSafeBroadcaster(
+    agentClients.publicClient,
+    agentClients.walletClient as unknown as WalletClient,
+    operator.safeAddress as Address,
+  );
+  mechAdapter.setBroadcaster(broadcaster);
 
   // 7. Wire packagingDeps, envelopeDeps, deliveryDeps (Task 5).
   //    - packagingDeps: operatorEndpoint + pricing config for artifact serving.
@@ -1371,10 +1378,8 @@ export async function startDaemon(
     routerAddress: (v3Env ? v3Env.routerAddress : routerAddress) as Address,
     claimDeliveryVariant: routerClaimDeliveryVariant as 'v1' | 'v2' | 'v3',
     // evictionRecovery: omitted — no master wallet in test
-    // Finding E16 / the C2 ruling: the SAME broadcaster instance `mechAdapter` above just picked
-    // up — undefined when `opts.enableComposition` was not set (no composition, no broadcaster,
-    // same as production on a network with no composition).
-    broadcaster: composition?.broadcaster,
+    // Finding E16 / the C2 ruling: the SAME host-owned broadcaster instance used by mechAdapter.
+    broadcaster,
   };
 
   // 8. Construct Daemon. Translation of main.ts §2046.

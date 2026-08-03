@@ -98,6 +98,7 @@ import {
   type BaseVenue,
   type BaseVenueSafeBroadcaster,
   type ChainLogSource,
+  type ChainLogSourceOptions,
 } from '@jinn-network/marketplace-venue-base';
 import type {
   ClaimPorts,
@@ -147,6 +148,7 @@ import {
 } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
+import { legacyPredictionV1BaselineLauncher } from './legacy-prediction-v1-launcher.js';
 import type {
   AnnouncementRecordMaterial,
   AnnouncementRecordRole,
@@ -317,6 +319,8 @@ export interface CompositionRootInput {
   readonly stateRoot: string;
   readonly evidenceRoot: string;
   readonly venueStateDbPath: string;
+  /** Host-owned scan floor/finality policy for bounded-history deployments and fixtures. */
+  readonly venueLogSource?: ChainLogSourceOptions;
   readonly profileStore: ProfileStore;
   readonly identityRegistryAddress?: string;
   readonly secretForwardResolver?: LocalTaskExecutionBackendConfig['secretForwardResolver'];
@@ -395,6 +399,7 @@ const ALL_LAUNCHERS: readonly LauncherContract[] = [
   hermesLauncher,
   cursorLauncher,
   predictionV1BaselineLauncher,
+  legacyPredictionV1BaselineLauncher,
 ];
 
 /**
@@ -404,6 +409,11 @@ const ALL_LAUNCHERS: readonly LauncherContract[] = [
  */
 const HARNESS_TO_LAUNCHER_ID: Readonly<Record<string, string>> = {
   'hermes-agent': 'hermes',
+};
+
+const LEGACY_HARNESS_TO_LAUNCHER_ID: Readonly<Record<string, string>> = {
+  ...HARNESS_TO_LAUNCHER_ID,
+  'prediction-v1-baseline': legacyPredictionV1BaselineLauncher.id,
 };
 
 /**
@@ -470,9 +480,13 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
   return { path, digest };
 }
 
-function buildLaunchers(wiring: readonly ExecutionWiringEntry[]): readonly LauncherContract[] {
+function buildLaunchers(
+  wiring: readonly ExecutionWiringEntry[],
+  mode: CompositionRootInput['mode'],
+): readonly LauncherContract[] {
+  const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
-    wiring.map((entry) => HARNESS_TO_LAUNCHER_ID[entry.harness] ?? entry.harness),
+    wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
   return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
 }
@@ -1116,6 +1130,7 @@ export async function buildOperatorComposition(
       }
       return projectorParts.observations();
     },
+    ...(input.venueLogSource === undefined ? {} : { logSource: input.venueLogSource }),
   });
 
   const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
@@ -1174,7 +1189,7 @@ export async function buildOperatorComposition(
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring);
+  const launchers = buildLaunchers(wiring, input.mode);
   const launcherDeployments = buildLauncherDeployments(launchers, config);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 

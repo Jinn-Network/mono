@@ -6,13 +6,13 @@
 // environment-derived default).
 import type { Address, PublicClient, WalletClient } from "viem";
 import type { SafeBroadcastOptions } from "./broadcast/safe-broadcaster.js";
+import type { ChainLogSourceOptions } from "./log-source/chain-log-source.js";
 import type { IpfsPinPort, MarketplaceChainConfig, SettlementPorts } from "@jinn-network/marketplace-binding";
 import type { ProtocolObservation } from "@jinn-network/task-execution-protocol";
 
 // Empty extension points: Tasks 7-14 declare the real shape of each of these alongside the
 // component they configure (the chain log source, the Safe broadcaster, the finality waiter and
 // the delivery waiter respectively) and wire it in here.
-export interface ChainLogSourceOptions {}
 export interface FinalityWaiterOptions {}
 export interface DeliveryWaiterOptions {}
 
