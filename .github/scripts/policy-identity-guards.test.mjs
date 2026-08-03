@@ -136,6 +136,35 @@ test("drift: protocol still registers a constraint-membership test for `model` a
   );
 });
 
+test("drift: the model-id provider prefix table matches protocol's, entry for entry", () => {
+  // The one lookup table in the merge whose contents decide which Submissions have a tuple at all.
+  // `merge-parity.test.ts` proves the three implementations agree on the cases it lists; this
+  // proves the tables ARE the same table, so a seventh prefix added upstream is caught here rather
+  // than by whichever fixture first happens to use that model family.
+  const table = (source, where) => {
+    const literal = /const MODEL_ID_PROVIDER_PREFIXES[^=]*=\s*(?:Object\.freeze\()?\{([\s\S]*?)\}\s*\)?\s*;/
+      .exec(source);
+    assert.ok(literal, `${where} no longer declares MODEL_ID_PROVIDER_PREFIXES as an object literal`);
+    return [...literal[1].matchAll(/"([^"]+)"\s*:\s*"([^"]+)"/g)]
+      .map((match) => `${match[1]} -> ${match[2]}`).sort();
+  };
+  const protocolTable = table(
+    readFileSync(join(root, 'packages', 'task-execution', 'protocol', 'src', 'requirements.ts'), 'utf8'),
+    'protocol',
+  );
+  assert.ok(protocolTable.length > 0, 'protocol declares an empty prefix table');
+  assert.deepEqual(
+    table(readFileSync(join(pkg, 'src', 'merge.ts'), 'utf8'), 'policy-identity'),
+    protocolTable,
+    "the reproduced prefix table drifted from protocol's",
+  );
+  assert.deepEqual(
+    table(readFileSync(join(pkg, 'fixtures', 'reference', 'merge.ts'), 'utf8'), 'the kit reference'),
+    protocolTable,
+    "the kit reference's prefix table drifted from protocol's",
+  );
+});
+
 test('drift: the effort ordinals this package reproduces still match protocol', () => {
   const common = readFileSync(
     join(root, 'packages', 'task-execution', 'protocol', 'src', 'schemas', 'common.ts'), 'utf8');

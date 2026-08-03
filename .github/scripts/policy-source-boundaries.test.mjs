@@ -40,6 +40,12 @@ const POLICY_FOREIGN_PACKAGES = [
   '@jinn-network/task-derivation',
   '@jinn-network/task-posting',
   '@jinn-network/task-execution-backend',
+  // Protocol is a devDependency, for `merge-parity.test.ts` only — it runs the real
+  // `mergeRequirements` beside this package's reproduction of it. PRODUCTION source may never
+  // import it: the whole point of reproducing the merge is that a pure tier-3 substrate carries no
+  // Jinn runtime edge (substrate §2). This scan covers production files only, so listing it here
+  // makes the test-only rule enforced rather than merely intended.
+  '@jinn-network/task-execution-protocol',
   '@jinn-network/trust-*',
   'viem',
   'better-sqlite3',

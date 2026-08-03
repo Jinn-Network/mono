@@ -41,6 +41,11 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      # Test-only portal: `merge-parity.test.ts` runs protocol's real `mergeRequirements` beside
+      # this package's reproduction of it. There is no runtime edge (substrate §2) — production
+      # source is banned from importing protocol by the source-boundary guard.
+      - name: Build the test-only protocol portal from source
+        run: (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
       - name: Verify Policy Identity
         working-directory: packages/policy/identity
         run: |

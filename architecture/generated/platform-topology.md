@@ -1028,12 +1028,18 @@ The exact 49-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | conformance | @jinn-network/marketplace-testing | packages/marketplace/testing/src/projector-conformance.ts | ./projector-conformance | ./dist/projector-conformance.d.ts<br>./dist/projector-conformance.js | — |
 | conformance | @jinn-network/marketplace-testing | packages/marketplace/testing/src/revised-contract-conformance.ts | ./revised-contract-conformance | ./dist/revised-contract-conformance.d.ts<br>./dist/revised-contract-conformance.js | — |
 | conformance | @jinn-network/marketplace-testing | packages/marketplace/testing/src/venue-conformance.ts | ./venue-conformance | ./dist/venue-conformance.d.ts<br>./dist/venue-conformance.js | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/canonical/adversarial/non-plain-object.json | — | — | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/canonical/adversarial/sparse-array.json | — | — | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/canonical/golden/mixed-scalars-and-nesting.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/effort-floor-violated.json | — | — | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/fractional-declared-key.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/harness-conflict.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/model-constraint-violated.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/profile-declares-format-token.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/profile-digest-mismatch.json | — | — | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/adversarial/provider-inference-miss.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/golden/equivalence-primary.json | — | — | — |
+| fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/golden/provider-inferred-from-model-id.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/derivation/golden/unpinned-all-core-null.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/dsse/adversarial/wrong-predicate-type.json | — | — | — |
 | fixtures | @jinn-network/policy-identity | packages/policy/identity/fixtures/dsse/adversarial/wrong-subject.json | — | — | — |
@@ -1404,7 +1410,7 @@ The exact 49-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3456 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3465 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1412,13 +1418,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 21 |
 | boundaryPolicies | 20 |
 | catalogManifests | 77 |
-| catalogPublicSurfaces | 1225 |
+| catalogPublicSurfaces | 1234 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2759 |
-| generatedOutputSources | 1281 |
+| discoveredFirstPartySurfaces | 2768 |
+| generatedOutputSources | 1290 |
 | generatorSources | 559 |
 | marketplaceControl | 2 |
 | requiredGates | 19 |

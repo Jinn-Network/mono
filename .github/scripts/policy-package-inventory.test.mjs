@@ -28,13 +28,24 @@ const POLICY_PACKAGES = [
 // layer too. C2's `outcomes` will carry exactly one edge, to `identity`.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['identity', {
-    dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [],
+    dependencies: [],
+    // TEST-ONLY. `src/merge-parity.test.ts` runs protocol's real `mergeRequirements` beside this
+    // package's reproduction of it and the kit reference's, on every derivation fixture and on the
+    // relation semantics no fixture reaches. The reproduction exists because a pure tier-3
+    // substrate depends on no Jinn package at RUNTIME (substrate §2); the equivalence is then
+    // checked rather than asserted, which needs the real function in the test graph. A runtime
+    // edge here would be a design question — this one is not, and the source-boundary guard scans
+    // production files only, so the distinction is enforced and not merely intended.
+    devDependencies: ['@jinn-network/task-execution-protocol'],
+    optionalDependencies: [], peerDependencies: [],
   }],
 ]);
 
-// Cross-tree Jinn dependencies would live outside packages/policy; map name -> absolute dir.
-// Empty today, and deliberately so: every addition is a design question first.
-const SIBLING_TREE_DIRS = new Map([]);
+// Cross-tree Jinn dependencies live outside packages/policy; map name -> absolute dir. Every
+// RUNTIME addition to this map is a design question first; the one entry here is test-only.
+const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+]);
 
 function readPackage(directory) {
   const packageJson = join(packageRoot, directory, 'package.json');
