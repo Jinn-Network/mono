@@ -23,7 +23,20 @@ export type { DirProvisionerOptions } from "./dir-provisioner.js";
 export type { WorkspaceRuntimePorts } from "./dir-provisioner.js";
 export { makeWorktreeProvisioner, selectProvisioner } from "./worktree-provisioner.js";
 export { ContentCorruptionError, materializeInput, materializeLoadout } from "./materialize.js";
-export { canonicalLoadoutPath, canonicalLoadoutPin } from "./loadout.js";
-export type { CanonicalLoadoutPin } from "./loadout.js";
+export { canonicalLoadoutPath, canonicalLoadoutPin, LOADOUT_KINDS } from "./loadout.js";
+export type { CanonicalLoadoutPin, LoadoutKind } from "./loadout.js";
+export {
+  assertHarnessStatePackageMaterializable,
+  hashHarnessStatePackage,
+  hashMaterializedHarnessStateTree,
+  HarnessStateHashProfileViolationError,
+  HarnessStateMaterializationRefusedError,
+  LEARNER_PUBLIC_V1_ALLOWED_DIRS,
+  LEARNER_PUBLIC_V1_ALLOWED_FILES,
+  LEARNER_PUBLIC_V1_EXCLUDED_ROOTS,
+  writeHarnessStatePackage,
+} from "./harness-state-package.js";
+export type { HarnessStateTreeEntry } from "./harness-state-package.js";
+export { toBareSha256Hex, toSha256Digest } from "./sha256-digest.js";
 export { harvest } from "./harvest.js";
 export { enforceWorkspaceQuota, WorkspaceQuotaExceededError } from "./quota.js";

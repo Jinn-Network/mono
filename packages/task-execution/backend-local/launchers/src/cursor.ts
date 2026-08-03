@@ -10,7 +10,7 @@ export function makeCursorLauncher(options: LauncherOptions = {}): LauncherContr
     capabilities: () => capabilities([
       { key: "harness", inventory: ["cursor"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-      { key: "loadout", inventory: ["jinn.skill.v1"] },
+      { key: "loadout", inventory: ["jinn.skill.v1", "jinn.harness-state.v1"] },
       { key: "model", inventory: ["pinned-id"] },
     ], false),
     probe: probeFrom(options, "cursor"),

@@ -508,3 +508,57 @@ test('Task-execution production source never orders or formats with the host loc
     );
   }
 });
+
+// Program §1 C5 / §9 addendum F9: `packages/task-execution/backend-local/workspace/src/
+// harness-state-package.ts` MIRRORS (never imports — client is tier 4, workspace is tier 3, and
+// the frozen dependency direction forbids the reverse edge) the `learner-public.v1` hash profile
+// shipped in `client/src/harnesses/hash-profile.ts`. This is the drift guard: it reads both
+// files as plain text (the established `packages/task-supply/curation` "drift" pattern —
+// `.github/scripts/task-supply-curation-guards.test.mjs`) and asserts the mirrored constants and
+// the cross-unit golden digest still agree. A third independent implementation exists in
+// `@jinn-network/policy-identity` (`packages/policy/identity/src/hash-profile.ts`, C1) on the
+// as-yet-unmerged `claude/policy-c1-kit` branch; it is not asserted here because it is not part
+// of this tree yet, but it is bound to the same golden digest constant.
+function extractStringArrayLiteral(source, label) {
+  const labelIndex = source.indexOf(label);
+  assert.ok(labelIndex !== -1, `label "${label}" not found`);
+  const open = source.indexOf('[', labelIndex);
+  const close = source.indexOf(']', open);
+  const body = source.slice(open + 1, close);
+  return [...body.matchAll(/'([^']*)'|"([^"]*)"/g)].map((match) => match[1] ?? match[2]);
+}
+
+test('the mirrored learner-public.v1 profile constants match client/src/harnesses/hash-profile.ts', () => {
+  const clientSource = readFileSync(join(root, 'client', 'src', 'harnesses', 'hash-profile.ts'), 'utf8');
+  const workspaceSource = readFileSync(
+    join(packages, 'backend-local', 'workspace', 'src', 'harness-state-package.ts'), 'utf8',
+  );
+  // The labels include the opening bracket so the search lands on the value literal
+  // (`ignoreRelPaths: ['.git', ...]`) rather than the interface's type signature
+  // (`readonly ignoreRelPaths: readonly string[];`), which also contains the label text.
+  assert.deepEqual(
+    extractStringArrayLiteral(workspaceSource, 'LEARNER_PUBLIC_V1_EXCLUDED_ROOTS = ['),
+    extractStringArrayLiteral(clientSource, 'ignoreRelPaths: ['),
+    'the workspace mirror\'s excluded roots drifted from client\'s ignoreRelPaths',
+  );
+  assert.deepEqual(
+    extractStringArrayLiteral(workspaceSource, 'LEARNER_PUBLIC_V1_ALLOWED_DIRS = ['),
+    extractStringArrayLiteral(clientSource, 'allowedDirs: ['),
+    'the workspace mirror\'s allowed dirs drifted from client\'s allowedDirs',
+  );
+  assert.deepEqual(
+    extractStringArrayLiteral(workspaceSource, 'LEARNER_PUBLIC_V1_ALLOWED_FILES = ['),
+    extractStringArrayLiteral(clientSource, 'allowedFiles: ['),
+    'the workspace mirror\'s allowed files drifted from client\'s allowedFiles',
+  );
+});
+
+test('the fork-healing golden digest constant is shared between client and the workspace mirror', () => {
+  const digest = '90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8';
+  const clientTest = readFileSync(join(root, 'client', 'test', 'harnesses', 'hash-profile.test.ts'), 'utf8');
+  assert.ok(clientTest.includes(digest), 'client/test/harnesses/hash-profile.test.ts lost the fork-healing digest constant');
+  const workspaceTest = readFileSync(
+    join(packages, 'backend-local', 'workspace', 'src', 'harness-state-package.test.ts'), 'utf8',
+  );
+  assert.ok(workspaceTest.includes(digest), 'the workspace mirror\'s test lost the fork-healing digest constant');
+});
