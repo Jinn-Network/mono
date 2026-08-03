@@ -70,9 +70,15 @@ describe("mirrored vocabularies (substrate §2 — mirrored, never imported)", (
 describe("fixture inventory", () => {
   const families: Record<string, { golden: number; adversarial: number }> = {
     tuple: { golden: 6, adversarial: 7 },
-    derivation: { golden: 2, adversarial: 5 },
+    // +1 golden / +2 adversarial in the C1 DEEP-review round: the model constraint's
+    // provider-inference leg (both outcomes) and the fractional-declared-key case that pins which
+    // of the merge comparator and step 5 refuses.
+    derivation: { golden: 3, adversarial: 7 },
     manifest: { golden: 3, adversarial: 7 },
     dsse: { golden: 1, adversarial: 2 },
+    // Added in the same round: the values that arrive from code rather than from JSON — non-plain
+    // objects and array holes — which are the ones a canonicalizer accepts silently.
+    canonical: { golden: 1, adversarial: 2 },
   };
 
   for (const [family, counts] of Object.entries(families)) {

@@ -2,7 +2,7 @@
   "note": "The other end of the range: a Task and a Submission that pin nothing at all. Every core axis null-fills, and the tuple still has a stable identity — 'unpinned' is a treatment, not the absence of one. This is the fixture that catches a deriver which returns early, returns `undefined`, or omits the core block when the effective requirements are empty. The profile declares `effort` and neither document sets it, so the declared-but-unset rule also applies here with an empty requirement map.",
   "profile": {
     "profile": "https://jinn.network/task-profiles/example-domain/1.0",
-    "digest": "sha256:5c47b10f5902e4c5810559b404d1b785b0cd5d5bec802b2e6086898ca7109f96",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9leGFtcGxlLWRvbWFpbi8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImZsb29yIiwia2V5IjoiZWZmb3J0In1dfQ==",
     "requirementKeys": [{ "key": "effort", "comparisonClass": "floor" }]
   },
   "task": {

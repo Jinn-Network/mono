@@ -16,7 +16,7 @@
  */
 
 import type { ComparisonClass, JsonValue } from "../../src/types.js";
-import { canonicallyEqual } from "./canonical.js";
+import { compareCodeUnitStrings } from "./canonical.js";
 
 export type MergeResult =
   | { readonly ok: true; readonly effective: Record<string, JsonValue> }
@@ -55,18 +55,66 @@ function effortRank(value: unknown): number | undefined {
 
 /**
  * The only `constraint`-class membership test the stack registers is `model`'s (protocol's
- * `CONSTRAINT_MEMBERSHIP`). The kit exercises only its provider-to-provider and id-to-id legs;
- * protocol's model-id prefix table is a private inference heuristic, and a kit that pinned it
- * would be gating an implementation detail rather than the design.
+ * `CONSTRAINT_MEMBERSHIP`), reproduced here **in full**, including the model-id prefix table.
+ *
+ * An earlier version of this reference omitted the provider-inference leg on the grounds that the
+ * prefix table is an implementation detail. That was wrong in the way that matters: a Submission
+ * pinning `{id: "claude-haiku-4-5"}` against a Task constraining `{provider: "anthropic"}` is
+ * admitted at every shipped venue and was refused here, so the two implementations disagreed about
+ * which Submissions have a tuple at all — a divergence no fixture caught, because no fixture
+ * exercised it. `derivation/golden/provider-inferred-from-model-id.json` now does.
  */
+const MODEL_ID_PROVIDER_PREFIXES: Record<string, string> = {
+  "claude-": "anthropic",
+  "gpt-": "openai",
+  "o1-": "openai",
+  "gemini-": "google",
+  "llama-": "meta",
+  "mistral-": "mistralai",
+};
+
+function inferProviderFromModelId(id: string): string | undefined {
+  for (const prefix of Object.keys(MODEL_ID_PROVIDER_PREFIXES)) {
+    if (id.startsWith(prefix)) return MODEL_ID_PROVIDER_PREFIXES[prefix];
+  }
+  return undefined;
+}
+
 function modelConstraintAdmits(taskConstraint: unknown, submissionValue: unknown): boolean {
   if (typeof taskConstraint !== "object" || taskConstraint === null) return false;
   if (typeof submissionValue !== "object" || submissionValue === null) return false;
   const constraint = taskConstraint as { provider?: unknown; id?: unknown };
   const pinned = submissionValue as { provider?: unknown; id?: unknown };
-  if (typeof constraint.provider === "string") return pinned.provider === constraint.provider;
+  if (typeof constraint.provider === "string") {
+    if (typeof pinned.provider === "string") return pinned.provider === constraint.provider;
+    if (typeof pinned.id === "string") return inferProviderFromModelId(pinned.id) === constraint.provider;
+    return false;
+  }
   if (typeof constraint.id === "string") return pinned.id === constraint.id;
   return false;
+}
+
+/**
+ * Structural equality over **arbitrary requirement values** — deliberately without the I-JSON
+ * restrictions the sealer enforces, matching protocol's `byteEqual`.
+ *
+ * The earlier version called `canonicallyEqual`, i.e. the strict sealer, as the merge comparator.
+ * That made the merge stage throw `invalid-document` on any requirement value that is legal in a
+ * requirements map but not in a sealed document — a fractional number is the reachable case — so
+ * a comparison that should have succeeded or produced `requirement-conflict` instead produced a
+ * refusal at the wrong stage with the wrong path. The requirements merge compares requirement
+ * values; only step 5 seals.
+ */
+function structurallyEqual(left: unknown, right: unknown): boolean {
+  return lenientCanonical(left) === lenientCanonical(right);
+}
+
+function lenientCanonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(lenientCanonical).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort(compareCodeUnitStrings);
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${lenientCanonical(record[key])}`).join(",")}}`;
 }
 
 export function mergeRequirementsNaive(
@@ -100,7 +148,7 @@ export function mergeRequirementsNaive(
 
     switch (keyClass) {
       case "exact":
-        admitted = canonicallyEqual(taskValue, submissionValue);
+        admitted = structurallyEqual(taskValue, submissionValue);
         break;
       case "ceiling":
         admitted = typeof taskValue === "number"
@@ -123,14 +171,14 @@ export function mergeRequirementsNaive(
         // Unknown constraint keys fall through to the conservative byte-equality default.
         admitted = key === "model"
           ? modelConstraintAdmits(taskValue, submissionValue)
-          : canonicallyEqual(taskValue, submissionValue);
+          : structurallyEqual(taskValue, submissionValue);
         break;
       case "addable":
       default:
         // `addable`'s relation only applies when the key is absent from the Task, which is
         // handled above. Present in both, under `addable`, an unknown class, or no declared
         // class at all: the conservative default is byte-equality or rejection.
-        admitted = canonicallyEqual(taskValue, submissionValue);
+        admitted = structurallyEqual(taskValue, submissionValue);
         break;
     }
 

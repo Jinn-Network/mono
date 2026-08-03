@@ -9,7 +9,7 @@
   },
   "profile": {
     "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "digest": "sha256:797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9XX0=",
     "requirementKeys": [
       { "key": "effort", "comparisonClass": "floor" },
       { "key": "maxTokens", "comparisonClass": "ceiling" },

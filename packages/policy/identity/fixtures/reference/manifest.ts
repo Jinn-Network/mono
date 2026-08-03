@@ -164,7 +164,7 @@ export function validateCandidateManifest(input: unknown): ValidationResult {
     const seen = new Set<string>();
     parents.forEach((parent, index) => {
       if (!isPlainObject(parent)) return;
-      const key = `${String(parent["kind"])}${String(parent["digest"])}`;
+      const key = JSON.stringify([String(parent["kind"]), String(parent["digest"])]);
       if (seen.has(key)) {
         push(`parents.${index}`, "malformed-parent", "duplicate parent reference");
       }

@@ -180,11 +180,22 @@ export function verifyCandidateStatementBinding(envelope: unknown): StatementBin
   if (!Array.isArray(subject) || subject.length !== 1) {
     errors.push(issue("statement-binding", "payload.subject",
       "the Statement must name exactly one subject: the sealed manifest"));
-  } else if (sealedDigest !== undefined) {
-    const named = (subject[0] as { digest?: Record<string, unknown> } | null)?.digest?.["sha256"];
-    if (typeof named !== "string" || `sha256:${named}` !== sealedDigest) {
-      errors.push(issue("statement-binding", "payload.subject.0.digest.sha256",
-        "the subject digest does not name the manifest carried in the predicate"));
+  } else {
+    const entry = subject[0] as { name?: unknown; digest?: Record<string, unknown> } | null;
+    // §5.2 pins the subject as "the sealed manifest (digest + name)". The name is not decorative:
+    // a ResourceDescriptor carrying a digest and nothing else tells a verifier what was signed but
+    // not what it is, and in-toto's own rule is that a descriptor identifies its artifact by more
+    // than the digest alone.
+    if (typeof entry?.name !== "string" || entry.name === "") {
+      errors.push(issue("statement-binding", "payload.subject.0.name",
+        "the subject must name the sealed manifest, not only digest it"));
+    }
+    if (sealedDigest !== undefined) {
+      const named = entry?.digest?.["sha256"];
+      if (typeof named !== "string" || `sha256:${named}` !== sealedDigest) {
+        errors.push(issue("statement-binding", "payload.subject.0.digest.sha256",
+          "the subject digest does not name the manifest carried in the predicate"));
+      }
     }
   }
 

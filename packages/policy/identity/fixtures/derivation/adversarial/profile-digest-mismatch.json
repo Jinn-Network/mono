@@ -2,7 +2,7 @@
   "note": "The quietest way to make two honest derivers disagree: hand them the same (Task, Submission) pair and DIFFERENT revisions of the pinned profile. `requirementKeys` decides the tuple's key set, so a newer patch of the same profile URI that adds one key produces a different digest for identical execution. profiles §6.2 already forbids validating against a cached document whose digest differs from the pin; this fixture makes the derivation honor the same rule. A deriver that trusts whatever profile it was handed passes every other fixture in this kit and still forks the identity space in production.",
   "profile": {
     "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9XX0=",
     "requirementKeys": [{ "key": "effort", "comparisonClass": "floor" }]
   },
   "task": {

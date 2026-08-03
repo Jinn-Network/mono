@@ -141,8 +141,10 @@ export function verifyCandidateStatementBinding(envelope: unknown): StatementBin
   const expectedHex = sha256Hex(canonicalJsonBytes(manifest));
 
   const subject = stmt["subject"];
-  if (!Array.isArray(subject) || subject.length === 0) {
-    push("payload.subject", "subject must be a non-empty array");
+  // Exactly one: §5.2 pins the subject as THE sealed manifest. A second subject would make the
+  // Statement's claim ambiguous, and the two implementations must refuse identically.
+  if (!Array.isArray(subject) || subject.length !== 1) {
+    push("payload.subject", "the Statement must name exactly one subject: the sealed manifest");
     return { ok: false, errors };
   }
   const first = subject[0] as Record<string, unknown> | undefined;

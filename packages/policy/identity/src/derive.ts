@@ -16,10 +16,13 @@
  *   4. byte-exact copy        no enrichment, then canonicalize and validate
  */
 
+import { decodeStrictBase64 } from "./base64.js";
+import { canonicalJsonText } from "./canonical.js";
+import { sha256Hex } from "./digest.js";
 import { refuse } from "./errors.js";
 import { CORE_KEY_CLASSES, mergeEffectiveRequirements } from "./merge.js";
 import { CORE_AXES, EXECUTION_TUPLE_FORMAT_TOKEN } from "./tokens.js";
-import { assertValidTuple } from "./tuple.js";
+import { assertValidTuple, canonicalTupleBytes } from "./tuple.js";
 import type {
   ComparisonClass,
   ExecutionPolicyTuple,
@@ -38,15 +41,80 @@ function assertDocument(value: unknown, path: string, what: string): void {
   }
 }
 
+/** The parsed profile document, read out of the sealed bytes rather than out of the caller. */
+interface ProfileDocument {
+  readonly profile: string;
+  readonly requirementKeys: readonly { readonly key: string; readonly comparisonClass: ComparisonClass }[];
+}
+
+const COMPARISON_CLASSES = new Set<string>(["exact", "ceiling", "floor", "constraint", "addable"]);
+
+/** An order-independent identity for a set of declared requirement keys. */
+function declarationIdentity(
+  entries: readonly { readonly key: string; readonly comparisonClass: ComparisonClass }[],
+): string {
+  return canonicalJsonText(
+    [...entries]
+      .map(({ key, comparisonClass }) => ({ key, comparisonClass }))
+      .sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0)),
+  );
+}
+
+function readProfileDocument(document: unknown): ProfileDocument {
+  assertDocument(document, "profile.sealedBytes", "the sealed profile document");
+  const parsed = document as Record<string, unknown>;
+
+  if (typeof parsed["profile"] !== "string" || parsed["profile"] === "") {
+    refuse("invalid-document", "profile.sealedBytes.profile",
+      "the sealed profile document must name its profile URI");
+  }
+  const declared = parsed["requirementKeys"];
+  if (!Array.isArray(declared)) {
+    refuse("invalid-document", "profile.sealedBytes.requirementKeys",
+      "the sealed profile document must declare requirementKeys as an array");
+  }
+
+  const seen = new Set<string>();
+  const requirementKeys = declared.map((entry, index) => {
+    const path = `profile.sealedBytes.requirementKeys.${index}`;
+    assertDocument(entry, path, "a declared requirement key");
+    const record = entry as Record<string, unknown>;
+    if (typeof record["key"] !== "string" || record["key"] === "") {
+      refuse("invalid-document", `${path}.key`, "a declared requirement key must name a key");
+    }
+    if (typeof record["comparisonClass"] !== "string"
+      || !COMPARISON_CLASSES.has(record["comparisonClass"])) {
+      refuse("invalid-document", `${path}.comparisonClass`,
+        "a declared requirement key must carry one of the five profiles §5.1 comparison classes");
+    }
+    // A key declared twice, under two classes, would make the merge depend on which entry the
+    // reader happened to keep. Refuse rather than pick.
+    if (seen.has(record["key"])) {
+      refuse("invalid-document", `profile.requirementKeys.${record["key"]}`,
+        "a profile may declare each requirement key at most once");
+    }
+    seen.add(record["key"]);
+    return { key: record["key"], comparisonClass: record["comparisonClass"] as ComparisonClass };
+  });
+
+  return { profile: parsed["profile"], requirementKeys };
+}
+
 /**
- * Stage 0. profiles §6.2 already forbids validating against a cached profile whose digest differs
- * from the Task's pin; the derivation honors the same rule, because handing two honest derivers
- * different revisions of one profile URI is the quietest way to fork the identity space —
- * `requirementKeys` decides the tuple's key set, so one added key is one new digest for identical
- * execution. A deriver that trusts whatever profile it was handed passes every other fixture in
- * the kit and still forks in production.
+ * Stage 0 — the profile pin-check, done against the document's own bytes.
+ *
+ * profiles §6.2 already forbids validating against a cached profile whose digest differs from the
+ * Task's pin; the derivation honors the same rule, because handing two honest derivers different
+ * revisions of one profile URI is the quietest way to fork the identity space — `requirementKeys`
+ * decides the tuple's key set, so one added key is one new digest for identical execution.
+ *
+ * The check recomputes sha256 over `sealedBytes` rather than reading a digest the caller asserts.
+ * A label-only comparison checks that two strings agree about a document neither of them holds:
+ * a caller with revision B can label it with revision A's digest and derive under A's key set,
+ * which is the fork this stage exists to rule out. The caller's parsed view is then verified to be
+ * a faithful reading of the same bytes, so there is no second place for the two to disagree.
  */
-function assertProfileMatchesPin(task: SealedTaskDoc, profile: ResolvedTaskProfile): void {
+function resolveProfile(task: SealedTaskDoc, profile: ResolvedTaskProfile): ProfileDocument {
   const pin = task.profile;
   assertDocument(pin, "task.profile", "the Task's profile pin");
 
@@ -54,24 +122,77 @@ function assertProfileMatchesPin(task: SealedTaskDoc, profile: ResolvedTaskProfi
   if (typeof pinnedDigest !== "string") {
     refuse("invalid-document", "task.profile.digest.sha256", "the Task pins no profile digest");
   }
-  if (profile.digest !== `sha256:${pinnedDigest}`) {
+
+  if (typeof profile.sealedBytes !== "string") {
+    refuse("invalid-document", "profile.sealedBytes",
+      "the resolved profile must carry the sealed document's exact bytes");
+  }
+  const bytes = decodeStrictBase64(profile.sealedBytes);
+  if (bytes === undefined) {
+    refuse("invalid-document", "profile.sealedBytes", "sealed profile bytes must be strict base64");
+  }
+
+  if (sha256Hex(bytes) !== pinnedDigest) {
     refuse(
       "invalid-document",
       "task.profile.digest.sha256",
-      "the supplied profile document is not the revision the Task pinned",
+      "the supplied profile bytes do not hash to the digest the Task pinned",
     );
   }
-  if (typeof pin.uri === "string" && pin.uri !== profile.profile) {
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    refuse("invalid-document", "profile.sealedBytes",
+      "sealed profile bytes are not a UTF-8 JSON document");
+  }
+  const document = readProfileDocument(parsed);
+
+  // The caller's parsed view must be what the bytes say. Anything else is a caller deriving under
+  // one key set while claiming another.
+  if (typeof profile.profile !== "string" || profile.profile !== document.profile) {
+    refuse("invalid-document", "profile.profile",
+      "the supplied profile URI is not the one the sealed bytes carry");
+  }
+  // Checked before it is read. A malformed caller view is invalid input and must arrive as a typed
+  // refusal — a `TypeError` out of a spread would be the same fact in a form no caller can branch
+  // on, and would read like a bug in this package rather than a rejection of theirs.
+  if (!Array.isArray(profile.requirementKeys)) {
+    refuse("invalid-document", "profile.requirementKeys",
+      "the resolved profile must carry its declared requirement keys as an array");
+  }
+  for (const [index, entry] of profile.requirementKeys.entries()) {
+    const path = `profile.requirementKeys.${index}`;
+    assertDocument(entry, path, "a declared requirement key");
+    if (typeof (entry as { key?: unknown }).key !== "string") {
+      refuse("invalid-document", `${path}.key`, "a declared requirement key must name a key");
+    }
+  }
+
+  // Compared as a SET, keyed by `key`. The sealed bytes are authoritative for the content of the
+  // declaration — which keys, under which classes — and the order they happen to be listed in is
+  // spelling, which the derivation is a function of nothing about. A view carrying the same pairs
+  // in a different order is the same declaration; a view carrying a different key or a different
+  // class is a caller deriving under one key set while claiming another.
+  if (declarationIdentity(profile.requirementKeys) !== declarationIdentity(document.requirementKeys)) {
+    refuse("invalid-document", "profile.requirementKeys",
+      "the supplied requirement keys are not the ones the sealed bytes carry");
+  }
+
+  if (typeof pin.uri === "string" && pin.uri !== document.profile) {
     refuse(
       "invalid-document",
       "task.profile.uri",
-      "the supplied profile document does not carry the Task's profile URI",
+      "the sealed profile document does not carry the Task's profile URI",
     );
   }
+
+  return document;
 }
 
 /** Stage 1 + the profile's contribution to the class map, read once. */
-function profileKeyClasses(profile: ResolvedTaskProfile): Record<string, ComparisonClass> {
+function profileKeyClasses(profile: ProfileDocument): Record<string, ComparisonClass> {
   const classes: Record<string, ComparisonClass> = {};
   for (const declared of profile.requirementKeys) {
     if (RESERVED_TUPLE_MEMBERS.has(declared.key)) {
@@ -98,8 +219,8 @@ export function deriveExecutionTuple(
   assertDocument(submission, "submission", "the sealed Submission");
   assertDocument(profile, "profile", "the resolved task profile");
 
-  assertProfileMatchesPin(task, profile);
-  const declaredClasses = profileKeyClasses(profile);
+  const resolved = resolveProfile(task, profile);
+  const declaredClasses = profileKeyClasses(resolved);
 
   // Stage 2. The merge decides. Where it refuses there is no tuple, and the caller sees
   // `requirement-conflict` rather than a treatment the Task never admitted.
@@ -137,7 +258,14 @@ export function deriveExecutionTuple(
     tuple[key] = effective[key] as JsonValue;
   }
 
+  // Stage 5 is part of this function, not a favour the caller does afterwards: §4.1 ends at
+  // "canonical bytes, and tupleDigest over those bytes". So the derivation canonicalizes here and
+  // refuses if the result will not seal. A requirement value that merges cleanly but is not
+  // I-JSON — a fractional number is the reachable case — would otherwise produce a tuple object
+  // that every consumer accepts and no consumer can digest, and the refusal would surface at
+  // whichever call site happened to seal it first.
   const derived = tuple as ExecutionPolicyTuple;
   assertValidTuple(derived);
+  canonicalTupleBytes(derived);
   return derived;
 }

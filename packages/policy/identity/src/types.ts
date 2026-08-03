@@ -128,17 +128,28 @@ export type RequirementEntries = Readonly<Record<string, JsonValue>>;
 export type ComparisonClass = "exact" | "ceiling" | "floor" | "constraint" | "addable";
 
 /**
- * The subset of a resolved task-profile document the derivation needs (profiles §6.1).
+ * The resolved task-profile document the derivation needs (profiles §6.1), carried as **the
+ * document's exact sealed bytes plus a parsed view of them**.
  *
  * See FINDING F1 in `README.md`: the program's frozen signature
  * `deriveExecutionTuple(task, submission)` cannot execute substrate §4.1 steps 1–2 without it —
  * the comparison classes for profile-added keys and the closed key rule both live here, and the
- * profile is a separate sealed document that `Task.profile` only pins by digest.
+ * Task carries the profile only as a pin.
+ *
+ * The bytes are what makes the pin-check real. An earlier shape carried a self-asserted `digest`
+ * string, which the deriver could only compare against the Task's pin — two labels agreeing about
+ * a document neither of them held. A caller with revision B of a profile could label it with
+ * revision A's digest and derive under A's key set, which is exactly the identity-space fork
+ * §4.1's pin-check exists to rule out. The deriver now recomputes sha256 over `sealedBytes`, and
+ * verifies that the parsed view below is a faithful reading of those same bytes. Any disagreement
+ * fails closed.
  */
 export interface ResolvedTaskProfile {
+  /** The profile URI. Verified against the sealed bytes, never trusted on its own. */
   readonly profile: string;
-  /** `sha256:<64 lowercase hex>` — MUST equal the Task's `profile.digest.sha256`, prefixed. */
-  readonly digest: string;
+  /** Base64 of the exact sealed profile-document bytes the Task's `profile.digest` names. */
+  readonly sealedBytes: string;
+  /** The parsed view. Verified to match `sealedBytes`; a disagreement is invalid input. */
   readonly requirementKeys: readonly { readonly key: string; readonly comparisonClass: ComparisonClass }[];
 }
 

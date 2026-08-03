@@ -24,6 +24,25 @@
  * refused, because there is no key to omit it by and JCS has no undefined token. Because omission
  * is the rule, `assertValidTuple` rejects an explicitly-`undefined` core axis separately — see
  * `tuple.ts`.
+ *
+ * Four structural refusals exist because the alternative is a **digest collision reachable from
+ * ordinary input**, not because the shapes are exotic:
+ *
+ * - **Non-plain objects.** A `Date`, `Map`, `Set`, `RegExp`, class instance, or boxed primitive
+ *   has no own enumerable members, so a writer that walks own keys emits `{}` for all of them:
+ *   two different instants seal to one digest, and a policy identity stops naming one treatment.
+ *   The prototype must be `Object.prototype` or `null`.
+ * - **Sparse arrays.** `[1, , 3]` has a hole at index 1. A writer that maps over elements skips
+ *   holes and renders them as nothing, emitting `[1,,3]` — bytes `JSON.parse` rejects. A sealed
+ *   document nobody can parse is worse than a refused one.
+ * - **Symbol keys and non-enumerable members.** Both are invisible to a `JSON.stringify`-shaped
+ *   walk and visible to a reader of the object: the same disagreement in a different spelling.
+ * - **Cycles.** Refused, so the caller gets a typed refusal rather than a `RangeError`.
+ *
+ * One thing this canonicalizer cannot defend against, stated so nobody assumes it does: an
+ * accessor member is read exactly once, here, and a getter that returns something different on
+ * the next read makes the sealed bytes disagree with the object the caller still holds. Seal
+ * plain data.
  */
 
 import { childPath, refuse } from "./errors.js";
@@ -78,7 +97,7 @@ function writeNumber(value: number, path: string): string {
   return String(value);
 }
 
-function write(value: unknown, path: string): string {
+function write(value: unknown, path: string, ancestors: ReadonlySet<object>): string {
   if (value === null) return "null";
 
   switch (typeof value) {
@@ -96,34 +115,62 @@ function write(value: unknown, path: string): string {
       refuse("invalid-document", path, `value of type ${typeof value} is not JSON`);
   }
 
+  const container = value as object;
+  if (ancestors.has(container)) {
+    refuse("invalid-document", path, "cyclic values are not representable as JSON");
+  }
+  const nested = new Set(ancestors).add(container);
+
   if (Array.isArray(value)) {
-    const elements = value.map((element, index) => {
-      if (element === undefined) {
+    const elements: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const elementPath = childPath(path, index);
+      // A hole is not `undefined` stored at the index — it is the absence of the index. Checked
+      // first, and with `in` rather than a value comparison, because reading a hole yields
+      // `undefined` and the two cases deserve different messages.
+      if (!(index in value)) {
+        refuse("invalid-document", elementPath, "sparse arrays are not representable as JSON");
+      }
+      if (value[index] === undefined) {
         refuse(
           "invalid-document",
-          childPath(path, index),
+          elementPath,
           "array element is undefined; JCS has no undefined token and there is no key to omit it by",
         );
       }
-      return write(element, childPath(path, index));
-    });
+      elements.push(write(value[index], elementPath, nested));
+    }
     return `[${elements.join(",")}]`;
   }
 
+  const prototype = Object.getPrototypeOf(container);
+  if (prototype !== Object.prototype && prototype !== null) {
+    refuse("invalid-document", path, "non-plain objects are not representable as JSON");
+  }
+  if (Object.getOwnPropertySymbols(container).length > 0) {
+    refuse("invalid-document", path, "symbol-keyed members are not representable as JSON");
+  }
+
   const record = value as Record<string, unknown>;
+  const names = Object.getOwnPropertyNames(record);
+  if (names.length !== Object.keys(record).length) {
+    refuse("invalid-document", path, "non-enumerable members are not representable as JSON");
+  }
+
   const members: string[] = [];
-  for (const key of Object.keys(record).sort(compareCodeUnitStrings)) {
+  for (const key of names.sort(compareCodeUnitStrings)) {
     const member = record[key];
     if (member === undefined) continue; // F10: omitted, exactly as `JSON.stringify` would
-    assertIJsonString(key, path === "" ? key : path);
-    members.push(`${JSON.stringify(key)}:${write(member, childPath(path, key))}`);
+    const memberPath = childPath(path, key);
+    assertIJsonString(key, memberPath);
+    members.push(`${JSON.stringify(key)}:${write(member, memberPath, nested)}`);
   }
   return `{${members.join(",")}}`;
 }
 
 /** The canonical text of any I-JSON value. Refuses fail-closed on every non-I-JSON member. */
 export function canonicalJsonText(value: unknown): string {
-  return write(value, "");
+  return write(value, "", new Set());
 }
 
 /** The canonical text's UTF-8 encoding — the bytes that get digested and signed. */

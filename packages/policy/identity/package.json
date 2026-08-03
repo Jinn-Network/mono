@@ -43,8 +43,12 @@
     "@noble/hashes": "^2.2.0"
   },
   "devDependencies": {
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
+  },
+  "resolutions": {
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
   }
 }
