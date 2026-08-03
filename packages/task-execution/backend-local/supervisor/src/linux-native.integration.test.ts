@@ -58,6 +58,22 @@ describe.runIf(linux)("Linux native custody shim", () => {
     }
   });
 
+  it("does not require a secrets directory when the launch declares no secret forwards", async () => {
+    const root = mkdtempSync(join(tmpdir(), "jinn-linux-no-secrets-"));
+    dirs.push(root);
+    const meta = join(root, "meta");
+    const secrets = join(root, "secrets-not-materialized");
+    const seen = join(root, "seen");
+    mkdirSync(meta, { recursive: true });
+    spawnShim({ attemptId: "attempt-no-secrets", nonce: "nonce-no-secrets", metaDir: meta, secretsDir: secrets }, {
+      argv: [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(seen)},'ok')`],
+      env: {},
+      cwd: root,
+    });
+    await waitFor(() => readOutcome(meta, "nonce-no-secrets") ?? undefined, "no-secrets outcome");
+    expect(readFileSync(seen, "utf8")).toBe("ok");
+  });
+
   it("adopts an orphan and retains the exited leader until the stubborn group descendant is killed", async () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-linux-native-"));
     dirs.push(root);
