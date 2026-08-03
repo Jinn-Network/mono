@@ -15,15 +15,22 @@ const itWithIndexer = existsSync(resolve(indexerRoot, 'node_modules/.yarn-state.
 describe('spawnPonderIndexer', () => {
   itWithIndexer('surfaces an unreachable RPC diagnostic before the health timeout', async () => {
     const startedAt = Date.now();
-    await expect(
-      spawnPonderIndexer({
-        rpcUrl: 'http://127.0.0.1:8545',
+    const rpcUrl = 'http://127.0.0.1:8545';
+    let failure: unknown;
+    try {
+      await spawnPonderIndexer({
+        rpcUrl,
         chainId: 84532,
         readyTimeoutMs: 30_000,
-      }),
-    ).rejects.toThrow(
-      'Ponder RPC diagnostic failed — the RPC URL is unreachable.',
-    );
+      });
+    } catch (err) {
+      failure = err;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain('Ponder RPC diagnostic failed — the RPC URL is unreachable.');
+    expect(message).toContain('Ponder startup output (tail):');
+    expect(message).not.toContain(rpcUrl);
     expect(Date.now() - startedAt).toBeLessThan(25_000);
   }, 30_000);
 
