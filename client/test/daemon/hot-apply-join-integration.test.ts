@@ -203,7 +203,7 @@ describe('hot-apply join takes effect within one poll, no restart (#1037)', () =
     const registry = new SolverNetRegistry();
     const config: { joinedSolverNets?: Record<string, JoinedSolverNetConfig> } = {};
 
-    const applyJoin = createJoinApplier({ taskDiscovery, view, readiness, registry, config });
+    const applyJoin = createJoinApplier({ taskDiscovery, view, learnerRouting: null, readiness, registry, config });
 
     // BEFORE: zero joins → discovery yields nothing, findClaimableTasks never called.
     const before = (adapter as any).discoverSubgraphRestorationTasks()[Symbol.asyncIterator]();

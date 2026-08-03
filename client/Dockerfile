@@ -56,6 +56,7 @@ COPY packages/task-execution/evaluator-adapters/package.json packages/task-execu
 COPY packages/task-execution/backend-local/assembly/package.json packages/task-execution/backend-local/assembly/yarn.lock packages/task-execution/backend-local/assembly/.yarnrc.yml ./packages/task-execution/backend-local/assembly/
 COPY packages/marketplace/pipeline/package.json packages/marketplace/pipeline/yarn.lock packages/marketplace/pipeline/.yarnrc.yml ./packages/marketplace/pipeline/
 COPY packages/discovery/protocol/package.json packages/discovery/protocol/yarn.lock packages/discovery/protocol/.yarnrc.yml ./packages/discovery/protocol/
+COPY packages/policy/identity/package.json packages/policy/identity/yarn.lock packages/policy/identity/.yarnrc.yml ./packages/policy/identity/
 COPY packages/discovery/serve/package.json packages/discovery/serve/yarn.lock packages/discovery/serve/.yarnrc.yml ./packages/discovery/serve/
 COPY packages/marketplace/projector/package.json packages/marketplace/projector/yarn.lock packages/marketplace/projector/.yarnrc.yml ./packages/marketplace/projector/
 COPY packages/marketplace/venue-base/package.json packages/marketplace/venue-base/yarn.lock packages/marketplace/venue-base/.yarnrc.yml ./packages/marketplace/venue-base/
@@ -89,6 +90,8 @@ COPY packages/task-execution/protocol/tsconfig.json ./packages/task-execution/pr
 COPY packages/task-execution/backend/tsconfig.json ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/tsconfig.json ./packages/task-execution/profiles/
 COPY packages/trust/core/tsconfig.json ./packages/trust/core/
+COPY packages/policy/identity/tsconfig.json packages/policy/identity/tsconfig.build.json ./packages/policy/identity/
+COPY packages/policy/identity/scripts/ ./packages/policy/identity/scripts/
 COPY packages/trust/resolve/tsconfig.json ./packages/trust/resolve/
 COPY packages/environments/record/tsconfig.json ./packages/environments/record/
 COPY packages/task-supply/admission/tsconfig.json ./packages/task-supply/admission/
@@ -118,6 +121,7 @@ COPY packages/task-execution/protocol/src/ ./packages/task-execution/protocol/sr
 COPY packages/task-execution/backend/src/ ./packages/task-execution/backend/src/
 COPY packages/task-execution/profiles/src/ ./packages/task-execution/profiles/src/
 COPY packages/trust/core/src/ ./packages/trust/core/src/
+COPY packages/policy/identity/src/ ./packages/policy/identity/src/
 COPY packages/trust/resolve/src/ ./packages/trust/resolve/src/
 COPY packages/environments/record/src/ ./packages/environments/record/src/
 COPY packages/task-supply/admission/src/ ./packages/task-supply/admission/src/
@@ -155,6 +159,8 @@ COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
 COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md
 COPY packages/trust/core/fixtures/ ./packages/trust/core/fixtures/
 COPY packages/trust/core/README.md ./packages/trust/core/README.md
+COPY packages/policy/identity/fixtures/ ./packages/policy/identity/fixtures/
+COPY packages/policy/identity/README.md ./packages/policy/identity/README.md
 COPY packages/environments/record/schemas/ ./packages/environments/record/schemas/
 COPY packages/environments/record/fixtures/ ./packages/environments/record/fixtures/
 COPY packages/environments/record/README.md ./packages/environments/record/README.md

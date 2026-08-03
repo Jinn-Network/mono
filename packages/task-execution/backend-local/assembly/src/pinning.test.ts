@@ -23,6 +23,33 @@ describe("verifyRunPinning", () => {
     })).resolves.toEqual({ ready: true });
   });
 
+  test("accepts a jinn.harness-state.v1 pin against a matching sha256:-prefixed readiness entry (F9)", async () => {
+    const harnessStateDeployment = {
+      ...deployment,
+      async probe() {
+        return {
+          ...(await deployment.probe()),
+          loadouts: [
+            { kind: "jinn.harness-state.v1" as const, name: "learner-state", digest: `sha256:${"c".repeat(64)}` },
+          ],
+        };
+      },
+    };
+    await expect(verifyRunPinning(harnessStateDeployment, {
+      harness: { id: "claude-code", version: "1.2.3", digest: "a".repeat(64) },
+      model: { id: "opus" },
+      loadout: { kind: "jinn.harness-state.v1", name: "learner-state", digest: `sha256:${"c".repeat(64)}` },
+    })).resolves.toEqual({ ready: true });
+  });
+
+  test("refuses a jinn.harness-state.v1 pin the readiness probe does not carry", async () => {
+    await expect(verifyRunPinning(deployment, {
+      harness: { id: "claude-code", version: "1.2.3", digest: "a".repeat(64) },
+      model: { id: "opus" },
+      loadout: { kind: "jinn.harness-state.v1", name: "learner-state", digest: `sha256:${"c".repeat(64)}` },
+    })).resolves.toMatchObject({ ready: false, detail: "loadout digest mismatch" });
+  });
+
   test("refuses an executable swap, model mismatch, and digest/path-mismatched loadout", async () => {
     await expect(verifyRunPinning({
       ...deployment,

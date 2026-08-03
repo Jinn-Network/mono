@@ -11,7 +11,7 @@ export function makeClaudeCodeLauncher(options: LauncherOptions = {}): LauncherC
       { key: "effort", inventory: ["low", "medium", "high", "xhigh", "max"] },
       { key: "harness", inventory: ["claude-code"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-      { key: "loadout", inventory: ["jinn.skill.v1"] },
+      { key: "loadout", inventory: ["jinn.skill.v1", "jinn.harness-state.v1"] },
       { key: "model", inventory: ["pinned-id"] },
     ], true),
     probe: probeFrom(options, "claude-code"),

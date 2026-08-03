@@ -38,6 +38,7 @@ export {
   validatePayloadV2,
   codeDigestSha256ToBytes32,
   modeStringToFlag,
+  protocolExecutorMode,
   resolveAgentIdForManifest,
   type ContentKind,
   type ExecutionPayload,

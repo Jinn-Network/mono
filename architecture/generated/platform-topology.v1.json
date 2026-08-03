@@ -252,6 +252,11 @@
       {
         "from": "@jinn-network/client",
         "kind": "runtime",
+        "to": "@jinn-network/policy-identity"
+      },
+      {
+        "from": "@jinn-network/client",
+        "kind": "runtime",
         "to": "@jinn-network/record-discovery-client"
       },
       {
@@ -1563,7 +1568,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2776,
+      "discoveredFirstPartySurfaces": 2779,
       "generatedOutputSources": 1294,
       "generatorSources": 573,
       "marketplaceControl": 2,
@@ -11523,6 +11528,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/harnesses/impls/learner/candidate-mode.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/harnesses/impls/learner/candidate-prompt-discipline.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/harnesses/impls/learner/claude-code-adapter.test.ts"
       },
       {
@@ -11654,6 +11679,16 @@
           "@ritsukai"
         ],
         "path": "client/test/harnesses/impls/learner/restoration-patch.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/harnesses/impls/learner/supports-routing.test.ts"
       },
       {
         "categories": [
@@ -39198,6 +39233,7 @@
           "@jinn-network/marketplace-projector",
           "@jinn-network/marketplace-venue-base",
           "@jinn-network/plugin",
+          "@jinn-network/policy-identity",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-facts-task-execution",
           "@jinn-network/record-discovery-protocol",
@@ -52347,6 +52383,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-policy",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"

@@ -18,6 +18,8 @@ import {
   LearnerHarness,
 } from './learner/index.js';
 import { ClaudeCodeHarnessAdapter, CodexCodeHarnessAdapter } from './learner/index.js';
+import type { LearnerCandidateConfig } from './learner/candidate.js';
+import type { LearnerRoutingConfig } from './learner/routing.js';
 import { SweRebenchV2EvaluatorHarness } from './swe-rebench-v2-evaluator/harness.js';
 import { JinnRepoEvaluatorHarness } from './jinn-repo-evaluator/harness.js';
 import type {
@@ -99,6 +101,16 @@ export interface HarnessEnv {
   /** From `config.sweRebenchV2StateDir` — swe-rebench-v2 evaluator substrate. */
   sweRebenchV2StateDir?: string;
   /**
+   * Explicit `supports()` routing for the two `LearnerHarness` instances
+   * (product design §10). When `solverTypes` is absent, `buildHarnesses`
+   * derives the allowlist from the operator's joined SolverNets — the routing
+   * they already declared — so an existing deployment keeps claiming exactly
+   * what it joined, and neither more nor less.
+   */
+  learnerRouting?: LearnerRoutingConfig;
+  /** Candidate-mode settings forwarded to the `LearnerHarness` instances. */
+  learnerCandidate?: LearnerCandidateConfig;
+  /**
    * Pre-loaded external (operator-supplied) Harnesses — produced by
    * `loadExternalImpl()` in `client/src/harnesses/external-impls/`. Appended to
    * the in-repo construction list. See plan
@@ -154,6 +166,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     if (!env.pk) throw new Error('buildHarnesses: pk is required when stub is not set');
     if (!env.safe) throw new Error('buildHarnesses: safe is required when stub is not set');
   }
+
+  const learnerRouting: LearnerRoutingConfig = env.learnerRouting ?? {};
 
   const out: Harness[] = [];
 
@@ -281,6 +295,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
   out.push(new LearnerHarness({
     adapter: learnerAdapter,
     claudePath: env.claudePath,
+    routing: learnerRouting,
+    ...(env.learnerCandidate ? { candidate: env.learnerCandidate } : {}),
   }));
 
   // Codex-backed peer Harness. It supports the same restoration surface as
@@ -298,6 +314,8 @@ export function buildHarnesses(env: HarnessEnv): Harness[] {
     name: CODEX_HARNESS,
     adapter: codexLearnerAdapter,
     claudePath: env.claudePath,
+    routing: learnerRouting,
+    ...(env.learnerCandidate ? { candidate: env.learnerCandidate } : {}),
     ...(env.codexPath !== undefined ? { codexPath: env.codexPath } : {}),
     ...(env.codexDoctorTimeoutMs !== undefined
       ? { codexDoctorTimeoutMs: env.codexDoctorTimeoutMs }

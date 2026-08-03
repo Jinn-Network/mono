@@ -36,7 +36,12 @@ import type { CampaignDocument, PolicyRef, SealedCampaign, SeedResolution } from
 
 const Sha256Prefixed = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const NonEmptyText = z.string().min(1);
-const Count = z.number().int().nonnegative();
+/**
+ * A budget is a positive integer, never zero. A campaign that may make no proposals or run no
+ * cells cannot do the thing it declares, and a zero budget reads as "unset" to every author who
+ * did not write it — so the document refuses rather than sealing a campaign that can only stop.
+ */
+const BudgetCount = z.number().int().min(1);
 const Parameters = z.record(z.string(), z.unknown());
 
 const PolicyRefSchema = z.strictObject({
@@ -66,9 +71,9 @@ const ObjectiveSchema = z.strictObject({
 });
 
 const BudgetsSchema = z.strictObject({
-  proposal: z.strictObject({ maxProposals: Count }),
-  evaluation: z.strictObject({ maxCells: Count }),
-  hardCap: z.strictObject({ maxCells: Count }),
+  proposal: z.strictObject({ maxProposals: BudgetCount }),
+  evaluation: z.strictObject({ maxCells: BudgetCount }),
+  hardCap: z.strictObject({ maxCells: BudgetCount }),
 });
 
 /**
@@ -261,6 +266,7 @@ export function checkSeedAgreement(
   resolutions: readonly SeedResolution[],
 ): ValidationResult<readonly ExecutionPolicyTuple[]> {
   const errors: PolicyOptimizationIssue[] = [];
+  const mutable = new Set(campaign.mutationSurface);
   const byDigest = new Map<string, SeedResolution>();
   for (const resolution of resolutions) {
     byDigest.set(`${resolution.kind}${resolution.digest}`, resolution);
@@ -293,6 +299,21 @@ export function checkSeedAgreement(
       if (isExactPin(axis, actual)) continue;
       errors.push(issue("constraint-shaped-pin", childPath(path, axis),
         `seed's mutable axis ${axis} must carry an exact pin; the search dimension is what the arms are compared on`));
+    }
+
+    // BLOCKER-1. The two loops above check the axes the *campaign* names. A tuple carries more
+    // than that: substrate §4.1 step 2 admits every profile-declared `requirementKey` present in
+    // the effective requirements, so a `repository-work/1.0` seed carries `effort` alongside the
+    // four core axes. An axis in neither list is checked by nothing — two seeds differing only on
+    // `effort` would seal cleanly and then be compared as though they shared a treatment, which is
+    // precisely the uncomputable-check blocker §5.1's `frozenAxes` exists to close. §5.1 says
+    // frozen axes are "every non-mutable axis", not "every non-mutable core axis", so the fix is a
+    // refusal that names the axis: the owner freezes it, or moves it into the mutation surface.
+    for (const axis of Object.keys(tuple)) {
+      if (axis === "formatToken") continue;
+      if (Object.hasOwn(campaign.frozenAxes, axis) || mutable.has(axis)) continue;
+      errors.push(issue("unclassified-axis", childPath(path, axis),
+        `seed carries axis ${axis}, which the campaign neither freezes nor mutates; add it to frozenAxes or to mutationSurface`));
     }
   });
 

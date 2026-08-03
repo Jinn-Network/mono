@@ -59,8 +59,27 @@ axes: a tuple is re-digested, a candidate manifest is parsed exactly and re-dige
 is its `policy` compared byte-for-byte against `frozenAxes`. Handing over the wrong referent under
 the right digest is refused, not trusted.
 
+Three things are checked per seed, and the third is the one that is easy to miss:
+
+1. every axis in `frozenAxes` is carried by the seed and byte-shares the campaign's value;
+2. every axis in `mutationSurface` carries an exact pin;
+3. **every remaining member of the tuple, `formatToken` aside, is refused** — an axis the campaign
+   neither freezes nor mutates is checked by nothing.
+
+(3) matters because a tuple carries more than the four core axes: substrate §4.1 step 2 admits
+every profile-declared `requirementKey` present in the effective requirements, so a
+`repository-work/1.0` seed carries `effort`. Without the refusal, two seeds differing only on
+`effort` seal cleanly and are then compared as though they shared a treatment — the same
+uncomputable-check hole §5.1's `frozenAxes` exists to close, one axis over. §5.1 says frozen axes
+are "every non-mutable axis", not "every non-mutable *core* axis", so `frozenAxes` accepts a
+declared axis and the refusal offers both resolutions: freeze it, or make it mutable.
+
 `checkSeedAgreement` is exported separately so a *reader* who holds the referents can re-run
 exactly what the sealer ran. It is the one campaign check a parse of the sealed bytes cannot repeat.
+
+Budgets are positive integers, never zero: a campaign that may make no proposals or run no cells
+cannot do the thing it declares, and a zero budget reads as "unset" to every author who did not
+write it.
 
 ## The journal
 
@@ -113,6 +132,15 @@ returns is indistinguishable from the one the appending process held.
 - the `seq` is already recorded and the entry differs → **`journal-conflict`** (two decisions
   cannot occupy one position in an ordering);
 - the `seq` is the next one and every guard passes → the line is fsynced, then the new handle exists.
+
+The last guard before that write compares the handle's view against the journal's tail on disk
+(line count plus the tail entry's digest). Two live handles on one directory are ordinary — a
+long-running campaign process beside a CLI invocation — and without the comparison the stale one
+appends a line whose `previous` and `seq` both disagree with what precedes it, wedging every future
+`openCampaign`. The comparison closes the stale-handle case completely; it is not a lock, so two
+processes that both pass it and then both write are still caught at the next open rather than at
+write time. Single-writer-per-campaign is the operating assumption, and this is what makes a
+violation of it loud instead of silent.
 
 ## The wave engine
 

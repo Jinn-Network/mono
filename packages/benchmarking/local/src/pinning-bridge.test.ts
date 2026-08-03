@@ -17,6 +17,10 @@ import {
 const HARNESS = { id: "claude-code", version: "2.1.34" };
 const MODEL = { id: "anthropic/claude-haiku-4-5" };
 const LOADOUT = { kind: "jinn.skill.v1", name: "repo-work", digest: `sha256:${"a".repeat(64)}` };
+// The harness-state loadout kind (policy identity design §4.2, task-execution program §1 C5):
+// the bridge never inspects `kind` — it compares the whole pinning value structurally, exactly
+// as it does for jinn.skill.v1 above — so a second kind flows through with no bridge change.
+const HARNESS_STATE_LOADOUT = { kind: "jinn.harness-state.v1", name: "learner-state", digest: `sha256:${"d".repeat(64)}` };
 
 const PINNING = {
   harness: HARNESS,
@@ -168,6 +172,40 @@ describe("pinningStatusForAxis (identity design §7)", () => {
         }],
       },
     })).toBe("mismatch");
+  });
+
+  test("a jinn.harness-state.v1 loadout pin flows through exactly like jinn.skill.v1 (task-execution program §1 C5)", () => {
+    const harnessStatePinning = { ...PINNING, loadout: HARNESS_STATE_LOADOUT };
+    expect(pinningStatusForAxis({
+      axis: "loadout",
+      pinning: harnessStatePinning,
+      venue: VENUE,
+      evidence: {
+        admission: { ready: true },
+        observations: [{ axis: "loadout", value: HARNESS_STATE_LOADOUT, source: "materialization" }],
+      },
+    })).toBe("match");
+    // A disagreeing observation (a different tree digest) is still a mismatch, kind-independent.
+    expect(pinningStatusForAxis({
+      axis: "loadout",
+      pinning: harnessStatePinning,
+      venue: VENUE,
+      evidence: {
+        admission: { ready: true },
+        observations: [{
+          axis: "loadout",
+          value: { ...HARNESS_STATE_LOADOUT, digest: `sha256:${"e".repeat(64)}` },
+          source: "materialization",
+        }],
+      },
+    })).toBe("mismatch");
+    // No observation, admission alone: still enforced, still matches — same as jinn.skill.v1.
+    expect(pinningStatusForAxis({
+      axis: "loadout",
+      pinning: harnessStatePinning,
+      evidence: ADMITTED,
+      venue: VENUE,
+    })).toBe("match");
   });
 
   test("absent admission evidence stays unverifiable", () => {

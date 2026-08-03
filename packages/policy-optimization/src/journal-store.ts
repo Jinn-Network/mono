@@ -83,6 +83,38 @@ function recordedInOrder(previous: string, candidate: string, path: string): boo
   return comparison >= 0;
 }
 
+/**
+ * MAJOR-1. Refuses when the journal on disk has moved on from what this handle believes.
+ *
+ * A handle is a snapshot, and two live handles on one directory are ordinary — a long-running
+ * campaign process beside a CLI invocation, or a resumed process that never noticed a sibling.
+ * Without this check the stale handle appends its next entry with a `previous` copied from its own
+ * out-of-date head, and the line lands: the file then contains a chain that does not join and a
+ * duplicated `seq`, so every subsequent `openCampaign` refuses. The journal would be wedged by a
+ * write that looked locally valid.
+ *
+ * The check is a comparison, not a lock: line count plus the tail entry's digest. It closes the
+ * stale-handle case completely. It does not make concurrent appends *atomic* — two processes that
+ * both pass this check and then both write can still interleave, and the loser's line is caught on
+ * the next open rather than at write time. Single-writer-per-campaign is the operating assumption;
+ * this guard is what makes a violation of it loud instead of silent.
+ */
+function assertHandleIsCurrent(handle: CampaignHandle): void {
+  const lines = readTextIfExistsSync(journalPath(handle.directory))
+    .split("\n").filter((line) => line !== "");
+  if (lines.length !== handle.entries.length) {
+    refuse("journal-conflict", "entries",
+      `this handle holds ${handle.entries.length} entries, the journal on disk holds ${lines.length}; another writer has moved it on`);
+  }
+  const tail = lines[lines.length - 1];
+  if (tail === undefined) return;
+  const onDisk = journalEntryDigest(parseExactJournalLine(tail));
+  if (onDisk !== handle.state.head) {
+    refuse("journal-conflict", "entries",
+      "the journal's tail on disk is not the entry this handle believes it follows");
+  }
+}
+
 function documentPath(directory: string): string {
   return join(directory, CAMPAIGN_DOCUMENT_FILENAME);
 }
@@ -217,6 +249,9 @@ function readSealedCampaign(bytes: Uint8Array): { campaign: CampaignDocument; di
  *   decisions cannot occupy one position in an ordering; refusing is the only honest answer.
  * - `seq` is the next one and every guard passes → the line is fsynced before the new handle
  *   exists, so nothing downstream can observe a decision that is not yet durable.
+ *
+ * The last guard before the write is `assertHandleIsCurrent`: a handle whose view of the journal
+ * is stale refuses rather than appending a line that would wedge the file for every future reader.
  */
 export function appendCampaignEvent(
   handle: CampaignHandle,
@@ -265,6 +300,9 @@ export function appendCampaignEvent(
   }
 
   const entry = buildJournalEntry(handle.digest, handle.state.head, input);
+  // Last, and immediately before the only write: every cheaper refusal has already run, and the
+  // window between reading the tail and appending is as small as it can be made without a lock.
+  assertHandleIsCurrent(handle);
   appendFsyncedLineSync(journalPath(handle.directory), journalEntryText(entry));
   return {
     ...handle,

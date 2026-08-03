@@ -223,6 +223,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-policy",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"
