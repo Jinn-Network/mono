@@ -21,8 +21,10 @@ export function phaseBClosureFixture(): PhaseBClosureManifest {
     admission: 'admission',
     'requester-discovery': 'requester',
     'solver-delivery': 'solver',
+    'solver-settlement': 'solver',
     'solver-discovery': 'solver',
     'evaluator-verdict': 'evaluator',
+    'evaluator-settlement': 'evaluator',
     'evaluator-discovery': 'evaluator',
   };
   return {
@@ -45,7 +47,7 @@ export function phaseBClosureFixture(): PhaseBClosureManifest {
     publicRoles: PHASE_B_ROLE_SET.map((role, index) => ({
       role,
       agent: `urn:jinn:agent:${actorForRole[role]}`,
-      keyId: `did:key:z${String(index + 2).repeat(44)}`,
+      keyId: `did:key:z${'23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'[index]!.repeat(44)}`,
       bindingDigest: digest(20 + index),
     })),
     sourceHeads: PHASE_B_SOURCE_ROLE_SET.map((role, index) => ({

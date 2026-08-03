@@ -88,6 +88,13 @@ export interface NativeGraphRoots {
       readonly taskId: string;
       readonly transactionHash: `0x${string}`;
       readonly sealedAt: string;
+      readonly authorityTime: {
+        readonly chainId: 84532;
+        readonly blockNumber: string;
+        readonly blockHash: `0x${string}`;
+        readonly timestamp: string;
+        readonly finalized: true;
+      };
     };
   };
   readonly solution: {
@@ -316,7 +323,7 @@ export function discoverNativeGraphRoots(input: {
   }), 'requester-root-ambiguous');
   const association = record(requesterMatch.facts[REQUESTER_ASSOCIATION_FACT])!;
   const associationMembers = [
-    'admissionReceiptDigest', 'chainId', 'coordinator', 'creator', 'intendedSpendWei', 'nonce',
+    'admissionReceiptDigest', 'authorityTime', 'chainId', 'coordinator', 'creator', 'intendedSpendWei', 'nonce',
     'postingTerms', 'requesterEnvelopeDigest', 'runId', 'sealedAt', 'submission', 'taskDigest', 'taskId', 'txHash',
   ];
   if (Object.keys(association).sort().join('|') !== associationMembers.sort().join('|')) {
@@ -327,6 +334,21 @@ export function discoverNativeGraphRoots(input: {
   const creator = stringFact(association.creator, 'creator');
   const transactionHash = stringFact(association.txHash, 'txHash');
   const sealedAt = stringFact(association.sealedAt, 'sealedAt');
+  const authorityTime = record(association.authorityTime);
+  const authorityMembers = ['blockHash', 'blockNumber', 'chainId', 'finalized', 'timestamp'];
+  if (authorityTime === null
+    || Object.keys(authorityTime).sort().join('|') !== authorityMembers.sort().join('|')
+    || authorityTime.chainId !== 84532
+    || authorityTime.finalized !== true
+    || typeof authorityTime.blockNumber !== 'string'
+    || !/^(?:0|[1-9][0-9]*)$/u.test(authorityTime.blockNumber)
+    || typeof authorityTime.blockHash !== 'string'
+    || !/^0x[a-fA-F0-9]{64}$/u.test(authorityTime.blockHash)
+    || typeof authorityTime.timestamp !== 'string'
+    || !Number.isFinite(Date.parse(authorityTime.timestamp))
+    || Date.parse(sealedAt) !== Date.parse(authorityTime.timestamp)) {
+    throw new NativeGraphError('public-record-fact-invalid', 'authority time');
+  }
   if (!Number.isSafeInteger(chainId) || (chainId as number) < 0
       || !/^0x[a-fA-F0-9]{40}$/u.test(coordinator)
       || !/^0x[a-fA-F0-9]{40}$/u.test(creator)
@@ -397,6 +419,7 @@ export function discoverNativeGraphRoots(input: {
         taskId,
         transactionHash: transactionHash as `0x${string}`,
         sealedAt,
+        authorityTime: authorityTime as unknown as NativeGraphRoots['requester']['chain']['authorityTime'],
       },
     },
     solution: {

@@ -27,13 +27,13 @@ describe('operator vertical mode', () => {
     })).toEqual({ requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' });
   });
 
-  it('admits native-v1 only for the exact Base Sepolia today deployment and a validated live receipt', () => {
+  it('admits explicit native-v1 for a closure run without treating a local receipt as release authority', () => {
     expect(resolveOperatorVerticalMode({
       requestedMode: 'native-v1',
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
       liveClosure: VALIDATED,
-    })).toEqual({ requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'live-closure-validated' });
+    })).toEqual({ requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'explicit-native-unvalidated' });
   });
 
   it('allows an explicit native-v1 closure run without pretending closure is already validated', () => {
@@ -48,12 +48,12 @@ describe('operator vertical mode', () => {
     });
   });
 
-  it('flips the default only when the live closure receipt validates', () => {
+  it('does not let a self-declared local receipt flip the production default', () => {
     expect(resolveOperatorVerticalMode({
       network: 'testnet',
       chain: BASE_SEPOLIA_TODAY,
       liveClosure: VALIDATED,
-    })).toEqual({ requestedMode: undefined, effectiveMode: 'native-v1', readiness: 'live-closure-validated' });
+    })).toEqual({ requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' });
   });
 
   it('refuses mainnet and every contract/generation mismatch before considering closure readiness', () => {
@@ -88,7 +88,12 @@ describe('operator vertical mode', () => {
           ipfs: { apiUrl: 'https://ipfs.example.test' },
           chainId: 84532,
           generation: 'today',
-          contracts: BASE_SEPOLIA_TODAY,
+          contracts: {
+            taskCoordinator: BASE_SEPOLIA_TODAY.taskCoordinator,
+            jinnRouter: BASE_SEPOLIA_TODAY.jinnRouter,
+            mechMarketplace: BASE_SEPOLIA_TODAY.mechMarketplace,
+            activityChecker: BASE_SEPOLIA_TODAY.activityChecker,
+          },
           transactionCaps: {
             createTaskMaxWei: '1', claimMaxWei: '2', solutionSettlementMaxWei: '3',
             evaluationClaimMaxWei: '4', verdictSettlementMaxWei: '5', escrowMaxWei: '6',
@@ -97,7 +102,7 @@ describe('operator vertical mode', () => {
           identityStores: { solver: '/var/lib/jinn/identities' },
           trustRootsPath: '/etc/jinn/trust-roots.json',
           trustPolicyGenesisDigest: `sha256:${'dd'.repeat(32)}`,
-          runtime: { provider: 'first-party' },
+          runtime: { provider: 'first-party', nodeExecutableDigest: `sha256:${'ab'.repeat(32)}` },
           evaluator: {
             deploymentModule: '/opt/jinn/prediction-evaluator.mjs',
             moduleDigest: `sha256:${'aa'.repeat(32)}`,

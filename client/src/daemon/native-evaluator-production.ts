@@ -43,6 +43,7 @@ import {
 import { openOperatorEvidence } from './evidence-join.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
+import { NativeConstructionScope } from './native-construction-scope.js';
 
 const DELIVERY_PAYLOAD_TYPE = 'application/vnd.jinn.marketplace.executor-binding.v1+json';
 
@@ -185,13 +186,13 @@ function authorityClaim(input: {
       executor: {
         signerKey: uniqueSigner(solutionEnvelope.bytes, 'solution Delivery envelope'),
         agent: solverSources[0]!.agent,
-        declarationKey: uniqueSigner(solutionEnvelope.bytes, 'solution Delivery envelope'),
+        declarationKey: input.opportunities.settlementDeclarationKey(evaluation.advertisedDeliveryDigest),
         address: evaluation.solutionOperator,
       },
       evaluator: {
         signerKey: evaluator.keyId,
         agent: input.roles.agent,
-        declarationKey: evaluator.keyId,
+        declarationKey: input.roles.get('evaluator-settlement').keyId,
         address: input.config.safeAddress,
       },
     };
@@ -215,6 +216,8 @@ function closeAll(actions: readonly (() => void | Promise<void>)[]): () => Promi
 export async function buildNativeEvaluatorProductionHost(
   input: EvaluatorProductionInput,
 ): Promise<NativeOperatorHost> {
+  const scope = new NativeConstructionScope();
+  try {
   const config = input.config.operator.native;
   if (config.role !== 'evaluator'
     || config.evaluator === undefined
@@ -224,10 +227,12 @@ export async function buildNativeEvaluatorProductionHost(
     throw new Error('native evaluator structured deployment/custody/chain reads are incomplete');
   }
   const store = new Store(join(config.stateDir, 'evaluator.sqlite'));
+  scope.defer(() => store.close());
   const state = new NativeEvaluatorStateRepository(store);
   const observations = new NativeCanonicalObservationRepository(store);
   const marketplaceEvents = new NativeMarketplaceEventRepository(store);
   const evidence = await openOperatorEvidence({ rootDir: join(config.stateDir, 'evaluator-evidence') });
+  scope.defer(evidence.close);
   const writeSession = await input.infrastructure.activateWrites({
     role: 'evaluator',
     password: input.password,
@@ -242,6 +247,7 @@ export async function buildNativeEvaluatorProductionHost(
         candidate.toLowerCase() === config.marketplaceAgentAddress!.toLowerCase(),
     },
   });
+  scope.defer(writeSession.close);
   if (writeSession.writes.role !== 'evaluator') {
     await writeSession.close();
     throw new Error('native evaluator write activation returned another role');
@@ -266,7 +272,9 @@ export async function buildNativeEvaluatorProductionHost(
   });
   const evaluationProfile = buildEvaluationTaskProfile();
   const evaluationProfileDigest = sealTaskProfile(evaluationProfile).digest;
-  const deployment = await buildPinnedNodeLauncherDeployment();
+  const deployment = await buildPinnedNodeLauncherDeployment(
+    config.runtime.nodeExecutableDigest as `sha256:${string}`,
+  );
   if (!(await deployment.probe()).ready) throw new Error('pinned evaluator Node launcher is not ready');
   const subjectAuthority = {
     bindingResolver: input.trust.bindingResolver,
@@ -282,17 +290,27 @@ export async function buildNativeEvaluatorProductionHost(
         readonly agent: string;
         readonly address: string;
         readonly atTime: string;
+        readonly purpose: 'native:solver-settlement' | 'native:evaluator-settlement';
       }) {
-        if (value.signerKey !== input.roles.get('evaluator-verdict').keyId
-          || value.declarationKey !== value.signerKey
-          || value.agent !== input.roles.agent
-          || value.address.toLowerCase() !== config.safeAddress.toLowerCase()) {
+        if (value.purpose === 'native:evaluator-settlement'
+          && (value.signerKey !== input.roles.get('evaluator-verdict').keyId
+            || value.declarationKey !== input.roles.get('evaluator-settlement').keyId
+            || value.agent !== input.roles.agent
+            || value.address.toLowerCase() !== config.safeAddress.toLowerCase())) {
           return { ok: false as const, reason: 'evaluator declaration does not equal scoped custody/configuration' };
         }
-        const decision = await input.roles.resolveEffective('evaluator-verdict', value.atTime);
-        return decision.ok
-          ? { ok: true as const }
-          : { ok: false as const, reason: decision.reason };
+        try {
+          await input.trust.verifyOnchainAuthority({
+            key: value.declarationKey,
+            agent: value.agent,
+            address: value.address as `0x${string}`,
+            atTime: value.atTime,
+            purpose: value.purpose,
+          });
+          return { ok: true as const };
+        } catch (cause) {
+          return { ok: false as const, reason: String(cause) };
+        }
       },
     },
   };
@@ -357,10 +375,13 @@ export async function buildNativeEvaluatorProductionHost(
       blockTime: evaluatorRead.blockTime,
     },
   });
+  scope.defer(composition.close);
   const endpoint = await input.infrastructure.mountPublicSource(composition.publisher.handler);
+  scope.defer(endpoint.close);
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   let stopped = false;
+  let workFailure: unknown;
   const tick = async () => {
     if (running || stopped) return;
     running = true;
@@ -379,16 +400,18 @@ export async function buildNativeEvaluatorProductionHost(
     () => store.close(),
   ]);
   const closeVenue = closeAll([writeSession.close, input.infrastructure.close]);
-  return createNativeOperatorHost({
+  const host = createNativeOperatorHost({
     role: 'evaluator',
     roleKeyIds: {
       'evaluator-verdict': input.roles.get('evaluator-verdict').keyId,
+      'evaluator-settlement': input.roles.get('evaluator-settlement').keyId,
       'evaluator-discovery': input.roles.get('evaluator-discovery').keyId,
     },
     lease: input.lease,
     bindings: {
       async verify() {
-        for (const role of ['evaluator-verdict', 'evaluator-discovery'] as const) {
+        await input.trust.assertFresh();
+        for (const role of ['evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery'] as const) {
           const decision = await input.roles.resolveEffective(role, new Date().toISOString());
           if (!decision.ok) throw new Error(`native ${role} authority is not effective: ${decision.reason}`);
         }
@@ -437,12 +460,24 @@ export async function buildNativeEvaluatorProductionHost(
     work: {
       async start() {
         await tick();
-        timer = setInterval(() => { void tick().catch(() => undefined); }, 5_000);
+        timer = setInterval(() => {
+          void tick().catch((cause: unknown) => {
+            workFailure = cause;
+            stopped = true;
+            if (timer !== undefined) clearInterval(timer);
+          });
+        }, 5_000);
         timer.unref();
       },
       stop: stopOwned,
+      failure: () => workFailure,
     },
   });
+  scope.release();
+  return host;
+  } catch (cause) {
+    return scope.unwind(cause);
+  }
 }
 
 function sourceId(source: NativeProductConfig['operator']['native']['sources'][number]): string {

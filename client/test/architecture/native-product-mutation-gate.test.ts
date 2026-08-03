@@ -61,6 +61,8 @@ describe('native product recursive mutation gate', () => {
     ['ephemeral discovery key', 'ephemeral-discovery-key', "const keyId = 'ephemeral-discovery-key'; void keyId;"],
     ['legacy document synthesis', 'legacy-document-synthesis', 'function x() { return synthesizeLegacyExecutionDocuments(); } void x;'],
     ['bridge Delivery extension', 'bridge-delivery-extension', 'const backend = { deliveryExtensions() {} }; void backend;'],
+    ['fabricated zero Submission', 'fabricated-zero-submission', 'const ZERO_SUBMISSION = new Uint8Array(); void ZERO_SUBMISSION;'],
+    ['fabricated zero chain task', 'fabricated-zero-chain-task', 'const chain = { taskId: 0n }; void chain;'],
     ['throwing gap port', 'throwing-native-gap-port', "function verifyVerdictObservationGap() { throw new Error('gap'); } void verifyVerdictObservationGap;"],
   ] as const)('kills the %s mutation', (_label, expected, mutation) => {
     const subject = fixture({ 'entry.ts': mutation });

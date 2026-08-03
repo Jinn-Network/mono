@@ -127,7 +127,7 @@ export async function runOldVerdictAfterKeyRotationWalkthrough(
     voucher,
     eoaCeremony: { signer: evaluatorSigner, chainId: 84532 },
     validFrom: "2026-01-01T00:00:00.000Z",
-    scope: ["verdicts"],
+    scope: ["settlements"],
     isGenesis: false,
     incumbentControlVoucher: voucher,
   });
@@ -271,7 +271,11 @@ export async function runConfidentialLeakedDocumentsWalkthrough(
       requesterAgent: victimRequesterAgent,
       sealingTime: "2026-06-01T00:00:00.000Z",
     },
-    { bindingResolver: fakes.bindingResolver, dsseVerifier: fakes.dsseVerifier },
+    {
+      bindingResolver: fakes.bindingResolver,
+      witnessVerifier: fakes.witnessVerifier,
+      dsseVerifier: fakes.dsseVerifier,
+    },
   );
 
   return { outcome };

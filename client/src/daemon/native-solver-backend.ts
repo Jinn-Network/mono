@@ -43,6 +43,7 @@ export interface NativeSolverBackendInput {
   readonly quotaBytes?: number;
   readonly workTtlMs?: number;
   readonly diskFloorBytes?: number;
+  readonly nodeExecutableDigest: `sha256:${string}`;
 }
 
 export class NativeSolverBackendError extends Error {
@@ -62,14 +63,18 @@ export function buildNativeWorkspaceRuntime(): WorkspaceRuntimePorts {
   };
 }
 
-export async function buildPinnedNodeLauncherDeployment(): Promise<{
+export async function buildPinnedNodeLauncherDeployment(expectedDigest: `sha256:${string}`): Promise<{
   readonly executable: { readonly path: string; readonly digest: string };
   probe(): Promise<{ readonly ready: boolean; readonly executable: { readonly path: string; readonly digest: string } }>;
 }> {
   const bytes = await readFile(process.execPath);
+  const actualDigest = createHash('sha256').update(bytes).digest('hex');
+  if (`sha256:${actualDigest}` !== expectedDigest) {
+    throw new NativeSolverBackendError('configured Node executable digest does not match the running executable');
+  }
   const executable = {
     path: process.execPath,
-    digest: createHash('sha256').update(bytes).digest('hex'),
+    digest: expectedDigest.slice('sha256:'.length),
   };
   return {
     executable,
@@ -125,7 +130,7 @@ function claimLauncherPort(
  * composition and installs no Delivery extension, model credential, or requester grant path.
  */
 export async function buildNativeSolverBackend(input: NativeSolverBackendInput): Promise<NativeSolverBackend> {
-  const deployment = await buildPinnedNodeLauncherDeployment();
+  const deployment = await buildPinnedNodeLauncherDeployment(input.nodeExecutableDigest);
   if (!(await deployment.probe()).ready) throw new NativeSolverBackendError('pinned Node launcher is not ready');
   const runtime = buildNativeWorkspaceRuntime();
   const launcher = predictionV1BaselineLauncher;

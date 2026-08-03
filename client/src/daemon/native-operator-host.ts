@@ -64,7 +64,12 @@ export interface NativeOperatorHostInput {
     publicSource(): Promise<boolean>;
     readonly executableDigest?: `sha256:${string}`;
   };
-  readonly work: { start(): Promise<void>; stop(): void | Promise<void> };
+  readonly work: {
+    start(): Promise<void>;
+    stop(): void | Promise<void>;
+    /** A terminal asynchronous loop failure. Healthy native workers never suppress this. */
+    failure?(): unknown;
+  };
 }
 
 export class NativeOperatorHostError extends Error {
@@ -115,6 +120,10 @@ export function createNativeOperatorHost(input: NativeOperatorHostInput): Native
   async function health(): Promise<NativeOperatorHealth> {
     if (renewalFailure !== undefined) {
       throw new NativeOperatorHostError(`native worker lease renewal failed: ${String(renewalFailure)}`);
+    }
+    const workFailure = input.work.failure?.();
+    if (workFailure !== undefined) {
+      throw new NativeOperatorHostError(`native background work loop failed: ${String(workFailure)}`);
     }
     const venue = await input.venue.health();
     return {

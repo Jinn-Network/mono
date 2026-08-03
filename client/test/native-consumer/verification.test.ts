@@ -78,6 +78,13 @@ const SOLVER_ADDRESS = '0x1111111111111111111111111111111111111111' as const;
 const EVALUATOR_ADDRESS = '0x2222222222222222222222222222222222222222' as const;
 const COORDINATOR = '0x3333333333333333333333333333333333333333' as const;
 const CREATOR = '0x4444444444444444444444444444444444444444' as const;
+const AUTHORITY_TIME = {
+  chainId: 84532 as const,
+  blockNumber: '90',
+  blockHash: `0x${'9'.repeat(64)}` as const,
+  timestamp: NOW,
+  finalized: true as const,
+};
 const SOURCES = {
   requester: { agent: 'did:web:requester.example', name: 'requester' },
   solver: { agent: 'did:web:solver.example', name: 'solver' },
@@ -141,7 +148,7 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
     _type: 'https://in-toto.io/Statement/v1',
     subject: [descriptor(task, 'task'), descriptor(evaluationSpec, 'evaluation-spec.json')],
     predicateType: 'https://jinn.network/attestations/admission-receipt/v1',
-    predicate: { issuer: ADMISSION_AGENT },
+    predicate: { issuer: ADMISSION_AGENT, authorityTime: AUTHORITY_TIME },
   };
   const admissionReceipt = artifact('admission-receipt', envelope(
     canonicalJsonBytes(admissionStatement), 'application/vnd.in-toto+json', keys.admission,
@@ -151,7 +158,10 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
     submission: 'urn:uuid:50000000-0000-4000-8000-000000000005',
     task: descriptor(task, 'task'), requester: REQUESTER_AGENT,
     idempotencyKey: 'golden-run', nonce: 'golden-run', deadline: '2026-08-03T00:00:00Z',
-    annotations: { 'https://jinn.network/annotations/admission-receipt/1.0': descriptor(admissionReceipt, 'admission-receipt') },
+    annotations: {
+      'https://jinn.network/annotations/admission-receipt/1.0': descriptor(admissionReceipt, 'admission-receipt'),
+      'https://jinn.network/annotations/authority-time/1.0': AUTHORITY_TIME,
+    },
   }), SUBMISSION_MEDIA_TYPE);
   const requesterEnvelope = artifact(
     'requester-envelope', envelope(submission.bytes, SUBMISSION_MEDIA_TYPE, keys.requester), DSSE_ENVELOPE_MEDIA_TYPE,
@@ -217,7 +227,15 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
         responseTimeoutSeconds: '60', allowSolverSelfEvaluation: false,
       },
       intendedSpendWei: '5',
-      chain: { chainId: 84532, coordinator: COORDINATOR, taskId: '7' },
+      chain: {
+        chainId: 84532,
+        coordinator: COORDINATOR,
+        creator: CREATOR,
+        taskId: '7',
+        transactionHash: `0x${'a'.repeat(64)}`,
+        sealedAt: NOW,
+        authorityTime: AUTHORITY_TIME,
+      },
     },
     solution: {
       source: sourceRoot(SOURCES.solver, 'https://solver.example'), engagementId: `sha256:${'a'.repeat(64)}`,
@@ -266,9 +284,9 @@ function makeTrust(keys: Record<string, RoleKey>, input: { revokedRequester?: bo
   };
   const requesterDigest = binding(REQUESTER_AGENT, keys.requester!, ['authorizations', 'bindings'], 'controls', 1);
   binding(ADMISSION_AGENT, keys.admission!, [ADMISSION_RECEIPT_TRUST_SCOPE], 'controls', 2);
-  binding(SOLVER_AGENT, keys.solverDeclaration!, ['deliveries'], 'controls', 3);
+  binding(SOLVER_AGENT, keys.solverDeclaration!, ['settlements'], 'controls', 3);
   binding(SOLVER_AGENT, keys.executor!, ['deliveries'], 'signs-for', 4);
-  binding(EVALUATOR_AGENT, keys.evaluatorDeclaration!, ['verdicts'], 'controls', 5);
+  binding(EVALUATOR_AGENT, keys.evaluatorDeclaration!, ['settlements'], 'controls', 5);
   binding(EVALUATOR_AGENT, keys.evaluator!, ['deliveries', 'verdicts'], 'signs-for', 6);
 
   const revocations: SealedRevocationRecord[] = [];
@@ -337,7 +355,7 @@ async function fixture(options: { revokedRequester?: boolean; missingAnchors?: b
   const graph = makeGraph(keys);
   const authority: NativeRoleAuthority = {
     requester: { key: keys.requester.id, sealingTime: NOW, address: CREATOR },
-    admission: { key: keys.admission.id, effectiveTime: EARLIER },
+    admission: { key: keys.admission.id, effectiveTime: NOW },
     executor: { key: keys.executor.id, agent: SOLVER_AGENT, declarationKey: keys.solverDeclaration.id, address: SOLVER_ADDRESS },
     evaluator: { key: keys.evaluator.id, agent: EVALUATOR_AGENT, declarationKey: keys.evaluatorDeclaration.id, address: EVALUATOR_ADDRESS },
   };
@@ -353,6 +371,7 @@ async function fixture(options: { revokedRequester?: boolean; missingAnchors?: b
   });
   return {
     state, graph, authority, trust: makeTrust(keys, options),
+    authorityTime: { async verifyFinalized(anchor: typeof AUTHORITY_TIME) { return anchor.blockHash === AUTHORITY_TIME.blockHash; } },
     taskCreated: { chainId: 84532, coordinator: COORDINATOR, taskId: '7', creator: CREATOR,
       taskDigest: graph.task.digest, canonical: true as const, finalized: true as const,
       maxClaims: 1 as const, postingTerms: graph.roots.requester.postingTerms,
@@ -452,6 +471,15 @@ describe('independent native vertical verification', () => {
     await expect(verifyNativeVertical({ ...value, graph })).rejects.toMatchObject({
       reason: 'requester-authentication-failed',
     });
+    value.state.close();
+  });
+
+  it('fails when the signed authority-time anchor is not canonical and finalized on chain', async () => {
+    const value = await fixture();
+    await expect(verifyNativeVertical({
+      ...value,
+      authorityTime: { async verifyFinalized() { return false; } },
+    })).rejects.toMatchObject({ reason: 'authority-time-not-finalized' });
     value.state.close();
   });
 });

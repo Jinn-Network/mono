@@ -27,7 +27,7 @@ function nativeConfig() {
         },
         stateDir: '/state', identityStores: { solver: '/identity' }, trustRootsPath: '/trust',
         trustPolicyGenesisDigest: `sha256:${'dd'.repeat(32)}`,
-        runtime: { provider: 'first-party' },
+        runtime: { provider: 'first-party', nodeExecutableDigest: `sha256:${'ab'.repeat(32)}` },
         evaluator: {
           deploymentModule: '/evaluator.mjs', moduleDigest: `sha256:${'bb'.repeat(32)}`,
           signerHandle: 'verdict', evaluationMethodDigest: `sha256:${'cc'.repeat(32)}`,

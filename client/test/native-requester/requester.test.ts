@@ -46,6 +46,13 @@ const CHAIN = {
 };
 const CREATOR = '0x1111111111111111111111111111111111111111' as const;
 const TX_HASH = `0x${'ab'.repeat(32)}` as const;
+const AUTHORITY_TIME = {
+  chainId: 84532 as const,
+  blockNumber: '100',
+  blockHash: `0x${'cd'.repeat(32)}` as const,
+  timestamp: '2026-08-02T11:59:00.000Z',
+  finalized: true as const,
+};
 const REQUESTER_AGENT = 'urn:jinn:requester:test';
 const TERMS = {
   solutionMaxDeliveryRateWei: 2n,
@@ -106,6 +113,7 @@ function fixture(input: {
       admissionAgent: 'urn:jinn:admission:test',
       publicBaseUrl: 'https://requester.test',
       readChain,
+      authorityTime: async () => AUTHORITY_TIME,
       loadRoles,
       creatorSafe: CREATOR,
       posting: {
@@ -542,7 +550,8 @@ describe('native requester', () => {
       taskId: '17',
       taskDigest: result.association.taskDigest,
       txHash: TX_HASH,
-      sealedAt: '2026-08-02T12:00:00.000Z',
+      sealedAt: AUTHORITY_TIME.timestamp,
+      authorityTime: AUTHORITY_TIME,
       submission: result.association.submissionUri,
       nonce: result.association.nonce,
       postingTerms: {

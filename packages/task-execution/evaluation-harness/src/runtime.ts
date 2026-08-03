@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
-  prepareResultEvaluation,
+  buildResultEvaluationPayload,
   type AttestationResourceReference,
   type EvaluationMeasurement as IssuerMeasurement,
 } from "@jinn-network/attestation-issuer";
@@ -47,7 +47,6 @@ import {
   type EvaluatorRegistration,
   validateEvaluatorRegistrationSet,
 } from "./registration.js";
-import { makeSecretsSigner } from "./sign.js";
 
 export const EVALUATION_HARNESS_EXIT_INVALID_INPUT = 65;
 export const EVALUATION_HARNESS_EXIT_OPERATIONAL_FAILURE = 70;
@@ -774,7 +773,7 @@ export async function runEvaluationHarness(
       ),
     );
     const normalized = await validateCompletedDetails(completed, specification, deployment);
-    const prepared = await prepareResultEvaluation({
+    const payloadBytes = buildResultEvaluationPayload({
       task: resourceReference(exactTask.descriptor, "Task subject"),
       results: exactResults.map(({ descriptor }) =>
         resourceReference(descriptor, "Result subject")
@@ -798,8 +797,8 @@ export async function runEvaluationHarness(
       ...(completed.limitations === undefined
         ? {}
         : { limitations: completed.limitations }),
-    }, makeSecretsSigner(paths.secrets, registration.signer.handle));
-    await atomicExclusiveWrite(paths.out, "verdict", prepared.envelopeBytes);
+    });
+    await atomicExclusiveWrite(paths.out, "verdict", payloadBytes);
     return 0;
   } catch (cause) {
     if (

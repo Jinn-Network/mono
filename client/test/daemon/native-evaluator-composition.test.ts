@@ -35,7 +35,7 @@ function binding(key: string): ResolvedBinding {
   return {
     binding: {
       key: { didKey: key, keyid: key },
-      scope: ["authorizations", "observations", "deliveries", "verdicts"],
+      scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements"],
       validFrom: "2026-08-01T00:00:00.000Z",
     },
     effectiveStart: "2026-08-01T00:00:00.000Z",
@@ -158,19 +158,12 @@ describe("native evaluator production composition", () => {
     expect(config.launchers[0]!.capabilities().taskProfiles).toEqual([
       "https://jinn.network/task-profiles/evaluation-task/1.0",
     ]);
-    expect(config.launchers[0]!.capabilities().hostSecretForwards).toEqual([{
-      handle: "evaluator.pem",
-      target: "evaluator.pem",
-      role: "evaluator",
-      evaluator: AGENT,
-      registrationId: "prediction-market",
-      evaluationMethodDigest: METHOD_DIGEST,
-    }]);
+    expect(config.launchers[0]!.capabilities().hostSecretForwards).toEqual([]);
     expect(config.trustKeys?.deliverySigningKey?.keyId)
       .toBe(value.roles.get("evaluator-verdict").keyId);
     expect(config.trustKeys?.deliverySigningKey?.keyId)
       .not.toBe(value.roles.get("solver-delivery").keyId);
-    expect(config.hostSecretResolver).toBeDefined();
+    expect(config.hostSecretResolver).toBeUndefined();
     expect(config.capabilityGrants).toBeUndefined();
     expect(config.secretForwardResolver).toBeUndefined();
     expect(config.deliveryExtensions).toBeUndefined();

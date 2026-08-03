@@ -146,6 +146,28 @@ export interface NativeVerticalVerificationReport {
   readonly producerPrivatePaths: readonly [];
 }
 
+type AuthorityTimeAnchor = NativePublicGraph['roots']['requester']['chain']['authorityTime'];
+
+function authorityTimeAnchor(value: unknown, label: string): AuthorityTimeAnchor {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new NativeVerificationError('authority-time-invalid', label);
+  }
+  const anchor = value as Record<string, unknown>;
+  const members = ['blockHash', 'blockNumber', 'chainId', 'finalized', 'timestamp'];
+  if (Object.keys(anchor).sort().join('|') !== members.join('|')
+    || anchor.chainId !== 84532
+    || anchor.finalized !== true
+    || typeof anchor.blockNumber !== 'string'
+    || !/^(?:0|[1-9][0-9]*)$/u.test(anchor.blockNumber)
+    || typeof anchor.blockHash !== 'string'
+    || !/^0x[a-fA-F0-9]{64}$/u.test(anchor.blockHash)
+    || typeof anchor.timestamp !== 'string'
+    || !Number.isFinite(Date.parse(anchor.timestamp))) {
+    throw new NativeVerificationError('authority-time-invalid', label);
+  }
+  return anchor as unknown as AuthorityTimeAnchor;
+}
+
 function canonicalDigest(value: Parameters<typeof serializeCanonicalJson>[0]): Digest {
   return documentDigest(serializeCanonicalJson(value));
 }
@@ -326,6 +348,9 @@ export async function verifyNativeVertical(input: {
   readonly solutionSettlement: SolutionSettlementFact;
   readonly verdictSettlement: VerdictSettlementFact;
   readonly packages: readonly PackageProvenance[];
+  readonly authorityTime: {
+    verifyFinalized(anchor: AuthorityTimeAnchor): Promise<boolean>;
+  };
 }): Promise<NativeVerticalVerificationReport> {
   const submission = exactJson(input.graph.submission.bytes, (value) => SubmissionRecordSchema.parse(value), 'Submission');
   const solutionDelivery = exactJson(
@@ -336,6 +361,30 @@ export async function verifyNativeVertical(input: {
   );
   const statement = verdictStatement(input.graph.evaluation.verdict.bytes);
   const verdictCode = verdictCodeFromValue(statement.predicate.verdict);
+  const receiptEnvelope = parseExactDsseEnvelope(input.graph.admissionReceipt.bytes);
+  const receiptStatement = exactJson(
+    receiptEnvelope.payloadBytes,
+    (value) => value as { predicate?: { authorityTime?: unknown } },
+    'admission receipt',
+  );
+  const receiptAnchor = authorityTimeAnchor(receiptStatement.predicate?.authorityTime, 'admission receipt');
+  const submissionAnchor = authorityTimeAnchor(
+    submission.annotations?.['https://jinn.network/annotations/authority-time/1.0'],
+    'Submission',
+  );
+  const sourceAnchor = input.graph.roots.requester.chain.authorityTime;
+  const anchorDigest = (anchor: AuthorityTimeAnchor) => canonicalDigest(
+    anchor as unknown as Parameters<typeof serializeCanonicalJson>[0],
+  );
+  if (anchorDigest(receiptAnchor) !== anchorDigest(sourceAnchor)
+    || anchorDigest(submissionAnchor) !== anchorDigest(sourceAnchor)
+    || Date.parse(sourceAnchor.timestamp) !== Date.parse(input.authority.requester.sealingTime)
+    || Date.parse(sourceAnchor.timestamp) !== Date.parse(input.authority.admission.effectiveTime)) {
+    throw new NativeVerificationError('authority-time-correspondence-failed');
+  }
+  if (!await input.authorityTime.verifyFinalized(sourceAnchor)) {
+    throw new NativeVerificationError('authority-time-not-finalized');
+  }
 
   for (const artifact of input.graph.all) {
     if (documentDigest(artifact.bytes) !== artifact.digest) {

@@ -358,4 +358,18 @@ describe('native trust catalog authority', () => {
       anchorClient: { async lookupFinalizedAnchor() { return null; } },
     })).rejects.toThrow(/regular non-symlink/u);
   });
+
+  it('fails closed when the catalog bytes change after the authority snapshot opens', async () => {
+    const fixture = await buildCatalog();
+    const authority = await openNativeTrustCatalog({
+      path: fixture.path,
+      expectedPolicyGenesisDigest: fixture.policyGenesisDigest,
+      anchorClient: anchorClient(fixture, []),
+      now: new Date(NOW),
+    });
+    await expect(authority.assertFresh()).resolves.toBeUndefined();
+
+    await writeFile(fixture.path, `${JSON.stringify(fixture.catalog)}\n`);
+    await expect(authority.assertFresh()).rejects.toThrow(/changed after authority load; restart is required/u);
+  });
 });

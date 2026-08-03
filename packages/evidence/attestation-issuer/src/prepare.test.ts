@@ -10,6 +10,7 @@ import * as protocol from "@jinn-network/evidence-protocol";
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  buildResultEvaluationPayload,
   prepareExecutionVerification,
   prepareResultEvaluation,
 } from "./prepare.js";
@@ -49,6 +50,18 @@ describe("attestation preparation", () => {
       conforms: true,
       recordDigest: prepared.recordDigest,
     });
+  });
+
+  test("builds the same canonical Result Evaluation payload without exposing a signer", async () => {
+    const input = {
+      task: { name: "task", digest },
+      results: [{ name: "result", digest }] as [{ name: string; digest: typeof digest }],
+      evaluator: { id: "https://example.test/evaluator" },
+      evaluatedAt: "2026-07-24T12:00:00Z",
+      verdict: "pass" as const,
+    };
+    const prepared = await prepareResultEvaluation(input, signer);
+    expect(buildResultEvaluationPayload(input)).toEqual(prepared.payloadBytes);
   });
 
   test("prepares Execution Verification and preserves signature order", async () => {

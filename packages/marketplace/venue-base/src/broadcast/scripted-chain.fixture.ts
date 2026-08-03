@@ -124,6 +124,9 @@ export function buildScriptedChain(options: { readonly signerIsOwner?: boolean }
     async estimateFeesPerGas() {
       return { maxFeePerGas: 1_000_000_000n, maxPriorityFeePerGas: 100_000_000n };
     },
+    async estimateContractGas() {
+      return 21_000n;
+    },
     async getTransactionCount({ blockTag }: { readonly blockTag: "pending" | "latest" }) {
       if (blockTag === "pending") return pendingOverride ?? txNonceCounter;
       return txNonceCounter;

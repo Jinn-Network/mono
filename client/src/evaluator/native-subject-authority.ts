@@ -23,6 +23,7 @@ import {
   type WitnessVerifier,
 } from "@jinn-network/trust-core";
 import type { NativeEvaluationAuthority } from "../daemon/native-evaluator-state.js";
+import { parseNativeAuthorityTimeAnchor } from "../native-requester/requester.js";
 import type { SubjectMaterial } from "./subject-material.js";
 
 const SUBMISSION_DSSE_PAYLOAD_TYPE =
@@ -64,6 +65,7 @@ export interface NativeSubjectAuthorityDependencies {
       readonly agent: string;
       readonly address: string;
       readonly atTime: string;
+      readonly purpose: "native:solver-settlement" | "native:evaluator-settlement";
     }): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
   };
 }
@@ -167,6 +169,7 @@ export async function verifyNativeSubjectAuthority(input: {
     sealingTime: claim.requester.sealingTime,
   }, {
     bindingResolver: dependencies.bindingResolver,
+    witnessVerifier: dependencies.witnessVerifier,
     dsseVerifier: dependencies.dsseVerifier,
     policy: dependencies.requesterPolicy,
   });
@@ -184,6 +187,30 @@ export async function verifyNativeSubjectAuthority(input: {
     expectedEvaluationSpecDigest: material.evaluationSpec.digest,
   });
   if (!receipt.ok) throw new NativeSubjectAuthorityError("admission-receipt-invalid", receipt.reason);
+  const admissionStatement = exactJson(
+    parseDsseEnvelope(material.admissionReceipt.bytes).payloadBytes,
+    "admission receipt payload",
+  );
+  const admissionPredicate = (admissionStatement as { predicate?: unknown }).predicate;
+  const admissionAnchor = parseNativeAuthorityTimeAnchor(
+    typeof admissionPredicate === "object" && admissionPredicate !== null
+      ? (admissionPredicate as Record<string, unknown>)["authorityTime"]
+      : undefined,
+  );
+  const submissionAnchor = parseNativeAuthorityTimeAnchor(
+    (submission.annotations as Record<string, unknown> | undefined)?.[
+      "https://jinn.network/annotations/authority-time/1.0"
+    ],
+  );
+  if (documentDigest(serializeCanonicalJson(
+      admissionAnchor as unknown as Parameters<typeof serializeCanonicalJson>[0],
+    )) !== documentDigest(serializeCanonicalJson(
+      submissionAnchor as unknown as Parameters<typeof serializeCanonicalJson>[0],
+    ))
+    || claim.requester.sealingTime !== submissionAnchor.timestamp
+    || claim.admission.effectiveTime !== admissionAnchor.timestamp) {
+    throw new NativeSubjectAuthorityError("authority-time-anchor-mismatch");
+  }
   const admission = await verifyEnvelopeBinding({
     envelopeBytes: material.admissionReceipt.bytes,
     key: claim.admission.signerKey,
@@ -220,6 +247,15 @@ export async function verifyNativeSubjectAuthority(input: {
   });
   if (!executor.ok) throw new NativeSubjectAuthorityError("executor-binding-failed", executor.reason);
 
+  const executorSettlement = await dependencies.evaluatorAuthority.resolve({
+    ...claim.executor,
+    atTime: delivery.createdAt,
+    purpose: "native:solver-settlement",
+  });
+  if (!executorSettlement.ok) {
+    throw new NativeSubjectAuthorityError("executor-settlement-binding-failed", executorSettlement.reason);
+  }
+
   if (claim.executor.agent === claim.evaluator.agent
     || claim.executor.address.toLowerCase() === claim.evaluator.address.toLowerCase()) {
     throw new NativeSubjectAuthorityError("self-evaluation-refused");
@@ -227,6 +263,7 @@ export async function verifyNativeSubjectAuthority(input: {
   const evaluatorBinding = await dependencies.evaluatorAuthority.resolve({
     ...claim.evaluator,
     atTime: claim.admission.effectiveTime,
+    purpose: "native:evaluator-settlement",
   });
   if (!evaluatorBinding.ok) {
     throw new NativeSubjectAuthorityError("evaluator-binding-failed", evaluatorBinding.reason);
@@ -248,9 +285,10 @@ export async function verifyNativeSubjectAuthority(input: {
     admission: { key: claim.admission.signerKey, agent: receipt.issuer, at: claim.admission.effectiveTime },
     executor: { key: claim.executor.signerKey, agent: claim.executor.agent, at: delivery.createdAt },
     evaluator: { key: claim.evaluator.signerKey, agent: claim.evaluator.agent },
+    authorityTime: submissionAnchor,
   };
   const verificationDigest = documentDigest(serializeCanonicalJson(
-    proof as Parameters<typeof serializeCanonicalJson>[0],
+    proof as unknown as Parameters<typeof serializeCanonicalJson>[0],
   ));
   return {
     requester: claim.requester,

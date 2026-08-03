@@ -551,6 +551,7 @@ describe("settlementJoinCheck (§7.5a)", () => {
       agent: AGENT,
       key: { publicKey: "0x00", keyid: SETTLEMENT_KEY, algorithm: "ed25519", didKey: SETTLEMENT_KEY },
       voucher: { kind: "account", did: OTHER_VOUCHER_DID, contractAccount: false },
+      scope: ["settlements"],
     });
   }
 
@@ -642,7 +643,7 @@ describe("authenticateRequester (§7.5b)", () => {
 
     const outcome = await authenticateRequester(
       { envelopeBytes, key: REQUESTER_KEY, requesterAgent: AGENT, sealingTime: "2026-03-01T00:00:00Z" },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
   });
@@ -668,12 +669,12 @@ describe("authenticateRequester (§7.5b)", () => {
         requesterAgent: AGENT,
         sealingTime: "2026-03-01T00:00:00Z",
       },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
 
     expect(outcome).toEqual({
       ok: false,
-      reason: `revoked effective "2026-02-01T00:00:00Z" by "${VOUCHER_DID}".`,
+      reason: `requester binding ceremony failed: revoked: revoked effective "2026-02-01T00:00:00Z" by "${VOUCHER_DID}".`,
     });
   });
 
@@ -699,12 +700,12 @@ describe("authenticateRequester (§7.5b)", () => {
         requesterAgent: AGENT,
         sealingTime,
       },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
 
     expect(outcome).toEqual({
       ok: false,
-      reason: `revoked effective "${sealingTime}" by "${VOUCHER_DID}".`,
+      reason: `requester binding ceremony failed: revoked: revoked effective "${sealingTime}" by "${VOUCHER_DID}".`,
     });
   });
 
@@ -729,7 +730,7 @@ describe("authenticateRequester (§7.5b)", () => {
         requesterAgent: AGENT,
         sealingTime: "2026-03-01T00:00:00Z",
       },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -756,7 +757,7 @@ describe("authenticateRequester (§7.5b)", () => {
         requesterAgent: AGENT,
         sealingTime: "2026-03-01T00:00:00Z",
       },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
 
     expect(outcome).toEqual({ ok: true });
@@ -778,7 +779,7 @@ describe("authenticateRequester (§7.5b)", () => {
 
     const outcome = await authenticateRequester(
       { envelopeBytes, key: REQUESTER_KEY, requesterAgent: AGENT, sealingTime: "2026-03-01T00:00:00Z" },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(false);
   });
@@ -800,7 +801,7 @@ describe("authenticateRequester (§7.5b)", () => {
 
     const outcome = await authenticateRequester(
       { envelopeBytes, key: REQUESTER_KEY, requesterAgent: AGENT, sealingTime: "2026-03-01T00:00:00Z" },
-      { bindingResolver: resolver, dsseVerifier: trustingDsseVerifier },
+      { bindingResolver: resolver, witnessVerifier: fakeWitnessVerifier, dsseVerifier: trustingDsseVerifier },
     );
     expect(outcome.ok).toBe(true);
   });

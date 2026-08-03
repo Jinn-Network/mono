@@ -72,6 +72,9 @@ export interface VerifyEnvelopeBindingInput {
   /** the record family this envelope belongs to -- must be in the
    * resolved binding's `scope` (step 4). */
   readonly family: string;
+  /** A `signs-for` relationship is a narrow, explicit substitute for an
+   * authorizations scope when authenticating requester envelopes. */
+  readonly allowSignsForAuthorization?: boolean;
   /** the evidence's effective time -- binding resolution and the window
    * check both apply at this time. */
   readonly atTime: string;
@@ -357,7 +360,10 @@ export async function verifyEnvelopeBinding(
       detail: `atTime "${input.atTime}" is after the binding's expiresAt "${resolved.binding.expiresAt}".`,
     };
   }
-  if (!resolved.binding.scope.includes(input.family)) {
+  if (!resolved.binding.scope.includes(input.family)
+    && !(input.allowSignsForAuthorization === true
+      && input.family === "authorizations"
+      && resolved.binding.relationship === "signs-for")) {
     return {
       ok: false,
       resolvedBinding: resolved,
@@ -471,6 +477,9 @@ export async function settlementJoinCheck(
   if (settlementLegAtEnvelopeTime === null) {
     return { ok: false, reason: "settlement leg does not resolve to the claimed evaluator IRI." };
   }
+  if (!settlementLegAtEnvelopeTime.binding.scope.includes("settlements")) {
+    return { ok: false, reason: "settlement leg does not carry scope:settlements." };
+  }
 
   // "not revoked at claim time" -- a distinct, later check from the
   // envelope-time resolution above (divergent-times protection).
@@ -480,6 +489,9 @@ export async function settlementJoinCheck(
   );
   if (settlementLegAtClaimTime === null) {
     return { ok: false, reason: "settlement leg is not valid (revoked or expired) at claim time." };
+  }
+  if (!settlementLegAtClaimTime.binding.scope.includes("settlements")) {
+    return { ok: false, reason: "settlement leg lost scope:settlements at claim time." };
   }
 
   return { ok: true, agent: input.claimedEvaluatorAgent };
@@ -515,22 +527,27 @@ export async function authenticateRequester(
   input: SubmissionAuthenticationInput,
   deps: {
     readonly bindingResolver: BindingResolver;
+    readonly witnessVerifier: WitnessVerifier;
     readonly dsseVerifier: DsseChainVerifier;
     readonly policy?: PolicyCheckInput;
   },
 ): Promise<RequesterAuthenticationOutcome> {
-  const { validSignerKeyids } = deps.dsseVerifier(input.envelopeBytes);
-  if (!validSignerKeyids.includes(input.key)) {
-    return { ok: false, reason: "no valid signature from the claimed key on the Submission envelope." };
+  const verified = await verifyEnvelopeBinding({
+    envelopeBytes: input.envelopeBytes,
+    key: input.key,
+    agent: input.requesterAgent,
+    family: "authorizations",
+    atTime: input.sealingTime,
+    allowSignsForAuthorization: true,
+  }, deps);
+  if (!verified.ok || verified.resolvedBinding === undefined) {
+    return {
+      ok: false,
+      reason: `requester binding ceremony failed: ${verified.reason ?? "unknown"}`
+        + `${verified.detail === undefined ? "" : `: ${verified.detail}`}`,
+    };
   }
-
-  const resolved = await deps.bindingResolver.resolveBinding(
-    { key: input.key, agent: input.requesterAgent },
-    input.sealingTime,
-  );
-  if (resolved === null) {
-    return { ok: false, reason: "the signing key does not resolve to the claimed requester Agent IRI." };
-  }
+  const resolved = verified.resolvedBinding;
 
   const authorized = resolved.binding.scope.includes("authorizations")
     || resolved.binding.relationship === "signs-for";
@@ -539,25 +556,6 @@ export async function authenticateRequester(
       ok: false,
       reason: "binding neither carries scope:authorizations nor relationship:signs-for.",
     };
-  }
-
-  const revocationResult = await checkRevocation(
-    resolved,
-    input.sealingTime,
-    deps,
-  );
-  if (!revocationResult.ok) {
-    return {
-      ok: false,
-      reason: revocationResult.detail ?? "requester binding is revoked.",
-    };
-  }
-
-  if (deps.policy !== undefined) {
-    const policyResult = checkPolicy(resolved, deps.policy);
-    if (!policyResult.ok) {
-      return { ok: false, ...(policyResult.detail === undefined ? {} : { reason: policyResult.detail }) };
-    }
   }
 
   return { ok: true };

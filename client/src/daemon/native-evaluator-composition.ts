@@ -1,7 +1,10 @@
-import { readFile } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { readFile, rename, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { EvidenceBindingPorts } from "@jinn-network/task-execution-backend-local";
+import {
+  ResultEvaluationStatementSchema,
+} from "@jinn-network/evidence-protocol";
 import {
   makeLocalTaskExecutionBackend,
   type LocalProvisionerInput,
@@ -17,6 +20,7 @@ import { PREDICTION_REGISTRATION_ID } from "@jinn-network/task-execution-evaluat
 import {
   EVALUATION_SPEC_MEDIA_TYPE,
   EVALUATION_TASK_PROFILE_URI,
+  VERDICT_DSSE_PAYLOAD_TYPE,
   buildEvaluationTaskProfile,
   sealTaskProfile,
   type ProfileStore,
@@ -25,6 +29,7 @@ import {
   SubmissionRecordSchema,
   documentDigest,
 } from "@jinn-network/task-execution-protocol";
+import { sealSignedRecord } from "@jinn-network/trust-core";
 import {
   makeDirProvisioner,
   type WorkspaceRuntimePorts,
@@ -236,6 +241,8 @@ function digestFromDescriptor(descriptor: { readonly digest?: Readonly<Record<st
 function stateBackedProvisioner(input: {
   readonly state: NativeEvaluatorStateRepository;
   readonly runtime: WorkspaceRuntimePorts;
+  readonly roles: RoleIdentitySet;
+  readonly evaluationMethodDigest: `sha256:${string}`;
   readonly quotaBytes?: number;
   readonly workTtlMs?: number;
   readonly diskFloorBytes?: number;
@@ -298,7 +305,49 @@ function stateBackedProvisioner(input: {
           }, paths, grants);
         },
         executionEnv: provisioner.executionEnv,
-        harvest: provisioner.harvest,
+        async harvest(paths, outputs) {
+          const verdictPath = join(paths.out, "verdict");
+          const payloadBytes = new Uint8Array(await readFile(verdictPath));
+          const statement = ResultEvaluationStatementSchema.parse(JSON.parse(
+            new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes),
+          ));
+          const one = (role: string) => {
+            const values = artifacts.filter((artifact) => artifact.role === role);
+            if (values.length !== 1) throw new NativeEvaluatorCompositionError(`evaluation has no unique ${role}`);
+            return values[0]!;
+          };
+          const task = one("task");
+          const specification = one("evaluation-spec");
+          const results = artifacts.filter((artifact) => artifact.role === "solution-result");
+          const statementSubjects = statement.subject.map((subject) => ({
+            name: subject.name,
+            digest: `sha256:${subject.digest.sha256}`,
+          }));
+          const expectedSubjects = [task, ...results].map(({ name, digest }) => ({ name, digest }));
+          const predicate = statement.predicate;
+          if (predicate.evaluator.id !== input.roles.agent
+            || JSON.stringify(statementSubjects) !== JSON.stringify(expectedSubjects)
+            || predicate.taskSubject !== task.name
+            || JSON.stringify(predicate.resultSubjects) !== JSON.stringify(results.map(({ name }) => name))
+            || predicate.evaluationSpecification?.digest.sha256 !== specification.digest.slice("sha256:".length)
+            || predicate.evaluationMethod?.digest.sha256 !== input.evaluationMethodDigest.slice("sha256:".length)
+            || Date.parse(predicate.evaluatedAt) > Date.parse(effectiveDeadline(input.state, local.attempt.attemptUri) ?? "")) {
+            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is outside its exact Attempt authority");
+          }
+          const identity = input.roles.get("evaluator-verdict");
+          const sealed = await sealSignedRecord({
+            record: statement,
+            payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
+            signer: async ({ preAuthEncoding }) => [{ keyid: identity.keyId, signature: identity.sign(preAuthEncoding) }],
+          });
+          if (!Buffer.from(sealed.payloadBytes).equals(Buffer.from(payloadBytes))) {
+            throw new NativeEvaluatorCompositionError("unsigned evaluator statement is not canonical exact bytes");
+          }
+          const temporary = `${verdictPath}.sealed`;
+          await writeFile(temporary, sealed.envelopeBytes, { mode: 0o600, flag: "wx" });
+          await rename(temporary, verdictPath);
+          return provisioner.harvest(paths, outputs);
+        },
       },
     };
   };
@@ -356,27 +405,6 @@ export async function buildNativeEvaluatorComposition(
     selectRegistration: () => registration,
   });
 
-  const hostSecretResolver = input.roles.createEvaluatorHostSecretResolver({
-    handle: input.deployment.signerHandle,
-    evaluator: input.roles.agent,
-    registrationId: PREDICTION_REGISTRATION_ID,
-    evaluationMethodDigest: input.deployment.evaluationMethodDigest,
-    async authorize(request) {
-      await requireModuleDigest(location.path, input.deployment.moduleDigest);
-      const evaluation = input.state.listEvaluations().find(
-        ({ evaluationAttemptUri }) => evaluationAttemptUri === request.attemptUri,
-      );
-      if (evaluation === undefined || evaluation.evaluatorAgent !== input.roles.agent) return false;
-      const derived = input.state.getDerivedEvaluation(evaluation.evaluationId);
-      return derived !== undefined
-        && derived.attemptUri === request.attemptUri
-        && derived.taskDigest === request.taskDigest
-        && derived.submissionUri === request.submission
-        && derived.submissionDigest === request.submissionDigest
-        && effectiveDeadline(input.state, request.attemptUri) === request.deadline;
-    },
-  });
-
   const backendConfig: LocalTaskExecutionBackendConfig = {
     stateRoot: input.backend.stateRoot,
     source: input.backend.source,
@@ -387,6 +415,8 @@ export async function buildNativeEvaluatorComposition(
     provisioner: stateBackedProvisioner({
       state: input.state,
       runtime: input.backend.workspaceRuntime,
+      roles: input.roles,
+      evaluationMethodDigest: input.deployment.evaluationMethodDigest,
       ...(input.backend.quotaBytes === undefined ? {} : { quotaBytes: input.backend.quotaBytes }),
       ...(input.backend.workTtlMs === undefined ? {} : { workTtlMs: input.backend.workTtlMs }),
       ...(input.backend.diskFloorBytes === undefined ? {} : { diskFloorBytes: input.backend.diskFloorBytes }),
@@ -408,7 +438,6 @@ export async function buildNativeEvaluatorComposition(
       deliverySigningKey: input.roles.get("evaluator-verdict"),
     },
     evidence: input.backend.evidence,
-    hostSecretResolver,
   };
   const backend = (input.constructBackend ?? makeLocalTaskExecutionBackend)(backendConfig);
   let publisher: NativeEvaluatorPublisher | undefined;
@@ -480,6 +509,7 @@ export async function buildNativeEvaluatorComposition(
             evaluatorAgent: input.roles.agent,
             coordinator: input.coordinatorAddress,
             material,
+            reopenWithdrawn: true,
           });
         }
         return {

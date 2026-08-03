@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import {
@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { InMemoryEvidenceCatalog } from "@jinn-network/evidence-discovery";
-import { validateResultEvaluation } from "@jinn-network/evidence-protocol";
+import { ResultEvaluationStatementSchema } from "@jinn-network/evidence-protocol";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import {
   makeLocalTaskExecutionBackend,
@@ -259,20 +259,17 @@ function evaluatorRegistration(): EvaluatorRegistration {
 interface BackendFixture {
   readonly backend: LocalTaskExecutionBackend;
   readonly pathsByAttempt: Map<string, WorkspacePaths>;
-  readonly resolvedSigner: Uint8Array;
 }
 
 async function backendFixture(
   root: string,
   docs: Documents,
-  privateKeyText: string,
   options: {
     readonly crashAfterDeliveryCheckpoint?: () => void;
   } = {},
 ): Promise<BackendFixture> {
   const pathsByAttempt = new Map<string, WorkspacePaths>();
   const registration = evaluatorRegistration();
-  const resolvedSigner = encoder.encode(privateKeyText);
   const deploymentModule = join(root, "evaluation-deployment.mjs");
   await writeFile(
     deploymentModule,
@@ -408,20 +405,6 @@ export const evaluationHarnessDeployment = {
         },
       },
     },
-    hostSecretResolver: {
-      async resolve(input) {
-        expect(input).toMatchObject({
-          launcherId: "evaluation-harness",
-          role: "evaluator",
-          evaluator: registration.evaluatorIdentity.id,
-          handle: registration.signer.handle,
-          registrationId: registration.registrationId,
-          evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
-          deadline: "2099-01-01T00:00:00.000Z",
-        });
-        return resolvedSigner;
-      },
-    },
     recorderAvailability: "always",
     evidence: {
       repository,
@@ -436,7 +419,7 @@ export const evaluationHarnessDeployment = {
     now: () => "2026-07-29T12:02:00.000Z",
   });
   backends.push(backend);
-  return { backend, pathsByAttempt, resolvedSigner };
+  return { backend, pathsByAttempt };
 }
 
 async function textFiles(root: string): Promise<string> {
@@ -451,7 +434,7 @@ async function textFiles(root: string): Promise<string> {
 }
 
 describe("evaluationLauncher", () => {
-  test("rejects ambiguous deployment-wide signer or recovery facts", () => {
+  test("rejects ambiguous deployment-wide recovery facts without forwarding signer material", () => {
     const configured = evaluatorRegistration();
     expect(() => makeEvaluationLauncher({
       registrations: [
@@ -463,16 +446,6 @@ describe("evaluationLauncher", () => {
         }),
       ],
     })).toThrow("ambiguous interruption behavior");
-    expect(() => makeEvaluationLauncher({
-      registrations: [
-        configured,
-        defineEvaluatorRegistration({
-          ...configured,
-          registrationId: "different-signer",
-          signer: { handle: "ordinary-key" },
-        }),
-      ],
-    })).toThrow("ambiguous signer forward");
   });
 
   test("rejects a missing registration selector before a plan exists", () => {
@@ -503,7 +476,7 @@ describe("evaluationLauncher", () => {
       .toThrow("unique");
   });
 
-  test("derives signer and recovery facts from the configured registration, not a same-id selector forgery", () => {
+  test("derives recovery facts from the configured registration without forwarding signer material", () => {
     const configured = evaluatorRegistration();
     const forged = defineEvaluatorRegistration({
       ...configured,
@@ -524,18 +497,11 @@ describe("evaluationLauncher", () => {
     }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
     expect(plan).toMatchObject({
       interruptionBehavior: configured.interruptionBehavior,
-      hostSecretForwards: [{
-        handle: configured.signer.handle,
-        target: configured.signer.handle,
-        role: "evaluator",
-        evaluator: configured.evaluatorIdentity.id,
-        registrationId: configured.registrationId,
-        evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
-      }],
     });
+    expect(plan.hostSecretForwards).toBeUndefined();
   });
 
-  test("forwards an ordinary signer handle without suffix rewriting", () => {
+  test("never forwards an evaluator signer handle", () => {
     const configured = defineEvaluatorRegistration({
       ...evaluatorRegistration(),
       signer: { handle: "ordinary-key" },
@@ -550,14 +516,7 @@ describe("evaluationLauncher", () => {
       root: "/a", input: "/a/input", work: "/a/work", out: "/a/out", logs: "/a/logs", harnessState: "/a/state", secrets: "/a/secrets", tmp: "/a/tmp", meta: "/a/meta",
     }, { attemptUri: "urn:uuid:00000000-0000-4000-8000-000000000004", nonce: "n", attemptNumber: 1 });
     expect(plan.secretForwards).toBeUndefined();
-    expect(plan.hostSecretForwards).toEqual([{
-      handle: "ordinary-key",
-      target: "ordinary-key",
-      role: "evaluator",
-      evaluator: configured.evaluatorIdentity.id,
-      registrationId: configured.registrationId,
-      evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
-    }]);
+    expect(plan.hostSecretForwards).toBeUndefined();
   });
 
   test("is a pure evaluation-profile launcher with only reference/path configuration", () => {
@@ -600,7 +559,7 @@ describe("evaluationLauncher", () => {
       cwd: paths.work,
       validExitCodes: [0],
       resultContract: {
-        envelopeFormat: "jinn-result-evaluation-dsse-v1",
+        envelopeFormat: "jinn-result-evaluation-statement-v1",
         structuredOutputArtifact: "out/verdict",
       },
       interruptionBehavior: "repeatable",
@@ -624,18 +583,9 @@ describe("evaluationLauncher", () => {
         : { NODE_OPTIONS: process.env["NODE_OPTIONS"]! }),
     });
     expect(first.secretForwards).toBeUndefined();
-    expect(first.hostSecretForwards).toEqual([
-      {
-        handle: "evaluator-agent-key.pem",
-        target: "evaluator-agent-key.pem",
-        role: "evaluator",
-        evaluator: evaluatorRegistration().evaluatorIdentity.id,
-        registrationId: evaluatorRegistration().registrationId,
-        evaluationMethodDigest: `sha256:${"6".repeat(64)}`,
-      },
-    ]);
+    expect(first.hostSecretForwards).toBeUndefined();
     expect(launcher.capabilities().secretForwards).toEqual([]);
-    expect(launcher.capabilities().hostSecretForwards).toEqual(first.hostSecretForwards);
+    expect(launcher.capabilities().hostSecretForwards).toEqual([]);
     expect(Object.keys(first.env)).toEqual(
       expect.arrayContaining([
         "JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE",
@@ -668,15 +618,11 @@ describe("evaluationLauncher", () => {
     ]);
   });
 
-  test("runs an evaluator-signed ordinary Attempt through the assembled backend", async () => {
+  test("runs an unsigned evaluator payload Attempt through the assembled backend", async () => {
     const root = await mkdtemp(join(tmpdir(), "jinn-evaluation-launcher-"));
     roots.push(root);
     const docs = documents();
-    const { privateKey } = generateKeyPairSync("ed25519");
-    const privateKeyText = String(
-      privateKey.export({ type: "pkcs8", format: "pem" }),
-    );
-    const fixture = await backendFixture(root, docs, privateKeyText);
+    const fixture = await backendFixture(root, docs);
 
     const ack = await fixture.backend.submit(
       docs.evaluationTask,
@@ -701,11 +647,9 @@ describe("evaluationLauncher", () => {
     const paths = fixture.pathsByAttempt.get(snapshot.descriptor.attempt);
     expect(paths).toBeDefined();
     const verdictBytes = await readFile(join(paths!.out, "verdict"));
-    const resultEvaluation = validateResultEvaluation(verdictBytes);
-    expect(
-      resultEvaluation.conforms,
-      JSON.stringify(resultEvaluation.diagnostics),
-    ).toBe(true);
+    expect(ResultEvaluationStatementSchema.safeParse(
+      JSON.parse(decoder.decode(verdictBytes)),
+    ).success).toBe(true);
 
     const refs = await fixture.backend.deliveries(
       snapshot.descriptor.attempt,
@@ -729,8 +673,7 @@ describe("evaluationLauncher", () => {
     expect(delivery.executionIds).toHaveLength(1);
     await expect(readFile(join(paths!.secrets, "evaluator-agent-key.pem")))
       .rejects.toThrow();
-    expect(fixture.resolvedSigner).toEqual(new Uint8Array(fixture.resolvedSigner.length));
-    expect(await textFiles(root)).not.toContain(privateKeyText);
+    expect(await textFiles(root)).not.toContain("PRIVATE KEY");
   });
 
   test("reuses the backend seal-once Delivery checkpoint after a scripted crash", async () => {
@@ -739,12 +682,8 @@ describe("evaluationLauncher", () => {
     );
     roots.push(root);
     const docs = documents();
-    const { privateKey } = generateKeyPairSync("ed25519");
-    const privateKeyText = String(
-      privateKey.export({ type: "pkcs8", format: "pem" }),
-    );
     let crash = true;
-    const first = await backendFixture(root, docs, privateKeyText, {
+    const first = await backendFixture(root, docs, {
       crashAfterDeliveryCheckpoint() {
         if (crash) throw new Error("scripted process crash after checkpoint");
       },
@@ -761,7 +700,9 @@ describe("evaluationLauncher", () => {
     const paths = first.pathsByAttempt.get(attempt);
     expect(paths).toBeDefined();
     const verdictBytes = await readFile(join(paths!.out, "verdict"));
-    expect(validateResultEvaluation(verdictBytes).conforms).toBe(true);
+    expect(ResultEvaluationStatementSchema.safeParse(
+      JSON.parse(decoder.decode(verdictBytes)),
+    ).success).toBe(true);
     const checkpoint = await readFile(
       first.backend.deliveryCheckpointPath(attempt),
     );
@@ -769,7 +710,7 @@ describe("evaluationLauncher", () => {
     await (first.backend as LocalTaskExecutionBackend & { shutdown(): Promise<void> }).shutdown();
     backends.splice(backends.indexOf(first.backend), 1);
     crash = false;
-    const recovered = await backendFixture(root, docs, privateKeyText, {
+    const recovered = await backendFixture(root, docs, {
       crashAfterDeliveryCheckpoint() {
         if (crash) throw new Error("unreachable");
       },

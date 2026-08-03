@@ -20,16 +20,16 @@ import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:f
 import { dirname, isAbsolute } from 'node:path';
 import bs58 from 'bs58';
 import type { BindingResolver } from '@jinn-network/trust-core';
-import type { HostSecretResolver } from '@jinn-network/task-execution-backend-local';
-import { EVALUATION_TASK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 
 export const NATIVE_ROLE_IDENTITY_ROLES = [
   'requester-submission',
   'admission',
   'requester-discovery',
   'solver-delivery',
+  'solver-settlement',
   'solver-discovery',
   'evaluator-verdict',
+  'evaluator-settlement',
   'evaluator-discovery',
 ] as const;
 
@@ -41,8 +41,10 @@ export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdenti
   admission: ['authorizations'],
   'requester-discovery': ['observations'],
   'solver-delivery': ['deliveries'],
+  'solver-settlement': ['settlements'],
   'solver-discovery': ['observations'],
   'evaluator-verdict': ['verdicts', 'deliveries'],
+  'evaluator-settlement': ['settlements'],
   'evaluator-discovery': ['observations'],
 };
 
@@ -389,7 +391,6 @@ export class RoleIdentitySet {
   private constructor(
     readonly agent: string,
     private readonly byRole: ReadonlyMap<NativeRoleIdentityRole, NativeRoleIdentity>,
-    private readonly hostSecretKeys: ReadonlyMap<NativeRoleIdentityRole, KeyObject>,
     private readonly bindingResolver: BindingResolver,
     private readonly now: () => Date,
   ) {}
@@ -410,7 +411,6 @@ export class RoleIdentitySet {
     const orderedRequired = NATIVE_ROLE_IDENTITY_ROLES.filter((role) => required.has(role));
     const storedRoles = await store.loadOrCreate(now, orderedRequired);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
-    const hostSecretKeys = new Map<NativeRoleIdentityRole, KeyObject>();
 
     for (const stored of storedRoles) {
       const role = stored.role;
@@ -463,15 +463,11 @@ export class RoleIdentitySet {
         sign: (payload) => new Uint8Array(cryptoSign(null, payload, privateKey)),
         verify: (payload, signature) => cryptoVerify(null, payload, publicKey, signature),
       });
-      if (role === 'evaluator-verdict') {
-        hostSecretKeys.set(role, privateKey);
-      }
     }
     if (byRole.size !== required.size) throw new IdentityStoreError('identity store did not load every process-owned role');
     return new RoleIdentitySet(
       input.agent,
       byRole,
-      hostSecretKeys,
       input.bindingResolver,
       input.now ?? (() => new Date()),
     );
@@ -521,69 +517,6 @@ export class RoleIdentitySet {
     return { ok: true, bindingDigest: resolved.bindingDigest };
   }
 
-  /**
-   * Produces the backend's host-owned evaluator secret resolver. The child handle is only one
-   * leg: every request must match the exact sealed Submission, evaluation profile, Attempt,
-   * evaluator role, and immutable deployment registration/method selected by the host.
-   */
-  createEvaluatorHostSecretResolver(registration: {
-    readonly handle: string;
-    readonly evaluator: string;
-    readonly registrationId: string;
-    readonly evaluationMethodDigest: `sha256:${string}`;
-    readonly authorize: (input: {
-      readonly attemptUri: string;
-      readonly taskDigest: `sha256:${string}`;
-      readonly submission: `urn:uuid:${string}`;
-      readonly submissionDigest: `sha256:${string}`;
-      readonly deadline: string;
-    }) => Promise<boolean> | boolean;
-  }): HostSecretResolver {
-    const identity = this.get('evaluator-verdict');
-    if (registration.evaluator !== this.agent) {
-      throw new IdentityStoreError('evaluator host-secret registration names a different agent');
-    }
-    const privateKey = this.hostSecretKeys.get('evaluator-verdict');
-    if (privateKey === undefined) throw new IdentityStoreError('evaluator host-secret custody is unavailable');
-    return {
-      resolve: async (input, options) => {
-        options.signal?.throwIfAborted();
-        if (input.role !== 'evaluator'
-          || input.launcherId !== 'evaluation-harness'
-          || input.evaluator !== registration.evaluator
-          || input.handle !== registration.handle
-          || input.target !== registration.handle
-          || input.registrationId !== registration.registrationId
-          || input.evaluationMethodDigest !== registration.evaluationMethodDigest
-          || input.taskProfile !== EVALUATION_TASK_PROFILE_URI
-          || !/^sha256:[0-9a-f]{64}$/u.test(input.taskDigest)
-          || !/^sha256:[0-9a-f]{64}$/u.test(input.submissionDigest)
-          || !/^urn:uuid:/u.test(input.submission)
-          || input.attempt.attemptUri.length === 0) {
-          throw new IdentityStoreError('evaluator host-secret request is outside its sealed Attempt/registration scope');
-        }
-        if (!await registration.authorize({
-          attemptUri: input.attempt.attemptUri,
-          taskDigest: input.taskDigest,
-          submission: input.submission,
-          submissionDigest: input.submissionDigest,
-          deadline: input.deadline,
-        })) {
-          throw new IdentityStoreError('evaluator host-secret request does not match the durable sealed evaluation');
-        }
-        const now = this.now();
-        if (!Number.isFinite(now.getTime()) || Date.parse(input.deadline) <= now.getTime()) {
-          throw new IdentityStoreError('evaluator host-secret request is expired');
-        }
-        const binding = await this.resolveEffective('evaluator-verdict', now.toISOString());
-        if (!binding.ok || identity.keyId.length === 0) {
-          throw new IdentityStoreError(`evaluator host-secret authority is not effective: ${binding.ok ? 'invalid-key' : binding.reason}`);
-        }
-        options.signal?.throwIfAborted();
-        return new Uint8Array(Buffer.from(privateKey.export({ type: 'pkcs8', format: 'pem' })));
-      },
-    };
-  }
 }
 
 export function openRoleIdentitySet(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {

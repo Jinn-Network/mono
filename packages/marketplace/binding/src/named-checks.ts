@@ -534,6 +534,7 @@ async function requesterAuthenticationFailure(
       },
       {
         bindingResolver: ports.bindingResolver,
+        witnessVerifier: ports.witnessVerifier,
         dsseVerifier: ports.dsseVerifier,
         ...(ports.requesterPolicy === undefined ? {} : { policy: ports.requesterPolicy }),
       },

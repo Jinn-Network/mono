@@ -122,6 +122,15 @@ export interface CanonicalTaskCreated {
   readonly maxClaims: 1;
 }
 
+/** Finalized chain time sealed into both admission and requester authority. */
+export interface NativeAuthorityTimeAnchor {
+  readonly chainId: 84532;
+  readonly blockNumber: string;
+  readonly blockHash: `0x${string}`;
+  readonly timestamp: string;
+  readonly finalized: true;
+}
+
 export interface NativePostingTermsWire {
   readonly solutionMaxDeliveryRateWei: string;
   readonly verdictMaxDeliveryRateWei: string;
@@ -154,6 +163,7 @@ interface NativeRequesterDraft {
   readonly nonce: string;
   readonly postingTerms: NativePostingTermsWire;
   readonly intendedSpendWei: string;
+  readonly authorityTime: NativeAuthorityTimeAnchor;
   readonly artifacts: NativeRequesterArtifacts;
   readonly stage: 'prepared' | 'broadcasting' | 'broadcasted';
   readonly outcome?: StoredPostingOutcome;
@@ -202,6 +212,7 @@ export interface NativeRequesterAssociation {
   readonly postingTerms: NativePostingTermsWire;
   readonly intendedSpendWei: string;
   readonly txHash: `0x${string}`;
+  readonly authorityTime: NativeAuthorityTimeAnchor;
   readonly submission: StoredExactRecord;
   readonly requesterEnvelope: StoredExactRecord;
   readonly admissionReceipt: StoredExactRecord;
@@ -233,6 +244,8 @@ export interface NativeRequesterDeps {
   readonly publicBaseUrl: string;
   /** This is intentionally first: mismatches reject before key loading or transaction preparation. */
   readonly readChain: () => Promise<MarketplaceChainConfig>;
+  /** Latest canonical finalized block, fetched before role custody is loaded. */
+  readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
   readonly loadRoles: () => Promise<NativeRequesterRoles>;
   readonly creatorSafe: `0x${string}`;
   readonly posting: {
@@ -360,6 +373,21 @@ function digestFact(value: unknown, label: string): Digest {
   return value as Digest;
 }
 
+export function parseNativeAuthorityTimeAnchor(value: unknown): NativeAuthorityTimeAnchor {
+  const anchor = objectFact(value, 'authority time');
+  if (anchor.chainId !== 84532
+    || anchor.finalized !== true
+    || typeof anchor.blockNumber !== 'string'
+    || !/^(?:0|[1-9][0-9]*)$/u.test(anchor.blockNumber)
+    || typeof anchor.blockHash !== 'string'
+    || !/^0x[0-9a-fA-F]{64}$/u.test(anchor.blockHash)
+    || typeof anchor.timestamp !== 'string'
+    || !Number.isFinite(Date.parse(anchor.timestamp))) {
+    failAssociation('authority time is not a canonical finalized Base Sepolia block');
+  }
+  return anchor as unknown as NativeAuthorityTimeAnchor;
+}
+
 /**
  * Turns one already trust-gated requester source item into the exact native marketplace card.
  * Source/head cryptographic authority remains in `NativeDiscoveryConsumer.verify`; this pure join
@@ -434,6 +462,7 @@ export async function decodeNativeRequesterAnnouncement(input: {
     const association = objectFact(facts[NATIVE_REQUESTER_ASSOCIATION_FACT], 'requester association fact');
     const expectedAssociationMembers = [
       'admissionReceiptDigest',
+      'authorityTime',
       'chainId',
       'coordinator',
       'creator',
@@ -462,9 +491,8 @@ export async function decodeNativeRequesterAnnouncement(input: {
     }
     if (association.creator !== canonical.creator) failAssociation('creator does not match canonical TaskCreated');
     if (association.txHash !== canonical.txHash) failAssociation('transaction hash does not match canonical TaskCreated');
-    if (typeof association.sealedAt !== 'string' || !Number.isFinite(Date.parse(association.sealedAt))) {
-      failAssociation('sealedAt is not an RFC 3339 instant');
-    }
+    const authorityTime = parseNativeAuthorityTimeAnchor(association.authorityTime);
+    if (association.sealedAt !== authorityTime.timestamp) failAssociation('sealedAt does not equal the sealed authority time');
     const taskId = uint256Decimal(association.taskId, 'taskId');
     if (taskId !== canonical.taskId) failAssociation('taskId does not match canonical TaskCreated');
     const taskDigest = digestFact(association.taskDigest, 'taskDigest');
@@ -481,6 +509,10 @@ export async function decodeNativeRequesterAnnouncement(input: {
     digestFact(association.requesterEnvelopeDigest, 'requesterEnvelopeDigest');
     if (typeof association.runId !== 'string' || !RUN_ID_PATTERN.test(association.runId)) {
       failAssociation('runId is not canonical');
+    }
+    const annotations = objectFact(submission.annotations ?? {}, 'Submission annotations');
+    if (!sameJson(annotations['https://jinn.network/annotations/authority-time/1.0'], authorityTime)) {
+      failAssociation('signed Submission authority time does not equal signed source facts');
     }
 
     const wireTerms = postingTermsFromWire(association.postingTerms);
@@ -800,6 +832,7 @@ async function sealRunBundle(input: {
   readonly requesterAgent: string;
   readonly admissionAgent: string;
   readonly roles: NativeRequesterRoles;
+  readonly authorityTime: NativeAuthorityTimeAnchor;
   readonly checkpoint?: NativeRequesterDeps['checkpoints'];
 }): Promise<{
   readonly evaluationSpecBytes: Uint8Array;
@@ -820,11 +853,14 @@ async function sealRunBundle(input: {
   const taskBytes = template.task;
 
   const admissionRole = input.roles.get('admission');
-  const receipt = admitPredictionSnapshot({
+  const receipt = {
+    ...admitPredictionSnapshot({
     taskBytes,
     evaluationSpecBytes,
     issuer: input.admissionAgent,
-  });
+    }),
+    authorityTime: input.authorityTime,
+  };
   const sealedReceipt = await sealPredictionSnapshotAdmissionReceipt(receipt, roleDsseSigner(admissionRole));
   const admissionReceiptBytes = sealedReceipt.envelopeBytes;
   await input.checkpoint?.('admission-receipt-sealed');
@@ -840,6 +876,7 @@ async function sealRunBundle(input: {
       digest: { sha256: sealedReceipt.receiptDigest.slice('sha256:'.length) },
     },
     'https://jinn.network/annotations/native-requester-run/1.0': { runId: input.runId },
+    'https://jinn.network/annotations/authority-time/1.0': input.authorityTime,
   };
   const submissionBytes = sealSubmission({
     ...templateSubmission,
@@ -913,9 +950,9 @@ async function sourceFacts(
     | 'intendedSpendWei'
     | 'requesterEnvelopeDigest'
     | 'admissionReceiptDigest'
-    | 'txHash'>,
+    | 'txHash'
+    | 'authorityTime'>,
   runId: string,
-  sealedAt: string,
 ): Promise<Record<string, unknown>> {
   const recompute = TASK_EXECUTION_FACTS_RECOMPUTE.get(RECORD_KINDS.submission);
   if (recompute === undefined) throw new Error('submission facts recompute is not registered');
@@ -939,7 +976,8 @@ async function sourceFacts(
       admissionReceiptDigest: association.admissionReceiptDigest,
       requesterEnvelopeDigest: association.requesterEnvelopeDigest,
       txHash: association.txHash,
-      sealedAt,
+      authorityTime: association.authorityTime,
+      sealedAt: association.authorityTime.timestamp,
       runId,
     },
   };
@@ -984,7 +1022,6 @@ async function appendRequesterSource(input: {
           (await input.state.records.get(association.submission.path))!.bytes,
           association,
           input.runId,
-          issuedAt,
         ),
       }],
     };
@@ -1182,6 +1219,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         || existing.requesterEnvelopeDigest !== draft.requesterEnvelopeDigest
         || existing.submissionUri !== draft.submissionUri
         || existing.nonce !== draft.nonce
+        || !sameJson(existing.authorityTime, draft.authorityTime)
         || !sameJson(existing.postingTerms, draft.postingTerms)
         || existing.intendedSpendWei !== draft.intendedSpendWei
       ) throw new Error('canonical TaskCreated is already associated with a different exact Submission graph');
@@ -1209,6 +1247,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       nonce: draft.nonce,
       postingTerms: draft.postingTerms,
       intendedSpendWei: draft.intendedSpendWei,
+      authorityTime: draft.authorityTime,
       txHash: canonical.txHash,
       submission: draft.artifacts.submission,
       requesterEnvelope: draft.artifacts.requesterEnvelope,
@@ -1270,6 +1309,14 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       if (input.fixture !== FIXTURE) throw new Error(`native requester fixture must be ${FIXTURE}`);
       // This assertion is intentionally before role load, template signing, or post construction.
       const chain = assertBaseSepoliaTarget(input.network, await deps.readChain());
+      const authorityTime = await deps.authorityTime();
+      if (authorityTime.chainId !== 84532
+        || authorityTime.finalized !== true
+        || !/^(?:0|[1-9][0-9]*)$/u.test(authorityTime.blockNumber)
+        || !/^0x[0-9a-fA-F]{64}$/u.test(authorityTime.blockHash)
+        || !Number.isFinite(Date.parse(authorityTime.timestamp))) {
+        throw new Error('native requester authority time is not a canonical finalized Base Sepolia block');
+      }
       const configuredPostingTerms = postingTermsWire(deps.posting.terms);
       const configuredIntendedSpend = intendedSpendWire(deps.posting.terms);
       const roles = await deps.loadRoles();
@@ -1296,6 +1343,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         requesterAgent: deps.requesterAgent,
         admissionAgent: deps.admissionAgent,
         roles,
+        authorityTime,
         ...(deps.checkpoints === undefined ? {} : { checkpoint: deps.checkpoints }),
       });
       const artifacts = await storeExactRecords(state, {
@@ -1321,6 +1369,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
         nonce: bundle.nonce,
         postingTerms: configuredPostingTerms,
         intendedSpendWei: configuredIntendedSpend,
+        authorityTime,
         artifacts,
         stage: 'prepared',
       };

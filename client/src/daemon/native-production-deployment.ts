@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
+import { BASE_SEPOLIA_TODAY, type MarketplaceChainConfig } from '@jinn-network/marketplace-binding';
 import {
   createNativeRequester,
   createNativeRequesterPostTask,
@@ -23,6 +23,7 @@ import {
   type NativeProductConfig,
 } from './native-product-config.js';
 import { createNativeRoleLease } from './native-role-lease.js';
+import { NativeConstructionScope } from './native-construction-scope.js';
 import { buildNativeSolverProductionHost } from './native-solver-production.js';
 import { buildNativeEvaluatorProductionHost } from './native-evaluator-production.js';
 import { openNativeTrustCatalog, type NativeTrustAuthority } from './native-trust-catalog.js';
@@ -76,6 +77,8 @@ function isInfrastructure(value: unknown): value is NativeInfrastructurePrimitiv
   const candidate = value as Partial<NativeInfrastructurePrimitives>;
   return typeof candidate.inspectTarget === 'function'
     && typeof candidate.anchorClient?.lookupFinalizedAnchor === 'function'
+    && typeof candidate.authorityTime?.latestFinalized === 'function'
+    && typeof candidate.authorityTime?.verifyFinalized === 'function'
     && typeof candidate.records?.byLocation === 'function'
     && typeof candidate.records?.byDigest === 'function'
     && typeof candidate.records?.byRawCid === 'function'
@@ -111,7 +114,7 @@ function equalAddress(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
 
-function requiredEstimate(role: NativeOperatorConfig['role']): readonly (
+function requiredOperations(role: NativeOperatorConfig['role']): readonly (
   keyof NativeTargetInspection['estimatedMaximumWei']
 )[] {
   switch (role) {
@@ -138,9 +141,12 @@ export function assertNativeTargetInspection(
 ): void {
   if (inspection.chainId !== 84532) throw new NativeProductionDeploymentError(`native target chain ${inspection.chainId} is not Base Sepolia`);
   for (const name of ['taskCoordinator', 'jinnRouter', 'mechMarketplace', 'activityChecker'] as const) {
+    const accepted = BASE_SEPOLIA_TODAY[name];
     const expected = config.contracts[name];
     const observed = inspection.contracts[name];
-    if (!equalAddress(observed.address, expected) || ZERO_CODE_HASH.test(observed.codeHash)) {
+    if (!equalAddress(expected, accepted)
+      || !equalAddress(observed.address, accepted)
+      || ZERO_CODE_HASH.test(observed.codeHash)) {
       throw new NativeProductionDeploymentError(`native target ${name} address/code does not match the accepted deployment`);
     }
   }
@@ -158,14 +164,10 @@ export function assertNativeTargetInspection(
   if (inspection.finalizedBlock < 0n || inspection.canonicalBlock < inspection.finalizedBlock) {
     throw new NativeProductionDeploymentError('native preflight chain head is behind finalized state');
   }
-  let ownerGas = 0n;
-  for (const operation of requiredEstimate(config.role)) {
-    const estimate = inspection.estimatedMaximumWei[operation];
-    if (estimate === undefined || estimate <= 0n || estimate > capFor(config, operation)) {
-      throw new NativeProductionDeploymentError(`native ${operation} estimate is missing or exceeds its configured cap`);
-    }
-    ownerGas += estimate;
-  }
+  // Exact calldata does not exist at startup. Reserve against configured caps here; each
+  // activated broadcaster estimates its exact Safe calldata immediately before signing.
+  const ownerGas = requiredOperations(config.role)
+    .reduce((total, operation) => total + capFor(config, operation), 0n);
   if (inspection.ownerBalanceWei < ownerGas * 2n) {
     throw new NativeProductionDeploymentError('native EVM owner balance is below the two-times gas reserve');
   }
@@ -219,7 +221,8 @@ function roleKeyIds(...sets: readonly RoleIdentitySet[]): Readonly<Record<string
   for (const set of sets) {
     for (const role of [
       'requester-submission', 'admission', 'requester-discovery', 'solver-delivery',
-      'solver-discovery', 'evaluator-verdict', 'evaluator-discovery',
+      'solver-settlement', 'solver-discovery', 'evaluator-verdict',
+      'evaluator-settlement', 'evaluator-discovery',
     ] as const) {
       try { result[role] = set.get(role).keyId; } catch { /* role is not owned by this scoped set */ }
     }
@@ -234,6 +237,8 @@ async function buildRequesterHost(input: {
   readonly password: string;
   readonly lease: ReturnType<typeof createNativeRoleLease>;
 }): Promise<NativeOperatorHost & { readonly requester: ReturnType<typeof createNativeRequester> }> {
+  const scope = new NativeConstructionScope();
+  try {
   const config = input.config.operator.native;
   const requesterPath = config.identityStores.requester;
   const admissionPath = config.identityStores.admission;
@@ -270,6 +275,7 @@ async function buildRequesterHost(input: {
     expectedOwnerAddress: config.evmCustody.expectedOwnerAddress as `0x${string}`,
     accountIndex: config.evmCustody.accountIndex,
   });
+  scope.defer(writeSession.close);
   if (writeSession.writes.role !== 'requester') {
     await writeSession.close();
     throw new NativeProductionDeploymentError('requester write activation returned another role');
@@ -281,6 +287,7 @@ async function buildRequesterHost(input: {
     admissionAgent: config.admissionAgent,
     publicBaseUrl: config.publicBaseUrl,
     readChain: async () => chain(config),
+    authorityTime: input.infrastructure.authorityTime.latestFinalized,
     loadRoles: async () => requesterRolePort,
     creatorSafe: config.safeAddress as `0x${string}`,
     posting: {
@@ -291,12 +298,14 @@ async function buildRequesterHost(input: {
     now: () => new Date(),
   });
   const endpoint = await input.infrastructure.mountPublicSource(requester.handleDiscoveryRequest);
+  scope.defer(endpoint.close);
   const host = createNativeOperatorHost({
     role: 'requester',
     roleKeyIds: roleKeyIds(requesterRoles, admissionRoles),
     lease: input.lease,
     bindings: {
       async verify() {
+        await input.trust.assertFresh();
         for (const [set, roles] of [
           [requesterRoles, ['requester-submission', 'requester-discovery']],
           [admissionRoles, ['admission']],
@@ -332,7 +341,11 @@ async function buildRequesterHost(input: {
     },
     work: { start: async () => undefined, stop: endpoint.close },
   });
+  scope.release();
   return Object.assign(host, { requester });
+  } catch (cause) {
+    return scope.unwind(cause);
+  }
 }
 
 interface DeferredProductionHost extends NativeOperatorHost {
@@ -461,11 +474,14 @@ export async function loadNativeRequesterCommandExecutor(input: { readonly passw
   }>;
   close(): Promise<void>;
 }> {
+  const scope = new NativeConstructionScope();
+  try {
   const config = loadProductionConfig();
   if (config.operator.native.role !== 'requester') {
     throw new NativeProductionDeploymentError('native requester execution requires requester role configuration');
   }
   const infrastructure = await openInfrastructure(config);
+  scope.defer(infrastructure.close);
   assertNativeTargetInspection(config.operator.native, await infrastructure.inspectTarget());
   const native = config.operator.native;
   const lease = createNativeRoleLease({
@@ -474,13 +490,16 @@ export async function loadNativeRequesterCommandExecutor(input: { readonly passw
     agent: native.agent,
   });
   await lease.acquire();
+  scope.defer(lease.release);
   const trust = await openNativeTrustCatalog({
     path: native.trustRootsPath,
     expectedPolicyGenesisDigest: native.trustPolicyGenesisDigest as `sha256:${string}`,
     anchorClient: infrastructure.anchorClient,
   });
   const host = await buildRequesterHost({ config, infrastructure, trust, password: input.password, lease });
+  scope.defer(host.close);
   await host.start();
+  scope.release();
   return {
     close: () => host.close(),
     async request(request) {
@@ -496,6 +515,9 @@ export async function loadNativeRequesterCommandExecutor(input: { readonly passw
       };
     },
   };
+  } catch (cause) {
+    return scope.unwind(cause);
+  }
 }
 
 async function buildSolverHost(input: Parameters<typeof buildRequesterHost>[0]): Promise<NativeOperatorHost> {
@@ -503,7 +525,7 @@ async function buildSolverHost(input: Parameters<typeof buildRequesterHost>[0]):
   if (path === undefined) throw new NativeProductionDeploymentError('solver scoped custody is missing');
   const roles = await openRoles({
     agent: input.config.operator.native.agent,
-    roles: ['solver-delivery', 'solver-discovery'],
+    roles: ['solver-delivery', 'solver-settlement', 'solver-discovery'],
     storePath: path,
     password: input.password,
     trust: input.trust,
@@ -516,7 +538,7 @@ async function buildEvaluatorHost(input: Parameters<typeof buildRequesterHost>[0
   if (path === undefined) throw new NativeProductionDeploymentError('evaluator scoped custody is missing');
   const roles = await openRoles({
     agent: input.config.operator.native.agent,
-    roles: ['evaluator-verdict', 'evaluator-discovery'],
+    roles: ['evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery'],
     storePath: path,
     password: input.password,
     trust: input.trust,

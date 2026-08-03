@@ -4,11 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DELIVERY_MEDIA_TYPE, documentDigest } from '@jinn-network/task-execution-protocol';
-import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
+import { archivePagePath } from '@jinn-network/record-discovery-protocol';
+import { openNativeSolutionPublisher as openNativeSolutionPublisherImpl } from '../../src/daemon/native-solution-publisher.js';
 import { publicationKey } from '../../src/daemon/native-operation-identity.js';
 
 const roots: string[] = [];
 const closers: Array<() => Promise<void>> = [];
+const SETTLEMENT_DECLARATION_KEY = 'did:key:z6MkSolverSettlement';
+const openNativeSolutionPublisher = (
+  input: Omit<Parameters<typeof openNativeSolutionPublisherImpl>[0], 'settlementDeclarationKey'>,
+) => openNativeSolutionPublisherImpl({ ...input, settlementDeclarationKey: SETTLEMENT_DECLARATION_KEY });
 
 afterEach(async () => {
   await Promise.all(closers.splice(0).map((close) => close()));
@@ -95,6 +100,47 @@ describe('native solution public source', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe(DELIVERY_MEDIA_TYPE);
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(firstBytes);
+  });
+
+  it('appends a signed reorg withdrawal without rewriting the available announcement', async () => {
+    const stateRoot = await root();
+    const publisher = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+    });
+    closers.push(() => publisher.close());
+    const value = artifact(new TextEncoder().encode('{"delivery":1}'), 1);
+    const available = await publisher.publish(value);
+    const withdrawn = await publisher.withdraw({
+      withdrawalKey: publicationKey({
+        sourceId: publisher.sourceId,
+        role: 'delivery',
+        recordDigest: value.artifact.digest,
+        availabilityState: 'withdrawn',
+      }),
+      targetAnnouncementId: value.publication.publicationKey,
+      recordDigest: value.artifact.digest,
+      bytes: value.bytes,
+      mediaType: value.artifact.mediaType,
+      timestamp: '2026-08-02T00:00:02.000Z',
+      reason: 'reorged',
+    });
+
+    expect(available.sequence).toBe('0000000000000001');
+    expect(withdrawn.sequence).toBe('0000000000000002');
+    const response = await publisher.handler(new Request(
+      `https://operator.example/native${archivePagePath('solver-records', withdrawn.sequence)}`,
+    ));
+    const page = JSON.parse(await response.text()) as {
+      entries: Array<{ entry: { announcements: unknown[] } }>;
+    };
+    expect(page.entries[0]!.entry.announcements).toEqual([expect.objectContaining({
+      action: 'withdrawn',
+      retracts: value.publication.publicationKey,
+      reason: 'reorged',
+    })]);
   });
 
   it('refuses a second lifecycle owner for the same source state path', async () => {

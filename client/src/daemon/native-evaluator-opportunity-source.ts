@@ -2,7 +2,7 @@ import {
   decodeRawCodecCidDigestHex,
   deriveMarketplaceAttemptUri,
 } from '@jinn-network/marketplace-binding';
-import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
+import type { NativeDiscoveryCardProvenance } from '@jinn-network/marketplace-pipeline';
 import { recordPath } from '@jinn-network/record-discovery-protocol';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
 import {
@@ -12,6 +12,8 @@ import {
 import {
   NATIVE_REQUESTER_ASSOCIATION_FACT,
   decodeNativeRequesterAnnouncement,
+  parseNativeAuthorityTimeAnchor,
+  type NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
 import type { FetchBytesByDigest, SubjectMaterialReferences } from '../evaluator/subject-material.js';
 import type { Store } from '../store/store.js';
@@ -27,8 +29,18 @@ import type { NativeOperatorConfig } from './native-product-config.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 
 const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
-const ZERO_SUBMISSION = 'urn:uuid:00000000-0000-4000-8000-000000000000' as const;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
+
+interface NativePublicRecordCard {
+  readonly record: {
+    readonly kind: string;
+    readonly digest: `sha256:${string}`;
+  };
+  readonly facts: Record<string, unknown>;
+  readonly discovery?: NativeDiscoveryCardProvenance;
+}
+
+type NativePublicRecordQueueItem = NativeDiscoveryQueuedCard<NativePublicRecordCard>;
 
 export interface IndexedNativeRequesterAssociation {
   readonly taskDigest: `sha256:${string}`;
@@ -36,6 +48,7 @@ export interface IndexedNativeRequesterAssociation {
   readonly requesterEnvelopeDigest: `sha256:${string}`;
   readonly admissionReceiptDigest: `sha256:${string}`;
   readonly sealedAt: string;
+  readonly authorityTime: NativeAuthorityTimeAnchor;
   readonly requesterAgent: string;
   readonly chainId: 84532;
   readonly coordinator: `0x${string}`;
@@ -81,7 +94,7 @@ function exactDelivery(bytes: Uint8Array, expected: `sha256:${string}`) {
   return parsed.data;
 }
 
-function cardLocations(card: NativeDiscoveryQueuedCard): readonly string[] {
+function cardLocations(card: NativePublicRecordQueueItem): readonly string[] {
   const value = card.card.facts['nativePublicLocations'];
   if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string')) {
     throw new Error('signed native record has no exact public location');
@@ -89,19 +102,19 @@ function cardLocations(card: NativeDiscoveryQueuedCard): readonly string[] {
   return value as string[];
 }
 
-function provenance(card: NativeDiscoveryQueuedCard) {
+function provenance(card: NativeDiscoveryQueuedCard<{ readonly discovery?: NativeDiscoveryCardProvenance }>) {
   const value = card.card.discovery;
   if (value === undefined) throw new Error('native evaluator card has no signed provenance');
   return value;
 }
 
-function role(card: NativeDiscoveryQueuedCard): string {
+function role(card: NativePublicRecordQueueItem): string {
   const value = card.card.facts['role'];
   if (typeof value !== 'string' || value.length === 0) throw new Error('solver record has no signed role');
   return value;
 }
 
-function engagement(card: NativeDiscoveryQueuedCard): string {
+function engagement(card: NativePublicRecordQueueItem): string {
   const value = card.card.facts['engagementId'];
   if (typeof value !== 'string' || value.length === 0) throw new Error('solver record has no engagement identity');
   return value;
@@ -115,9 +128,10 @@ function parseAssociation(card: NativeDiscoveryQueuedCard): IndexedNativeRequest
   if (chainId !== 84532) throw new Error('requester association is not Base Sepolia');
   const coordinator = value['coordinator'];
   const sealedAt = value['sealedAt'];
+  const authorityTime = parseNativeAuthorityTimeAnchor(value['authorityTime']);
   const terms = object(value['postingTerms'], 'requester posting terms');
   if (typeof coordinator !== 'string' || !/^0x[0-9a-fA-F]{40}$/u.test(coordinator)
-    || typeof sealedAt !== 'string' || !Number.isFinite(Date.parse(sealedAt))) {
+    || sealedAt !== authorityTime.timestamp) {
     throw new Error('requester association has invalid coordinator/sealing time');
   }
   return {
@@ -126,6 +140,7 @@ function parseAssociation(card: NativeDiscoveryQueuedCard): IndexedNativeRequest
     requesterEnvelopeDigest: digest(value['requesterEnvelopeDigest'], 'requester envelope digest'),
     admissionReceiptDigest: digest(value['admissionReceiptDigest'], 'admission receipt digest'),
     sealedAt,
+    authorityTime,
     requesterAgent: discovery.source.agent,
     chainId: 84532,
     coordinator: coordinator as `0x${string}`,
@@ -151,10 +166,47 @@ function installSchema(store: Store): void {
       source_sequence TEXT NOT NULL,
       entry_digest TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS native_evaluator_settlement_declarations (
+      delivery_digest TEXT PRIMARY KEY,
+      declaration_key TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      source_sequence TEXT NOT NULL,
+      entry_digest TEXT NOT NULL
+    );
   `);
 }
 
-function indexLocation(store: Store, card: NativeDiscoveryQueuedCard, location: string): void {
+function indexSettlementDeclaration(store: Store, card: NativePublicRecordQueueItem): void {
+  const value = card.card.facts['settlementDeclarationKey'];
+  if (typeof value !== 'string' || !value.startsWith('did:key:')) {
+    throw new Error('solver Delivery has no signed settlement declaration key');
+  }
+  const origin = provenance(card);
+  const source = `${origin.source.agent}/${origin.source.name}`;
+  const existing = store.db.prepare(
+    `SELECT declaration_key, source_id, source_sequence, entry_digest
+       FROM native_evaluator_settlement_declarations WHERE delivery_digest = ?`,
+  ).get(card.card.record.digest) as {
+    declaration_key: string;
+    source_id: string;
+    source_sequence: string;
+    entry_digest: string;
+  } | undefined;
+  if (existing !== undefined) {
+    if (existing.declaration_key !== value || existing.source_id !== source
+      || existing.source_sequence !== origin.sequence || existing.entry_digest !== origin.entryDigest) {
+      throw new Error('solver settlement declaration changed signed provenance');
+    }
+    return;
+  }
+  store.db.prepare(
+    `INSERT INTO native_evaluator_settlement_declarations
+      (delivery_digest, declaration_key, source_id, source_sequence, entry_digest)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(card.card.record.digest, value, source, origin.sequence, origin.entryDigest);
+}
+
+function indexLocation(store: Store, card: NativePublicRecordQueueItem, location: string): void {
   const origin = provenance(card);
   const existing = store.db.prepare(
     `SELECT source_id, source_sequence, entry_digest FROM native_evaluator_public_records
@@ -275,6 +327,7 @@ export interface NativeEvaluatorOpportunityReader {
   readonly source: NativeEvaluatorOpportunitySource;
   readonly fetcher: FetchBytesByDigest;
   association(taskDigest: `sha256:${string}`): IndexedNativeRequesterAssociation | undefined;
+  settlementDeclarationKey(deliveryDigest: `sha256:${string}`): string;
   deadline(taskDigest: `sha256:${string}`, admittedAt: string): string;
   syncSignedSources(): Promise<void>;
 }
@@ -317,6 +370,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     sources: requesterSources,
     transport,
     async decode(discovery) {
+      await input.trust.assertFresh();
       const locations = discovery.announcement.locations ?? [];
       if (locations.length !== 1) {
         throw new Error('requester Submission must advertise exactly one public location');
@@ -326,6 +380,10 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       );
       const signedFacts = object(discovery.announcement.facts ?? {}, 'requester facts');
       const association = object(signedFacts[ASSOCIATION], 'requester association');
+      const authorityTime = parseNativeAuthorityTimeAnchor(association['authorityTime']);
+      if (!await input.infrastructure.authorityTime.verifyFinalized(authorityTime)) {
+        throw new Error('requester authority time is not canonical and finalized');
+      }
       const terms = object(association['postingTerms'], 'requester posting terms');
       const canonical = await input.infrastructure.evaluator!.canonicalTaskCreated({
         chainId: Number(association['chainId']),
@@ -354,7 +412,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     store: input.store,
     sources: solverSources,
     transport,
-    async decode(discovery): Promise<AnnouncedSubmissionCard> {
+    async decode(discovery): Promise<NativePublicRecordCard> {
       const locations = (discovery.announcement.locations ?? []).map(({ locator }) => locator);
       if (locations.length !== 1) throw new Error('solver record must advertise exactly one public location');
       return {
@@ -363,8 +421,6 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
           digest: discovery.announcement.record.digest,
         },
         facts: { ...(discovery.announcement.facts ?? {}), nativePublicLocations: locations },
-        chain: { taskId: 0n, submission: ZERO_SUBMISSION, nonce: 'not-applicable', intendedSpendWei: 0n },
-        derivationKind: 'chain',
       };
     },
   });
@@ -389,6 +445,13 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     fetcher,
     syncSignedSources,
     association: (taskDigest) => associationFor(input.store, taskDigest),
+    settlementDeclarationKey(deliveryDigest) {
+      const row = input.store.db.prepare(
+        `SELECT declaration_key FROM native_evaluator_settlement_declarations WHERE delivery_digest = ?`,
+      ).get(deliveryDigest) as { declaration_key: string } | undefined;
+      if (row === undefined) throw new Error(`no signed settlement declaration for ${deliveryDigest}`);
+      return row.declaration_key;
+    },
     deadline(taskDigest, admittedAt) {
       const association = associationFor(input.store, taskDigest);
       if (association === undefined) throw new Error(`no signed requester deadline authority for ${taskDigest}`);
@@ -404,17 +467,42 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
         await syncSignedSources();
         await input.syncVenue();
         const pending = solver.takePending();
-        const groups = new Map<string, NativeDiscoveryQueuedCard[]>();
+        const groups = new Map<string, NativePublicRecordQueueItem[]>();
         for (const card of pending) {
           const key = engagement(card);
           groups.set(key, [...(groups.get(key) ?? []), card]);
         }
         const result: Array<Awaited<ReturnType<NativeEvaluatorOpportunitySource['read']>>[number]> = [];
+        for (const withdrawal of solver.takePendingWithdrawals()) {
+          if (!sequenceAfter(withdrawal.sequence, after?.sequence)) continue;
+          const target = input.store.db.prepare(
+            `SELECT card_json FROM native_discovery_cards
+              WHERE source_agent = ? AND source_name = ? AND announcement_id = ?
+              ORDER BY id DESC LIMIT 1`,
+          ).get(withdrawal.source.agent, withdrawal.source.name, withdrawal.retracts) as { card_json: string } | undefined;
+          if (target === undefined) throw new Error('signed withdrawal target is absent from the authenticated source history');
+          const targetCard = JSON.parse(target.card_json) as { record?: { digest?: unknown }; facts?: Record<string, unknown> };
+          if (targetCard.facts?.['role'] !== 'delivery' || typeof targetCard.record?.digest !== 'string') continue;
+          const evaluation = input.store.db.prepare(
+            `SELECT canonical_event_identity FROM native_evaluations
+              WHERE advertised_delivery_digest = ? ORDER BY created_at DESC LIMIT 1`,
+          ).get(targetCard.record.digest) as { canonical_event_identity: string } | undefined;
+          if (evaluation === undefined) continue;
+          result.push({
+            kind: 'solution-withdrawn',
+            source: sourceId(solverConfigured[0]!),
+            sourceSequence: withdrawal.sequence,
+            sourceEntryDigest: withdrawal.entryDigest,
+            canonicalEventIdentity: evaluation.canonical_event_identity,
+            reason: withdrawal.reason,
+          });
+        }
         for (const cards of groups.values()) {
           const deliveries = cards.filter((card) => role(card) === 'delivery');
           const envelopes = cards.filter((card) => role(card) === 'delivery-envelope');
           if (deliveries.length !== 1 || envelopes.length !== 1) continue;
           const deliveryCard = deliveries[0]!;
+          indexSettlementDeclaration(input.store, deliveryCard);
           const deliveryProvenance = provenance(deliveryCard);
           if (!sequenceAfter(deliveryProvenance.sequence, after?.sequence)) continue;
           const envelope = envelopes[0]!;

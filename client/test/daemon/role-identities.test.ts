@@ -36,7 +36,7 @@ function resolvedBinding(input: {
   } as ResolvedBinding;
 }
 
-const ALL_NATIVE_SCOPES = ['authorizations', 'observations', 'deliveries', 'verdicts'] as const;
+const ALL_NATIVE_SCOPES = ['authorizations', 'observations', 'deliveries', 'verdicts', 'settlements'] as const;
 
 function openAt(root: string, bindingResolver: BindingResolver) {
   return openRoleIdentitySet({
@@ -316,48 +316,16 @@ describe('native persistent role identities', () => {
     }, deliveryTime);
   });
 
-  it('releases evaluator custody only for the exact sealed Attempt and immutable deployment registration', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-host-secret-'));
+  it('never exposes evaluator private custody through a child-process secret resolver', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'jinn-role-identities-host-signing-'));
     const resolver: BindingResolver = {
       resolveBinding: vi.fn(async (query) => resolvedBinding({ key: query.key, scopes: ALL_NATIVE_SCOPES })),
     };
     const identities = await openAt(root, resolver);
-    const registration = {
-      handle: 'evaluator.pem',
-      evaluator: AGENT,
-      registrationId: 'prediction-v1',
-      evaluationMethodDigest: `sha256:${'6'.repeat(64)}` as const,
-      authorize: (input: { readonly submissionDigest: string }) => input.submissionDigest === `sha256:${'2'.repeat(64)}`,
-    };
-    const host = identities.createEvaluatorHostSecretResolver(registration);
-    const authorization = {
-      attempt: { attemptUri: 'urn:uuid:00000000-0000-4000-8000-000000000040' },
-      launcherId: 'evaluation-harness',
-      taskDigest: `sha256:${'1'.repeat(64)}`,
-      submission: 'urn:uuid:00000000-0000-4000-8000-000000000041',
-      submissionDigest: `sha256:${'2'.repeat(64)}`,
-      taskProfile: 'https://jinn.network/task-profiles/evaluation-task/1.0',
-      deadline: '2026-08-03T00:00:00.000Z',
-      handle: registration.handle,
-      target: registration.handle,
-      role: 'evaluator',
-      evaluator: registration.evaluator,
-      registrationId: registration.registrationId,
-      evaluationMethodDigest: registration.evaluationMethodDigest,
-    } as const;
-    const bytes = await host.resolve(authorization as never, {});
-    expect(new TextDecoder().decode(bytes)).toContain('PRIVATE KEY');
-    bytes.fill(0);
-    const fresh = await host.resolve(authorization as never, {});
-    expect(new TextDecoder().decode(fresh)).toContain('PRIVATE KEY');
-    fresh.fill(0);
-    await expect(host.resolve({ ...authorization, submissionDigest: `sha256:${'3'.repeat(64)}` } as never, {}))
-      .rejects.toThrow(/durable sealed evaluation/);
-    await expect(host.resolve({ ...authorization, taskProfile: 'https://jinn.network/task-profiles/repository-work/1.0' } as never, {}))
-      .rejects.toThrow(/outside its sealed Attempt\/registration scope/);
-    await expect(host.resolve({ ...authorization, registrationId: 'task-controlled' } as never, {}))
-      .rejects.toThrow(/outside its sealed Attempt\/registration scope/);
-    await expect(host.resolve({ ...authorization, evaluationMethodDigest: `sha256:${'7'.repeat(64)}` } as never, {}))
-      .rejects.toThrow(/outside its sealed Attempt\/registration scope/);
+    expect('createEvaluatorHostSecretResolver' in identities).toBe(false);
+    const payload = new TextEncoder().encode('host-validated-verdict-payload');
+    const identity = identities.get('evaluator-verdict');
+    expect(identity.verify(payload, identity.sign(payload))).toBe(true);
+    expect(JSON.stringify(identities)).not.toContain('PRIVATE KEY');
   });
 });

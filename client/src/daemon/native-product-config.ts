@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import { AgentIriSchema } from '@jinn-network/trust-core';
+import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 import { z } from 'zod/v3';
 
 const address = z.string().regex(/^0x[0-9a-fA-F]{40}$/u);
@@ -76,11 +77,12 @@ export const NativeOperatorConfigSchema = z.object({
   trustRootsPath: absolutePath,
   trustPolicyGenesisDigest: digest,
   runtime: z.discriminatedUnion('provider', [
-    z.object({ provider: z.literal('first-party') }).strict(),
+    z.object({ provider: z.literal('first-party'), nodeExecutableDigest: digest }).strict(),
     z.object({
       provider: z.literal('digest-pinned-bundle'),
       infrastructureBundle: absolutePath,
       bundleDigest: digest,
+      nodeExecutableDigest: digest,
     }).strict(),
   ]),
   evaluator: z.object({
@@ -92,6 +94,15 @@ export const NativeOperatorConfigSchema = z.object({
   finality: z.object({ confirmations: z.number().int().positive() }).strict(),
   liveClosureReceiptPath: absolutePath,
 }).strict().superRefine((value, context) => {
+  for (const name of ['taskCoordinator', 'jinnRouter', 'mechMarketplace', 'activityChecker'] as const) {
+    if (value.contracts[name].toLowerCase() !== BASE_SEPOLIA_TODAY[name].toLowerCase()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['contracts', name],
+        message: 'must equal the accepted Base Sepolia today deployment',
+      });
+    }
+  }
   const seen = new Set<string>();
   for (const [index, source] of value.sources.entries()) {
     const key = `${source.agent}\0${source.name}`;
@@ -149,6 +160,14 @@ export const NativeOperatorConfigSchema = z.object({
       path: ['marketplaceAgentAddress'],
       message: `${value.role} role requires its deployed marketplace agent address`,
     });
+  }
+  const requesterSources = value.sources.filter(({ role }) => role === 'requester');
+  const solverSources = value.sources.filter(({ role }) => role === 'solver');
+  if (value.role === 'solver' && requesterSources.length !== 1) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sources'], message: 'solver role requires exactly one requester source' });
+  }
+  if (value.role === 'evaluator' && (requesterSources.length !== 1 || solverSources.length !== 1)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['sources'], message: 'evaluator role requires exactly one requester and one solver source' });
   }
   const requiredStores = value.role === 'requester' ? ['requester', 'admission'] as const : [value.role] as const;
   const configuredStores = Object.entries(value.identityStores)

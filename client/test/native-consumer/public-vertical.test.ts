@@ -169,6 +169,13 @@ describe('native public vertical consumer', () => {
       admissionAgent: ADMISSION_AGENT,
       publicBaseUrl: REQUESTER_BASE,
       readChain: async () => CHAIN,
+      authorityTime: async () => ({
+        chainId: 84532 as const,
+        blockNumber: '100',
+        blockHash: `0x${'d'.repeat(64)}` as const,
+        timestamp: '2026-08-02T11:59:00.000Z',
+        finalized: true as const,
+      }),
       loadRoles: async () => roles(requesterKeys),
       creatorSafe: REQUESTER_ADDRESS,
       posting: {
@@ -194,6 +201,7 @@ describe('native public vertical consumer', () => {
 
     const solutionPublisher = await openNativeSolutionPublisher({
       rootDir: producer.solver, publicBaseUrl: SOLVER_BASE, source: SOURCES.solver, signer: solverSource,
+      settlementDeclarationKey: solverDeclaration.keyId,
     });
     const evaluatorPublisher = await openNativeEvaluatorPublisher({
       rootDir: producer.evaluator, publicBaseUrl: EVALUATOR_BASE, source: SOURCES.evaluator, signer: evaluatorSource,
@@ -308,10 +316,10 @@ describe('native public vertical consumer', () => {
           { agent: REQUESTER_AGENT, identity: identities.requester, scope: ['authorizations'], relationship: 'controls', voucher: 'requester', order: 1 },
           { agent: REQUESTER_AGENT, identity: identities.requesterSource, scope: [DISCOVERY_SIGNING_SCOPE], relationship: 'signs-for', voucher: 'requester', order: 2 },
           { agent: ADMISSION_AGENT, identity: identities.admission, scope: [ADMISSION_RECEIPT_TRUST_SCOPE], relationship: 'controls', voucher: 'admission', order: 3 },
-          { agent: SOLVER_AGENT, identity: identities.solverDeclaration, scope: ['deliveries'], relationship: 'controls', voucher: 'solver', order: 4 },
+          { agent: SOLVER_AGENT, identity: identities.solverDeclaration, scope: ['settlements'], relationship: 'controls', voucher: 'solver', order: 4 },
           { agent: SOLVER_AGENT, identity: identities.executor, scope: ['deliveries'], relationship: 'signs-for', voucher: 'solver', order: 5 },
           { agent: SOLVER_AGENT, identity: identities.solverSource, scope: [DISCOVERY_SIGNING_SCOPE], relationship: 'signs-for', voucher: 'solver', order: 6 },
-          { agent: EVALUATOR_AGENT, identity: identities.evaluatorDeclaration, scope: ['verdicts'], relationship: 'controls', voucher: 'evaluator', order: 7 },
+          { agent: EVALUATOR_AGENT, identity: identities.evaluatorDeclaration, scope: ['settlements'], relationship: 'controls', voucher: 'evaluator', order: 7 },
           { agent: EVALUATOR_AGENT, identity: identities.evaluator, scope: ['deliveries', 'verdicts'], relationship: 'signs-for', voucher: 'evaluator', order: 8 },
           { agent: EVALUATOR_AGENT, identity: identities.evaluatorSource, scope: [DISCOVERY_SIGNING_SCOPE], relationship: 'signs-for', voucher: 'evaluator', order: 9 },
         ],
@@ -367,9 +375,18 @@ describe('native public vertical consumer', () => {
       });
       const report = await verifyNativeVertical({
         graph, state: consumer,
+        authorityTime: {
+          async verifyFinalized(anchor) {
+            return anchor.chainId === 84532
+              && anchor.blockNumber === '100'
+              && anchor.blockHash === `0x${'d'.repeat(64)}`
+              && anchor.timestamp === '2026-08-02T11:59:00.000Z'
+              && anchor.finalized;
+          },
+        },
         authority: {
-          requester: { key: identities.requester.keyId, sealingTime: '2026-08-02T12:00:00Z', address: REQUESTER_ADDRESS },
-          admission: { key: identities.admission.keyId, effectiveTime: '2026-08-02T12:00:00Z' },
+          requester: { key: identities.requester.keyId, sealingTime: '2026-08-02T11:59:00.000Z', address: REQUESTER_ADDRESS },
+          admission: { key: identities.admission.keyId, effectiveTime: '2026-08-02T11:59:00.000Z' },
           executor: { key: identities.executor.keyId, agent: SOLVER_AGENT, declarationKey: identities.solverDeclaration.keyId, address: SOLVER_ADDRESS },
           evaluator: { key: identities.evaluator.keyId, agent: EVALUATOR_AGENT, declarationKey: identities.evaluatorDeclaration.keyId, address: EVALUATOR_ADDRESS },
         },

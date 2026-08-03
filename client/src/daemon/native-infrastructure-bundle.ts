@@ -19,6 +19,7 @@ import type { ProtocolObservation } from '@jinn-network/task-execution-protocol'
 import type { Address, Hex } from 'viem';
 import type {
   CanonicalTaskCreated,
+  NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
 import type {
   NativeClaimBroadcastPort,
@@ -127,6 +128,7 @@ export interface NativePublicRecordTransport {
 }
 
 export interface NativeRequesterReadPrimitives {
+  readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
   readonly recoverPosting: (draft: {
     readonly chain: MarketplaceChainConfig;
     readonly creatorSafe: `0x${string}`;
@@ -145,6 +147,11 @@ export interface NativeRequesterReadPrimitives {
     readonly terms: PostingTerms;
     readonly maxClaims: 1;
   }) => Promise<CanonicalTaskCreated | null>;
+}
+
+export interface NativeAuthorityTimePrimitives {
+  readonly latestFinalized: () => Promise<NativeAuthorityTimeAnchor>;
+  readonly verifyFinalized: (anchor: NativeAuthorityTimeAnchor) => Promise<boolean>;
 }
 
 export interface NativeSolverReadPrimitives {
@@ -225,6 +232,7 @@ export interface NativeWriteSession {
 export interface NativeInfrastructurePrimitives {
   readonly inspectTarget: () => Promise<NativeTargetInspection>;
   readonly anchorClient: import('./native-trust-catalog.js').NativeFinalizedAnchorReadClient;
+  readonly authorityTime: NativeAuthorityTimePrimitives;
   readonly records: NativePublicRecordTransport;
   readonly requester?: NativeRequesterReadPrimitives;
   readonly solver?: NativeSolverReadPrimitives;

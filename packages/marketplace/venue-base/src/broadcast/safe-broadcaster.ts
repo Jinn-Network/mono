@@ -68,6 +68,8 @@ export interface SafeBroadcastOptions {
   readonly stuckNonceAfterMs?: number;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
+  /** Product-owned per-operation gas-cost cap, evaluated over the exact Safe calldata. */
+  readonly maxCostWei?: (request: SafeBroadcastRequest) => bigint;
 }
 
 export interface BaseVenueSafeBroadcaster extends SafeBroadcastPort {
@@ -226,6 +228,27 @@ export function createSafeBroadcaster(input: {
       const signature = toSafeEthSignSignature(
         await input.walletClient.signMessage({ account: signer, message: { raw: safeTxHash as Hex } }) as Hex,
       );
+
+      if (options.maxCostWei !== undefined) {
+        const feePerGas = fees.maxFeePerGas ?? fees.gasPrice;
+        if (feePerGas === undefined) throw new Error("Safe broadcast fee estimate is unavailable");
+        const gas = await input.publicClient.estimateContractGas({
+          address: input.safeAddress,
+          abi: SAFE_ABI,
+          functionName: "execTransaction",
+          args: [
+            request.to, request.value, request.data, request.operation ?? 0,
+            0n, 0n, 0n, ZERO_ADDRESS, ZERO_ADDRESS, signature,
+          ],
+          account: from,
+          value: request.value,
+        });
+        const exactMaximumWei = gas * feePerGas;
+        const cap = options.maxCostWei(request);
+        if (cap <= 0n || exactMaximumWei > cap) {
+          throw new Error(`Safe broadcast exact gas maximum ${exactMaximumWei} exceeds configured cap ${cap}`);
+        }
+      }
 
       let txHash: Hex;
       try {

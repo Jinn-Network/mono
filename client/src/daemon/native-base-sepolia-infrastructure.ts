@@ -23,6 +23,7 @@ import {
   createBaseVenue,
   createChainLogSource,
   DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS,
+  encodePreValidatedSignature,
   openVenueState,
   type BaseVenue,
   type ChainLogSource,
@@ -32,6 +33,7 @@ import {
   decodeFunctionData,
   getAddress,
   keccak256,
+  toFunctionSelector,
   zeroAddress,
   type Hex,
   type PublicClient,
@@ -73,6 +75,35 @@ export interface NativeBaseSepoliaTargetReadClient {
 
 const DEFAULT_RECORD_LIMIT_BYTES = 64 * 1024 * 1024;
 const MAX_PUBLIC_REQUEST_BYTES = 1024 * 1024;
+const SELECTORS = {
+  claimTask: toFunctionSelector('claimTask(uint256,address)'),
+  claimEvaluation: toFunctionSelector('claimEvaluation(uint256,uint32,address,bytes32)'),
+  claimSolutionDelivery: toFunctionSelector('claimSolutionDelivery(bytes32,bytes32)'),
+  claimVerdictDelivery: toFunctionSelector('claimVerdictDelivery(bytes32,bytes32,uint8)'),
+  deliverToMarketplace: toFunctionSelector('deliverToMarketplace(bytes32[],bytes[])'),
+} as const;
+
+function operationGasCap(
+  input: NativeInfrastructureFactoryInput,
+  data: Hex,
+): bigint {
+  const selector = data.slice(0, 10).toLowerCase();
+  if (input.role === 'solver') {
+    if (selector === SELECTORS.claimTask.toLowerCase()) return BigInt(input.transactionCaps.claimMaxWei);
+    if (selector === SELECTORS.claimSolutionDelivery.toLowerCase()
+      || selector === SELECTORS.deliverToMarketplace.toLowerCase()) {
+      return BigInt(input.transactionCaps.solutionSettlementMaxWei);
+    }
+  }
+  if (input.role === 'evaluator') {
+    if (selector === SELECTORS.claimEvaluation.toLowerCase()) return BigInt(input.transactionCaps.evaluationClaimMaxWei);
+    if (selector === SELECTORS.claimVerdictDelivery.toLowerCase()
+      || selector === SELECTORS.deliverToMarketplace.toLowerCase()) {
+      return BigInt(input.transactionCaps.verdictSettlementMaxWei);
+    }
+  }
+  throw new Error(`native ${input.role} broadcast selector ${selector} has no configured transaction cap`);
+}
 
 async function requestBody(request: import('node:http').IncomingMessage): Promise<Uint8Array | undefined> {
   if (request.method === 'GET' || request.method === 'HEAD') return undefined;
@@ -482,6 +513,37 @@ async function blockAtOrBefore(publicClient: PublicClient, timestamp: bigint): P
   return low;
 }
 
+async function latestAuthorityTime(publicClient: PublicClient) {
+  const block = await publicClient.getBlock({ blockTag: 'finalized' });
+  if (block.hash === null) throw new Error('finalized Base Sepolia authority block has no hash');
+  return {
+    chainId: 84532 as const,
+    blockNumber: block.number.toString(10),
+    blockHash: block.hash,
+    timestamp: new Date(Number(block.timestamp) * 1_000).toISOString(),
+    finalized: true as const,
+  };
+}
+
+async function verifyAuthorityTime(
+  publicClient: PublicClient,
+  anchor: import('../native-requester/requester.js').NativeAuthorityTimeAnchor,
+): Promise<boolean> {
+  if (anchor.chainId !== 84532 || anchor.finalized !== true || !/^(?:0|[1-9][0-9]*)$/u.test(anchor.blockNumber)) {
+    return false;
+  }
+  const number = BigInt(anchor.blockNumber);
+  const [block, finalized] = await Promise.all([
+    publicClient.getBlock({ blockNumber: number }).catch(() => undefined),
+    publicClient.getBlock({ blockTag: 'finalized' }),
+  ]);
+  return block !== undefined
+    && block.hash !== null
+    && number <= finalized.number
+    && sameHex(block.hash, anchor.blockHash)
+    && new Date(Number(block.timestamp) * 1_000).toISOString() === anchor.timestamp;
+}
+
 function createRequesterReads(input: {
   readonly config: NativeInfrastructureFactoryInput;
   readonly publicClient: PublicClient;
@@ -491,6 +553,7 @@ function createRequesterReads(input: {
   return {
     intents,
     reads: {
+      authorityTime: () => latestAuthorityTime(input.publicClient),
       async recoverPosting(draft): Promise<PostingOutcome | null> {
         const key = {
           creatorSafe: draft.creatorSafe,
@@ -566,8 +629,32 @@ export function createBaseSepoliaEvaluatorReads(input: {
       });
       if (!routerCanonical.canonical || !routerCanonical.finalized) return null;
 
-      const mechEvents = await publicClient.getContractEvents({
+      const requestInfo = await publicClient.readContract({
         address: chain.mechMarketplace,
+        abi: MECH_MARKETPLACE_ABI,
+        functionName: 'mapRequestIdInfos',
+        args: [expected.requestId],
+      }) as readonly [`0x${string}`, `0x${string}`, `0x${string}`, bigint, bigint, `0x${string}`];
+      const deliveryMech = requestInfo[1];
+      if (sameHex(deliveryMech, zeroAddress)) return null;
+      const [mechOperator, registeredFactory] = await Promise.all([
+        publicClient.readContract({
+          address: deliveryMech,
+          abi: MECH_OPERATOR_ABI,
+          functionName: 'getOperator',
+        }),
+        publicClient.readContract({
+          address: chain.mechMarketplace,
+          abi: MECH_MARKETPLACE_ABI,
+          functionName: 'mapAgentMechFactories',
+          args: [deliveryMech],
+        }),
+      ]);
+      if (!sameHex(String(mechOperator), expected.operator)
+        || sameHex(String(registeredFactory), zeroAddress)) return null;
+
+      const mechEvents = await publicClient.getContractEvents({
+        address: deliveryMech,
         abi: MECH_ABI,
         eventName: 'Deliver',
         fromBlock,
@@ -680,8 +767,10 @@ async function canonicalTransactionBlock(input: {
 function createSolverReads(input: {
   readonly config: NativeInfrastructureFactoryInput;
   readonly publicClient: PublicClient;
+  readonly records: NativePublicRecordTransport;
 }): NativeSolverReadPrimitives {
   const chain = marketplaceChain(input.config);
+  const exactDelivery = createBaseSepoliaEvaluatorReads(input).readCanonicalSolutionDelivery;
   const fromOperation = async (createdAt: string) => {
     const parsed = Date.parse(createdAt);
     if (!Number.isFinite(parsed)) throw new Error('native chain operation has invalid creation time');
@@ -802,6 +891,26 @@ function createSolverReads(input: {
       } catch {
         return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution settlement calldata is not bound to the request' };
       }
+      if (canonical.finalized) {
+        const detail = operation.detail as { readonly deliveryDigest?: unknown };
+        if (typeof detail?.deliveryDigest !== 'string'
+          || !/^sha256:[0-9a-f]{64}$/u.test(detail.deliveryDigest)) {
+          return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution operation has no exact Delivery digest' };
+        }
+        const correspondence = await exactDelivery({
+          chainId: 84532,
+          coordinator: chain.taskCoordinator,
+          router: chain.jinnRouter,
+          taskId: engagement.taskId,
+          attemptIndex: engagement.attemptIndex!,
+          requestId: engagement.requestId,
+          operator: input.config.safeAddress,
+          advertisedDeliveryDigest: detail.deliveryDigest as `sha256:${string}`,
+        });
+        if (correspondence === null || !sameHex(correspondence.transactionHash, event.transactionHash)) {
+          return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution settlement does not bind the exact public Delivery' };
+        }
+      }
       return canonical.finalized
         ? {
             kind: 'finalized',
@@ -898,7 +1007,6 @@ export async function inspectBaseSepoliaNativeTarget(
     throw new Error('native Base Sepolia finalized height is ahead of the canonical head');
   }
 
-  const cap = input.transactionCaps;
   const escrowRequiredWei = input.role === 'requester'
     ? (() => {
         if (input.postingTerms === undefined) {
@@ -908,15 +1016,9 @@ export async function inspectBaseSepoliaNativeTarget(
           + BigInt(input.postingTerms.verdictMaxDeliveryRateWei);
       })()
     : 0n;
-  const estimatedMaximumWei = input.role === 'requester'
-    ? { createTask: BigInt(cap.createTaskMaxWei) }
-    : input.role === 'solver' ? {
-        claim: BigInt(cap.claimMaxWei),
-        solutionSettlement: BigInt(cap.solutionSettlementMaxWei),
-      } : {
-        evaluationClaim: BigInt(cap.evaluationClaimMaxWei),
-        verdictSettlement: BigInt(cap.verdictSettlementMaxWei),
-      };
+  // No operation calldata exists during startup inspection. Do not mislabel caps as estimates;
+  // exact-call gas estimates are enforced by the activated requester/Safe broadcasters.
+  const estimatedMaximumWei = {};
   let marketplaceAgentAuthorized: boolean | undefined;
   if (input.marketplaceAgentAddress !== undefined) {
     marketplaceAgentAuthorized = await client.marketplaceAgentAuthorization({
@@ -1031,6 +1133,29 @@ async function requesterPostingOutcome(input: {
     || !sameHex(input.request.to, chain.jinnRouter)) {
     throw new Error('native requester Safe broadcast target does not match structured deployment');
   }
+  const account = input.walletClient.account;
+  if (account === undefined) throw new Error('native requester wallet has no account');
+  const feeEstimate = await input.publicClient.estimateFeesPerGas().catch(async () => ({
+    gasPrice: await input.publicClient.getGasPrice(),
+  }));
+  const feePerGas = 'maxFeePerGas' in feeEstimate
+    ? feeEstimate.maxFeePerGas
+    : feeEstimate.gasPrice;
+  if (feePerGas === undefined) throw new Error('native requester fee estimate is unavailable');
+  const signature = encodePreValidatedSignature(account.address);
+  const gas = await input.publicClient.estimateContractGas({
+    address: input.request.safeAddress,
+    abi: SAFE_ABI,
+    functionName: 'execTransaction',
+    args: [input.request.to, input.request.value, input.request.data, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, signature],
+    account: account.address,
+    value: input.request.value,
+  });
+  const exactMaximumWei = gas * feePerGas;
+  const cap = BigInt(input.config.transactionCaps.createTaskMaxWei);
+  if (cap <= 0n || exactMaximumWei > cap) {
+    throw new Error(`native createTask exact gas maximum ${exactMaximumWei} exceeds configured cap ${cap}`);
+  }
   const txHash = await executeSafeTransaction(
     input.publicClient as Parameters<typeof executeSafeTransaction>[0],
     input.walletClient as Parameters<typeof executeSafeTransaction>[1],
@@ -1099,7 +1224,7 @@ export async function createNativeInfrastructure(
   const evaluator = input.role === 'evaluator'
     ? createBaseSepoliaEvaluatorReads({ config: input, publicClient, records })
     : undefined;
-  const solver = input.role === 'solver' ? createSolverReads({ config: input, publicClient }) : undefined;
+  const solver = input.role === 'solver' ? createSolverReads({ config: input, publicClient, records }) : undefined;
   const endpoints = new Set<NativePublicEndpointOwner>();
   let active: NativeWriteSession | undefined;
   let closed = false;
@@ -1107,6 +1232,10 @@ export async function createNativeInfrastructure(
   return {
     inspectTarget: () => inspectBaseSepoliaNativeTarget(input, viemReads.target),
     anchorClient,
+    authorityTime: {
+      latestFinalized: () => latestAuthorityTime(publicClient),
+      verifyFinalized: (authority) => verifyAuthorityTime(publicClient, authority),
+    },
     records,
     ...(requester === undefined ? {} : { requester: requester.reads }),
     ...(evaluator === undefined ? {} : { evaluator }),
@@ -1182,6 +1311,9 @@ export async function createNativeInfrastructure(
         verifySettlementGrade: activation.venueAuthority.verifySettlementGrade,
         isAuthorizedMechOrigin: activation.venueAuthority.isAuthorizedMechOrigin,
         observations: activation.venueAuthority.observations,
+        broadcast: {
+          maxCostWei: (request) => operationGasCap(input, request.data),
+        },
       });
       const venue = venuePrimitives({
         logSource: baseVenue.logSource,

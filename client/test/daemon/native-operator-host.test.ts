@@ -172,4 +172,39 @@ describe('native operator host lifecycle', () => {
       vi.useRealTimers();
     }
   });
+
+  it('fails health after a background work-loop failure instead of reporting a healthy idle worker', async () => {
+    const failure = new Error('settlement reconciliation failed');
+    const host = createNativeOperatorHost({
+      role: 'solver',
+      roleKeyIds: { 'solver-delivery': 'did:key:delivery' },
+      lease: { acquire: vi.fn(), owned: () => true, release: vi.fn() },
+      bindings: { verify: vi.fn(async () => undefined) },
+      venue: {
+        rollbackToFinalized: vi.fn(async () => undefined),
+        health: vi.fn(async () => ({ canonicalBlock: 1n, finalizedBlock: 1n, caughtUp: true })),
+        close: vi.fn(),
+      },
+      operations: {
+        reconcileTransactions: vi.fn(async () => undefined),
+        reconcilePublications: vi.fn(async () => undefined),
+        uncertainCount: () => 0,
+      },
+      discovery: { sync: vi.fn(async () => ({ lag: 0 })) },
+      recovery: { recoverBackends: vi.fn(async () => undefined) },
+      readiness: {
+        backendRequired: true, evidenceRequired: true,
+        backend: vi.fn(async () => true), evidence: vi.fn(async () => true), publicSource: vi.fn(async () => true),
+      },
+      work: {
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(async () => undefined),
+        failure: () => failure,
+      },
+    });
+
+    await host.start();
+    await expect(host.health()).rejects.toThrow(/background work loop failed.*settlement reconciliation failed/u);
+    await host.close();
+  });
 });

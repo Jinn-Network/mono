@@ -2,6 +2,7 @@ import {
   RECORD_DISCOVERY_VERSION,
   RECORD_KINDS,
   type SourceIdentity,
+  type WithdrawnAnnouncement,
 } from '@jinn-network/record-discovery-protocol';
 import type { ArchiveHttpHandler } from '@jinn-network/record-discovery-transport-http';
 import type { NativeSolutionPublisherPort } from './native-solution-coordinator.js';
@@ -22,6 +23,15 @@ export class NativeSolutionPublisherOwnershipError extends Error {
 
 export interface NativeSolutionPublisher extends NativeSolutionPublisherPort {
   readonly handler: ArchiveHttpHandler;
+  withdraw(input: {
+    readonly withdrawalKey: string;
+    readonly targetAnnouncementId: string;
+    readonly recordDigest: `sha256:${string}`;
+    readonly bytes: Uint8Array;
+    readonly mediaType: string;
+    readonly timestamp: string;
+    readonly reason: WithdrawnAnnouncement['reason'];
+  }): Promise<{ readonly sequence: string; readonly entryDigest: `sha256:${string}` }>;
   close(): Promise<void>;
 }
 
@@ -39,6 +49,7 @@ export async function openNativeSolutionPublisher(input: {
   readonly publicBaseUrl: string;
   readonly source: SourceIdentity;
   readonly signer: NativeSignedSourceSigner;
+  readonly settlementDeclarationKey: string;
   /** Deterministic crash seams used by the B8 recovery matrix. */
   readonly faults?: NativeSignedSourceFaults;
   /** Lease seams are deterministic-test-only; production uses wall time and real PID liveness. */
@@ -90,11 +101,36 @@ export async function openNativeSolutionPublisher(input: {
               engagementId: value.publication.engagementId,
               role: value.publication.role,
               family: value.artifact.family,
+              settlementDeclarationKey: input.settlementDeclarationKey,
               ...(value.artifact.name === null ? {} : { name: value.artifact.name }),
             },
           }],
         }),
       });
+    },
+    async withdraw(value) {
+      const receipt = await core.publish({
+        publicationKey: value.withdrawalKey,
+        sourceId: core.sourceId,
+        recordDigest: value.recordDigest,
+        bytes: value.bytes,
+        mediaType: value.mediaType,
+        timestamp: value.timestamp,
+        makeEntry: ({ sequence, previous }) => ({
+          protocol: RECORD_DISCOVERY_VERSION,
+          source: input.source,
+          sequence,
+          previous,
+          timestamp: value.timestamp,
+          announcements: [{
+            announcementId: value.withdrawalKey,
+            action: 'withdrawn',
+            retracts: value.targetAnnouncementId,
+            reason: value.reason,
+          }],
+        }),
+      });
+      return { sequence: receipt.sequence, entryDigest: receipt.entryDigest };
     },
   };
 }

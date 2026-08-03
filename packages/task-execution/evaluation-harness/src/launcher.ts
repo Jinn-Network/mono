@@ -2,7 +2,6 @@
 
 import { fileURLToPath } from "node:url";
 import type {
-  HostSecretForwardDeclaration,
   InterruptionBehavior,
   LauncherCapabilities,
   LauncherContract,
@@ -78,7 +77,6 @@ function nodeBootstrapEnv(): Record<string, string> {
 
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
-  hostSecretForwards: readonly HostSecretForwardDeclaration[],
   configured: boolean,
 ): LauncherCapabilities {
   return {
@@ -94,7 +92,7 @@ function launcherCapabilities(
     resume: interruptionBehavior === "recoverable",
     interruptionBehaviorDefault: interruptionBehavior,
     secretForwards: [],
-    hostSecretForwards,
+    hostSecretForwards: [],
     runPinning: {
       keys: [{
         key: "harness",
@@ -155,18 +153,10 @@ function launchPlan(
       },
     ],
     resultContract: {
-      envelopeFormat: "jinn-result-evaluation-dsse-v1",
+      envelopeFormat: "jinn-result-evaluation-statement-v1",
       structuredOutputArtifact: "out/verdict",
     },
     interruptionBehavior: registration.interruptionBehavior,
-    hostSecretForwards: [{
-      handle: registration.signer.handle,
-      target: registration.signer.handle,
-      role: "evaluator",
-      evaluator: registration.evaluatorIdentity.id,
-      registrationId: registration.registrationId,
-      evaluationMethodDigest: methodDigest(registration),
-    }],
   };
 }
 
@@ -192,20 +182,6 @@ export function makeEvaluationLauncher(
   if (interruptionBehaviors.size > 1) {
     throw new TypeError("evaluation launcher registrations have ambiguous interruption behavior");
   }
-  const signerHandles = new Set(registrations.map((registration) => registration.signer.handle));
-  if (signerHandles.size > 1) {
-    throw new TypeError("evaluation launcher registrations have ambiguous signer forward");
-  }
-  const registrationForwards: readonly HostSecretForwardDeclaration[] = registrations.length === 0
-    ? []
-    : [{
-      handle: registrations[0]!.signer.handle,
-      target: registrations[0]!.signer.handle,
-      role: "evaluator",
-      evaluator: registrations[0]!.evaluatorIdentity.id,
-      registrationId: registrations[0]!.registrationId,
-      evaluationMethodDigest: methodDigest(registrations[0]!),
-    }];
   const selectedRegistration = (view: TaskView): EvaluatorRegistration => {
     if (options.selectRegistration === undefined) {
       throw new TypeError("evaluation launcher requires a registration selector");
@@ -222,7 +198,6 @@ export function makeEvaluationLauncher(
     id: EVALUATION_LAUNCHER_ID,
     capabilities: () => launcherCapabilities(
       registrations[0]?.interruptionBehavior ?? "repeatable",
-      registrationForwards,
       registrations.length > 0,
     ),
     ...(options.probe === undefined ? {} : { probe: options.probe }),

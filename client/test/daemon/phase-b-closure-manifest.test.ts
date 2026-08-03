@@ -10,7 +10,7 @@ describe('Phase B closure artifact manifest', () => {
     const bytes = buildPhaseBClosureManifest(phaseBClosureFixture());
     const validated = parseValidatedPhaseBClosureManifest(bytes);
     expect(validated.manifest.liveRun).toBe(true);
-    expect(validated.manifest.publicRoles).toHaveLength(7);
+    expect(validated.manifest.publicRoles).toHaveLength(9);
     expect(validated.manifest.recordRoots).toHaveLength(15);
     expect(validated.manifest.recoveryReports).toHaveLength(6);
     expect(validated.manifest.acceptanceCriteria).toHaveLength(62);

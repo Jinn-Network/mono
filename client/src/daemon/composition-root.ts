@@ -1325,6 +1325,7 @@ export async function buildOperatorComposition(
         publicBaseUrl: input.nativeClaimRuntime!.solution.publicBaseUrl,
         source: { agent: identities!.agent, name: 'solver-records' },
         signer: identities!.get('solver-discovery'),
+        settlementDeclarationKey: identities!.get('solver-settlement').keyId,
       })
     : undefined;
   const nativeSolutionCoordinator = input.mode === 'native'

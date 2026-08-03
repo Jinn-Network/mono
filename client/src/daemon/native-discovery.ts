@@ -9,6 +9,7 @@
 import type {
   AnnouncementEntry,
   AvailableAnnouncement,
+  WithdrawnAnnouncement,
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
@@ -76,6 +77,22 @@ CREATE TABLE IF NOT EXISTS native_discovery_cards (
 );
 CREATE INDEX IF NOT EXISTS idx_native_discovery_cards_pending
   ON native_discovery_cards (acknowledged_at, id);
+
+CREATE TABLE IF NOT EXISTS native_discovery_withdrawals (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_agent       TEXT NOT NULL,
+  source_name        TEXT NOT NULL,
+  sequence           TEXT NOT NULL,
+  entry_digest       TEXT NOT NULL,
+  announcement_id    TEXT NOT NULL,
+  retracts           TEXT NOT NULL,
+  reason             TEXT NOT NULL,
+  accepted_at        TEXT NOT NULL,
+  acknowledged_at    TEXT,
+  UNIQUE (source_agent, source_name, entry_digest, announcement_id)
+);
+CREATE INDEX IF NOT EXISTS idx_native_discovery_withdrawals_pending
+  ON native_discovery_withdrawals (acknowledged_at, id);
 `;
 
 export interface SignedSourceHighWater {
@@ -101,10 +118,20 @@ export interface NativeDiscoveryProvenance {
   readonly signedHighWater: SignedSourceHighWater;
 }
 
-export interface NativeDiscoveryQueuedCard {
+export interface NativeDiscoveryQueuedCard<Card = AnnouncedSubmissionCard> {
   readonly id: number;
   readonly announcementId: string;
-  readonly card: AnnouncedSubmissionCard;
+  readonly card: Card;
+}
+
+export interface NativeDiscoveryQueuedWithdrawal {
+  readonly id: number;
+  readonly source: SourceIdentity;
+  readonly sequence: string;
+  readonly entryDigest: `sha256:${string}`;
+  readonly announcementId: string;
+  readonly retracts: string;
+  readonly reason: WithdrawnAnnouncement['reason'];
 }
 
 export interface NativeDiscoveryVerificationInput {
@@ -145,13 +172,15 @@ export interface NativeDiscoveryDecodeInput {
   readonly signedHighWater: SignedSourceHighWater;
 }
 
-export interface NativeDiscoveryConsumer {
+export interface NativeDiscoveryConsumer<Card = AnnouncedSubmissionCard> {
   /** Pulls/validates every configured source to a signed head and durably queues new cards. */
   sync(): Promise<{ readonly accepted: number; readonly verifiedSources: number }>;
   /** Durable, unacknowledged cards in source sequence/insertion order. */
-  takePending(): readonly NativeDiscoveryQueuedCard[];
+  takePending(): readonly NativeDiscoveryQueuedCard<Card>[];
+  takePendingWithdrawals(): readonly NativeDiscoveryQueuedWithdrawal[];
   /** Marks one locally queued card consumed only after its work-loop pass completed. */
-  acknowledge(card: NativeDiscoveryQueuedCard): void;
+  acknowledge(card: NativeDiscoveryQueuedCard<Card>): void;
+  acknowledgeWithdrawal(withdrawal: NativeDiscoveryQueuedWithdrawal): void;
   /** The exact source checkpoint retained across process restarts. */
   checkpoint(source: SourceIdentity): NativeDiscoveryCheckpoint | undefined;
   /** Opens the optional SSE hints with durable per-source resume cursors. */
@@ -252,15 +281,15 @@ function appendCursor(url: string, entry: `sha256:${string}`): string {
   return parsed.toString();
 }
 
-export function createNativeDiscoveryConsumer(input: {
+export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSubmissionCard>(input: {
   readonly store: Store;
   readonly sources: readonly NativeDiscoverySource[];
   readonly transport: Transport;
-  readonly decode: (input: NativeDiscoveryDecodeInput) => Promise<AnnouncedSubmissionCard | undefined>;
+  readonly decode: (input: NativeDiscoveryDecodeInput) => Promise<Card | undefined>;
   readonly streamTransport?: StreamTransport;
   readonly onSseError?: (error: unknown) => void;
   readonly now?: () => Date;
-}): NativeDiscoveryConsumer {
+}): NativeDiscoveryConsumer<Card> {
   const sources = [...input.sources];
   const keys = new Set<string>();
   for (const source of sources) {
@@ -282,7 +311,11 @@ export function createNativeDiscoveryConsumer(input: {
     readonly sequence: string;
     readonly entryDigest: `sha256:${string}`;
     readonly announcementId: string;
-    readonly card: AnnouncedSubmissionCard;
+    readonly card: Card;
+  }[], withdrawals: readonly {
+    readonly sequence: string;
+    readonly entryDigest: `sha256:${string}`;
+    readonly announcement: WithdrawnAnnouncement;
   }[]): void {
     input.store.db.transaction(() => {
       input.store.db.prepare(
@@ -321,6 +354,24 @@ export function createNativeDiscoveryConsumer(input: {
           item.entryDigest,
           item.announcementId,
           serialize(item.card),
+          acceptedAt,
+        );
+      }
+      const insertWithdrawal = input.store.db.prepare(
+        `INSERT INTO native_discovery_withdrawals
+           (source_agent, source_name, sequence, entry_digest, announcement_id, retracts, reason, accepted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(source_agent, source_name, entry_digest, announcement_id) DO NOTHING`,
+      );
+      for (const item of withdrawals) {
+        insertWithdrawal.run(
+          source.agent,
+          source.name,
+          item.sequence,
+          item.entryDigest,
+          item.announcement.announcementId,
+          item.announcement.retracts,
+          item.announcement.reason,
           acceptedAt,
         );
       }
@@ -394,12 +445,20 @@ export function createNativeDiscoveryConsumer(input: {
           sequence: string;
           entryDigest: `sha256:${string}`;
           announcementId: string;
-          card: AnnouncedSubmissionCard;
+          card: Card;
+        }> = [];
+        const withdrawals: Array<{
+          sequence: string;
+          entryDigest: `sha256:${string}`;
+          announcement: WithdrawnAnnouncement;
         }> = [];
         for (const item of fetched) {
           const entryDigest = sealJson(item.entry).digest;
           for (const announcement of item.entry.announcements) {
-            if (announcement.action !== 'available') continue;
+            if (announcement.action === 'withdrawn') {
+              withdrawals.push({ sequence: item.entry.sequence, entryDigest, announcement });
+              continue;
+            }
             const decoded = await input.decode({
               source,
               entry: item.entry,
@@ -420,12 +479,12 @@ export function createNativeDiscoveryConsumer(input: {
                   entryDigest,
                   signedHighWater: highWater,
                 },
-              },
+              } as Card,
             });
           }
         }
-        queue(source, highWater, cards);
-        accepted += cards.length;
+        queue(source, highWater, cards, withdrawals);
+        accepted += cards.length + withdrawals.length;
         verifiedSources += 1;
       }
       return { accepted, verifiedSources };
@@ -439,7 +498,27 @@ export function createNativeDiscoveryConsumer(input: {
       return rows.filter((row) => keys.has(`${row.source_agent}/${row.source_name}`)).map((row) => ({
         id: row.id,
         announcementId: row.announcement_id,
-        card: deserialize<AnnouncedSubmissionCard>(row.card_json),
+        card: deserialize<Card>(row.card_json),
+      }));
+    },
+
+    takePendingWithdrawals() {
+      const rows = input.store.db.prepare(
+        `SELECT id, source_agent, source_name, sequence, entry_digest, announcement_id, retracts, reason
+           FROM native_discovery_withdrawals WHERE acknowledged_at IS NULL ORDER BY id ASC`,
+      ).all() as Array<{
+        id: number; source_agent: string; source_name: string; sequence: string;
+        entry_digest: `sha256:${string}`; announcement_id: string; retracts: string;
+        reason: WithdrawnAnnouncement['reason'];
+      }>;
+      return rows.filter((row) => keys.has(`${row.source_agent}/${row.source_name}`)).map((row) => ({
+        id: row.id,
+        source: { agent: row.source_agent, name: row.source_name },
+        sequence: row.sequence,
+        entryDigest: row.entry_digest,
+        announcementId: row.announcement_id,
+        retracts: row.retracts,
+        reason: row.reason,
       }));
     },
 
@@ -449,6 +528,13 @@ export function createNativeDiscoveryConsumer(input: {
             SET acknowledged_at = ?
           WHERE id = ? AND acknowledged_at IS NULL`,
       ).run(new Date().toISOString(), card.id);
+    },
+
+    acknowledgeWithdrawal(withdrawal) {
+      input.store.db.prepare(
+        `UPDATE native_discovery_withdrawals SET acknowledged_at = ?
+          WHERE id = ? AND acknowledged_at IS NULL`,
+      ).run(new Date().toISOString(), withdrawal.id);
     },
 
     checkpoint,

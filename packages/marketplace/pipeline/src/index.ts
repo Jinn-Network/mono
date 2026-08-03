@@ -64,4 +64,5 @@ export type {
   FactsMapperOptions,
   FactsMappingRefusal,
   FactsMappingResult,
+  NativeDiscoveryCardProvenance,
 } from "./facts-mapper.js";

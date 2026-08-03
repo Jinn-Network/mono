@@ -432,9 +432,27 @@ async function consumerProbeMain() {
       const reportPath = joinPath(consumerRoot, 'native-vertical-verification.json');
       if (!fileExists(reportPath)) throw new Error('consumer fixture did not emit its verification report');
       const report = JSON.parse(readFile(reportPath, 'utf8'));
-      if (report.schemaVersion !== 1 || report.verified !== true
-        || !String(report.recordDigest).startsWith('sha256:')
-        || !String(report.taskDigest).startsWith('sha256:')) {
+      const requiredChecks = [
+        'exact-record-digests',
+        'grant-free-evaluation-submission',
+        'requester-admission-executor-evaluator-bindings',
+        'execution-evidence-graph',
+        'solution-delivery-graph',
+        'pair-fixed-evaluation-task',
+        'signed-result-evaluation-statement',
+        'evaluation-delivery-verdict-join',
+        'decision-grade-verdict-gate',
+        'signed-discovery-entry',
+      ];
+      if (report.schemaVersion !== 1 || report.decisionGrade !== true
+        || !Array.isArray(report.records) || report.records.length < 14
+        || report.records.some((record) => !String(record.digest).match(/^sha256:[a-f0-9]{64}$/u))
+        || !Array.isArray(report.bindings) || report.bindings.length < 6
+        || requiredChecks.some((check) => !report.checks?.includes(check))
+        || !String(report.operations?.solutionSettlementId).match(/^sha256:[a-f0-9]{64}$/u)
+        || !String(report.operations?.verdictSettlementId).match(/^sha256:[a-f0-9]{64}$/u)
+        || !String(report.sourceHead?.entry).match(/^sha256:[a-f0-9]{64}$/u)
+        || JSON.stringify(report).includes('"verified":true')) {
         throw new Error('consumer fixture emitted an invalid verification report');
       }
       if (JSON.stringify(report).includes(consumerRoot)) {

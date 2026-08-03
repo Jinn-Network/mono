@@ -7,9 +7,10 @@ consumer proof on **Base Sepolia only**. It is not evidence that a live run has 
 
 At the repository head that introduced this runbook:
 
-- the accepted command spelling is present but deliberately feature-disabled;
-- invoking it may perform a read-only readiness check, but it must not load role keys, construct a
-  transaction, or post a task;
+- the accepted command is production-wired; without `--execute` it performs only the read-only
+  readiness check and does not load role keys, construct a transaction, or post a task;
+- execution additionally requires `JINN_NATIVE_VERTICAL_EXECUTE=1` and `JINN_PASSWORD`; the
+  requester host remains alive to serve its signed public source until SIGINT/SIGTERM;
 - no live Base Sepolia transaction or closure run was performed while writing this runbook;
 - Base Sepolia must not default to `native-v1` until a separately captured, validated live closure
   receipt proves both finalized settlements and the public consumer report;
@@ -31,8 +32,18 @@ jinn native-vertical request \
 
 `<unique-run-id>` must be new for a new sealed Submission identity. Repeating an already sealed run
 ID must recover or return the prior durable posting outcome; it must never mint another logical post.
-While the command reports `feature-disabled`, stop there. Do not bypass it by populating a database,
-calling a product-internal function, or broadcasting equivalent calldata manually.
+Run it without `--execute` first and archive the readiness envelope. Do not bypass a refusal by
+populating a database, calling a product-internal function, or broadcasting equivalent calldata
+manually. The separately authorized live form is:
+
+```bash
+JINN_NATIVE_VERTICAL_EXECUTE=1 JINN_PASSWORD='<from-approved-secret-source>' \
+  jinn native-vertical request \
+  --network base-sepolia \
+  --fixture prediction-forecast-golden.json \
+  --run-id <unique-run-id> \
+  --execute
+```
 
 ## Fixed network contract
 
@@ -120,19 +131,20 @@ as evidence, source entries, closure manifests, or support bundles. Treat creden
 ## Startup order
 
 1. Start the approved Kubo/IPFS or pinning endpoint. Prove a raw-CID byte-for-byte round trip.
-2. Start requester discovery HTTP and check well-known, signed head, archive, and exact record paths.
-3. Start solver public evidence/discovery service.
-4. Start evaluator public discovery service.
-5. Start requester role after its chain/address/funding/identity checks pass.
-6. Start solver role. Require one worker lease, venue rollback/catch-up, source synchronization,
+2. Start solver public evidence/discovery service.
+3. Start evaluator public discovery service.
+4. Start solver role. Require one worker lease, venue rollback/catch-up, source synchronization,
    backend readiness, evidence readiness, and zero uncertain operations.
-7. Start evaluator role. Require distinct evaluator authority, digest-pinned deployment, isolated
+5. Start evaluator role. Require distinct evaluator authority, digest-pinned deployment, isolated
    host signer channel, venue/source health, and self-evaluation disabled.
-8. Start the independent consumer with public URLs and trust roots only.
-9. Run the accepted request command only when the build has explicitly enabled execution and the
-   operator has authorized the capped Base Sepolia run.
-10. Continue until both independent settlement operations are finalized and the consumer reaches
-    every signed source head and emits a decision-grade verification report.
+6. Start the independent consumer with public URLs and trust roots only; it may retry the requester
+   source until the requester command mounts it.
+7. Run the accepted request command only after its read-only readiness passes and the operator has
+   authorized the capped Base Sepolia run. The command acquires the requester lease, mounts the
+   requester public source, posts, announces, and remains the requester role process.
+8. Verify requester well-known, signed head, archive, and exact record paths, then continue until
+   both independent settlement operations are finalized and the consumer reaches every signed
+   source head and emits a decision-grade verification report.
 
 ## Required health before request
 

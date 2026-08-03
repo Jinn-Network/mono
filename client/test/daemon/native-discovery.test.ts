@@ -38,13 +38,29 @@ function entry(sequence: string, previous: `sha256:${string}` | null, digest: `s
   };
 }
 
+function withdrawnEntry(sequence: string, previous: `sha256:${string}`, retracts: string): AnnouncementEntry {
+  return {
+    protocol: RECORD_DISCOVERY_VERSION,
+    source: { agent: AGENT, name: SOURCE_NAME },
+    sequence,
+    previous,
+    timestamp: `2026-08-02T00:00:0${Number(sequence)}.000Z`,
+    announcements: [{
+      announcementId: `withdrawal-${sequence}`,
+      action: 'withdrawn',
+      retracts,
+      reason: 'reorged',
+    }],
+  };
+}
+
 function signed(entryValue: AnnouncementEntry) {
   return {
     entry: entryValue,
     signature: {
       payloadType: 'application/vnd.jinn.record-discovery.entry.v1+json',
-      payload: 'signed-entry',
-      signatures: [{ keyid: 'requester-key', sig: 'signature' }],
+      payload: Buffer.from('signed-entry').toString('base64'),
+      signatures: [{ keyid: 'requester-key', sig: Buffer.from('signature').toString('base64') }],
     },
   };
 }
@@ -64,7 +80,7 @@ function wireHead(headValue: SourceHead) {
   return {
     payloadType: 'application/vnd.jinn.record-discovery.head.v1+json',
     payload: Buffer.from(JSON.stringify(headValue)).toString('base64'),
-    signatures: [{ keyid: 'requester-key', sig: 'signature' }],
+    signatures: [{ keyid: 'requester-key', sig: Buffer.from('signature').toString('base64') }],
   };
 }
 
@@ -311,6 +327,32 @@ describe('native discovery consumer', () => {
     const subscription = synced.resumeSse();
     expect(transport.url).toBe(`${ROOT}/subscribe?cursor=${encodeURIComponent(sealJson(first).digest)}`);
     subscription.close();
+  });
+
+  it('durably queues a signed append-only withdrawal and acknowledges it independently of cards', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const second = withdrawnEntry(
+      '0000000000000002',
+      sealJson(first).digest,
+      first.announcements[0]!.announcementId,
+    );
+    const store = new Store(':memory:');
+    const synced = consumer({
+      store,
+      routes: routesFor([first, second]),
+      verify: async () => ({ status: 'ok' as const }),
+    });
+
+    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1 });
+    expect(synced.takePending()).toHaveLength(1);
+    expect(synced.takePendingWithdrawals()).toEqual([expect.objectContaining({
+      sequence: '0000000000000002',
+      retracts: first.announcements[0]!.announcementId,
+      reason: 'reorged',
+    })]);
+    const withdrawal = synced.takePendingWithdrawals()[0]!;
+    synced.acknowledgeWithdrawal(withdrawal);
+    expect(synced.takePendingWithdrawals()).toEqual([]);
   });
 
   it('isolates durable pending cards when two domain consumers share one product database', () => {

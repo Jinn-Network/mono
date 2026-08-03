@@ -346,16 +346,29 @@ async function validateCommittedHistory(input: {
     previousPage = page;
     previousEntry = verified.entryDigest;
     const announcement = verified.entry.announcements[0];
-    if (verified.entry.announcements.length !== 1
-      || announcement?.action !== 'available'
-      || announcement.locations?.length !== 1) {
+    if (verified.entry.announcements.length !== 1 || announcement === undefined) {
       throw new NativeSignedSourceIntegrityError('owned archive entry has unexpected announcement cardinality');
     }
-    authenticated.set(announcement.announcementId, {
-      location: announcement.locations[0]!.locator,
-      sequence: verified.entry.sequence,
-      entryDigest: verified.entryDigest,
-    });
+    if (announcement.action === 'available') {
+      if (announcement.locations?.length !== 1) {
+        throw new NativeSignedSourceIntegrityError('owned available announcement has no unique exact location');
+      }
+      authenticated.set(announcement.announcementId, {
+        location: announcement.locations[0]!.locator,
+        sequence: verified.entry.sequence,
+        entryDigest: verified.entryDigest,
+      });
+    } else {
+      const target = authenticated.get(announcement.retracts);
+      if (target === undefined) {
+        throw new NativeSignedSourceIntegrityError('owned withdrawal does not retract an earlier available announcement');
+      }
+      authenticated.set(announcement.announcementId, {
+        location: target.location,
+        sequence: verified.entry.sequence,
+        entryDigest: verified.entryDigest,
+      });
+    }
   }
   if (previousEntry !== input.state.last.entryDigest || previousPage !== input.state.last.page) {
     throw new NativeSignedSourceIntegrityError('committed state does not equal the authenticated archive tip');

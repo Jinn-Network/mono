@@ -100,7 +100,7 @@ export function resolveOperatorVerticalMode(input: {
 
   // An absent control is a default-selection request. The receipt may flip the
   // default only after closure; until then the compatibility product remains active.
-  if (input.requestedMode === undefined && input.liveClosure === undefined) {
+  if (input.requestedMode === undefined) {
     return { requestedMode: undefined, effectiveMode: 'legacy', readiness: 'live-closure-missing' };
   }
 
@@ -112,10 +112,9 @@ export function resolveOperatorVerticalMode(input: {
       readiness: 'explicit-native-unvalidated',
     };
   }
+  // A parsed local file is evidence input, not release authority. Until the closure verifier
+  // independently resolves its chain, source, package and consumer references, explicit mode is
+  // permitted for closure runs but the product never treats the local manifest as cutover proof.
   assertValidatedLiveClosure(input.liveClosure);
-  return {
-    requestedMode: input.requestedMode,
-    effectiveMode: 'native-v1',
-    readiness: 'live-closure-validated',
-  };
+  return { requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'explicit-native-unvalidated' };
 }

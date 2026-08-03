@@ -22,6 +22,13 @@ const ADMISSION_KEY = "did:key:admission";
 const EXECUTOR_KEY = "did:key:executor";
 const EVALUATOR_KEY = "did:key:evaluator";
 const NOW = "2026-08-02T10:00:00Z";
+const AUTHORITY_TIME = {
+  chainId: 84532,
+  blockNumber: "100",
+  blockHash: `0x${"a".repeat(64)}`,
+  timestamp: NOW,
+  finalized: true,
+} as const;
 
 function artifact(name: string, bytes: Uint8Array): ExactSubjectArtifact {
   return { name, bytes, digest: documentDigest(bytes) };
@@ -54,7 +61,7 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
       { name: "evaluation-spec", digest: { sha256: evaluationSpec.digest.slice(7) } },
     ],
     predicateType: "https://jinn.network/admission/prediction/1",
-    predicate: { issuer: ADMISSION },
+    predicate: { issuer: ADMISSION, authorityTime: AUTHORITY_TIME },
   };
   const receipt = artifact("admission-receipt", envelope(
     "application/vnd.in-toto+json",
@@ -74,6 +81,7 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
         name: "admission-receipt",
         digest: { sha256: receipt.digest.slice(7) },
       },
+      "https://jinn.network/annotations/authority-time/1.0": AUTHORITY_TIME,
     },
   });
   const submission = artifact("submission", submissionBytes);
@@ -162,13 +170,23 @@ function dependencies(input: {
     admissionAgentPolicy: { accepted: [ADMISSION], requiredStrength: "strong" },
     executorPolicy: { accepted: [EXECUTOR], requiredStrength: "strong" },
     evaluatorAuthority: {
-      resolve: async (authority) => input.evaluatorFailure === undefined
-        && authority.signerKey === EVALUATOR_KEY
-        && authority.declarationKey === EVALUATOR_KEY
-        && authority.agent === EVALUATOR
-        && authority.address === "0x2222222222222222222222222222222222222222"
-        ? { ok: true }
-        : { ok: false, reason: input.evaluatorFailure ?? "wrong-key" },
+      resolve: async (authority) => {
+        if (authority.purpose === "native:solver-settlement") {
+          return authority.signerKey === EXECUTOR_KEY
+            && authority.declarationKey === EXECUTOR_KEY
+            && authority.agent === EXECUTOR
+            && authority.address === "0x1111111111111111111111111111111111111111"
+            ? { ok: true }
+            : { ok: false, reason: "wrong-key" };
+        }
+        return input.evaluatorFailure === undefined
+          && authority.signerKey === EVALUATOR_KEY
+          && authority.declarationKey === EVALUATOR_KEY
+          && authority.agent === EVALUATOR
+          && authority.address === "0x2222222222222222222222222222222222222222"
+          ? { ok: true }
+          : { ok: false, reason: input.evaluatorFailure ?? "wrong-key" };
+      },
     },
   };
 }

@@ -48,6 +48,6 @@
     "timestamp": "2026-07-29T12:05:00Z"
   },
   "expect": {
-    "correctionSha256": "sha256:fd9b99d9ec36f6d978fc586e6eaf2abc319183eb1ab4463cc00e33c89158703b"
+    "correctionSha256": "sha256:9dcbe1ec6450074a0056e070acb633b9e88ebf011793d41010c8fe9c6ba2835c"
   }
 }

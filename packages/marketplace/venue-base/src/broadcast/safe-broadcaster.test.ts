@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 afterEach(() => { state.close(); rmSync(root, { recursive: true, force: true }); });
 
-function broadcaster(chain: ReturnType<typeof buildScriptedChain>) {
+function broadcaster(chain: ReturnType<typeof buildScriptedChain>, maxCostWei?: bigint) {
   return createSafeBroadcaster({
     chainId: 84532,
     safeAddress: SAFE,
@@ -32,7 +32,11 @@ function broadcaster(chain: ReturnType<typeof buildScriptedChain>) {
     walletClient: chain.walletClient,
     ledger: createSubmissionLedger(state),
     lock: createBroadcastLock(state, { now: chain.now, sleep: chain.sleep }),
-    options: { now: chain.now, sleep: chain.sleep },
+    options: {
+      now: chain.now,
+      sleep: chain.sleep,
+      ...(maxCostWei === undefined ? {} : { maxCostWei: () => maxCostWei }),
+    },
   });
 }
 
@@ -57,6 +61,29 @@ describe("Safe broadcaster (design §6.1 Safe broadcast, §7 ruling 1)", () => {
     await broadcaster(chain).execute({ to: TO, value: 7n, data: DATA, logicalTx: "post" });
     expect(chain.lastWrite()?.value).toBe(7n);
     expect(chain.lastWrite()?.args?.[1]).toBe(7n);
+  });
+
+  test("estimates the exact signed Safe call and refuses a broadcast above its operation cap", async () => {
+    const chain = buildScriptedChain();
+    await expect(
+      broadcaster(chain, 20_999_999_999_999n).execute({
+        to: TO,
+        value: 0n,
+        data: DATA,
+        logicalTx: "claim",
+      }),
+    ).rejects.toThrow(/exact gas maximum 21000000000000 exceeds configured cap 20999999999999/u);
+    expect(chain.writeCount()).toBe(0);
+
+    await expect(
+      broadcaster(chain, 21_000_000_000_000n).execute({
+        to: TO,
+        value: 0n,
+        data: DATA,
+        logicalTx: "claim",
+      }),
+    ).resolves.toMatchObject({ alreadySettled: false });
+    expect(chain.writeCount()).toBe(1);
   });
 
   test("defaults execTransaction to operation 0 (Call) and forwards operation 1 for a delegatecall batch", async () => {

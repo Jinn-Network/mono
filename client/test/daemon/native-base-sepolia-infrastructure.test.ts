@@ -130,7 +130,7 @@ describe('first-party Base Sepolia target inspection', () => {
       ownerBalanceWei: 1_000n,
       safeBalanceWei: 2_000n,
       escrowRequiredWei: 5n,
-      estimatedMaximumWei: { createTask: 100n },
+      estimatedMaximumWei: {},
       canonicalBlock: 200n,
       finalizedBlock: 180n,
     });
@@ -171,7 +171,7 @@ describe('first-party Base Sepolia target inspection', () => {
     expect(result).toMatchObject({
       marketplaceAgentAddress: marketplaceAgent,
       marketplaceAgentAuthorized: true,
-      estimatedMaximumWei: { claim: 200n, solutionSettlement: 300n },
+      estimatedMaximumWei: {},
     });
     expect(result.estimatedMaximumWei).not.toHaveProperty('createTask');
     expect(result.estimatedMaximumWei).not.toHaveProperty('evaluationClaim');
@@ -199,10 +199,7 @@ describe('first-party Base Sepolia target inspection', () => {
 
     const result = await inspectBaseSepoliaNativeTarget(input, client);
 
-    expect(result.estimatedMaximumWei).toEqual({
-      evaluationClaim: 400n,
-      verdictSettlement: 500n,
-    });
+    expect(result.estimatedMaximumWei).toEqual({});
   });
 });
 
@@ -247,6 +244,7 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
   const transactionHash = `0x${'34'.repeat(32)}` as const;
   const routerBlockHash = `0x${'56'.repeat(32)}` as const;
   const mechBlockHash = `0x${'78'.repeat(32)}` as const;
+  const deliveryMech = '0x9999999999999999999999999999999999999999' as const;
   const operator = SAFE;
   const deliveryBytes = new TextEncoder().encode('{"delivery":"exact"}');
   const advertisedDeliveryDigest = `sha256:${createHash('sha256').update(deliveryBytes).digest('hex')}` as const;
@@ -275,10 +273,19 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     };
     const publicClient = {
       async getBlockNumber() { return 100n; },
-      async getContractEvents(input: { eventName: string }) {
+      async readContract(input: { functionName: string }) {
+        if (input.functionName === 'mapRequestIdInfos') {
+          return [deliveryMech, deliveryMech, operator, 60n, 1n, `0x${'00'.repeat(32)}`] as const;
+        }
+        if (input.functionName === 'getOperator') return operator;
+        if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        throw new Error(`unexpected read ${input.functionName}`);
+      },
+      async getContractEvents(input: { eventName: string; address: string }) {
         if (input.eventName === 'SolutionDeliveryClaimed') {
           return options.duplicateRouter ? [routerEvent, { ...routerEvent }] : [routerEvent];
         }
+        expect(input.address.toLowerCase()).toBe(deliveryMech.toLowerCase());
         return [{
           args: {
             requestId,

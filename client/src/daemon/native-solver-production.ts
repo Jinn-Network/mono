@@ -5,6 +5,7 @@ import { documentDigest } from '@jinn-network/task-execution-protocol';
 import {
   NATIVE_REQUESTER_ASSOCIATION_FACT,
   decodeNativeRequesterAnnouncement,
+  parseNativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
 import { Store } from '../store/store.js';
 import { NativeClaimCoordinator } from './native-claim-coordinator.js';
@@ -32,6 +33,8 @@ import { buildNativeSolverBackend } from './native-solver-backend.js';
 import { openOperatorEvidence } from './evidence-join.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
+import { NativeConstructionScope } from './native-construction-scope.js';
+import { publicationKey } from './native-operation-identity.js';
 
 const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
 
@@ -98,6 +101,7 @@ function chain(config: NativeProductConfig['operator']['native']) {
 function roleKeyIds(roles: RoleIdentitySet): Readonly<Record<string, string>> {
   return {
     'solver-delivery': roles.get('solver-delivery').keyId,
+    'solver-settlement': roles.get('solver-settlement').keyId,
     'solver-discovery': roles.get('solver-discovery').keyId,
   };
 }
@@ -123,6 +127,8 @@ function closeAll(actions: readonly (() => void | Promise<void>)[]): () => Promi
 export async function buildNativeSolverProductionHost(
   input: SolverProductionInput,
 ): Promise<NativeOperatorHost> {
+  const scope = new NativeConstructionScope();
+  try {
   const config = input.config.operator.native;
   if (config.role !== 'solver' || config.identityStores.solver === undefined) {
     throw new Error('native solver production composition requires solver-only custody');
@@ -131,16 +137,20 @@ export async function buildNativeSolverProductionHost(
     throw new Error('native solver chain reads or marketplace Agent are unavailable');
   }
   const store = new Store(join(config.stateDir, 'solver.sqlite'));
+  scope.defer(() => store.close());
   const state = new NativeOperatorStateRepository(store);
   const observations = new NativeCanonicalObservationRepository(store);
   const marketplaceEvents = new NativeMarketplaceEventRepository(store);
   const evidence = await openOperatorEvidence({ rootDir: join(config.stateDir, 'evidence') });
+  scope.defer(evidence.close);
   const solver = await buildNativeSolverBackend({
     roles: input.roles,
     stateRoot: join(config.stateDir, 'backend'),
     evidence: evidence.ports,
+    nodeExecutableDigest: config.runtime.nodeExecutableDigest as `sha256:${string}`,
     maxConcurrentAttempts: 1,
   });
+  scope.defer(solver.close);
   const verification = buildNativeSolutionVerification({
     identities: input.roles,
     resolveEvaluationSpec: async (expected) => {
@@ -164,6 +174,7 @@ export async function buildNativeSolverProductionHost(
         candidate.toLowerCase() === config.marketplaceAgentAddress!.toLowerCase(),
     },
   });
+  scope.defer(writeSession.close);
   if (writeSession.writes.role !== 'solver') {
     await writeSession.close();
     throw new Error('native solver write activation returned another role');
@@ -186,10 +197,130 @@ export async function buildNativeSolverProductionHost(
     publicBaseUrl: config.publicBaseUrl,
     source: { agent: config.agent, name: 'solver-records' },
     signer: input.roles.get('solver-discovery'),
+    settlementDeclarationKey: input.roles.get('solver-settlement').keyId,
   });
+  scope.defer(publisher.close);
   const endpoint = await input.infrastructure.mountPublicSource(publisher.handler);
+  scope.defer(endpoint.close);
+  store.db.exec(`
+    CREATE TABLE IF NOT EXISTS native_solution_discovery_corrections (
+      event_key TEXT NOT NULL,
+      action TEXT NOT NULL,
+      delivery_digest TEXT NOT NULL,
+      announcement_id TEXT NOT NULL,
+      source_sequence TEXT NOT NULL,
+      entry_digest TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (event_key, action)
+    );
+  `);
+
+  const deliveryPublicationFor = (event: ReturnType<NativeMarketplaceEventRepository['solutionCandidates']>[number]) => {
+    const facts = event.facts as { readonly taskId: bigint; readonly attemptIndex: number };
+    return store.db.prepare(
+      `SELECT a.engagement_id, a.record_digest, a.media_type, a.family, a.name, a.exact_bytes,
+              p.publication_key, p.source_id
+         FROM native_engagements e
+         JOIN native_solution_artifacts a ON a.engagement_id = e.engagement_id AND a.role = 'delivery'
+         JOIN native_publication_outbox p ON p.engagement_id = e.engagement_id
+           AND p.role = 'delivery' AND p.record_digest = a.record_digest AND p.status = 'published'
+        WHERE e.task_id = ? AND e.attempt_index = ?`,
+    ).get(facts.taskId.toString(10), facts.attemptIndex) as {
+      engagement_id: `sha256:${string}`; record_digest: `sha256:${string}`; media_type: string;
+      family: string; name: string | null; exact_bytes: Uint8Array;
+      publication_key: `sha256:${string}`; source_id: string;
+    } | undefined;
+  };
+
+  const reconcileSignedReorgCorrections = async (): Promise<void> => {
+    for (const orphan of marketplaceEvents.orphanedSolutionCandidates()) {
+      const exists = store.db.prepare(
+        `SELECT 1 FROM native_solution_discovery_corrections WHERE event_key = ? AND action = 'withdrawn'`,
+      ).get(orphan.eventKey);
+      if (exists !== undefined) continue;
+      const delivery = deliveryPublicationFor(orphan.event);
+      if (delivery === undefined) continue;
+      const latestAvailable = store.db.prepare(
+        `SELECT announcement_id FROM native_solution_discovery_corrections
+          WHERE delivery_digest = ? AND action = 'available' ORDER BY rowid DESC LIMIT 1`,
+      ).get(delivery.record_digest) as { announcement_id: string } | undefined;
+      const withdrawalKey = publicationKey({
+        sourceId: delivery.source_id,
+        role: 'delivery',
+        recordDigest: delivery.record_digest,
+        availabilityState: `withdrawn:${orphan.event.derivation.blockHash.toLowerCase()}`,
+      });
+      const receipt = await publisher.withdraw({
+        withdrawalKey,
+        targetAnnouncementId: latestAvailable?.announcement_id ?? delivery.publication_key,
+        recordDigest: delivery.record_digest,
+        bytes: delivery.exact_bytes,
+        mediaType: delivery.media_type,
+        timestamp: orphan.orphanedAt,
+        reason: 'reorged',
+      });
+      store.db.prepare(
+        `INSERT INTO native_solution_discovery_corrections
+          (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)
+         VALUES (?, 'withdrawn', ?, ?, ?, ?, ?)`,
+      ).run(orphan.eventKey, delivery.record_digest, withdrawalKey, receipt.sequence, receipt.entryDigest, orphan.orphanedAt);
+    }
+    for (const event of marketplaceEvents.solutionCandidates()) {
+      const delivery = deliveryPublicationFor(event);
+      if (delivery === undefined) continue;
+      const hadWithdrawal = store.db.prepare(
+        `SELECT 1 FROM native_solution_discovery_corrections
+          WHERE delivery_digest = ? AND action = 'withdrawn' LIMIT 1`,
+      ).get(delivery.record_digest);
+      if (hadWithdrawal === undefined) continue;
+      const key = [event.derivation.chainId, event.derivation.contract.toLowerCase(),
+        event.derivation.blockHash.toLowerCase(), event.derivation.txHash.toLowerCase(),
+        event.derivation.logIndex].join(':');
+      const exists = store.db.prepare(
+        `SELECT 1 FROM native_solution_discovery_corrections WHERE event_key = ? AND action = 'available'`,
+      ).get(key);
+      if (exists !== undefined) continue;
+      const announcementId = publicationKey({
+        sourceId: delivery.source_id,
+        role: 'delivery',
+        recordDigest: delivery.record_digest,
+        availabilityState: `available:${event.derivation.blockHash.toLowerCase()}`,
+      });
+      const timestamp = new Date().toISOString();
+      const receipt = await publisher.publish({
+        publication: {
+          publicationKey: announcementId,
+          engagementId: delivery.engagement_id,
+          sourceId: delivery.source_id,
+          role: 'delivery',
+          recordDigest: delivery.record_digest,
+          availability: 'available',
+          status: 'intent',
+          detail: { canonicalBlockHash: event.derivation.blockHash },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        artifact: {
+          engagementId: delivery.engagement_id,
+          role: 'delivery',
+          family: delivery.family,
+          mediaType: delivery.media_type,
+          name: delivery.name,
+          digest: delivery.record_digest,
+          bytes: delivery.exact_bytes,
+          createdAt: timestamp,
+        },
+        bytes: delivery.exact_bytes,
+      });
+      store.db.prepare(
+        `INSERT INTO native_solution_discovery_corrections
+          (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)
+         VALUES (?, 'available', ?, ?, ?, ?, ?)`,
+      ).run(key, delivery.record_digest, announcementId, receipt.sequence, receipt.entryDigest, timestamp);
+    }
+  };
   const requesterSources = config.sources.filter(({ role }) => role === 'requester');
-  if (requesterSources.length === 0) throw new Error('native solver has no requester source');
+  if (requesterSources.length !== 1) throw new Error('native solver requires exactly one requester source');
   const transport = createHttpTransport('');
   const sources = await buildNativeDiscoverySources({
     configured: requesterSources,
@@ -202,8 +333,13 @@ export async function buildNativeSolverProductionHost(
     sources,
     transport,
     async decode(discoveryInput) {
+      await input.trust.assertFresh();
       const facts = object(discoveryInput.announcement.facts, 'requester facts');
       const association = object(facts[ASSOCIATION], 'requester association');
+      const authorityTime = parseNativeAuthorityTimeAnchor(association['authorityTime']);
+      if (!await input.infrastructure.authorityTime.verifyFinalized(authorityTime)) {
+        throw new Error('native requester authority time is not canonical and finalized');
+      }
       const submissionLocation = discoveryInput.announcement.locations ?? [];
       if (submissionLocation.length !== 1) throw new Error('native requester announcement must advertise one Submission location');
       const submissionBytes = await input.infrastructure.records.byLocation(submissionLocation[0]!.locator);
@@ -265,7 +401,7 @@ export async function buildNativeSolverProductionHost(
           coordinator: config.contracts.taskCoordinator,
           generation: config.generation,
           maxSpendWei: BigInt(config.transactionCaps.escrowMaxWei),
-          minDeadlineLeadMs: 0,
+          minDeadlineLeadMs: 5 * 60 * 1_000,
           maxConcurrent: 1,
         },
         activeEngagements: state.listEngagements().filter(({ state }) => nonterminal(state)).length,
@@ -314,6 +450,7 @@ export async function buildNativeSolverProductionHost(
   let timer: NodeJS.Timeout | undefined;
   let running = false;
   let stopped = false;
+  let workFailure: unknown;
   const tick = async () => {
     if (running || stopped) return;
     running = true;
@@ -321,7 +458,35 @@ export async function buildNativeSolverProductionHost(
       await input.lease.renew();
       claim.renewWorker();
       await syncVenue();
+      await reconcileSignedReorgCorrections();
       await discovery.sync();
+      for (const withdrawal of discovery.takePendingWithdrawals()) {
+        const target = store.db.prepare(
+          `SELECT id, card_json FROM native_discovery_cards
+            WHERE source_agent = ? AND source_name = ? AND announcement_id = ?
+            ORDER BY id DESC LIMIT 1`,
+        ).get(withdrawal.source.agent, withdrawal.source.name, withdrawal.retracts) as {
+          id: number; card_json: string;
+        } | undefined;
+        if (target === undefined) throw new Error('requester withdrawal target is absent from authenticated history');
+        const card = JSON.parse(target.card_json) as {
+          record?: { digest?: string };
+          facts?: Record<string, unknown>;
+        };
+        const taskDigest = card.facts?.['taskDigest'];
+        const submissionDigest = card.record?.digest;
+        if (typeof taskDigest === 'string' && typeof submissionDigest === 'string') {
+          store.db.prepare(
+            `UPDATE native_engagements SET state = 'withdrawn', updated_at = ?
+              WHERE task_digest = ? AND submission_digest = ?
+                AND state IN ('discovered', 'eligible')`,
+          ).run(new Date().toISOString(), taskDigest, submissionDigest);
+        }
+        store.db.prepare(
+          `UPDATE native_discovery_cards SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL`,
+        ).run(new Date().toISOString(), target.id);
+        discovery.acknowledgeWithdrawal(withdrawal);
+      }
       for (const queued of discovery.takePending()) {
         const documents = await exactDocuments({
           taskDigest: digest(queued.card.facts['taskDigest'], 'taskDigest'),
@@ -346,13 +511,14 @@ export async function buildNativeSolverProductionHost(
   ]);
   const closeVenue = closeAll([writeSession.close, input.infrastructure.close]);
 
-  return createNativeOperatorHost({
+  const host = createNativeOperatorHost({
     role: 'solver',
     roleKeyIds: roleKeyIds(input.roles),
     lease,
     bindings: {
       async verify() {
-        for (const role of ['solver-delivery', 'solver-discovery'] as const) {
+        await input.trust.assertFresh();
+        for (const role of ['solver-delivery', 'solver-settlement', 'solver-discovery'] as const) {
           const result = await input.roles.resolveEffective(role, new Date().toISOString());
           if (!result.ok) throw new Error(`native ${role} authority is not effective: ${result.reason}`);
         }
@@ -401,10 +567,22 @@ export async function buildNativeSolverProductionHost(
     work: {
       async start() {
         await tick();
-        timer = setInterval(() => { void tick().catch(() => undefined); }, 5_000);
+        timer = setInterval(() => {
+          void tick().catch((cause: unknown) => {
+            workFailure = cause;
+            stopped = true;
+            if (timer !== undefined) clearInterval(timer);
+          });
+        }, 5_000);
         timer.unref();
       },
       stop: stopOwned,
+      failure: () => workFailure,
     },
   });
+  scope.release();
+  return host;
+  } catch (cause) {
+    return scope.unwind(cause);
+  }
 }

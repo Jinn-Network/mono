@@ -15,7 +15,8 @@ const agentIri = z.string().refine(
 
 export const PHASE_B_ROLE_SET = [
   'requester-submission', 'admission', 'requester-discovery', 'solver-delivery',
-  'solver-discovery', 'evaluator-verdict', 'evaluator-discovery',
+  'solver-settlement', 'solver-discovery', 'evaluator-verdict',
+  'evaluator-settlement', 'evaluator-discovery',
 ] as const;
 export const PHASE_B_SOURCE_ROLE_SET = ['requester', 'solver', 'evaluator'] as const;
 export const PHASE_B_RECORD_ROOT_SET = [
@@ -147,7 +148,9 @@ export const PhaseBClosureManifestSchema = z.object({
   const actorJoins = [
     ['requester-submission', 'requester-discovery', 'requester'],
     ['solver-delivery', 'solver-discovery', 'solver'],
+    ['solver-settlement', 'solver-discovery', 'solver'],
     ['evaluator-verdict', 'evaluator-discovery', 'evaluator'],
+    ['evaluator-settlement', 'evaluator-discovery', 'evaluator'],
   ] as const;
   for (const [authorityRole, discoveryRole, sourceRole] of actorJoins) {
     if (roleAgent.get(authorityRole) !== roleAgent.get(discoveryRole)

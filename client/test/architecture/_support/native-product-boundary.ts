@@ -6,6 +6,8 @@ export type NativeBoundaryViolationKind =
   | 'bridge-delivery-extension'
   | 'compatibility-runtime-edge'
   | 'ephemeral-discovery-key'
+  | 'fabricated-zero-chain-task'
+  | 'fabricated-zero-submission'
   | 'genesis-archive-rescan'
   | 'legacy-card-fallback'
   | 'legacy-document-synthesis'
@@ -62,6 +64,16 @@ const SOURCE_PATTERNS: readonly {
     kind: 'bridge-delivery-extension',
     pattern: /\b(?:deliveryExtensions|legacyRestorationResultFromDelivery|hasLegacyDeliveryExtension)\b/u,
     detail: 'native graph installs or reads a bridge Delivery extension',
+  },
+  {
+    kind: 'fabricated-zero-submission',
+    pattern: /\bZERO_SUBMISSION\b/u,
+    detail: 'native graph fabricates an evaluator Submission placeholder',
+  },
+  {
+    kind: 'fabricated-zero-chain-task',
+    pattern: /\btaskId\s*:\s*0n\b/u,
+    detail: 'native graph fabricates a zero marketplace task identity',
   },
 ];
 

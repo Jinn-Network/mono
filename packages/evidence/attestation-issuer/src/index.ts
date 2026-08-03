@@ -6,6 +6,7 @@ export {
 } from "./errors.js";
 export { commitPreparedAttestation } from "./commit.js";
 export {
+  buildResultEvaluationPayload,
   prepareExecutionVerification,
   prepareResultEvaluation,
 } from "./prepare.js";

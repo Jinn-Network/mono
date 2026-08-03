@@ -189,6 +189,8 @@ export interface NativeTrustAuthority {
   readonly conflicts: readonly BindingConflict[];
   readonly newestPolicyVersion: number;
   readonly rawSignatureVerifier: RawSignatureVerifier;
+  /** Fails closed when the deployment catalog changed after this authority snapshot opened. */
+  assertFresh(): Promise<void>;
   candidateKeys(agent: string): readonly { readonly keyid: string; readonly probeAt: string }[];
   policy(purpose: string): PolicyCheckInput;
   verifyRoleBinding(input: {
@@ -197,6 +199,13 @@ export interface NativeTrustAuthority {
     readonly agent: string;
     readonly family: string;
     readonly atTime: string;
+  }): Promise<{ readonly bindingDigest: `sha256:${string}` }>;
+  verifyOnchainAuthority(input: {
+    readonly key: string;
+    readonly agent: string;
+    readonly address: `0x${string}`;
+    readonly atTime: string;
+    readonly purpose: 'native:solver-settlement' | 'native:evaluator-settlement';
   }): Promise<{ readonly bindingDigest: `sha256:${string}` }>;
   resolverFor(input: { readonly family: string; readonly purpose: string }): BindingResolver;
 }
@@ -235,12 +244,27 @@ export async function openNativeTrustCatalog(input: {
     throw new NativeTrustCatalogError('native trust catalog must be a regular non-symlink file');
   }
   let raw: unknown;
-  try { raw = JSON.parse(await readFile(input.path, 'utf8')); } catch (cause) {
+  let catalogBytes: Uint8Array;
+  try {
+    catalogBytes = await readFile(input.path);
+    raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(catalogBytes));
+  } catch (cause) {
     throw new NativeTrustCatalogError(`native trust catalog cannot be read: ${String(cause)}`);
   }
   const parsed = NativeTrustCatalogSchema.safeParse(raw);
   if (!parsed.success) throw new NativeTrustCatalogError(`native trust catalog is invalid: ${parsed.error.message}`);
   const catalog = parsed.data;
+  const openedCatalogDigest = recordDigest(catalogBytes!);
+  const assertFresh = async (): Promise<void> => {
+    const currentMetadata = await lstat(input.path).catch(() => undefined);
+    if (currentMetadata === undefined || !currentMetadata.isFile() || currentMetadata.isSymbolicLink()) {
+      throw new NativeTrustCatalogError('native trust catalog changed type or disappeared after authority load');
+    }
+    const current = await readFile(input.path);
+    if (recordDigest(current) !== openedCatalogDigest) {
+      throw new NativeTrustCatalogError('native trust catalog changed after authority load; restart is required before authorizing work');
+    }
+  };
   if (catalog.policyGenesisDigest !== input.expectedPolicyGenesisDigest) {
     throw new NativeTrustCatalogError('native trust catalog policy genesis does not match structured deployment authority');
   }
@@ -332,6 +356,7 @@ export async function openNativeTrustCatalog(input: {
     readonly purpose: string;
     readonly atTime: string;
   }): Promise<{ readonly bindingDigest: `sha256:${string}` }> {
+    await assertFresh();
     const conflictCount = conflicts.length;
     const resolved = await bindingResolver.resolveBinding(
       { key: inputValue.key, agent: inputValue.agent },
@@ -374,6 +399,7 @@ export async function openNativeTrustCatalog(input: {
         }
       },
     },
+    assertFresh,
     candidateKeys(agent) {
       return bindings.filter(({ binding }) => binding.agent === agent).map(({ binding }) => ({
         keyid: binding.key.didKey,
@@ -382,6 +408,26 @@ export async function openNativeTrustCatalog(input: {
     },
     policy: policyFor,
     verifyRoleBinding: ({ role, ...rest }) => verified({ ...rest, purpose: nativeRolePurpose(role) }),
+    async verifyOnchainAuthority(value) {
+      const result = await verified({
+        key: value.key,
+        agent: value.agent,
+        family: 'settlements',
+        purpose: value.purpose,
+        atTime: value.atTime,
+      });
+      const resolved = await bindingResolver.resolveBinding(
+        { key: value.key, agent: value.agent },
+        value.atTime,
+      );
+      const ceremonyAddress = resolved?.ceremonyEvidence?.message.address;
+      if (ceremonyAddress === undefined || ceremonyAddress.toLowerCase() !== value.address.toLowerCase()) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} is not ceremony-bound to ${value.address}`,
+        );
+      }
+      return result;
+    },
     resolverFor({ family, purpose }) {
       return {
         async resolveBinding(query, atTime) {

@@ -5,6 +5,7 @@
 // persistent artefact lives under the one host-supplied `stateDbPath` (never a home directory or
 // environment-derived default).
 import type { Address, PublicClient, WalletClient } from "viem";
+import type { SafeBroadcastRequest } from "./broadcast/safe-broadcaster.js";
 import type { IpfsPinPort, MarketplaceChainConfig, SettlementPorts } from "@jinn-network/marketplace-binding";
 import type { ProtocolObservation } from "@jinn-network/task-execution-protocol";
 
@@ -12,7 +13,9 @@ import type { ProtocolObservation } from "@jinn-network/task-execution-protocol"
 // component they configure (the chain log source, the Safe broadcaster, the finality waiter and
 // the delivery waiter respectively) and wire it in here.
 export interface ChainLogSourceOptions {}
-export interface SafeBroadcastOptions {}
+export interface SafeBroadcastOptions {
+  readonly maxCostWei?: (request: SafeBroadcastRequest) => bigint;
+}
 export interface FinalityWaiterOptions {}
 export interface DeliveryWaiterOptions {}
 

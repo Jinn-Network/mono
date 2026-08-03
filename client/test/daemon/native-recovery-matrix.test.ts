@@ -116,6 +116,13 @@ async function requesterRun(input: {
     admissionAgent: 'urn:jinn:admission:B800',
     publicBaseUrl: 'https://requester.example',
     readChain: async () => BASE_SEPOLIA_TODAY,
+    authorityTime: async () => ({
+      chainId: 84532 as const,
+      blockNumber: '100',
+      blockHash: `0x${'cd'.repeat(32)}` as const,
+      timestamp: '2026-08-02T11:59:00.000Z',
+      finalized: true as const,
+    }),
     loadRoles: async () => input.roles,
     creatorSafe: CREATOR,
     posting: {
@@ -1187,6 +1194,7 @@ async function publisherRun(input: {
     publicBaseUrl: 'https://operator.example/native',
     source: { agent: OPERATOR, name: 'solver-records' },
     signer: input.signer,
+    settlementDeclarationKey: input.signer.keyId,
     ...(input.recover ? {
       faults: {
         afterHeadBeforeState: () => {
@@ -1204,6 +1212,7 @@ async function publisherRun(input: {
       publicBaseUrl: 'https://operator.example/native',
       source: { agent: OPERATOR, name: 'solver-records' },
       signer: input.signer,
+      settlementDeclarationKey: input.signer.keyId,
     });
   }
   const receipt = await publisher.publish(value);

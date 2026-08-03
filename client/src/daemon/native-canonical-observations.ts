@@ -81,6 +81,17 @@ function eventKey(event: MarketplaceEvent): string {
   ].join(':');
 }
 
+function decodeEvent(value: string): MarketplaceEvent {
+  return JSON.parse(value, (_key, item: unknown) => {
+    if (typeof item === 'object' && item !== null && !Array.isArray(item)
+      && Object.keys(item).length === 1
+      && typeof (item as Record<string, unknown>)[BIGINT] === 'string') {
+      return BigInt((item as Record<string, string>)[BIGINT]!);
+    }
+    return item;
+  }) as MarketplaceEvent;
+}
+
 /** Product-owned raw canonical event journal. Reorgs mark provenance; history is never deleted. */
 export class NativeMarketplaceEventRepository {
   constructor(private readonly store: Store) {
@@ -138,17 +149,28 @@ export class NativeMarketplaceEventRepository {
       `SELECT event_json FROM native_marketplace_events
         WHERE orphaned_at IS NULL ORDER BY rowid`,
     ).all() as Array<{ event_json: string }>;
-    return rows.map(({ event_json }) => JSON.parse(event_json, (_key, item: unknown) => {
-      if (typeof item === 'object' && item !== null && !Array.isArray(item)
-        && Object.keys(item).length === 1
-        && typeof (item as Record<string, unknown>)[BIGINT] === 'string') {
-        return BigInt((item as Record<string, string>)[BIGINT]!);
-      }
-      return item;
-    }) as MarketplaceEvent).filter(
+    return rows.map(({ event_json }) => decodeEvent(event_json)).filter(
       (event): event is Extract<MarketplaceEvent, { readonly event: 'SolutionDeliveryClaimed' }> =>
         event.event === 'SolutionDeliveryClaimed',
     );
+  }
+
+
+  orphanedSolutionCandidates(): readonly {
+    readonly eventKey: string;
+    readonly event: Extract<MarketplaceEvent, { readonly event: 'SolutionDeliveryClaimed' }>;
+    readonly orphanedAt: string;
+  }[] {
+    const rows = this.store.db.prepare(
+      `SELECT event_key, event_json, orphaned_at FROM native_marketplace_events
+        WHERE orphaned_at IS NOT NULL ORDER BY accepted_at, event_key`,
+    ).all() as Array<{ event_key: string; event_json: string; orphaned_at: string }>;
+    return rows.flatMap((row) => {
+      const event = decodeEvent(row.event_json);
+      return event.event === 'SolutionDeliveryClaimed'
+        ? [{ eventKey: row.event_key, event, orphanedAt: row.orphaned_at }]
+        : [];
+    });
   }
 }
 
