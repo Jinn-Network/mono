@@ -52,9 +52,9 @@ worktrees. Everything touching `client/`, `packages/task-execution/`, or
 - **Files:** create `packages/policy/identity/` (package + kit fixtures under
   `packages/policy/identity/fixtures/`); catalog + guards in same PR.
 - **Produces (frozen interface):**
-  - `deriveExecutionTuple(task: SealedTaskDoc, submission: SealedSubmissionDoc): ExecutionPolicyTuple`
-    — the substrate §4.1 total function (effective-requirements merge → closed key rule →
-    byte-exact copy → canonicalize).
+  - `deriveExecutionTuple(task: SealedTaskDoc, submission: SealedSubmissionDoc, profile: ResolvedTaskProfile): ExecutionPolicyTuple`
+    — the substrate §4.1 total function (profile pin-check → effective-requirements merge →
+    closed key rule → byte-exact copy → canonicalize). *(3-arg per addendum F1.)*
   - `canonicalTupleBytes(tuple)` / `tupleDigest(tuple): string` (`sha256:<hex>`).
   - `expressAsRunPinning(tuple): RequirementEntries` (§4.1 expression rule).
   - `sealCandidateManifest(manifest): {bytes, digest}` /
@@ -331,7 +331,40 @@ Haiku: not used in this program.
 - Harbor / Environments Hub / RFT seams — declared, unscheduled.
 - Second-domain policy adapter — the generalization test, after v0.
 
-## 9. Issue tree (filed at execution start, not before the base gate clears)
+## 9. Addendum 2026-08-03 — execution findings and dispositions
+
+**C1 kit findings (10; kit landed on `claude/policy-c1-kit`, 165 tests, mutation-checked):**
+
+- **F1 (material, spec amended in-place):** `deriveExecutionTuple` takes a third
+  `profile: ResolvedTaskProfile` parameter, pin-checked against the Task — substrate §4.1
+  amended; C1's charter interface updated accordingly.
+- **F2:** core-axis comparison classes unpinned across venues; behaviorally inert today
+  (only `model` has constraint membership). Disposition: the C1 implementation pins one
+  map; the kit's tripwire test fails the day another core key gains membership.
+- **F3:** local backend declares `isolation` + `isolationPolicy` as distinct keys; the
+  substrate's naming pin stands (`isolationPolicy` in tuples/rows). Carried to C4/C5.
+- **F4/F5:** expression-rule wording and the reserved-member (`formatToken`) collision —
+  spec amended in-place, kit fails closed.
+- **F6/F7/F8:** manifest field optionality, nested-extension limits (a score inside
+  `declaredChanges` is consumer-MUST-ignore, not validation-catchable), duplicate
+  `parents[]` refused — kit's fail-closed choices ratified as the v0 contract.
+- **F9:** `learner-public.v1` emits bare hex; `loadout.digest` carries `sha256:` — the
+  conversion point is C5's, named here so it cannot be improvised.
+- **F10:** explicit-`undefined` members follow the `benchmarking-records` canonicalization
+  precedent, with a guard that an `undefined` core axis is still rejected.
+
+**C3 DEEP review (1 blocker, 3 majors, 3 nits, 1 design finding — all dispositioned):**
+
+- Blocker (locale-dependent `localeCompare` sort) fixed in-window: UTF-16 code-unit sort,
+  digest-neutral for the reference fixture; two locale fixtures added.
+- Design finding (LF-join combining-format forgery): coordinator ruling — fail closed on
+  control characters in path components now (digest-neutral, closes the demonstrated
+  collision); any re-encoding is a future profile version.
+- Majors (note absolutes, hermes status-surface remainder) fixed as note wording in the
+  same commit; nit fixtures (policy.json-as-directory, top-level `secrets` file,
+  codex profile-resolution parity) added.
+
+## 10. Issue tree (filed at execution start, not before the base gate clears)
 
 One epic (`feat`, this program) with children per unit: C1, C2, C3 (`refactor`), C4, C5,
 C6 (`refactor`), C7a–d, C8, C9 (`test`). Issue bodies frame problem + acceptance criteria
