@@ -52,7 +52,11 @@ export type PolicyOptimizationErrorCategory =
   /** Product §7.3 — the optional smoke canary did not complete. */
   | "smoke-canary-failed"
   /** Product §5.2/§7.3 — the population registry disagrees with itself about an arm. */
-  | "population-conflict";
+  | "population-conflict"
+  /** Product §8.3 — the archive's inputs cannot be projected (a self-parent, a duplicate, an unorderable value). */
+  | "archive-derivation"
+  /** Product §9/§7.4 — an adoption was refused: an unapproved payload class, or nothing to roll back to. */
+  | "adoption-gate";
 
 export interface PolicyOptimizationIssue {
   readonly path: string;

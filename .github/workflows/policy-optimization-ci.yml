@@ -52,6 +52,7 @@ jobs:
           (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
           (cd packages/policy/identity && yarn install --immutable && yarn build)
+          (cd packages/policy/outcomes && yarn install --immutable && yarn build)
       # Test-only. The wave engine's tests dispatch against the TEP conformance kit's in-memory
       # fake, and that kit carries the local backend's conformance slice as runtime dependencies
       # (FINDING F-C7b-4) — so consuming `createInMemoryBackend` means building this whole tail.
@@ -125,5 +126,6 @@ jobs:
           (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
           (cd packages/policy/identity && yarn install --immutable && yarn build)
+          (cd packages/policy/outcomes && yarn install --immutable && yarn build)
       - name: Compile the packed public entrypoint consumer
         run: node .github/scripts/policy-optimization-packed-types.test.mjs

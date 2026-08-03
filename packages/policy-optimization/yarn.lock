@@ -128,6 +128,8 @@ __metadata:
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
     zod: "npm:4.4.3"
+  bin:
+    policy-optimization: ./dist/cli/bin.js
   languageName: unknown
   linkType: soft
 

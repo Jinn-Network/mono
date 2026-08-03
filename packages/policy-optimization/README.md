@@ -14,8 +14,8 @@ Publication is disabled. Nothing in tiers 1–3 may reference this package, and 
 
 ## What is here now
 
-Sub-units **C7a — the core state layer**, **C7b — the wave engine**, **C7c — admission and
-proposers**, and **C8 — the two observation adapters**:
+The whole product: **C7a** (the core state layer), **C7b** (the wave engine), **C7c** (admission and
+proposers), **C7d** (the archive and the CLI), and **C8** (the two observation adapters):
 
 | Surface | Design section | What it is |
 | --- | --- | --- |
@@ -31,8 +31,11 @@ proposers**, and **C8 — the two observation adapters**:
 | The proposer contract | §7.1 | `PolicyProposer.propose({parents, evidence, objective, mutationSurface, budget}) → CandidateManifest[]`. Product-local; implementations are invisible to the campaign. |
 | The reference proposer | §7.2 | Deterministic skill ablation and recombination over the parent loadout. No model, no clock, no randomness. The replaceability falsifier, not a baseline. |
 | Admission | §7.3, §7.4 | Eleven individually-reported checks, injected ports, a payload-class consent gate, and a `tupleDigest`-keyed population with first-admitted attribution. |
+| The archive | §8.3 | A pure, re-derivable projection: `lineageGraph`, `evaluatedHistory`, `frontier` (a **set**, never a ranking), plus a host-directory layout that puts the derivable half under `derived/`. |
+| Adoption | §9 | `adopt` / `rollback` over an append-only, explicitly **non-derivable** log, gated per §7.4 payload class. Emits an operator-config fragment; changes no daemon. |
+| The `optimize` CLI | program §1 C7d | Six verbs as this package's own bin (`policy-optimization optimize …`), argv-shaped so `jinn optimize …` is a later dispatch entry, not a re-design. |
 
-The archive and CLI (C7d) build on these types. This package
+This package
 implements **no execution, assembly, or aggregation machinery** — re-implementing any of it is
 forbidden duplication (§6.1), and statistics reach this product only as `benchmarking-aggregate`
 method-registry references (program ruling R3). The source-boundary guard enforces both.
@@ -361,6 +364,165 @@ manifests.
   learner or wave a stranger's hooks through, and v0's bound on exposure is precisely the
   closed-proposer setup (§7.4). Same-operator hostile payloads are admitted and the report says so,
   naming the vacuity of isolation rather than implying a safety this venue does not have.
+
+## The archive
+
+A **derived local projection** over candidate manifests, Reports, and projection rows (§8.3), plus
+one thing that is not derived at all.
+
+```
+lineageGraph(manifestBytes)              -> typed-parent graph  (pure; digests from the bytes)
+evaluatedHistory(reports, rows, tuple)   -> one policy's measured history, verbatim, ordered
+frontier(entries, dimensions)            -> ReadonlySet<tupleDigest>   (non-dominated; NOT a list)
+deriveArchive({manifests, …})            -> all three, as one throwaway document
+```
+
+**The frontier returns a `Set`, and that is the design.** §14 forbids a leaderboard and a ranking
+record; an array has a first element, and the first person to read one would take position 0 for
+"best". Where bytes are needed the members are sorted **by digest** — deliberately meaningless as a
+quality ordering. Domination is a pairwise exact-decimal comparison through
+`benchmarking-records`' `parseExactDecimal`/`scaleDecimal`; nothing is scalarized, weighted, or
+normalized, because each of those would be the product inventing a measurement the Reports never
+made. Ties are members: two entries equal on every dimension dominate each other nowhere, and the
+archive has no tie-break to offer that would not be an invented preference.
+
+### The layout is the label
+
+```
+<campaign-dir>/archive/
+  derived/
+    projection.json    formatToken …archive-projection/1.0, "derived": true   — safe to delete
+  adoption.json        formatToken …adoption/1.0,           "nonDerivable": true — keep it
+```
+
+§8.3 draws exactly one distinction inside the archive, and a reader who has only the directory
+should be able to act on it. So the derivable half lives under a directory whose name says it is
+derived, the non-derivable half sits outside it, and **both documents carry the claim as a field**,
+so a consumer holding one file and not the tree still knows which it has. An absent `adoption.json`
+reads as "no decisions yet"; a *malformed* one refuses, because it is the one file no re-derivation
+can rebuild.
+
+### Adoption (§9) and the payload-class gate (§7.4)
+
+```ts
+interface AdoptionRecord {
+  formatToken: "network.jinn.policy-optimization.adoption/1.0";
+  tupleDigest: string;              // the population key (§7.3), never a manifest digest
+  adoptedAt?: string;               // RFC 3339 with an offset
+  scope: { taskProfile: string; route?: string };
+  priorTuple: string | null;        // what this displaced; null on a scope's first adoption
+  payloadClassesApproved: PayloadClass[];   // sorted along §7.4's gradient
+}
+```
+
+`priorTuple` is read from the log, never from the caller — rollback restores what was actually
+displaced, and a caller-supplied prior is a caller-supplied history. A rollback is appended as an
+ordinary adoption of that prior rather than as a deletion: the log is append-only for the same
+reason the campaign journal is, and a rollback is itself a decision. The gate does not re-run on a
+rollback (the prior tuple was approved when it was adopted, and charging for a *retreat* makes the
+safety net cost more to pull than to leave alone), and the approvals are copied from the record
+being restored so the log still says what was consented to.
+
+The gate is a subset check on §7.4's closed vocabulary — `prompt`, `skill`, `tool-config`, `hook`,
+`harness-fork`, `unclassified` — expressed non-interactively as `--approve-payload-class=hook`.
+A prompt is an injection surface and a hook is arbitrary code execution; consenting to one is not
+consenting to the other, so an unapproved class is refused rather than warned about. `unclassified`
+is the fail-closed member and is approvable only by that name.
+
+Adoption **records** a decision. Pinning the tuple into a daemon's task routes is the operator
+config's business, so `adopt` *prints* the config fragment (`expressAsRunPinning(tuple)`, byte-
+identical to a wave arm's) and changes nothing. The freeze-fence and L1 revert remain the safety net
+under any adopted policy; this verb does not replace them and does not claim to.
+
+## The CLI
+
+Shipped as this package's own bin. The argv shape is `jinn optimize …` verbatim from the second word
+on, so the later client wiring is a dispatch entry rather than a re-design (F-C7d-4).
+
+```
+policy-optimization optimize campaign create   --dir … --document … --seed … [--seed …] [--at …]
+policy-optimization optimize campaign run      --dir … --settings … --benchmark … --candidates …
+                                               [--reports …] [--outcomes …] [--informativeness …]
+                                               first wave: --promotion-benchmark … and one of
+                                                 --trusted-at <rfc3339> | --trusted-run-not-closed
+policy-optimization optimize campaign status   --dir …
+policy-optimization optimize candidate inspect --manifest … [--population <dir>]
+policy-optimization optimize policy adopt      (--dir … | --archive-dir …) --candidate …
+                                               --task-profile … [--route …]
+                                               [--approve-payload-class=<class> …]
+policy-optimization optimize policy rollback   (--dir … | --archive-dir …) --task-profile …
+                                               [--route …] [--tuple <file>]
+```
+
+`runCli` returns `{exitCode, stdout, stderr}`; only `bin.ts` touches the process, which is what
+makes every verb testable without spawning anything. An unknown flag is refused rather than
+ignored, and a repeated single-valued flag is refused rather than silently resolved.
+
+Seeds and adoption targets are supplied as **documents**, not as `{kind, digest}` pairs: the
+discriminant is read from each file's own `formatToken` and the digest is derived from the bytes.
+That is the difference between verifying a seed and being told about one.
+
+## Findings
+
+### C7d — the archive and the CLI
+
+- **F-C7d-1 (structural, closed at the right boundary).** C6's MAJOR-3 made a self-parent
+  unrepresentable where a learner emits a candidate. Through `lineageGraph(bytes)` it is
+  unrepresentable a *second* time, by construction: a manifest whose `parents[]` contains its own
+  digest is a sha256 fixed point, and rewriting a sealed manifest to add one changes the bytes and
+  therefore the digest. The refusal is therefore unreachable through the bytes-in front door. Rather
+  than ship an untestable check or drop it, the graph core is exported separately as
+  `lineageFromEntries`, which takes digests this module did not derive — the surface an indexer or a
+  cross-operator import would use, and the only surface on which a forged self-parent or a parent
+  cycle can actually arrive. Both refusals are asserted there.
+- **F-C7d-2 (honest gap, `campaign run`).** `run` decides the allocation, plans the wave, seals the
+  Run, journals all three, and writes the sealed Benchmark and Run to `<campaign-dir>/waves/<n>/` —
+  and then stops. Dispatching cells needs a `TaskExecutionBackend` **binding**, and this package
+  names the backend *contract* while its own source boundary denies every implementation of it by
+  name (`task-execution-backend-local`, `-launchers`, `-supervisor`, `-workspace`). A CLI inside
+  this package therefore cannot execute a wave, and it prints the gap rather than implying it ran
+  something. Closing it is a host-side item: a caller holding a backend drives `executeWave` on the
+  sealed Run, then journals `matrix-assembled` and `report-recorded`.
+- **F-C7d-3 (cross-unit schema boundary).** `status` renders the arms of the most recently *planned*
+  wave, read off C7b's frozen `wave-planned` payload — not the admitted population, which would mean
+  reading `candidate-admitted`, whose schema is C7c's and which C7a's rule ("a payload schema belongs
+  to the sub-unit that emits it") says this unit must not guess. The consequence is stated rather
+  than hidden: an admitted-but-never-planned candidate does not appear in `status`. The union pass
+  can widen this once C7c's payload is frozen.
+- **F-C7d-4 (deferred wiring, not a defect).** The verb tree is this package's own bin because it
+  cannot be the client's yet: the client is denied by this package's source boundary, and this
+  package is denied to the client by the tier boundary the inventory guard enforces repository-wide
+  ("no other package in the repository depends on the product"). Wiring `jinn optimize …` is a
+  later item that needs the tier question answered, not a missing import.
+- **F-C7d-5 (lifecycle ordering, wave 1 only).** `allocation-decided` is illegal in `DRAFT` (C7a's
+  lifecycle table) and the first `wave-planned` is what enters `EXPLORING` — so the wave-1 allocation
+  can only be journaled *after* the boundary it chronologically precedes. `run` records it before
+  the wave from wave 2 on, and after it on wave 1, so chronology is preserved wherever the lifecycle
+  admits it rather than being uniformly wrong. No change proposed to C7a: admitting
+  `allocation-decided` in `DRAFT` would let a campaign journal an allocation it never spent against.
+- **F-C7d-6 (declared, not verified — stated so it is not mistaken for a check).**
+  `declaredPayloadClasses` classifies `declaredChanges.touchedComponents`, which substrate §5.1
+  marks "declared, not verified". It is a convenience over a *claim*, and the authoritative
+  classification belongs to admission (C7c), which holds the materialized tree. It fails closed:
+  a component root the table cannot place is `unclassified`, including any root
+  `policy-identity` adds to `LEARNER_PUBLIC_V1_ALLOWED_DIRS` later. Every CLI line that prints a
+  class says "(declared, not verified)".
+- **F-C7d-8 (integration finding, `policy-optimization-ci.yml`, fixed here).** The workflow's two
+  "build portal dependencies from source" lists ended at `packages/policy/identity` and never built
+  `packages/policy/outcomes`, which C8 added as a runtime dependency. Every job in that workflow
+  therefore failed at `yarn typecheck` (`Cannot find module '@jinn-network/policy-outcomes'`),
+  reproduced here by removing that package's `dist/` and re-running. One line added to each list.
+  Flagged rather than silently swept: it is a red gate that predates this sub-unit and blocks the
+  whole C7 train, so the fix travels with whichever PR lands first.
+- **F-C7d-7 (union-pass note, not a finding against anyone).** Two shared files were edited
+  additively outside this sub-unit's own directories: `src/errors.ts` gained the
+  `archive-derivation` and `adoption-gate` categories (using `invalid-document` for an
+  unapproved-payload-class refusal would have been plainly wrong), and
+  `.github/scripts/policy-optimization-packed-types.test.mjs` gained the C7d symbol list. C7c is
+  expected to add its own admission categories and symbols to the same two places; both merges are
+  textual, and the payload-class vocabulary in `src/archive/types.ts` is the one to watch — if C7c
+  defines an equivalent at admission, the union pass should collapse them into one list rather than
+  keep two.
 
 ### C7b — the wave engine
 
