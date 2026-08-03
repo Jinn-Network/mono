@@ -1,4 +1,4 @@
-import { canonicalLoadoutPin } from "@jinn-network/task-execution-workspace";
+import { canonicalLoadoutPin, type LoadoutKind } from "@jinn-network/task-execution-workspace";
 
 export interface VerifiedExecutable {
   readonly path: string;
@@ -12,7 +12,7 @@ export interface LauncherReadiness {
   readonly harnessVersions?: readonly string[];
   readonly models?: readonly string[];
   readonly loadouts?: readonly {
-    readonly kind: "jinn.skill.v1";
+    readonly kind: LoadoutKind;
     readonly name: string;
     readonly digest: string;
   }[];
@@ -28,8 +28,12 @@ export interface RunPinningCheck {
   readonly detail?: string;
 }
 
+// canonicalLoadoutPin already enforces the kind-appropriate digest spelling (bare hex for
+// jinn.skill.v1, sha256:-prefixed for jinn.harness-state.v1 — F9,
+// packages/task-execution/backend-local/workspace/src/sha256-digest.ts); this is a defensive
+// re-check on the already-parsed value, so it accepts both forms rather than picking one.
 function isDigest(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+  return typeof value === "string" && (/^[0-9a-f]{64}$/u.test(value) || /^sha256:[0-9a-f]{64}$/u.test(value));
 }
 
 /** The deployment probe is the sole dynamic admission boundary for enforced local pins. */
