@@ -80,21 +80,32 @@ const FORBIDDEN_ROOTS = [
   join(root, 'packages', 'evidence'),
 ];
 
-// Identifiers that name a statistic rather than use one. Deliberately a small, high-signal set:
-// the point is to catch a private estimator being written, not to police arithmetic.
+// Identifiers that name a statistic rather than use one. High-signal, and deliberately wider than
+// the seed set after review findings M1/N6: the original list caught the named estimators a reader
+// would think of first and let through the summary statistics anyone actually reaches for by
+// reflex (a variance, a median, an average, a correlation). Every addition below is verified
+// zero-hit against the tree at the time it was added, so the sweep starts and stays green.
 const PRIVATE_STATISTICS_IDENTIFIERS = [
+  'average',
   'bayesFactor',
   'bootstrap',
   'confidenceInterval',
+  'correlation',
   'credibleInterval',
+  'geometricMean',
+  'harmonicMean',
+  'median',
   'pValue',
   'percentile',
   'posterior',
   'quantile',
+  'regression',
+  'sqrt',
   'standardDeviation',
   'standardError',
   'stdDev',
   'tTest',
+  'variance',
   'wilson',
   'zScore',
 ];
@@ -105,9 +116,43 @@ const privateStatisticsIdentifier = new RegExp(
 );
 
 /**
- * Replace comments and string/template literals with layout-preserving whitespace. A scanner that
- * skips this step reports every mention of `pValue` in a comment explaining why `pValue` is banned
- * -- and the first person to hit that deletes the explanation.
+ * `mean`, but only where it is being **declared or called** — never as a bare identifier.
+ *
+ * A bare `mean` is how a consumer READS a registry method's own published output
+ * (`arms[armId].mean`, in the seam and lifecycle tests), and banning that would ban the one
+ * legitimate use: consuming a statistic `benchmarking-aggregate` computed. Declaring `mean` or
+ * calling `mean(...)` is the product computing one, which is exactly what ruling R3 forbids.
+ */
+const privateMeanDeclaration = new RegExp(
+  String.raw`(?:\bfunction\s+mean\b|\b(?:const|let|var)\s+mean\s*=|(?<![\w$.])mean\s*\()`,
+  'g',
+);
+
+/**
+ * Can a `/` at this position only start a regex literal, not a division?
+ *
+ * The usual heuristic, and enough here: after a value (identifier, literal, closing bracket) a
+ * slash divides; after an operator, a keyword, or the start of input it opens a regex. Getting this
+ * wrong in the permissive direction is the dangerous one -- treating code as a regex body blanks
+ * real source -- so the check requires an affirmative "previous token cannot end a value".
+ */
+function regexCanStartHere(result) {
+  const before = result.replace(/\s+$/u, '');
+  if (before === '') return true;
+  const last = before.at(-1);
+  if ('([{,;:!&|?+-*/^~%<>='.includes(last)) return true;
+  return /(?:^|[^\w$])(?:return|typeof|instanceof|in|of|new|delete|void|do|else|case|yield|await)$/u.test(before);
+}
+
+/**
+ * Replace comments, string/template literals, and regex literals with layout-preserving whitespace.
+ *
+ * A scanner that skips comments and strings reports every mention of `pValue` in a comment
+ * explaining why `pValue` is banned -- and the first person to hit that deletes the explanation.
+ * Regex literals are the same problem one level down (review finding N6): this file's own
+ * `/median/`-style patterns are code, but the identifiers inside a regex body are data, and a
+ * character class containing `/` would otherwise desynchronise the scanner and blank whatever
+ * followed until the next quote.
  */
 export function executableSource(source) {
   let result = '';
@@ -129,6 +174,19 @@ export function executableSource(source) {
         if (index < source.length) inert(source[index++]);
       }
       if (index < source.length) inert(source[index++]);
+    } else if (char === '/' && regexCanStartHere(result)) {
+      inert(char); index += 1;
+      let inClass = false;
+      while (index < source.length && source[index] !== '\n') {
+        const current = source[index];
+        if (current === '\\') { inert(current); index += 1; if (index < source.length) inert(source[index++]); continue; }
+        if (current === '[') inClass = true;
+        else if (current === ']') inClass = false;
+        else if (current === '/' && !inClass) break;
+        inert(source[index++]);
+      }
+      if (index < source.length && source[index] === '/') inert(source[index++]);
+      while (index < source.length && /[dgimsuvy]/u.test(source[index])) inert(source[index++]);
     } else {
       result += char;
       index += 1;
@@ -176,8 +234,13 @@ function unapprovedImports(sourceFiles, allowed, forbiddenRoots = []) {
 }
 
 function privateStatisticsUses(sourceFiles) {
-  return sourceFiles.flatMap((file) => [...executableSource(readFileSync(file, 'utf8'))
-    .matchAll(privateStatisticsIdentifier)].map((match) => `${relative(root, file)} -> ${match[0]}`)).sort();
+  return sourceFiles.flatMap((file) => {
+    const executable = executableSource(readFileSync(file, 'utf8'));
+    return [
+      ...[...executable.matchAll(privateStatisticsIdentifier)].map((match) => match[0]),
+      ...[...executable.matchAll(privateMeanDeclaration)].map((match) => match[0].trim()),
+    ].map((hit) => `${relative(root, file)} -> ${hit}`);
+  }).sort();
 }
 
 test('the import scanner catches static, export, dynamic, require, and local-path escapes', () => {
@@ -260,15 +323,49 @@ test('the private-statistics sweep reads code, not prose', () => {
     mkdirSync(source);
     writeFileSync(join(source, 'clean.ts'), [
       '// A private pValue or bootstrap estimator is banned; this comment must not trip the sweep.',
-      'const prose = "wilson confidenceInterval";',
+      'const prose = "wilson confidenceInterval median variance";',
       'export const objectiveMethods = [];',
+      '// Reading a registry method\'s own published output is the legitimate use of `mean`.',
+      'const armMean = arms[armId].mean;',
+      'const named = { mean: report.mean };',
+      '// Regex literals are data, not a private estimator (N6) -- including a class holding a slash.',
+      'const pattern = /median|variance/u;',
+      'const withSlash = /[/]average/u;',
+      'const ratio = passed / scorable;',
     ].join('\n'));
     assert.deepEqual(privateStatisticsUses(files(source)), []);
 
     writeFileSync(join(source, 'dirty.ts'), [
       'export function wilson(num, den) { return num / den; }',
       'const ci = confidenceInterval(rows);',
+      'export function mean(values) { return values.reduce((a, b) => a + b, 0) / values.length; }',
+      'const avg = mean(rates);',
+      'const spread = variance(rates);',
+      'const mid = median(rates);',
+      'const root = sqrt(spread);',
+      'const r = correlation(a, b);',
+      'const line = regression(points);',
+      'const g = geometricMean(rates);',
+      'const h = harmonicMean(rates);',
+      'const mu = average(rates);',
+      'const m2 = ((values) => { const mean = 0; return mean; })([]);',
     ].join('\n'));
-    assert.equal(privateStatisticsUses([join(source, 'dirty.ts')]).length, 2);
+    // 2 seed hits + 11 additions/`mean` shapes: `function mean`, `mean(`, variance, median, sqrt,
+    // correlation, regression, geometricMean, harmonicMean, average, `const mean =`.
+    assert.equal(privateStatisticsUses([join(source, 'dirty.ts')]).length, 13);
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('the sweep separates a declared mean from a read one', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-policy-optimization-mean-'));
+  try {
+    const source = join(fixture, 'src');
+    mkdirSync(source);
+    // The exact shape the seam and lifecycle tests use to read `avg-at-k@1`'s sealed output.
+    writeFileSync(join(source, 'read.ts'), 'const value = arms[arm.armId].mean;');
+    assert.deepEqual(privateStatisticsUses(files(source)), []);
+
+    writeFileSync(join(source, 'declare.ts'), 'function mean(xs) { return xs.length; }');
+    assert.equal(privateStatisticsUses([join(source, 'declare.ts')]).length, 1);
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });

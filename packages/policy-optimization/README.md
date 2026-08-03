@@ -216,6 +216,27 @@ Nothing here computes a statistic. Report values are ordered as exact decimals t
 integer cross-multiplication, mirroring curation's own `compareRateTo`. The source-boundary guard
 sweeps for private estimators (ruling R3).
 
+### What a mid-wave crash costs
+
+A sealed Run is never amended (§6.1), and the campaign journal records decisions, not cells. So a
+crash in the middle of `executeWave` loses the *dispatch bookkeeping* for that wave and nothing
+else: the Run is already sealed and journaled, the cells that reached a terminal are durable in the
+backend, and `resumeRun` exists in `benchmarking-run` for a host that tracked which cells were
+outstanding. What this package does **not** do is keep its own per-cell journal to make that
+automatic — C7a's reasoning applies unchanged, that a second copy of a fact the backend already
+holds is a second thing that can disagree with it.
+
+The practical cost is therefore one wave's dispatch work, not one campaign's. Re-running
+`executeWave` against the same sealed plan re-dispatches every cell; the backend's own idempotency
+(a Submission's `idempotencyKey` is `cellIdempotencyKey(runDigest, cellKey, dispatch)`) means a
+re-dispatch of a cell that already ran returns the original Attempt rather than minting a second
+one, so the wave converges on the same Matrix rather than doubling its spend. The budget accounting
+converges too, because it is derived from `run-sealed` entries — cells are charged when the Run is
+sealed, not when they are dispatched, so a crashed-and-retried wave is counted once. Where this
+stops being true is the cell that had *not* yet been dispatched when the crash happened: that one is
+dispatched on the retry and is genuinely new work, which is the honest floor for a design with no
+per-cell journal (review disposition N4).
+
 ### Budgets and stopping
 
 `budgets.evaluation.maxCells` bounds development waves; `budgets.hardCap.maxCells` bounds
@@ -523,6 +544,34 @@ That is the difference between verifying a seed and being told about one.
   textual, and the payload-class vocabulary in `src/archive/types.ts` is the one to watch — if C7c
   defines an equivalent at admission, the union pass should collapse them into one list rather than
   keep two.
+
+### The union pass — merge and review-fold findings
+
+- **F-UNION-1 (collision named, collapse not taken).** C7c and C7d each defined a
+  `PAYLOAD_CLASSES` / `PayloadClass` for §7.4's gradient, with different members: admission's
+  `[prompt, skill, hook-or-tool-config, harness-code]` (hostile set = the tail) against the
+  archive's `[prompt, skill, tool-config, hook, harness-fork, unclassified]`. They cannot both hold
+  the name, and collapsing the *values* decides a product question — which classes exist, which are
+  hostile, how an admission-time approval relates to an adoption-time one — that a merge should not
+  decide. C7d's own module doc settles which is which: "The authoritative classification belongs to
+  admission (C7c), which holds the materialized tree. This is a convenience over a claim." So the
+  archive's is renamed `ADOPTION_COMPONENT_CLASSES` / `AdoptionComponentClass` (with
+  `isAdoptionComponentClass`, `sortAdoptionComponentClasses`, `formatAdoptionComponentClasses`,
+  `declaredAdoptionComponentClasses`). No value, order, or behaviour changed on either side. The
+  divergence is now typed and reviewable instead of a silent shared name.
+- **F-C7b-6 (integration finding, `benchmarking-run`).** `quoteRun`'s inventory check is exact set
+  membership and does not honor the `"*"` wildcard that `task-execution-backend`'s capability
+  vocabulary defines and that the reference in-memory backend honors at `submit`. A backend
+  declaring `{key: "harness", inventory: ["*"]}` therefore quotes as `unsupported-requirement` for
+  a Run it would accept. Disposition: `quoteWave` (M2) checks **keys only** — what the review asked
+  for, unambiguous, and needing no wildcard rule — rather than composing `quoteRun` and inheriting
+  the defect, or re-deriving the wildcard rule here and reimplementing a capability check this
+  product does not own. Proposed upstream fix, not taken: `quoteRun` should treat an inventory
+  containing `"*"` as admitting any value, matching the backend contract it is quoting against.
+- **M4's citation.** The product design's dated item-disjointness amendment (PR #2371) had **not**
+  landed on `integration/evidence-v1` when this shipped, so `benchmark-disjointness.ts` cites the
+  coordinator ruling and §6.3's own contamination rationale rather than a spec line. If the
+  amendment lands, that module's doc comment is the one place to update.
 
 ### C7b — the wave engine
 

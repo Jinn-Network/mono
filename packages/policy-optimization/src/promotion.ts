@@ -48,7 +48,14 @@ import type { AdmittedCandidate, CommittedCells, WavePlan, WaveRunSettings } fro
 export interface PromotionReveal {
   /** Exact sealed bytes of the Benchmark the campaign names as `target.promotionBenchmark`. */
   readonly benchmarkBytes: Uint8Array;
-  /** Committed Task digest → the exact revealed Task bytes. Every committed item, or none of this. */
+  /**
+   * Committed Task digest → the exact revealed Task bytes. Every committed item, or none of this.
+   *
+   * The key is **bare lowercase hex** — a Benchmark item's `task.digest.sha256`, which is the same
+   * spelling `ExecuteWaveInput.taskBytesFor` takes and the same one `checkRevealConsistency` looks
+   * up (review disposition N2). Not `sha256:<hex>`: a prefixed key silently misses every lookup,
+   * and a full reveal keyed that way reports as no reveal at all.
+   */
   readonly revealed: ReadonlyMap<string, Uint8Array>;
 }
 

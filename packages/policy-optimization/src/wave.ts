@@ -249,6 +249,13 @@ export function planWave(input: PlanWaveInput): WavePlan {
     refuse("wave-composition", "allocation.waveNumber",
       `the allocation decides wave ${input.allocation.waveNumber}; this plan is wave ${input.waveNumber}`);
   }
+  // Review disposition N3. The decision echoes the policy that made it; a plan built from a
+  // decision some *other* policy produced would journal this campaign's `policyRef` beside an arm
+  // set it never chose — the one thing the `allocation-decided` entry exists to make auditable.
+  if (input.allocation.policyRef !== input.campaign.allocation.policyRef) {
+    refuse("allocation-policy", "allocation.policyRef",
+      `the allocation was decided by ${input.allocation.policyRef}; this campaign declares ${input.campaign.allocation.policyRef}`);
+  }
   const stopping = checkStoppingRule(input.campaign, {
     waveNumber: input.waveNumber,
     committed: input.committed,

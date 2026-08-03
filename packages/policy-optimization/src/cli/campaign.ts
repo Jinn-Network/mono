@@ -239,6 +239,9 @@ export function campaignRun(args: ParsedArgs, context: CliContext): CliResult {
   const exploringEntry = handle.state.phase === "DRAFT"
     ? {
       benchmarkBytes: readBytes(pathFrom(context.cwd, requiredForExploring(args, "promotion-benchmark"))),
+      // Review disposition M4: the gate re-checks item disjointness, so it needs the slate this
+      // wave is already running — the same bytes, not a second read of a second path.
+      developmentBenchmarkBytes,
       revealContext: revealContextFrom(args),
     }
     : undefined;

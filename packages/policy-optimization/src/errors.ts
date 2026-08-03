@@ -56,7 +56,11 @@ export type PolicyOptimizationErrorCategory =
   /** Product §8.3 — the archive's inputs cannot be projected (a self-parent, a duplicate, an unorderable value). */
   | "archive-derivation"
   /** Product §9/§7.4 — an adoption was refused: an unapproved payload class, or nothing to roll back to. */
-  | "adoption-gate";
+  | "adoption-gate"
+  /** Review disposition M4 — the development slate and the promotion gate share at least one item. */
+  | "benchmark-overlap"
+  /** Review disposition M2 — the injected backend does not declare a pinning key the wave's arms use. */
+  | "backend-capability";
 
 export interface PolicyOptimizationIssue {
   readonly path: string;

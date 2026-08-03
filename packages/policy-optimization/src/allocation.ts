@@ -244,6 +244,37 @@ function rankingMethod(campaign: CampaignDocument): { id: string; version: strin
   return { id: method.id, version: method.version };
 }
 
+/**
+ * When a pruning was decided by the organic tie-break rather than by the experiment, say so in the
+ * reason (review disposition M3).
+ *
+ * §6.2's hazard is that a manipulable bucket can prune the genuinely best candidate. A journal that
+ * recorded only "bottom-1 on avg-at-k@1 (value 0.5000)" beside a survivor with the *same* 0.5000
+ * would leave a reader unable to see that the experiment did not decide this — which is exactly the
+ * survivorship question the journaled decision exists to answer.
+ */
+function tieBreakNote(
+  tupleDigest: string,
+  row: WaveReportRow,
+  survivors: readonly string[],
+  latest: ReadonlyMap<string, WaveReportRow>,
+  outcomes: readonly OutcomesProjectionRow[],
+): string {
+  const tied = survivors.find((candidate) => {
+    const other = latest.get(candidate);
+    return other !== undefined && compareExactDecimals(row.value, other.value) === 0;
+  });
+  if (tied === undefined) return "";
+  const pruledOrganic = organicRateFor(outcomes, tupleDigest);
+  const survivorOrganic = organicRateFor(outcomes, tied);
+  if (pruledOrganic === undefined || survivorOrganic === undefined) return "";
+  const comparison = compareObservedRates(pruledOrganic.passRate, survivorOrganic.passRate);
+  if (comparison === undefined || comparison === 0) return "";
+  return "; tie broken on the organic bucket "
+    + `(${pruledOrganic.passRate.num}/${pruledOrganic.passRate.den}`
+    + ` vs ${survivorOrganic.passRate.num}/${survivorOrganic.passRate.den})`;
+}
+
 function dropBottomK(input: AllocationInput, retainedIds: string[]): {
   retained: string[];
   pruned: PrunedCandidate[];
@@ -292,10 +323,12 @@ function dropBottomK(input: AllocationInput, retainedIds: string[]): {
   if (droppable < k) {
     notes.push(`k=${k} would leave fewer than minCandidates=${minCandidates}; pruning ${droppable}`);
   }
-  const pruned: PrunedCandidate[] = ordered.slice(0, droppable).map((tupleDigest) => ({
-    tupleDigest,
-    reason: `bottom-${droppable} on ${method.id}@${method.version} (value ${latest.get(tupleDigest)!.value}, Report ${latest.get(tupleDigest)!.reportDigest})`,
-  }));
+  const survivors = ordered.slice(droppable);
+  const pruned: PrunedCandidate[] = ordered.slice(0, droppable).map((tupleDigest) => {
+    const row = latest.get(tupleDigest)!;
+    const base = `bottom-${droppable} on ${method.id}@${method.version} (value ${row.value}, Report ${row.reportDigest})`;
+    return { tupleDigest, reason: `${base}${tieBreakNote(tupleDigest, row, survivors, latest, outcomes)}` };
+  });
   const prunedSet = new Set(pruned.map((entry) => entry.tupleDigest));
   return {
     retained: retainedIds.filter((tupleDigest) => !prunedSet.has(tupleDigest)),

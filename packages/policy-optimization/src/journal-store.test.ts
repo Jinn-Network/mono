@@ -26,11 +26,21 @@ const promotionBenchmark = sealBenchmark({
   reveal: { policy: "after-run" },
 });
 
+/** Item-disjoint from the promotion gate's `a`, so the M4 check passes on the honest path. */
+const developmentBenchmark = sealBenchmark({
+  protocol: "https://jinn.network/protocols/benchmarking/1.0",
+  name: "development",
+  description: "the slate dev waves run against",
+  version: "1.0.0",
+  items: [{ task: { digest: { sha256: "b".repeat(64) } } }],
+  reveal: { policy: "immediate" },
+});
+
 function campaign(): CampaignDocument {
   return campaignWith({
     target: {
       taskProfile: "https://profiles.jinn.network/repository-work/1.0",
-      developmentBenchmark: digestOf("d"),
+      developmentBenchmark: developmentBenchmark.digest,
       promotionBenchmark: promotionBenchmark.digest,
     },
   });
@@ -38,6 +48,7 @@ function campaign(): CampaignDocument {
 
 const exploringEntry = {
   benchmarkBytes: promotionBenchmark.bytes,
+  developmentBenchmarkBytes: developmentBenchmark.bytes,
   revealContext: { kind: "after-run", trustedRunNotClosed: true },
 } as const;
 

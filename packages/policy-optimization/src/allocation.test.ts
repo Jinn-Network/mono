@@ -118,6 +118,8 @@ describe("drop-bottom-k/1.0", () => {
     }));
     expect(decision.pruned.map((entry) => entry.tupleDigest)).toEqual([THIRD.tupleDigest]);
     expect(decision.pruned[0]!.reason).toContain(OBJECTIVE_METHOD.id);
+    // No tie: the experiment decided it, and the reason says nothing about the organic bucket.
+    expect(decision.pruned[0]!.reason).not.toContain("tie broken");
     expect(decision.inputs.reports).toEqual([`sha256:${"1".repeat(64)}`]);
     expect(decision.retained).not.toContain(THIRD.tupleDigest);
   });
@@ -173,12 +175,17 @@ describe("drop-bottom-k/1.0", () => {
     }));
     // Experimentally tied; the organic bucket decides which of the two goes.
     expect(favouringCandidate.pruned.map((entry) => entry.tupleDigest)).toEqual([CANDIDATE.tupleDigest]);
+    // M3: a reader of the journal can see the experiment did NOT decide this one.
+    expect(favouringCandidate.pruned[0]!.reason)
+      .toContain("; tie broken on the organic bucket (1/10 vs 9/10)");
 
     const favouringParent = decideAllocation(input(policy, {
       reports,
       outcomes: [organic(PARENT, 1, 10), organic(CANDIDATE, 9, 10)],
     }));
     expect(favouringParent.pruned.map((entry) => entry.tupleDigest)).toEqual([PARENT.tupleDigest]);
+    expect(favouringParent.pruned[0]!.reason)
+      .toContain("; tie broken on the organic bucket (1/10 vs 9/10)");
     // Both runs consumed rows, and both journal exactly which ones.
     expect(favouringParent.inputs.outcomes).toHaveLength(2);
   });

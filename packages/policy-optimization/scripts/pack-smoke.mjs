@@ -156,8 +156,17 @@ console.log("Installed package imports and dependency boundary verified.");
   // C7d: the `optimize` verb tree ships as this package's own bin. A `bin` entry pointing at a file
   // the tarball does not carry installs as a dangling symlink and fails on first use, which is the
   // one failure mode `yarn test` cannot see.
+  //
+  // Both `bin` spellings are accepted, because both are the same declaration: for a package named
+  // `@scope/name`, npm and Yarn treat `"bin": "./x.js"` as exactly `{name: "./x.js"}`, and `yarn
+  // install` NORMALISES the object form down to the string whenever the only key matches the
+  // unscoped package name. A guard that insisted on the object form would pass on the branch that
+  // authored it and fail on the next `yarn install` anyone ran -- which is what happened.
   const installedManifest = JSON.parse(await readFileAsync(join(installedRoot, "package.json"), "utf8"));
-  const binTarget = installedManifest.bin?.["policy-optimization"];
+  const declaredBin = installedManifest.bin;
+  const binTarget = typeof declaredBin === "string"
+    ? declaredBin
+    : declaredBin?.["policy-optimization"];
   if (typeof binTarget !== "string") throw new Error("the policy-optimization bin entry is missing");
   const binPath = join(installedRoot, binTarget);
   await access(binPath);

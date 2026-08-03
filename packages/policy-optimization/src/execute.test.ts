@@ -6,7 +6,7 @@ import { createInMemoryBackend, type TestableBackend } from "@jinn-network/task-
 import { describe, expect, test } from "vitest";
 import { decideAllocation } from "./allocation.js";
 import { PolicyOptimizationError } from "./errors.js";
-import { assembleWaveMatrix, executeWave } from "./execute.js";
+import { assembleWaveMatrix, executeWave, quoteWave } from "./execute.js";
 import {
   CANDIDATE,
   PARENT,
@@ -173,6 +173,47 @@ describe("dispatch accounting is total over the expected cell set, not over the 
       venue: VENUE,
     });
     expect(matrix.record.completeness.runOutcome).toBe("cancelled");
+  });
+});
+
+describe("quoteWave: the backend is checked before a cell is dispatched (M2)", () => {
+  test("a backend declaring every pinned key quotes the wave's cell count", async () => {
+    const wave = plan();
+    const quote = await quoteWave(wave, backend());
+    expect(quote.cells).toBe(wave.cells);
+    expect(quote.requiredKeys).toEqual(["harness", "isolationPolicy", "loadout", "model"]);
+    expect(quote.declaredKeys).toEqual(["harness", "isolationPolicy", "loadout", "model"]);
+  });
+
+  test("a backend missing a pinned key is a typed refusal, not a per-cell surprise", async () => {
+    const partial = createInMemoryBackend({
+      now: CLOCK.now,
+      runPinning: [
+        { key: "harness", inventory: ["*"], posture: "enforced" },
+        { key: "model", inventory: ["*"], posture: "enforced" },
+      ],
+    });
+    expect(await category(() => quoteWave(plan(), partial))).toBe("backend-capability");
+  });
+
+  test("executeWave quotes first, so an unrunnable wave spends nothing", async () => {
+    const partial = createInMemoryBackend({
+      now: CLOCK.now,
+      runPinning: [{ key: "harness", inventory: ["*"], posture: "enforced" }],
+    });
+    let submitted = 0;
+    const counting = Object.create(partial) as TestableBackend;
+    counting.submit = async (...args: Parameters<TestableBackend["submit"]>) => {
+      submitted += 1;
+      return partial.submit(...args);
+    };
+    expect(await category(() => executeWave({
+      plan: plan(),
+      backend: counting,
+      taskBytesFor: (digest) => TASK_BYTES.get(digest)!,
+      launch: { clock: CLOCK, waitForTerminal: deliveringWaitPort(partial) },
+    }))).toBe("backend-capability");
+    expect(submitted).toBe(0);
   });
 });
 

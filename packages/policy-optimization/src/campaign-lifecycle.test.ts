@@ -376,6 +376,7 @@ async function runMiniatureCampaign(): Promise<RunOutcome> {
   }, {
     exploringEntry: {
       benchmarkBytes: GATE.bytes,
+      developmentBenchmarkBytes: DEV.bytes,
       revealContext: { kind: "after-run", trustedRunNotClosed: true },
     },
   });

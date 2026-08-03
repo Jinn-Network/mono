@@ -36,6 +36,53 @@ import type {
 /** Options the host owns; `runDigest` and the Task resolver are the plan's and the venue's. */
 export type WaveLaunchOptions = Omit<LaunchOptions, "runDigest" | "taskBytesFor">;
 
+/** What `quoteWave` established about a backend before a cell was dispatched. */
+export interface WaveQuote {
+  readonly cells: number;
+  /** Every pinning key the wave's arms use, sorted. */
+  readonly requiredKeys: readonly string[];
+  /** The subset the backend's capability inventory declares, sorted. */
+  readonly declaredKeys: readonly string[];
+}
+
+/**
+ * Checks, **before anything is dispatched**, that the injected backend declares every run-pinning
+ * key this wave's arms carry (review disposition M2).
+ *
+ * Without it the first failure is a per-cell `unsupported-requirement` rejection at `submit`, after
+ * the loop has already started — a wave that was never runnable is discovered one cell at a time,
+ * and the Matrix that comes out of it is a real record of an accident.
+ *
+ * **Keys only, deliberately.** `benchmarking-run`'s `quoteRun` checks the pinned *values* against
+ * the inventory too, and is the natural thing to compose here — but its inventory test is exact set
+ * membership and does not honor the `"*"` wildcard that `task-execution-backend`'s capability
+ * vocabulary defines and that the reference backend honors at `submit` (FINDING F-C7b-6). Composing
+ * it would refuse every wildcard-declaring backend, and re-deriving the wildcard rule here would be
+ * this product reimplementing a capability check it does not own. The key check is what the review
+ * asked for, is unambiguous, and needs no such rule.
+ */
+export async function quoteWave(
+  plan: WavePlan,
+  backend: TaskExecutionBackend,
+): Promise<WaveQuote> {
+  const capabilities = await backend.capabilities();
+  const declared = new Set(capabilities.runPinning.keys.map((entry) => entry.key));
+  const required = new Set<string>(Object.keys(plan.run.record.policy.submissionBaseline));
+  for (const arm of plan.run.record.arms) {
+    for (const key of Object.keys(arm.pinning)) required.add(key);
+  }
+  const missing = [...required].filter((key) => !declared.has(key)).sort(compareCodeUnitStrings);
+  if (missing.length > 0) {
+    refuse("backend-capability", "backend.capabilities.runPinning",
+      `the backend declares no run-pinning support for ${missing.join(", ")}; this wave's arms pin ${[...required].sort(compareCodeUnitStrings).join(", ")}`);
+  }
+  return {
+    cells: plan.cells,
+    requiredKeys: [...required].sort(compareCodeUnitStrings),
+    declaredKeys: [...declared].sort(compareCodeUnitStrings),
+  };
+}
+
 export interface ExecuteWaveInput {
   readonly plan: WavePlan;
   readonly backend: TaskExecutionBackend;
@@ -63,6 +110,9 @@ function terminalKindOf(events: readonly CellStatusEvent[]): CellStatusEvent | u
  */
 export async function executeWave(input: ExecuteWaveInput): Promise<WaveExecution> {
   const { plan } = input;
+  // M2: quote before spending. Always, not on request — an opt-in check that guards the one thing
+  // that costs money is a check most callers will discover they wanted afterwards.
+  await quoteWave(plan, input.backend);
   const events: CellStatusEvent[] = [];
   for await (const event of launchAndWatch(plan.benchmark.record, plan.run.record, input.backend, {
     ...(input.launch ?? {}),

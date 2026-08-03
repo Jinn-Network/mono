@@ -133,6 +133,28 @@ describe("a wave is one sealed Run (§6.1)", () => {
     }))).toBe("wave-composition");
   });
 
+  test("an allocation decided by another policy is refused (N3)", () => {
+    const document = campaign({ policyRef: "uniform/1.0", parameters: {} });
+    const decision = decideAllocation({
+      campaign: document,
+      waveNumber: 1,
+      population: [PARENT, CANDIDATE],
+      taskDigests: DEV.record.items.map(itemTaskDigest),
+    });
+    expect(category(() => planWave({
+      campaign: campaign({ policyRef: "drop-bottom-k/1.0", parameters: { k: 1 } }),
+      campaignDigest: CAMPAIGN_DIGEST,
+      waveNumber: 1,
+      candidates: [PARENT, CANDIDATE],
+      // A `uniform/1.0` decision carried into a campaign that declares `drop-bottom-k/1.0`: the
+      // journal would name a policy that never chose this arm set.
+      allocation: decision,
+      developmentBenchmarkBytes: DEV.bytes,
+      settings: runSettings(),
+      committed: NO_CELLS_COMMITTED,
+    }))).toBe("allocation-policy");
+  });
+
   test("an allocation retaining a candidate the population lacks is refused", () => {
     const document = campaign({ policyRef: "uniform/1.0", parameters: {} });
     const decision = decideAllocation({

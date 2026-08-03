@@ -35,6 +35,7 @@ import {
   type JudgeabilityRevealContext,
   type RevealCoverage,
 } from "@jinn-network/benchmarking-records";
+import { checkBenchmarkDisjointness } from "./benchmark-disjointness.js";
 import type { CampaignDocument } from "./types.js";
 
 export type ExploringEntryRefusal =
@@ -49,7 +50,9 @@ export type ExploringEntryRefusal =
   /** A `scheduled` benchmark whose `notBefore` has already arrived: the items are publishable. */
   | "reveal-window-open"
   /** The caller can already show at least one committed item as revealed, or as tampered with. */
-  | "already-revealed";
+  | "already-revealed"
+  /** Review disposition M4 — the gate shares at least one item with the development slate. */
+  | "development-overlap";
 
 /**
  * The typed proof that the transition was checked. It is not forgeable by accident: the journal's
@@ -65,6 +68,15 @@ export interface ExploringEntryAdmission {
 export interface ExploringEntryInput {
   /** The exact sealed bytes of the Benchmark record the campaign names as its promotion gate. */
   readonly benchmarkBytes: Uint8Array;
+  /**
+   * The exact sealed bytes of the campaign's **development** slate.
+   *
+   * Required, not optional (review disposition M4). A dev wave reveals every item it runs, so an
+   * item present in both slates is contaminated before the promotion Run is ever planned. Making
+   * these bytes optional would leave the property merely offered; this gate is the one moment
+   * where the check is both computable and still in time to matter.
+   */
+  readonly developmentBenchmarkBytes: Uint8Array;
   /**
    * The trusted fact that distinguishes genuinely pre-reveal material, in
    * `@jinn-network/benchmarking-records`' own vocabulary. Required: "committed" is a claim about a
@@ -102,6 +114,19 @@ export function checkExploringEntry(
   if (digest !== campaign.target.promotionBenchmark) {
     return refuse("digest-mismatch",
       `supplied bytes digest to ${digest}, campaign names ${campaign.target.promotionBenchmark}`);
+  }
+
+  // M4, before anything else about reveal state: a gate sharing an item with the slate every
+  // candidate was tuned against is contaminated whatever its reveal policy says.
+  const disjointness = checkBenchmarkDisjointness(campaign.target, {
+    development: input.developmentBenchmarkBytes,
+    promotion: input.benchmarkBytes,
+  });
+  if (!disjointness.ok) {
+    return refuse(
+      disjointness.reason === "shared-items" ? "development-overlap" : disjointness.reason,
+      disjointness.detail,
+    );
   }
 
   if (record.items.length === 0) {

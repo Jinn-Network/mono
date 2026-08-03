@@ -51,6 +51,13 @@ export {
 } from "./campaign.js";
 export { assertExactPin, axisValuesByteShare, isExactPin } from "./frozen-axes.js";
 
+// --- review disposition M4: the two slates share no item ---
+export {
+  checkBenchmarkDisjointness,
+  type BenchmarkDisjointnessResult,
+  type CampaignBenchmarkBytes,
+} from "./benchmark-disjointness.js";
+
 // --- product §6.3: the committed-and-unrevealed promotion gate ---
 export {
   checkExploringEntry,
@@ -146,9 +153,11 @@ export {
 export {
   assembleWaveMatrix,
   executeWave,
+  quoteWave,
   type AssembleWaveInput,
   type ExecuteWaveInput,
   type WaveLaunchOptions,
+  type WaveQuote,
 } from "./execute.js";
 
 // --- product §6.1/§6.3: Reports, through the method registry only (ruling R3) ---

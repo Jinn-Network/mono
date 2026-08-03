@@ -218,6 +218,7 @@ function seedAWave(directory: string): void {
     type: "wave-planned", recordedAt: NOW, payload: wavePlannedPayload(plan),
   }, { exploringEntry: {
     benchmarkBytes: PROMOTION.bytes,
+    developmentBenchmarkBytes: DEV.bytes,
     revealContext: { kind: "after-run", trustedRunNotClosed: true },
   } });
   next = appendWaveEvent(next, {
