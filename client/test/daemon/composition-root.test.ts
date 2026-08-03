@@ -3,22 +3,31 @@
  * and tested directly; `buildOperatorComposition` is exercised end to end against a real
  * `LocalTaskExecutionBackend` + real evidence runtime + real trust-resolve/pipeline wiring +
  * (C8) a real `ProjectorLoop`/`ClaimGate`/`EngagementLedger`/`verifySettlementGrade`, with only
- * `createBaseVenue` (chain I/O) and `openOperatorEvidence` (kept but hermetic — see below)
- * stubbed via `vi.mock`. `openVenueState`/`createChainLogSource` and the rest of
- * `@jinn-network/marketplace-venue-base` stay real (pure local SQLite, no network) so the
- * projector wiring this test proves is the actual production path.
+ * `createBaseVenue` (chain I/O) and `openOperatorEvidence` are stubbed via `vi.mock`; the
+ * composition assertions exercise the real backend and projector wiring around those ports.
  */
 import { mkdtempSync } from 'node:fs';
+import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
 import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
 import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
+import {
+  claudeCodeLauncher,
+  predictionV1BaselineLauncher,
+} from '@jinn-network/task-execution-launchers';
 import { Store } from '../../src/store/store.js';
 import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
 import { ProjectorLoop } from '../../src/daemon/projector-loop.js';
+import {
+  NATIVE_ROLE_IDENTITY_ROLES,
+  type RoleIdentitySet,
+} from '../../src/daemon/role-identities.js';
+import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
+import { NativeSolutionCoordinator } from '../../src/daemon/native-solution-coordinator.js';
 
 const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() => ({
   createBaseVenueMock: vi.fn(),
@@ -26,8 +35,8 @@ const { createBaseVenueMock, safeExecuteMock, venueCloseMock } = vi.hoisted(() =
   venueCloseMock: vi.fn(),
 }));
 
-// Only `createBaseVenue` is replaced — `openVenueState`/`createChainLogSource` (C3) stay real so
-// the projector's log-source wiring this test exercises is production code, not a fake.
+// The BaseVenue factory is replaced so these tests remain hermetic while still asserting that the
+// composition consumes its one returned log source.
 vi.mock('@jinn-network/marketplace-venue-base', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@jinn-network/marketplace-venue-base')>();
   return { ...actual, createBaseVenue: createBaseVenueMock };
@@ -140,6 +149,41 @@ describe('operator caps assembly (coordinator amendment 1)', () => {
   });
 });
 
+describe('native launcher executable inspection', () => {
+  it('combines an executable X_OK/digest recheck with the launcher probe and fails missing binaries', async () => {
+    const {
+      buildLauncherDeployments,
+      buildNativeLauncherCapabilityPort,
+    } = await import('../../src/daemon/composition-root.js');
+    const predictionDeployments = buildLauncherDeployments(
+      [predictionV1BaselineLauncher],
+      {} as never,
+    );
+    const prediction = buildNativeLauncherCapabilityPort(
+      [predictionV1BaselineLauncher],
+      predictionDeployments,
+    );
+    await expect(prediction.inspect({
+      profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      requirements: { harness: { id: 'prediction-v1-baseline' } },
+    })).resolves.toMatchObject({
+      launcherId: 'prediction-v1-baseline',
+      executable: { path: process.execPath, digest: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      probe: { ready: true, executable: { path: process.execPath } },
+    });
+
+    const missingDeployments = buildLauncherDeployments(
+      [claudeCodeLauncher],
+      { claudePath: '/definitely/missing/jinn-claude' } as never,
+    );
+    const missing = buildNativeLauncherCapabilityPort([claudeCodeLauncher], missingDeployments);
+    await expect(missing.inspect({
+      profileUri: 'https://jinn.network/task-profiles/repository-work/1.0',
+      requirements: { harness: { id: 'claude-code' } },
+    })).resolves.toMatchObject({ probe: { ready: false } });
+  });
+});
+
 function stubVenue() {
   return {
     claim: { taskDigest: 'stub' },
@@ -156,9 +200,174 @@ function stubVenue() {
   };
 }
 
+function nativeRoleIdentities(): RoleIdentitySet {
+  const roles = new Map(
+    NATIVE_ROLE_IDENTITY_ROLES.map((role) => {
+      const keyPair = generateKeyPairSync('ed25519');
+      return [role, {
+        role,
+        keyId: `did:key:ztest-${role}`,
+        publicKey: keyPair.publicKey,
+        sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
+      }] as const;
+    }),
+  );
+  return {
+    agent: 'urn:jinn:operator:test',
+    get: (role) => roles.get(role)!,
+    resolveEffective: async () => ({ ok: true as const, bindingDigest: `sha256:${'9'.repeat(64)}` }),
+  } as unknown as RoleIdentitySet;
+}
+
+function nativeClaimRuntime(
+  store: Store,
+  coordinator = '0x3333333333333333333333333333333333333333',
+) {
+  return {
+    operatorAgent: 'urn:jinn:operator:test',
+    state: new NativeOperatorStateRepository(store),
+    exactDocuments: async () => { throw new Error('exact documents not exercised'); },
+    canonical: { read: async () => ({ kind: 'absent' as const, checkedAtBlock: 0n }) },
+    policy: {
+      chainId: 84532,
+      coordinator,
+      generation: 'today' as const,
+      maxSpendWei: 10n,
+      minDeadlineLeadMs: 0,
+      maxConcurrent: 1,
+    },
+    canonicalFinalized: async () => true,
+    activeEngagements: () => 0,
+    worker: { ownerId: 'composition-test-worker', ttlMs: 60_000 },
+    solution: {
+      publisherRootDir: mkdtempSync(join(tmpdir(), 'jinn-native-solution-publisher-')),
+      publicBaseUrl: 'https://operator.example/solver',
+      exactDocuments: async () => { throw new Error('solution documents not exercised'); },
+      resolveEvaluationSpec: async () => undefined,
+    },
+  };
+}
+
+function nativeProjectorPorts() {
+  return {
+    resolveRecord: async () => { throw new Error('exact public record not exercised'); },
+    verifyVerdictObservation: async () => { throw new Error('decision-grade gate not exercised'); },
+  };
+}
+
 describe('buildOperatorComposition', () => {
+  it('refuses native boot before opening a venue when no persistent role identities are supplied', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    await expect(buildOperatorComposition({ mode: 'native', config: {} } as never)).rejects.toThrow(
+      /persistent role identities with effective bindings/i,
+    );
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a bridge signer rather than installing legacy Delivery extensions in native mode', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      nativeRoleIdentities: nativeRoleIdentities(),
+      legacyBridgeSigner: () => `0x${'0'.repeat(130)}` as const,
+    } as never)).rejects.toThrow(/must not receive a legacy bridge signer/i);
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses native boot when the product omits durable claim runtime ports or changes the bound agent IRI', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      nativeRoleIdentities: nativeRoleIdentities(),
+    } as never)).rejects.toThrow(/durable claim state.*exact-document.*canonical-reader.*lease/i);
+
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: { operatorAgent: 'urn:jinn:operator:safe-derived' },
+    } as never)).rejects.toThrow(/must equal the agent used for role trust bindings/i);
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+  });
+
+  it('refuses native boot when B6/B7 exact record and verdict ports are absent', async () => {
+    createBaseVenueMock.mockReset();
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    const store = new Store(':memory:');
+    await expect(buildOperatorComposition({
+      mode: 'native',
+      config: {},
+      chain: {
+        chainId: 84532,
+        taskCoordinator: '0x3333333333333333333333333333333333333333',
+        generation: 'today',
+      },
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: nativeClaimRuntime(store),
+    } as never)).rejects.toThrow(/exact public solution\/evaluation record resolution.*decision-grade verdict gate/i);
+    expect(createBaseVenueMock).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it('keeps the explicit legacy bridge composition startable without native identities', async () => {
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+    const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-legacy-'));
+    const store = new Store(':memory:');
+
+    const composition = await buildOperatorComposition({
+      mode: 'legacy',
+      config: {
+        ipfsRegistryUrl: 'https://registry.example',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: [],
+        claimPolicy: { mode: 'claim-nothing' },
+      } as never,
+      publicClient: { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) } as never,
+      walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
+      safeAddress: '0x1111111111111111111111111111111111111111',
+      mechAddress: '0x2222222222222222222222222222222222222222',
+      chain: {
+        chainId: 84532,
+        taskCoordinator: '0x3333333333333333333333333333333333333333',
+        jinnRouter: '0x4444444444444444444444444444444444444444',
+        mechMarketplace: '0x5555555555555555555555555555555555555555',
+        activityChecker: '0x6666666666666666666666666666666666666666',
+        generation: 'today',
+      } as never,
+      stateRoot,
+      evidenceRoot: join(stateRoot, 'evidence'),
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+      legacyBridgeSigner: () => `0x${'0'.repeat(130)}` as const,
+    });
+
+    expect(composition.mode).toBe('legacy');
+    expect(composition.identities).toBeUndefined();
+    expect((await composition.backend.capabilities()).signedDeliveries).toBe(false);
+
+    await composition.close();
+    store.close();
+  });
+
   it('installs the broadcaster, wires the pipeline, and closes the evidence runtime', async () => {
     createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    evidenceCloseMock.mockClear();
+    venueCloseMock.mockClear();
     openOperatorEvidenceMock.mockReset().mockResolvedValue({
       runtime: {},
       ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
@@ -207,8 +416,10 @@ describe('buildOperatorComposition', () => {
     const publicClient = {
       getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }),
     };
+    const identities = nativeRoleIdentities();
 
     const composition = await buildOperatorComposition({
+      mode: 'native',
       config: config as never,
       publicClient: publicClient as never,
       walletClient: { account: { address: safeAddress } } as never,
@@ -220,7 +431,18 @@ describe('buildOperatorComposition', () => {
       venueStateDbPath: join(stateRoot, 'venue.db'),
       profileStore: { get: () => undefined },
       store,
+      nativeRoleIdentities: identities,
+      nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
+
+    expect(composition.identities).toBe(identities);
+    expect(createBaseVenueMock).toHaveBeenCalledTimes(1);
+    expect(composition.nativeSolutionCoordinator).toBeInstanceOf(NativeSolutionCoordinator);
+    expect(composition.nativeSolutionPublisher?.sourceId).toBe(
+      'urn:jinn:operator:test/solver-records',
+    );
+    expect(composition.nativeSolutionPublisher?.sourceId).not.toContain('operator-projector');
 
     // (a) the composition returns its own broadcaster (finding E16 / the C2 ruling: no
     // process-global install — the host threads `composition.broadcaster` explicitly).
@@ -315,24 +537,21 @@ describe('buildOperatorComposition', () => {
     });
     expect(grade.dispatchBinding.status).toBe('verified');
     expect(grade.evaluationSpecification.status).toBe('not-applicable');
-    // Finding E31: no `deliverySigningKey` was supplied to this composition, so nothing was ever
-    // signed -- `getDeliverySignature` legitimately finds no envelope for this digest.
+    // No Delivery has been completed in this test, so the real persistent solver-delivery key has
+    // no envelope to verify yet.
     expect(grade.executorBinding.status).toBe('missing');
 
-    // Finding E31: `signedDeliveries` reflects reality -- `false` here because this composition
-    // was built with no `deliverySigningKey` (ending the old unconditional `true` lie).
-    expect(capabilities.signedDeliveries).toBe(false);
+    // Native delivery capability is backed by the supplied persistent role identity.
+    expect(capabilities.signedDeliveries).toBe(true);
 
-    // (e) close() closes the evidence runtime and both venue-state handles (finding: the
-    // composition's own `openVenueState` handle for the projector's log source, plus
-    // `createBaseVenue`'s own separate connection to the same file — see the file header).
+    // close() releases the evidence runtime and the sole venue owner.
     await composition.close();
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
     store.close();
   });
 
-  it('advertises repository-work when wiring selects prediction-v1-baseline (E39 cycle 3)', async () => {
+  it('advertises prediction-forecast when wiring selects prediction-v1-baseline (E39 cycle 3)', async () => {
     // E39 diagnose→fix cycle 3: the e2e wires harness: 'prediction-v1-baseline', but
     // ALL_LAUNCHERS only listed claude-code/codex/hermes/cursor. buildLaunchers returned [],
     // assembleCapabilities filtered provisioner profiles against an empty launcher set, and
@@ -367,6 +586,7 @@ describe('buildOperatorComposition', () => {
     };
     const store = new Store(':memory:');
     const composition = await buildOperatorComposition({
+      mode: 'native',
       config: config as never,
       publicClient: { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) } as never,
       walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
@@ -385,18 +605,21 @@ describe('buildOperatorComposition', () => {
       venueStateDbPath: join(stateRoot, 'venue.db'),
       profileStore: { get: () => undefined },
       store,
+      nativeRoleIdentities: nativeRoleIdentities(),
+      nativeClaimRuntime: nativeClaimRuntime(store),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
 
     const capabilities = await composition.backend.capabilities();
     expect(capabilities.taskProfiles).toContain(
-      'https://jinn.network/task-profiles/repository-work/1.0',
+      'https://jinn.network/task-profiles/prediction-forecast/1.0',
     );
 
     await composition.close();
     store.close();
   });
 
-  it('wires a supplied deliverySigningKey through to signedDeliveries (finding E31)', async () => {
+  it('uses the scoped solver-delivery identity for signed deliveries', async () => {
     createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
     openOperatorEvidenceMock.mockReset().mockResolvedValue({
       runtime: {},
@@ -405,7 +628,6 @@ describe('buildOperatorComposition', () => {
     });
 
     const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
-    const { generateKeyPairSync, sign: cryptoSign } = await import('node:crypto');
 
     const stateRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-state-signing-'));
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'jinn-composition-evidence-signing-'));
@@ -430,9 +652,10 @@ describe('buildOperatorComposition', () => {
     };
     const store = new Store(':memory:');
     const publicClient = { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) };
-    const keyPair = generateKeyPairSync('ed25519');
+    const identities = nativeRoleIdentities();
 
     const composition = await buildOperatorComposition({
+      mode: 'native',
       config: config as never,
       publicClient: publicClient as never,
       walletClient: { account: { address: safeAddress } } as never,
@@ -444,16 +667,15 @@ describe('buildOperatorComposition', () => {
       venueStateDbPath: join(stateRoot, 'venue.db'),
       profileStore: { get: () => undefined },
       store,
-      deliverySigningKey: {
-        keyId: 'operator-executor-key',
-        publicKey: keyPair.publicKey,
-        sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, keyPair.privateKey)),
-      },
+      nativeRoleIdentities: identities,
+      nativeClaimRuntime: nativeClaimRuntime(store, chain.taskCoordinator),
+      nativeProjectorPorts: nativeProjectorPorts(),
     });
 
     // Ending the lie: with a real key supplied, `signedDeliveries` reports `true`.
     const capabilities = await composition.backend.capabilities();
     expect(capabilities.signedDeliveries).toBe(true);
+    expect(composition.identities.get('solver-delivery')).toBe(identities.get('solver-delivery'));
 
     await composition.close();
     store.close();
@@ -784,6 +1006,7 @@ describe('readSealedDocuments legacy bridge (E41)', () => {
     };
 
     const composition = await buildOperatorComposition({
+      mode: 'legacy',
       config: {
         ipfsGatewayUrl: 'http://fixture-ipfs',
         ipfsRegistryUrl: 'http://fixture-registry',

@@ -18,10 +18,31 @@ export interface PostingIntent {
   readonly submissionDigest: `sha256:${string}`;
   readonly idempotencyKey: string;
   readonly createdAt: string;
+  /** Phase C commands are exact; absent fields identify a legacy record that cannot be replayed. */
+  readonly version?: 2;
+  readonly venueNamespace?: string;
+  readonly commandDigest?: `sha256:${string}`;
+  readonly command?: import("./posting.js").PreparedPostingCommand;
 }
 
-/** The `(creatorSafe, taskCidDigest, submissionDigest)` key an intent is re-keyed onto (§6.1). */
-export type PostingIntentKey = Pick<PostingIntent, "creatorSafe" | "taskCidDigest" | "submissionDigest">;
+/** Exact operation key; the optional legs exist only to read frozen pre-Phase-C records. */
+export type PostingIntentKey = Pick<PostingIntent, "creatorSafe" | "taskCidDigest" | "submissionDigest"
+  | "venueNamespace" | "commandDigest">;
+
+/** Stable cross-store join key for a requester scope and its sole broadcast WAL record. */
+export function postingIntentKeyOf(key: PostingIntentKey): string {
+  const legacy = `${key.creatorSafe.toLowerCase()}|${key.taskCidDigest}|${key.submissionDigest}`;
+  return key.venueNamespace === undefined || key.commandDigest === undefined
+    ? `legacy|${legacy}`
+    : `v2|${key.venueNamespace}|${legacy}|${key.commandDigest}`;
+}
+
+/** Exact equality guard used by every durable adapter before treating a claim as replay. */
+export function postingIntentsEqual(left: PostingIntent, right: PostingIntent): boolean {
+  return postingIntentKeyOf(left) === postingIntentKeyOf(right)
+    && left.idempotencyKey === right.idempotencyKey
+    && JSON.stringify(left.command) === JSON.stringify(right.command);
+}
 
 /** A resolved intent's on-chain outcome. */
 export interface PostingOutcome {
@@ -56,7 +77,8 @@ export type PostingIntentClaim =
   | {
       readonly kind: "resolved";
       readonly outcome: PostingOutcome;
-    };
+    }
+  | { readonly kind: "conflict"; readonly existing: PostingIntent };
 
 /**
  * Linearizable persistence port (program §7.52). `claim` atomically creates ownership or reports
@@ -79,6 +101,9 @@ export interface PostingIntentStore {
 /** An in-memory `PostingIntentStore` -- the reference implementation for tests and small hosts. */
 export function createInMemoryPostingIntentStore(): PostingIntentStore {
   const byKey = new Map<string, OwnedPostingIntentRecord>();
+  // One sealed Submission may bind exactly one money-path command. The logical row key remains
+  // the original tuple so changed terms/venue bytes collide and are rejected by the exact
+  // equality check instead of allocating a second broadcast authority.
   const keyOf = (key: PostingIntentKey): string =>
     `${key.creatorSafe.toLowerCase()}|${key.taskCidDigest}|${key.submissionDigest}`;
 
@@ -87,9 +112,15 @@ export function createInMemoryPostingIntentStore(): PostingIntentStore {
       const key = keyOf(intent);
       const existing = byKey.get(key);
       if (existing?.resolved !== undefined) {
+        if (!postingIntentsEqual(existing, intent)) {
+          return { kind: "conflict", existing };
+        }
         return { kind: "resolved", outcome: existing.resolved };
       }
       if (existing !== undefined) {
+        if (!postingIntentsEqual(existing, intent)) {
+          return { kind: "conflict", existing };
+        }
         return {
           kind: "pending-other",
           intent: {
@@ -98,6 +129,10 @@ export function createInMemoryPostingIntentStore(): PostingIntentStore {
             submissionDigest: existing.submissionDigest,
             idempotencyKey: existing.idempotencyKey,
             createdAt: existing.createdAt,
+            ...(existing.version === undefined ? {} : { version: existing.version }),
+            ...(existing.venueNamespace === undefined ? {} : { venueNamespace: existing.venueNamespace }),
+            ...(existing.commandDigest === undefined ? {} : { commandDigest: existing.commandDigest }),
+            ...(existing.command === undefined ? {} : { command: existing.command }),
           },
         };
       }
@@ -159,10 +194,11 @@ export class BroadcastUncertainError extends Error {
 export type ScanForOnChainMatch = (intent: PostingIntent) => Promise<PostingOutcome | null>;
 
 /**
- * The recovery scan (design §6.1): for every still-pending intent, ask the injected `scan` port
- * whether it actually landed on-chain. A match is adopted idempotently (resolved in the store,
- * dropped from the returned list); no match leaves the intent uncertain -- returned so the
- * caller can surface it (never silently retried/rebroadcast).
+ * Conservative chain diagnostic for legacy hosts. `TaskCreated` does not anchor a Submission or
+ * command digest, so neither a singleton nor an ambiguous chain match may resolve this WAL. The
+ * scan is still run to support operator diagnostics, but every pending intent remains uncertain.
+ * Phase C requester recovery adopts only an already-resolved exact WAL (or a future exact local
+ * transaction-ledger proof) through `MarketplaceRequesterBackend.recoverPosting()`.
  */
 export async function recoverPostingIntents(
   store: PostingIntentStore,
@@ -173,12 +209,11 @@ export async function recoverPostingIntents(
   for (const ownedIntent of pending) {
     const { ownerToken, ...intent } = ownedIntent;
     // eslint-disable-next-line no-await-in-loop -- recovery scans are small and sequential by design.
-    const match = await scan(intent);
-    if (match !== null) {
-      await store.resolve(intent, ownerToken, match);
-    } else {
-      stillUncertain.push(intent);
-    }
+    await scan(intent);
+    // The owner token is intentionally retained in durable storage. Chain-only evidence cannot
+    // distinguish two Submissions for the same Task digest and therefore cannot consume it.
+    void ownerToken;
+    stillUncertain.push(intent);
   }
   return stillUncertain;
 }

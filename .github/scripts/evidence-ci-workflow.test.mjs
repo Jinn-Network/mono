@@ -491,7 +491,7 @@ test('mutation: anonymous pack:smoke inserted before npm pin in trajectory job f
 
 test('mutation: remove setup-node from trajectory job fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - uses: actions\/checkout@v4\n)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trajectory:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
   expectValidationFailure(mutant, /trajectory must have exactly one setup-node step \(found 0\)/);
@@ -510,7 +510,7 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
 
 test('mutation: setup-node before checkout in trajectory job fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trajectory:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n$2',
   );
   expectValidationFailure(mutant, /trajectory checkout must precede setup-node/);

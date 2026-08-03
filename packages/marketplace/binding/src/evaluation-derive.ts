@@ -151,7 +151,9 @@ export function deriveAndSealEvaluationSubmission(
     ...(input.submissionFields.evaluationRequirements === undefined
       ? {}
       : { evaluationRequirements: input.submissionFields.evaluationRequirements }),
-    capabilityGrants: input.capabilityGrants,
+    ...(Object.keys(input.capabilityGrants).length === 0
+      ? {}
+      : { capabilityGrants: input.capabilityGrants }),
     ...(input.submissionFields.requirements === undefined
       ? {}
       : { requirements: input.submissionFields.requirements }),

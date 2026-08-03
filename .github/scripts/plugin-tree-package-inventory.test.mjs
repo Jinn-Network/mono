@@ -42,6 +42,7 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/record-discovery-protocol', join(root, 'packages', 'discovery', 'protocol')],
   ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
+  ['@jinn-network/record-discovery-serve', join(root, 'packages', 'discovery', 'serve')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/trust-resolve', join(root, 'packages', 'trust', 'resolve')],
 ]);
@@ -66,6 +67,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
+    transitivePortalResolutions: ['@jinn-network/record-discovery-serve'],
   }],
 ]);
 
@@ -165,13 +167,21 @@ test('plugin tree Jinn dependencies and portal resolutions match the approved gr
     const resolutions = manifest.resolutions ?? {};
     const resolved = Object.keys(resolutions)
       .filter((name) => name.startsWith('@jinn-network/')).sort();
-    assert.deepEqual(resolved, declared, `${directory} has unmatched Jinn resolutions`);
+    const transitive = [...(approved.transitivePortalResolutions ?? [])].sort();
+    assert.deepEqual(resolved, [...declared, ...transitive].sort(),
+      `${directory} has unmatched Jinn resolutions`);
     for (const dependencyName of declared) {
       const siblingVersion = JSON.parse(readFileSync(join(SIBLING_TREE_DIRS.get(dependencyName), 'package.json'), 'utf8')).version;
       assert.equal(manifest.dependencies?.[dependencyName] ?? manifest.devDependencies?.[dependencyName], siblingVersion,
         `${directory} must declare the exact sibling version for ${dependencyName}`);
       assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
         `${directory} must resolve ${dependencyName} through its matching portal`);
+    }
+    for (const dependencyName of transitive) {
+      assert.ok(!declared.includes(dependencyName),
+        `${directory} must not declare transitive portal ${dependencyName} as a dependency`);
+      assert.equal(resolutions[dependencyName], expectedPortal(directory, dependencyName),
+        `${directory} must resolve transitive ${dependencyName} through its matching portal`);
     }
   }
 });

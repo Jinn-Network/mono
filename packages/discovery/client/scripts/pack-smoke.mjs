@@ -71,6 +71,18 @@ import { readFile, readdir } from "node:fs/promises";
 import * as recordDiscoveryClient from "@jinn-network/record-discovery-client";
 
 if (typeof recordDiscoveryClient !== "object") throw new Error("root import failed");
+if (typeof recordDiscoveryClient.decodeWireEnvelopeForVerification !== "function") {
+  throw new Error("strict wire-envelope decoder is missing from the packed public surface");
+}
+const decoded = recordDiscoveryClient.decodeWireEnvelopeForVerification({
+  payloadType: "application/test",
+  payload: Buffer.from("exact-public-payload").toString("base64"),
+  signatures: [{ keyid: "test-key", sig: Buffer.from([0, 127, 128, 255]).toString("base64") }],
+});
+if (Buffer.from(decoded.payloadBytes).toString() !== "exact-public-payload"
+    || !Buffer.from(decoded.signatures[0].signatureBytes).equals(Buffer.from([0, 127, 128, 255]))) {
+  throw new Error("packed strict wire-envelope decoder changed exact bytes");
+}
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/record-discovery-protocol", "@jinn-network/trust-core"];

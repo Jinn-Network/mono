@@ -385,6 +385,19 @@ describe('createProjectorEnrich', () => {
     expect(enriched?.projection.dispatchContext).toEqual(DISPATCH_CONTEXT);
   });
 
+  it('never invokes the SignedTaskV1 bridge fallback when the native requester mode disables it', async () => {
+    const store = buildFixtureStore();
+    const legacyTaskBytes = legacySignedTaskV1Bytes();
+    const legacyTaskDigest = computeRawCodecCid(legacyTaskBytes).sha256Digest;
+    store.submissionsByTask.set(TASK_ID.toString(), legacyTaskBytes);
+    store.dispatchContexts.set(TASK_ID.toString(), DISPATCH_CONTEXT);
+
+    const enrich = createProjectorEnrich(buildPorts(store, { allowLegacySignedTaskV1: false }));
+    const enriched = await enrich(taskCreatedEvent(legacyTaskDigest.slice('sha256:'.length)));
+
+    expect(enriched).toBeUndefined();
+  });
+
   it('still drops a today-mode TaskCreated whose resolved document is neither a valid Submission nor a valid SignedTaskV1', async () => {
     const store = buildFixtureStore();
     const garbage = new TextEncoder().encode(JSON.stringify({ not: 'a recognized document shape' }));

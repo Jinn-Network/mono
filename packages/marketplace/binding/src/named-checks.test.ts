@@ -152,7 +152,7 @@ function makePorts(
   const entries = [
     { key: ADMISSION_KEY, agent: ADMISSION_AGENT, binding: resolvedBinding(ADMISSION_KEY, ADMISSION_AGENT, [ADMISSION_RECEIPT_TRUST_SCOPE]) },
     { key: VERDICT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(VERDICT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
-    { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["verdicts"]) },
+    { key: SETTLEMENT_KEY, agent: EVALUATOR_AGENT, binding: resolvedBinding(SETTLEMENT_KEY, EVALUATOR_AGENT, ["settlements"]) },
     { key: SOLVER_KEY, agent: solverAgent, binding: resolvedBinding(SOLVER_KEY, solverAgent, ["deliveries"]) },
     {
       key: REQUESTER_KEY,

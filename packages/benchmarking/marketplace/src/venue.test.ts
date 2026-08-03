@@ -19,7 +19,7 @@ import {
   deriveMarketplaceAttemptUri,
   encodeRevisedRequestData,
   makeMarketplaceBackend,
-  type MarketplaceTestableBackend,
+  type MarketplaceRequesterBackend,
 } from "@jinn-network/marketplace-binding";
 import {
   REVISED_PROJECTOR_EVENTS_ABI,
@@ -32,6 +32,7 @@ import {
   type ObservationMarketplaceEvent,
 } from "@jinn-network/marketplace-projector";
 import { sealDelivery, sealSubmission, sealTask } from "@jinn-network/task-execution-protocol";
+import type { TaskExecutionBackend } from "@jinn-network/task-execution-backend";
 import {
   encodeAbiParameters,
   encodeEventTopics,
@@ -116,7 +117,7 @@ async function loadMiniatureTask(): Promise<Uint8Array> {
   return sealTask(task.record);
 }
 
-function makeBackend(): MarketplaceTestableBackend {
+function makeBackend(): MarketplaceRequesterBackend {
   let nextTaskId = 1n;
   return makeMarketplaceBackend(BASE_SEPOLIA_TODAY, {
     creatorSafe: "0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98",
@@ -141,7 +142,7 @@ function makeBackend(): MarketplaceTestableBackend {
   });
 }
 
-function marketplaceWaitPort(backend: MarketplaceTestableBackend) {
+function marketplaceWaitPort(backend: MarketplaceRequesterBackend) {
   return {
     async waitUntilTerminal({ attempt }: { attempt: string }) {
       const snap = await backend.observe(attempt as never);
@@ -308,8 +309,9 @@ describe("runOnMarketplace", () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  test("composes via decode pipeline with attempt + settled cost from projector authority", async () => {
+  test("uses a concrete requester backend through the two-argument TaskExecutionBackend seam", async () => {
     const backend = makeBackend();
+    const executionBackend: TaskExecutionBackend = backend;
     const submit = vi.spyOn(backend, "submit");
     const { bench, benchDigest } = singleCellBench();
     const run = openCompetitionRun(benchDigest);
@@ -478,7 +480,7 @@ describe("runOnMarketplace", () => {
       accounted: 1,
     };
 
-    const result = await runOnMarketplace(bench, run, backend, {
+    const result = await runOnMarketplace(bench, run, executionBackend, {
       runDigest,
       closeBoundary: closePorts(),
       projector: {

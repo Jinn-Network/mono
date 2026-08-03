@@ -213,8 +213,8 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     };
     const fakeEnvelope = (payloadType: string, bytes: Uint8Array) => ({
       payloadType,
-      payload: new TextDecoder().decode(bytes),
-      signatures: [{ keyid: "key-1", sig: "any" }],
+      payload: Buffer.from(bytes).toString("base64"),
+      signatures: [{ keyid: "key-1", sig: Buffer.from("any").toString("base64") }],
     });
 
     const chainOutcome = await driver.verifySource({

@@ -50,6 +50,27 @@ describe("createSqlitePostingIntentStore (design §7 ruling 4 -- transactional o
     expect(kinds).toEqual(["owner", "pending-other"]);
   });
 
+  test("the logical tuple rejects a second command digest instead of creating another WAL", async () => {
+    const store = createSqlitePostingIntentStore(state);
+    const firstDigest = `sha256:${"d".repeat(64)}` as const;
+    const first = baseIntent({
+      version: 2,
+      venueNamespace: "eip155:84532:today:router",
+      commandDigest: firstDigest,
+      command: { commandDigest: firstDigest } as NonNullable<PostingIntent["command"]>,
+    });
+    expect((await store.claim(first)).kind).toBe("owner");
+    const changedDigest = `sha256:${"e".repeat(64)}` as const;
+    const changed = {
+      ...first,
+      commandDigest: changedDigest,
+      command: { commandDigest: changedDigest } as NonNullable<PostingIntent["command"]>,
+    };
+
+    await expect(store.claim(changed)).resolves.toMatchObject({ kind: "conflict" });
+    expect(await store.scanPending()).toHaveLength(1);
+  });
+
   test("claim on a pending key owned elsewhere returns the STORED intent, not the caller's", async () => {
     const store = createSqlitePostingIntentStore(state);
     const original = baseIntent({ createdAt: "2026-01-01T00:00:00.000Z" });

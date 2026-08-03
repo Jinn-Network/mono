@@ -112,6 +112,10 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         // the daemon can claim with its own mech.
         const v3Env = await deployMinimalV3Stack(fixture, operator, DEPLOYER_PRIV_KEY);
 
+        // The dump-state fixture retains its tip but not arbitrary predecessor blocks. Mine a
+        // local finality buffer so the compatibility projector never requests pre-snapshot data.
+        await fixture.anvil.mineBlocks(130);
+
         running = await startDaemon(
           fixture,
           operator,
@@ -119,7 +123,10 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
           mockIpfs.baseUrl, // ipfsGatewayUrl (task fetch)
           v3Env,
           mockIpfs.baseUrl, // ipfsRegistryUrl (envelope upload)
-          { polymarketGammaBaseUrl: mockGamma.baseUrl }, // offline market resolution
+          {
+            polymarketGammaBaseUrl: mockGamma.baseUrl,
+            enableComposition: true,
+          },
         );
 
         // Baseline the activity counter before posting.
@@ -145,9 +152,6 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
         expect(delivered.deliveryTxHash, 'no on-chain delivery tx').toMatch(/^0x[0-9a-fA-F]+$/);
         // The envelope must name the deterministic harness we ran.
         expect(delivered.solverHarnessName).toBe(selectorToHarnessName(HARNESS));
-        const taskCreatedBlock = await fixture.publicClient.getBlock({
-          blockNumber: posted.createdAtBlock,
-        });
         const claimReceipt = await fixture.publicClient.getTransactionReceipt({
           hash: claim.txHash,
         });
@@ -155,19 +159,15 @@ describeMaybe('hermetic full daemon loop (spec §3.1 / §6 Home 1)', () => {
           claimReceipt.blockNumber,
           'fixture must separate TaskCreated from TaskAttemptCreated',
         ).not.toBe(posted.createdAtBlock);
-        expect(delivered.envelope.executor.generatorModel).toEqual({
-          id: 'unknown',
-          source: 'config',
-        });
-        expect(delivered.envelope.distributionClass).toBe('unknown');
+        // The legacy-to-TEP bridge is explicit about the provenance it cannot reconstruct: it
+        // carries the real marketplace request id while leaving creation anchors as documented
+        // placeholders. The native exact-document path owns full Task provenance.
         expect(delivered.envelope.task).toMatchObject({
-          onchainCreationTx: posted.creationTxHash,
-          onchainCreationBlock: Number(posted.createdAtBlock),
-          createdAt: Number(taskCreatedBlock.timestamp),
-          instanceId: PROVENANCE.instanceId,
-          repo: PROVENANCE.repo,
-          baseCommit: PROVENANCE.baseCommit,
+          requestId: claim.requestId,
+          onchainCreationTx: '0x',
+          onchainCreationBlock: 0,
         });
+        expect(delivered.envelope.payload).toMatchObject({ probabilityYes: '0.75' });
 
         // LOAD-BEARING: the settle tx must have incremented the operator's
         // on-chain activity counter (recordSolutionDelivery → activity checker).

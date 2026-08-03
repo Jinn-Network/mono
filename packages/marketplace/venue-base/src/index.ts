@@ -83,3 +83,12 @@ export {
 export { createProjectorObservePort } from "./observe/projector-observe.js";
 export { deliverToMarketplace, encodeMechDeliverCalldata } from "./deliver-leg.js";
 export type { MechDeliverInput } from "./deliver-leg.js";
+export { createVerdictPorts } from "./verdict.js";
+export type {
+  CanonicalVerdictAttempt,
+  CanonicalVerdictDelivery,
+  CanonicalVerdictSettlement,
+  VerdictPortDeps,
+  VerdictPorts,
+  VerdictTransactionIdentity,
+} from "./verdict.js";

@@ -173,12 +173,21 @@ export interface MarketplaceProjectorConformanceSubject {
 const fixturesRoot = fileURLToPath(
   new URL("../fixtures/projector/", import.meta.url),
 );
+const fixtureManifest = JSON.parse(
+  readFileSync(fileURLToPath(new URL("../fixtures/manifest.sha256.json", import.meta.url)), "utf8"),
+) as {
+  readonly errata?: ReadonlyArray<{ readonly id: string }>;
+};
+const supersededFixtureIds = new Set(
+  (fixtureManifest.errata ?? []).map((erratum) => erratum.id),
+);
 
 function loadDirectory<T>(directory: string): T[] {
   return readdirSync(`${fixturesRoot}${directory}`, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
     .map((entry) => entry.name)
     .sort()
+    .filter((name) => !supersededFixtureIds.has(`projector/${directory}/${name}`))
     .map((name) =>
       JSON.parse(
         readFileSync(`${fixturesRoot}${directory}/${name}`, "utf8"),

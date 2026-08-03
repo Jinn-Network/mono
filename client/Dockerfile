@@ -39,15 +39,20 @@ COPY packages/evidence/discovery/package.json packages/evidence/discovery/yarn.l
 COPY packages/evidence/catalog-sqlite/package.json packages/evidence/catalog-sqlite/yarn.lock packages/evidence/catalog-sqlite/.yarnrc.yml ./packages/evidence/catalog-sqlite/
 COPY packages/evidence/local-runtime/package.json packages/evidence/local-runtime/yarn.lock packages/evidence/local-runtime/.yarnrc.yml ./packages/evidence/local-runtime/
 COPY packages/evidence/execution-recorder/package.json packages/evidence/execution-recorder/yarn.lock packages/evidence/execution-recorder/.yarnrc.yml ./packages/evidence/execution-recorder/
+COPY packages/evidence/attestation-issuer/package.json packages/evidence/attestation-issuer/yarn.lock packages/evidence/attestation-issuer/.yarnrc.yml ./packages/evidence/attestation-issuer/
 COPY packages/task-execution/protocol/package.json packages/task-execution/protocol/yarn.lock packages/task-execution/protocol/.yarnrc.yml ./packages/task-execution/protocol/
 COPY packages/task-execution/backend/package.json packages/task-execution/backend/yarn.lock packages/task-execution/backend/.yarnrc.yml ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/package.json packages/task-execution/profiles/yarn.lock packages/task-execution/profiles/.yarnrc.yml ./packages/task-execution/profiles/
 COPY packages/trust/core/package.json packages/trust/core/yarn.lock packages/trust/core/.yarnrc.yml ./packages/trust/core/
 COPY packages/trust/resolve/package.json packages/trust/resolve/yarn.lock packages/trust/resolve/.yarnrc.yml ./packages/trust/resolve/
+COPY packages/environments/record/package.json packages/environments/record/yarn.lock packages/environments/record/.yarnrc.yml ./packages/environments/record/
+COPY packages/task-supply/admission/package.json packages/task-supply/admission/yarn.lock packages/task-supply/admission/.yarnrc.yml ./packages/task-supply/admission/
 COPY packages/marketplace/binding/package.json packages/marketplace/binding/yarn.lock packages/marketplace/binding/.yarnrc.yml ./packages/marketplace/binding/
 COPY packages/task-execution/backend-local/supervisor/package.json packages/task-execution/backend-local/supervisor/yarn.lock packages/task-execution/backend-local/supervisor/.yarnrc.yml ./packages/task-execution/backend-local/supervisor/
 COPY packages/task-execution/backend-local/workspace/package.json packages/task-execution/backend-local/workspace/yarn.lock packages/task-execution/backend-local/workspace/.yarnrc.yml ./packages/task-execution/backend-local/workspace/
 COPY packages/task-execution/backend-local/launchers/package.json packages/task-execution/backend-local/launchers/yarn.lock packages/task-execution/backend-local/launchers/.yarnrc.yml ./packages/task-execution/backend-local/launchers/
+COPY packages/task-execution/evaluation-harness/package.json packages/task-execution/evaluation-harness/yarn.lock packages/task-execution/evaluation-harness/.yarnrc.yml ./packages/task-execution/evaluation-harness/
+COPY packages/task-execution/evaluator-adapters/package.json packages/task-execution/evaluator-adapters/yarn.lock packages/task-execution/evaluator-adapters/.yarnrc.yml ./packages/task-execution/evaluator-adapters/
 COPY packages/task-execution/backend-local/assembly/package.json packages/task-execution/backend-local/assembly/yarn.lock packages/task-execution/backend-local/assembly/.yarnrc.yml ./packages/task-execution/backend-local/assembly/
 COPY packages/marketplace/pipeline/package.json packages/marketplace/pipeline/yarn.lock packages/marketplace/pipeline/.yarnrc.yml ./packages/marketplace/pipeline/
 COPY packages/discovery/protocol/package.json packages/discovery/protocol/yarn.lock packages/discovery/protocol/.yarnrc.yml ./packages/discovery/protocol/
@@ -63,6 +68,7 @@ RUN corepack enable && cd client && yarn install --immutable
 # in dependency order before compiling the client.
 COPY packages/sdk/tsconfig.json ./packages/sdk/
 COPY packages/sdk/src/ ./packages/sdk/src/
+COPY packages/sdk/fixtures/ ./packages/sdk/fixtures/
 COPY packages/plugin/tsconfig.json ./packages/plugin/
 COPY packages/plugin/src/ ./packages/plugin/src/
 COPY packages/core/tsconfig.json ./packages/core/
@@ -78,15 +84,20 @@ COPY packages/evidence/discovery/tsconfig.json ./packages/evidence/discovery/
 COPY packages/evidence/catalog-sqlite/tsconfig.json ./packages/evidence/catalog-sqlite/
 COPY packages/evidence/local-runtime/tsconfig.json ./packages/evidence/local-runtime/
 COPY packages/evidence/execution-recorder/tsconfig.json ./packages/evidence/execution-recorder/
+COPY packages/evidence/attestation-issuer/tsconfig.json ./packages/evidence/attestation-issuer/
 COPY packages/task-execution/protocol/tsconfig.json ./packages/task-execution/protocol/
 COPY packages/task-execution/backend/tsconfig.json ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/tsconfig.json ./packages/task-execution/profiles/
 COPY packages/trust/core/tsconfig.json ./packages/trust/core/
 COPY packages/trust/resolve/tsconfig.json ./packages/trust/resolve/
+COPY packages/environments/record/tsconfig.json ./packages/environments/record/
+COPY packages/task-supply/admission/tsconfig.json ./packages/task-supply/admission/
 COPY packages/marketplace/binding/tsconfig.json ./packages/marketplace/binding/
 COPY packages/task-execution/backend-local/supervisor/tsconfig.json ./packages/task-execution/backend-local/supervisor/
 COPY packages/task-execution/backend-local/workspace/tsconfig.json ./packages/task-execution/backend-local/workspace/
 COPY packages/task-execution/backend-local/launchers/tsconfig.json ./packages/task-execution/backend-local/launchers/
+COPY packages/task-execution/evaluation-harness/tsconfig.json ./packages/task-execution/evaluation-harness/
+COPY packages/task-execution/evaluator-adapters/tsconfig.json ./packages/task-execution/evaluator-adapters/
 COPY packages/task-execution/backend-local/assembly/tsconfig.json ./packages/task-execution/backend-local/assembly/
 COPY packages/marketplace/pipeline/tsconfig.json ./packages/marketplace/pipeline/
 COPY packages/discovery/protocol/tsconfig.json ./packages/discovery/protocol/
@@ -102,15 +113,20 @@ COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
 COPY packages/evidence/catalog-sqlite/src/ ./packages/evidence/catalog-sqlite/src/
 COPY packages/evidence/local-runtime/src/ ./packages/evidence/local-runtime/src/
 COPY packages/evidence/execution-recorder/src/ ./packages/evidence/execution-recorder/src/
+COPY packages/evidence/attestation-issuer/src/ ./packages/evidence/attestation-issuer/src/
 COPY packages/task-execution/protocol/src/ ./packages/task-execution/protocol/src/
 COPY packages/task-execution/backend/src/ ./packages/task-execution/backend/src/
 COPY packages/task-execution/profiles/src/ ./packages/task-execution/profiles/src/
 COPY packages/trust/core/src/ ./packages/trust/core/src/
 COPY packages/trust/resolve/src/ ./packages/trust/resolve/src/
+COPY packages/environments/record/src/ ./packages/environments/record/src/
+COPY packages/task-supply/admission/src/ ./packages/task-supply/admission/src/
 COPY packages/marketplace/binding/src/ ./packages/marketplace/binding/src/
 COPY packages/task-execution/backend-local/supervisor/src/ ./packages/task-execution/backend-local/supervisor/src/
 COPY packages/task-execution/backend-local/workspace/src/ ./packages/task-execution/backend-local/workspace/src/
 COPY packages/task-execution/backend-local/launchers/src/ ./packages/task-execution/backend-local/launchers/src/
+COPY packages/task-execution/evaluation-harness/src/ ./packages/task-execution/evaluation-harness/src/
+COPY packages/task-execution/evaluator-adapters/src/ ./packages/task-execution/evaluator-adapters/src/
 COPY packages/task-execution/backend-local/assembly/src/ ./packages/task-execution/backend-local/assembly/src/
 COPY packages/marketplace/pipeline/src/ ./packages/marketplace/pipeline/src/
 COPY packages/discovery/protocol/src/ ./packages/discovery/protocol/src/
@@ -131,12 +147,19 @@ COPY packages/evidence/repository/README.md ./packages/evidence/repository/READM
 COPY packages/evidence/repository/specification.md ./packages/evidence/repository/specification.md
 COPY packages/evidence/execution-recorder/fixtures/ ./packages/evidence/execution-recorder/fixtures/
 COPY packages/evidence/execution-recorder/README.md ./packages/evidence/execution-recorder/README.md
+COPY packages/evidence/attestation-issuer/fixtures/ ./packages/evidence/attestation-issuer/fixtures/
+COPY packages/evidence/attestation-issuer/README.md ./packages/evidence/attestation-issuer/README.md
 COPY packages/discovery/client/README.md ./packages/discovery/client/README.md
 COPY packages/task-execution/backend/README.md ./packages/task-execution/backend/README.md
 COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c ./packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
 COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md
 COPY packages/trust/core/fixtures/ ./packages/trust/core/fixtures/
 COPY packages/trust/core/README.md ./packages/trust/core/README.md
+COPY packages/environments/record/schemas/ ./packages/environments/record/schemas/
+COPY packages/environments/record/fixtures/ ./packages/environments/record/fixtures/
+COPY packages/environments/record/README.md ./packages/environments/record/README.md
+COPY packages/task-supply/admission/fixtures/ ./packages/task-supply/admission/fixtures/
+COPY packages/task-supply/admission/README.md ./packages/task-supply/admission/README.md
 
 # Publish-file payloads the bundled stack packages declare in their `files` arrays
 # (profiles, fixtures, schemas, READMEs). They must exist before
@@ -156,6 +179,9 @@ COPY packages/discovery/serve/README.md ./packages/discovery/serve/README.md
 COPY packages/discovery/transport-http/README.md ./packages/discovery/transport-http/README.md
 COPY packages/task-execution/backend-local/assembly/README.md ./packages/task-execution/backend-local/assembly/README.md
 COPY packages/task-execution/backend-local/launchers/README.md ./packages/task-execution/backend-local/launchers/README.md
+COPY packages/task-execution/evaluation-harness/README.md ./packages/task-execution/evaluation-harness/README.md
+COPY packages/task-execution/evaluator-adapters/fixtures/ ./packages/task-execution/evaluator-adapters/fixtures/
+COPY packages/task-execution/evaluator-adapters/README.md ./packages/task-execution/evaluator-adapters/README.md
 COPY packages/task-execution/profiles/profiles/ ./packages/task-execution/profiles/profiles/
 COPY packages/task-execution/profiles/fixtures/ ./packages/task-execution/profiles/fixtures/
 COPY packages/task-execution/profiles/README.md ./packages/task-execution/profiles/README.md

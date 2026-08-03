@@ -2,9 +2,14 @@
 
 import { describe, expect, test } from "vitest";
 import { createPublicClient, http } from "viem";
-import { anvilAvailable, withForkVenue } from "./venue-fork.js";
+import { anvilAvailable, resolveForkRpcUrl, withForkVenue } from "./venue-fork.js";
 
 const hasAnvil = await anvilAvailable();
+
+test("blank optional fork configuration falls back to the public Base Sepolia endpoint", () => {
+  expect(resolveForkRpcUrl("   ")).toBe("https://sepolia.base.org");
+  expect(resolveForkRpcUrl("https://example.invalid/rpc")).toBe("https://example.invalid/rpc");
+});
 
 describe.runIf(hasAnvil)("Anvil-fork venue backbone (design §6.6)", () => {
   test("deploys a today-generation venue and hands back a usable chain config", async () => {

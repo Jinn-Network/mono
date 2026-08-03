@@ -225,17 +225,25 @@ describe("chain log source (design §7 ruling 2)", () => {
     expect(batch.finalizedCheckpoint.blockNumber).toBe(40n);
   });
 
-  test("a hash change at the persisted cursor's height produces a reorg batch rolled back to the finalized checkpoint", async () => {
+  test("a reorg enumerates the complete displaced suffix (including empty blocks) from its canonical rebuild boundary", async () => {
     const chain = buildScriptedChain();
     chain.mine(50);
     chain.setFinalized(40n);
     const s = source(chain, { startBlock: 0n });
     const first = await s.poll();
-    chain.reorgFrom(first.cursor.blockNumber);
+    // The old chain at 41..50 contained no marketplace log. Their hashes must nevertheless be
+    // retained before the replacement fork becomes visible to the RPC.
+    chain.reorgFrom(45n);
     const second = await s.poll();
     expect(second.reorg).toBeDefined();
     expect(second.reorg!.rolledBackTo.blockNumber).toBe(40n);
-    expect(second.reorg!.orphanedBlockHashes.length).toBeGreaterThan(0);
+    expect(second.reorg!.canonicalRebuildBoundary).toEqual(second.reorg!.rolledBackTo);
+    expect(second.reorg!.displacedBlocks.map((block) => block.blockNumber)).toEqual([
+      45n, 46n, 47n, 48n, 49n, 50n,
+    ]);
+    expect(second.reorg!.orphanedBlockHashes).toEqual(
+      second.reorg!.displacedBlocks.map((block) => block.blockHash),
+    );
   });
 
   test("the rescan after a reorg re-requests every block above the checkpoint", async () => {

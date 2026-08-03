@@ -82,6 +82,8 @@ export interface InMemoryBackendOptions {
   executor?: string;
   /** Declared run-pinning support (carried amendment 1, profiles §5.2). */
   runPinning?: RunPinningKeySupport[];
+  /** Injected wall clock for deterministic deadline folding and observation timestamps. */
+  now?: () => Date;
 }
 
 // The idempotency scope key MUST be delimited (§12.2): `requester` and `idempotencyKey`
@@ -120,6 +122,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
   private readonly source: string;
   private readonly executor: string;
   private readonly runPinning: RunPinningKeySupport[];
+  private readonly now: () => Date;
   private readonly attempts: BackendCapabilities["attempts"] = DEFAULT_ATTEMPT_BOUNDS;
 
   private readonly submissionsByScope = new Map<string, StoredSubmission>();
@@ -134,6 +137,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     this.source = options.source ?? "urn:jinn:backend:fake-in-memory";
     this.executor = options.executor ?? "urn:jinn:agent:fake-in-memory-operator";
     this.runPinning = options.runPinning ?? DEFAULT_RUN_PINNING;
+    this.now = options.now ?? (() => new Date());
   }
 
   async capabilities(): Promise<BackendCapabilities> {
@@ -364,7 +368,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     }
     const observations = this.logs.get(attempt) ?? [];
     const derived = foldObservations(observations, {
-      now: new Date().toISOString(),
+      now: this.now().toISOString(),
       effectiveDeadline: meta.effectiveDeadline,
     });
     const descriptor: AttemptDescriptor = {
@@ -387,7 +391,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
     }
     const observations = this.logs.get(attempt) ?? [];
     const derived = foldObservations(observations, {
-      now: new Date().toISOString(),
+      now: this.now().toISOString(),
       effectiveDeadline: meta.effectiveDeadline,
     });
     if (derived.terminal) {
@@ -487,7 +491,7 @@ export class InMemoryTaskExecutionBackend implements TestableBackend {
       id: `${attempt}:${next}`,
       source: this.source,
       subject: attempt,
-      time: new Date().toISOString(),
+      time: this.now().toISOString(),
       datacontenttype: "application/json",
       sequence: next.toString().padStart(16, "0"),
       ...(meta !== undefined ? { taskdigest: meta.task } : {}),

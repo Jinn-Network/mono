@@ -1,6 +1,11 @@
 import { sha256Hex } from "@jinn-network/task-execution-protocol";
 import { describe, expect, test } from "vitest";
-import { computeRawCodecCid, decodeRawCodecCidDigestHex, uploadRawCodecCid } from "./ipfs.js";
+import {
+  computeRawCodecCid,
+  decodeRawCodecCidDigestHex,
+  rawCodecCidFromSha256Digest,
+  uploadRawCodecCid,
+} from "./ipfs.js";
 
 describe("computeRawCodecCid", () => {
   test("the CID digest equals sha256 of the exact bytes -- raw codec, no dag-pb wrapping (§3 audit)", () => {
@@ -26,6 +31,20 @@ describe("computeRawCodecCid", () => {
     const a = computeRawCodecCid(new TextEncoder().encode("a")).cid;
     const b = computeRawCodecCid(new TextEncoder().encode("b")).cid;
     expect(a).not.toBe(b);
+  });
+});
+
+describe("rawCodecCidFromSha256Digest", () => {
+  test("reconstructs the same canonical CID that exact bytes produce", () => {
+    const bytes = new TextEncoder().encode("advertised delivery");
+    const computed = computeRawCodecCid(bytes);
+
+    expect(rawCodecCidFromSha256Digest(computed.sha256Digest)).toBe(computed.cid);
+  });
+
+  test("refuses a digest outside the lowercase sha256 digest domain", () => {
+    expect(() => rawCodecCidFromSha256Digest(`sha256:${"A".repeat(64)}` as `sha256:${string}`))
+      .toThrow(/lowercase sha256/u);
   });
 });
 

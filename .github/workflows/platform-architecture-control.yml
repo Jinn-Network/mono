@@ -27,6 +27,8 @@ jobs:
           mkdir -p .architecture-control
           node --test \
             .github/scripts/platform-catalog.test.mjs \
+            .github/scripts/transition-manifest.test.mjs \
+            .github/scripts/phase-d-transition-deletion.test.mjs \
             .github/scripts/architecture-control.test.mjs \
             .github/scripts/branch-protection-audit.test.mjs \
             .github/scripts/architecture-control-workflow.test.mjs

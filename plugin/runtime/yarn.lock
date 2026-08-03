@@ -255,6 +255,8 @@ __metadata:
     "@jinn-network/evidence-discovery": "npm:0.1.0"
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    "@jinn-network/record-discovery-serve": "npm:0.1.0"
     better-sqlite3: "npm:13.0.1"
   languageName: node
   linkType: soft
@@ -386,6 +388,15 @@ __metadata:
   dependencies:
     "@jinn-network/trust-core": "npm:0.1.0"
     "@noble/hashes": "npm:^2.2.0"
+    zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-serve@portal:../../packages/discovery/serve::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-serve@portal:../../packages/discovery/serve::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
   languageName: node
   linkType: soft

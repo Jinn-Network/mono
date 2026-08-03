@@ -11,6 +11,7 @@ import type {
   PostingIntent, PostingIntentClaim, PostingIntentKey, PostingIntentRecord,
   PostingIntentStore, PostingOutcome, PostingOwnerToken,
 } from "@jinn-network/marketplace-binding";
+import { postingIntentsEqual } from "@jinn-network/marketplace-binding";
 import type { VenueStateDatabase } from "../state/database.js";
 
 interface IntentRow {
@@ -20,17 +21,30 @@ interface IntentRow {
   readonly idempotency_key: string;
   readonly owner_token: string;
   readonly created_at: string;
+  readonly venue_namespace: string | null;
+  readonly command_digest: string | null;
+  readonly command_json: string | null;
+  readonly legacy_unrecoverable: 0 | 1;
   readonly resolved_task_id: string | null;
   readonly resolved_tx_hash: string | null;
 }
 
 function toIntent(row: IntentRow): PostingIntent {
+  const command = row.command_json === null
+    ? undefined
+    : JSON.parse(row.command_json) as NonNullable<PostingIntent["command"]>;
   return {
     creatorSafe: row.creator_safe as `0x${string}`,
     taskCidDigest: row.task_cid_digest as `sha256:${string}`,
     submissionDigest: row.submission_digest as `sha256:${string}`,
     idempotencyKey: row.idempotency_key,
     createdAt: row.created_at,
+    ...(row.venue_namespace === null || row.command_digest === null || command === undefined ? {} : {
+      version: 2 as const,
+      venueNamespace: row.venue_namespace,
+      commandDigest: row.command_digest as `sha256:${string}`,
+      command,
+    }),
   };
 }
 
@@ -46,7 +60,8 @@ export function createSqlitePostingIntentStore(state: VenueStateDatabase): Posti
   );
   const insert = state.db.prepare(
     "INSERT INTO posting_intents (creator_safe, task_cid_digest, submission_digest, idempotency_key,"
-    + " owner_token, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    + " owner_token, created_at, venue_namespace, command_digest, command_json, legacy_unrecoverable)"
+    + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0) ON CONFLICT DO NOTHING",
   );
   const resolveRow = state.db.prepare(
     "UPDATE posting_intents SET resolved_task_id = ?, resolved_tx_hash = ?"
@@ -65,14 +80,21 @@ export function createSqlitePostingIntentStore(state: VenueStateDatabase): Posti
         const inserted = insert.run(
           intent.creatorSafe.toLowerCase(), intent.taskCidDigest, intent.submissionDigest,
           intent.idempotencyKey, ownerToken, intent.createdAt,
+          intent.venueNamespace ?? null,
+          intent.commandDigest ?? null,
+          intent.command === undefined ? null : JSON.stringify(intent.command),
         );
         if (inserted.changes === 1) {
           return { kind: "owner", intent, ownerToken };
         }
         const row = select.get(...keyArgs(intent)) as IntentRow;
+        const existingIntent = toIntent(row);
+        if (row.legacy_unrecoverable === 1 || !postingIntentsEqual(existingIntent, intent)) {
+          return { kind: "conflict", existing: existingIntent };
+        }
         const outcome = toOutcome(row);
         return outcome === undefined
-          ? { kind: "pending-other", intent: toIntent(row) }
+          ? { kind: "pending-other", intent: existingIntent }
           : { kind: "resolved", outcome };
       });
     },

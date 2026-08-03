@@ -28,3 +28,7 @@ export type {
   FinalizeEvidenceCaptureInput,
   StartEvidenceCaptureInput,
 } from "./evidence-join.js";
+export type {
+  HostSecretAuthorization,
+  HostSecretResolver,
+} from "./host-secret-forwards.js";

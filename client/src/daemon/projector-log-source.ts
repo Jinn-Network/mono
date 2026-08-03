@@ -19,7 +19,7 @@ import {
   type ChainLogSourceOptions,
   type VenueStateDatabase,
 } from '@jinn-network/marketplace-venue-base';
-import type { Address, PublicClient } from 'viem';
+import type { Address, Hex, PublicClient } from 'viem';
 
 export type { ChainLogSource, ChainLogSourceOptions } from '@jinn-network/marketplace-venue-base';
 
@@ -27,14 +27,9 @@ export interface ProjectorLogSourceInput {
   readonly chain: MarketplaceChainConfig;
   readonly publicClient: PublicClient;
   /**
-   * The venue's own open state database, not a fresh `openVenueState(path)` call. `createBaseVenue`
-   * (venue-base) always opens its own connection to `stateDbPath` internally and has no seam to
-   * accept an already-open one, so composing this alongside a venue means two connections to the
-   * same SQLite file either way — this factory refuses to make that worse by opening a *third*.
-   * Per finding E4, the projector's log source is built (and this state handle opened) BEFORE
-   * `createBaseVenue`, since `BaseVenueConfig.observations` needs the already-built projector —
-   * so whichever composition root wires this factory in owns opening this handle once, via
-   * venue-base's own `openVenueState(stateDbPath)`, and passes it here.
+   * A caller-owned venue state database. This helper remains for isolated integrations that
+   * already own a state handle; the operator composition instead consumes `BaseVenue.logSource`
+   * directly, so it never opens or receives another handle for the same state path.
    */
   readonly state: VenueStateDatabase;
   /**
@@ -89,5 +84,19 @@ export function createFinalizedHeadReader(publicClient: PublicClient): () => Pro
   return async () => {
     const block = await publicClient.getBlock({ blockTag: 'finalized' });
     return block.number ?? 0n;
+  };
+}
+
+/**
+ * Read-only canonical block identity lookup for the projector's local reorg journal. This never
+ * advances `ChainLogSource`; it only compares retained pre-fork provenance with the chain that
+ * is now canonical at the same height.
+ */
+export function createCanonicalBlockHashReader(
+  publicClient: PublicClient,
+): (blockNumber: bigint) => Promise<Hex | undefined> {
+  return async (blockNumber) => {
+    const block = await publicClient.getBlock({ blockNumber });
+    return block.hash ?? undefined;
   };
 }

@@ -1,5 +1,9 @@
 # @jinn-network/task-admission
 
+> Phase C maturity: semantic candidate, publication disabled. Its native requester use is not
+> independent ratification; graduation requires approved authority, a second independent
+> consumer, frozen conformance, packed external installation, and load-bearing live use.
+
 Differential admission: *(candidate task + environment record) → `DifferentialAdmissionReceipt/3`*.
 
 Given a candidate's sealed EvaluationSpec bytes and the sealed bytes of the environment record it

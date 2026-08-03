@@ -56,7 +56,7 @@ function baseConfig(
 }
 
 describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)", () => {
-  test("returns all ten named members plus close, each typed against its own port", () => {
+  test("returns all eleven named members plus close, including the feature-disabled verdict port", () => {
     const chainInstance = buildScriptedChain();
     const venue = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainInstance));
     try {
@@ -69,6 +69,7 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
       const observe: MarketplaceObservePort = venue.observe;
       const safe: SafeBroadcastPort = venue.safe;
       const intents: PostingIntentStore = venue.intents;
+      const verdict = venue.verdict;
       expect(claim).toBeDefined();
       expect(settlement).toBeDefined();
       expect(lifecycle).toBeDefined();
@@ -79,6 +80,7 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
       expect(safe).toBeDefined();
       expect(venue.logSource).toBeDefined();
       expect(intents).toBeDefined();
+      expect(verdict).toBeDefined();
       expect(typeof venue.close).toBe("function");
     } finally {
       venue.close();
@@ -156,6 +158,11 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
         submissionUri: "urn:uuid:00000000-0000-0000-0000-000000000002" as `urn:uuid:${string}`,
         digest: `sha256:${"c".repeat(64)}` as `sha256:${string}`,
         submissionBytes: new Uint8Array([1, 2, 3]),
+        taskDigest: `sha256:${"a".repeat(64)}` as `sha256:${string}`,
+        creatorSafe: SAFE,
+        venueNamespace: "test:venue",
+        commandDigest: `sha256:${"d".repeat(64)}`,
+        postingIntentKey: `${SAFE.toLowerCase()}|sha256:${"a".repeat(64)}|sha256:${"c".repeat(64)}`,
       });
     } finally {
       venue.close();
@@ -201,6 +208,18 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
     }
   });
 
+  test("today-only V3 verdict ports are unavailable on revised-generation venues", () => {
+    const today = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, buildScriptedChain()));
+    const revised = createBaseVenue(baseConfig(REVISED, buildScriptedChain(), { stateDbPath: join(root, "revised-verdict.db") }));
+    try {
+      expect(today.verdict).toBeDefined();
+      expect(revised.verdict).toBeUndefined();
+    } finally {
+      today.close();
+      revised.close();
+    }
+  });
+
   test("lifecycle.closeTask / lifecycle.releaseAttempt follow the same generation conditionality", () => {
     const today = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, buildScriptedChain()));
     const revised = createBaseVenue(baseConfig(REVISED, buildScriptedChain(), { stateDbPath: join(root, "revised2.db") }));
@@ -217,27 +236,18 @@ describe("createBaseVenue (Task 17 -- the composition surface program §5 pins)"
     }
   });
 
-  test("two createBaseVenue calls against the same stateDbPath share the lock table", async () => {
+  test("refuses a second BaseVenue owner for an active state path, then releases it on close", () => {
     const chainA = buildScriptedChain();
     const chainB = buildScriptedChain();
     const venueA = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainA));
-    const venueB = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath }));
     try {
-      const refundA = (venueA.lifecycle as { refundUnusedTaskBudget?: (input: { taskId: bigint }) => Promise<void> })
-        .refundUnusedTaskBudget;
-      const refundB = (venueB.lifecycle as { refundUnusedTaskBudget?: (input: { taskId: bigint }) => Promise<void> })
-        .refundUnusedTaskBudget;
-      await Promise.all([refundA?.({ taskId: 1n }), refundB?.({ taskId: 2n })]);
+      expect(() =>
+        createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath })),
+      ).toThrow(/already owned/i);
     } finally {
       venueA.close();
-      venueB.close();
     }
-    const db = new Database(dbPath, { readonly: true });
-    try {
-      const rows = db.prepare("SELECT COUNT(*) AS n FROM tx_submissions").get() as { n: number };
-      expect(rows.n).toBeGreaterThan(0);
-    } finally {
-      db.close();
-    }
+    const replacement = createBaseVenue(baseConfig(BASE_SEPOLIA_TODAY, chainB, { stateDbPath: dbPath }));
+    replacement.close();
   });
 });

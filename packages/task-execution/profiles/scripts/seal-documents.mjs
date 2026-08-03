@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 import { sealTaskProfile } from "../dist/task-profile/seal.js";
 import { buildRepositoryWorkProfile } from "../dist/documents/repository-work-1.0.js";
+import { buildPredictionForecastProfile } from "../dist/documents/prediction-forecast-1.0.js";
 import { buildEvaluationTaskProfile } from "../dist/documents/evaluation-task-1.0.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -23,6 +24,10 @@ const DOCUMENTS = [
   {
     dir: join("profiles", "task-profiles", "repository-work", "1.0"),
     build: buildRepositoryWorkProfile,
+  },
+  {
+    dir: join("profiles", "task-profiles", "prediction-forecast", "1.0"),
+    build: buildPredictionForecastProfile,
   },
   {
     dir: join("profiles", "task-profiles", "evaluation-task", "1.0"),

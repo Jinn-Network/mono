@@ -1,5 +1,8 @@
 # @jinn-network/information-world
 
+> Phase C maturity: experimental and publication disabled. Approved family semantics and an
+> independent consumer are required before a compatibility promise exists.
+
 The sealed information-world record kind, its canonical request key, and its loopback replay
 service.
 

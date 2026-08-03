@@ -11,8 +11,9 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
 - The catalog-selected core candidates in `platform-v1` are eligible only for receipt-gated canary
   publication. A push to `integration/evidence-v1` or `next` uses the `canary` dist-tag and the
   `npm-publish` GitHub environment.
-- The catalog-selected disabled experiments in `experimental-environment-supply` are not part of the core
-  set and cannot publish through the stack workflow.
+- The catalog-selected provisional packages in `experimental-task-supply` and
+  `experimental-environment-supply` are disabled, are not part of the core set, and cannot publish
+  through the stack workflow. Native-role closure is test evidence, not a canary publication promise.
 - Stable publication is mechanically disabled. A stable event may run read-only tag resolution
   and same-run verification, but `stable-hosting-blocker` fails before any publisher job exists.
   The hold remains until live `jinn.network` profile hosting is implemented and verified.

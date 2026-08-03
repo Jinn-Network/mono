@@ -6,7 +6,12 @@
 // ensure the parent directory exists before calling `openVenueState`. WAL + synchronous=FULL
 // matches the stack's SQLite precedent (`packages/evidence/catalog-sqlite/src/database.ts`).
 import Database from "better-sqlite3";
-import { SCHEMA_SQL, VENUE_STATE_SCHEMA_VERSION } from "./schema.js";
+import {
+  SCHEMA_SQL,
+  VENUE_STATE_SCHEMA_VERSION,
+  VENUE_STATE_V4_MIGRATION_SQL,
+  VENUE_STATE_V5_MIGRATION_SQL,
+} from "./schema.js";
 
 export { VENUE_STATE_SCHEMA_VERSION };
 
@@ -55,6 +60,21 @@ export function openVenueState(stateDbPath: string): VenueStateDatabase {
         db.prepare(
           "INSERT INTO venue_state_metadata (singleton, schema_version, created_at_ms) VALUES (1, ?, ?)",
         ).run(VENUE_STATE_SCHEMA_VERSION, Date.now());
+        db.exec("COMMIT");
+      } catch (cause) {
+        db.exec("ROLLBACK");
+        throw cause;
+      }
+    } else if (version === 3 || version === 4) {
+      // v4 is deliberately additive: prior cursors/outbox state must survive so a restarted
+      // operator can still identify and correct a reorged suffix.
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        if (version === 3) db.exec(VENUE_STATE_V4_MIGRATION_SQL);
+        db.exec(VENUE_STATE_V5_MIGRATION_SQL);
+        db.prepare(
+          "UPDATE venue_state_metadata SET schema_version = ? WHERE singleton = 1",
+        ).run(VENUE_STATE_SCHEMA_VERSION);
         db.exec("COMMIT");
       } catch (cause) {
         db.exec("ROLLBACK");

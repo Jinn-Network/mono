@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { encodeAbiParameters, encodeEventTopics, type Hex } from 'viem';
 import { documentDigest } from '@jinn-network/task-execution-protocol';
-import { mapAnnouncedSubmissionToFacts } from '@jinn-network/marketplace-pipeline';
 import type { MarketplaceProtocolObservation } from '@jinn-network/marketplace-projector';
 import { JINN_ROUTER_ABI } from '../../src/adapters/mech/types.js';
 import { buildArchiveSubscription } from '../../src/daemon/archive-subscription.js';
+import { mapAnnouncedSubmissionToFacts } from '../../src/daemon/native-submission-facts.js';
 
 const TASK_CREATED_ABI_ITEM = JINN_ROUTER_ABI.find(
   (item): item is Extract<typeof JINN_ROUTER_ABI[number], { name: 'TaskCreated' }> =>

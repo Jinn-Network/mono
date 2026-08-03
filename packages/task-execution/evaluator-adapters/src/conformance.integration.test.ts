@@ -3,17 +3,18 @@
 /**
  * The component's gate (Task 10, `docs/superpowers/plans/2026-07-30-evaluator-adapters.md`):
  * both adapters driven through the REAL `runEvaluationHarness` — real workspace layout, real
- * Ed25519 signer, real DSSE `out/verdict` envelope. No mocking of the harness itself; only the
+ * unsigned `ResultEvaluationStatement` at `out/verdict`. The host signs those exact bytes after
+ * validating them; no signing key enters the evaluator child. No mocking of the harness itself; only the
  * injected `GraderReportSource` / `ResolutionSnapshotSource` ports (Findings A/B) are supplied,
  * exactly as a host would supply them via the evaluation context (§8.3 supporting context).
  *
  * The workspace-building helper mirrors `evaluation-harness/src/runtime.test.ts:110-236`
  * (same file names: `task.sealed`, `subject-task.json`, `subject-delivery.json`, a Result
  * subject, `evaluation-spec.json`, `evaluation-context.json`, `dispatch-context.json`, plus an
- * Ed25519 PKCS#8 PEM at `secrets/evaluator-agent-key.pem`).
+ * host-selected evaluator registration).
  */
 
-import { createHash, generateKeyPairSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -219,14 +220,6 @@ async function buildWorkspace(options: {
     writeFile(join(paths.logs, "harness.ndjson"), '{"safe":"log"}\n'),
   ]);
 
-  const { privateKey } = generateKeyPairSync("ed25519");
-  const privateKeyText = String(privateKey.export({ type: "pkcs8", format: "pem" }));
-  await writeFile(
-    join(paths.secrets, "evaluator-agent-key.pem"),
-    privateKeyText,
-    { mode: 0o600 },
-  );
-
   return { paths };
 }
 
@@ -275,10 +268,8 @@ async function readVerdictStatement(paths: WorkspacePaths): Promise<{
   readonly predicateType: string;
   readonly predicate: { readonly verdict: string; readonly [key: string]: unknown };
 }> {
-  const envelopeBytes = await readFile(join(paths.out, "verdict"));
-  const envelope = JSON.parse(envelopeBytes.toString("utf8")) as { payload: string };
-  const payloadBytes = Buffer.from(envelope.payload, "base64");
-  return JSON.parse(payloadBytes.toString("utf8")) as {
+  const statementBytes = await readFile(join(paths.out, "verdict"));
+  return JSON.parse(statementBytes.toString("utf8")) as {
     predicateType: string;
     predicate: { verdict: string; [key: string]: unknown };
   };
@@ -297,7 +288,7 @@ function predictionFixture(name: string) {
 }
 
 describe("evaluator adapters conform to the real evaluation harness", () => {
-  test("case 1 — swe-rebench pass produces a signed DSSE verdict with predicate pass", async () => {
+  test("case 1 — swe-rebench pass produces an unsigned host-sealable statement with predicate pass", async () => {
     const fixture = sweRebenchFixture("resolved-all-transitions");
     const { paths } = await buildWorkspace({
       specification: sweRebenchSpec(fixture.transitions),

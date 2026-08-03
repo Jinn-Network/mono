@@ -112,6 +112,45 @@ function solutionDeliveryClaimedLog(input: {
   } as Log;
 }
 
+function todaySolutionDeliveryClaimedLog(input: {
+  readonly requestId: Hex;
+  readonly taskId?: bigint;
+  readonly attemptIndex?: number;
+}): Log {
+  const topics = encodeEventTopics({
+    abi: [{
+      type: "event", name: "SolutionDeliveryClaimed",
+      inputs: [
+        { name: "operator", type: "address", indexed: true },
+        { name: "requestId", type: "bytes32", indexed: true },
+        { name: "taskId", type: "uint256", indexed: true },
+        { name: "attemptIndex", type: "uint32", indexed: false },
+      ],
+    }] as const,
+    eventName: "SolutionDeliveryClaimed",
+    args: {
+      operator: SAFE_ADDRESS,
+      requestId: input.requestId,
+      taskId: input.taskId ?? TASK_ID,
+    },
+  });
+  const data = encodeAbiParameters(
+    parseAbiParameters("uint32 attemptIndex"),
+    [input.attemptIndex ?? ATTEMPT_INDEX],
+  );
+  return {
+    address: BASE_SEPOLIA_TODAY.jinnRouter,
+    topics,
+    data,
+    blockHash: `0x${"f".repeat(64)}` as Hex,
+    blockNumber: 100_000n,
+    logIndex: 0,
+    transactionHash: TX_HASH,
+    transactionIndex: 0,
+    removed: false,
+  } as Log;
+}
+
 function baseInput(overrides: Partial<SettlementWriterInput> = {}): SettlementWriterInput {
   return {
     chain: BASE_SEPOLIA_TODAY,
@@ -203,41 +242,62 @@ describe("readRouterDeliveryFacts", () => {
 });
 
 describe("claimSolutionDelivery", () => {
-  test("returns settled on a successful broadcast", async () => {
+  test("returns the mined transaction identity and uses an injected durable operation identity", async () => {
     const readContract = vi.fn(async () => false);
     const broadcaster = mockBroadcaster(async () => successReceipt([]));
     const input = baseInput({ publicClient: { readContract } as unknown as PublicClient, broadcaster });
     const ports = createSettlementPorts(input);
 
-    const result = await ports.claimSolutionDelivery({ requestId: REQUEST_ID, solutionDigest: DELIVERY_DIGEST });
+    const result = await ports.claimSolutionDelivery({
+      requestId: REQUEST_ID,
+      solutionDigest: DELIVERY_DIGEST,
+      operationId: `sha256:${"4".repeat(64)}`,
+    });
 
-    expect(result).toEqual({ status: "settled" });
+    expect(result).toEqual({ status: "settled", txHash: TX_HASH });
     expect(broadcaster.execute).toHaveBeenCalledWith(expect.objectContaining({
-      to: BASE_SEPOLIA_TODAY.jinnRouter, value: 0n, logicalTx: `settlement.claimSolutionDelivery:${REQUEST_ID}`,
+      to: BASE_SEPOLIA_TODAY.jinnRouter, value: 0n, logicalTx: `sha256:${"4".repeat(64)}`,
     }));
   });
 
   test("returns already-settled when the router's claimed(requestId) view already reads true, without broadcasting", async () => {
     const readContract = vi.fn(async () => true);
     const broadcaster = mockBroadcaster(async () => successReceipt([]));
-    const input = baseInput({ publicClient: { readContract } as unknown as PublicClient, broadcaster });
+    const logSource = mockLogSource([todaySolutionDeliveryClaimedLog({ requestId: REQUEST_ID })]);
+    const input = baseInput({
+      publicClient: {
+        readContract,
+        getBlockNumber: async () => 100_000n,
+      } as unknown as PublicClient,
+      broadcaster,
+      logSource,
+    });
     const ports = createSettlementPorts(input);
 
     const result = await ports.claimSolutionDelivery({ requestId: REQUEST_ID, solutionDigest: DELIVERY_DIGEST });
 
-    expect(result).toEqual({ status: "already-settled" });
+    expect(result).toEqual({ status: "already-settled", txHash: TX_HASH });
+    expect(logSource.logsInRange).toHaveBeenCalledWith(50_000n, 100_000n);
     expect(broadcaster.execute).not.toHaveBeenCalled();
   });
 
   test("returns already-settled when the broadcaster reports alreadySettled", async () => {
     const readContract = vi.fn(async () => false);
+    const logSource = mockLogSource([todaySolutionDeliveryClaimedLog({ requestId: REQUEST_ID })]);
     const broadcaster = mockBroadcaster(async () => alreadySettledReceipt());
-    const input = baseInput({ publicClient: { readContract } as unknown as PublicClient, broadcaster });
+    const input = baseInput({
+      publicClient: {
+        readContract,
+        getBlockNumber: async () => 100_000n,
+      } as unknown as PublicClient,
+      broadcaster,
+      logSource,
+    });
     const ports = createSettlementPorts(input);
 
     const result = await ports.claimSolutionDelivery({ requestId: REQUEST_ID, solutionDigest: DELIVERY_DIGEST });
 
-    expect(result).toEqual({ status: "already-settled" });
+    expect(result).toEqual({ status: "already-settled", txHash: TX_HASH });
   });
 
   test("returns rejected on a decoded permanent inner revert that is not an already-claimed variant", async () => {

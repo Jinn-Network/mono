@@ -6,17 +6,48 @@
       "sha256": "22ecbe6bfa5c79f2f0eb2a5a3ea593be6bc7df1e4e2effda3bb606511461196d"
     },
     {
+      "id": "projector/golden-events/revised-cross-batch-flow-2026-08-03.json",
+      "sha256": "6607cff64de4ecd46cf94527bebb5d39e969b4927f80f79ba032250759bed626"
+    },
+    {
       "id": "projector/golden-events/revised-cross-batch-flow.json",
       "sha256": "2bddcc897f775957d51128ecf25623b5288b896b28d4da8270b778a6f964940a"
+    },
+    {
+      "id": "projector/golden-events/revised-task-created-2026-08-03.json",
+      "sha256": "e2a10fc83ae79eba89ab22a95f60a0b304d7a1a6e7ffc3872062f3948f8e3344"
     },
     {
       "id": "projector/golden-events/revised-task-created.json",
       "sha256": "ae63d28f539f9f4ef32892931731942981aeef39727ffb05bf86e72b2c142463"
     },
     {
+      "id": "projector/reorg-scenarios/revised-task-created-reorg-2026-08-03.json",
+      "sha256": "ffec9fc79a95eb948a941008f11c3e4a61404ca80d3fcb69dc14e991f4b981f7"
+    },
+    {
       "id": "projector/reorg-scenarios/revised-task-created-reorg.json",
       "sha256": "0f59c59cf9fd4332e2b74a4650fa0d0994f85968ff9a3ec9ba41e3d1231dc6a3"
     }
   ],
-  "errata": []
+  "errata": [
+    {
+      "id": "projector/golden-events/revised-cross-batch-flow.json",
+      "supersededBy": "projector/golden-events/revised-cross-batch-flow-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected announcement bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    },
+    {
+      "id": "projector/golden-events/revised-task-created.json",
+      "supersededBy": "projector/golden-events/revised-task-created-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected announcement bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    },
+    {
+      "id": "projector/reorg-scenarios/revised-task-created-reorg.json",
+      "supersededBy": "projector/reorg-scenarios/revised-task-created-reorg-2026-08-03.json",
+      "date": "2026-08-03",
+      "reason": "Expected correction bytes predate the corrected deterministic projector output; the published fixture is retained unchanged."
+    }
+  ]
 }

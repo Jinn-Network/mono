@@ -1,32 +1,36 @@
 # @jinn-network/task-posting
 
+> Phase C maturity: experimental and publication disabled. Its 0.x policy API may change until a
+> tier-4 host proves the approval and money path through packed external conformance.
+
 Supply policy for marketplace posting: which pool entries post, when, at what terms, under whose
 identity, with the escrow surfaced before spending.
 
 `planPosting(pool, policy)` is pure — a materialized pool listing plus a policy in, a
 `PostingPlan` out, carrying per-entry and total escrow. `executePosting(deps, plan)` surfaces that
-plan, requires approval before spending, and posts through injected ports. Explicit post is the
-default; auto-post is an opt-in standing policy flag with the same visibility in a log line.
+plan, requires approval before spending, and posts through an injected requester backend.
+Explicit post is the default; auto-post is an opt-in standing policy flag with the same visibility
+in a log line.
 
 The plan is the replay unit: the sealed dispatch Submission is a function of the plan alone, so
 re-executing the same plan produces byte-identical Submission bytes, the same broadcast-intent
 key, and a replayed outcome rather than a second post.
 
-## Named residual: the work client (F7)
+## Requester posting boundary
 
-This package owns supply **policy** only. *How to post safely* — posting and settlement mechanics,
-the preflight core, requester-side evaluation sealing, custody discipline — is the work client's
-job (`packages/marketplace/work-client`), whose design already owns it under a no-wrapper-layers
-rule. The work client's mint is gated on daemon cutover stage 3 plus published canaries; until
-then this package composes the marketplace binding's `postTask` plus the D7 on-ramp adapters
-directly.
+This package owns supply **policy** only. `PostingDeps.backend` is the existing
+`MarketplaceRequesterBackend` from `@jinn-network/marketplace-binding`. It owns exact Task and
+Submission admission, requester/idempotency scope, the posting WAL, recovered outcome
+reconciliation and the actual transaction. This package never receives raw chain configuration,
+wallet/broadcast ports, or a direct `postTask` function. The host must compose the backend with the
+same creator and terms used to construct the plan; those configured venue inputs do not cross the
+per-post operation boundary.
 
-That interim composition is a **named residual of the same class the consumption-boundary design
-already records for benchmarking's marketplace venue**, with the same disposition: **at
-work-client mint, task-posting adopts the work client's posting core beneath its policy surface —
-same code, no fork.** Filed as F7 in
-`docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md` §13. The swap point is
-the injected `PostingDeps.postTask` and `PostingDeps.ports`; no policy code changes with it.
+`executePosting` calls `backend.post(taskBytes, submissionBytes)` only after the plan is surfaced,
+approval is granted and the complete batch passes its pure preflight. A recovered backend outcome
+is accepted exactly like the original result. A retryable unresolved operation is reported as
+uncertain and is never retried here; the host may invoke `backend.recoverPosting()` before a later
+policy run. No separate work-client package or wrapper is required.
 
 ## Reported to the program: F-C5-8 (resolved — ruling R10)
 
@@ -35,7 +39,7 @@ the injected `PostingDeps.postTask` and `PostingDeps.ports`; no policy code chan
 `(entry: PoolListing[number]) => PostingPoolEntry` and instructs a stop-and-report if it does not
 compile (program §5 contract 11). It does not compile. This is that report.
 
-On `supply/c4-task-derivation`, `SupplyPool.list()` yields `PoolEntrySummary`:
+The task-derivation `SupplyPool.list()` yields `PoolEntrySummary`:
 
 | `PostingPoolEntry` needs | C4 has |
 | --- | --- |
@@ -59,8 +63,9 @@ plan pins, and it was not widened. The reconciliation lives in one named, tested
 bytes the entry's own digest addresses: D5's stamping writes `accessClass: "public"` onto every
 access-classified descriptor at seal time, and `evaluationSpecIsPublic` reads those stamps back,
 failing closed on an unstamped specification, a private stamp, a non-string stamp, or bytes that
-are not a JSON document. `src/pool-shape.test.ts` pins C4's stored entry against the adapter's
-input type at compile time, so a rename on either side stops the build.
+are not a JSON document. `src/pool-shape.test.ts` is the package's sole, test-only dependency on
+task derivation; it pins C4's stored entry against the adapter input type at compile time, so a
+rename on either side stops the build.
 
 **How the program ruled (R10).** The C5 plan was wrong on every count; C4 is unchanged.
 

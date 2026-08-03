@@ -791,7 +791,11 @@ export function describeMarketplaceBackendConformance(
 
       const outcome = await authenticateRequester(
         { envelopeBytes: envelope, key: trustFixture.requesterKey, requesterAgent: trustFixture.requesterAgent, sealingTime: "2026-01-01T00:00:00Z" },
-        { bindingResolver: trustFixture.bindingResolver, dsseVerifier: trustFixture.dsseVerifier },
+        {
+          bindingResolver: trustFixture.bindingResolver,
+          witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
+          dsseVerifier: trustFixture.dsseVerifier,
+        },
       );
       expect(outcome.ok).toBe(true);
     });
@@ -816,7 +820,11 @@ export function describeMarketplaceBackendConformance(
 
       const outcome = await authenticateRequester(
         { envelopeBytes: envelope, key: trustFixture.executorKey, requesterAgent: trustFixture.executorAgent, sealingTime: "2026-01-01T00:00:00Z" },
-        { bindingResolver: trustFixture.bindingResolver, dsseVerifier: trustFixture.dsseVerifier },
+        {
+          bindingResolver: trustFixture.bindingResolver,
+          witnessVerifier: { verify1271Witness: async () => ({ verified: true }) },
+          dsseVerifier: trustFixture.dsseVerifier,
+        },
       );
       expect(outcome.ok).toBe(false);
     });

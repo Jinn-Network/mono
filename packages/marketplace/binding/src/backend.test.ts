@@ -45,12 +45,13 @@ function goldenSubmission(taskBytes: Uint8Array, overrides: Record<string, unkno
 let nextTaskId = 1n;
 
 function makeTestPorts(): MarketplaceBackendPorts {
+  const intents = createInMemoryPostingIntentStore();
   return {
     creatorSafe: CREATOR_SAFE,
     terms: TERMS,
     posting: {
       ipfs: { pin: async () => {} },
-      intents: createInMemoryPostingIntentStore(),
+      intents,
       safe: {
         broadcastCreateTask: async () => {
           const taskId = nextTaskId;
@@ -59,7 +60,7 @@ function makeTestPorts(): MarketplaceBackendPorts {
         },
       },
     },
-    observe: createInMemoryMarketplaceObserveStore(BASE_SEPOLIA_TODAY),
+    observe: createInMemoryMarketplaceObserveStore(BASE_SEPOLIA_TODAY, { intents }),
   };
 }
 
@@ -83,6 +84,35 @@ function invalidUtf8(value: Uint8Array): Uint8Array {
 }
 
 describe("makeMarketplaceBackend -- submit", () => {
+  test("restart recovery atomically joins a resolved WAL after scope completion was interrupted", async () => {
+    const ports = makeTestPorts();
+    const broadcast = vi.fn(ports.posting.safe.broadcastCreateTask);
+    ports.posting.safe.broadcastCreateTask = broadcast;
+    const complete = ports.observe.resolveSubmissionScope.bind(ports.observe);
+    let interruptOnce = true;
+    ports.observe.resolveSubmissionScope = async (input, ownerToken) => {
+      if (interruptOnce) {
+        interruptOnce = false;
+        throw new Error("simulated death after WAL resolution");
+      }
+      return complete(input, ownerToken);
+    };
+    const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
+    const task = goldenTask();
+    const submission = goldenSubmission(task);
+    const submissionUri = (JSON.parse(text(submission)) as SubmissionRecord).submission;
+
+    await expect(backend.post(task, submission)).rejects.toThrow(/after WAL resolution/u);
+    await expect(backend.recoverPosting()).resolves.toMatchObject({
+      resolvedScopes: [submissionUri],
+      uncertainScopes: [],
+      conflicts: [],
+    });
+    const replayed = await backend.post(task, submission);
+    expect(typeof replayed.taskId).toBe("bigint");
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
   test("linearizes simultaneous requester-scope contenders before any upload, intent, or broadcast", async () => {
     const ports = makeTestPorts();
     const broadcasts: unknown[] = [];

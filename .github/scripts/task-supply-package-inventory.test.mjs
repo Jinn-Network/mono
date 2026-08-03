@@ -31,11 +31,16 @@ const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/marketplace-binding', join(root, 'packages', 'marketplace', 'binding')],
 ]);
 
-// Admission consumes environments/record types + digests and trust-core's DSSE spine, and
-// nothing else (design §3.3). Every addition to this graph is a design question first.
+// Admission consumes environments/record types + digests, trust-core's DSSE spine, and the
+// portable Task/EvaluationSpec descriptor types used by its deterministic prediction fixture.
+// Every addition to this graph is a design question first.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['admission', {
-    dependencies: ['@jinn-network/environment-record', '@jinn-network/trust-core'],
+    dependencies: [
+      '@jinn-network/environment-record',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/trust-core',
+    ],
     devDependencies: [], optionalDependencies: [], peerDependencies: [],
   }],
   // curation is a pure projection over verdict observations (design §9): it derives
@@ -84,29 +89,26 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/trust-core',
     ],
   }],
-  // posting is an application over the binding (design §3.3): it consumes the marketplace
-  // binding's posting mechanics plus the D7 on-ramp adapters, the protocol package that owns
-  // Submission sealing, and derivation for the pool listing type ONLY (finding F-C5-5 — the
-  // source-boundary guard asserts that edge is `import type`).
+  // posting is an application over the requester backend: its runtime graph contains only the
+  // binding and the protocol package that owns Submission sealing. Derivation remains a
+  // compile-time structural fixture and therefore belongs in devDependencies only.
   ['posting', {
     dependencies: [
       '@jinn-network/marketplace-binding',
-      '@jinn-network/task-derivation',
       '@jinn-network/task-execution-protocol',
     ],
     // Shadow devDependencies: marketplace-binding's own portal closure needs top-level
     // resolutions in a standalone yarn project (marketplace inventory guard's documented
     // pattern).
     devDependencies: [
+      '@jinn-network/task-derivation',
       '@jinn-network/task-execution-backend',
       '@jinn-network/task-execution-profiles',
       '@jinn-network/trust-core',
       '@jinn-network/trust-resolve',
     ],
     optionalDependencies: [], peerDependencies: [],
-    // Transitive portals reached through task-derivation (environments/record and its
-    // evidence-protocol dependency, plus task-admission). Posting's source imports none of
-    // them; yarn still needs the resolution to build the portal graph.
+    // Test-only task-derivation still needs its portal closure in a standalone yarn project.
     portalResolutions: [
       '@jinn-network/environment-record',
       '@jinn-network/evidence-protocol',

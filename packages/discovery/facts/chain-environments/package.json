@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-facts-chain-environments",
   "version": "0.1.0",
-  "description": "Facts profiles and record-fact recompute for the Jinn chain-environment/1.0, crypto-environment/1.0, and information-world/1.0 record kinds.",
+  "description": "Experimental, publication-disabled facts profiles and recompute for the Jinn chain-environment, crypto-environment, and information-world record kinds.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {

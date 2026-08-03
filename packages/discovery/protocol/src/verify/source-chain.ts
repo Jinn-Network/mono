@@ -2,7 +2,10 @@ import type { DsseEnvelope } from "@jinn-network/trust-core";
 import type { AnnouncementEntry } from "../entry.js";
 import type { SourceHead } from "../head.js";
 import { splitOrigin } from "../grammar.js";
+import { MEDIA_ENTRY, MEDIA_HEAD } from "../identifiers.js";
 import { dssePreAuthEncoding } from "../dsse.js";
+import { parseWireDsseEnvelope } from "../dsse.js";
+import { sealJson } from "../sealing.js";
 import { checkGlobalChainRules, digestEntries, walkLinkage, type DigestedEntry } from "./chain-rules.js";
 import type { FreshnessPolicy, HighWaterMark, HighWaterMarkStore, KeyResolver, ResolvedKey, SignatureVerifier } from "./ports.js";
 import type { SourceChainOutcome } from "./outcomes.js";
@@ -28,33 +31,29 @@ import type { SourceChainOutcome } from "./outcomes.js";
 // module is the I/O-adjacent orchestration (keys, signatures, freshness,
 // the high-water mark).
 
-const encoder = new TextEncoder();
-
-// The DsseEnvelope's `payload` field, as constructed by this tree's
-// conformance kit (and by any producer following the same convention until
-// `client` (M6) bridges real synced envelopes, §10.1), carries the exact
-// canonical-JSON text of the sealed document -- not the base64 encoding
-// `trust-core`'s own `sealDsseEnvelope`/`parseDsseEnvelope` would produce
-// for a wire-serialized envelope. This function's PAE computation is over
-// that text's UTF-8 bytes directly. Recorded as a finding: a real M6 client
-// wiring `verifySourceChain`'s `headSignature`/entry `signature` params from
-// bytes synced off the wire must base64-decode `payload` (via trust-core's
-// `parseDsseEnvelope`) into this same text-of-canonical-bytes shape before
-// calling here.
-function envelopePreAuthEncoding(envelope: DsseEnvelope): Uint8Array {
-  return dssePreAuthEncoding(envelope.payloadType, encoder.encode(envelope.payload));
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
 }
 
 async function verifySignedBy(
   envelope: DsseEnvelope,
+  expectedPayload: Uint8Array,
+  expectedPayloadType: string,
   candidates: readonly ResolvedKey[],
   sigs: SignatureVerifier,
 ): Promise<boolean> {
-  const pae = envelopePreAuthEncoding(envelope);
-  for (const signature of envelope.signatures) {
+  let parsed;
+  try {
+    parsed = parseWireDsseEnvelope(envelope);
+  } catch {
+    return false;
+  }
+  if (parsed.envelope.payloadType !== expectedPayloadType || !sameBytes(parsed.payloadBytes, expectedPayload)) return false;
+  const pae = dssePreAuthEncoding(parsed.envelope.payloadType, parsed.payloadBytes);
+  for (const signature of parsed.signatures) {
     const key = candidates.find((candidate) => candidate.keyid === signature.keyid);
     if (key === undefined) continue;
-    if (await sigs.verify(pae, encoder.encode(signature.sig), key)) return true;
+    if (await sigs.verify(pae, signature.signatureBytes, key)) return true;
   }
   return false;
 }
@@ -79,7 +78,7 @@ export async function verifySourceChain(opts: {
   // Step 1 + 2: resolve working keys under the discovery scope, verify the
   // head's DSSE signature against a key currently valid at `now`.
   const currentKeys = await keys.resolve(source.agent, now);
-  if (!(await verifySignedBy(headSignature, currentKeys, sigs))) {
+  if (!(await verifySignedBy(headSignature, sealJson(head).bytes, MEDIA_HEAD, currentKeys, sigs))) {
     return { status: "unauthorized-signer" };
   }
 
@@ -169,6 +168,8 @@ export async function verifySourceChain(opts: {
     }
     const corroborated = await verifySignedBy(
       signature,
+      sealJson(node.entry).bytes,
+      MEDIA_ENTRY,
       [{ keyid: everBoundSigner, publicKey: "", algorithm: "" }],
       sigs,
     );

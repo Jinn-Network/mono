@@ -24,6 +24,7 @@ const portals = [
   { name: "@jinn-network/trust-core", root: join(repoRoot, "packages", "trust", "core"), archive: "trust-core.tgz" },
   { name: "@jinn-network/evidence-protocol", root: join(repoRoot, "packages", "evidence", "protocol"), archive: "evidence-protocol.tgz" },
   { name: "@jinn-network/record-discovery-protocol", root: join(repoRoot, "packages", "discovery", "protocol"), archive: "record-discovery-protocol.tgz" },
+  { name: "@jinn-network/record-discovery-serve", root: join(repoRoot, "packages", "discovery", "serve"), archive: "record-discovery-serve.tgz" },
   { name: "@jinn-network/evidence-repository", root: join(repoRoot, "packages", "evidence", "repository"), archive: "evidence-repository.tgz" },
   { name: "@jinn-network/execution-recorder", root: join(repoRoot, "packages", "evidence", "execution-recorder"), archive: "execution-recorder.tgz" },
   { name: "@jinn-network/evidence-discovery", root: join(repoRoot, "packages", "evidence", "discovery"), archive: "evidence-discovery.tgz" },

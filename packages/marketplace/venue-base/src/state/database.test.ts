@@ -41,16 +41,57 @@ describe("venue state database", () => {
     } finally { second.close(); }
   });
 
-  test("declares all eight tables plus metadata", () => {
+  test("declares all durable tables plus metadata", () => {
     const state = openVenueState(path);
     try {
       const names = (state.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as
         { name: string }[]).map((row) => row.name).filter((name) => !name.startsWith("sqlite_")).sort();
       expect(names).toEqual([
         "attempt_deliveries", "broadcast_locks", "cancel_signals", "log_cursors", "orphaned_blocks",
-        "posting_intents", "submission_scopes", "tx_submissions", "venue_state_metadata",
+        "posting_intents", "scanned_block_hashes", "submission_scopes", "tx_submissions", "venue_state_metadata",
       ]);
     } finally { state.close(); }
+  });
+
+  test("migrates v3 state additively, retaining pre-existing cursor and outbox data", () => {
+    const old = openVenueState(path);
+    old.db.prepare(
+      "INSERT INTO log_cursors (stream, chain_id, live_block_number, live_block_hash,"
+      + " finalized_block_number, finalized_block_hash, updated_at_ms) VALUES (?,?,?,?,?,?,?)",
+    ).run("projector", 84532, 20, `0x${"a".repeat(64)}`, 10, `0x${"b".repeat(64)}`, 1);
+    old.db.prepare(
+      "INSERT INTO posting_intents (creator_safe, task_cid_digest, submission_digest, idempotency_key, owner_token, created_at)"
+      + " VALUES (?,?,?,?,?,?)",
+    ).run("0xsafe", "sha256:aa", "sha256:bb", "idempotency", "owner", "2026-08-02T00:00:00Z");
+    // Reconstruct the actual v3 column shape; merely downgrading the metadata on a current
+    // schema would test an impossible duplicate-column state rather than the migration.
+    old.db.exec(`
+      ALTER TABLE posting_intents DROP COLUMN venue_namespace;
+      ALTER TABLE posting_intents DROP COLUMN command_digest;
+      ALTER TABLE posting_intents DROP COLUMN command_json;
+      ALTER TABLE posting_intents DROP COLUMN legacy_unrecoverable;
+      ALTER TABLE submission_scopes DROP COLUMN task_digest;
+      ALTER TABLE submission_scopes DROP COLUMN creator_safe;
+      ALTER TABLE submission_scopes DROP COLUMN venue_namespace;
+      ALTER TABLE submission_scopes DROP COLUMN command_digest;
+      ALTER TABLE submission_scopes DROP COLUMN posting_intent_key;
+      ALTER TABLE submission_scopes DROP COLUMN legacy_scope_unrecoverable;
+    `);
+    old.db.exec("DROP TABLE scanned_block_hashes");
+    old.db.prepare("UPDATE venue_state_metadata SET schema_version = 3 WHERE singleton = 1").run();
+    old.close();
+
+    const migrated = openVenueState(path);
+    try {
+      expect(migrated.db.prepare("SELECT schema_version FROM venue_state_metadata").get()).toMatchObject({
+        schema_version: VENUE_STATE_SCHEMA_VERSION,
+      });
+      expect(migrated.db.prepare("SELECT live_block_number FROM log_cursors WHERE stream = ?").get("projector"))
+        .toMatchObject({ live_block_number: 20 });
+      expect(migrated.db.prepare("SELECT COUNT(*) AS n FROM posting_intents").get()).toMatchObject({ n: 1 });
+      expect(migrated.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scanned_block_hashes'").get())
+        .toBeDefined();
+    } finally { migrated.close(); }
   });
 
   test("rejects a state file written by a newer schema version", () => {

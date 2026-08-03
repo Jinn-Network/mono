@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type {
-  RecordSubmissionInput, SubmissionScopeOwnerToken,
+  ClaimSubmissionScopeInput, RecordSubmissionInput, SubmissionScopeOwnerToken,
+} from "@jinn-network/marketplace-binding";
+import {
+  postingCommandDigestOf,
+  postingIntentKeyOf,
+  type PreparedPostingCommand,
 } from "@jinn-network/marketplace-binding";
 import { TaskExecutionError, type AttemptUri, type SubmissionUri } from "@jinn-network/task-execution-backend";
 import { documentDigest } from "@jinn-network/task-execution-protocol";
@@ -22,15 +27,28 @@ function bytes(seed: string): Uint8Array {
   return new TextEncoder().encode(seed);
 }
 
-function baseInput(overrides: Partial<Parameters<ReturnType<typeof createObserveStore>["claimSubmissionScope"]>[0]> = {}) {
+function baseInput(overrides: Partial<ClaimSubmissionScopeInput> = {}): ClaimSubmissionScopeInput {
   const submissionBytes = bytes("submission-a");
+  const venueNamespace = overrides.venueNamespace ?? "test:venue";
+  const commandDigest = overrides.commandDigest ?? `sha256:${"d".repeat(64)}`;
   return {
     requester: REQUESTER,
     idempotencyKey: "idem-1",
     submissionUri: SUBMISSION_URI,
     digest: documentDigest(submissionBytes),
     submissionBytes,
+    taskDigest: TASK_DIGEST,
+    creatorSafe: REQUESTER,
+    postingIntentKey: postingIntentKeyOf({
+      creatorSafe: REQUESTER,
+      taskCidDigest: TASK_DIGEST,
+      submissionDigest: documentDigest(submissionBytes),
+      venueNamespace,
+      commandDigest,
+    }),
     ...overrides,
+    venueNamespace,
+    commandDigest,
   };
 }
 
@@ -44,6 +62,28 @@ function resolveInput(overrides: Partial<RecordSubmissionInput> = {}): RecordSub
     outcome: { taskId: 7n, txHash: TX_HASH },
     ...overrides,
   };
+}
+
+function exactCommand(input: ClaimSubmissionScopeInput): PreparedPostingCommand {
+  const unsigned: Omit<PreparedPostingCommand, "commandDigest"> = {
+    venueNamespace: input.venueNamespace,
+    chainId: 84532,
+    generation: "today",
+    router: "0x2222222222222222222222222222222222222222",
+    creatorSafe: input.creatorSafe,
+    taskCidDigest: input.taskDigest,
+    submissionDigest: input.digest,
+    idempotencyKey: input.idempotencyKey,
+    maxClaims: 1,
+    solutionMaxDeliveryRateWei: "1",
+    verdictMaxDeliveryRateWei: "1",
+    responseTimeoutSeconds: "60",
+    allowSolverSelfEvaluation: false,
+    to: "0x2222222222222222222222222222222222222222",
+    valueWei: "2",
+    data: "0x1234",
+  };
+  return { ...unsigned, commandDigest: postingCommandDigestOf(unsigned) };
 }
 
 let root: string;
@@ -68,6 +108,30 @@ describe("createObserveStore (design §7 ruling on TEP §12.2 idempotent resubmi
     expect(claim.kind).toBe("owner");
     if (claim.kind !== "owner") throw new Error("expected owner");
     expect(claim.ownerToken).toMatch(/^submission-scope-owner:/u);
+  });
+
+  test("atomically adopts only the exact resolved posting WAL outcome", async () => {
+    const store = createObserveStore(state);
+    const seed = baseInput();
+    const command = exactCommand(seed);
+    const input = baseInput({ commandDigest: command.commandDigest });
+    const claim = await store.claimSubmissionScope(input);
+    expect(claim.kind).toBe("owner");
+    state.db.prepare(
+      "INSERT INTO posting_intents (creator_safe, task_cid_digest, submission_digest, idempotency_key,"
+      + " owner_token, created_at, venue_namespace, command_digest, command_json, resolved_task_id, resolved_tx_hash)"
+      + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      input.creatorSafe.toLowerCase(), input.taskDigest, input.digest, input.idempotencyKey,
+      "posting-owner:test", "2026-08-03T00:00:00Z", input.venueNamespace,
+      input.commandDigest, JSON.stringify(command), "7", TX_HASH,
+    );
+
+    await expect(store.resolveRecoveredSubmissionScope(input)).resolves.toBe("resolved");
+    await expect(store.resolveRecoveredSubmissionScope(input)).resolves.toBe("already-resolved");
+    await expect(store.readSubmissionScope(input.requester, input.idempotencyKey)).resolves.toMatchObject({
+      outcome: { taskId: 7n, txHash: TX_HASH },
+    });
   });
 
   test("a second claim with byte-identical bytes while pending returns pending", async () => {

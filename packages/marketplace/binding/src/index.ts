@@ -28,6 +28,7 @@ export type { TwoPartyEngagement } from "./two-party-engagement.js";
 export {
   computeRawCodecCid,
   decodeRawCodecCidDigestHex,
+  rawCodecCidFromSha256Digest,
   uploadRawCodecCid,
 } from "./venue/ipfs.js";
 export type { IpfsPinPort } from "./venue/ipfs.js";
@@ -59,7 +60,12 @@ export type {
 export { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 export { JINN_ROUTER_V4_ABI } from "./abis/revised-contracts.js";
 export { TASK_COORDINATOR_ABI } from "./abis/task-coordinator.js";
-export { MECH_ABI, MECH_MARKETPLACE_ABI } from "./abis/mech-marketplace.js";
+export {
+  MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
+  MECH_MARKETPLACE_ABI,
+  MECH_OPERATOR_ABI,
+} from "./abis/mech-marketplace.js";
 export {
   REVISED_DOMAIN_HASH,
   REVISED_LEG_SOLUTION,
@@ -84,6 +90,8 @@ export type { HonorOrRejectResult } from "./honor-or-reject.js";
 export {
   BroadcastUncertainError,
   createInMemoryPostingIntentStore,
+  postingIntentKeyOf,
+  postingIntentsEqual,
   recoverPostingIntents,
 } from "./broadcast-intent.js";
 export { createFilePostingIntentStore } from "./posting-intent-file-store.js";
@@ -104,8 +112,14 @@ export type {
 } from "./broadcast-intent.js";
 
 // --- today-mode posting + digest-join (§6.1; M2.3) ---
-export { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask } from "./posting.js";
-export type { PostingPorts, PostingTerms, SafeBroadcastPort } from "./posting.js";
+export {
+  MARKETPLACE_MANIFEST_DIGEST_SENTINEL,
+  encodeCreateTaskCalldata,
+  postTask,
+  postingCommandDigestOf,
+  preparePostingCommand,
+} from "./posting.js";
+export type { PostingPorts, PostingTerms, PreparedPostingCommand, SafeBroadcastPort } from "./posting.js";
 
 // --- requester on-ramp defaults (supply design §8 D7; finding F2) ---
 export {
@@ -120,12 +134,20 @@ export { MARKETPLACE_CORE_KEY_CLASSES, marketplaceCapabilities } from "./capabil
 
 // --- the requester-facing TaskExecutionBackend (§13, Finding F2; M2.4) ---
 export { makeMarketplaceBackend } from "./backend.js";
-export type { MarketplaceTestableBackend } from "./backend.js";
 export type {
+  MarketplaceRequesterBackend,
+  MarketplaceTestableBackend,
+  RequesterPostingRecoveryReport,
+} from "./backend.js";
+export type {
+  ClaimSubmissionScopeInput,
   MarketplaceBackendPorts,
   MarketplaceLifecyclePorts,
   MarketplaceObservePort,
+  PendingSubmissionScopeRecord,
   RecordSubmissionInput,
+  RecoveredSubmissionScopeResolution,
+  ResolveRecoveredSubmissionScopeInput,
   SubmissionScopeClaim,
   SubmissionScopeOwnerToken,
   SubmissionScopeRecord,

@@ -45,6 +45,7 @@ import {
 import {
   describeMarketplaceProjectorConformance,
   loadMarketplaceProjectorFixtures,
+  loadMarketplaceProjectorReorgFixtures,
   describeMarketplaceProjectorIdentityConformance,
   type DerivationOutcome,
   type MarketplaceProjectorConformanceSubject,
@@ -77,6 +78,18 @@ function stringifyProjectionState(state: unknown): string {
 }
 const DELIVERY_BYTES = encoder.encode('{"record":"delivery"}');
 const EVALUATION_BYTES = encoder.encode('{"record":"evaluation-delivery"}');
+
+test("projector fixture loaders select append-only erratum successors", () => {
+  const activeGolden = loadMarketplaceProjectorFixtures().map(({ name }) => name);
+  expect(activeGolden).toContain("revised-cross-batch-flow-2026-08-03");
+  expect(activeGolden).toContain("revised-task-created-2026-08-03");
+  expect(activeGolden).not.toContain("revised-cross-batch-flow");
+  expect(activeGolden).not.toContain("revised-task-created");
+
+  const activeReorg = loadMarketplaceProjectorReorgFixtures().map(({ name }) => name);
+  expect(activeReorg).toContain("revised-task-created-reorg-2026-08-03");
+  expect(activeReorg).not.toContain("revised-task-created-reorg");
+});
 
 function asFixtureLogs(fixture: {
   readonly logs: readonly unknown[];
@@ -365,7 +378,9 @@ function appendedProcessedLogId(
 }
 
 test("lifecycle replay and refusals preserve the complete accepted-output boundary", () => {
-  const fixture = loadMarketplaceProjectorFixtures().find(({ name }) => name === "revised-cross-batch-flow");
+  const fixture = loadMarketplaceProjectorFixtures().find(
+    ({ name }) => name === "revised-cross-batch-flow-2026-08-03",
+  );
   if (fixture === undefined) throw new Error("revised lifecycle fixture is missing");
   const [created, claim] = enrichedEvents(fixture);
   if (

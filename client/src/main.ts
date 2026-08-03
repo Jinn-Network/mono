@@ -59,7 +59,7 @@ import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
 import { decryptMnemonic, deriveMasterSigner } from './earning/wallet.js';
-import { deriveDeliverySigningKey, deriveLegacyBridgeSigner } from './daemon/trust-keys.js';
+import { deriveLegacyBridgeSigner } from './daemon/trust-keys.js';
 import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
@@ -2184,6 +2184,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
     );
     composition = await buildOperatorComposition({
+      mode: 'legacy',
       config,
       publicClient,
       // Service Safe is owned by the agent EOA (index N), not the master (index 0).
@@ -2197,11 +2198,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
       profileStore: { get: (digest) => profilesByDigest.get(digest) },
       store: sharedStore,
-      // Ruling 3 (E36 appendix): keystore-derived, host-side, no new custody surface — both
-      // signers are pure functions of the same `agentPrivateKey` this daemon already decrypted
-      // from the operator keystore for every other trust surface (envelopeDeps, deliveryDeps,
-      // identityPublisher). See `./daemon/trust-keys.js` for the derivations.
-      deliverySigningKey: deriveDeliverySigningKey(agentPrivateKey),
+      // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
+      // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without it.
       legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });

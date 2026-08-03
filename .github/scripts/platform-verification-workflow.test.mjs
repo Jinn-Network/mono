@@ -179,6 +179,8 @@ test('artifacts build and upload public/profile/pack outputs without OIDC', () =
   assert.match(artifacts, /build-platform-public-surface\.mjs/u);
   assert.match(artifacts, /build-profile-root\.mjs/u);
   assert.match(artifacts, /build-prepublication-bundle\.mjs/u);
+  assert.match(artifacts, /--native-vertical-roles/u);
+  assert.match(artifacts, /--out \.platform-verification\/native-role-pack/u);
   assert.match(artifacts, /stack-trusted-publishers\.mjs/u);
   assert.match(artifacts, /--out \.platform-verification\/trusted-publishers/u);
   assert.match(artifacts, /--source-sha "\$\{SOURCE_SHA\}"/u);
@@ -200,6 +202,8 @@ test('artifact attestation downloads immutable build outputs without executing r
   for (const subject of [
     /\.platform-verification\/pack\/manifest\.json/u,
     /\.platform-verification\/pack\/tarballs\/\*\.tgz/u,
+    /\.platform-verification\/native-role-pack\/manifest\.json/u,
+    /\.platform-verification\/native-role-pack\/tarballs\/\*\.tgz/u,
     /\.platform-verification\/public-surface-manifest\.json/u,
     /\.platform-verification\/profile-root\/\*\*/u,
     /\.platform-verification\/trusted-publishers\/trusted-publishers\.json/u,
@@ -214,6 +218,7 @@ test('external consumer accepts only the downloaded same-run tarball bundle', ()
   assert.match(consumer, /uses: actions\/download-artifact@v4/u);
   assert.match(consumer, /prepublication-external-consumer\.mjs/u);
   assert.match(consumer, /\.platform-verification\/pack\/manifest\.json/u);
+  assert.match(consumer, /--native-manifest \.platform-verification\/native-role-pack\/manifest\.json/u);
 });
 
 test('the always-running receipt receives every exact job conclusion and is uploaded only on success', () => {

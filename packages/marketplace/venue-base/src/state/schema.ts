@@ -7,8 +7,46 @@
 // version 2): the durable, idempotent requester cancellation signal. Task 16 adds
 // `submission_scopes` and `attempt_deliveries` (schema version 3): the durable half of the
 // projector-backed `MarketplaceObservePort` -- linearizable requester-scope ownership and
-// recorded Delivery bytes.
-export const VENUE_STATE_SCHEMA_VERSION = 3 as const;
+// recorded Delivery bytes. Version 4 adds scanned block-number/hash history so reorg handling
+// can enumerate every displaced block, including blocks with no marketplace logs.
+export const VENUE_STATE_SCHEMA_VERSION = 5 as const;
+
+/** Additive v3 -> v4 migration; old venue state must retain every existing cursor/outbox row. */
+export const VENUE_STATE_V4_MIGRATION_SQL = `
+CREATE TABLE scanned_block_hashes (
+  stream TEXT NOT NULL,
+  chain_id INTEGER NOT NULL,
+  block_number INTEGER NOT NULL CHECK (block_number >= 0),
+  block_hash TEXT NOT NULL,
+  orphaned_at_ms INTEGER,
+  PRIMARY KEY (stream, block_number, block_hash)
+);
+CREATE INDEX scanned_block_hashes_active_range
+  ON scanned_block_hashes (stream, block_number)
+  WHERE orphaned_at_ms IS NULL;
+`;
+
+/** Additive v4 -> v5 migration. Unresolved legacy scopes are retained but fail closed. */
+export const VENUE_STATE_V5_MIGRATION_SQL = `
+ALTER TABLE posting_intents ADD COLUMN venue_namespace TEXT;
+ALTER TABLE posting_intents ADD COLUMN command_digest TEXT;
+ALTER TABLE posting_intents ADD COLUMN command_json TEXT;
+ALTER TABLE posting_intents ADD COLUMN legacy_unrecoverable INTEGER NOT NULL DEFAULT 0
+  CHECK (legacy_unrecoverable IN (0, 1));
+UPDATE posting_intents
+SET legacy_unrecoverable = 1
+WHERE resolved_tx_hash IS NULL;
+ALTER TABLE submission_scopes ADD COLUMN task_digest TEXT;
+ALTER TABLE submission_scopes ADD COLUMN creator_safe TEXT;
+ALTER TABLE submission_scopes ADD COLUMN venue_namespace TEXT;
+ALTER TABLE submission_scopes ADD COLUMN command_digest TEXT;
+ALTER TABLE submission_scopes ADD COLUMN posting_intent_key TEXT;
+ALTER TABLE submission_scopes ADD COLUMN legacy_scope_unrecoverable INTEGER NOT NULL DEFAULT 0
+  CHECK (legacy_scope_unrecoverable IN (0, 1));
+UPDATE submission_scopes
+SET legacy_scope_unrecoverable = 1
+WHERE resolved_at_ms IS NULL;
+`;
 
 export const SCHEMA_SQL = `
 CREATE TABLE venue_state_metadata (
@@ -66,6 +104,23 @@ CREATE TABLE orphaned_blocks (
   PRIMARY KEY (chain_id, block_hash)
 );
 
+-- Canonical block provenance sampled as the log cursor advances. \`getLogs\` cannot tell us the
+-- hash of an empty block, and after a fork the RPC exposes only replacement hashes; retaining
+-- this history is therefore the only way to enumerate the full displaced suffix. A later
+-- finalized-boundary prune may remove rows only at or below that boundary, where they can no
+-- longer be reorged. Orphaned rows remain independently auditable in \`orphaned_blocks\`.
+CREATE TABLE scanned_block_hashes (
+  stream TEXT NOT NULL,
+  chain_id INTEGER NOT NULL,
+  block_number INTEGER NOT NULL CHECK (block_number >= 0),
+  block_hash TEXT NOT NULL,
+  orphaned_at_ms INTEGER,
+  PRIMARY KEY (stream, block_number, block_hash)
+);
+CREATE INDEX scanned_block_hashes_active_range
+  ON scanned_block_hashes (stream, block_number)
+  WHERE orphaned_at_ms IS NULL;
+
 -- The transactional outbox (design §7 ruling 4). The idempotency key is the LOGICAL operation
 -- identity carried by the sealed Submission -- never a tx hash. A row is written in the same
 -- transaction as the motivating state change, strictly before broadcast; the sweeper drains
@@ -77,6 +132,11 @@ CREATE TABLE posting_intents (
   idempotency_key TEXT NOT NULL,
   owner_token TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  venue_namespace TEXT,
+  command_digest TEXT,
+  command_json TEXT,
+  legacy_unrecoverable INTEGER NOT NULL DEFAULT 0
+    CHECK (legacy_unrecoverable IN (0, 1)),
   resolved_task_id TEXT,
   resolved_tx_hash TEXT,
   PRIMARY KEY (creator_safe, task_cid_digest, submission_digest),
@@ -123,6 +183,13 @@ CREATE TABLE submission_scopes (
   resolved_tx_hash TEXT,
   engagement_attempt TEXT,
   dispatch_context_json TEXT,
+  task_digest TEXT NOT NULL,
+  creator_safe TEXT NOT NULL,
+  venue_namespace TEXT NOT NULL,
+  command_digest TEXT NOT NULL,
+  posting_intent_key TEXT NOT NULL,
+  legacy_scope_unrecoverable INTEGER NOT NULL DEFAULT 0
+    CHECK (legacy_scope_unrecoverable IN (0, 1)),
   PRIMARY KEY (requester, idempotency_key)
 );
 

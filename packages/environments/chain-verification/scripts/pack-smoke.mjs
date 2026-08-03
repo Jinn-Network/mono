@@ -88,11 +88,12 @@ try {
       "@jinn-network/trust-core": "file:./trust-core.tgz",
     },
   }));
-  await writeFile(join(consumer, ".yarnrc.yml"), [
-    "nodeLinker: node-modules",
-    "enableGlobalCache: false",
-  ].join("\n") + "\n");
-  await run("corepack", ["yarn@4.13.0", "install"], { cwd: consumer });
+  // Yarn's optional-platform resolver can reject Rolldown's Android binding while
+  // installing this Linux-only generated consumer. npm's legacy peer resolver keeps
+  // the local tarball graph repeatable; the packed imports below remain the oracle.
+  await run("npm", [
+    "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",
+  ], { cwd: consumer });
   await writeFile(join(consumer, "packed-imports.test.mjs"), `
 import assert from "node:assert/strict";
 import {

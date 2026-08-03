@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { z } from 'zod/v3';
+import { NativeOperatorConfigSchema } from './daemon/native-product-config.js';
 import { TaskSchema, parseTask } from './types/task.js';
 import type { Task } from './types/task.js';
 import { canonicalHarnessName, CLAUDE_CODE_HARNESS } from './harnesses/names.js';
@@ -31,6 +32,7 @@ import {
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
+import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -540,6 +542,10 @@ export const JinnConfigSchema = z.object({
    */
   operator: z
     .object({
+      /** Explicit product boundary. Native never silently falls back to legacy. */
+      verticalMode: z.enum(['legacy', 'native-v1']).optional(),
+      /** Stable native deployment configuration. Private keys and tokens are env-only. */
+      native: NativeOperatorConfigSchema.optional(),
       publicEndpoint: z.string().url().optional(),
       defaultPriceUsdc: z
         .string()
@@ -1440,6 +1446,14 @@ export function loadConfig(configPath?: string): JinnConfig {
   // this keeps the two L1/L2 defaults symmetric. Both chains ship ≥5 free
   // providers per issue #911.
   const parsed = result.data;
+  const usesLegacyWiring = (parsed.executionWiring ?? []).some((entry) => (
+    entry.harness.length > 0
+    || entry.model.length > 0
+    || entry.plugins.length > 0
+    || entry.credentialRef.length > 0
+    || entry.legacyManifestDigest !== undefined
+  ));
+  if (usesLegacyWiring) recordPhaseDTransitionUse('legacy-wiring-config-field');
   const defaultRpcUrls: readonly string[] = parsed.network === 'testnet'
     ? DEFAULT_TESTNET_RPC_URLS
     : DEFAULT_MAINNET_RPC_URLS;

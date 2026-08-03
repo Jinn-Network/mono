@@ -7,6 +7,7 @@ import type {
   ClaimPorts, DeliveryWaitPort, FinalityPort, MarketplaceLifecyclePorts, MarketplaceObservePort,
   PostingIntentStore, ReleaseAttemptPort, SettlementPorts,
 } from "@jinn-network/marketplace-binding";
+import { resolve } from "node:path";
 import type { BaseVenueConfig } from "./config.js";
 import { createBroadcastLock } from "./broadcast/lock.js";
 import { createSubmissionLedger } from "./broadcast/ledger.js";
@@ -15,11 +16,21 @@ import { createChainLogSource, type ChainLogSource } from "./log-source/chain-lo
 import { createFinalityWaiter } from "./waiters/finality.js";
 import { createDeliveryWaiter } from "./waiters/delivery.js";
 import { createClaimWriter } from "./writers/claim.js";
+import { createVerdictPorts, type VerdictPorts } from "./verdict.js";
 import { createSettlementPorts } from "./writers/settlement.js";
 import { createLifecyclePorts, createReleasePort } from "./writers/lifecycle.js";
 import { createSqlitePostingIntentStore } from "./intents/intent-store.js";
 import { createProjectorObservePort } from "./observe/projector-observe.js";
 import { openVenueState } from "./state/database.js";
+
+// A venue owns the only mutable SQLite connection/cursor/broadcast ledger for its state path.
+// Without this process-local guard two independently assembled builders can race Safe nonces and
+// projector cursors even though SQLite's WAL mode permits both file handles to exist.
+const ACTIVE_STATE_PATHS = new Set<string>();
+
+export class BaseVenueOwnershipError extends Error {
+  override readonly name = "BaseVenueOwnershipError";
+}
 
 export interface BaseVenue {
   readonly claim: ClaimPorts;
@@ -32,6 +43,8 @@ export interface BaseVenue {
   readonly safe: BaseVenueSafeBroadcaster;
   readonly logSource: ChainLogSource;
   readonly intents: PostingIntentStore;
+  /** Feature-disabled V3 evaluator primitives; absent for revised V4 venues. */
+  readonly verdict?: VerdictPorts;
   close(): void;
 }
 
@@ -42,7 +55,18 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
       + "only and never loads or derives key material",
     );
   }
-  const state = openVenueState(config.stateDbPath);
+  const statePath = resolve(config.stateDbPath);
+  if (ACTIVE_STATE_PATHS.has(statePath)) {
+    throw new BaseVenueOwnershipError(`BaseVenue state path is already owned by this process: ${statePath}`);
+  }
+  ACTIVE_STATE_PATHS.add(statePath);
+
+  let state: ReturnType<typeof openVenueState> | undefined;
+  try {
+    state = openVenueState(config.stateDbPath);
+  // Capture the successfully opened state for the returned venue. The outer variable remains
+  // optional solely so the factory catch path can clean up a partial construction.
+  const ownedState = state;
   const ledger = createSubmissionLedger(state);
   const lock = createBroadcastLock(state);
   const safe = createSafeBroadcaster({
@@ -77,6 +101,7 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     broadcaster: safe, priorityMech: config.priorityMech,
   });
 
+  let closed = false;
   return {
     // Per-engagement members (taskDigest/submission/nonce/capabilityMatch) are supplied by the
     // host at each `runPipeline` call, exactly as `pipeline.ts` spreads them over `ports.claim`.
@@ -108,9 +133,36 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     safe,
     logSource,
     intents: createSqlitePostingIntentStore(state),
+    ...(config.chain.generation === "today" ? {
+      verdict: createVerdictPorts({
+        publicClient: config.publicClient,
+        broadcaster: safe,
+        safeAddress: config.safeAddress,
+        routerAddress: config.chain.jinnRouter,
+        mechAddress: config.priorityMech,
+      }),
+    } : {}),
     close() {
-      logSource.close();
-      state.close();
+      if (closed) return;
+      closed = true;
+      try {
+        logSource.close();
+      } finally {
+        try {
+          ownedState.close();
+        } finally {
+          ACTIVE_STATE_PATHS.delete(statePath);
+        }
+      }
     },
   };
+  } catch (cause) {
+    try {
+      state?.close();
+    } catch {
+      // Preserve the factory failure that caused cleanup, not a secondary close failure.
+    }
+    ACTIVE_STATE_PATHS.delete(statePath);
+    throw cause;
+  }
 }

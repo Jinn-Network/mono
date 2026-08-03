@@ -59,6 +59,14 @@ function nonEmpty(value: string, label: string): string {
   return value;
 }
 
+function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
+  const value = registration.evaluationMethod.digest?.sha256;
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+    throw new TypeError("evaluation launcher registration requires a canonical evaluation method sha256 digest");
+  }
+  return `sha256:${value}`;
+}
+
 /** Forward Yarn PnP bootstrap when the launcher itself runs under PnP (CI/dev). */
 function nodeBootstrapEnv(): Record<string, string> {
   const nodeOptions = process.env["NODE_OPTIONS"];
@@ -69,7 +77,6 @@ function nodeBootstrapEnv(): Record<string, string> {
 
 function launcherCapabilities(
   interruptionBehavior: InterruptionBehavior,
-  secretForwards: readonly { readonly grantKey: string; readonly target: string }[],
   configured: boolean,
 ): LauncherCapabilities {
   return {
@@ -84,7 +91,8 @@ function launcherCapabilities(
     structuredOutput: false,
     resume: interruptionBehavior === "recoverable",
     interruptionBehaviorDefault: interruptionBehavior,
-    secretForwards,
+    secretForwards: [],
+    hostSecretForwards: [],
     runPinning: {
       keys: [{
         key: "harness",
@@ -145,14 +153,10 @@ function launchPlan(
       },
     ],
     resultContract: {
-      envelopeFormat: "jinn-result-evaluation-dsse-v1",
+      envelopeFormat: "jinn-result-evaluation-statement-v1",
       structuredOutputArtifact: "out/verdict",
     },
     interruptionBehavior: registration.interruptionBehavior,
-    secretForwards: [{
-      grantKey: registration.signer.handle,
-      target: registration.signer.handle,
-    }],
   };
 }
 
@@ -178,16 +182,6 @@ export function makeEvaluationLauncher(
   if (interruptionBehaviors.size > 1) {
     throw new TypeError("evaluation launcher registrations have ambiguous interruption behavior");
   }
-  const signerHandles = new Set(registrations.map((registration) => registration.signer.handle));
-  if (signerHandles.size > 1) {
-    throw new TypeError("evaluation launcher registrations have ambiguous signer forward");
-  }
-  const registrationForwards = registrations.length === 0
-    ? []
-    : [{
-      grantKey: registrations[0]!.signer.handle,
-      target: registrations[0]!.signer.handle,
-    }];
   const selectedRegistration = (view: TaskView): EvaluatorRegistration => {
     if (options.selectRegistration === undefined) {
       throw new TypeError("evaluation launcher requires a registration selector");
@@ -204,7 +198,6 @@ export function makeEvaluationLauncher(
     id: EVALUATION_LAUNCHER_ID,
     capabilities: () => launcherCapabilities(
       registrations[0]?.interruptionBehavior ?? "repeatable",
-      registrationForwards,
       registrations.length > 0,
     ),
     ...(options.probe === undefined ? {} : { probe: options.probe }),

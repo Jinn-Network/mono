@@ -85,7 +85,9 @@ jobs:
           ref: ${{ inputs.source_sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.1
+      - name: Pin npm for packed-consumer smoke coverage
+        run: npm install --global npm@11.19.0 --no-audit --no-fund
       - name: Enable Yarn 4.13.0
         run: |
           corepack enable
@@ -512,6 +514,17 @@ jobs:
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+          # The restored assembly dist resolves its runtime dependencies from the
+          # assembly package directory, not from the evaluation harness portal.
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable)
+      - name: Rebuild and probe the native custody binary
+        env:
+          JINN_NATIVE_CUSTODY_BINARY: ${{ github.workspace }}/packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim
+        run: |
+          # Artifact transfer does not preserve the executable bit, so rebuild on this runner.
+          (cd packages/task-execution/backend-local/supervisor && node scripts/build-native.mjs)
+          test -x "$JINN_NATIVE_CUSTODY_BINARY"
+          "$JINN_NATIVE_CUSTODY_BINARY" --probe
       - name: Build evidence contract packages from source
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
@@ -521,6 +534,8 @@ jobs:
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
       - name: Verify Task Execution Evaluation Harness
         working-directory: packages/task-execution/evaluation-harness
+        env:
+          JINN_NATIVE_CUSTODY_BINARY: ${{ github.workspace }}/packages/task-execution/backend-local/supervisor/dist/native/jinn-attempt-shim
         run: |
           yarn install --immutable
           yarn typecheck

@@ -73,6 +73,35 @@ describe('assembleStatusV1', () => {
     expect(j.earnings.hint).toMatch(/omitted/);
   });
 
+  it('exposes the durable Phase D observation window without re-deriving it', () => {
+    const raw: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+      phaseDTransitionUsage: {
+        schemaVersion: 1,
+        durable: true,
+        observationWindowStartedAt: '2026-08-03T00:00:00.000Z',
+        counters: [{
+          signal: 'marketplace-pipeline-invocation',
+          count: 2,
+          firstObservedAt: '2026-08-03T01:00:00.000Z',
+          lastObservedAt: '2026-08-03T02:00:00.000Z',
+        }],
+      },
+    };
+    expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual(raw.phaseDTransitionUsage);
+  });
+
   it('reports zero runway excess when balance is already below minimum', () => {
     const raw: GatheredStatusRaw = {
       shutdownState: 'running',

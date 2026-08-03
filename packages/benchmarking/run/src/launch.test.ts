@@ -58,6 +58,7 @@ function sealingTasks(tasks: { digest: string; record: unknown }[]) {
 
 function pinningBackend(): TestableBackend {
   return createInMemoryBackend({
+    now: () => new Date("2026-08-01T00:00:00Z"),
     runPinning: [
       { key: "harness", inventory: ["*"], posture: "enforced" },
       { key: "model", inventory: ["*"], posture: "enforced" },

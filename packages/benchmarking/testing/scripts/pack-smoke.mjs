@@ -61,7 +61,7 @@ try {
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"],
     { cwd: consumer },
   );
 
@@ -80,6 +80,10 @@ const packageJson = JSON.parse(
     "utf8",
   ),
 );
+if (packageJson.peerDependencies?.vitest !== "^4.1.8"
+    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
+  throw new Error("packed optional Vitest peer contract changed");
+}
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/benchmarking-records", "@jinn-network/task-execution-profiles", "@jinn-network/task-execution-protocol"];
 if (jinnDependencies.length !== expectedJinnDependencies.length

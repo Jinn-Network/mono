@@ -20,6 +20,8 @@ describe("marketplace pipeline public surface", () => {
       "runPinningConstraint",
       "runPipeline",
       "takeEveryRunnable",
+      "validateRequirementsAgainstRunPinning",
+      "verifyPreclaim",
       "wiringHonorsPinning",
     ]);
   });

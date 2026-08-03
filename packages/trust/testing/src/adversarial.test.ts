@@ -459,10 +459,14 @@ describe("§16 adversarial battery", () => {
         requesterAgent: victimAgent,
         sealingTime: "2026-06-01T00:00:00.000Z",
       },
-      { bindingResolver: fakes.bindingResolver, dsseVerifier: fakes.dsseVerifier },
+      {
+        bindingResolver: fakes.bindingResolver,
+        witnessVerifier: fakes.witnessVerifier,
+        dsseVerifier: fakes.dsseVerifier,
+      },
     );
     expect(outcome.ok).toBe(false);
-    expect(outcome.reason).toMatch(/does not resolve to the claimed requester/);
+    expect(outcome.reason).toMatch(/binding-not-resolved/);
   });
 
   test("audience-authentication failure: a resolved requester binding not policy-accepted is rejected", async () => {
@@ -488,6 +492,7 @@ describe("§16 adversarial battery", () => {
       },
       {
         bindingResolver: fakes.bindingResolver,
+        witnessVerifier: fakes.witnessVerifier,
         dsseVerifier: fakes.dsseVerifier,
         // The requester's Agent IRI is not in the accepted audience.
         policy: { accepted: [testAgentIri("adversarial-audience-someone-else")], requiredStrength: "weak" },
@@ -514,6 +519,7 @@ describe("§16 adversarial battery", () => {
       { envelopeBytes: fixture.envelopeBytes, key, requesterAgent: agent, sealingTime: "2026-06-01T00:00:00.000Z" },
       {
         bindingResolver: fakes.bindingResolver,
+        witnessVerifier: fakes.witnessVerifier,
         dsseVerifier: fakes.dsseVerifier,
         policy: { accepted: [agent], requiredStrength: "strong" },
       },
@@ -550,6 +556,7 @@ describe("§16 adversarial battery", () => {
         ceremonyType: "eoa",
         voucher: accountVoucher(84532, settlementSigner.address),
         eoaCeremony: { signer: settlementSigner, chainId: 84532 },
+        scope: ["settlements"],
       });
       fakes.registerBinding({
         key: settlementKey,
@@ -603,6 +610,7 @@ describe("§16 adversarial battery", () => {
         ceremonyType: "eoa",
         voucher: accountVoucher(84532, settlementSigner.address),
         eoaCeremony: { signer: settlementSigner, chainId: 84532 },
+        scope: ["settlements"],
       });
       fakes.registerBinding({
         key: settlementKey,
@@ -654,6 +662,7 @@ describe("§16 adversarial battery", () => {
         ceremonyType: "eoa",
         voucher: settlementVoucher,
         eoaCeremony: { signer: settlementSigner, chainId: 84532 },
+        scope: ["settlements"],
       });
       const settlementRevocation = await buildRevocationFixture({
         target: settlementFixture.bindingDigest,

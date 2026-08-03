@@ -13,8 +13,13 @@
  */
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { SAFE_ABI } from '../../contracts/abis.js';
-import { withRecoverableRetry } from '../../tx-retry.js';
+import { flattenErrorMessage, withRecoverableRetry } from '../../tx-retry.js';
 import type { VenueBroadcaster } from './safe.js';
+import {
+  decodeSafeInnerRevert,
+  formatDecodedRevert,
+  SafeInnerRevertError,
+} from './safe-revert.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as Address;
 
@@ -66,26 +71,53 @@ export function createDirectSafeBroadcaster(
         });
         const safeSignature = toSafeEthSignSignature(ethSignature as Hex);
 
-        const txHash = await walletClient.writeContract({
-          address: safeAddress,
-          abi: SAFE_ABI,
-          functionName: 'execTransaction',
-          args: [
-            request.to,
-            request.value,
-            request.data,
-            request.operation ?? 0,
-            0n,
-            0n,
-            0n,
-            ZERO_ADDRESS,
-            ZERO_ADDRESS,
-            safeSignature,
-          ],
-          account,
-          chain: walletClient.chain,
-          value: request.value,
-        });
+        let txHash: Hex;
+        try {
+          txHash = await walletClient.writeContract({
+            address: safeAddress,
+            abi: SAFE_ABI,
+            functionName: 'execTransaction',
+            args: [
+              request.to,
+              request.value,
+              request.data,
+              request.operation ?? 0,
+              0n,
+              0n,
+              0n,
+              ZERO_ADDRESS,
+              ZERO_ADDRESS,
+              safeSignature,
+            ],
+            account,
+            chain: walletClient.chain,
+            value: request.value,
+          });
+        } catch (error) {
+          const message = flattenErrorMessage(error);
+          if (message.includes('GS013') || message.includes('GS026')) {
+            const inner = await decodeSafeInnerRevert(publicClient, {
+              safeAddress,
+              to: request.to,
+              value: request.value,
+              data: request.data,
+            });
+            if (inner.decodedName !== null || inner.innerSelector !== null) {
+              const detail = inner.decodedName === null
+                ? `undecoded selector ${inner.innerSelector}`
+                : formatDecodedRevert(inner.decodedName, inner.decodedArgs);
+              throw new SafeInnerRevertError(
+                `Safe execTransaction inner revert: ${detail}`,
+                inner.innerSelector,
+                inner.innerData,
+                inner.decodedName,
+                inner.decodedArgs,
+                null,
+              );
+            }
+          }
+          throw error;
+        }
         await publicClient.waitForTransactionReceipt({ hash: txHash });
         return { txHash };
       });

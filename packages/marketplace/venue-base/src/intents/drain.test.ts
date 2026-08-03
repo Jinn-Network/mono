@@ -108,7 +108,7 @@ afterEach(() => {
 });
 
 describe("drainPostingIntents (design §6.1 recovery scan)", () => {
-  test("a pending intent whose post is found on chain is resolved idempotently and drops out of scanPending", async () => {
+  test("a TaskCreated-only match stays uncertain because it cannot prove the Submission", async () => {
     const store = createSqlitePostingIntentStore(state);
     const intent = baseIntent();
     const claim = await store.claim(intent);
@@ -118,13 +118,13 @@ describe("drainPostingIntents (design §6.1 recovery scan)", () => {
 
     const stillUncertain = await drainPostingIntents({ store, scan });
 
-    expect(stillUncertain).toEqual([]);
-    expect(await store.scanPending()).toEqual([]);
+    expect(stillUncertain).toEqual([intent]);
+    expect(await store.scanPending()).toHaveLength(1);
     const record = await store.lookup(intent);
-    expect(record?.resolved).toEqual(match);
+    expect(record?.resolved).toBeUndefined();
 
     // Idempotent: draining again with the same matching scan does not throw or re-resolve.
-    await expect(drainPostingIntents({ store, scan })).resolves.toEqual([]);
+    await expect(drainPostingIntents({ store, scan })).resolves.toEqual([intent]);
   });
 
   test("a pending intent with no on-chain match stays pending and is returned to the caller, never silently retried", async () => {

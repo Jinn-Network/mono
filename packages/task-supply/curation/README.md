@@ -1,5 +1,10 @@
 # `@jinn-network/task-curation`
 
+> Phase C maturity: experimental and publication disabled. The production adapter is deliberately
+> deferred: a named tier-4 product must first supply verified subject, verdict, evaluator, time,
+> attempt, provenance, and judged-solution benchmark joins with a fail-closed conflict policy. A
+> second consumer is required before that join may be extracted into discovery facts.
+
 ## What this is
 
 A projection of observed verdicts into per-task **observed pass rates**.

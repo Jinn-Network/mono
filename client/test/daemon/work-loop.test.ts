@@ -16,6 +16,7 @@ import {
   serializeCanonicalJson,
   sha256Hex,
 } from '@jinn-network/task-execution-protocol';
+import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 import {
   TaskExecutionError,
   type BackendCapabilities,
@@ -28,9 +29,7 @@ import {
   keccakEvidenceHash,
 } from '@jinn-network/marketplace-binding';
 import {
-  RECORD_KINDS_SUBMISSION,
   takeEveryRunnable,
-  type AnnouncedSubmissionCard,
   type ExecutionWiringEntry,
   type PipelineConfig,
   type PipelinePorts,
@@ -41,6 +40,10 @@ import { EngagementLedger } from '../../src/daemon/engagement-ledger.js';
 import { WorkLoop, type WorkLoopConfig } from '../../src/daemon/work-loop.js';
 import type { ClaimGate } from '../../src/daemon/claim-gate.js';
 import type { OperatorComposition } from '../../src/daemon/composition-root.js';
+import {
+  LEGACY_SUBMISSION_RECORD_KIND,
+  type AnnouncedSubmissionCard,
+} from '../../src/daemon/native-submission-facts.js';
 
 const PROFILE_URI = 'https://jinn.network/task-profiles/repository-work/1.0';
 const WORK_KIND = 'repo-fix';
@@ -108,7 +111,7 @@ function goldenDelivery(): Uint8Array {
 
 function card(): AnnouncedSubmissionCard {
   return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: `sha256:${'d'.repeat(64)}` },
+    record: { kind: RECORD_KINDS.submission, digest: `sha256:${'d'.repeat(64)}` },
     facts: {
       taskDigest: TASK_DIGEST,
       taskProfileUri: PROFILE_URI,
@@ -131,7 +134,7 @@ const LEGACY_MANIFEST_DIGEST = `0x${'e'.repeat(64)}`;
 
 function legacyCard(): AnnouncedSubmissionCard {
   return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: `sha256:${'d'.repeat(64)}` },
+    record: { kind: LEGACY_SUBMISSION_RECORD_KIND, digest: `sha256:${'d'.repeat(64)}` },
     facts: {
       taskDigest: TASK_DIGEST,
       taskProfileUri: PROFILE_URI,
@@ -176,6 +179,7 @@ function backendCapabilities(): BackendCapabilities {
 interface CompositionHooks {
   onClaimBroadcast?: () => void;
   onMechDeliver?: () => void;
+  onDeliveryClassify?: () => void;
   onReadMechFacts?: () => void;
   onAwaitIndexed?: () => void;
   onSettled?: () => void;
@@ -267,10 +271,14 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
       // `classify()` below, without needing a real decodable `Deliver` event log.
       throw new Error('already delivered');
     },
-    classify: () => 'already-settled',
+    classify: () => {
+      hooks.onDeliveryClassify?.();
+      return 'already-settled';
+    },
   };
 
   return {
+    mode: 'legacy',
     backend,
     pipelineConfig: {
       chain: BASE_SEPOLIA_TODAY,
@@ -281,6 +289,7 @@ function composition(hooks: CompositionHooks = {}): OperatorComposition {
     } satisfies PipelineConfig,
     pipelinePorts,
     venue: { safe: venueSafe } as unknown as BaseVenue,
+    deliveryBroadcaster: venueSafe,
     evidence: {
       runtime: {} as never,
       ports: {
@@ -336,6 +345,167 @@ function build(overrides: Record<string, unknown> = {}) {
 }
 
 describe('work loop', () => {
+  it('uses the verified native queue and never falls through to the legacy archive adapter', async () => {
+    const archiveSince = vi.fn(async () => [card()]);
+    const sync = vi.fn(async () => ({ accepted: 0, verifiedSources: 1 }));
+    const takePending = vi.fn(() => []);
+    const coordinator = {
+      startWorker: vi.fn(),
+      renewWorker: vi.fn(),
+      reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+      process: vi.fn(),
+    };
+    const solutionCoordinator = {
+      reconcileStartup: vi.fn(async () => []),
+      reconcileEngagement: vi.fn(),
+    };
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      nativeDiscovery: {
+        sync,
+        takePending,
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: coordinator,
+      nativeSolutionCoordinator: solutionCoordinator,
+      acceptLegacyCards: false,
+    });
+
+    await loop.initialize();
+    await expect(loop.tick()).resolves.toEqual([]);
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(takePending).toHaveBeenCalledOnce();
+    expect(coordinator.renewWorker).toHaveBeenCalledOnce();
+    expect(solutionCoordinator.reconcileStartup).toHaveBeenCalledOnce();
+    expect(archiveSince).not.toHaveBeenCalled();
+  });
+
+  it('initializes native ownership, reconciliation, and verified source sync in that order', async () => {
+    const order: string[] = [];
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync: vi.fn(async () => { order.push('sync'); return { accepted: 0, verifiedSources: 1 }; }),
+        takePending: () => [],
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: () => { order.push('lease'); },
+        renewWorker: () => { order.push('renew'); },
+        reconcileStartup: async () => { order.push('reconcile'); return { reconciled: 0, finalized: 0 }; },
+        process: vi.fn(),
+      },
+      nativeSolutionCoordinator: {
+        reconcileStartup: async () => { order.push('solution-reconcile'); return []; },
+        reconcileEngagement: vi.fn(),
+      },
+    });
+    await loop.initialize();
+    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync']);
+    await loop.tick();
+    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync', 'renew', 'sync']);
+  });
+
+  it('fails an idle native tick before source sync when lease renewal fails', async () => {
+    const sync = vi.fn();
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync,
+        takePending: () => [],
+        acknowledge: vi.fn(),
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: vi.fn(),
+        renewWorker: () => { throw new Error('lease expired'); },
+        reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+        process: vi.fn(),
+      },
+      nativeSolutionCoordinator: {
+        reconcileStartup: vi.fn(async () => []),
+        reconcileEngagement: vi.fn(),
+      },
+    });
+    await loop.initialize();
+    sync.mockClear();
+    await expect(loop.tick()).rejects.toThrow('lease expired');
+    expect(sync).not.toHaveBeenCalled();
+  });
+
+  it('routes a verified native card only through the durable claim coordinator and never acknowledges separately', async () => {
+    const nativeCard: AnnouncedSubmissionCard = {
+      ...card(),
+      discovery: {
+        source: { agent: 'urn:jinn:requester:one', name: 'requester' },
+        sequence: '0000000000000001',
+        entryDigest: `sha256:${'a'.repeat(64)}`,
+        signedHighWater: {
+          sequence: '0000000000000001',
+          entry: `sha256:${'a'.repeat(64)}`,
+          issuedAt: '2026-08-02T00:00:00.000Z',
+          refreshBy: '2026-08-03T00:00:00.000Z',
+          signature: {},
+        },
+      },
+    };
+    const queued = { id: 1, announcementId: 'announcement-1', card: nativeCard };
+    const acknowledge = vi.fn();
+    const process = vi.fn(async () => ({
+      kind: 'claim-finalized' as const,
+      operationId: `sha256:${'b'.repeat(64)}` as const,
+      engagementId: `sha256:${'c'.repeat(64)}` as const,
+    }));
+    const readSealedDocuments = vi.fn(async () => ({
+      taskBytes: goldenTask(),
+      submissionBytes: goldenSubmission(),
+    }));
+    const reconcileEngagement = vi.fn(async () => ({ kind: 'solution-settled' as const, operationId: `sha256:${'d'.repeat(64)}` as const }));
+    const { loop } = build({
+      composition: { ...composition(), mode: 'native' },
+      archive: undefined,
+      acceptLegacyCards: false,
+      nativeDiscovery: {
+        sync: async () => ({ accepted: 0, verifiedSources: 1 }),
+        takePending: () => [queued],
+        acknowledge,
+        checkpoint: () => undefined,
+        resumeSse: () => ({ close: () => undefined }),
+      },
+      nativeClaimCoordinator: {
+        startWorker: vi.fn(),
+        renewWorker: vi.fn(),
+        reconcileStartup: vi.fn(async () => ({ reconciled: 0, finalized: 0 })),
+        process,
+      },
+      nativeSolutionCoordinator: {
+        reconcileStartup: vi.fn(async () => []),
+        reconcileEngagement,
+      },
+      readSealedDocuments,
+    });
+
+    await loop.initialize();
+    await expect(loop.tick()).resolves.toEqual([{
+      card: SUBMISSION_URI,
+      outcome: { kind: 'native-claim', result: expect.objectContaining({ kind: 'claim-finalized' }) },
+    }]);
+    expect(readSealedDocuments).toHaveBeenCalledWith(nativeCard);
+    expect(process).toHaveBeenCalledWith(queued, await readSealedDocuments.mock.results[0]!.value);
+    expect(reconcileEngagement).toHaveBeenCalledWith(`sha256:${'c'.repeat(64)}`);
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
   it('refuses to claim before the projector catch-up gate opens', async () => {
     const { loop } = build({ claimGate: closedGate() });
     expect(await loop.tick()).toEqual([
@@ -439,6 +609,15 @@ describe('work loop', () => {
     });
     await loop.tick();
     expect(order).toEqual(['deliver', 'read-facts']);
+  });
+
+  it('supplies the delivery broadcaster error classifier to the real deliver leg', async () => {
+    const classify = vi.fn();
+    const { loop } = build({ composition: composition({ onDeliveryClassify: classify }) });
+
+    await loop.tick();
+
+    expect(classify).toHaveBeenCalledOnce();
   });
 
   it('awaits evidence indexing before recording settlement', async () => {

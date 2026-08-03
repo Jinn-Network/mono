@@ -1745,6 +1745,21 @@ describe("bounded IPFS block readers", () => {
       maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
     });
     assert.equal(accepted?.byteLength, MAX_STANDARD_IPFS_BLOCK_BYTES);
+    assert.deepEqual(accepted, exactBytes);
+
+    const corruptBytes = Uint8Array.from(exactBytes);
+    corruptBytes[corruptBytes.byteLength - 1] = 1;
+    const corrupt = createGatewayBlockReader({
+      endpoint: "https://gateway.example.test",
+      fetch: async () =>
+        new Response(streamBytes([corruptBytes]), { status: 200 }),
+    });
+    await assert.rejects(
+      corrupt.getBlock(exactCid, {
+        maxBytes: MAX_STANDARD_IPFS_BLOCK_BYTES,
+      }),
+      hasCode("CONTENT_CORRUPT"),
+    );
 
     let canceled = false;
     const oversized = createGatewayBlockReader({

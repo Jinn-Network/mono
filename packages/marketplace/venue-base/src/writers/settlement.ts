@@ -10,6 +10,7 @@ import {
   JINN_ROUTER_V3_ABI,
   JINN_ROUTER_V4_ABI,
   MECH_ABI,
+  MECH_DELIVER_TO_MARKETPLACE_ABI,
   SafeInnerRevertError,
   decodeRawCodecCidDigestHex,
   encodeRevisedSolutionRequestData,
@@ -124,22 +125,6 @@ const MECH_MARKETPLACE_REQUEST_ID_VIEW_ABI = [{
     { name: "nonce", type: "uint256" },
   ],
   outputs: [{ name: "requestId", type: "bytes32" }],
-}] as const;
-
-/**
- * The mech's own delivery-broadcast entry point, confirmed real and fork-exercised in this repo
- * (`packages/marketplace/testing/src/escrow-lifecycle.test.ts`: `mech.deliverToMarketplace([requestId],
- * [data])`). Reused here, unverified against the real OLAS `OlasMech`/`MechMarketplace` "deliver with
- * signature" surface, as the best-evidenced analog available for the revised-generation middle leg
- * (see task report: this is the single largest open assumption in this file).
- */
-const MECH_DELIVER_TO_MARKETPLACE_ABI = [{
-  name: "deliverToMarketplace", type: "function", stateMutability: "nonpayable",
-  inputs: [
-    { name: "requestIds", type: "bytes32[]" },
-    { name: "datas", type: "bytes[]" },
-  ],
-  outputs: [],
 }] as const;
 
 /** Gnosis Safe `MultiSend` v1.3.0 canonical singleton (identical address across EVM chains). */
@@ -284,12 +269,20 @@ async function readRouterDeliveryFacts(
 
 async function claimSolutionDelivery(
   input: SettlementWriterInput,
-  args: { readonly requestId: Hex; readonly solutionDigest: Hex },
-): Promise<{ readonly status: "settled" | "already-settled" | "rejected" | "delivered-unsettled" }> {
+  args: { readonly requestId: Hex; readonly solutionDigest: Hex; readonly operationId?: string },
+): Promise<{
+  readonly status: "settled" | "already-settled" | "rejected" | "delivered-unsettled";
+  readonly txHash?: Hex;
+}> {
   const alreadyClaimed = await input.publicClient.readContract({
     address: input.chain.jinnRouter, abi: CLAIMED_VIEW_ABI, functionName: "claimed", args: [args.requestId],
   });
-  if (alreadyClaimed) return { status: "already-settled" };
+  if (alreadyClaimed) {
+    return {
+      status: "already-settled",
+      ...(await readTodaySettlementTransaction(input, args.requestId)),
+    };
+  }
 
   const data = encodeFunctionData({
     abi: JINN_ROUTER_V3_ABI, functionName: "claimSolutionDelivery",
@@ -298,14 +291,51 @@ async function claimSolutionDelivery(
   try {
     const receipt = await input.broadcaster.execute({
       to: input.chain.jinnRouter, value: 0n, data,
-      logicalTx: `settlement.claimSolutionDelivery:${args.requestId}`,
+      logicalTx: args.operationId ?? `settlement.claimSolutionDelivery:${args.requestId}`,
     });
-    return { status: receipt.alreadySettled ? "already-settled" : "settled" };
+    const transaction = /^0x[0-9a-fA-F]{64}$/.test(receipt.txHash)
+      ? { txHash: receipt.txHash }
+      : await readTodaySettlementTransaction(input, args.requestId);
+    return {
+      status: receipt.alreadySettled ? "already-settled" : "settled",
+      ...transaction,
+    };
   } catch (error) {
     const classified = classifySettlementRevert(error);
     if (classified === undefined) throw error;
     return { status: classified };
   }
+}
+
+async function readTodaySettlementTransaction(
+  input: SettlementWriterInput,
+  requestId: Hex,
+): Promise<{ readonly txHash?: Hex }> {
+  const latest = await input.publicClient.getBlockNumber();
+  const fromBlock = latest > DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS
+    ? latest - DEFAULT_MECH_DELIVER_LOOKBACK_BLOCKS
+    : 0n;
+  const logs = await input.logSource.logsInRange(fromBlock, latest);
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const log = logs[index]!;
+    if (log.address.toLowerCase() !== input.chain.jinnRouter.toLowerCase()) continue;
+    try {
+      const decoded = decodeEventLog({
+        abi: JINN_ROUTER_V3_ABI,
+        data: log.data,
+        topics: log.topics as [Hex, ...Hex[]],
+        strict: true,
+      });
+      if (decoded.eventName !== "SolutionDeliveryClaimed") continue;
+      const decodedRequestId = (decoded.args as unknown as { requestId: Hex }).requestId;
+      if (decodedRequestId.toLowerCase() === requestId.toLowerCase()) {
+        return { txHash: log.transactionHash };
+      }
+    } catch {
+      // Not the requested V3 settlement event; the bounded router range contains other events.
+    }
+  }
+  return {};
 }
 
 function decodeClaimedRequestIdFromLogs(logs: readonly Log[]): Hex | undefined {
@@ -481,7 +511,11 @@ export function createSettlementPorts(input: SettlementWriterInput): SettlementP
       readMechDeliveryFacts(input, args),
     readRouterDeliveryFacts: (args: { readonly requestId: Hex; readonly config: MarketplaceChainConfig }) =>
       readRouterDeliveryFacts(input, args),
-    claimSolutionDelivery: (args: { readonly requestId: Hex; readonly solutionDigest: Hex }) =>
+    claimSolutionDelivery: (args: {
+      readonly requestId: Hex;
+      readonly solutionDigest: Hex;
+      readonly operationId?: string;
+    }) =>
       claimSolutionDelivery(input, args),
   };
   if (input.chain.generation !== "revised") return base;

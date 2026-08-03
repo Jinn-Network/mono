@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { mapAnnouncedSubmissionToFacts } from '@jinn-network/marketplace-pipeline';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import { synthesizeLegacyFactsCard, LEGACY_ENVELOPE_EXTENSION_KEY, signedEnvelopeJsonFromDeliveryOrRaw } from '../../src/daemon/bridge-legacy-delivery.js';
+import { mapAnnouncedSubmissionToFacts } from '../../src/daemon/native-submission-facts.js';
 
 const ANCHORED_TASK = {
   taskId: 77n,

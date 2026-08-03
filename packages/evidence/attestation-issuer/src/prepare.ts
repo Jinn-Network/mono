@@ -226,6 +226,17 @@ export async function prepareResultEvaluation(
   ) as PreparedResultEvaluation;
 }
 
+/**
+ * Builds the exact canonical ResultEvaluationStatement payload without signing it. This is the
+ * child-process boundary used by the native evaluator: an untrusted grader may calculate a
+ * statement, while only the backend host is allowed to seal that payload as a DSSE envelope.
+ */
+export function buildResultEvaluationPayload(
+  input: PrepareResultEvaluationInput,
+): Uint8Array {
+  return deterministicJsonBytes(buildResultEvaluationStatement(input));
+}
+
 export async function prepareExecutionVerification(
   input: PrepareExecutionVerificationInput,
   signer: DsseSigner,

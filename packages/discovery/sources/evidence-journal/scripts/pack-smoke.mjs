@@ -87,6 +87,9 @@ import { readFile, readdir } from "node:fs/promises";
 import * as recordDiscoverySourceEvidenceJournal from "@jinn-network/record-discovery-source-evidence-journal";
 
 if (typeof recordDiscoverySourceEvidenceJournal !== "object") throw new Error("root import failed");
+if (typeof recordDiscoverySourceEvidenceJournal.createEvidenceJournalDurableBridge !== "function") {
+  throw new Error("durable bridge export is missing");
+}
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/evidence-discovery", "@jinn-network/evidence-repository", "@jinn-network/record-discovery-protocol", "@jinn-network/record-discovery-serve"];

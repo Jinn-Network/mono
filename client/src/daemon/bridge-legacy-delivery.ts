@@ -8,7 +8,6 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { RECORD_KINDS_SUBMISSION, type AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import {
   documentDigest,
   sealSubmission,
@@ -21,6 +20,11 @@ import { keccakEvidenceHash } from '@jinn-network/marketplace-binding';
 import { canonicalJson } from '../harnesses/engine/canonical-json.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import type { SignedTaskV1 } from '../types/task-document.js';
+import {
+  LEGACY_SUBMISSION_RECORD_KIND,
+  type AnnouncedSubmissionCard,
+} from './native-submission-facts.js';
+import { recordPhaseDTransitionUse } from '../compatibility/phase-d-transition-usage.js';
 
 export const LEGACY_ENVELOPE_EXTENSION_KEY =
   'https://jinn.network/bridge/legacy-execution-envelope/1.0';
@@ -48,7 +52,7 @@ export function synthesizeLegacyFactsCard(anchored: {
 }): AnnouncedSubmissionCard {
   const taskDigest = documentDigest(anchored.taskBytes);
   return {
-    record: { kind: RECORD_KINDS_SUBMISSION, digest: taskDigest },
+    record: { kind: LEGACY_SUBMISSION_RECORD_KIND, digest: taskDigest },
     facts: {
       taskDigest,
       // A legacy-posted task carries no sealed Submission and therefore no profile URI; the
@@ -119,6 +123,7 @@ export function synthesizeLegacyTaskProjection(input: {
   readonly taskDigest: `sha256:${string}`;
   readonly effectiveDeadline: string;
 } {
+  recordPhaseDTransitionUse('legacy-task-submission-synthesis');
   const taskDigest = documentDigest(input.taskBytes);
   return {
     submission: uuidFromDigest(taskDigest),

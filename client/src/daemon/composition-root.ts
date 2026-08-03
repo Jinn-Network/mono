@@ -8,13 +8,10 @@
  *
  * CLOSED AT C8 (previously KNOWN GAPS 1 and 2 below):
  *
- *  1. `BaseVenueConfig.observations` is now backed by a REAL, constructed `ProjectorLoop`
- *     (log source via C3's `createProjectorLogSource`, enrich via C4's `createProjectorEnrich`,
- *     durable observations via C5's `ProjectorCursorStore.readObservations()`) rather than
- *     `async () => []`. Per finding E4 / C3's own docstring, the projector's `VenueStateDatabase`
- *     is opened (via venue-base's `openVenueState`) and the projector is fully constructed
- *     BEFORE `createBaseVenue`, since the venue's `observations` port needs the already-built
- *     cursor store.
+ *  1. `BaseVenueConfig.observations` is backed by a real `ProjectorLoop` (C3 log source, C4
+ *     enrich, C5 durable observations), rather than `async () => []`. The sole `BaseVenue`
+ *     owns the venue state path and supplies its log source to the projector; components never
+ *     open that state path independently.
  *
  *  2. `verifySettlementGrade` is now C6's real implementation (`./settlement-grade.js`), wired
  *     against this composition's own `EngagementLedger` and `ProfileStore`. The local fail-closed
@@ -70,22 +67,10 @@
  *     Because of (a), `transition.events` is always empty in this composition today, so neither
  *     of these is actually reachable yet -- they exist so a FUTURE fix to (a) fails loud instead
  *     of silently fabricating discovery entries.
- *  c. Discovery-announcement signer / executor-binding key: no persistent per-operator Ed25519
- *     signing identity exists anywhere in the repo for either purpose (discovery-entry signing or
- *     the executor-binding DSSE envelope C6 checks for). A single ephemeral Ed25519 keypair is
- *     generated per composition boot and used for both -- genuinely functional cryptography (a
- *     signature under this key really does verify), but nothing yet treats this specific key as a
- *     trusted, stable operator identity. `checkExecutorBinding` will legitimately report
- *     `"missing"` against every real delivery until a persistent key AND a producer of the
- *     `EXECUTOR_BINDING_EXTENSION_URI` envelope both exist (C7's bridge signs a DIFFERENT,
- *     secp256k1 envelope -- see `bridge-legacy-delivery.ts`).
- *  d. Double venue-state open (recorded per the task's own instruction, not worked around):
- *     `createProjectorLogSource` needs an already-open `VenueStateDatabase`, opened here via
- *     `openVenueState(input.venueStateDbPath)`, BEFORE `createBaseVenue` — but `createBaseVenue`
- *     has no seam to accept a pre-opened handle and always opens its OWN second connection to the
- *     SAME file. WAL journaling (venue-base's `openVenueState` enforces `journal_mode = WAL`)
- *     makes two connections to one SQLite file safe; it is wasteful, not incorrect. Both handles
- *     are closed on `composition.close()`.
+ *  c. Native role identities: the caller supplies the persistent, effective-time-trusted
+ *     `RoleIdentitySet`. Its solver-delivery and solver-discovery identities are the only keys
+ *     this native composition exposes to delivery verification and discovery signing. Omission
+ *     fails native boot closed; no EOA-derived or boot-generated signing key is available here.
  *
  * CLOSED (cutover stage 1 close-out C7, finding E24). `LocalTaskExecutionBackendConfig`'s
  * `deliveryExtensions` hook now attaches the bridge-era legacy execution envelope for real,
@@ -99,22 +84,21 @@
  * for the engagement ledger, strictly before `backend.submit()` -- `attemptUri` is
  * deterministic (`deriveMarketplaceAttemptUri`) so it is known ahead of submit and matches
  * exactly what `backend.ts`'s `completeAttempt` later keys its own note lookup by.
- * `legacyBridgeSigner` stays OPTIONAL and absent by default (`main.ts` does not supply one --
- * out of this task's write scope): with no signer, `deliveryExtensions` stays the safe no-op
- * `() => ({})` it always was. A follow-up task needs to give `main.ts` an actual synchronous
- * secp256k1 signer (e.g. derived from the operator's own keystore) to activate this in
- * production; `buildLegacyDeliveryExtensions` below is exported so that follow-up, and this
- * composition's own tests, can drive the exact same wiring.
+ * `legacyBridgeSigner` is consumed only by the explicit `mode: "legacy"` bridge path. Native
+ * delivery and discovery signing are supplied by the persistent role set; native mode never
+ * receives or derives an EOA-based Ed25519 key.
  */
-import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { createHash, type KeyObject } from 'node:crypto';
+import { constants, existsSync, readFileSync } from 'node:fs';
+import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import {
   createBaseVenue,
-  openVenueState,
   type BaseVenue,
+  type BaseVenueSafeBroadcaster,
+  type ChainLogSource,
+  type ChainLogSourceOptions,
 } from '@jinn-network/marketplace-venue-base';
 import type {
   ClaimPorts,
@@ -145,6 +129,7 @@ import {
   hermesLauncher,
   predictionV1BaselineLauncher,
   EVALUATION_TASK_PROFILE,
+  PREDICTION_FORECAST_PROFILE,
   REPOSITORY_WORK_PROFILE,
   type LauncherContract,
 } from '@jinn-network/task-execution-launchers';
@@ -163,6 +148,7 @@ import {
 } from '@jinn-network/task-execution-profiles';
 import type { JsonValue, ProtocolObservation } from '@jinn-network/task-execution-protocol';
 import { DISCOVERY_SIGNING_SCOPE, RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
+import { legacyPredictionV1BaselineLauncher } from './legacy-prediction-v1-launcher.js';
 import type {
   AnnouncementRecordMaterial,
   AnnouncementRecordRole,
@@ -182,7 +168,7 @@ import { buildLegacyExecutionEnvelope, LEGACY_ENVELOPE_EXTENSION_KEY, synthesize
 import { EngagementLedger } from './engagement-ledger.js';
 import { buildVerifySettlementGrade as buildRealVerifySettlementGrade } from './settlement-grade.js';
 import { createProjectorCatchUpGate, type ClaimGate } from './claim-gate.js';
-import { createFinalizedHeadReader, createProjectorLogSource } from './projector-log-source.js';
+import { createCanonicalBlockHashReader, createFinalizedHeadReader } from './projector-log-source.js';
 import { createProjectorEnrich, type ProjectorEnrichPorts } from './projector-enrich.js';
 import { ProjectorCursorStore } from './projector-cursor.js';
 import { ProjectorLoop } from './projector-loop.js';
@@ -190,12 +176,45 @@ import type { ProjectorPortsInput } from './projector-ports.js';
 import type { AnnouncedSubmissionCard, ArchiveSubscription, SealedDocuments } from './work-loop.js';
 import { buildArchiveSubscription } from './archive-subscription.js';
 import { parseSignedTaskV1 } from '../types/task-document.js';
+import type { RoleIdentitySet } from './role-identities.js';
+import {
+  assertNativeProjectorExactPorts,
+  type NativeProjectorExactPorts,
+} from './native-projector-ports.js';
+import {
+  evaluateNativeClaim,
+  type NativeLauncherCapabilityPort,
+  type NativeTier4ClaimPolicy,
+} from './native-claim-policy.js';
+import {
+  NativeClaimCoordinator,
+  type NativeClaimCanonicalReader,
+} from './native-claim-coordinator.js';
+import type { NativeEngagementRow, NativeOperatorStateRepository } from './native-operator-state.js';
+import { NativeSolutionCoordinator } from './native-solution-coordinator.js';
+import {
+  openNativeSolutionPublisher,
+  type NativeSolutionPublisher,
+} from './native-solution-publisher.js';
+import { buildNativeSolutionVerification } from './native-solution-verification.js';
+import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
+import {
+  createNativeRequesterSubmissionResolver,
+  type NativeRequesterSubmissionLookup,
+  type NativeRequesterSubmissionVerifier,
+} from '../native-requester/requester.js';
 
 export interface OperatorComposition {
+  /** Explicit composition path: legacy bridge or native effective-time-trusted operator. */
+  readonly mode: 'legacy' | 'native';
   readonly backend: TaskExecutionBackend;
   readonly pipelineConfig: PipelineConfig;
   readonly pipelinePorts: PipelinePorts;
   readonly venue: BaseVenue;
+  /** Narrow Safe port for the work loop's deliver leg; it never receives the full venue. */
+  readonly deliveryBroadcaster: BaseVenueSafeBroadcaster;
+  /** Complete persistent role set, present only in native mode after effective-time validation. */
+  readonly identities?: RoleIdentitySet;
   readonly evidence: OperatorEvidence;
   readonly chain: MarketplaceChainConfig;
   readonly safeAddress: `0x${string}`;
@@ -241,11 +260,56 @@ export interface OperatorComposition {
    * header's gap (a), always legacy-derived — reuses `bridge-legacy-delivery.ts`'s
    * `synthesizeLegacyFactsCard` rather than re-deriving that shape).
    */
-  readonly archive: ArchiveSubscription;
+  readonly archive?: ArchiveSubscription;
+  /** Present only in native mode. Owns B5 admission/claim/reconciliation; never executes work. */
+  readonly nativeClaimCoordinator?: NativeClaimCoordinator;
+  /** Present only in native mode; resumes execution/publication/solution settlement at startup. */
+  readonly nativeSolutionCoordinator?: NativeSolutionCoordinator;
+  /** Dedicated `solver-records` source; never shares the ProjectorLoop source tuple or root. */
+  readonly nativeSolutionPublisher?: NativeSolutionPublisher;
+  readonly nativeOperatorState?: NativeOperatorStateRepository;
+  readonly nativeLauncherInspector?: NativeLauncherCapabilityPort;
   close(): Promise<void>;
 }
 
+export interface NativeClaimRuntimeInput {
+  /** Exact agent IRI used when B2 resolved every role binding. */
+  readonly operatorAgent: string;
+  readonly state: NativeOperatorStateRepository;
+  readonly exactDocuments: (card: AnnouncedSubmissionCard) => Promise<SealedDocuments>;
+  readonly canonical: NativeClaimCanonicalReader;
+  readonly policy: NativeTier4ClaimPolicy;
+  readonly canonicalFinalized: (card: AnnouncedSubmissionCard) => Promise<boolean>;
+  readonly activeEngagements: () => number;
+  readonly worker: { readonly ownerId: string; readonly ttlMs: number };
+  readonly now?: () => Date;
+  readonly solution: {
+    /** Dedicated lifecycle-owned directory, distinct from the projector archive root. */
+    readonly publisherRootDir: string;
+    readonly publicBaseUrl: string;
+    /** Re-resolves original exact requester bytes during startup recovery. */
+    readonly exactDocuments: (engagement: NativeEngagementRow) => Promise<SealedDocuments>;
+    /** Resolves the Task's advertised public EvaluationSpec by exact digest. */
+    readonly resolveEvaluationSpec: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>;
+  };
+}
+
+/**
+ * Compatibility-only executor signer for the explicit legacy composition. Native composition
+ * instead takes its delivery identity exclusively from `RoleIdentitySet`.
+ */
+export interface LegacyDeliverySigningKey {
+  readonly keyId: string;
+  readonly publicKey: KeyObject;
+  sign(payload: Uint8Array): Uint8Array;
+}
+
 export interface CompositionRootInput {
+  /**
+   * Explicitly selects the bridge-compatible legacy path or the native role-identity path.
+   * There is intentionally no default: callers cannot silently downgrade native boot.
+   */
+  readonly mode: 'legacy' | 'native';
   readonly config: JinnConfig;
   readonly publicClient: PublicClient;
   readonly walletClient: WalletClient;
@@ -255,6 +319,8 @@ export interface CompositionRootInput {
   readonly stateRoot: string;
   readonly evidenceRoot: string;
   readonly venueStateDbPath: string;
+  /** Host-owned scan floor/finality policy for bounded-history deployments and fixtures. */
+  readonly venueLogSource?: ChainLogSourceOptions;
   readonly profileStore: ProfileStore;
   readonly identityRegistryAddress?: string;
   readonly secretForwardResolver?: LocalTaskExecutionBackendConfig['secretForwardResolver'];
@@ -268,21 +334,25 @@ export interface CompositionRootInput {
    */
   readonly legacyBridgeSigner?: (hash: `0x${string}`) => `0x${string}`;
   /**
-   * Real executor delivery-signing key (finding E31 close-out), host-supplied, keystore-derived
-   * the same way the operator's other trust keys are meant to be. Mirrors `legacyBridgeSigner`'s
-   * own shape and gap exactly: OPTIONAL, absent by default -- `main.ts` does not supply one today
-   * (out of this task's write scope) -- so `trustKeys.deliverySigningKey` stays unset,
-   * `deliverySigningKeyConfigured`/`signedDeliveries` correctly report `false`, and
-   * `completeAttempt` never signs (additive: byte-identical Delivery output either way). A
-   * follow-up task needs to give `main.ts` an actual key (e.g. deterministically derived from the
-   * operator's own wallet keystore, domain-separated from its secp256k1 signing use) to activate
-   * this in production.
+   * Compatibility-only Ed25519 delivery signer for `mode: 'legacy'`. Production startup does not
+   * supply it; hermetic legacy loop tests use it to retain their historical settlement coverage.
    */
-  readonly deliverySigningKey?: {
-    readonly keyId: string;
-    readonly publicKey: import('node:crypto').KeyObject;
-    sign(payload: Uint8Array): Uint8Array;
-  };
+  readonly legacyDeliverySigningKey?: LegacyDeliverySigningKey;
+  /**
+   * Persistent identities created by `RoleIdentitySet.open`, which requires a real
+   * effective-time BindingResolver. Omission remains structurally possible only so legacy
+   * callers get a deliberate native boot refusal rather than an accidental fallback.
+   */
+  readonly nativeRoleIdentities?: RoleIdentitySet;
+  /** Required native B5 product-owned state/chain/document ports. Legacy mode must omit it. */
+  readonly nativeClaimRuntime?: NativeClaimRuntimeInput;
+  /** Required B6/B7 exact-byte/public-verdict ports. Native mode has no gap fallback. */
+  readonly nativeProjectorPorts?: NativeProjectorExactPorts;
+  /**
+   * Durable requester association directory for native projection. Omitted uses the operator
+   * state root's `native-requester` child; it is read-only from projector composition.
+   */
+  readonly nativeRequesterStateDir?: string;
   /**
    * C8: the daemon's shared SQLite `Store` — backs the projector's durable cursor/observations
    * (C5, `ProjectorCursorStore`) and the engagement ledger (C6). Required so this composition can
@@ -329,6 +399,7 @@ const ALL_LAUNCHERS: readonly LauncherContract[] = [
   hermesLauncher,
   cursorLauncher,
   predictionV1BaselineLauncher,
+  legacyPredictionV1BaselineLauncher,
 ];
 
 /**
@@ -338,6 +409,11 @@ const ALL_LAUNCHERS: readonly LauncherContract[] = [
  */
 const HARNESS_TO_LAUNCHER_ID: Readonly<Record<string, string>> = {
   'hermes-agent': 'hermes',
+};
+
+const LEGACY_HARNESS_TO_LAUNCHER_ID: Readonly<Record<string, string>> = {
+  ...HARNESS_TO_LAUNCHER_ID,
+  'prediction-v1-baseline': legacyPredictionV1BaselineLauncher.id,
 };
 
 /**
@@ -386,7 +462,7 @@ interface VerifiedExecutable {
  * `@jinn-network/task-execution-backend-local`'s public `index.ts`). Kept structurally
  * identical so `LocalTaskExecutionBackendConfig.launcherDeployments` type-checks by shape.
  */
-interface LauncherDeployment {
+export interface LauncherDeployment {
   readonly executable: VerifiedExecutable;
   probe(): Promise<{ readonly ready: boolean; readonly executable: VerifiedExecutable }>;
 }
@@ -404,14 +480,18 @@ function buildVerifiedExecutable(command: string): VerifiedExecutable {
   return { path, digest };
 }
 
-function buildLaunchers(wiring: readonly ExecutionWiringEntry[]): readonly LauncherContract[] {
+function buildLaunchers(
+  wiring: readonly ExecutionWiringEntry[],
+  mode: CompositionRootInput['mode'],
+): readonly LauncherContract[] {
+  const aliases = mode === 'legacy' ? LEGACY_HARNESS_TO_LAUNCHER_ID : HARNESS_TO_LAUNCHER_ID;
   const wanted = new Set(
-    wiring.map((entry) => HARNESS_TO_LAUNCHER_ID[entry.harness] ?? entry.harness),
+    wiring.map((entry) => aliases[entry.harness] ?? entry.harness),
   );
   return ALL_LAUNCHERS.filter((launcher) => wanted.has(launcher.id));
 }
 
-function buildLauncherDeployments(
+export function buildLauncherDeployments(
   launchers: readonly LauncherContract[],
   config: JinnConfig,
 ): Readonly<Record<string, LauncherDeployment>> {
@@ -422,10 +502,64 @@ function buildLauncherDeployments(
     const executable = buildVerifiedExecutable(command);
     deployments[launcher.id] = {
       executable,
-      probe: async () => ({ ready: true, executable }),
+      probe: async () => {
+        try {
+          await access(executable.path, constants.X_OK);
+          const currentDigest = createHash('sha256').update(await readFile(executable.path)).digest('hex');
+          if (executable.digest === 'unresolved' || currentDigest !== executable.digest) {
+            return { ready: false, executable };
+          }
+          return { ready: true, executable };
+        } catch {
+          return { ready: false, executable };
+        }
+      },
     };
   }
   return deployments;
+}
+
+export function buildNativeLauncherCapabilityPort(
+  launchers: readonly LauncherContract[],
+  deployments: Readonly<Record<string, LauncherDeployment>>,
+): NativeLauncherCapabilityPort {
+  return {
+    async inspect({ profileUri, requirements }) {
+      const harness = requirements['harness'];
+      const requestedId = typeof harness === 'string'
+        ? harness
+        : typeof harness === 'object' && harness !== null && typeof (harness as { id?: unknown }).id === 'string'
+          ? (harness as { id: string }).id
+          : undefined;
+      const launcher = launchers.find((candidate) =>
+        (requestedId === undefined || candidate.id === requestedId)
+        && candidate.capabilities().taskProfiles.includes(profileUri));
+      if (launcher === undefined) throw new Error(`no launcher advertises ${profileUri}`);
+      const deployment = deployments[launcher.id];
+      if (deployment === undefined) throw new Error(`launcher ${launcher.id} has no configured executable deployment`);
+      const [deploymentProbe, launcherProbe] = await Promise.all([
+        deployment.probe(),
+        launcher.probe === undefined
+          ? Promise.resolve({ ready: false, detail: 'launcher has no readiness probe' })
+          : launcher.probe().catch((error) => ({
+              ready: false,
+              detail: error instanceof Error ? error.message : String(error),
+            })),
+      ]);
+      return {
+        launcherId: launcher.id,
+        taskProfiles: launcher.capabilities().taskProfiles,
+        executable: deployment.executable,
+        probe: {
+          ready: deploymentProbe.ready && launcherProbe.ready,
+          ...(!deploymentProbe.ready
+            ? { detail: 'deployment executable is missing, non-executable, or changed since boot' }
+            : launcherProbe.detail === undefined ? {} : { detail: launcherProbe.detail }),
+          executable: deploymentProbe.executable,
+        },
+      };
+    },
+  };
 }
 
 // ── Workspace provisioner ────────────────────────────────────────────────────
@@ -478,12 +612,6 @@ function buildProvisioner(runtime: WorkspaceRuntimePorts) {
 // exist anywhere in the repo (file header, new gap b), and C6's real `verifySettlementGrade`
 // (`./settlement-grade.js`) does not consume them either — its `executorBinding` check is a
 // genuine DSSE/Ed25519 verification that needs only a keyid + public key, not a binding resolver.
-
-/** Ephemeral per-boot Ed25519 identity — see file header item c. */
-function buildEphemeralExecutorKey(): { readonly keyId: string; readonly publicKey: import('node:crypto').KeyObject; readonly privateKey: import('node:crypto').KeyObject } {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  return { keyId: 'ephemeral-composition-key', publicKey, privateKey };
-}
 
 // ── Legacy bridge delivery extension (gap 3, closed — see file header) ──────
 
@@ -656,6 +784,38 @@ export function buildResolveSubmissionBytes(input: {
 }
 
 /**
+ * Native-only `projectAnnouncements.resolveRecord` path. Its resolver reads a local, requester-
+ * signed canonical association; there is deliberately no IPFS retrieval, CreatorLoop document,
+ * SignedTaskV1 parser, or synthesized projection on this path.
+ */
+export function buildNativeResolveRecord(
+  chain: MarketplaceChainConfig,
+  resolveAssociation: (lookup: NativeRequesterSubmissionLookup) => Promise<Uint8Array | undefined>,
+): (event: ObservationMarketplaceEvent, role: AnnouncementRecordRole) => Promise<AnnouncementRecordMaterial> {
+  return async (event, role) => {
+    if (role === 'submission' && 'taskId' in event.facts) {
+      if (
+        event.derivation.chainId !== chain.chainId
+        || event.projection.taskCoordinator.toLowerCase() !== chain.taskCoordinator.toLowerCase()
+      ) {
+        throw new Error('native resolveRecord refuses a projection outside the canonical Base Sepolia coordinator');
+      }
+      const bytes = await resolveAssociation({
+        chainId: chain.chainId,
+        coordinator: chain.taskCoordinator,
+        taskId: event.facts.taskId,
+        taskDigest: event.projection.taskDigest,
+      });
+      if (bytes !== undefined) return { kind: RECORD_KINDS.submission, bytes };
+    }
+    throw new Error(
+      `resolveRecord has no production implementation for role "${role}" (composition-root.ts `
+      + 'file header gap b)',
+    );
+  };
+}
+
+/**
  * Gap (a, file header — second half CLOSED, finding E35 ruled): `work-loop.ts`'s wrapped
  * `claimTask` now seals the dispatch-context document (TEP §9.3) exactly once, at claim time —
  * I-JSON, JCS, sha256 (TEP §9.1; `docs/superpowers/specs/2026-07-30-stack-design-principles.md`
@@ -695,7 +855,7 @@ export function buildEngagementLedgerDispatchContextPort(
  * Result Evaluation Statement's decision-grade gate for real. Loudly refuses rather than
  * fabricating a "verified" (or silently empty) result — `projectAnnouncements` turns this throw
  * into a fail-closed refusal, never a silent pass. */
-function verifyVerdictObservationGap(): never {
+function refuseLegacyVerdictObservation(): never {
   throw new Error(
     'verifyVerdictObservation has no production implementation: the Phase-B binding-resolver '
     + 'backing stores (BindingStore/AnchorReadClient/policy) do not exist anywhere in the repo '
@@ -732,22 +892,29 @@ function buildResolveRecord(
 
 /**
  * Assembles a fully-real `ProjectorLoop` (C3 log source, C4 enrich, C5 durable observations) plus
- * the `ClaimGate` (contract 3) that wraps its `hasCaughtUp()`. Opens its OWN `VenueStateDatabase`
- * handle via venue-base's `openVenueState` (file header gap d — a second, separate connection
- * from whatever `createBaseVenue` opens internally to the SAME file; WAL-safe, documented rather
- * than worked around) — the caller closes it.
+ * the `ClaimGate` (contract 3) that wraps its `hasCaughtUp()`. It consumes the sole BaseVenue's
+ * `logSource`; it never independently opens the venue state path.
  */
 function buildProjector(input: {
+  readonly mode: 'legacy' | 'native';
   readonly chain: MarketplaceChainConfig;
   readonly publicClient: PublicClient;
   readonly mechAddress: Address;
-  readonly venueStateDbPath: string;
+  readonly logSource: ChainLogSource;
+  readonly archiveRoot: string;
+  readonly discoverySigner: ScopedDiscoverySigner;
   readonly ipfsGatewayUrl: string;
   readonly store: Store;
   readonly pollIntervalMs: number;
   /** Same instance `buildOperatorComposition` later wires into `verifySettlementGrade` — the
    * dispatch-context resolver (finding E35) reads the exact rows `work-loop.ts` seals into. */
   readonly engagementLedger: EngagementLedger;
+  /** Present only after native composition proved B2's requester-submission binding. */
+  readonly nativeRequester?: {
+    readonly stateDir: string;
+    readonly requesterSubmission: NativeRequesterSubmissionVerifier;
+  };
+  readonly nativeProjectorPorts?: NativeProjectorExactPorts;
   readonly logger?: { info(m: string): void; warn(m: string): void };
 }): {
   readonly projector: ProjectorLoop;
@@ -758,31 +925,32 @@ function buildProjector(input: {
    *  port's async, loosely-typed `ProtocolObservation[]`) — `buildArchiveSubscription` (finding
    *  E36) reads this directly rather than opening a second `ProjectorCursorStore`. */
   readonly readObservations: () => readonly import('@jinn-network/marketplace-projector').MarketplaceProtocolObservation[];
-  readonly closeState: () => void;
+  /** Canonical settlement/evaluation readers consume the same projector-owned checkpoint. */
+  readonly readFinalizedBlockNumber: () => bigint;
+  readonly readCanonicalBlockHash: (blockNumber: bigint) => Promise<Hex | undefined>;
 } {
-  // Per finding E4 / C3's own docstring: this state handle, and the projector built from it,
-  // exist BEFORE `createBaseVenue` — `BaseVenueConfig.observations` below needs the already-built
-  // cursor store.
-  const venueState = openVenueState(input.venueStateDbPath);
   const cursorKey = `${input.chain.chainId}:${input.chain.taskCoordinator.toLowerCase()}`;
   const cursorStore = new ProjectorCursorStore(input.store, cursorKey);
 
   const isAuthorizedMechOrigin = (address: Address): boolean =>
     address.toLowerCase() === input.mechAddress.toLowerCase();
 
-  const logSource = createProjectorLogSource({
-    chain: input.chain,
-    publicClient: input.publicClient,
-    state: venueState,
-    mechAddresses: [input.mechAddress],
-  });
-
   const fetchIpfsBytes = buildFetchIpfsBytes(input.ipfsGatewayUrl);
-  const resolveSubmissionBytes = buildResolveSubmissionBytes({
-    publicClient: input.publicClient,
-    jinnRouter: input.chain.jinnRouter,
-    fetchIpfsBytes,
-  });
+  const resolveAssociation = input.mode === 'native'
+    ? createNativeRequesterSubmissionResolver(input.nativeRequester ?? (() => {
+      throw new Error('native projector requires a requester association directory and B2 requester-submission identity');
+    })())
+    : undefined;
+  const resolveSubmissionBytes: ProjectorEnrichPorts['resolveSubmissionBytes'] = input.mode === 'native'
+    ? async ({ chainId, taskCoordinator, taskId, taskDigest }) => {
+      if (taskDigest === undefined || resolveAssociation === undefined) return undefined;
+      return resolveAssociation({ chainId, coordinator: taskCoordinator, taskId, taskDigest });
+    }
+    : buildResolveSubmissionBytes({
+      publicClient: input.publicClient,
+      jinnRouter: input.chain.jinnRouter,
+      fetchIpfsBytes,
+    });
   const resolveDispatchContext = buildEngagementLedgerDispatchContextPort(input.engagementLedger);
   const enrich = createProjectorEnrich({
     chain: input.chain,
@@ -791,32 +959,30 @@ function buildProjector(input: {
     resolveSubmissionBytes,
     resolveDispatchContext,
     readTodayDeliveryFacts: buildReadTodayDeliveryFacts(input.publicClient, input.chain.taskCoordinator),
+    allowLegacySignedTaskV1: input.mode === 'legacy',
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
-
-  // Discovery-announcement signer (file header gap c): ephemeral per-boot Ed25519 identity —
-  // genuinely functional DSSE signing, no persistent operator discovery key exists yet.
-  const discoveryKey = generateKeyPairSync('ed25519');
-  const signer: ScopedDiscoverySigner = {
-    scope: DISCOVERY_SIGNING_SCOPE,
-    sign: async (pae) => [{ keyid: 'ephemeral-discovery-key', sig: new Uint8Array(cryptoSign(null, pae, discoveryKey.privateKey)) }],
-  };
 
   const pageCountKey = `projector-page-count:${cursorKey}`;
   const ports: ProjectorPortsInput = {
     source: { agent: `urn:jinn:operator:${input.mechAddress.toLowerCase()}`, name: 'operator-projector' },
-    signer,
-    archiveRoot: join(input.venueStateDbPath, '..', 'discovery-archive'),
-    resolveRecord: buildResolveRecord(resolveSubmissionBytes, input.chain),
-    verifyVerdictObservation: verifyVerdictObservationGap,
+    signer: input.discoverySigner,
+    archiveRoot: input.archiveRoot,
+    resolveRecord: input.mode === 'native'
+      ? input.nativeProjectorPorts!.resolveRecord
+      : buildResolveRecord(resolveSubmissionBytes, input.chain),
+    verifyVerdictObservation: input.mode === 'native'
+      ? input.nativeProjectorPorts!.verifyVerdictObservation
+      : refuseLegacyVerdictObservation,
     referencedBytes: { fetch: fetchIpfsBytes },
     readPageCount: () => Number.parseInt(input.store.getConfigValue(pageCountKey) ?? '0', 10),
     writePageCount: (count) => input.store.setConfigValue(pageCountKey, String(count)),
   };
 
+  const readCanonicalBlockHash = createCanonicalBlockHashReader(input.publicClient);
   const projector = new ProjectorLoop({
     chain: input.chain,
-    logSource,
+    logSource: input.logSource,
     cursorStore,
     ports,
     enrich,
@@ -824,6 +990,7 @@ function buildProjector(input: {
     store: input.store,
     isAuthorizedMechOrigin,
     readFinalizedBlockNumber: createFinalizedHeadReader(input.publicClient),
+    readCanonicalBlockHash,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
   });
 
@@ -838,7 +1005,8 @@ function buildProjector(input: {
     claimGate,
     observations: async () => cursorStore.readObservations(),
     readObservations: () => cursorStore.readObservations(),
-    closeState: () => venueState.close(),
+    readFinalizedBlockNumber: () => cursorStore.read()?.finalizedBlockNumber ?? 0n,
+    readCanonicalBlockHash,
   };
 }
 
@@ -860,6 +1028,47 @@ export async function buildOperatorComposition(
   input: CompositionRootInput,
 ): Promise<OperatorComposition> {
   const { config } = input;
+  const identities = input.nativeRoleIdentities;
+  if (input.mode === 'native' && identities === undefined) {
+    throw new Error('native operator boot requires persistent role identities with effective bindings');
+  }
+  if (input.mode === 'legacy' && identities !== undefined) {
+    throw new Error('legacy operator composition must not receive native role identities');
+  }
+  if (input.mode === 'legacy' && input.nativeClaimRuntime !== undefined) {
+    throw new Error('legacy operator composition must not receive native claim runtime ports');
+  }
+  if (input.mode === 'native' && input.legacyBridgeSigner !== undefined) {
+    throw new Error('native operator composition must not receive a legacy bridge signer');
+  }
+  if (input.mode === 'native' && input.legacyDeliverySigningKey !== undefined) {
+    throw new Error('native operator composition must not receive a legacy delivery signing key');
+  }
+  if (input.mode === 'native' && input.nativeClaimRuntime === undefined) {
+    throw new Error('native operator boot requires durable claim state, exact-document, canonical-reader, policy, and lease ports');
+  }
+  if (input.mode === 'legacy' && input.nativeProjectorPorts !== undefined) {
+    throw new Error('legacy operator composition must not receive native projector ports');
+  }
+  if (input.mode === 'native' && identities!.agent !== input.nativeClaimRuntime!.operatorAgent) {
+    throw new Error('native claim operator agent must equal the agent used for role trust bindings');
+  }
+  if (
+    input.mode === 'native'
+    && (
+      input.nativeClaimRuntime!.policy.chainId !== input.chain.chainId
+      || input.nativeClaimRuntime!.policy.coordinator.toLowerCase() !== input.chain.taskCoordinator.toLowerCase()
+      || input.nativeClaimRuntime!.policy.generation !== input.chain.generation
+    )
+  ) throw new Error('native claim policy network identity must equal the composed venue identity');
+  if (input.mode === 'native') assertNativeProjectorExactPorts(input.nativeProjectorPorts);
+  const solverDeliveryIdentity = input.mode === 'native'
+    ? identities!.get('solver-delivery')
+    : undefined;
+  const solverDiscoveryIdentity = input.mode === 'native'
+    ? identities!.get('solver-discovery')
+    : undefined;
+  const deliverySigningIdentity = solverDeliveryIdentity ?? input.legacyDeliverySigningKey;
 
   const fetchImpl = globalThis.fetch;
   const ipfsPin = createRegistryPinPort({ registryUrl: config.ipfsRegistryUrl, fetchImpl });
@@ -873,27 +1082,6 @@ export async function buildOperatorComposition(
   // C2: venue-base refuses ambient filesystem authority; tier-4 composition prepares the path.
   await mkdir(dirname(input.venueStateDbPath), { recursive: true });
 
-  // C8: the projector (log source + enrich + durable observations) is constructed BEFORE the
-  // venue — `BaseVenueConfig.observations` below needs the already-built cursor store (finding
-  // E4 / C3's own docstring).
-  const { projector, claimGate, observations, readObservations, closeState } = buildProjector({
-    chain: input.chain,
-    publicClient: input.publicClient,
-    mechAddress: input.mechAddress,
-    venueStateDbPath: input.venueStateDbPath,
-    ipfsGatewayUrl: config.ipfsGatewayUrl,
-    store: input.store,
-    pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
-    engagementLedger,
-    ...(input.logger === undefined ? {} : { logger: input.logger }),
-  });
-
-  // Finding E31 close-out: verification checks against the REAL `input.deliverySigningKey`'s
-  // keyid/public key when the host supplied one; the ephemeral per-boot identity (file header
-  // gap c) is retained only as the inert fallback when it wasn't -- unreachable in that case,
-  // since nothing ever signs under it, so `checkExecutorBinding` legitimately keeps reporting
-  // `"missing"`, unchanged from before this finding.
-  const executorKey = buildEphemeralExecutorKey();
   // `getDeliverySignature` is bound to `backend` via this mutable slot: `verifySettlementGrade`
   // is only ever CALLED later, at settlement time, well after `backend` is constructed below --
   // but it must be BUILT here, before `backend` exists, because `venue` (constructed next) needs
@@ -903,8 +1091,10 @@ export async function buildOperatorComposition(
   const verifySettlementGrade = buildRealVerifySettlementGrade({
     profileStore: input.profileStore,
     engagementLedger,
-    executorKeyId: input.deliverySigningKey?.keyId ?? executorKey.keyId,
-    executorPublicKey: input.deliverySigningKey?.publicKey ?? executorKey.publicKey,
+    ...(deliverySigningIdentity === undefined ? {} : {
+      executorKeyId: deliverySigningIdentity.keyId,
+      executorPublicKey: deliverySigningIdentity.publicKey,
+    }),
     getDeliverySignature: (digest) => backendForDeliverySignatures?.getDeliverySignature(digest),
   });
 
@@ -919,6 +1109,10 @@ export async function buildOperatorComposition(
   // leg's scope. Recorded as finding E26. The cast names the exact expected type rather than
   // `as never`, so it documents what is being asserted instead of erasing it.
   type VenueClients = Parameters<typeof createBaseVenue>[0];
+  // BaseVenue captures (but does not invoke) observations during construction. Bind it to the
+  // projector only after the venue supplies its single shared logSource; any premature use is a
+  // boot ordering fault and rejects rather than returning an empty observation set.
+  let projectorParts: ReturnType<typeof buildProjector> | undefined;
   const venue = createBaseVenue({
     chain: input.chain,
     publicClient: input.publicClient as unknown as VenueClients['publicClient'],
@@ -930,8 +1124,57 @@ export async function buildOperatorComposition(
     verifySettlementGrade,
     isAuthorizedMechOrigin: (address: Address) =>
       address.toLowerCase() === input.mechAddress.toLowerCase(),
-    observations,
+    observations: () => {
+      if (projectorParts === undefined) {
+        return Promise.reject(new Error('projector observation source is unavailable during venue boot'));
+      }
+      return projectorParts.observations();
+    },
+    ...(input.venueLogSource === undefined ? {} : { logSource: input.venueLogSource }),
   });
+
+  const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
+    ? {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        sign: async () => {
+          throw new Error('legacy composition cannot sign native discovery announcements');
+        },
+      }
+    : {
+        scope: DISCOVERY_SIGNING_SCOPE,
+        sign: async (pae) => [{
+          keyid: solverDiscoveryIdentity.keyId,
+          sig: solverDiscoveryIdentity.sign(pae),
+        }],
+      };
+  projectorParts = buildProjector({
+    mode: input.mode,
+    chain: input.chain,
+    publicClient: input.publicClient,
+    mechAddress: input.mechAddress,
+    logSource: venue.logSource,
+    archiveRoot: join(dirname(input.venueStateDbPath), 'discovery-archive'),
+    discoverySigner,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    store: input.store,
+    pollIntervalMs: input.projectorPollIntervalMs ?? 5000,
+    engagementLedger,
+    ...(input.mode === 'native' ? { nativeProjectorPorts: input.nativeProjectorPorts } : {}),
+    ...(input.mode === 'native' ? {
+      nativeRequester: {
+        stateDir: input.nativeRequesterStateDir ?? join(input.stateRoot, 'native-requester'),
+        requesterSubmission: identities!.get('requester-submission'),
+      },
+    } : {}),
+    ...(input.logger === undefined ? {} : { logger: input.logger }),
+  });
+  const {
+    projector,
+    claimGate,
+    readObservations,
+    readFinalizedBlockNumber,
+    readCanonicalBlockHash,
+  } = projectorParts;
 
   // Contract 1 (finding E16 / C2 ruling: per-daemon state, not a process-global install). Built
   // once per composition and returned on `OperatorComposition.broadcaster` — the host threads
@@ -941,11 +1184,12 @@ export async function buildOperatorComposition(
     safeAddress: input.safeAddress,
     execute: (request) => venue.safe.execute(request),
   };
+  const deliveryBroadcaster = venue.safe;
 
   const evidence = await openOperatorEvidence({ rootDir: input.evidenceRoot });
 
   const wiring = toPipelineWiring(config.executionWiring ?? []);
-  const launchers = buildLaunchers(wiring);
+  const launchers = buildLaunchers(wiring, input.mode);
   const launcherDeployments = buildLauncherDeployments(launchers, config);
   const workspaceRuntime = buildWorkspaceRuntimePorts();
 
@@ -958,7 +1202,7 @@ export async function buildOperatorComposition(
     launcherDeployments,
     provisioner: buildProvisioner(workspaceRuntime),
     provisionerCapabilities: {
-      taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE],
+      taskProfiles: [REPOSITORY_WORK_PROFILE, EVALUATION_TASK_PROFILE, PREDICTION_FORECAST_PROFILE],
       workspaceKinds: ['dir'],
       inputMediaTypes: ['application/json'],
       outputMediaTypes: ['application/json', 'application/octet-stream'],
@@ -970,12 +1214,7 @@ export async function buildOperatorComposition(
     recorderAvailability: 'always',
     trustKeys: {
       observationSigningKeyConfigured: true,
-      // Finding E31: real key material, not a hardcoded claim. Absent (the default; `main.ts`
-      // does not supply `input.deliverySigningKey` today, mirroring `legacyBridgeSigner`'s own
-      // gap) means `completeAttempt` never signs and `deliverySigningKeyConfigured`/
-      // `signedDeliveries` correctly reports `false` -- ending the lie the old unconditional
-      // `true` told.
-      ...(input.deliverySigningKey === undefined ? {} : { deliverySigningKey: input.deliverySigningKey }),
+      ...(deliverySigningIdentity === undefined ? {} : { deliverySigningKey: deliverySigningIdentity }),
     },
     evidence: evidence.ports,
     capabilityGrants: buildCapabilityGrants,
@@ -984,10 +1223,9 @@ export async function buildOperatorComposition(
       : { secretForwardResolver: input.secretForwardResolver }),
     cancellationGraceMs: 30_000,
     heartbeatIntervalMs: 10_000,
-    // Bridge era only (gap 3, file header — CLOSED by C7). Real when `legacyBridgeSigner` was
-    // supplied; the safe no-op it always was otherwise.
+    // Bridge era only: this extension can be installed only by the explicit legacy path.
     deliveryExtensions:
-      input.legacyBridgeSigner === undefined
+      input.mode !== 'legacy' || input.legacyBridgeSigner === undefined
         ? () => ({})
         : buildLegacyDeliveryExtensions({
             stateRoot: input.stateRoot,
@@ -1019,7 +1257,7 @@ export async function buildOperatorComposition(
   };
 
   const fetchIpfsBytes = buildFetchIpfsBytes(config.ipfsGatewayUrl);
-  const readSealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
+  const readLegacySealedDocuments = async (card: AnnouncedSubmissionCard): Promise<SealedDocuments> => {
     const taskDigest = card.facts['taskDigest'];
     if (typeof taskDigest !== 'string' || !taskDigest.startsWith('sha256:')) {
       throw new Error(`readSealedDocuments: card carries no valid taskDigest fact (${card.chain.submission})`);
@@ -1056,32 +1294,102 @@ export async function buildOperatorComposition(
         profile: { uri: REPOSITORY_WORK_PROFILE_URI, digest: sealedRepoProfile.digest },
       });
     }
-
-    const [taskBytes, submissionBytes] = await Promise.all([
-      fetchIpfsBytes(taskDigest as `sha256:${string}`),
-      fetchIpfsBytes(card.record.digest),
-    ]);
-    if (taskBytes === undefined || submissionBytes === undefined) {
-      throw new Error(`readSealedDocuments: could not resolve sealed documents for ${card.chain.submission}`);
-    }
-    return { taskBytes, submissionBytes };
+    throw new Error('legacy composition refuses a native card; use the required native exact-document resolver');
   };
+  const readSealedDocuments = input.mode === 'native'
+    ? input.nativeClaimRuntime!.exactDocuments
+    : readLegacySealedDocuments;
+
+  const nativeLauncherInspector = input.mode === 'native'
+    ? buildNativeLauncherCapabilityPort(launchers, launcherDeployments)
+    : undefined;
+  const nativeClaimCoordinator = input.mode === 'native'
+    ? new NativeClaimCoordinator({
+        state: input.nativeClaimRuntime!.state,
+        chain: input.chain,
+        operatorAgent: input.nativeClaimRuntime!.operatorAgent,
+        admission: {
+          evaluate: async (queued, documents) => evaluateNativeClaim({
+            card: queued.card,
+            taskBytes: documents.taskBytes,
+            submissionBytes: documents.submissionBytes,
+            backend,
+            launcher: nativeLauncherInspector!,
+            policy: input.nativeClaimRuntime!.policy,
+            activeEngagements: input.nativeClaimRuntime!.activeEngagements(),
+            canonicalFinalized: await input.nativeClaimRuntime!.canonicalFinalized(queued.card),
+            now: input.nativeClaimRuntime!.now?.() ?? new Date(),
+          }),
+        },
+        claim: {
+          priorityMech: venue.claim.priorityMech,
+          broadcast: (claim) => venue.claim.claimTask({
+            taskId: claim.taskId,
+            priorityMech: claim.priorityMech,
+            operationId: claim.operationId,
+          }),
+        },
+        canonical: input.nativeClaimRuntime!.canonical,
+        worker: input.nativeClaimRuntime!.worker,
+      })
+    : undefined;
+
+  const nativeSolutionPublisher = input.mode === 'native'
+    ? await openNativeSolutionPublisher({
+        rootDir: input.nativeClaimRuntime!.solution.publisherRootDir,
+        publicBaseUrl: input.nativeClaimRuntime!.solution.publicBaseUrl,
+        source: { agent: identities!.agent, name: 'solver-records' },
+        signer: identities!.get('solver-discovery'),
+        settlementDeclarationKey: identities!.get('solver-settlement').keyId,
+      })
+    : undefined;
+  const nativeSolutionCoordinator = input.mode === 'native'
+    ? new NativeSolutionCoordinator({
+        state: input.nativeClaimRuntime!.state,
+        backend,
+        documents: { resolve: input.nativeClaimRuntime!.solution.exactDocuments },
+        deliverySignature: { get: (digest) => backend.getDeliverySignature(digest) },
+        evidence: {
+          awaitIndexed: evidence.ports.awaitIndexed,
+          getRecord: (reference) => evidence.ports.repository.getRecord(reference),
+        },
+        verification: buildNativeSolutionVerification({
+          identities: identities!,
+          resolveEvaluationSpec: input.nativeClaimRuntime!.solution.resolveEvaluationSpec,
+        }),
+        publisher: nativeSolutionPublisher!,
+        settlement: buildNativeSolutionSettlementPort({
+          chain: input.chain,
+          mechAddress: input.mechAddress,
+          deliveryBroadcaster,
+          settlement: venue.settlement,
+          readObservations,
+          readFinalizedBlockNumber,
+          readCanonicalBlockHash,
+        }),
+      })
+    : undefined;
 
   // Finding E36 (ruled "build it"): the `ArchiveSubscription` `work-loop.ts`'s `WorkLoopConfig`
   // needs, fed from this SAME `readObservations` accessor `venue`'s `observations` port above
   // already reads (one `ProjectorCursorStore`, two consumers) — see `./archive-subscription.js`.
-  const archive = buildArchiveSubscription({
-    readObservations,
-    publicClient: input.publicClient,
-    fetchIpfsBytes,
-    ...(input.logger === undefined ? {} : { logger: input.logger }),
-  });
+  const archive = input.mode === 'legacy'
+    ? buildArchiveSubscription({
+        readObservations,
+        publicClient: input.publicClient,
+        fetchIpfsBytes,
+        ...(input.logger === undefined ? {} : { logger: input.logger }),
+      })
+    : undefined;
 
   return {
+    mode: input.mode,
     backend,
     pipelineConfig,
     pipelinePorts,
     venue,
+    deliveryBroadcaster,
+    ...(identities === undefined ? {} : { identities }),
     evidence,
     chain: input.chain,
     safeAddress: input.safeAddress,
@@ -1093,13 +1401,24 @@ export async function buildOperatorComposition(
     claimGate,
     engagementLedger,
     readSealedDocuments,
-    archive,
+    ...(archive === undefined ? {} : { archive }),
+    ...(nativeClaimCoordinator === undefined ? {} : {
+      nativeClaimCoordinator,
+      nativeSolutionCoordinator: nativeSolutionCoordinator!,
+      nativeSolutionPublisher: nativeSolutionPublisher!,
+      nativeOperatorState: input.nativeClaimRuntime!.state,
+      nativeLauncherInspector: nativeLauncherInspector!,
+    }),
     async close(): Promise<void> {
-      await evidence.close();
-      venue.close();
-      // File header gap d: this composition's OWN `openVenueState` handle for the projector's
-      // log source, distinct from `createBaseVenue`'s own separate connection to the same file.
-      closeState();
+      try {
+        await nativeSolutionPublisher?.close();
+      } finally {
+        try {
+          await evidence.close();
+        } finally {
+          venue.close();
+        }
+      }
     },
   };
 }

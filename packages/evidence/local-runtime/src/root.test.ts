@@ -130,6 +130,7 @@ describe("runtime root", () => {
         paths.catalogDir,
         paths.generationsDir,
         paths.operationsDir,
+        paths.publicDiscoveryDir,
       ]) {
         const stat = await lstat(path);
         expect(stat.mode & 0o777).toBe(0o700);

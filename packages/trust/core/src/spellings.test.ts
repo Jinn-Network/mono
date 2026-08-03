@@ -77,7 +77,14 @@ describe("RelationshipSchema", () => {
 
 describe("ScopeSchema", () => {
   test("accepts every closed-vocabulary member", () => {
-    for (const member of ["deliveries", "verdicts", "observations", "authorizations", "bindings"]) {
+    for (const member of [
+      "deliveries",
+      "verdicts",
+      "settlements",
+      "observations",
+      "authorizations",
+      "bindings",
+    ]) {
       expect(ScopeSchema.safeParse(member).success).toBe(true);
     }
   });

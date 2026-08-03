@@ -97,6 +97,7 @@ __metadata:
   resolution: "@jinn-network/task-admission@portal:../admission::locator=%40jinn-network%2Fchain-scenarios%40workspace%3A."
   dependencies:
     "@jinn-network/environment-record": "npm:0.1.0"
+    "@jinn-network/task-execution-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
     zod: "npm:4.4.3"
   peerDependencies:

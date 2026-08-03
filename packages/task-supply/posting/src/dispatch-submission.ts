@@ -65,7 +65,7 @@ export function assertPublicSpecEvaluationLeg(entry: PostingPoolEntry): void {
  * `attempts.maxTotal` explicitly **and re-parses its own sealed bytes to assert agreement**").
  *
  * Comparing the plan's two in-memory numbers is a tautology. The gate that matters is over the
- * bytes, because `postTask` takes the escrow multiplier from the sealed document
+ * bytes, because the requester backend takes the escrow multiplier from the sealed document
  * (`submission.attempts?.maxTotal ?? 1`): a sealing layer that dropped, renamed, or coerced the
  * field would send `(solution + verdict) x 1` to the chain while the surfaced plan and its log
  * line said N. `assertMaxClaimsAgreement` throws on `undefined` precisely to make that fallback

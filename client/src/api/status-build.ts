@@ -21,6 +21,7 @@ import {
 } from '../spend/cost-surface-status.js';
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
+import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
@@ -153,6 +154,8 @@ export interface GatheredStatusRaw {
     stale: boolean;
   };
   daemonStartedAt?: string | null;
+  /** Durable Phase D compatibility-use counters exposed for an external observation window. */
+  phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
   /**
    * Resolved ISO mtime of the keystore-password file, or `null` when the
    * password is env-sourced or the file is missing/unreadable. Computed at
@@ -389,6 +392,8 @@ export interface StatusV1Response {
   security: { lastPasswordRotationAt: string | null };
   /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
   configMigration?: ConfigMigrationStatus;
+  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates. */
+  phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
 }
 
 /**
@@ -672,5 +677,8 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
     ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
+    ...(raw.phaseDTransitionUsage !== undefined
+      ? { phaseDTransitionUsage: raw.phaseDTransitionUsage }
+      : {}),
   };
 }

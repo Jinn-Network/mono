@@ -102,7 +102,11 @@ try {
       },
     }),
   );
-  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
+  await run(
+    "npm",
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"],
+    { cwd: consumer },
+  );
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "marketplace-pipeline");
 

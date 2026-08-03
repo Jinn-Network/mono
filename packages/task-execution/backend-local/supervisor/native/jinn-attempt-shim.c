@@ -85,6 +85,14 @@ static int portable_secret_target(const char *target) {
 }
 
 static int resolve_secret_references(spawn_spec *spec) {
+  int has_secret_reference = 0;
+  for (size_t index = 0; index < spec->envc; index++) {
+    char *equals = strchr(spec->env[index], '=');
+    if (equals == NULL) return -1;
+    if (strncmp(equals + 1, "secrets/", 8) == 0) has_secret_reference = 1;
+  }
+  if (!has_secret_reference) return 0;
+
   char root[PATH_MAX];
   if (realpath(spec->secrets, root) == NULL) return -1;
   for (size_t index = 0; index < spec->envc; index++) {

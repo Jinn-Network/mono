@@ -34,6 +34,24 @@ function cloneBytes(bytes: Uint8Array): Uint8Array {
   return Uint8Array.from(bytes);
 }
 
+/**
+ * Keep the finite-object-limit conformance check linear when a repository
+ * advertises a multi-megabyte limit. Vitest's structural matcher walks typed
+ * arrays through its general object path, which can dominate this contract
+ * test on constrained CI workers. This is still an exact byte-for-byte
+ * comparison; it simply uses the native typed-array representation directly.
+ */
+function bytesEqual(
+  actual: Uint8Array | null,
+  expected: Uint8Array,
+): boolean {
+  if (actual === null || actual.byteLength !== expected.byteLength) return false;
+  for (let index = 0; index < expected.byteLength; index += 1) {
+    if (actual[index] !== expected[index]) return false;
+  }
+  return true;
+}
+
 function recordKey(reference: EvidenceRecordReference): string {
   return `${reference.family}:${reference.digest}`;
 }
@@ -170,12 +188,18 @@ export function describeEvidenceRepositoryContract(
         atLimit,
       );
       const artifactReceipt = await repository.putArtifact(atLimit);
-      expect(await repository.getRecord(recordReceipt.reference)).toEqual(
-        atLimit,
-      );
-      expect(await repository.getArtifact(artifactReceipt.reference)).toEqual(
-        atLimit,
-      );
+      expect(
+        bytesEqual(
+          await repository.getRecord(recordReceipt.reference),
+          atLimit,
+        ),
+      ).toBe(true);
+      expect(
+        bytesEqual(
+          await repository.getArtifact(artifactReceipt.reference),
+          atLimit,
+        ),
+      ).toBe(true);
 
       const oversizedRecord = createRecordReference(
         "execution-evidence",

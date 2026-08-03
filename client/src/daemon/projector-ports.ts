@@ -6,6 +6,7 @@
  * incremental batch needs a host-injected writer that continues the page count instead.
  */
 import type {
+  AnnouncementEntry,
   ReferencedBytes,
   SourceHead,
   SourceIdentity,
@@ -14,6 +15,7 @@ import {
   RECORD_DISCOVERY_VERSION,
   archivePagePath,
   formatSequence,
+  headPath,
   sealJson,
 } from '@jinn-network/record-discovery-protocol';
 import type {
@@ -65,6 +67,32 @@ export function buildAnnouncementProjectionPorts(
     referencedBytes: input.referencedBytes,
     resolveRecord: input.resolveRecord,
     verifyVerdictObservation: input.verifyVerdictObservation,
+    readPublishedArchive: async () => {
+      const entries: AnnouncementEntry[] = [];
+      // Read contiguous archive pages instead of trusting only the mutable page-count config:
+      // a crash may happen after a page rename but before that separate continuation counter is
+      // recorded. Archive paths are immutable and contiguous by construction.
+      for (let pageNumber = 1n; ; pageNumber += 1n) {
+        const page = formatSequence(pageNumber);
+        const stored = await store.get(archivePagePath(input.source.name, page));
+        if (stored === undefined) break;
+        const parsed = JSON.parse(new TextDecoder().decode(stored.bytes)) as {
+          entries?: Array<{ entry?: AnnouncementEntry }>;
+        };
+        for (const signed of parsed.entries ?? []) {
+          if (signed.entry !== undefined) entries.push(signed.entry);
+        }
+      }
+      const storedHead = await store.get(headPath(input.source.name));
+      if (storedHead === undefined) return { entries };
+      const wire = JSON.parse(new TextDecoder().decode(storedHead.bytes)) as {
+        payload?: string;
+      };
+      const payload = wire.payload === undefined
+        ? new TextDecoder().decode(storedHead.bytes)
+        : new TextDecoder().decode(Uint8Array.from(atob(wire.payload), (char) => char.charCodeAt(0)));
+      return { entries, head: JSON.parse(payload) as SourceHead };
+    },
     ...(continuation.previousHead === undefined
       ? {}
       : {

@@ -27,6 +27,7 @@
   },
   "files": [
     "dist/",
+    "fixtures/",
     "README.md"
   ],
   "publishConfig": {
@@ -36,11 +37,14 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "fixtures:generate": "yarn build && node scripts/generate-prediction-snapshot-fixture.mjs",
+    "fixtures:check": "yarn build && node scripts/generate-prediction-snapshot-fixture.mjs --check",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },
   "dependencies": {
     "@jinn-network/environment-record": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
     "@jinn-network/trust-core": "0.1.0",
     "zod": "4.4.3"
   },
@@ -54,6 +58,7 @@
   },
   "resolutions": {
     "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
     "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {

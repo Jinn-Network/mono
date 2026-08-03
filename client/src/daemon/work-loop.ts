@@ -22,13 +22,10 @@
  *     `{claimTask, preflight, priorityMech}` cast `as ClaimPorts` at construction. `runPipeline`
  *     itself spreads `taskDigest`/`submission`/`nonce`/`priorityMech` from `facts`/
  *     `config.priorityMech` onto `ports.claim` before calling `claimAttempt`, but it never
- *     supplies `capabilityMatch` — and nothing in venue-base or the composition root constructs
- *     one either (confirmed: `grep capabilityMatch` across both finds only the doc comment
- *     naming it, no implementation). Calling `ports.capabilityMatch()` inside `claimAttempt`
- *     would throw "not a function" without it, so this loop supplies a permissive
- *     `async () => ({ ok: true })` — the operator-policy/backend-capability checks earlier in
- *     `runPipeline` (`evaluateClaimPredicate`, `checkCaps`, `verifyPreclaim`) already gate the
- *     claim; this port has no separate on-chain capability signal to check yet.
+ *     supplies `capabilityMatch`. The explicit legacy compatibility branch therefore re-reads
+ *     the backend capability snapshot and refuses a profile mismatch. Native mode never enters
+ *     this pipeline: its evidence-bearing capability/launcher/preflight decision is persisted by
+ *     `NativeClaimCoordinator` before the claim intent.
  *  3. `ArchiveSubscription.since(afterSequence)` returns only `AnnouncedSubmissionCard[]` — no
  *     card carries a sequence/cursor value a caller could feed back in. This loop therefore never
  *     advances its cursor; every tick re-lists the archive and relies on the engagement ledger's
@@ -56,14 +53,11 @@
  * fakes and pass; that does not mean the loop works end-to-end against a live projector yet.
  */
 import {
-  mapAnnouncedSubmissionToFacts,
   resolveWiringEntry,
   runPipeline,
-  type AnnouncedSubmissionCard,
   type ExecutionWiringEntry,
   type PipelinePorts,
   type PipelineRunOutcome,
-  type SubmissionFacts,
 } from '@jinn-network/marketplace-pipeline';
 import { computeRawCodecCid, deriveMarketplaceAttemptUri } from '@jinn-network/marketplace-binding';
 import { deliverToMarketplace } from '@jinn-network/marketplace-venue-base';
@@ -76,6 +70,12 @@ import type { Store } from '../store/store.js';
 import type { EngagementLedger } from './engagement-ledger.js';
 import type { ClaimGate } from './claim-gate.js';
 import type { OperatorComposition } from './composition-root.js';
+import type { NativeDiscoveryConsumer, NativeDiscoveryQueuedCard } from './native-discovery.js';
+import type {
+  NativeClaimCoordinator,
+  NativeClaimCoordinatorResult,
+} from './native-claim-coordinator.js';
+import type { NativeSolutionCoordinator } from './native-solution-coordinator.js';
 import { runLoop } from './loop-heartbeat.js';
 import { gateClaimByAiUnits } from './ai-units-gate.js';
 import { gateClaimBySpendCap } from './spend-cap-gate.js';
@@ -84,6 +84,12 @@ import {
   persistWorkLoopDeliveredCorpus,
   wrapBackendWithWorkLoopCorpus,
 } from './work-loop-corpus.js';
+import {
+  mapAnnouncedSubmissionToFacts,
+  type AnnouncedSubmissionCard,
+  type SubmissionFacts,
+} from './native-submission-facts.js';
+import { recordPhaseDTransitionUse } from '../compatibility/phase-d-transition-usage.js';
 
 export type { AnnouncedSubmissionCard };
 
@@ -113,7 +119,12 @@ export interface SpendCapConfig {
 
 export interface WorkLoopConfig {
   readonly composition: OperatorComposition;
-  readonly archive: ArchiveSubscription;
+  /** Explicit legacy-only compatibility adapter. Native work never reads this source. */
+  readonly archive?: ArchiveSubscription;
+  /** Verified, checkpointed native source consumer. Mutually exclusive with native archive use. */
+  readonly nativeDiscovery?: NativeDiscoveryConsumer;
+  readonly nativeClaimCoordinator?: Pick<NativeClaimCoordinator, 'startWorker' | 'renewWorker' | 'reconcileStartup' | 'process'>;
+  readonly nativeSolutionCoordinator?: Pick<NativeSolutionCoordinator, 'reconcileStartup' | 'reconcileEngagement'>;
   readonly ledger: EngagementLedger;
   readonly claimGate: ClaimGate;
   readonly store: Store;
@@ -137,9 +148,11 @@ export type WorkLoopOutcome =
         | 'spend-capped'
         | 'already-engaged';
     }
-  | { readonly kind: 'pipeline'; readonly result: PipelineRunOutcome };
+  | { readonly kind: 'pipeline'; readonly result: PipelineRunOutcome }
+  | { readonly kind: 'native-claim'; readonly result: NativeClaimCoordinatorResult };
 
 const noopLogger = { info: (): void => undefined, warn: (): void => undefined };
+const LEGACY_ARCHIVE_START_SEQUENCE = '';
 
 function idempotencyKeyFor(chain: { chainId: number; taskCoordinator: string }, taskId: bigint): string {
   return `${chain.chainId}:${chain.taskCoordinator}:${taskId.toString()}`;
@@ -187,6 +200,7 @@ function resolveLegacyWorkKind(
  */
 function describeOutcome(outcome: WorkLoopOutcome): string {
   if (outcome.kind === 'skipped') return outcome.reason;
+  if (outcome.kind === 'native-claim') return `native-claim:${outcome.result.kind}`;
   const result = outcome.result;
   switch (result.kind) {
     case 'not-claimed':
@@ -214,22 +228,90 @@ function describeOutcome(outcome: WorkLoopOutcome): string {
 
 export class WorkLoop {
   private stopped = false;
+  private nativeInitialized = false;
   /** Last tick's serialized per-card outcome summary, for the log-on-change dedupe (E39). */
   private lastLoggedOutcomeSummary: string | undefined;
 
-  constructor(private readonly config: WorkLoopConfig) {}
+  constructor(private readonly config: WorkLoopConfig) {
+    if (config.composition.mode === 'native') {
+      if (config.acceptLegacyCards || config.archive !== undefined) {
+        throw new Error('native work loop requires acceptLegacyCards=false and no legacy archive');
+      }
+      if (
+        config.nativeDiscovery === undefined
+        || config.nativeClaimCoordinator === undefined
+        || config.nativeSolutionCoordinator === undefined
+      ) {
+        throw new Error('native work loop requires verified discovery and durable claim/solution coordinators');
+      }
+    } else if (
+      config.nativeDiscovery !== undefined
+      || config.nativeClaimCoordinator !== undefined
+      || config.nativeSolutionCoordinator !== undefined
+    ) {
+      throw new Error('legacy work loop cannot receive native discovery, claim, or solution coordinator');
+    }
+  }
+
+  /** Native startup order: own the worker, reconcile chain effects, then accept a signed source head. */
+  async initialize(): Promise<void> {
+    if (this.config.composition.mode !== 'native') return;
+    this.config.nativeClaimCoordinator!.startWorker();
+    await this.config.nativeClaimCoordinator!.reconcileStartup();
+    await this.config.nativeSolutionCoordinator!.reconcileStartup();
+    await this.config.nativeDiscovery!.sync();
+    this.nativeInitialized = true;
+  }
 
   /** One pass over new archive cards. Returns per-card outcomes for assertions. */
   async tick(): Promise<readonly { card: string; outcome: WorkLoopOutcome }[]> {
-    // Gap 3 (file header): no cursor is derivable from a card, so every tick re-lists from the
-    // start; the engagement ledger's own dedupe makes re-processing an already-claimed card safe.
-    const cards = await this.config.archive.since('');
+    const nativeQueued = await this.readNativeCards();
+    // This legacy-only compatibility branch remains deliberately separate from native source
+    // consumption. Native work has no call path to ArchiveSubscription at all.
+    const cards = nativeQueued === undefined
+      ? await this.readLegacyCards()
+      : nativeQueued.map((item) => item.card);
     const results: { card: string; outcome: WorkLoopOutcome }[] = [];
-    for (const card of cards) {
-      results.push({ card: card.chain.submission, outcome: await this.processCard(card) });
+    for (const [index, card] of cards.entries()) {
+      const outcome = nativeQueued === undefined
+        ? await this.processCard(card)
+        : await this.processNativeCard(nativeQueued[index]!);
+      results.push({ card: card.chain.submission, outcome });
+      // Native acknowledgement is part of the coordinator's admission transaction. Retryable
+      // deferrals and failures remain pending; the work loop never acknowledges independently.
     }
     this.logOutcomes(cards, results);
     return results;
+  }
+
+  private async processNativeCard(queued: NativeDiscoveryQueuedCard): Promise<WorkLoopOutcome> {
+    await this.config.claimGate.waitUntilOpen();
+    if (!this.config.claimGate.isOpen()) return { kind: 'skipped', reason: 'gate-closed' };
+    const documents = await this.config.readSealedDocuments(queued.card);
+    const result = await this.config.nativeClaimCoordinator!.process(queued, documents);
+    if (result.kind === 'claim-finalized') {
+      await this.config.nativeSolutionCoordinator!.reconcileEngagement(result.engagementId);
+    }
+    return { kind: 'native-claim', result };
+  }
+
+  private async readNativeCards(): Promise<readonly NativeDiscoveryQueuedCard[] | undefined> {
+    const native = this.config.nativeDiscovery;
+    if (native === undefined) return undefined;
+    if (!this.nativeInitialized) throw new Error('native work loop must initialize before polling');
+    this.config.nativeClaimCoordinator!.renewWorker();
+    // `sync()` is the verified signed-head gate. A stale/tampered/rewound head rejects before
+    // `takePending()` is reached, so even previously queued cards cannot start native work under
+    // a failed current sync.
+    await native.sync();
+    return native.takePending();
+  }
+
+  private async readLegacyCards(): Promise<readonly AnnouncedSubmissionCard[]> {
+    if (this.config.archive === undefined) {
+      throw new Error('work loop requires archive in legacy mode or nativeDiscovery in native mode');
+    }
+    return this.config.archive.since(LEGACY_ARCHIVE_START_SEQUENCE);
   }
 
   private logger(): { info(m: string): void; warn(m: string): void } {
@@ -381,6 +463,7 @@ export class WorkLoop {
       facts,
       getRequestId: () => claimedRequestId,
     });
+    recordPhaseDTransitionUse('marketplace-pipeline-invocation');
     const result = await runPipeline(
       { facts, taskBytes, submissionBytes },
       this.config.composition.pipelineConfig,
@@ -420,13 +503,18 @@ export class WorkLoop {
       ...base,
       claim: {
         ...base.claim,
-        // Gap 2 (file header): `runPipeline` itself spreads `taskDigest`/`submission`/`nonce`/
+        // Legacy compatibility only (file-header item 2): `runPipeline` itself spreads `taskDigest`/`submission`/`nonce`/
         // `priorityMech` from `facts`/`config.priorityMech` onto `ports.claim` before calling
         // `claimAttempt` — but it does NOT supply `capabilityMatch`, and nothing in venue-base or
         // the composition root constructs one either (`venue.claim` is only
-        // `{claimTask, preflight, priorityMech}` cast `as ClaimPorts`). Without this, calling
-        // `ports.capabilityMatch()` inside `claimAttempt` throws "not a function".
-        capabilityMatch: async () => ({ ok: true }),
+        // `{claimTask, preflight, priorityMech}` cast `as ClaimPorts`). Re-read the real backend
+        // snapshot here; no unconditional support answer remains.
+        capabilityMatch: async () => {
+          const capabilities = await composition.backend.capabilities();
+          return capabilities.taskProfiles.includes(facts.profileUri)
+            ? { ok: true }
+            : { ok: false, reason: 'profile-mismatch' };
+        },
         claimTask: async (input) => {
           const receipt = await base.claim.claimTask(input);
           if (receipt.requestId !== undefined) {
@@ -505,7 +593,7 @@ export class WorkLoop {
           // reads the mech Deliver fact it produces.
           await deliverToMarketplace(
             { mechAddress: composition.mechAddress, requestId: input.requestId, deliveryBytes },
-            composition.venue.safe,
+            composition.deliveryBroadcaster,
           );
           return base.settlement.readMechDeliveryFacts(input);
         },

@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/marketplace-pipeline",
   "version": "0.1.0",
-  "description": "The daemon's marketplace application: claim predicate, execution wiring, caps, two-party engagement composition, and the §9 TaskEngine carve disposition (library, not a live cutover).",
+  "description": "Deprecated legacy daemon marketplace composition retained only until the Phase D native cutover.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {

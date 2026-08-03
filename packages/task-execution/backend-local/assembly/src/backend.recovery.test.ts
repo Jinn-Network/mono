@@ -228,6 +228,11 @@ function fixture(root: string, options: BackendFixtureOptions = {}): LocalTaskEx
       isolation: ["process"],
     },
     recorderAvailability: options.recorderAvailability ?? "none",
+    // These tests assert recovery/deadline state transitions, while the supervisor suite owns
+    // the production TERM grace/kill-ladder timing contract. Keep this fixture's real shim
+    // lifecycle bounded so its terminal-state oracle does not race the 10-second default grace.
+    cancellationGraceMs: 100,
+    cancellationKillPollCeilingMs: 2_000,
     ...(options.heartbeatIntervalMs === undefined ? {} : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
     ...(repository === undefined
       ? {}

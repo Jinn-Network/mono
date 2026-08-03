@@ -131,7 +131,11 @@ try {
       },
     }),
   );
-  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
+  await run(
+    "npm",
+    ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"],
+    { cwd: consumer },
+  );
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "task-execution-testing");
 
@@ -236,6 +240,10 @@ const fakeLauncher = makeFakeLauncher({
 if (typeof fakeLauncher.plan !== "function") throw new Error("packed fake launcher missing plan()");
 
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+if (packageJson.peerDependencies?.vitest !== "^4.1.8"
+    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
+  throw new Error("packed optional Vitest peer contract changed");
+}
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/")).sort();
 const expected = [
   "@jinn-network/task-execution-backend",

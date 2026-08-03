@@ -1,5 +1,8 @@
 # @jinn-network/chain-environment-verification
 
+> Phase C maturity: experimental and publication disabled. A real archive/replay host and its
+> conformance evidence are required before graduation.
+
 Executes the closed-state protocol against a sealed chain environment record, or the
 archive-dependent observation protocol, and produces an in-toto Statement inside a DSSE
 envelope. Also exports the public runtime surface — materializer, probe executor, script

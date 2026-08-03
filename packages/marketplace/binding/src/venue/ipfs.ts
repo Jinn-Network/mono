@@ -63,13 +63,27 @@ export function computeRawCodecCid(
   bytes: Uint8Array,
 ): { cid: string; sha256Digest: `sha256:${string}` } {
   const digestHex = sha256Hex(bytes);
+  const sha256Digest = `sha256:${digestHex}` as const;
+  return { cid: rawCodecCidFromSha256Digest(sha256Digest), sha256Digest };
+}
+
+/**
+ * Reconstructs the canonical raw-codec CIDv1 from a validated exact-byte sha256 digest.
+ * Consumers that learn a Delivery digest from a canonical chain observation use this instead of
+ * implementing a second CID encoder locally.
+ */
+export function rawCodecCidFromSha256Digest(digest: `sha256:${string}`): string {
+  if (!/^sha256:[0-9a-f]{64}$/u.test(digest)) {
+    throw new Error("rawCodecCidFromSha256Digest requires a lowercase sha256 digest");
+  }
+  const digestHex = digest.slice("sha256:".length);
   const multihash = new Uint8Array(4 + 32);
   multihash[0] = 0x01; // CID version 1
   multihash[1] = 0x55; // codec: raw
   multihash[2] = 0x12; // multihash function: sha2-256
   multihash[3] = 0x20; // digest length: 32
   multihash.set(hexToBytes(digestHex), 4);
-  return { cid: `b${base32Encode(multihash)}`, sha256Digest: `sha256:${digestHex}` };
+  return `b${base32Encode(multihash)}`;
 }
 
 /**

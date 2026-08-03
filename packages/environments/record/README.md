@@ -1,5 +1,9 @@
 # @jinn-network/environment-record
 
+> Phase C maturity: experimental and publication disabled. Transitive use in native-role closure
+> is not ratification; an approved record-family decision and independent producers and consumers
+> are required before compatibility is promised.
+
 The sealed environment description record kind.
 
 One record describes exactly one environment: one `(source, image, platform, invocations,

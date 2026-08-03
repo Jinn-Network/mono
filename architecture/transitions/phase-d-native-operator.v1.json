@@ -1,0 +1,285 @@
+{
+  "schemaVersion": 1,
+  "phase": "phase-d-native-operator",
+  "defaultPolicy": "The operator default remains legacy until an exact-head live closure proves both settlements, native operations are resolved, and measured legacy use is zero for the approved observation window.",
+  "transitions": [
+    {
+      "id": "legacy-operator-composition",
+      "owner": "client operator composition",
+      "entryPoints": [
+        "client/src/daemon/daemon.ts",
+        "client/src/daemon/native-vertical-mode.ts",
+        "client/src/daemon/operator-host-factory.ts"
+      ],
+      "replacement": "The native production deployment selected by the explicit native-v1 operator mode.",
+      "consumers": [
+        "legacy operator daemon",
+        "operator configuration"
+      ],
+      "defaultMode": "legacy",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "Exactly one operator product graph is selected and native mode cannot load legacy restoration, work-loop, or compatibility composition."
+      },
+      "usageSignal": {
+        "name": "operator_vertical_mode",
+        "source": "durable client/src/daemon/phase-d-transition-usage.ts counters exposed by GET /v1/status",
+        "zeroDefinition": "No production instance selects the legacy graph during the approved observation window."
+      },
+      "migration": {
+        "description": "Complete native requester, solver, evaluator, public-source, recovery, and settlement closure before changing the default.",
+        "compatibility": "Explicit legacy and native-v1 modes remain accepted throughout Phase C; absent configuration still selects legacy."
+      },
+      "sunsetCondition": {
+        "description": "Native is the proven default and every durable native operation is resolved.",
+        "evidence": [
+          "exact merged-SHA Base Sepolia closure receipt",
+          "zero unresolved native operations",
+          "zero legacy-mode use for the approved observation window"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D1 default flip",
+      "status": "planned"
+    },
+    {
+      "id": "marketplace-pipeline",
+      "owner": "marketplace legacy compatibility",
+      "entryPoints": [
+        "packages/marketplace/pipeline/src/index.ts",
+        "client/src/daemon/work-loop.ts"
+      ],
+      "replacement": "Native tier-4 claim policy plus marketplace binding and task-execution backend capabilities.",
+      "consumers": [
+        "legacy client work loop"
+      ],
+      "defaultMode": "legacy",
+      "noNewUseGuard": {
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs",
+        "assertion": "Only the frozen legacy client import allowlist may import marketplace-pipeline."
+      },
+      "usageSignal": {
+        "name": "marketplace_pipeline_invocations",
+        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented at the legacy runPipeline call",
+        "zeroDefinition": "No production runPipeline invocation occurs during the approved observation window."
+      },
+      "migration": {
+        "description": "Native consumers use neutral task-execution backend helpers and native submission facts; no reusable consumer imports pipeline.",
+        "compatibility": "The deprecated root export corpus remains behavior-frozen for the legacy work loop until Phase D2."
+      },
+      "sunsetCondition": {
+        "description": "No runtime dependency or invocation remains after the native default is proven.",
+        "evidence": [
+          "zero non-legacy imports",
+          "zero production invocations",
+          "legacy client dependency removed"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D2 pipeline deletion",
+      "status": "migrating"
+    },
+    {
+      "id": "legacy-task-submission-synthesis",
+      "owner": "client legacy projector bridge",
+      "entryPoints": [
+        "client/src/daemon/bridge-legacy-delivery.ts",
+        "client/src/daemon/projector-enrich.ts"
+      ],
+      "replacement": "Native exact Task and Submission records obtained through verified Record Discovery entries.",
+      "consumers": [
+        "legacy projector enrichment",
+        "legacy worker delivery bridge"
+      ],
+      "defaultMode": "legacy",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "Legacy synthesis remains confined to the two declared bridge entry points and carries derivationKind legacy."
+      },
+      "usageSignal": {
+        "name": "legacy_synthesized_submission_cards",
+        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented at legacy Task/Submission synthesis",
+        "zeroDefinition": "No synthesized legacy Task or Submission card is produced during the approved observation window."
+      },
+      "migration": {
+        "description": "Require exact native Task and Submission bytes and canonical associations for all native work.",
+        "compatibility": "Legacy SignedTaskV1 fixtures and synthesis stay frozen while legacy mode is supported."
+      },
+      "sunsetCondition": {
+        "description": "All production Task and Submission joins use exact native records.",
+        "evidence": [
+          "zero synthesized-card usage",
+          "zero bridge imports outside archival tests"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D3 bridge deletion",
+      "status": "planned"
+    },
+    {
+      "id": "legacy-evaluator-delivery-watcher",
+      "owner": "client legacy evaluator composition",
+      "entryPoints": [
+        "client/src/daemon/delivery-watcher.ts",
+        "client/src/daemon/daemon.ts"
+      ],
+      "replacement": "Native evaluator composition and its durable evaluation, publication, and verdict-settlement sagas.",
+      "consumers": [
+        "legacy operator daemon"
+      ],
+      "defaultMode": "legacy",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "Native daemon construction rejects the legacy restoration and compatibility components."
+      },
+      "usageSignal": {
+        "name": "legacy_evaluator_components_loaded",
+        "source": "durable client/src/daemon/phase-d-transition-usage.ts counter exposed by GET /v1/status and instrumented when the legacy delivery watcher is loaded",
+        "zeroDefinition": "No legacy delivery watcher or evaluator component is loaded during the approved observation window."
+      },
+      "migration": {
+        "description": "Prove native evaluation, publication, and verdict settlement before removing the legacy watcher.",
+        "compatibility": "The watcher remains available only through explicit or default legacy composition during Phase C."
+      },
+      "sunsetCondition": {
+        "description": "Native evaluation closure is green and legacy components have zero measured load.",
+        "evidence": [
+          "finalized native verdict settlement",
+          "zero legacy component loads"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D4 evaluator deletion",
+      "status": "planned"
+    },
+    {
+      "id": "legacy-wiring-config",
+      "owner": "client legacy configuration",
+      "entryPoints": [
+        "client/src/config/shape-v2.ts",
+        "packages/marketplace/pipeline/src/index.ts"
+      ],
+      "replacement": "NativeTier4ClaimPolicy and injected native capability, model, harness, plugin, and credential ports.",
+      "consumers": [
+        "legacy configuration parser",
+        "legacy marketplace pipeline"
+      ],
+      "defaultMode": "legacy",
+      "noNewUseGuard": {
+        "path": ".github/scripts/marketplace-source-boundaries.test.mjs",
+        "assertion": "Native code cannot import marketplace-pipeline wiring or configuration types."
+      },
+      "usageSignal": {
+        "name": "legacy_wiring_config_fields",
+        "source": "accepted configuration parse diagnostics persisted by client/src/daemon/phase-d-transition-usage.ts and exposed by GET /v1/status",
+        "zeroDefinition": "No accepted production configuration supplies a legacy wiring, model, plugin, or credential field."
+      },
+      "migration": {
+        "description": "Keep operator policy in native product composition and translate no legacy wiring fields into native mode.",
+        "compatibility": "Legacy configuration remains parseable only for the legacy composition until Phase D."
+      },
+      "sunsetCondition": {
+        "description": "Production configuration no longer uses any legacy wiring field.",
+        "evidence": [
+          "zero legacy-field parse observations",
+          "native policy configuration conformance"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D2/D4 wiring deletion",
+      "status": "planned"
+    },
+    {
+      "id": "legacy-taskengine-carve",
+      "owner": "marketplace legacy compatibility",
+      "entryPoints": [
+        "packages/marketplace/pipeline/src/index.ts",
+        "packages/marketplace/pipeline/README.md"
+      ],
+      "replacement": "Native task-execution backend and product-owned durable operation state.",
+      "consumers": [
+        "legacy documentation",
+        "legacy pipeline tests"
+      ],
+      "defaultMode": "not-applicable",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "TaskEngine carve constants remain confined to marketplace-pipeline and its frozen tests."
+      },
+      "usageSignal": {
+        "name": "legacy_taskengine_carve_runtime_references",
+        "source": "architecture consumer inventory",
+        "zeroDefinition": "No runtime source outside marketplace-pipeline references a TaskEngine carve constant."
+      },
+      "migration": {
+        "description": "Preserve the carve as an archival compatibility statement while native state owners remain explicit.",
+        "compatibility": "No new runtime compatibility is granted; existing legacy exports remain frozen."
+      },
+      "sunsetCondition": {
+        "description": "The carve has no runtime consumer and its decision history is archived.",
+        "evidence": [
+          "zero runtime consumers",
+          "archived decision record"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Phase D2 pipeline deletion",
+      "status": "planned"
+    },
+    {
+      "id": "direct-public-posttask-composition",
+      "owner": "marketplace binding requester backend",
+      "entryPoints": [
+        "packages/marketplace/binding/src/posting.ts",
+        "packages/marketplace/binding/src/backend.ts"
+      ],
+      "replacement": "MarketplaceRequesterBackend.post and recoverPosting.",
+      "consumers": [],
+      "defaultMode": "not-applicable",
+      "noNewUseGuard": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "assertion": "Only marketplace-binding internals and explicit legacy compatibility may invoke its low-level postTask primitive."
+      },
+      "usageSignal": {
+        "name": "direct_posttask_external_consumers",
+        "source": "architecture import and call inventory",
+        "zeroDefinition": "No non-binding product or native source imports or invokes marketplace-binding postTask."
+      },
+      "migration": {
+        "description": "Route product posting through the exact-scope requester backend; retain low-level postTask only as a binding implementation detail.",
+        "compatibility": "TaskExecutionBackend.submit remains stable; task-posting is allowed its 0.x breaking port cleanup."
+      },
+      "sunsetCondition": {
+        "description": "The low-level primitive has no public composition consumer.",
+        "evidence": [
+          "zero non-binding imports",
+          "requester backend crash-recovery conformance"
+        ]
+      },
+      "deletionTest": {
+        "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
+        "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
+      },
+      "targetPullRequest": "Completed by Phase C4",
+      "status": "deleted"
+    }
+  ]
+}

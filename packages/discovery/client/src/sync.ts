@@ -1,11 +1,18 @@
 import type { DsseEnvelope } from "@jinn-network/trust-core";
-import type { AnnouncementEntry, SourceCursor, SourceHead } from "@jinn-network/record-discovery-protocol";
+import type {
+  AnnouncementEntry,
+  ParsedWireDsseEnvelope,
+  SourceCursor,
+  SourceHead,
+  WireDsseEnvelope,
+} from "@jinn-network/record-discovery-protocol";
 import {
   archivePagePath,
   compareCodeUnitStrings,
   headPath,
   parseAnnouncementEntry,
   parseSourceHead,
+  parseWireDsseEnvelope,
 } from "@jinn-network/record-discovery-protocol";
 
 import type { Transport } from "./ports.js";
@@ -47,27 +54,20 @@ export interface SyncedHead {
   signature?: DsseEnvelope;
 }
 
-interface WireDsseEnvelope {
-  payloadType: string;
-  payload: string;
-  signatures: Array<{ keyid?: string; sig: string }>;
+/**
+ * Public client entry for the protocol's one strict wire decoder. The verification driver accepts
+ * the returned `envelope`; callers may retain `payloadBytes`/`signatureBytes` for byte evidence.
+ */
+export function decodeWireEnvelopeForVerification(value: unknown): ParsedWireDsseEnvelope {
+  return parseWireDsseEnvelope(value);
 }
 
-function isWireEnvelope(value: unknown): value is WireDsseEnvelope {
+function isWireEnvelopeCandidate(value: unknown): boolean {
   return (
     typeof value === "object" &&
     value !== null &&
-    typeof (value as Record<string, unknown>)["payloadType"] === "string" &&
-    typeof (value as Record<string, unknown>)["payload"] === "string" &&
-    Array.isArray((value as Record<string, unknown>)["signatures"])
+    (Object.hasOwn(value, "payloadType") || Object.hasOwn(value, "payload") || Object.hasOwn(value, "signatures"))
   );
-}
-
-function decodeBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
 }
 
 async function fetchJson(url: string, transport: Transport): Promise<unknown> {
@@ -78,10 +78,10 @@ async function fetchJson(url: string, transport: Transport): Promise<unknown> {
 /** Fetches and parses a source's head, whether published (DSSE-enveloped) or unpublished (bare), §5.5. */
 export async function fetchHead(source: SourceEndpoint, transport: Transport): Promise<SyncedHead> {
   const parsed = await fetchJson(source.servingRoot + headPath(source.name), transport);
-  if (isWireEnvelope(parsed)) {
-    const headBytes = decodeBase64(parsed.payload);
-    const head = parseSourceHead(JSON.parse(new TextDecoder().decode(headBytes)));
-    return { head, signature: parsed as DsseEnvelope };
+  if (isWireEnvelopeCandidate(parsed)) {
+    const decoded = parseWireDsseEnvelope(parsed);
+    const head = parseSourceHead(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(decoded.payloadBytes)));
+    return { head, signature: decoded.envelope as DsseEnvelope };
   }
   return { head: parseSourceHead(parsed) };
 }
@@ -104,10 +104,13 @@ async function fetchPage(url: string, transport: Transport): Promise<WireArchive
 }
 
 function toSyncedEntries(page: WireArchivePage): SyncedEntry[] {
-  return page.entries.map((signed) => ({
-    entry: parseAnnouncementEntry(signed.entry),
-    ...(signed.signature === undefined ? {} : { signature: signed.signature as DsseEnvelope }),
-  }));
+  return page.entries.map((signed) => {
+    const signature = signed.signature === undefined ? undefined : parseWireDsseEnvelope(signed.signature).envelope;
+    return {
+      entry: parseAnnouncementEntry(signed.entry),
+      ...(signature === undefined ? {} : { signature: signature as DsseEnvelope }),
+    };
+  });
 }
 
 function pageUrl(source: SourceEndpoint, page: string): string {

@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: MIT
 
 import {
+  formatOrigin,
+  formatSequence,
+  MEDIA_ENTRY,
+  RECORD_DISCOVERY_VERSION,
   sealJson,
   nextSequence,
   type AnnouncementEntry,
 } from "@jinn-network/record-discovery-protocol";
-import type { SignedEntry } from "@jinn-network/record-discovery-serve";
+import {
+  maintainHead,
+  writeRecord,
+  type SignedEntry,
+} from "@jinn-network/record-discovery-serve";
 import {
   foldObservations,
   type DerivedAttemptState,
@@ -14,6 +22,8 @@ import {
 import type { Hex } from "viem";
 import {
   signAnnouncementEntry,
+  type AnnouncementProjectionPorts,
+  type AnnouncementProjectionResult,
   type ProjectedAnnouncement,
   type ScopedDiscoverySigner,
 } from "./announce.js";
@@ -102,6 +112,90 @@ export async function appendSignedReorgCorrection(
   return {
     entry,
     signature: await signAnnouncementEntry(entry, input.signer),
+  };
+}
+
+/**
+ * Publishes one signed, append-only withdrawal per displaced active availability. The ordinary
+ * availability entries stay byte-for-byte intact in the archive; only this later chain suffix
+ * changes the canonical view. `ProjectorCursorStore` records the matching local retractions in
+ * the same transaction as its rebuilt state/cursor.
+ */
+export async function appendSignedReorgCorrections(input: {
+  readonly priors: readonly AvailableProjectedAnnouncement[];
+  readonly ports: AnnouncementProjectionPorts;
+}): Promise<AnnouncementProjectionResult> {
+  if (input.priors.length === 0) {
+    return {
+      announcements: [],
+      entries: [],
+      pages: [],
+      refusals: [],
+      ...(input.ports.previousHead === undefined ? {} : { head: input.ports.previousHead }),
+    };
+  }
+  const previousHead = input.ports.previousHead;
+  const previousEntryDigest = input.ports.previousEntryDigest;
+  if (previousHead === undefined || previousEntryDigest === undefined || previousEntryDigest === null) {
+    throw new Error("reorg correction requires a persisted append-only discovery head");
+  }
+  if (input.ports.appendArchiveEntries === undefined) {
+    throw new Error("reorg correction requires an append-aware archive writer");
+  }
+  if (previousEntryDigest !== previousHead.entry) {
+    throw new Error("reorg correction previousEntryDigest must match previousHead.entry");
+  }
+  const expectedOrigin = formatOrigin(input.ports.source.agent, input.ports.source.name);
+  if (previousHead.origin !== expectedOrigin) {
+    throw new Error("reorg correction previousHead origin does not match projector source");
+  }
+
+  let sequence = input.ports.initialSequence ?? (BigInt(previousHead.sequence) + 1n);
+  if (sequence !== BigInt(previousHead.sequence) + 1n) {
+    throw new Error("reorg correction sequence must immediately follow previousHead");
+  }
+  let previous = previousEntryDigest;
+  const entries: SignedEntry[] = [];
+  const announcements: ProjectedAnnouncement[] = [];
+  for (const prior of input.priors) {
+    const correction = reorgCorrection(prior, prior.derivation.blockHash);
+    const entry: AnnouncementEntry = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      source: input.ports.source,
+      sequence: formatSequence(sequence),
+      previous,
+      timestamp: input.ports.clock.now().toISOString(),
+      announcements: [correction],
+    };
+    const signature = await signAnnouncementEntry(entry, input.ports.signer);
+    const sealed = sealJson(entry);
+    await writeRecord(input.ports.store, sealed.bytes, MEDIA_ENTRY);
+    entries.push({ entry, signature });
+    announcements.push(correction);
+    previous = sealed.digest;
+    sequence += 1n;
+  }
+
+  const { pages } = await input.ports.appendArchiveEntries({
+    source: input.ports.source,
+    previousHead,
+    entries,
+  });
+  const tip = entries.at(-1)!.entry;
+  const maintained = await maintainHead(
+    input.ports.store,
+    input.ports.signer,
+    input.ports.clock,
+    input.ports.source,
+    { ...previousHead, sequence: tip.sequence, entry: sealJson(tip).digest },
+  );
+  return {
+    announcements,
+    entries,
+    pages,
+    refusals: [],
+    head: maintained.head,
+    ...(maintained.envelope === undefined ? {} : { headEnvelope: maintained.envelope }),
   };
 }
 

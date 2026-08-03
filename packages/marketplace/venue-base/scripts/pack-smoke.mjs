@@ -97,7 +97,12 @@ try {
       },
     }),
   );
-  await run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: consumer });
+  // npm 10.9.x Arborist can crash with `edgesOut` while resolving this local
+  // tarball graph and Vitest's optional peers. The packed type/runtime checks
+  // below remain the oracle, so use the stable legacy peer resolver here.
+  await run("npm", [
+    "install", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps",
+  ], { cwd: consumer });
 
   const installedRoot = join(consumer, "node_modules", "@jinn-network", "marketplace-venue-base");
 

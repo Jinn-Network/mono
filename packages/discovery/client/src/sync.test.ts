@@ -8,7 +8,13 @@ import {
 import type { AnnouncementEntry, SourceHead } from "@jinn-network/record-discovery-protocol";
 
 import type { Transport, TransportResponse } from "./ports.js";
-import { coldSync, fetchHead, resolveHeadAcrossMirrors, returningSync } from "./sync.js";
+import {
+  coldSync,
+  decodeWireEnvelopeForVerification,
+  fetchHead,
+  resolveHeadAcrossMirrors,
+  returningSync,
+} from "./sync.js";
 import type { SourceEndpoint } from "./sync.js";
 
 function encodeBase64(bytes: Uint8Array): string {
@@ -56,6 +62,34 @@ const ENDPOINT: SourceEndpoint = {
 };
 
 describe("fetchHead (§5.2)", () => {
+  it("normalizes a real wire DSSE payload for the public verification driver without changing signatures", () => {
+    const payload = new TextEncoder().encode('{"sequence":"0000000000000001"}');
+    const wire = {
+      payloadType: "application/vnd.jinn.record-discovery.head.v1+json",
+      payload: Buffer.from(payload).toString("base64"),
+      signatures: [{ keyid: "did:key:zSource", sig: Buffer.from("signature").toString("base64") }],
+    };
+
+    expect(decodeWireEnvelopeForVerification(wire)).toEqual({
+      envelope: wire,
+      payloadBytes: payload,
+      signatures: [{
+        keyid: "did:key:zSource",
+        signatureBytes: new TextEncoder().encode("signature"),
+      }],
+    });
+    expect(wire.payload).toBe(Buffer.from(payload).toString("base64"));
+  });
+
+  it.each([
+    [{ payloadType: "type", payload: "e30", signatures: [{ sig: "c2ln" }] }, "payload is not canonical standard base64"],
+    [{ payloadType: "type", payload: "e30=", signatures: [{ sig: "c2ln-_==" }] }, "signature 0 is not canonical standard base64"],
+    [{ payloadType: "type", payload: "e30=", signatures: [{ sig: "c2ln" }], extra: true }, "exactly payload, payloadType, and signatures"],
+    [{ payloadType: "type", payload: "e30=", signatures: [{ sig: "c2ln", extra: true }] }, "signature 0 must contain exactly sig and optional keyid"],
+  ] as const)("rejects malformed or noncanonical wire DSSE %#", (wire, message) => {
+    expect(() => decodeWireEnvelopeForVerification(wire)).toThrow(message);
+  });
+
   it("parses a bare (unpublished-profile) head with no signature", async () => {
     const head: SourceHead = {
       protocol: "https://jinn.network/record-discovery/1.0",

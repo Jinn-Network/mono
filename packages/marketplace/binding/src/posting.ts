@@ -11,7 +11,12 @@ import { encodeFunctionData, keccak256, toBytes, type Address, type Hex } from "
 import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import { documentDigest, sha256Hex, type SubmissionRecord } from "@jinn-network/task-execution-protocol";
 import type { MarketplaceChainConfig } from "./addresses.js";
-import { BroadcastUncertainError, type PostingIntentStore, type PostingOutcome } from "./broadcast-intent.js";
+import {
+  BroadcastUncertainError,
+  type PostingIntent,
+  type PostingIntentStore,
+  type PostingOutcome,
+} from "./broadcast-intent.js";
 import { JINN_ROUTER_V3_ABI } from "./abis/jinn-router-v3.js";
 import type { IpfsPinPort } from "./venue/ipfs.js";
 import { uploadRawCodecCid } from "./venue/ipfs.js";
@@ -56,6 +61,31 @@ export interface PostingPorts {
   readonly safe: SafeBroadcastPort;
 }
 
+/**
+ * Exact, venue-neutral description of the wallet command protected by the posting WAL. The
+ * digest of these fields is the operation identity: changing a commercial term, venue, calldata
+ * or value is a conflict under the same sealed Submission, never an idempotent replay.
+ */
+export interface PreparedPostingCommand {
+  readonly venueNamespace: string;
+  readonly chainId: number;
+  readonly generation: MarketplaceChainConfig["generation"];
+  readonly router: Address;
+  readonly creatorSafe: Address;
+  readonly taskCidDigest: `sha256:${string}`;
+  readonly submissionDigest: `sha256:${string}`;
+  readonly idempotencyKey: string;
+  readonly maxClaims: number;
+  readonly solutionMaxDeliveryRateWei: string;
+  readonly verdictMaxDeliveryRateWei: string;
+  readonly responseTimeoutSeconds: string;
+  readonly allowSolverSelfEvaluation: boolean;
+  readonly to: Address;
+  readonly valueWei: string;
+  readonly data: Hex;
+  readonly commandDigest: `sha256:${string}`;
+}
+
 function decodeSubmission(submissionBytes: Uint8Array): SubmissionRecord {
   return JSON.parse(new TextDecoder().decode(submissionBytes)) as SubmissionRecord;
 }
@@ -83,6 +113,70 @@ export function encodeCreateTaskCalldata(input: {
   });
 }
 
+function canonicalCommandBytes(command: Omit<PreparedPostingCommand, "commandDigest">): Uint8Array {
+  // All keys are deliberately written in this fixed order. BigInts are converted to decimal
+  // strings before this boundary, so JSON serialization is portable and byte deterministic.
+  return new TextEncoder().encode(JSON.stringify(command));
+}
+
+export function postingCommandDigestOf(
+  command: Omit<PreparedPostingCommand, "commandDigest">,
+): `sha256:${string}` {
+  return documentDigest(canonicalCommandBytes(command));
+}
+
+/** Pure preparation shared by requester-scope claim and `postTask`; prevents command drift. */
+export function preparePostingCommand(
+  taskBytes: Uint8Array,
+  submissionBytes: Uint8Array,
+  terms: PostingTerms,
+  config: MarketplaceChainConfig,
+  creatorSafe: Address,
+): PreparedPostingCommand {
+  const taskDigestHex = sha256Hex(taskBytes);
+  const taskCidDigest = documentDigest(taskBytes);
+  const submission = decodeSubmission(submissionBytes);
+  const boundTaskDigestHex = submission.task.digest?.["sha256"];
+  if (boundTaskDigestHex !== taskDigestHex) {
+    throw new TaskExecutionError("invalid-reference", {
+      detail:
+        `Submission's task digest (sha256:${boundTaskDigestHex ?? "none"}) does not match the `
+        + `provided Task bytes' digest (${taskCidDigest}) -- refusing to prepare a mismatched pair (§6.1)`,
+    });
+  }
+
+  const submissionDigest = documentDigest(submissionBytes);
+  const maxClaims = submission.attempts?.maxTotal ?? 1;
+  const value = (terms.solutionMaxDeliveryRateWei + terms.verdictMaxDeliveryRateWei) * BigInt(maxClaims);
+  const data = encodeCreateTaskCalldata({
+    taskCidDigestBytes32: `0x${taskDigestHex}` as Hex,
+    maxClaims,
+    allowSolverSelfEvaluation: terms.allowSolverSelfEvaluation,
+    solutionMaxDeliveryRateWei: terms.solutionMaxDeliveryRateWei,
+    verdictMaxDeliveryRateWei: terms.verdictMaxDeliveryRateWei,
+    responseTimeoutSeconds: terms.responseTimeoutSeconds,
+  });
+  const withoutDigest: Omit<PreparedPostingCommand, "commandDigest"> = {
+    venueNamespace: `eip155:${config.chainId}:${config.generation}:${config.jinnRouter.toLowerCase()}`,
+    chainId: config.chainId,
+    generation: config.generation,
+    router: config.jinnRouter,
+    creatorSafe,
+    taskCidDigest,
+    submissionDigest,
+    idempotencyKey: submission.idempotencyKey,
+    maxClaims,
+    solutionMaxDeliveryRateWei: terms.solutionMaxDeliveryRateWei.toString(),
+    verdictMaxDeliveryRateWei: terms.verdictMaxDeliveryRateWei.toString(),
+    responseTimeoutSeconds: terms.responseTimeoutSeconds.toString(),
+    allowSolverSelfEvaluation: terms.allowSolverSelfEvaluation,
+    to: config.jinnRouter,
+    valueWei: value.toString(),
+    data,
+  };
+  return { ...withoutDigest, commandDigest: postingCommandDigestOf(withoutDigest) };
+}
+
 /**
  * Today-mode posting (design §6.1): uploads both sealed documents as raw-codec CIDs, enforces
  * the digest-join `Submission.task.digest.sha256 == sha256(taskBytes)` BEFORE broadcast,
@@ -101,29 +195,29 @@ export async function postTask(
   creatorSafe: Address,
   ports: PostingPorts,
 ): Promise<PostingOutcome> {
-  const taskDigestHex = sha256Hex(taskBytes);
-  const taskDigest = documentDigest(taskBytes);
-  const submission = decodeSubmission(submissionBytes);
+  const command = preparePostingCommand(taskBytes, submissionBytes, terms, config, creatorSafe);
+  const key = {
+    creatorSafe,
+    taskCidDigest: command.taskCidDigest,
+    submissionDigest: command.submissionDigest,
+    venueNamespace: command.venueNamespace,
+    commandDigest: command.commandDigest,
+  };
 
-  const boundTaskDigestHex = submission.task.digest?.["sha256"];
-  if (boundTaskDigestHex !== taskDigestHex) {
-    throw new TaskExecutionError("invalid-reference", {
-      detail:
-        `Submission's task digest (sha256:${boundTaskDigestHex ?? "none"}) does not match the `
-        + `provided Task bytes' digest (${taskDigest}) -- refusing to broadcast a mismatched pair (§6.1)`,
-    });
-  }
-
-  const submissionDigest = documentDigest(submissionBytes);
-  const key = { creatorSafe, taskCidDigest: taskDigest, submissionDigest };
-
-  const intent = {
+  const intent: PostingIntent = {
     ...key,
-    idempotencyKey: submission.idempotencyKey,
+    version: 2,
+    command,
+    idempotencyKey: command.idempotencyKey,
     createdAt: new Date().toISOString(),
   };
   const claim = await ports.intents.claim(intent);
   if (claim.kind === "resolved") return claim.outcome;
+  if (claim.kind === "conflict") {
+    throw new TaskExecutionError("submission-conflict", {
+      detail: "the sealed Submission is already bound to a different marketplace posting command",
+    });
+  }
   if (claim.kind === "pending-other") {
     throw new BroadcastUncertainError(claim.intent);
   }
@@ -133,17 +227,6 @@ export async function postTask(
   // announcement (projector), but only the task digest is anchored on-chain (§6.1).
   await uploadRawCodecCid(submissionBytes, ports.ipfs);
 
-  const maxClaims = submission.attempts?.maxTotal ?? 1;
-  const escrowValue = (terms.solutionMaxDeliveryRateWei + terms.verdictMaxDeliveryRateWei) * BigInt(maxClaims);
-  const data = encodeCreateTaskCalldata({
-    taskCidDigestBytes32: `0x${taskDigestHex}` as Hex,
-    maxClaims,
-    allowSolverSelfEvaluation: terms.allowSolverSelfEvaluation,
-    solutionMaxDeliveryRateWei: terms.solutionMaxDeliveryRateWei,
-    verdictMaxDeliveryRateWei: terms.verdictMaxDeliveryRateWei,
-    responseTimeoutSeconds: terms.responseTimeoutSeconds,
-  });
-
   // Final owner/freshness fence immediately precedes the wallet invocation. There is no await,
   // upload, persistence call, or other external effect between a successful fence and invoking
   // `broadcastCreateTask` (program §7.52).
@@ -152,9 +235,9 @@ export async function postTask(
   }
   const broadcast = ports.safe.broadcastCreateTask({
     safeAddress: creatorSafe,
-    to: config.jinnRouter,
-    value: escrowValue,
-    data,
+    to: command.to,
+    value: BigInt(command.valueWei),
+    data: command.data,
   });
   const outcome = await broadcast;
 

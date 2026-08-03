@@ -157,7 +157,7 @@ describe("deriveAndSealEvaluationSubmission (§6.4, program §7.39–§7.40)", (
       sealerRole: "evaluator",
       capabilityGrants: {},
     }));
-    expect(SubmissionRecordSchema.parse(result.submission.document).capabilityGrants).toEqual({});
+    expect(SubmissionRecordSchema.parse(result.submission.document).capabilityGrants).toBeUndefined();
   });
 
   test("rejects caller attempts to widen the closed submissionFields surface", () => {

@@ -6,6 +6,13 @@
 export const MECH_MARKETPLACE_ABI = [
   {
     type: "function",
+    name: "mapAgentMechFactories",
+    stateMutability: "view",
+    inputs: [{ name: "mech", type: "address" }],
+    outputs: [{ name: "factory", type: "address" }],
+  },
+  {
+    type: "function",
     name: "request",
     stateMutability: "payable",
     inputs: [
@@ -45,6 +52,17 @@ export const MECH_MARKETPLACE_ABI = [
   },
 ] as const;
 
+/** Authoritative per-Mech ownership read used by native preflight. */
+export const MECH_OPERATOR_ABI = [
+  {
+    type: "function",
+    name: "getOperator",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "operator", type: "address" }],
+  },
+] as const;
+
 /** The per-mech `Deliver` event -- carries the sha256 CID digest of the delivered content (§6.3). */
 export const MECH_ABI = [
   {
@@ -57,5 +75,19 @@ export const MECH_ABI = [
       { name: "deliveryRate", type: "uint256", indexed: false },
       { name: "data", type: "bytes", indexed: false },
     ],
+  },
+] as const;
+
+/** Authoritative AgentMech write slice shared by every today-mode delivery path. */
+export const MECH_DELIVER_TO_MARKETPLACE_ABI = [
+  {
+    type: "function",
+    name: "deliverToMarketplace",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "requestIds", type: "bytes32[]" },
+      { name: "datas", type: "bytes[]" },
+    ],
+    outputs: [{ name: "deliveredRequests", type: "bool[]" }],
   },
 ] as const;

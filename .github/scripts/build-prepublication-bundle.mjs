@@ -15,9 +15,15 @@ import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
   loadPublishableCatalogPackages,
+  loadPlatformCatalog,
 } from './platform-catalog.mjs';
+import {
+  loadNativeVerticalRoleFixtures,
+  nativeVerticalRuntimePackageNames,
+} from './native-vertical-role-packages.mjs';
 import { packWave } from './publish-stack-run.mjs';
 import { buildPublishPlan } from './publish-stack.mjs';
+import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -54,10 +60,12 @@ function requireIdentity({ repoRoot, sourceSha, catalogDigest, releaseGroup, lan
   if (catalogDigest !== actualDigest) {
     throw new Error(`catalog digest mismatch: expected ${catalogDigest}, checked out catalog is ${actualDigest}`);
   }
-  if (releaseGroup !== 'platform-v1') {
-    throw new Error(`prepublication supports the catalog-backed platform-v1 release group, got ${releaseGroup}`);
-  }
+  const definition = loadPlatformCatalog(repoRoot).releaseGroups[releaseGroup];
+  if (!definition) throw new Error(`prepublication release group is not cataloged: ${releaseGroup}`);
   if (!LANES.has(lane)) throw new Error(`lane must be canary or stable, got ${lane ?? '<missing>'}`);
+  if (lane === 'canary' && !definition.canary) {
+    throw new Error(`release group ${releaseGroup} is not eligible for canary prepublication`);
+  }
 }
 
 function stableReleaseTag(repoRoot, releaseGroup) {
@@ -158,10 +166,93 @@ export async function buildPrepublicationBundle({
   return manifest;
 }
 
+export async function buildNativeVerticalPrepublicationBundle({
+  repoRoot,
+  outDir,
+  sourceSha,
+  catalogDigest,
+  lane = 'canary',
+  exec,
+}) {
+  const root = resolve(repoRoot);
+  const output = resolve(outDir);
+  const releaseGroup = 'native-vertical-runtime-closure';
+  const versionAuthorityGroup = 'platform-v1';
+  requireIdentity({ repoRoot: root, sourceSha, catalogDigest, releaseGroup: versionAuthorityGroup, lane });
+  if (lane !== 'canary') throw new Error('native vertical role closure is canary-only');
+
+  const allPackages = loadCatalogPackages(root);
+  const promotedNames = new Set();
+  const selectedNames = nativeVerticalRuntimePackageNames(root, allPackages, []);
+  const byName = new Map(allPackages.map((pkg) => [pkg.name, pkg]));
+  const selected = selectedNames.map((name) => byName.get(name));
+  if (selected.some((pkg) => pkg === undefined)) {
+    throw new Error('native vertical role closure contains an uncataloged package');
+  }
+  const releasePlan = buildPublishPlan({
+    repoRoot: root,
+    mode: lane,
+    sha: sourceSha,
+    releaseGroup: versionAuthorityGroup,
+  });
+  const waves = topologicalWaves(buildDependencyGraph(selected)).map((wave) => wave.map((name) => {
+    const pkg = byName.get(name);
+    return {
+      name,
+      directory: pkg.directory,
+      manifestPath: pkg.manifestPath,
+      spec: `${name}@${releasePlan.version}`,
+    };
+  }));
+  const packageOrder = waves.flat().map(({ name }) => name);
+  if (JSON.stringify([...packageOrder].sort()) !== JSON.stringify(selectedNames)) {
+    throw new Error('native vertical role closure planning lost catalog packages');
+  }
+
+  const tarballsDir = ensureFreshOutput(output);
+  const artifacts = [];
+  const inSetNames = new Set(selectedNames);
+  for (const wave of waves) {
+    artifacts.push(...await packWave(wave, {
+      repoRoot: root,
+      version: releasePlan.version,
+      gitHead: sourceSha,
+      inSetNames,
+      tarballsDir,
+      ...(exec ? { exec } : {}),
+    }));
+  }
+  const manifest = {
+    schemaVersion: 1,
+    sourceSha,
+    catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
+    releaseGroup,
+    lane,
+    packageVersion: releasePlan.version,
+    distTag: releasePlan.distTag,
+    selection: {
+      kind: 'native-vertical-runtime-closure',
+      roleRoots: Object.fromEntries(Object.entries(loadNativeVerticalRoleFixtures(root))
+        .map(([role, { roots }]) => [role, roots])),
+      closureOnlyPackages: selectedNames.filter((name) => !promotedNames.has(name)),
+    },
+    waves: waves.map((wave) => wave.map(({ name }) => name)),
+    packageOrder,
+    tarballs: artifacts.map((artifact) => ({
+      name: artifact.name,
+      filename: relativeFilename(output, artifact.tarball),
+      integrity: artifact.integrity,
+    })),
+  };
+  writeFileSync(join(output, 'manifest.json'), canonicalJsonBytes(manifest), 'utf8');
+  return manifest;
+}
+
 function parseArgs(argv) {
   const parsed = {
     repoRoot: process.cwd(),
     releaseGroup: 'platform-v1',
+    nativeVerticalRoles: false,
   };
   const flags = new Map([
     ['--root', 'repoRoot'],
@@ -172,6 +263,10 @@ function parseArgs(argv) {
     ['--lane', 'lane'],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === '--native-vertical-roles') {
+      parsed.nativeVerticalRoles = true;
+      continue;
+    }
     const field = flags.get(argv[index]);
     if (!field) throw new Error(`unknown argument: ${argv[index]}`);
     const value = argv[index + 1];
@@ -193,7 +288,9 @@ function parseArgs(argv) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     const args = parseArgs(process.argv.slice(2));
-    const manifest = await buildPrepublicationBundle(args);
+    const manifest = args.nativeVerticalRoles
+      ? await buildNativeVerticalPrepublicationBundle(args)
+      : await buildPrepublicationBundle(args);
     console.log(
       `packed ${manifest.tarballs.length} ${manifest.releaseGroup} packages at ${manifest.packageVersion}`
       + ` into ${resolve(args.outDir)}`,

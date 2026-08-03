@@ -89,16 +89,16 @@ describe("PostingIntentStore (in-memory reference)", () => {
 });
 
 describe("recoverPostingIntents", () => {
-  test("a matched intent is adopted idempotently (resolved, dropped from the returned uncertain list)", async () => {
+  test("a chain-only match remains diagnostic and cannot resolve a Submission-specific intent", async () => {
     const store = createInMemoryPostingIntentStore();
     await store.claim(intent());
     const outcome = { taskId: 7n, txHash: `0x${"d".repeat(64)}` } as const;
 
     const uncertain = await recoverPostingIntents(store, async () => outcome);
 
-    expect(uncertain).toEqual([]);
-    expect(await store.scanPending()).toHaveLength(0);
-    expect((await store.lookup(intent()))?.resolved).toEqual(outcome);
+    expect(uncertain).toHaveLength(1);
+    expect(await store.scanPending()).toHaveLength(1);
+    expect((await store.lookup(intent()))?.resolved).toBeUndefined();
   });
 
   test("no on-chain match leaves the intent uncertain -- never silently retried", async () => {

@@ -110,11 +110,14 @@ async function waitForHealth(baseUrl: string, timeoutMs: number): Promise<void> 
   throw new Error(`Ponder at ${baseUrl}/health did not return 200 within ${timeoutMs}ms`);
 }
 
+const MAX_STARTUP_OUTPUT_CHARS = 16_384;
+
 /**
- * Watch the child process's combined stdout+stderr for Ponder's RPC diagnostic
- * retry log lines. When the retry delay doubles past 4s (retry_count >= 7, meaning
- * exponential backoff has reached 8s delay), the RPC is definitively unreachable
- * and we reject so the caller can fail fast rather than burning the full ready timeout.
+ * Watch the child process's combined stdout+stderr for terminal startup states
+ * that do not stop `ponder dev`: build failures and exhausted RPC diagnostics.
+ * When the retry delay doubles past 4s (retry_count >= 7, meaning exponential
+ * backoff has reached 8s delay), the RPC is definitively unreachable and we
+ * reject so the caller can fail fast rather than burning the full ready timeout.
  *
  * Ponder 0.16.x emits structured log lines like:
  *   WARN  Received JSON-RPC error action=rpc_diagnostic ... retry_count=7 retry_delay=8000
@@ -126,11 +129,21 @@ async function waitForHealth(baseUrl: string, timeoutMs: number): Promise<void> 
  * Promise.race resolves to detach the data listeners — otherwise the listeners
  * accumulate across test invocations and Node emits MaxListenersExceededWarning.
  */
-function watchForRpcDiagnosticFailure(child: ChildProcess): { promise: Promise<never>; cancel: () => void } {
+function watchForStartupFailure(child: ChildProcess): { promise: Promise<never>; cancel: () => void } {
   let cleanup = (): void => {};
+  let recentOutput = '';
   const promise = new Promise<never>((_, reject) => {
     const onData = (chunk: Buffer | string): void => {
       const text = chunk.toString();
+      recentOutput = (recentOutput + text).slice(-8_192);
+      // `ponder dev` stays alive in watch mode after a compile failure, so the
+      // process-exit race cannot detect this condition. Fail immediately instead
+      // of waiting for the health timeout.
+      if (recentOutput.includes('Build failed') && /stage=(?:api|indexing)/u.test(recentOutput)) {
+        cleanup();
+        reject(new Error('Ponder build failed before becoming healthy.'));
+        return;
+      }
       // Match "retry_delay=NNNN" where NNNN >= 4000 during an rpc_diagnostic action.
       // This indicates the primary chain's RPC has failed all cheap retries.
       if (
@@ -216,6 +229,37 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  // Keep a bounded tail of startup output. The child normally stays quiet in the
+  // test log, but a cold Linux runner can spend materially longer compiling than
+  // a warm developer checkout. If readiness fails, surface enough output to
+  // distinguish compilation, RPC, database, and port failures. Redact configured
+  // RPC URLs because production callers may include credentials in them.
+  let startupOutput = '';
+  const captureStartupOutput = (stream: 'stdout' | 'stderr') =>
+    (chunk: Buffer | string): void => {
+      startupOutput += `[${stream}] ${chunk.toString()}`;
+      if (startupOutput.length > MAX_STARTUP_OUTPUT_CHARS) {
+        startupOutput = startupOutput.slice(-MAX_STARTUP_OUTPUT_CHARS);
+      }
+    };
+  const captureStdout = captureStartupOutput('stdout');
+  const captureStderr = captureStartupOutput('stderr');
+  child.stdout?.on('data', captureStdout);
+  child.stderr?.on('data', captureStderr);
+
+  const detachStartupCapture = (): void => {
+    child.stdout?.off('data', captureStdout);
+    child.stderr?.off('data', captureStderr);
+  };
+
+  const redactedStartupOutput = (): string => {
+    let output = startupOutput.trim();
+    for (const url of [opts.rpcUrl, opts.secondaryRpcUrl]) {
+      if (url) output = output.split(url).join('<rpc-url>');
+    }
+    return output || '<no subprocess output captured>';
+  };
+
   const baseUrl = `http://127.0.0.1:${port}`;
   const graphqlUrl = `${baseUrl}/graphql`;
 
@@ -251,19 +295,22 @@ export async function spawnPonderIndexer(opts: SpawnPonderOptions): Promise<Pond
     );
   });
 
-  const rpcWatcher = watchForRpcDiagnosticFailure(child);
+  const startupWatcher = watchForStartupFailure(child);
   const healthyPromise = waitForHealth(baseUrl, readyTimeoutMs);
 
   try {
-    await Promise.race([healthyPromise, exitPromise, rpcWatcher.promise]);
+    await Promise.race([healthyPromise, exitPromise, startupWatcher.promise]);
   } catch (err) {
-    // Always detach RPC watcher listeners before throwing.
-    rpcWatcher.cancel();
+    // Always detach startup watcher listeners before throwing.
+    startupWatcher.cancel();
     await terminateChild(200);
-    throw err;
+    detachStartupCapture();
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`${message}\nPonder startup output (tail):\n${redactedStartupOutput()}`);
   }
-  // Detach RPC watcher listeners on the happy path so they don't accumulate.
-  rpcWatcher.cancel();
+  // Detach startup watcher listeners on the happy path so they don't accumulate.
+  startupWatcher.cancel();
+  detachStartupCapture();
 
   let torn = false;
   return {

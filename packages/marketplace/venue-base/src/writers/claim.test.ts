@@ -27,6 +27,7 @@ const PRIORITY_MECH = "0x3333333333333333333333333333333333333333" as Address;
 const TASK_ID = 42n;
 const TX_HASH = `0x${"a".repeat(64)}` as Hex;
 const REQUEST_ID = `0x${"b".repeat(64)}` as Hex;
+const OPERATION_ID = `sha256:${"f".repeat(64)}`;
 
 function successReceipt(logs: readonly Log[]): SafeBroadcastReceipt {
   return { txHash: TX_HASH, blockNumber: 1n, blockHash: `0x${"c".repeat(64)}` as Hex, logs, alreadySettled: false };
@@ -95,14 +96,20 @@ describe("createClaimWriter", () => {
       broadcaster, priorityMech: PRIORITY_MECH,
     });
 
-    const result = await writer.claimTask({ taskId: TASK_ID, priorityMech: PRIORITY_MECH });
+    const result = await writer.claimTask({ taskId: TASK_ID, priorityMech: PRIORITY_MECH, operationId: OPERATION_ID });
 
-    expect(result).toEqual({ attemptIndex: 3, requestId: REQUEST_ID, txHash: TX_HASH });
+    expect(result).toEqual({
+      attemptIndex: 3,
+      requestId: REQUEST_ID,
+      txHash: TX_HASH,
+      blockNumber: 1n,
+      blockHash: `0x${"c".repeat(64)}`,
+    });
     expect(broadcaster.execute).toHaveBeenCalledWith({
       to: BASE_SEPOLIA_TODAY.jinnRouter,
       value: 0n,
       data: encodeClaimTaskCalldata(BASE_SEPOLIA_TODAY, TASK_ID, PRIORITY_MECH),
-      logicalTx: `claim.claimTask:${TASK_ID}`,
+      logicalTx: OPERATION_ID,
     });
   });
 

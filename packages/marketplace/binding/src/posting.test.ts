@@ -3,7 +3,7 @@ import { TaskExecutionError } from "@jinn-network/task-execution-backend";
 import { describe, expect, test, vi } from "vitest";
 import { BASE_SEPOLIA_TODAY } from "./addresses.js";
 import { BroadcastUncertainError, createInMemoryPostingIntentStore } from "./broadcast-intent.js";
-import { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask, type PostingPorts, type PostingTerms } from "./posting.js";
+import { MARKETPLACE_MANIFEST_DIGEST_SENTINEL, encodeCreateTaskCalldata, postTask, preparePostingCommand, type PostingPorts, type PostingTerms } from "./posting.js";
 
 const CREATOR_SAFE = "0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98" as const;
 
@@ -167,6 +167,22 @@ describe("postTask", () => {
     expect(broadcast).toHaveBeenCalledTimes(1);
   });
 
+  test("the same Submission cannot replay under changed money-path terms", async () => {
+    const task = goldenTask();
+    const submission = goldenSubmission(task);
+    const broadcast = vi.fn(async () => ({ taskId: 4n, txHash: hash("d") }));
+    const ports = makePorts(broadcast);
+    await postTask(task, submission, TERMS, BASE_SEPOLIA_TODAY, CREATOR_SAFE, ports);
+
+    await expect(postTask(task, submission, {
+      ...TERMS,
+      solutionMaxDeliveryRateWei: TERMS.solutionMaxDeliveryRateWei + 1n,
+    }, BASE_SEPOLIA_TODAY, CREATOR_SAFE, ports)).rejects.toMatchObject({
+      category: "submission-conflict",
+    });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
   test("a still-pending intent for the same key refuses a concurrent re-broadcast (broadcast-uncertain, never blind-retried)", async () => {
     const task = goldenTask();
     const submission = goldenSubmission(task);
@@ -174,12 +190,17 @@ describe("postTask", () => {
       throw new Error("never reached");
     });
     // Manually claim a pending intent for the same key, simulating a crashed prior owner.
+    const command = preparePostingCommand(task, submission, TERMS, BASE_SEPOLIA_TODAY, CREATOR_SAFE);
     await ports.intents.claim({
       creatorSafe: CREATOR_SAFE,
       taskCidDigest: `sha256:${sha256Hex(task)}`,
       submissionDigest: documentDigest(submission),
-      idempotencyKey: "stale",
+      idempotencyKey: command.idempotencyKey,
       createdAt: "2026-01-01T00:00:00Z",
+      version: 2,
+      venueNamespace: command.venueNamespace,
+      commandDigest: command.commandDigest,
+      command,
     });
 
     await expect(postTask(task, submission, TERMS, BASE_SEPOLIA_TODAY, CREATOR_SAFE, ports)).rejects.toBeInstanceOf(

@@ -1,5 +1,9 @@
 # @jinn-network/chain-environment-record
 
+> Phase C maturity: experimental and publication disabled. Fixtures are exact-record evidence,
+> not an approved public compatibility promise; graduation requires approved identity semantics
+> and an external packed consumer.
+
 Two sealed record kinds:
 
 - `https://jinn.network/records/chain-environment/1.0` — one sandboxed chain world: a pinned

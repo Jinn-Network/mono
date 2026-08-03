@@ -344,7 +344,7 @@ export async function buildNamedCheckFixture(
     settlement: await registerBinding(fakes, {
       key: SETTLEMENT_KEY,
       agent: settlementAgent,
-      scope: ["verdicts"],
+      scope: ["settlements"],
     }),
     solver: await registerBinding(fakes, {
       key: SOLVER_KEY,

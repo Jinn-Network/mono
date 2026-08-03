@@ -58,7 +58,17 @@ try {
   );
   await run(
     "npm",
-    ["install", "--ignore-scripts", "--no-audit", "--no-fund"],
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      // npm 10/11 Arborist crashes while expanding Vitest's optional peer
+      // set for a graph rooted in local tarballs. The packed manifest and the
+      // installed root import are asserted below, so use the legacy peer
+      // resolver only for this isolated consumer installation.
+      "--legacy-peer-deps",
+    ],
     { cwd: consumer },
   );
 
@@ -77,6 +87,10 @@ import * as recordDiscoveryTesting from "@jinn-network/record-discovery-testing"
 
 if (typeof recordDiscoveryTesting !== "object") throw new Error("root import failed");
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
+if (packageJson.peerDependencies?.vitest !== "^4.1.8"
+    || packageJson.peerDependenciesMeta?.vitest?.optional !== true) {
+  throw new Error("packed optional Vitest peer contract changed");
+}
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = ["@jinn-network/record-discovery-protocol"];
 if (jinnDependencies.length !== expectedJinnDependencies.length

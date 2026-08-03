@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { selectProfileSafeLauncher } from "./routing.js";
+import { PREDICTION_FORECAST_PROFILE, selectProfileSafeLauncher } from "./routing.js";
 import type { LauncherContract } from "./contract.js";
 
 const repository = "https://jinn.network/task-profiles/repository-work/1.0";
@@ -47,5 +47,15 @@ describe("selectProfileSafeLauncher", () => {
 
     expect(selectProfileSafeLauncher([generic, evaluator], evaluation)).toBe(evaluator);
     expect(() => selectProfileSafeLauncher([generic], evaluation)).toThrow("dedicated evaluation harness");
+  });
+
+  test("routes native prediction only to its explicitly advertising launcher", () => {
+    const generic = launcher("generic", [repository]);
+    const forecaster = launcher("prediction-v1-baseline", [PREDICTION_FORECAST_PROFILE]);
+
+    expect(PREDICTION_FORECAST_PROFILE).toBe("https://jinn.network/task-profiles/prediction-forecast/1.0");
+    expect(selectProfileSafeLauncher([generic, forecaster], PREDICTION_FORECAST_PROFILE)).toBe(forecaster);
+    expect(() => selectProfileSafeLauncher([generic], PREDICTION_FORECAST_PROFILE))
+      .toThrow("no launcher supports profile");
   });
 });

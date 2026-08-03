@@ -27,3 +27,13 @@ export type {
 export { TaskExecutionError } from "./errors.js";
 
 export type { TaskExecutionBackend } from "./backend.js";
+
+export {
+  validateRequirementsAgainstRunPinning,
+  verifyPreclaim,
+} from "./preclaim.js";
+export type {
+  BackendPreclaimRequest,
+  PreclaimNotClaimedReason,
+  PreclaimResult,
+} from "./preclaim.js";

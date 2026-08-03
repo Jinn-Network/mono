@@ -112,7 +112,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 50,
+      "expectedPackageCount": 49,
       "publishPolicies": [
         "canary-only"
       ],
@@ -135,14 +135,12 @@
       "canary": true,
       "stable": false
     },
-    "experimental-environment-supply": {
-      "expectedPackageCount": 12,
+    "experimental-task-supply": {
+      "expectedPackageCount": 5,
       "publishPolicies": [
         "disabled"
       ],
       "requiredGateIds": [
-        "environments-ci",
-        "record-discovery-ci",
         "task-supply-ci"
       ],
       "allowedClassifications": [
@@ -150,6 +148,28 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-task-supply",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "experimental-environment-supply": {
+      "expectedPackageCount": 8,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "environments-ci",
+        "record-discovery-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "experimental-task-supply",
         "platform-v1"
       ],
       "stackPublished": false,
@@ -157,7 +177,7 @@
       "stable": false
     },
     "legacy-product-lines": {
-      "expectedPackageCount": 5,
+      "expectedPackageCount": 6,
       "publishPolicies": [
         "independent"
       ],
@@ -165,14 +185,18 @@
         "client-ci",
         "core-ci",
         "layer-ci",
+        "marketplace-ci",
         "plugin-ci",
         "sdk-ci"
       ],
       "allowedClassifications": [
         "legacy",
-        "product"
+        "product",
+        "transitional"
       ],
       "allowedDependencyReleaseGroups": [
+        "experimental-environment-supply",
+        "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"
       ],
@@ -204,6 +228,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1",
         "transitional-or-private"
@@ -259,7 +284,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -301,7 +329,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -341,7 +372,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -355,6 +389,51 @@
       },
       "publicSurface": {
         "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": [
+          "./testing"
+        ]
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/information-world",
+      "path": "packages/environments/information-world",
+      "domain": "environments",
+      "role": "sealed information-world record family and loopback replay capability",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "experimental-environment-supply",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "environments-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/environments-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [
+          "schemas"
+        ],
         "profiles": [],
         "fixtures": [
           "fixtures"
@@ -385,9 +464,12 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "experimental-environment-supply",
+      "releaseGroup": "experimental-task-supply",
       "publishPolicy": "disabled",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
@@ -425,7 +507,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -1077,7 +1162,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -1474,7 +1562,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -1516,7 +1607,10 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
       "releaseGroup": "experimental-environment-supply",
       "publishPolicy": "disabled",
@@ -2506,14 +2600,15 @@
       "name": "@jinn-network/marketplace-pipeline",
       "path": "packages/marketplace/pipeline",
       "domain": "marketplace",
-      "role": "marketplace pipeline composition",
-      "tier": 3,
-      "classification": "platform",
-      "stability": "candidate",
+      "role": "legacy marketplace operator composition",
+      "tier": null,
+      "tierReason": "The package combines tier-4 operator policy with legacy orchestration and is retained only as a compatibility surface.",
+      "classification": "transitional",
+      "stability": "transitional",
       "authority": {
         "documents": [
           {
-            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "path": "docs/superpowers/specs/2026-08-03-phase-c-capability-boundaries.md",
             "status": "ratified"
           },
           {
@@ -2522,12 +2617,12 @@
           }
         ],
         "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
           "status": "ratified"
         }
       },
-      "releaseGroup": "platform-v1",
-      "publishPolicy": "canary-only",
+      "releaseGroup": "legacy-product-lines",
+      "publishPolicy": "independent",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
         "marketplace-ci"
@@ -2543,7 +2638,15 @@
         "conformance": []
       },
       "supersedes": [],
-      "replacedBy": []
+      "replacedBy": [
+        "@jinn-network/marketplace-binding",
+        "@jinn-network/task-execution-backend"
+      ],
+      "transition": {
+        "reason": "The package combines legacy claim, spend, wiring and orchestration policy that native tier-4 composition now owns.",
+        "status": "deprecated legacy compatibility surface with a frozen consumer allowlist",
+        "sunsetCondition": "The operator defaults to the exact-head proven native vertical, legacy pipeline usage is zero for the approved observation window, and deletion tests find no remaining importer or invocation."
+      }
     },
     {
       "name": "@jinn-network/marketplace-projector",
@@ -2795,10 +2898,14 @@
           {
             "path": "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md",
             "status": "approved"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-08-03-phase-c-capability-boundaries.md",
+            "status": "ratified"
           }
         ],
         "decisionRecord": {
-          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
           "status": "ratified"
         }
       },
@@ -3232,7 +3339,7 @@
       "role": "task admission capability",
       "tier": 3,
       "classification": "platform",
-      "stability": "experimental",
+      "stability": "candidate",
       "authority": {
         "documents": [
           {
@@ -3240,9 +3347,12 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "experimental-environment-supply",
+      "releaseGroup": "experimental-task-supply",
       "publishPolicy": "disabled",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
@@ -3278,9 +3388,12 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "experimental-environment-supply",
+      "releaseGroup": "experimental-task-supply",
       "publishPolicy": "disabled",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
@@ -3316,9 +3429,12 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "experimental-environment-supply",
+      "releaseGroup": "experimental-task-supply",
       "publishPolicy": "disabled",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [
@@ -3356,9 +3472,12 @@
             "status": "draft"
           }
         ],
-        "decisionRecord": null
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md",
+          "status": "ratified"
+        }
       },
-      "releaseGroup": "experimental-environment-supply",
+      "releaseGroup": "experimental-task-supply",
       "publishPolicy": "disabled",
       "ownerGroup": "architecture-control",
       "requiredGateIds": [

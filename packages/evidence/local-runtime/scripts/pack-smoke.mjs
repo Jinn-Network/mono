@@ -18,11 +18,15 @@ const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-local-runtime-"));
 const consumer = join(temporaryRoot, "consumer");
 
 const packages = [
-  ["protocol", "@jinn-network/evidence-protocol"],
-  ["repository", "@jinn-network/evidence-repository"],
-  ["discovery", "@jinn-network/evidence-discovery"],
-  ["catalog-sqlite", "@jinn-network/evidence-catalog-sqlite"],
-  ["local-runtime", "@jinn-network/evidence-local-runtime"],
+  [join(packagesRoot, "protocol"), "evidence-protocol", "@jinn-network/evidence-protocol"],
+  [join(packagesRoot, "repository"), "evidence-repository", "@jinn-network/evidence-repository"],
+  [join(packagesRoot, "discovery"), "evidence-discovery", "@jinn-network/evidence-discovery"],
+  [join(packagesRoot, "catalog-sqlite"), "evidence-catalog-sqlite", "@jinn-network/evidence-catalog-sqlite"],
+  [join(packagesRoot, "local-runtime"), "evidence-local-runtime", "@jinn-network/evidence-local-runtime"],
+  [join(packagesRoot, "..", "trust", "core"), "trust-core", "@jinn-network/trust-core"],
+  [join(packagesRoot, "..", "discovery", "protocol"), "record-discovery-protocol", "@jinn-network/record-discovery-protocol"],
+  [join(packagesRoot, "..", "discovery", "serve"), "record-discovery-serve", "@jinn-network/record-discovery-serve"],
+  [join(packagesRoot, "..", "discovery", "sources", "evidence-journal"), "record-discovery-source-evidence-journal", "@jinn-network/record-discovery-source-evidence-journal"],
 ];
 
 function run(command, args, options = {}) {
@@ -85,18 +89,19 @@ function assertArchiveShape(packageName, entries) {
 
 try {
   const archives = new Map();
-  for (const [directory, name] of packages) {
-    const archive = join(temporaryRoot, `${directory}.tgz`);
+  for (const [directory, archiveName, name] of packages) {
+    const archive = join(temporaryRoot, `${archiveName}.tgz`);
     await run("yarn", ["pack", "--out", archive], {
-      cwd: join(packagesRoot, directory),
+      cwd: directory,
     });
     archives.set(name, archive);
   }
 
   for (const directory of [
-    "catalog-sqlite",
-    "discovery",
-    "local-runtime",
+    "evidence-catalog-sqlite",
+    "evidence-discovery",
+    "evidence-local-runtime",
+    "record-discovery-source-evidence-journal",
   ]) {
     const entries = (
       await output("tar", ["-tzf", join(temporaryRoot, `${directory}.tgz`)])
@@ -111,7 +116,7 @@ try {
       private: true,
       type: "module",
       dependencies: Object.fromEntries([
-        ...packages.map(([, name]) => [name, `file:${archives.get(name)}`]),
+        ...packages.map(([, , name]) => [name, `file:${archives.get(name)}`]),
         ["better-sqlite3", "13.0.1"],
       ]),
     }),
@@ -143,10 +148,62 @@ import {
 import {
   openLocalEvidenceRuntime,
 } from "@jinn-network/evidence-local-runtime";
+import {
+  DISCOVERY_SIGNING_SCOPE,
+  GENESIS_SEQUENCE,
+  archivePagePath,
+  headPath,
+} from "@jinn-network/record-discovery-protocol";
+import {
+  createEvidenceJournalDurableBridge,
+} from "@jinn-network/record-discovery-source-evidence-journal";
 
 assert.equal(typeof openFilesystemEvidenceAnnouncementJournal, "function");
 assert.equal(typeof createSqliteEvidenceCatalog, "function");
 assert.equal(typeof openLocalEvidenceRuntime, "function");
+assert.equal(typeof createEvidenceJournalDurableBridge, "function");
+
+function equalBytes(left, right) {
+  return left.length === right.length && left.every((byte, index) => byte === right[index]);
+}
+
+class MemoryBlobs {
+  values = new Map();
+  async get(path) {
+    const value = this.values.get(path);
+    return value === undefined ? undefined : { bytes: value.bytes.slice(), contentType: value.contentType };
+  }
+  async put(path, bytes, contentType) {
+    this.values.set(path, { bytes: bytes.slice(), contentType });
+  }
+  async putImmutable(path, bytes, contentType) {
+    const existing = this.values.get(path);
+    if (existing !== undefined && (!equalBytes(existing.bytes, bytes) || existing.contentType !== contentType)) {
+      throw new Error("immutable packed bridge conflict at " + path);
+    }
+    if (existing === undefined) this.values.set(path, { bytes: bytes.slice(), contentType });
+  }
+}
+
+const source = { agent: "did:key:zPackedEvidenceBridge", name: "evidence-journal" };
+const signer = {
+  keyId: "packed-evidence-bridge-key",
+  scope: DISCOVERY_SIGNING_SCOPE,
+  async sign(pae) { return [{ keyid: this.keyId, sig: pae.slice() }]; },
+  verify(pae, signature) { return equalBytes(pae, signature); },
+};
+const bridgeFactory = (context) => createEvidenceJournalDurableBridge({
+  source: context.source,
+  evidenceSourceId: context.evidenceSourceId,
+  journal: context.journal,
+  withdrawals: context.withdrawals,
+  records: context.records,
+  writer: context.writer,
+  writerIntents: context.writerIntents,
+  states: context.openBridgeStateStore(),
+  strategies: context.strategies,
+  now: context.now,
+});
 
 const root = await mkdtemp(join(tmpdir(), "jinn-packed-runtime-"));
 try {
@@ -191,6 +248,46 @@ try {
   );
   await reopened.close();
 
+  const publicRoot = await mkdtemp(join(tmpdir(), "jinn-packed-public-bridge-"));
+  try {
+    const blobs = new MemoryBlobs();
+    const publicOptions = {
+      source,
+      signer,
+      blobs,
+      bridgeFactory,
+      now: () => new Date("2026-08-03T12:00:00.000Z"),
+    };
+    const publicRuntime = await openLocalEvidenceRuntime({
+      rootDir: publicRoot,
+      publicDiscovery: publicOptions,
+    });
+    const publicReceipt = await publicRuntime.repository.putRecord(
+      "execution-evidence",
+      recordBytes,
+    );
+    await publicRuntime.sync();
+    const page = await blobs.get(archivePagePath(source.name, GENESIS_SEQUENCE));
+    assert.ok(page);
+    const pageJson = JSON.parse(new TextDecoder().decode(page.bytes));
+    assert.equal(
+      pageJson.entries[0].entry.announcements[0].record.digest,
+      publicReceipt.reference.digest,
+    );
+    const headBefore = (await blobs.get(headPath(source.name))).bytes;
+    await publicRuntime.close();
+
+    const restarted = await openLocalEvidenceRuntime({
+      rootDir: publicRoot,
+      publicDiscovery: publicOptions,
+    });
+    assert.deepEqual((await blobs.get(headPath(source.name))).bytes, headBefore);
+    assert.equal((await restarted.publicDiscovery.readState()).pending, undefined);
+    await restarted.close();
+  } finally {
+    await rm(publicRoot, { recursive: true, force: true });
+  }
+
   for (const directory of [
     "evidence-catalog-sqlite",
     "evidence-discovery",
@@ -224,6 +321,11 @@ try {
       "prohibited runtime dependency: " + dependency,
     );
   }
+  assert.equal(
+    runtimeManifest.dependencies?.["@jinn-network/record-discovery-source-evidence-journal"],
+    undefined,
+    "optional bridge adapter leaked into the ordinary local-runtime closure",
+  );
 } finally {
   await rm(root, { recursive: true, force: true });
 }
@@ -231,8 +333,8 @@ try {
   );
   await run(process.execPath, [smokeTest], { cwd: consumer });
   console.log(
-    "Packed local packages, exact-byte persistence, indexing, restart, " +
-    "README, archive, and dependency boundaries verified.",
+    "Packed local and bridge packages, exact-byte persistence, indexing, restart, " +
+    "optional adapter injection, README, archive, and dependency boundaries verified.",
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });

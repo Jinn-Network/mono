@@ -40,13 +40,24 @@ const FORBIDDEN_ROOTS = [
   join(root, 'packages', 'environments', 'verification'),
 ];
 
-// Admission's approved Jinn imports are exactly two packages (design §3.3): environments/record
-// and trust-core. Nothing else in the monorepo is reachable from its production source.
+// Admission's approved task-execution import is exactly the portable protocol package used by
+// its deterministic prediction fixture. Every other task-execution package remains denied by
+// family-derived default.
+const ADMISSION_TASK_EXECUTION_ALLOWED = ['@jinn-network/task-execution-protocol'];
+
 const ADMISSION_FORBIDDEN_EXTRA = [
   '@jinn-network/task-derivation',
   '@jinn-network/task-posting',
   '@jinn-network/task-curation',
 ];
+
+function admissionForbiddenPackages(allowed = ADMISSION_TASK_EXECUTION_ALLOWED) {
+  return [
+    ...TASK_SUPPLY_FOREIGN_PACKAGES.filter((forbidden) => forbidden !== '@jinn-network/task-execution-*'),
+    ...familyMembers('task-execution').filter((name) => !allowed.includes(name)).sort(),
+    ...ADMISSION_FORBIDDEN_EXTRA,
+  ];
+}
 
 // Derivation's pinned output IS sealed Task + EvaluationSpec pairs, which only the packages that
 // own those two kinds can produce (`sealTask`, `sealEvaluationSpec`). So the tree-wide
@@ -405,13 +416,14 @@ test('the attestation and verification bans hold by exact name and by wildcard f
 });
 
 test('task-supply source boundaries remain one-way across the approved graph', () => {
-  // admission imports environments/record + trust-core only (design §3.3).
+  // admission imports environments/record, trust-core, and the portable protocol used to build
+  // its deterministic prediction receipt fixture.
   // `src/testing.ts` is production source under this same boundary: its `vitest` import is an
   // optional peer (not a Jinn package), and its only Jinn import is the approved
   // `@jinn-network/environment-record`.
   assertBoundary(
     join(packages, 'admission', 'src'),
-    [...TASK_SUPPLY_FOREIGN_PACKAGES, ...ADMISSION_FORBIDDEN_EXTRA],
+    admissionForbiddenPackages(),
     FORBIDDEN_ROOTS,
   );
   // curation is a pure projection over verdict observations (design §9) and imports NO Jinn
@@ -436,8 +448,8 @@ test('task-supply source boundaries remain one-way across the approved graph', (
     chainScenariosForbiddenPackages(),
     [...FORBIDDEN_ROOTS, join(root, 'packages', 'environments', 'chain-verification')],
   );
-  // posting imports the marketplace binding (posting mechanics + D7 on-ramp adapters), the
-  // protocol package that owns Submission sealing, and task-derivation for types only.
+  // posting imports the marketplace requester backend and the protocol package that owns
+  // Submission sealing. Task derivation is permitted only in a compile-time test fixture.
   assertBoundary(
     join(packages, 'posting', 'src'),
     postingForbiddenPackages(),
@@ -486,17 +498,29 @@ test('chain-scenarios reaches task-admission for types only (design §3: admissi
       + 'calls admission through an injected port, never directly (program ruling R4)');
 });
 
-test('task-posting reaches task-derivation for types only (supply plan finding F-C5-5)', () => {
+test('task-posting reaches task-derivation only from its compile-time structural fixture', () => {
   const production = files(join(packages, 'posting', 'src'))
     .filter((file) => !/\.test\.[cm]?[jt]sx?$/u.test(file));
-  const valueImports = production.flatMap((file) => {
+  const imports = production.flatMap((file) => {
     const source = readFileSync(file, 'utf8');
-    return [...source.matchAll(/^\s*import\s+(?!type\b)[^;]*?from\s+["']@jinn-network\/task-derivation["']/gmu)]
+    return [...source.matchAll(/^\s*import\s+[^;]*?from\s+["']@jinn-network\/task-derivation["']/gmu)]
       .map((match) => `${relative(root, file)} -> ${match[0].trim()}`);
   });
-  assert.deepEqual(valueImports, [],
-    'posting may import @jinn-network/task-derivation with `import type` only: design §3.3 has no '
-      + 'runtime posting -> derivation edge');
+  assert.deepEqual(imports, [],
+    'posting production code has no dependency on @jinn-network/task-derivation');
+
+  const structuralFixture = readFileSync(join(packages, 'posting', 'src', 'pool-shape.test.ts'), 'utf8');
+  assert.match(structuralFixture,
+    /^import type \{ SupplyPool \} from "@jinn-network\/task-derivation";/mu,
+    'the sole task-derivation edge must remain an explicitly type-only structural fixture');
+});
+
+test('task-posting exposes the requester backend and no raw posting-operation ports', () => {
+  const execution = readFileSync(join(packages, 'posting', 'src', 'execute.ts'), 'utf8');
+  const publicIndex = readFileSync(join(packages, 'posting', 'src', 'index.ts'), 'utf8');
+  assert.match(execution, /readonly backend: MarketplaceRequesterBackend;/u);
+  assert.doesNotMatch(execution, /\bPostTaskFn\b|readonly postTask:|readonly ports:|readonly chain:/u);
+  assert.doesNotMatch(publicIndex, /\bPostTaskFn\b/u);
 });
 
 test('derivation\'s task-execution carve-out admits exactly two packages and bans the rest', () => {

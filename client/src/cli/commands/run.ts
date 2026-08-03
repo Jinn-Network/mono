@@ -22,6 +22,7 @@ import {
   apiPortFailureMessage as defaultApiPortFailureMessage,
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
+import { resolveConfiguredOperatorVerticalMode } from '../../daemon/native-vertical-config.js';
 
 function routeConsoleToStderr(): void {
   const writer = (line: string): void => {
@@ -105,6 +106,8 @@ export interface RunDeps extends BaseCommandDeps {
   resolveCliPassword: typeof defaultResolveCliPassword;
   /** Wraps the dynamic import('../../main.js') + invocation. Production calls main(); tests inject a no-op. */
   mainFn: () => Promise<unknown>;
+  /** Separate entry prevents native startup from loading the legacy daemon graph. */
+  nativeMainFn?: () => Promise<unknown>;
 }
 
 const PRODUCTION_DEPS: RunDeps = {
@@ -118,6 +121,10 @@ const PRODUCTION_DEPS: RunDeps = {
   // environment plumbing for the spawned daemon — out of DI scope
   mainFn: async () => {
     const m = await import('../../main.js');
+    return m.main();
+  },
+  nativeMainFn: async () => {
+    const m = await import('../../native-main.js');
     return m.main();
   },
 };
@@ -202,6 +209,12 @@ Failure example (funding gate):
         return;
       }
 
+      const configPath = deps.getConfigPathFromArgs(ctx.argv);
+      const config = deps.loadConfig(configPath);
+      // This decision happens before password/key resolution. Native deployment or closure
+      // mismatches therefore cannot cause legacy wallet material to be loaded as a fallback.
+      const vertical = resolveConfiguredOperatorVerticalMode(config);
+
       // Resolve password: env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run
       // `jinn run` with no env var, no setup, no input. Plaintext lives at
@@ -247,8 +260,6 @@ Failure example (funding gate):
       }
       // environment plumbing for the spawned daemon — out of DI scope
       process.env['JINN_PASSWORD'] = resolvedPassword;
-      const configPath = deps.getConfigPathFromArgs(ctx.argv);
-      const config = deps.loadConfig(configPath);
       const rpcPreflight = await deps.checkRpcNetwork(config);
       if (!rpcPreflight.ok) {
         emitEnvelope(
@@ -344,7 +355,9 @@ Failure example (funding gate):
         process.env['JINN_JSON_PROGRESS'] = '1';
       }
 
-      const payload = await deps.mainFn();
+      const selectedMain = vertical.effectiveMode === 'native-v1' ? deps.nativeMainFn : deps.mainFn;
+      if (selectedMain === undefined) throw new Error('native-v1 entry is not configured');
+      const payload = await selectedMain();
       emitResult(payload, humanRunSummary, {
         json: Boolean(parsed.values.json),
         human: Boolean(parsed.values.human),

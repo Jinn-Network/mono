@@ -186,6 +186,7 @@ export const SCOPE_VOCABULARY = [
   "bindings",
   "deliveries",
   "observations",
+  "settlements",
   "verdicts",
 ] as const;
 export type ScopeVocabularyMember = (typeof SCOPE_VOCABULARY)[number];

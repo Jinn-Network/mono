@@ -52,6 +52,7 @@ export const APPROVED_RUNTIME_RESOLUTIONS = Object.freeze({
   '@jinn-network/execution-recorder': 'portal:../../packages/evidence/execution-recorder',
   '@jinn-network/record-discovery-client': 'portal:../../packages/discovery/client',
   '@jinn-network/record-discovery-protocol': 'portal:../../packages/discovery/protocol',
+  '@jinn-network/record-discovery-serve': 'portal:../../packages/discovery/serve',
   '@jinn-network/trust-core': 'portal:../../packages/trust/core',
   vite: '6.4.3',
 });

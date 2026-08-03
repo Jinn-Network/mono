@@ -1,5 +1,11 @@
 # @jinn-network/marketplace-venue-base
 
+Phase C keeps this package as the Base transport and canonical venue-state authority. Its schema
+stores the exact posting command alongside requester submission scopes. Recovery reads a resolved
+WAL row and completes the matching scope atomically; caller-supplied outcomes and chain-only
+`TaskCreated` matches cannot resolve a scope. Older pending scopes that lack the exact join fields
+are retained as `legacy-scope-unrecoverable` and are never silently retried.
+
 The tier-3 chain-adapter tree for the canonical Base venue: the production plugs — a chunked,
 hash-verified log source; a single Safe broadcaster implementing the named Defender-relayer
 profile; the claim, settlement and lifecycle writers; the finality and delivery waiters; a

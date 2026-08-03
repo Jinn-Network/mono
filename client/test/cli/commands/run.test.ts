@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRunCommand } from '../../../src/cli/commands/run.js';
 import { makeCommandCtx } from '@test/cli.js';
 import type { RunDeps } from '../../../src/cli/commands/run.js';
+import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 
 function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
   return {
@@ -78,6 +79,30 @@ describe('run command', () => {
     expect(fakeDeps.mainFn).toHaveBeenCalled();
     const parsed = JSON.parse(writes[writes.length - 1]);
     expect(parsed.kind).toBe('daemon_started');
+  });
+
+  it('selects the separate native entry without importing or falling back to legacy main', async () => {
+    const nativeMainFn = vi.fn(async () => ({
+      schemaVersion: 1, kind: 'native_daemon_started', mode: 'native-v1', readiness: 'explicit-native-unvalidated',
+    }));
+    fakeDeps = makeFakeDeps({
+      loadConfig: vi.fn(() => ({
+        network: 'testnet', rpcUrl: 'https://sepolia.base.org', apiPort: 7331,
+        operator: {
+          verticalMode: 'native-v1',
+          native: {
+            chainId: 84532, generation: 'today', contracts: BASE_SEPOLIA_TODAY,
+            liveClosureReceiptPath: join(fakeHome, 'missing-live-closure.json'),
+          },
+        },
+      })) as never,
+      nativeMainFn,
+    });
+    const run = createRunCommand(fakeDeps);
+    const { ctx } = makeCommandCtx({ env: { JINN_PASSWORD: 'test', HOME: fakeHome } });
+    await run.run(ctx);
+    expect(nativeMainFn).toHaveBeenCalledOnce();
+    expect(fakeDeps.mainFn).not.toHaveBeenCalled();
   });
 
   it('fails before mainFn() when api port is occupied', async () => {

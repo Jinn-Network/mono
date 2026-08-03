@@ -48,10 +48,9 @@
  *     carried OUTSIDE it, retrieved here via the injected `getDeliverySignature(digest)` port
  *     (backed by `LocalTaskExecutionBackend.getDeliverySignature`), keyed by the Delivery's own
  *     digest -- the only identity `SettlementGradeVerificationInput` carries across this package
- *     boundary (no AttemptUri field exists on it). Legitimately reports `"missing"` when the host
- *     configured no delivery-signing key (`composition-root.ts`'s `deliverySigningKey` input,
- *     absent by default -- `main.ts` does not supply one yet, mirroring `legacyBridgeSigner`'s own
- *     gap) or when this specific digest was never signed.
+ *     boundary (no AttemptUri field exists on it). It legitimately reports `"missing"` for the
+ *     explicit legacy composition, which has no native solver-delivery identity, or when this
+ *     specific digest was never signed.
  *
  *  2. `dispatchBinding` -- proves this operator's own local engagement ledger
  *     (`./engagement-ledger.ts`) recorded a claim for this exact settlement identity: chain,
@@ -137,9 +136,9 @@ export interface BuildVerifySettlementGradeInput {
    * The `keyid` this operator's executor-binding envelopes are expected to sign under (matched
    * against the DSSE envelope's `signatures[].keyid`).
    */
-  readonly executorKeyId: string;
+  readonly executorKeyId?: string;
   /** The public-key counterpart of the operator's own delivery-signing key (Ed25519). */
-  readonly executorPublicKey: KeyObject;
+  readonly executorPublicKey?: KeyObject;
   /**
    * Reads a previously-produced DSSE executor-binding envelope back by the settling Delivery's
    * own digest (finding E31 close-out). Backed by `LocalTaskExecutionBackend.getDeliverySignature`
@@ -173,6 +172,12 @@ function checkExecutorBinding(
   deliveryDigest: `sha256:${string}`,
   input: Pick<BuildVerifySettlementGradeInput, 'executorKeyId' | 'executorPublicKey' | 'getDeliverySignature'>,
 ): ExecutorBindingCheck {
+  if (input.executorKeyId === undefined || input.executorPublicKey === undefined) {
+    return {
+      status: 'missing',
+      detail: 'native solver-delivery identity is not configured for this composition',
+    };
+  }
   const envelopeBytes = input.getDeliverySignature(deliveryDigest);
   if (envelopeBytes === undefined) {
     return {

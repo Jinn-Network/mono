@@ -13,10 +13,10 @@ Application-specific producer adapter
                   |
                   v
        Local Evidence Runtime
-          |       |       |
-          v       v       v
-     filesystem  journal  SQLite
-     repository           catalog
+          |       |       |       |
+          v       v       v       v
+     filesystem  journal  SQLite  optional injected
+     repository           catalog Record Discovery bridge
 ```
 
 The runtime closes a deployment boundary. It does not add evidence semantics or
@@ -102,17 +102,65 @@ old generation while in-flight calls finish, and `current.json` switches
 atomically only after the replacement catches up. A failed rebuild leaves the
 previous generation active.
 
-Local discovery is automatic for records written through
-`runtime.repository`. It is not public publication: the runtime has no network
-transport, portable-location publisher, or withdrawal API.
+Local discovery is automatic for records written through `runtime.repository`.
+
+## Optional public Record Discovery bridge
+
+The package can host the real filesystem journal as an explicitly configured Record Discovery
+source. The adapter stays outside the ordinary local-runtime dependency closure: the application
+installs `@jinn-network/record-discovery-source-evidence-journal` and injects its factory.
+
+```ts
+import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
+import {
+  createEvidenceJournalDurableBridge,
+} from "@jinn-network/record-discovery-source-evidence-journal";
+
+const bridgeFactory = (context) => createEvidenceJournalDurableBridge({
+  source: context.source,
+  evidenceSourceId: context.evidenceSourceId,
+  journal: context.journal,
+  withdrawals: context.withdrawals,
+  records: context.records,
+  writer: context.writer,
+  writerIntents: context.writerIntents,
+  states: context.openBridgeStateStore(),
+  strategies: context.strategies,
+  now: context.now,
+});
+
+const runtime = await openLocalEvidenceRuntime({
+  rootDir,
+  publicDiscovery: {
+    source,
+    signer,
+    blobs,
+    withdrawals,
+    bridgeFactory,
+  },
+});
+```
+
+The runtime persists the source writer state, append intent, bridge cursors, pending command, and
+the exclusive strategy claim in its private `public-discovery/` directory. `open` and `sync()`
+recover before consuming new input. Available announcements preserve the local `announcementId`,
+original record digest, and exact bytes. The separately injected withdrawal source preserves its
+announcement and retraction identities. A second publication strategy for the same public source
+identity fails closed.
+
+The host performs no network transport and has no ambient signer or clock. Public blobs, signing,
+withdrawals, and time are explicit application ports. Omitting `publicDiscovery` retains the
+local-only runtime and does not load the adapter.
 
 ## Boundary
 
-This package does not provide an application adapter, daemon, plugin,
+This package does not provide a built-in application adapter, daemon, plugin,
 marketplace integration, Autopilot integration, OCI or IPFS binding, network
 service, corpus membership, ranking, trust or admission policy, scrubbing,
-retention, deletion, migration, or public publication. Applications compose
-those concerns above the Catalog and repository contracts.
+retention, deletion, or migration. Applications compose those concerns above
+the Catalog and repository contracts. Its optional public host only supplies
+durability and explicit ports for the separately installed evidence-journal
+adapter and generic Record Discovery source writer.
 
 ## Development
 

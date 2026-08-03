@@ -136,10 +136,13 @@ export function createClaimWriter(
       return { ok: true };
     },
 
-    async claimTask({ taskId, priorityMech }) {
+    async claimTask({ taskId, priorityMech, operationId }) {
       const data = encodeClaimTaskCalldata(input.chain, taskId, priorityMech);
       const receipt = await input.broadcaster.execute({
-        to: input.chain.jinnRouter, value: 0n, data, logicalTx: `claim.claimTask:${taskId}`,
+        to: input.chain.jinnRouter,
+        value: 0n,
+        data,
+        logicalTx: operationId ?? `claim.claimTask:${taskId}`,
       });
       const attempt = receipt.alreadySettled
         ? await readSettledAttemptFromChain(input, taskId)
@@ -154,6 +157,8 @@ export function createClaimWriter(
         attemptIndex: attempt.attemptIndex,
         ...(attempt.requestId === undefined ? {} : { requestId: attempt.requestId }),
         txHash: receipt.txHash,
+        blockNumber: receipt.blockNumber,
+        blockHash: receipt.blockHash,
       };
     },
   };

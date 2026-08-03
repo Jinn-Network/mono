@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, generateKeyPairSync, verify } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   mkdir,
   mkdtemp,
@@ -12,8 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  dssePreAuthEncoding,
-  validateResultEvaluation,
+  ResultEvaluationStatementSchema,
 } from "@jinn-network/evidence-protocol";
 import {
   deriveEvaluationTask,
@@ -103,8 +102,6 @@ interface Fixture {
   readonly spec: EvaluationSpec;
   readonly specBytes: Uint8Array;
   readonly specDigest: `sha256:${string}`;
-  readonly privateKeyText: string;
-  readonly publicKey: ReturnType<typeof generateKeyPairSync>["publicKey"];
 }
 
 async function makeFixture(options: {
@@ -214,23 +211,11 @@ async function makeFixture(options: {
     writeFile(join(paths.logs, "harness.ndjson"), '{"safe":"log"}\n'),
   ]);
 
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const privateKeyText = String(
-    privateKey.export({ type: "pkcs8", format: "pem" }),
-  );
-  await writeFile(
-    join(paths.secrets, "evaluator-agent-key.pem"),
-    privateKeyText,
-    { mode: 0o600 },
-  );
-
   return {
     paths,
     spec,
     specBytes: sealed.bytes,
     specDigest: sealed.digest,
-    privateKeyText,
-    publicKey,
   };
 }
 
@@ -297,7 +282,7 @@ async function allFileText(directory: string): Promise<string> {
 }
 
 describe("runEvaluationHarness", () => {
-  test("issues the exact crosswalk-stamped Result Evaluation through Attestation Issuer", async () => {
+  test("writes the exact crosswalk-stamped Result Evaluation payload for host sealing", async () => {
     const fixture = await makeFixture();
     const evaluate = vi.fn<EvaluatorRegistration["adapter"]["evaluate"]>(
       async (task, results, specification, context, attempt, signal) => {
@@ -343,16 +328,10 @@ describe("runEvaluationHarness", () => {
 
     expect(exitCode).toBe(0);
     expect(evaluate).toHaveBeenCalledOnce();
-    const envelopeBytes = await readFile(join(fixture.paths.out, "verdict"));
-    const report = validateResultEvaluation(envelopeBytes);
-    expect(report.conforms, JSON.stringify(report.diagnostics)).toBe(true);
-    const envelope = JSON.parse(envelopeBytes.toString("utf8")) as {
-      payloadType: string;
-      payload: string;
-      signatures: readonly { sig: string }[];
-    };
-    const payloadBytes = Buffer.from(envelope.payload, "base64");
-    const statement = JSON.parse(payloadBytes.toString("utf8")) as {
+    const payloadBytes = await readFile(join(fixture.paths.out, "verdict"));
+    const statement = ResultEvaluationStatementSchema.parse(
+      JSON.parse(payloadBytes.toString("utf8")),
+    ) as {
       predicate: {
         evaluationSpecification: { digest: { sha256: string } };
         evaluationMethod: { digest: { sha256: string } };
@@ -379,20 +358,7 @@ describe("runEvaluationHarness", () => {
     expect(statement.predicate.evidence.map(({ name }) => name)).toEqual([
       "evaluation-report.json",
     ]);
-    expect(
-      verify(
-        null,
-        dssePreAuthEncoding(envelope.payloadType, payloadBytes),
-        fixture.publicKey,
-        Buffer.from(envelope.signatures[0]!.sig, "base64"),
-      ),
-    ).toBe(true);
-    expect(await allFileText(fixture.paths.meta)).not.toContain(
-      fixture.privateKeyText,
-    );
-    expect(await allFileText(fixture.paths.logs)).not.toContain(
-      fixture.privateKeyText,
-    );
+    expect(await readdir(fixture.paths.secrets)).toEqual([]);
   });
 
   test("stores content claim evidence through the injected writer before issuing", async () => {

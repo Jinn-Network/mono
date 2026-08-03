@@ -6,6 +6,7 @@ import {
   DID_PKH_IDENTIFIER_SCHEME_IRI,
   DSSE_PAYLOAD_TYPE,
   CONFORMANCE_DIAGNOSTIC_CODES,
+  EXECUTION_EVIDENCE_MEDIA_TYPE,
   EXECUTION_EVIDENCE_PROFILE_URI,
   EXECUTION_VERIFICATION_PREDICATE_TYPE,
   ExecutionEvidenceDocumentSchema,
@@ -22,6 +23,9 @@ describe("public contracts", () => {
   it("exports the stable protocol identifiers", () => {
     expect(EXECUTION_EVIDENCE_PROFILE_URI).toBe(
       "https://jinn.network/profiles/execution-evidence/1.0",
+    );
+    expect(EXECUTION_EVIDENCE_MEDIA_TYPE).toBe(
+      "application/vnd.jinn.execution-evidence.v1+json",
     );
     expect(RESULT_EVALUATION_PREDICATE_TYPE).toBe(
       "https://jinn.network/attestations/result-evaluation/v1",

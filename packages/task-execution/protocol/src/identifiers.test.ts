@@ -1,5 +1,19 @@
 import { describe, expect, test } from "vitest";
-import { deriveAttemptUri, isValidUrnUuid } from "./identifiers.js";
+import {
+  DELIVERY_MEDIA_TYPE,
+  SUBMISSION_MEDIA_TYPE,
+  TASK_MEDIA_TYPE,
+  deriveAttemptUri,
+  isValidUrnUuid,
+} from "./identifiers.js";
+
+describe("record media types", () => {
+  test("pins the exact Task Execution Protocol wire types", () => {
+    expect(TASK_MEDIA_TYPE).toBe("application/vnd.jinn.task-execution.task.v1+json");
+    expect(SUBMISSION_MEDIA_TYPE).toBe("application/vnd.jinn.task-execution.submission.v1+json");
+    expect(DELIVERY_MEDIA_TYPE).toBe("application/vnd.jinn.task-execution.delivery.v1+json");
+  });
+});
 
 describe("deriveAttemptUri", () => {
   test("is a deterministic UUIDv5 urn (RFC 9562 §5.5)", () => {

@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/record-discovery-serve",
   "version": "0.1.0",
-  "description": "Published-source toolkit for the Jinn Record Discovery Protocol v1: layout writer, archive pager, head maintenance, well-known discovery document, pings, and location profiles.",
+  "description": "Published-source toolkit for the Jinn Record Discovery Protocol v1: durable signed-source writer, layout, archive, head, discovery document, pings, and locations.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
