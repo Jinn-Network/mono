@@ -22,6 +22,10 @@ import {
 import { decryptMnemonic as defaultDecryptMnemonic } from '../../earning/wallet.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { createJinnPublicClient as defaultCreateJinnPublicClient } from '../../earning/viem-clients.js';
+import {
+  checkDaemonGuard as defaultCheckDaemonGuard,
+  daemonGuardEnvelope,
+} from '../daemon-guard.js';
 
 interface SweepEntry {
   from: string;
@@ -45,6 +49,7 @@ export interface WithdrawDeps extends BaseCommandDeps {
   decryptMnemonic: typeof defaultDecryptMnemonic;
   fleetStateStoreFactory: (earningDir: string) => FleetStateStore;
   createJinnPublicClient: typeof defaultCreateJinnPublicClient;
+  checkDaemonGuard: typeof defaultCheckDaemonGuard;
 }
 
 const PRODUCTION_DEPS: WithdrawDeps = {
@@ -60,6 +65,7 @@ const PRODUCTION_DEPS: WithdrawDeps = {
   decryptMnemonic: defaultDecryptMnemonic,
   fleetStateStoreFactory: (earningDir) => new FleetStateStore(earningDir),
   createJinnPublicClient: defaultCreateJinnPublicClient,
+  checkDaemonGuard: defaultCheckDaemonGuard,
 };
 
 export function createWithdrawCommand(deps: WithdrawDeps = PRODUCTION_DEPS): CommandModule {
@@ -186,6 +192,19 @@ Examples:
       const configPath =
         deps.getConfigPathFromArgs(ctx.argv ?? []) ?? deps.getConfigPathFromArgs(process.argv.slice(2));
       const config = deps.loadConfig(configPath);
+
+      // D0a P3 (#525/#562/#897): below, `runWithdrawPlan` sweeps the master
+      // EOA and every agent EOA with no cross-process lock against a
+      // concurrently running `jinn run` daemon signing from the same keys.
+      const daemonGuard = deps.checkDaemonGuard({ earningDir: config.earningDir, env: ctx.env });
+      if (daemonGuard.blocked) {
+        emitEnvelope(
+          daemonGuardEnvelope(daemonGuard, 'jinn withdraw --to 0xDEST --yes'),
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+
       const networkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
       const publicClient = deps.createJinnPublicClient(config.rpcUrl, networkChain);
       const store = deps.fleetStateStoreFactory(config.earningDir);
