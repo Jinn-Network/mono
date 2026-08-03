@@ -76,8 +76,10 @@ it("relays a nonce-bound cancellation command from the shim to the harness subtr
   const fingerprint = await waitForJson(join(metaDir, "shim.json"));
   writeShimCancellationCommand(metaDir, {
     nonce: "nonce-3",
-    graceMs: 0,
-    killPollCeilingMs: 100,
+    // This case asserts TERM relay specifically, so give the harness a bounded
+    // grace window before the shim is allowed to escalate to KILL.
+    graceMs: 500,
+    killPollCeilingMs: 2_000,
   });
   expect(requestShimCancellation(metaDir, readShimFingerprint(metaDir)!)).toBe(true);
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
