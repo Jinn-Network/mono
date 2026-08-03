@@ -514,6 +514,9 @@ jobs:
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable)
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable)
+          # The restored assembly dist resolves its runtime dependencies from the
+          # assembly package directory, not from the evaluation harness portal.
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable)
       - name: Build evidence contract packages from source
         run: |
           (cd packages/evidence/protocol && yarn install --immutable && yarn build)
