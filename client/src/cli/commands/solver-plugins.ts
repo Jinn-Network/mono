@@ -36,6 +36,7 @@ import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork
 import { walletPrivateKeyAtIndex, decryptMnemonic } from '../../earning/wallet.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { checkDaemonGuard, daemonGuardEnvelope } from '../daemon-guard.js';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
@@ -132,6 +133,20 @@ export interface SolverPluginsDeps extends BaseCommandDeps {
   now: () => number;
 }
 
+/**
+ * D0a P3 (#525/#562/#897): refuse a solver-plugins write when a live jinn
+ * daemon is detected for this earning directory -- see `../daemon-guard.js`.
+ * Throws a plain `Error`; each write handler's existing top-level try/catch
+ * (see `solver-plugins-publish.ts`, `solver-plugins-revoke.ts`,
+ * `solver-plugins-feedback.ts`) already surfaces it as a `*_failed` envelope.
+ */
+function assertNoLiveDaemon(earningDir: string): void {
+  const guard = checkDaemonGuard({ earningDir });
+  if (guard.blocked) {
+    throw new Error(daemonGuardEnvelope(guard, 'jinn solver-plugins publish <source>').message);
+  }
+}
+
 export const PRODUCTION_DEPS: SolverPluginsDeps = {
   loadConfig: defaultLoadConfig,
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
@@ -156,6 +171,10 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
     const getWalletClient = async () => {
       if (!walClientPromise) {
         walClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): `publish`/`revoke` sign via
+          // `createDirectSafeBroadcaster` below with this same agent EOA a
+          // running daemon uses, with no cross-process lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), args.password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);
@@ -228,6 +247,11 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
         const password = args.password;
         const store = new FleetStateStore(args.earningDir);
         writeClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): writes below sign via
+          // `createDirectSafeBroadcaster` (when routed through a Safe) with
+          // this same agent EOA a running daemon uses, with no cross-process
+          // lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);

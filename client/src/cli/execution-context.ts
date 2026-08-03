@@ -19,6 +19,7 @@ import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadc
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
 import { resolveCliPassword } from './password.js';
+import { checkDaemonGuard, daemonGuardEnvelope } from './daemon-guard.js';
 
 export type NetworkChain = 'base' | 'base-sepolia';
 
@@ -179,6 +180,18 @@ export async function createCliExecutionContext(
         exampleCli: 'jinn bootstrap --json',
         details: { field: 'fleet' },
       },
+    };
+  }
+
+  // D0a P3 (#525/#562/#897): this verb signs Safe writes below via
+  // `createDirectSafeBroadcaster` with the same agent EOA a running daemon
+  // uses, and (unlike the daemon's own in-process broadcasts) has no
+  // cross-process lock to prevent a nonce collision with it.
+  const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env: opts.env });
+  if (daemonGuard.blocked) {
+    return {
+      ok: false,
+      envelope: daemonGuardEnvelope(daemonGuard, 'jinn tasks submit --id x --description "…" --solver-net prediction --yes'),
     };
   }
 
