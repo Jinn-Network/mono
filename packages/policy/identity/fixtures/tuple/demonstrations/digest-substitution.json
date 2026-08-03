@@ -1,0 +1,26 @@
+{
+  "note": "Digest substitution — the cheapest lie available to a proposer. Two tuples identical in every human-readable field (same loadout kind, same NAME 'alpha') and differing only in the loadout's content digest MUST have different tuple digests, or a proposer could swap the loadout contents under a well-regarded name and inherit its outcome history. Nothing in this package inspects what a loadout DOES (substrate §9); the digest is the whole of what it IS, so the digest must be load-bearing in the identity.",
+  "original": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": {
+      "kind": "jinn.skill.v1",
+      "name": "alpha",
+      "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7"
+    },
+    "isolationPolicy": "unrestricted"
+  },
+  "substituted": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": {
+      "kind": "jinn.skill.v1",
+      "name": "alpha",
+      "digest": "sha256:ef419f699076f8ad73068cf0004548fef901117e4a85c9dc9eee9828520f78d3"
+    },
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": { "digestsDiffer": true }
+}

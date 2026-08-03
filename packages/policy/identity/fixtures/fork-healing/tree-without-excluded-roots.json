@@ -1,0 +1,13 @@
+{
+  "note": "The same tree with all four excluded roots removed. Its digest is IDENTICAL to `tree-golden.json` — that equality is the whole content of 'excludes .git/, secrets/, transcripts/, operator-requests/'. It is also the reason the digest cannot be the control against smuggled bytes (see `smuggled-git-hooks.json`): the profile is blind here by design. Unlike the golden tree, this one carries no excluded root, so it IS materializable.",
+  "profile": "learner-public.v1",
+  "entries": [
+    { "path": "notes/2026-08-03-note.md", "kind": "file", "content": "note one\n" },
+    { "path": "policy.json", "kind": "file", "content": "{\"revertThreshold\":3}\n" },
+    { "path": "skills/alpha/SKILL.md", "kind": "file", "content": "# alpha\n" }
+  ],
+  "expect": {
+    "digest": "90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8",
+    "materializable": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "note": "Substrate §4.1 — a fully-pinned tuple. Input member order is deliberately scrambled; the canonical bytes emit members in UTF-16 code-unit order (formatToken, harness, isolationPolicy, loadout, model), and nested loadout members likewise (digest, kind, name).",
+  "input": {
+    "loadout": {
+      "name": "alpha",
+      "kind": "jinn.skill.v1",
+      "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7"
+    },
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "isolationPolicy": "unrestricted",
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "harness": { "version": "2.1.34", "id": "claude-code" }
+  },
+  "expect": {
+    "canonical": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7\",\"kind\":\"jinn.skill.v1\",\"name\":\"alpha\"},\"model\":{\"id\":\"anthropic/claude-haiku-4-5\"}}",
+    "digest": "sha256:46a375359250aa1ce97d1b329fd138d945b944c104a12b50712c5bf685e29a85",
+    "runPinning": {
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "isolationPolicy": "unrestricted",
+      "loadout": {
+        "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7",
+        "kind": "jinn.skill.v1",
+        "name": "alpha"
+      },
+      "model": { "id": "anthropic/claude-haiku-4-5" }
+    }
+  }
+}

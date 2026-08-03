@@ -1,0 +1,11 @@
+{
+  "note": "The format token is the document's self-description; a tuple claiming a different token is a different document family and must not be canonicalized as this one.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/2.0",
+    "harness": null,
+    "model": null,
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": { "ok": false, "code": "invalid-document", "path": "formatToken" }
+}

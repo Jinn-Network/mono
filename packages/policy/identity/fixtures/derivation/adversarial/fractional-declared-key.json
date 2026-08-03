@@ -1,0 +1,66 @@
+{
+  "note": "A profile-declared `exact` key carrying the same fractional value on both sides. Two rules meet here and the fixture pins which one fires. The MERGE must compare requirement values leniently — a requirements map may legally hold a float, so comparing with the sealed-document canonicalizer would refuse at the wrong stage with path \"\" instead of merging. Step 5 must then refuse, because §4.1 ends at canonical bytes: a tuple that merges cleanly and cannot be digested is an identity no consumer can key on. So: merge succeeds, canonicalization refuses, and the path names the offending axis.",
+  "profile": {
+    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJ0ZW1wZXJhdHVyZSJ9XX0=",
+    "requirementKeys": [
+      {
+        "key": "effort",
+        "comparisonClass": "floor"
+      },
+      {
+        "key": "maxTokens",
+        "comparisonClass": "ceiling"
+      },
+      {
+        "key": "reviewDepth",
+        "comparisonClass": "exact"
+      },
+      {
+        "key": "temperature",
+        "comparisonClass": "exact"
+      }
+    ]
+  },
+  "task": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "profile": {
+      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "digest": {
+        "sha256": "d7350aee6c698874af0342a557d6b02637b24175de5d3a80d17d344f874955de"
+      }
+    },
+    "instructions": "Fix the failing test.",
+    "outputs": [
+      {
+        "name": "patch",
+        "mediaType": "text/x-diff",
+        "required": true
+      }
+    ],
+    "requirements": {
+      "temperature": 0.7
+    }
+  },
+  "submission": {
+    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c110",
+    "task": {
+      "digest": {
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "requester": "urn:jinn:agent:policy-kit-requester",
+    "idempotencyKey": "policy-c1-kit-fractional-declared-key",
+    "nonce": "0000000000000010",
+    "deadline": "2026-08-10T00:00:00Z",
+    "requirements": {
+      "temperature": 0.7
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document",
+    "path": "temperature"
+  }
+}

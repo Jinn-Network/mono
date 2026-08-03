@@ -1,0 +1,31 @@
+{
+  "note": "The same `(kind, digest)` pair listed twice. It is not a second parent — it is free in-degree in the derived lineage graph C7d builds, and 'most-derived-from' is exactly the kind of statistic a proposer would like to inflate at zero cost. Refuse rather than silently de-duplicate: silent de-duplication makes the sealed bytes and the parsed meaning disagree, which is the one thing a sealed document may never do.",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "model": { "provider": "anthropic", "id": "claude-haiku-4-5" },
+      "loadout": null,
+      "isolationPolicy": "unrestricted"
+    },
+    "parents": [
+      { "kind": "tuple", "digest": "sha256:2c90270f1c5afb29879f768aeb2173c0a371fedfa98f1aaf2371ab095f4aff83" },
+      { "kind": "tuple", "digest": "sha256:2c90270f1c5afb29879f768aeb2173c0a371fedfa98f1aaf2371ab095f4aff83" }
+    ],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "evidenceProvenance": {
+      "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+      "snapshotReceipt": {
+        "savedQueryDigest": "sha256:0f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7",
+        "sourceSet": { "id": "local-evidence-repository", "version": "1.0" },
+        "sources": [],
+        "evaluatedAt": "2026-08-03T12:00:00Z",
+        "reproducibility": "replayable"
+      },
+      "recordListDigest": "sha256:1f3ea1f81c9a1c5eb9e2b0e6e2f1b1e0d1d3f2a2b8f7c6d5e4f3a2b1c0d9e8f7"
+    },
+    "declaredChanges": { "summary": "Ablate one skill.", "touchedComponents": ["loadout"] }
+  },
+  "expect": { "ok": false, "code": "malformed-parent", "path": "parents.1" }
+}

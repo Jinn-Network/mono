@@ -1,0 +1,30 @@
+{
+  "note": "Array holes (BLOCKER B2). A hole is not `undefined` stored at an index — it is the absence of the index, and the difference is exactly what breaks a canonicalizer: `Array.prototype.map` SKIPS holes rather than visiting them, so a writer built on map-then-join emits `[1,,3]`. Those bytes are not JSON; `JSON.parse` rejects them. The failure mode is therefore worse than a wrong digest — it is a document that seals, digests, signs, and can never be read back, and the refusal surfaces at whoever tries to parse it rather than at whoever produced it. JSON cannot spell a hole, so the cases are described and materialized by `canonical.test.ts`. Both a literal hole and `new Array(n)` are covered because they arrive from different code: a literal from hand-written data, `new Array(n)` from a preallocation that was never filled.",
+  "input": {
+    "cases": [
+      {
+        "name": "literal-hole",
+        "construct": "SparseLiteral",
+        "args": [[1, null, 3], 1],
+        "why": "`[1, , 3]`: elements 0 and 2 present, index 1 absent. The first index that is not `in` the array is 1, so that is the index the refusal must name.",
+        "expect": { "ok": false, "code": "invalid-document", "index": 1 }
+      },
+      {
+        "name": "preallocated",
+        "construct": "ArrayOfLength",
+        "args": [3],
+        "why": "`new Array(3)`: length 3, no indices at all. Every element is a hole, so the refusal names index 0 — the first one checked.",
+        "expect": { "ok": false, "code": "invalid-document", "index": 0 }
+      }
+    ],
+    "carriers": {
+      "why": "The same value has to be refused wherever it can reach a sealed document, so each case is canonicalized three ways: bare, as a tuple's profile-declared axis, and as a manifest's namespaced extension. A canonicalizer fixed only on the path someone happened to test is fixed on one path.",
+      "tupleAxis": "retryPlan",
+      "manifestExtension": "network.example.retryPlan"
+    }
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document"
+  }
+}
