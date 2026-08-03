@@ -32,11 +32,13 @@ One rule decides where every self-improving phase writes. Bind it once, at the t
 
 ```bash
 case "${JINN_HARNESS_MODE:-train}" in
-  candidate) STATE_DIR="$JINN_LEARNER_CANDIDATE_DIR" ;;
+  candidate) STATE_DIR="${JINN_LEARNER_CANDIDATE_DIR:?candidate dir unset}" ;;
   frozen)    STATE_DIR="" ;;
   *)         STATE_DIR="$IMPL_STATE_DIR" ;;
 esac
 ```
+
+**If `mode = candidate` and `JINN_LEARNER_CANDIDATE_DIR` is unset, empty, or not a directory: write `workingDir/.errors/candidate.json` naming the missing variable, skip sections 8 and 9 entirely, and return.** Never fall back to `implStateDir`. The `:?` above makes the shell fail loudly rather than silently expanding to an empty string, because the failure mode this rules out is the quiet one: an empty `STATE_DIR` turns `$STATE_DIR/skills/...` into an absolute `/skills/...`, and a bare `cd "$STATE_DIR"` lands in `$HOME`. A candidate run that writes nowhere is recoverable; one that writes to the policy under measurement is not.
 
 The session-start hook (`hooks/session-start`) has already initialized `implStateDir` as a git repo with the `claude-code-learner` author identity.
 

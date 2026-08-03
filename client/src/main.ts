@@ -1539,8 +1539,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         .map((joined) => `${joined.contract!.id}.${joined.contract!.version}`),
     ),
   ].sort();
+  // The array is deliberately mutable and shared by reference: both
+  // LearnerHarness instances hold this exact object, and `join-applier.ts`
+  // pushes onto it so a hot join reaches routing without a restart (#1037).
+  const operatorPinnedSolverTypes = config.harness.routing?.solverTypes;
+  const learnerRoutingSolverTypes: string[] = [...(operatorPinnedSolverTypes ?? joinedSolverTypes)];
   const learnerRouting = {
-    solverTypes: config.harness.routing?.solverTypes ?? joinedSolverTypes,
+    solverTypes: learnerRoutingSolverTypes,
     ...(config.harness.routing?.legacyDefaultRouting !== undefined
       ? { legacyDefaultRouting: config.harness.routing.legacyDefaultRouting }
       : {}),
@@ -2475,6 +2480,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   joinApplierHolder.current = createJoinApplier({
     taskDiscovery,
     view: joinedSolverNetsView,
+    // A hot join widens derived routing, but never an operator-pinned
+    // allowlist — boot ignores joined nets entirely in that case, so widening
+    // it live would diverge from what a restart produces.
+    learnerRouting: operatorPinnedSolverTypes ? null : learnerRouting,
     readiness: harnessReadinessRegistry,
     registry: solverNetRegistry,
     config,

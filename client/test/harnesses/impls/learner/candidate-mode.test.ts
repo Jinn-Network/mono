@@ -9,7 +9,7 @@
  * of authorities §10 exists to end.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,6 +29,7 @@ import type {
 } from '../../../../src/harnesses/impls/learner/types.js';
 import {
   CANDIDATE_DIR_ENV,
+  INLINE_MUTATION_ENV,
   readCandidateEmission,
 } from '../../../../src/harnesses/impls/learner/candidate.js';
 import { runHarnessWithFreezeFence } from '../../../../src/daemon/freeze-fence.js';
@@ -430,6 +431,30 @@ describe('candidate mode — sealed manifest emission', () => {
     }
   });
 
+  it('refuses to seal when the candidate tree is byte-identical to its parent', async () => {
+    const fixture = await makeFixture();
+    try {
+      await seedHarvestableSolution(fixture.workingDir);
+      // A run that solves but proposes nothing: no Improve, no Consolidate.
+      const inertAdapter: HarnessAdapter = {
+        name: 'inert',
+        allowsHarnessSelfModification: false,
+        async runTask() {},
+      };
+      await runHarnessWithFreezeFence(
+        makeHarness(fixture, inertAdapter),
+        makeCtx(fixture, 'candidate'),
+      );
+
+      const emission = await readCandidateEmission(fixture.candidateRoot, 'req-1');
+      expect(emission.candidateTreeDigest).toBe(emission.parentTreeDigest);
+      expect(emission.manifestPath).toBeUndefined();
+      expect(emission.error).toContain('byte-identical to its parent');
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it('fails closed — no manifest is emitted when no evidence provenance was supplied', async () => {
     const fixture = await makeFixture();
     try {
@@ -450,6 +475,79 @@ describe('candidate mode — sealed manifest emission', () => {
       // fabricated from a receipt nobody issued.
       expect(emission.manifestPath).toBeUndefined();
       expect(emission.error).toContain('evidenceProvenance');
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('deprecated inline self-mutation — the opt-out', () => {
+  const ORIGINAL = process.env[INLINE_MUTATION_ENV];
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env[INLINE_MUTATION_ENV];
+    else process.env[INLINE_MUTATION_ENV] = ORIGINAL;
+  });
+
+  it('is on by default — train mode still runs the full loop', async () => {
+    delete process.env[INLINE_MUTATION_ENV];
+    const fixture = await makeFixture();
+    try {
+      await seedHarvestableSolution(fixture.workingDir);
+      const adapter = new ImprovingAdapter();
+      await runHarnessWithFreezeFence(makeHarness(fixture, adapter), makeCtx(fixture, 'train'));
+      expect(adapter.lastInputs?.mode).toBe('train');
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['0', 'false', 'no'])('runs train mode under frozen semantics when set to %s', async (value) => {
+    process.env[INLINE_MUTATION_ENV] = value;
+    const fixture = await makeFixture();
+    try {
+      await seedHarvestableSolution(fixture.workingDir);
+      const adapter = new ImprovingAdapter();
+      // The plugin is told `frozen`, so its §2 phase-range guard skips Improve
+      // and Memory consolidation — the phases that do the inline mutation.
+      await runHarnessWithFreezeFence(makeHarness(fixture, adapter), makeCtx(fixture, 'train'));
+      expect(adapter.lastInputs?.mode).toBe('frozen');
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not alter frozen or candidate mode', async () => {
+    process.env[INLINE_MUTATION_ENV] = '0';
+    for (const mode of ['frozen', 'candidate'] as const) {
+      const fixture = await makeFixture();
+      try {
+        await seedHarvestableSolution(fixture.workingDir);
+        const adapter = new ImprovingAdapter();
+        await runHarnessWithFreezeFence(makeHarness(fixture, adapter), makeCtx(fixture, mode));
+        expect(adapter.lastInputs?.mode).toBe(mode);
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('still harvests cleanly with no Improve or Consolidate artifacts', async () => {
+    // The opt-out must not then fail harvest for the very artifacts it told the
+    // plugin not to produce.
+    process.env[INLINE_MUTATION_ENV] = '0';
+    const fixture = await makeFixture();
+    try {
+      await seedHarvestableSolution(fixture.workingDir);
+      const solveOnlyAdapter: HarnessAdapter = {
+        name: 'solve-only',
+        allowsHarnessSelfModification: false,
+        async runTask() {},
+      };
+      const fence = await runHarnessWithFreezeFence(
+        makeHarness(fixture, solveOnlyAdapter),
+        makeCtx(fixture, 'train'),
+      );
+      expect(fence.ok).toBe(true);
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

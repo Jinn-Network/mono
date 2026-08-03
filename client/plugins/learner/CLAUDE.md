@@ -24,7 +24,9 @@ When a session starts, the harness adapter provides the task payload and paths. 
 
 In `candidate` mode the plugin is a **proposer**: it runs the active policy read-only and writes its proposed changes to a provisioned copy, which the harness seals as a candidate manifest for separate evaluation. The active `implStateDir` is fenced and verified byte-identical; a run that mutates it is discarded.
 
-**Deprecated — inline self-mutation.** `train` mode's in-place mutation of `implStateDir` is a compatibility mode with no identity boundary between the policy that produced a result and the policy that replaced it. Product design §10 retires it once the first optimization campaign completes end-to-end; campaign evaluation never depends on it. Disable with `JINN_LEARNER_INLINE_MUTATION=0`. Do not build new behaviour on it.
+**Deprecated — inline self-mutation.** `train` mode's in-place mutation of `implStateDir` is a compatibility mode with no identity boundary between the policy that produced a result and the policy that replaced it. Product design §10 retires it once the first optimization campaign completes end-to-end; campaign evaluation never depends on it. Do not build new behaviour on it.
+
+`JINN_LEARNER_INLINE_MUTATION=0` opts out: the learner then runs train-mode tasks under frozen semantics (no Improve, no Memory consolidation, no write to `implStateDir`). It suppresses the instruction, not the capability — the freeze fence still branches on the daemon's mode, so enforcement requires `frozen` or `candidate` mode. See `README.md` for the full scope note.
 
 Authority: `docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md` §10.
 

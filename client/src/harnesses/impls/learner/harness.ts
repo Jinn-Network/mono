@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type {
   Harness,
   HarnessContext,
+  HarnessMode,
   ReadyStatus,
   RuntimePlugin,
   Solution,
@@ -23,6 +24,8 @@ import type {
 import {
   CANDIDATE_DIR_ENV,
   emitCandidate,
+  inlineMutationEnabled,
+  INLINE_MUTATION_ENV,
   provisionCandidateWorkspace,
   type LearnerCandidateConfig,
   type ProvisionedCandidate,
@@ -358,9 +361,39 @@ export class LearnerHarness implements Harness {
     }
   }
 
+  /**
+   * The mode the PLUGIN is told to run in, which is the daemon's mode except
+   * when an operator has opted out of deprecated inline self-mutation
+   * (`JINN_LEARNER_INLINE_MUTATION=0`). Train mode then runs the plugin under
+   * frozen semantics: Orient through Debrief, no Improve, no Consolidate, no
+   * write to `implStateDir`.
+   *
+   * Scope, stated rather than implied: this suppresses the *instruction*, not
+   * the *capability*. The daemon-wide freeze-fence still branches on the
+   * daemon's mode, which is `train`, so a plugin that ignored the steer and
+   * wrote anyway would not be caught here. The flag is a deprecation off-ramp
+   * for operators who want the learner to stop adapting in place; operators who
+   * need the write actually prevented run `frozen` or `candidate` mode, where
+   * the fence enforces it. Doing this at the harness rather than the engine is
+   * deliberate too — the flag is learner-specific, and forcing the engine's
+   * global mode would silently freeze every other harness in the registry.
+   */
+  private pluginMode(ctx: HarnessContext): HarnessMode {
+    if (ctx.mode === 'train' && !inlineMutationEnabled()) return 'frozen';
+    return ctx.mode;
+  }
+
   async run(ctx: HarnessContext): Promise<Solution> {
     const window = ctx.task.window ?? { startTs: 0, endTs: 0 };
     const candidate = ctx.mode === 'candidate' ? await this.provisionCandidate(ctx) : undefined;
+    const mode = this.pluginMode(ctx);
+    if (mode !== ctx.mode) {
+      console.warn(
+        `[learner:${this.name}] ${INLINE_MUTATION_ENV} is disabled — running train-mode task ` +
+          `${ctx.task.id} under frozen semantics (no Improve, no Memory consolidation). ` +
+          'Inline self-mutation is deprecated; candidate mode is the supported replacement.',
+      );
+    }
     const inputs: TaskSessionInputs = {
       taskId: ctx.task.id,
       requestId: ctx.requestId,
@@ -377,7 +410,7 @@ export class LearnerHarness implements Harness {
       windowEndTs: window.endTs,
       msUntilEndTs: ctx.msUntilEndTs(),
       abort: ctx.abort,
-      mode: ctx.mode,
+      mode,
       ...(candidate ? { adapterEnv: { [CANDIDATE_DIR_ENV]: candidate.treeDir } } : {}),
     };
 
@@ -392,8 +425,10 @@ export class LearnerHarness implements Harness {
     // Frozen mode skips the learning phases (improve, memory-consolidation), so
     // harvest must not require their artifacts — solve-only requires none. Train
     // and candidate mode (undefined → 'full') both run them; candidate mode only
-    // changes WHERE they write, not whether they run.
-    const phaseRange = ctx.mode === 'frozen' ? 'solve-only' : undefined;
+    // changes WHERE they write, not whether they run. Keyed on the PLUGIN's mode
+    // so an inline-mutation opt-out does not then fail harvest for the very
+    // artifacts it just told the plugin not to produce.
+    const phaseRange = mode === 'frozen' ? 'solve-only' : undefined;
     const solution = await harvestOutput(ctx.workingDir, phaseRange, ctx.task);
     return {
       ...solution,

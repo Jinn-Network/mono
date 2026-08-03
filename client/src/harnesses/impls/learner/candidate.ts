@@ -315,6 +315,19 @@ export async function emitCandidate(params: {
     return emission;
   };
 
+  // A run whose Improve and Consolidate phases changed nothing has proposed
+  // nothing. Sealing it anyway would mint a manifest whose policy tuple is
+  // byte-identical to its own declared parent — a self-parented candidate that
+  // admission would key to the parent's own `tupleDigest`, silently joining the
+  // parent's arm and spending evaluation budget re-measuring a policy already in
+  // the population. Refuse: "nothing changed" is a legitimate outcome of a
+  // learning run, just not a proposal.
+  if (candidateTreeDigest === provisioned.parentTreeDigest) {
+    return await refuse(
+      'candidate tree is byte-identical to its parent — nothing was proposed',
+    );
+  }
+
   if (!config.evidenceProvenance) {
     return await refuse(
       'no evidenceProvenance was supplied to candidate mode; refusing to seal a manifest whose ' +
