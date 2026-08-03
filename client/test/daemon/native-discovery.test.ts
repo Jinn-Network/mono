@@ -21,6 +21,7 @@ const ROOT = 'https://requester.example';
 const DIGEST_A = `sha256:${'a'.repeat(64)}` as const;
 const DIGEST_B = `sha256:${'b'.repeat(64)}` as const;
 const DIGEST_C = `sha256:${'c'.repeat(64)}` as const;
+const FRESH_FIXTURE_TIME = new Date('2026-08-02T02:00:00.000Z');
 
 function entry(sequence: string, previous: `sha256:${string}` | null, digest: `sha256:${string}`): AnnouncementEntry {
   return {
@@ -155,7 +156,7 @@ function consumer(input: {
       },
     },
     decode: input.decode ?? (async (input) => cardFor(input.entry.sequence)),
-    now: input.now,
+    now: input.now ?? (() => FRESH_FIXTURE_TIME),
   });
 }
 
