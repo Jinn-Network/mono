@@ -105,9 +105,14 @@ The execution-policy identity is a derived, canonical form of the run-pinning ax
 }
 ```
 
-**The derivation is a total function of exactly one input pair: the sealed Task and the
-sealed Submission.** Two honest derivers holding those two documents MUST produce identical
-bytes. The function, normatively:
+**The derivation is a total function of exactly one input triple: the sealed Task, the
+sealed Submission, and the resolved task-profile document the Task pins by digest.**
+*(Amended 2026-08-03 from "input pair" — C1 kit finding F1: steps 1–2 require the profile's
+comparison classes and `requirementKeys`, which the Task carries only as a pin.)* The
+deriver MUST verify the supplied profile document against the Task's pin before use —
+handing two honest derivers different revisions of one profile URI is the quietest way to
+fork the identity space. Two honest derivers holding these three documents MUST produce
+identical bytes. The function, normatively:
 
 1. Compute the **effective requirements**: the Task∪Submission merge under the profiles
    §5.1 comparison classes (`mergeRequirements` semantics — the winning value per key is
@@ -140,8 +145,14 @@ fidelity status (§7) that says how much the requested tuple can be believed, an
 else. One digest namespace; it names pinned treatments.
 
 **Expression rule (the inverse):** to express a tuple as Submission run pinning, emit one
-requirement entry per non-null key, byte-exact; `null` core axes emit no entry. The product
-design's arm construction cites this rule; it lives here so both directions have one owner.
+requirement entry per non-null **axis**, byte-exact; `null` core axes emit no entry, and
+`formatToken` is a document member, never a requirement entry *(amended 2026-08-03, C1 kit
+finding F4)*. The product design's arm construction cites this rule; it lives here so both
+directions have one owner.
+
+**Reserved members:** a task profile that declares a `requirementKey` colliding with a
+reserved tuple member (`formatToken`) is invalid input for derivation; the deriver fails
+closed *(added 2026-08-03, C1 kit finding F5)*.
 
 **Axis naming:** the tuple uses the requirements-vocabulary key `isolationPolicy`; the
 benchmarking Matrix names the same axis `isolation` in its `verification` block. One axis,
