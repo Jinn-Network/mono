@@ -59,6 +59,23 @@ test('the Phase D manifest is complete, path-valid, and keeps the Phase C defaul
   }
 });
 
+// Spec §7 human-gate rule: the receipt->deletion link is a human editing this manifest, and the
+// class system must bind that hop or it is cosmetic. `transition-manifest.mjs` already refuses to
+// load a `deleted` row without a resolving `evidenceCitation` (this file would have failed at
+// import above), but this test names the invariant explicitly rather than leaving it implicit in
+// schema validation: a deleted flip must cite Class A evidence, never just the Class O counters
+// that may have informed the decision.
+test('every deleted transition cites Class A evidence, not just Class O counters', () => {
+  const deletedTransitions = manifest.transitions.filter((candidate) => candidate.status === 'deleted');
+  assert.ok(deletedTransitions.length > 0, 'expected at least one deleted transition to exercise this guard');
+  for (const candidate of deletedTransitions) {
+    assert.equal(typeof candidate.evidenceCitation, 'string',
+      `${candidate.id} is deleted without an evidenceCitation`);
+    assert.equal(existsSync(resolve(root, candidate.evidenceCitation)), true,
+      `${candidate.id}.evidenceCitation does not resolve: ${candidate.evidenceCitation}`);
+  }
+});
+
 test('operator mode stays explicit and absent configuration still resolves to legacy', () => {
   const mode = readFileSync(resolve(root, 'client/src/daemon/native-vertical-mode.ts'), 'utf8');
   const daemon = readFileSync(resolve(root, 'client/src/daemon/daemon.ts'), 'utf8');

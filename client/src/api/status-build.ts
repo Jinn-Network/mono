@@ -26,6 +26,16 @@ import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
+/**
+ * `phaseDTransitionUsage` on the wire, tagged Class O — observation
+ * (docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md §7). The tag rides
+ * on the response payload so a consumer cannot silently promote this subtree to a gate input; it
+ * is never present on `GatheredStatusRaw`, only on the assembled response.
+ */
+export interface PhaseDTransitionUsageStatus extends PhaseDTransitionUsageDiagnostics {
+  readonly class: 'observation';
+}
+
 export interface ServiceBalanceErrorEntry {
   agent?: string;
   multisig?: string;
@@ -401,8 +411,9 @@ export interface StatusV1Response {
   security: { lastPasswordRotationAt: string | null };
   /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
   configMigration?: ConfigMigrationStatus;
-  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates. */
-  phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
+  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates.
+   *  Tagged Class O — observation (§7): never a gate input. */
+  phaseDTransitionUsage?: PhaseDTransitionUsageStatus;
   /** The daemon's resolved product mode (#2380) — see `GatheredStatusRaw.effectiveMode`. Always
    *  present; defaults to `'legacy'` when the gatherer didn't thread a value. */
   effectiveMode: OperatorVerticalMode;
@@ -691,7 +702,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
     ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
     ...(raw.phaseDTransitionUsage !== undefined
-      ? { phaseDTransitionUsage: raw.phaseDTransitionUsage }
+      ? { phaseDTransitionUsage: { ...raw.phaseDTransitionUsage, class: 'observation' } }
       : {}),
   };
 }
