@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { CommandContext } from '../../../src/cli/command.js';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
+import { DaemonGuardBlockedError, daemonGuardEnvelope } from '../../../src/cli/daemon-guard.js';
 
 const tempDirs: string[] = [];
 
@@ -86,6 +87,48 @@ describe('jinn solver-plugins revoke', () => {
     expect(out.pluginCid).toBe('bafyOldCid');
     expect(out.reason).toBe('security advisory CVE-2026-XXXX');
     expect(exits).toEqual([]);
+  });
+
+  // D0a round-1 review (minor finding): a DaemonGuardBlockedError thrown from the lazy
+  // publisherFactory write closure must surface its full envelope, not collapse into
+  // revoke_failed.
+  it('preserves the full daemon-guard envelope instead of collapsing it to revoke_failed', async () => {
+    const configPath = withTempConfig();
+    const ensureStage1 = vi.fn(async () => ({
+      ok: true,
+      fleet_state: {
+        fleet_agent_id: '777',
+        fleet_safe_address: '0xBBBB000000000000000000000000000000000001',
+        fleet_identity_registry: '0x8004A818BFB912233c491871b3d84c89A494BD9e',
+        fleet_stage: 'stage1',
+        chain: 'base-sepolia',
+      },
+      message: 'Stage 1 complete.',
+    }));
+    const guardEnvelope = daemonGuardEnvelope(
+      { blocked: true, pid: 987654, pidfilePath: '/tmp/e/daemon.pid', reason: 'alive' },
+      'jinn solver-plugins publish <source>',
+    );
+    const revoke = vi.fn(async () => { throw new DaemonGuardBlockedError(guardEnvelope); });
+
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1 } as any),
+      pinFileToIpfs: vi.fn(),
+      publisherFactory: () => ({ publish: vi.fn(), revoke }),
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+      now: () => 1_715_700_000_000,
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'revoke', 'bafyOldCid', '--reason', 'x', '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    const out = JSON.parse(writes.join('').trim().split('\n').pop()!);
+    expect(out.error.code).toBe('invalid_invocation');
+    expect(out.error.message).toContain('987654');
+    expect(out.error.hint).toContain('JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON');
+    expect(exits).toEqual([11]);
   });
 
   it('requires --reason', async () => {

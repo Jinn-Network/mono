@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMemoryTxSubmissionLedger,
   flattenErrorMessage,
+  getDefaultEoaBroadcastLock,
   isRecoverableTransactionError,
   isReplacementUnderpricedError,
   recoverStuckNonceIfNeeded,
+  resetDefaultEoaBroadcastLockForTesting,
+  setDefaultEoaBroadcastLock,
   viemSendTransactionWithRetry,
   withEoaBroadcastLock,
   withRecoverableRetry,
@@ -579,6 +582,70 @@ describe('tx-retry', () => {
         expect(call[0]).toMatchObject({ address: from, blockTag: 'pending' });
       }
     });
+
+    it('records the submission/resolution and reads prior fees under the REFRESHED nonce after refreshNonce() (D0a round-2 minor)', async () => {
+      // `executeSafeTxBatch` hits "nonce too low", calls `nonceLedger.refreshNonce()`, then
+      // retries and broadcasts at the refreshed nonce. `recordSubmitted`/`markResolved`/
+      // `feeResultForAttempt` must all key off that refreshed nonce -- otherwise the ledger gets a
+      // permanently-unresolved phantom entry at the STALE nonce (that `recoverStuckNonceIfNeeded`
+      // can later act on) and no entry at the nonce actually broadcast, plus a fee bump computed
+      // against the wrong prior transaction.
+      const from = '0x1111111111111111111111111111111111111111' as const;
+      const ledger = createMemoryTxSubmissionLedger();
+      const getTransactionCount = vi
+        .fn()
+        .mockResolvedValueOnce(5) // initial pin
+        .mockResolvedValueOnce(9); // refreshNonce read after "nonce too low"
+      const publicClient = {
+        getChainId: vi.fn().mockResolvedValue(84532),
+        getTransactionCount,
+        estimateFeesPerGas: vi.fn().mockResolvedValue({
+          maxFeePerGas: 80n,
+          maxPriorityFeePerGas: 8n,
+        }),
+        getGasPrice: vi.fn(),
+      };
+
+      await withNonceLedger(
+        {
+          publicClient: publicClient as never,
+          ledger,
+          from,
+        },
+        async (nonceLedger) => {
+          expect(nonceLedger.nonce).toBe(5);
+          await nonceLedger.refreshNonce();
+          expect(nonceLedger.nonce).toBe(9);
+
+          // Reads fees under the REFRESHED key -- there is no prior submission at nonce 9, so no
+          // previousFees, and no failure looking up a submission recorded under nonce 5.
+          const feeResult = await nonceLedger.feeResultForAttempt(0, { forceEstimate: true });
+          expect(feeResult.kind).toBe('eip1559');
+
+          await nonceLedger.recordSubmitted({
+            hash: `0x${'33'.repeat(32)}`,
+            logicalTx: 'retry-after-refresh',
+            fees: feeResult.snapshot,
+            to: '0x2222222222222222222222222222222222222222',
+            value: 1n,
+            data: '0x',
+            submittedAtMs: 4_000,
+          });
+          await nonceLedger.markResolved(5_000);
+        },
+      );
+
+      const atRefreshedNonce = await ledger.getTxSubmission({ chainId: 84532, from, nonce: 9 });
+      expect(atRefreshedNonce).toMatchObject({
+        hash: `0x${'33'.repeat(32)}`,
+        logicalTx: 'retry-after-refresh',
+        resolvedAtMs: 5_000,
+      });
+
+      // No phantom entry ever got written or left unresolved under the stale, pre-refresh nonce.
+      const atStaleNonce = await ledger.getTxSubmission({ chainId: 84532, from, nonce: 5 });
+      expect(atStaleNonce).toBeNull();
+    });
   });
 
   describe('stuck nonce recovery', () => {
@@ -764,6 +831,45 @@ describe('tx-retry', () => {
       await expect(
         withEoaBroadcastLock(key, async () => 'ok'),
       ).resolves.toBe('ok');
+    });
+  });
+
+  // D0a round-1 review (important finding): `setDefaultEoaBroadcastLock` installs a
+  // PROCESS-GLOBAL lock as module state, contradicting the "no process-global broadcaster"
+  // invariant (`adapters/mech/safe.ts`) -- a process that composes two venues had the second
+  // install silently clobber the first with no reset hook. It must now refuse a conflicting
+  // install instead of silently rebinding.
+  describe('setDefaultEoaBroadcastLock (D0a round 1: refuse a conflicting install)', () => {
+    afterEach(() => {
+      resetDefaultEoaBroadcastLockForTesting();
+    });
+
+    it('accepts a second install under the SAME key (idempotent re-install)', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-a.db')).not.toThrow();
+      expect(getDefaultEoaBroadcastLock()).toBe(lockB);
+    });
+
+    it('refuses a second install under a DIFFERENT key instead of silently clobbering it', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-b.db')).toThrow(
+        /venue-a\.db/,
+      );
+      // The original install must still be in effect -- the throw must not have clobbered it.
+      expect(getDefaultEoaBroadcastLock()).toBe(lockA);
+    });
+
+    it('resetDefaultEoaBroadcastLockForTesting clears the installed key, allowing a fresh install', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      resetDefaultEoaBroadcastLockForTesting();
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-b.db')).not.toThrow();
+      expect(getDefaultEoaBroadcastLock()).toBe(lockB);
     });
   });
 

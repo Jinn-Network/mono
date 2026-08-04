@@ -77,6 +77,7 @@ function makeFakeDeps(
       passwordOk
         ? { ok: true as const, password: 'test' }
         : { ok: false as const, message: 'Set JINN_PASSWORD or pass --password-fd N with a readable file descriptor.' },
+    checkDaemonGuard: () => ({ blocked: false, pid: null, pidfilePath: '', reason: 'not-running' as const }),
   };
 }
 
@@ -114,6 +115,32 @@ describe('bootstrap command', () => {
       haveWei: '500',
     });
     expect(exits).toEqual([10]);
+  });
+
+  it('emits invalid_invocation exit 11 and never bootstraps when the daemon guard blocks (#525/#562/#897)', async () => {
+    let bootstrapperInvoked = false;
+    const deps = makeFakeDeps();
+    deps.checkDaemonGuard = () => ({
+      blocked: true,
+      pid: 4242,
+      pidfilePath: '/tmp/earning/daemon.pid',
+      reason: 'alive',
+    });
+    const originalFactory = deps.bootstrapperFactory;
+    deps.bootstrapperFactory = (cfg) => {
+      bootstrapperInvoked = true;
+      return originalFactory(cfg);
+    };
+    const bootstrap = createBootstrapCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
+    await bootstrap.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.exitCode).toBe(11);
+    expect(parsed.message).toContain('4242');
+    expect(parsed.details?.pid).toBe(4242);
+    expect(exits).toEqual([11]);
+    expect(bootstrapperInvoked).toBe(false);
   });
 
   it('emits invalid_invocation exit 11 when password env is missing', async () => {

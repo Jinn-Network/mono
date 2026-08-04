@@ -122,6 +122,22 @@ replaces the four that belong to the marketplace loop and keeps the rest untouch
 | **Posting loop** | the requester side: posts Submission documents through the binding's posting leg + durable intent store; **owns requester-side adoption** of deliveries for the operator's own tasks (the carve table's "application" owner, named for this host); built as the extractable work-client module (§8) | creator loop internals; launched-record generators |
 | **Evidence driver** *(new, small)* | drives what the backend deliberately will not: local-runtime `sync`, publication/announcement, `awaitIndexed`, indexing-failure surfacing. **Publication policy:** the driver publishes only records already sealed for marketplace delivery or announcement — capability-grant material and secret-forwards never enter the archive. Idempotent by record digest; a record is announced only after it is indexed | nothing (unowned today) |
 
+> **Amended 2026-08-03 (`25924bd4a`): the Evaluator loop row's "the attestation-issuer runs
+> inside the executor" is reversed.** The sandbox now writes an **unsigned** Result Evaluation
+> statement to `out/verdict` and holds no signing key at all — the evaluation harness launcher
+> grants `secretForwards: []` (`evaluation-harness/src/launcher.ts:94-95`) and the composition
+> layer rejects any grant on the evaluator-sealed input
+> (`client/src/daemon/native-evaluator-composition.ts:291-293`). The **host** parses the
+> unsigned statement, re-serializes it to canonical bytes, and refuses to seal/publish unless
+> the reserialized bytes are byte-identical to what the sandbox wrote
+> (`client/src/daemon/native-evaluator-composition.ts:343-345`, fail-closed on mismatch), then
+> seals the DSSE envelope with the evaluator Agent's key on the host side. Why: no signing
+> capability goes into an untrusted sandbox; the byte-equality reseal preserves the same
+> integrity property (delivered verdict = exactly what the sandboxed evaluation produced) that
+> in-executor signing was meant to give. The reversal is sound and not reopened by this note.
+> Same reversal, same reasoning, recorded in the
+> [local-execution-backend design §10.4](./2026-07-27-local-execution-backend-design.md#104-evaluation-runner-design-reconciliation).
+
 **Kept as-is:** reward-claim, checkpoint, eviction, balance-topup, harvest (corpus mining),
 watchdog + heartbeats.
 **Retired:** delivery-watcher (absorbed by the settlement leg and the evaluator loop);

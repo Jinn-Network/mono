@@ -10,7 +10,7 @@ import { mkdtempSync } from 'node:fs';
 import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
 import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
 import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
@@ -18,6 +18,7 @@ import {
   claudeCodeLauncher,
   predictionV1BaselineLauncher,
 } from '@jinn-network/task-execution-launchers';
+import { resetDefaultEoaBroadcastLockForTesting, setDefaultEoaBroadcastLock } from '../../src/tx-retry.js';
 import { Store } from '../../src/store/store.js';
 import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
@@ -78,6 +79,14 @@ const FACTS = {
 };
 
 const CAPS = { spendCapWei: 10n, aiUnitCap: 10 };
+
+// D0a round-1 review: `buildOperatorComposition` installs a process-global broadcast lock keyed
+// by chainId + venue state path and now REFUSES a second install under a different key (instead
+// of silently clobbering it). This file composes many independent venues (fresh mkdtemp state
+// path per test) in the same worker, so each test must start from a clean slate.
+beforeEach(() => {
+  resetDefaultEoaBroadcastLockForTesting();
+});
 
 describe('claim predicate assembly', () => {
   it('claims nothing when no policy is configured', async () => {
@@ -549,6 +558,83 @@ describe('buildOperatorComposition', () => {
     expect(evidenceCloseMock).toHaveBeenCalledTimes(1);
     expect(venueCloseMock).toHaveBeenCalledTimes(1);
     store.close();
+  });
+
+  it('lets a second same-process composition opt out of installing the default EOA broadcast lock (D0a round-2 critical)', async () => {
+    // Round-1 named "two venues in one process" (e2e harness, multi-daemon tests) as a legitimate
+    // topology; round-1's fix made `setDefaultEoaBroadcastLock` throw on ANY conflicting key,
+    // which also hard-breaks that legitimate topology -- a second `buildOperatorComposition` in
+    // the same process could no longer compose at all. This test proves the opt-out escape hatch:
+    // the second composition passes `installDefaultEoaBroadcastLock: false` and composes cleanly,
+    // while the first composition's install (and the "no accidental clobber" protection) stays
+    // intact for anyone else who tries to install under yet another key.
+    createBaseVenueMock.mockReset().mockImplementation(() => stubVenue());
+    openOperatorEvidenceMock.mockReset().mockResolvedValue({
+      runtime: {},
+      ports: { repository: {}, catalog: {}, awaitIndexed: vi.fn() },
+      close: evidenceCloseMock,
+    });
+    const { buildOperatorComposition } = await import('../../src/daemon/composition-root.js');
+
+    const buildInput = (stateRoot: string, store: Store) => ({
+      mode: 'legacy' as const,
+      config: {
+        ipfsRegistryUrl: 'https://registry.example',
+        rpcUrl: 'http://127.0.0.1:8545',
+        claudePath: 'claude',
+        executionWiring: [],
+        claimPolicy: { mode: 'claim-nothing' },
+      } as never,
+      publicClient: { getBlock: async () => ({ number: 0n, hash: '0x' + '0'.repeat(64) }) } as never,
+      walletClient: { account: { address: '0x1111111111111111111111111111111111111111' } } as never,
+      safeAddress: '0x1111111111111111111111111111111111111111' as const,
+      mechAddress: '0x2222222222222222222222222222222222222222' as const,
+      chain: {
+        chainId: 84532,
+        taskCoordinator: '0x3333333333333333333333333333333333333333',
+        jinnRouter: '0x4444444444444444444444444444444444444444',
+        mechMarketplace: '0x5555555555555555555555555555555555555555',
+        activityChecker: '0x6666666666666666666666666666666666666666',
+        generation: 'today',
+      } as never,
+      stateRoot,
+      evidenceRoot: join(stateRoot, 'evidence'),
+      venueStateDbPath: join(stateRoot, 'venue.db'),
+      profileStore: { get: () => undefined },
+      store,
+      legacyBridgeSigner: () => `0x${'0'.repeat(130)}` as const,
+    });
+
+    const stateRootA = mkdtempSync(join(tmpdir(), 'jinn-composition-two-a-'));
+    const stateRootB = mkdtempSync(join(tmpdir(), 'jinn-composition-two-b-'));
+    const storeA = new Store(':memory:');
+    const storeB = new Store(':memory:');
+
+    const compositionA = await buildOperatorComposition(buildInput(stateRootA, storeA));
+
+    // Without the opt-out, a second venue in the same process still throws -- the protection
+    // against an ACCIDENTAL clobber (round-1's actual concern) is unchanged.
+    await expect(buildOperatorComposition(buildInput(stateRootB, storeB))).rejects.toThrow(
+      /a broadcast lock is already installed/i,
+    );
+
+    // With the explicit opt-out, the second composition builds fine.
+    const compositionB = await buildOperatorComposition({
+      ...buildInput(stateRootB, storeB),
+      installDefaultEoaBroadcastLock: false,
+    });
+    expect(compositionB.broadcaster).toBeDefined();
+    expect(compositionB.broadcaster.safeAddress).toBe('0x1111111111111111111111111111111111111111');
+
+    // The first composition's install is still the one and only thing installed -- a THIRD,
+    // unrelated attempt to install under yet another key still throws.
+    expect(() => setDefaultEoaBroadcastLock({ withSender: async (_s, fn) => fn() }, 'some-other-key'))
+      .toThrow(/a broadcast lock is already installed/i);
+
+    await compositionA.close();
+    await compositionB.close();
+    storeA.close();
+    storeB.close();
   });
 
   it('advertises prediction-forecast when wiring selects prediction-v1-baseline (E39 cycle 3)', async () => {

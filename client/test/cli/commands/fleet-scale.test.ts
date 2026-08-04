@@ -46,6 +46,7 @@ function makeFakeDeps(raw: GatheredStatusRaw = mockRawOne): FleetScaleDeps {
     retireFleetServiceOnChain: async () => ({ ok: true, message: 'retired', txHash: '0xabc' } as any),
     findServiceByDisplayIndex,
     isRecoverableTransactionError: () => false,
+    checkDaemonGuard: () => ({ blocked: false, pid: null, pidfilePath: '', reason: 'not-running' as const }),
   };
 }
 
@@ -102,5 +103,42 @@ describe('fleet compound command', () => {
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  it('scale --to 3 --yes refuses and never bootstraps when the daemon guard blocks (#525/#562/#897)', async () => {
+    let bootstrapperInvoked = false;
+    const deps = makeFakeDeps();
+    deps.signerContextFactory = async () => ({
+      ok: true,
+      ctx: {
+        config: { earningDir: '/tmp/earning' },
+        networkChain: 'base-sepolia',
+        chainConfig: { distributorAddress: '0xD' },
+        fleetStore: {},
+        mnemonic: 'test',
+        fleetState: { services: [] },
+        publicClient: {},
+        masterWallet: {},
+      },
+    } as any);
+    deps.checkDaemonGuard = () => ({
+      blocked: true,
+      pid: 4242,
+      pidfilePath: '/tmp/earning/daemon.pid',
+      reason: 'alive',
+    });
+    const originalFactory = deps.bootstrapperFactory;
+    deps.bootstrapperFactory = (cfg) => {
+      bootstrapperInvoked = true;
+      return originalFactory(cfg);
+    };
+    const fleet = createFleetScaleCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({ argv: ['scale', '--to', '3', '--yes'], env: { JINN_PASSWORD: 'test' } });
+    await fleet.run(ctx);
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toContain('4242');
+    expect(exits).toEqual([11]);
+    expect(bootstrapperInvoked).toBe(false);
   });
 });

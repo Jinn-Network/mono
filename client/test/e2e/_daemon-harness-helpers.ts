@@ -992,6 +992,16 @@ export async function startDaemon(
     polymarketGammaBaseUrl?: string;
     instanceLabel?: string;
     enableComposition?: boolean;
+    /**
+     * D0a round-2 critical fix: threaded straight to `buildOperatorComposition`'s
+     * `installDefaultEoaBroadcastLock` (composition-root.ts). Only meaningful when
+     * `enableComposition` is also `true`. Defaults to `true` (unchanged behavior). A caller that
+     * runs `startDaemon` with `enableComposition: true` MORE THAN ONCE in the same process must
+     * pass `false` for every call after the first, or the second call's `buildOperatorComposition`
+     * throws (`setDefaultEoaBroadcastLock` refuses to silently rebind a conflicting key — see
+     * `tx-retry.ts`).
+     */
+    installDefaultEoaBroadcastLock?: boolean;
   },
   /**
    * Extra SolverType→harness-name dispatch entries merged into
@@ -1335,6 +1345,7 @@ export async function startDaemon(
       // ("no production Submission/dispatch-context resolver exists for today-generation tasks
       // yet") on stdout so a stalled projector is diagnosable instead of silently ticking.
       logger: { info: (m: string) => console.log(m), warn: (m: string) => console.warn(m) },
+      installDefaultEoaBroadcastLock: opts.installDefaultEoaBroadcastLock ?? true,
     });
   }
 
