@@ -72,12 +72,12 @@ describe('executeSafeTxBatch -- nonce ledger integration (issue #525/#562/#897)'
 
     const results = await Promise.all([
       executeSafeTxBatch(
-        makeSafe(),
+        { safe: makeSafe(), signerAddress: FROM },
         [{ to: '0x1111111111111111111111111111111111111111', value: '0', data: '0x' }],
         { publicClient: publicClient as never, from: FROM, ledger },
       ),
       executeSafeTxBatch(
-        makeSafe(),
+        { safe: makeSafe(), signerAddress: FROM },
         [{ to: '0x2222222222222222222222222222222222222222', value: '0', data: '0x' }],
         { publicClient: publicClient as never, from: FROM, ledger },
       ),
@@ -89,5 +89,30 @@ describe('executeSafeTxBatch -- nonce ledger integration (issue #525/#562/#897)'
     expect(new Set(usedNonces).size).toBe(2);
     // The core invariant: pinning + the shared per-EOA lock prevented the collision entirely.
     expect(nonceTooLowCount()).toBe(0);
+  });
+
+  // D0a round-1 review (important finding): `executeSafeTxBatch` used to trust a caller-supplied
+  // `from` with no check that it is the address the `SafeInstance` will actually sign and
+  // broadcast with. If `from` ever diverges from the Safe instance's own signer (a hand-edited
+  // fleet JSON, a rotated agent, a reconcile path that patches `agent_address`), the old code
+  // would pin account A's nonce onto account B's transaction. `initDeployedSafe` now returns the
+  // signer address alongside the `SafeInstance`, and `executeSafeTxBatch` asserts it against
+  // `options.from` before doing anything else -- a mismatch must never reach `createTransaction`.
+  it('refuses to run when options.from does not match the Safe instance\'s own signer', async () => {
+    const { publicClient, makeSafe } = makeSimulatedSafeChain(10);
+    const ledger = createMemoryTxSubmissionLedger();
+    const safe = makeSafe();
+    const wrongFrom = '0x1234567890123456789012345678901234567890' as const;
+
+    await expect(
+      executeSafeTxBatch(
+        { safe, signerAddress: FROM },
+        [{ to: '0x1111111111111111111111111111111111111111', value: '0', data: '0x' }],
+        { publicClient: publicClient as never, from: wrongFrom, ledger },
+      ),
+    ).rejects.toThrow(/signer/i);
+
+    // The mismatch must be caught BEFORE any Safe SDK call, not after a wrong broadcast.
+    expect(safe.createTransaction).not.toHaveBeenCalled();
   });
 });

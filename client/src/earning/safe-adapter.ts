@@ -162,20 +162,31 @@ export async function initPredictedSafe(opts: {
   return { safe, address };
 }
 
+/** A `SafeInstance` paired with the address it was actually constructed to sign with. */
+export interface DeployedSafe {
+  readonly safe: SafeInstance;
+  readonly signerAddress: Address;
+}
+
 /**
  * Initialise a Safe SDK instance for an already-deployed Safe.
+ *
+ * Returns the derived signer address alongside the instance (D0a round-1 review) so
+ * `executeSafeTxBatch` can verify a caller-supplied `from` actually matches the key this
+ * `SafeInstance` will sign and broadcast with, rather than trusting it blindly.
  */
 export async function initDeployedSafe(opts: {
   rpcUrl: string;
   signerKey: string;
   safeAddress: string;
-}): Promise<SafeInstance> {
+}): Promise<DeployedSafe> {
   const init = await resolveSafeInit();
-  return init({
+  const safe = await init({
     provider: opts.rpcUrl,
     signer: opts.signerKey,
     safeAddress: opts.safeAddress,
   });
+  return { safe, signerAddress: privateKeyToAccount(opts.signerKey as Hex).address };
 }
 
 export interface ExecuteSafeTxBatchOptions {
@@ -201,12 +212,25 @@ export interface ExecuteSafeTxBatchOptions {
  * `withEoaBroadcastLock` critical section as `executeSafeTxDirect`, so both
  * paths -- and venue-base's own broadcaster, once `setDefaultEoaBroadcastLock`
  * is installed -- serialize against each other.
+ *
+ * D0a round-1 review: `options.from` is used to pick the lock/nonce-ledger key, so it MUST be
+ * the address `deployedSafe.safe` will actually sign and broadcast with. `deployedSafe` (from
+ * `initDeployedSafe`) carries that address alongside the instance -- if it does not match
+ * `options.from`, this pins the wrong EOA's nonce, which is caught here before any Safe SDK
+ * call rather than discovered later as a stuck/gapped nonce.
  */
 export async function executeSafeTxBatch(
-  safe: SafeInstance,
+  deployedSafe: DeployedSafe,
   transactions: MetaTransactionData[],
   options: ExecuteSafeTxBatchOptions,
 ): Promise<TransactionResult> {
+  if (deployedSafe.signerAddress.toLowerCase() !== options.from.toLowerCase()) {
+    throw new Error(
+      `executeSafeTxBatch: options.from (${options.from}) does not match the Safe instance's `
+      + `own signer (${deployedSafe.signerAddress}). Refusing to pin the wrong EOA's nonce/lock.`,
+    );
+  }
+  const { safe } = deployedSafe;
   return withNonceLedger(
     {
       publicClient: options.publicClient,
