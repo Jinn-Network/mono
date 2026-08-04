@@ -157,6 +157,51 @@ describe('jinn run native/legacy config routing (issue #2378)', () => {
     expect(written.configShapeVersion).toBe(2);
   });
 
+  // --- Coordinator re-review: --config=<path> (equals form) bypassed both the
+  // "explicit --config always forces legacy" behavior above and the mutual-exclusion
+  // guard below, because run.ts sourced the legacy flag from
+  // deps.getConfigPathFromArgs (a raw argv.indexOf('--config') scan, config.ts:1520-1523)
+  // while the native side had already learned the equals form. The two scanners were
+  // asymmetric — --config=<path> was silently invisible to the legacy-flag check.
+
+  it('an explicit --config=<path> (equals form) also always forces legacy, even when a native default file exists', async () => {
+    writeNative(defaultNativeConfigPath);
+    const nativeBefore = readFileSync(defaultNativeConfigPath, 'utf-8');
+    const explicitLegacyPath = join(jinnDir, 'my-legacy-config.json');
+    writeLegacy(explicitLegacyPath, { network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx } = makeCommandCtx({ argv: [`--config=${explicitLegacyPath}`], env: { JINN_PASSWORD: 'test' } });
+    await run.run(ctx);
+
+    expect(deps.mainFn).toHaveBeenCalledOnce();
+    expect(deps.nativeMainFn).not.toHaveBeenCalled();
+    // The native default file was never read or written.
+    expect(readFileSync(defaultNativeConfigPath, 'utf-8')).toBe(nativeBefore);
+    const written = JSON.parse(readFileSync(explicitLegacyPath, 'utf-8'));
+    expect(written.configShapeVersion).toBe(2);
+  });
+
+  it('--config=<path> and --native-config=<path> (both equals form) together is invalid_invocation, no boot', async () => {
+    writeNative(defaultNativeConfigPath);
+    writeLegacy(DEFAULT_CONFIG_PATH, {});
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      argv: [`--native-config=${defaultNativeConfigPath}`, `--config=${DEFAULT_CONFIG_PATH}`],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(deps.mainFn).not.toHaveBeenCalled();
+    expect(deps.nativeMainFn).not.toHaveBeenCalled();
+  });
+
   it('passing --native-config and --config together is invalid_invocation, no boot', async () => {
     writeNative(defaultNativeConfigPath);
     writeLegacy(DEFAULT_CONFIG_PATH, {});

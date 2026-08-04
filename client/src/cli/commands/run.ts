@@ -25,7 +25,6 @@ import {
 } from '../../preflight/api-port.js';
 import { resolveConfiguredOperatorVerticalMode } from '../../daemon/native-vertical-config.js';
 import {
-  getNativeConfigPathFromArgs,
   loadNativeProductConfigFile as defaultLoadNativeConfig,
   resolveNativeConfigPath,
 } from '../../daemon/native-config-path.js';
@@ -238,8 +237,17 @@ Failure example (funding gate):
       // branch, and the legacy config.json is never even opened once native is
       // selected. With neither flag, the default native-config.json's mere presence
       // (nobody creates that file by accident) is the deliberate opt-in signal.
-      const legacyConfigFlag = deps.getConfigPathFromArgs(ctx.argv);
-      const nativeConfigFlag = getNativeConfigPathFromArgs(ctx.argv);
+      //
+      // Read both flags from `parsed.values` (parseArgs already handles `--flag value`
+      // and `--flag=value` identically for a `type: 'string'` option) rather than from
+      // `deps.getConfigPathFromArgs` — that DI'd helper is `config.ts`'s raw
+      // `argv.indexOf('--config')` scan, which only recognises the space-separated
+      // form. Using it here while the native side recognises both forms made
+      // `--config=<path>` invisible to this decision: it neither forced legacy nor
+      // tripped the mutual-exclusion check below, silently falling through to
+      // whichever branch the (unrecognised-by-this-scan) rest of argv implied.
+      const legacyConfigFlag = parsed.values.config as string | undefined;
+      const nativeConfigFlag = parsed.values['native-config'] as string | undefined;
       if (legacyConfigFlag !== undefined && nativeConfigFlag !== undefined) {
         emitEnvelope(
           {
