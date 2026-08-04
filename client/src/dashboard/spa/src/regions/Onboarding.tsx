@@ -80,6 +80,12 @@ const PHASE_FOR_STEP: Record<string, BootstrapPhaseDescriptor> = {
   safe_predicted: { phase: 1, subState: null },
   awaiting_funding: { phase: 2, subState: null },
   safe_deployed: { phase: 3, subState: 'Deploying' },
+  // #2407: the daemon's fleet-phase list now reports `awaiting_stake`
+  // (previously mis-reported as `wallet` by the endpoint's own sync bug —
+  // see client/src/earning/fleet-bootstrap-phase.ts). It's the first
+  // per-service step in both progressions, same phase/subState as its
+  // siblings below.
+  awaiting_stake: { phase: 3, subState: 'Deploying' },
   service_created: { phase: 3, subState: 'Deploying' },
   service_activated: { phase: 3, subState: 'Deploying' },
   agents_registered: { phase: 3, subState: 'Deploying' },
