@@ -1,5 +1,6 @@
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { z } from 'zod';
 
 /**
  * Class O (observation) container primitive
@@ -8,7 +9,9 @@ import { dirname } from 'node:path';
  * Every Class O writer in this repo hand-rolled the same atomic-rename idiom, and one of them
  * (`phase-d-transition-usage.ts`) dropped the restrictive mode along the way — its temp file
  * defaulted to 0644, and the rename preserved that leak straight through to the durable file.
- * This is the one Class O container: mkdir the parent directory, write to a uniquely-named temp
+ * This is the one Class O container: Zod-validate the value against the caller's schema (AC1:
+ * "versioned-Zod-strict" — a cyclic, unserializable, or shape-drifted value never touches the
+ * filesystem), mkdir the parent directory, write the serialized result to a uniquely-named temp
  * file with `wx` (never silently clobber a concurrent writer) and mode 0600 by default, fsync the
  * file, rename into place, chmod the target to the requested mode (independent of the process
  * umask), then fsync the parent directory so the rename itself is durable. Mode is a tested
@@ -20,6 +23,11 @@ import { dirname } from 'node:path';
  * for now — see issue #2409's follow-up scope) `client/src/config/atomic-write.ts`'s discipline,
  * the stronger sibling of this idiom for config files.
  *
+ * The schema is a caller-supplied parameter, not a helper-owned import: this keeps the container
+ * generic and extractable rather than coupling it to any one writer's domain shape. Reader-side
+ * validation (parsing a Class O file back in) is explicitly out of scope here and stays
+ * hand-rolled at each reader for now — folding readers onto the same schemas is a follow-up.
+ *
  * Deliberately import-free of daemon/api/cli — this module is an extractable boundary (issue
  * #2409); a later stage moves it beside the trust core (`packages/trust/core`) once Class A
  * receipts exist to share a container profile with.
@@ -28,11 +36,16 @@ export interface WriteObservationOptions {
   readonly mode?: number;
 }
 
-export function writeObservation(
+export function writeObservation<T>(
   path: string,
-  contents: string,
+  schema: z.ZodType<T>,
+  value: T,
   { mode = 0o600 }: WriteObservationOptions = {},
 ): void {
+  // Validate and serialize before any filesystem call: an invalid value must never partially
+  // land, and a serialization failure (a cyclic value slipping past a lenient schema) must not
+  // leave a temp file behind.
+  const contents = `${JSON.stringify(schema.parse(value), null, 2)}\n`;
   const directory = dirname(path);
   mkdirSync(directory, { recursive: true });
   const temporaryPath = `${path}.tmp-${process.pid}-${crypto.randomUUID()}`;

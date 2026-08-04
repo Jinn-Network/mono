@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { z } from 'zod';
 
 import { writeObservation } from '../observability/write-observation.js';
 
@@ -16,13 +17,18 @@ import { writeObservation } from '../observability/write-observation.js';
  * durable file lives under the operator's `stateDir` instead and is shipped by the periodic
  * status-snapshot loop (see that module) rather than an HTTP GET.
  */
-export type PhaseDTransitionSignal =
-  | 'legacy-operator-composition'
-  | 'marketplace-pipeline-invocation'
-  | 'legacy-task-submission-synthesis'
-  | 'legacy-evaluator-delivery-watcher-loaded'
-  | 'legacy-wiring-config-field'
-  | 'native-operator-composition';
+// The single source of truth for the signal vocabulary: both the TS union below and the Zod
+// enum used to validate every write derive from this array, so they cannot drift apart.
+const PHASE_D_TRANSITION_SIGNALS = [
+  'legacy-operator-composition',
+  'marketplace-pipeline-invocation',
+  'legacy-task-submission-synthesis',
+  'legacy-evaluator-delivery-watcher-loaded',
+  'legacy-wiring-config-field',
+  'native-operator-composition',
+] as const;
+
+export type PhaseDTransitionSignal = typeof PHASE_D_TRANSITION_SIGNALS[number];
 
 export interface PhaseDTransitionUsageCounter {
   readonly signal: PhaseDTransitionSignal;
@@ -37,12 +43,36 @@ interface PhaseDTransitionUsageState {
   readonly counters: readonly PhaseDTransitionUsageCounter[];
 }
 
+// Versioned-Zod-strict container profile (spec §7): the shape a durable state file must satisfy
+// before writeObservation will write it.
+const phaseDTransitionUsageCounterSchema = z.object({
+  signal: z.enum(PHASE_D_TRANSITION_SIGNALS),
+  count: z.number().int().min(1),
+  firstObservedAt: z.string().min(1),
+  lastObservedAt: z.string().min(1),
+});
+
+const phaseDTransitionUsageStateSchema = z.object({
+  schemaVersion: z.literal(1),
+  observationWindowStartedAt: z.string().min(1),
+  counters: z.array(phaseDTransitionUsageCounterSchema).readonly(),
+});
+
 export interface PhaseDTransitionUsageDiagnostics {
   readonly schemaVersion: 1;
   readonly durable: boolean;
   readonly observationWindowStartedAt: string;
   readonly counters: readonly PhaseDTransitionUsageCounter[];
 }
+
+// Exported so a container embedding these diagnostics as a subtree (e.g. the native status
+// snapshot) can compose it into its own writeObservation schema without duplicating the shape.
+export const phaseDTransitionUsageDiagnosticsSchema = z.object({
+  schemaVersion: z.literal(1),
+  durable: z.boolean(),
+  observationWindowStartedAt: z.string().min(1),
+  counters: z.array(phaseDTransitionUsageCounterSchema).readonly(),
+});
 
 const counters = new Map<PhaseDTransitionSignal, PhaseDTransitionUsageCounter>();
 let storagePath: string | undefined;
@@ -68,11 +98,11 @@ function parseState(path: string): PhaseDTransitionUsageState | undefined {
 
 function persist(): void {
   if (storagePath === undefined) return;
-  writeObservation(storagePath, `${JSON.stringify({
+  writeObservation(storagePath, phaseDTransitionUsageStateSchema, {
     schemaVersion: 1,
     observationWindowStartedAt,
     counters: phaseDTransitionUsageSnapshot(),
-  } satisfies PhaseDTransitionUsageState, null, 2)}\n`);
+  } satisfies PhaseDTransitionUsageState);
 }
 
 /** Configure (or reload) the durable observation window used by this process. */

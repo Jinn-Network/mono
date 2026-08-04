@@ -20,6 +20,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { z } from 'zod';
 import {
   appendDailyObservation,
   fetchHttpStatusSnapshot,
@@ -30,6 +31,24 @@ import {
   type PhaseDObservationReceipt,
 } from '../src/monitoring/phase-d-observation-window.js';
 import { writeObservation } from '../src/observability/write-observation.js';
+
+// Minimal structural container profile (spec §7, issue #2409's follow-up scope): validates the
+// receipt's top-level envelope at the write boundary without re-deriving the full deep shape
+// (missing/corrupt/reset invalidation, the verdict computation) that already lives, and is
+// already tested, in `src/monitoring/phase-d-observation-window.ts` — the pure library that
+// builds every value passed here. Folding the reader side onto full Zod schemas is out of scope
+// for this change (reader-side hand-rolled validators are explicitly retained).
+const phaseDObservationReceiptWriteSchema = z.object({
+  schemaVersion: z.literal(1),
+  kind: z.literal('jinn.phase-d-observation-window'),
+  windowId: z.string().min(1),
+  approvedBy: z.string().min(1),
+  startedAt: z.string().min(1),
+  endedAt: z.string().min(1).nullable(),
+  supportBoundary: z.unknown(),
+  instances: z.array(z.unknown()).readonly(),
+  verdict: z.unknown(),
+});
 
 interface FleetInstanceConfig {
   readonly instanceId: string;
@@ -126,7 +145,7 @@ async function fetchInstance(instance: FleetInstanceConfig, collectedAt: string)
 }
 
 function persistReceiptAtomic(path: string, receipt: PhaseDObservationReceipt): void {
-  writeObservation(path, `${JSON.stringify(receipt, null, 2)}\n`);
+  writeObservation(path, phaseDObservationReceiptWriteSchema, receipt);
 }
 
 async function main(): Promise<void> {

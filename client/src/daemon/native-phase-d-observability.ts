@@ -21,11 +21,13 @@
 
 import { join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
+import { z } from 'zod';
 
 import { buildInfo } from '../build-info.js';
 import {
   configurePhaseDTransitionUsage,
   phaseDTransitionUsageDiagnostics,
+  phaseDTransitionUsageDiagnosticsSchema,
   recordPhaseDTransitionUse,
   type PhaseDTransitionUsageDiagnostics,
 } from '../compatibility/phase-d-transition-usage.js';
@@ -74,12 +76,54 @@ export interface NativeStatusSnapshot {
   readonly phaseDTransitionUsage: PhaseDTransitionUsageDiagnostics;
 }
 
-function persistDurable(path: string, contents: string): void {
+// Versioned-Zod-strict container profile (spec §7). Mirrors the `NativeOperatorHealth` interface
+// (`native-operator-host.ts`) field-for-field rather than importing it as a schema — that
+// interface is TS-only (no runtime Zod counterpart), and this module's own extractability (issue
+// #2409: no daemon/api/cli imports on the write path beyond what it already needs) argues against
+// growing a new coupling just to share a schema object.
+const nativeOperatorHealthSchema = z.object({
+  mode: z.literal('native-v1'),
+  role: z.enum(['requester', 'solver', 'evaluator']),
+  roleKeyIds: z.record(z.string(), z.string()),
+  sourceLag: z.number(),
+  sourceLagBySource: z.record(z.string(), z.number()),
+  leaseOwned: z.boolean(),
+  venue: z.object({
+    canonicalBlock: z.string(),
+    finalizedBlock: z.string(),
+    caughtUp: z.boolean(),
+  }),
+  backendReady: z.boolean(),
+  backendRequired: z.boolean(),
+  executableDigest: z.string().optional(),
+  evidenceReady: z.boolean(),
+  evidenceRequired: z.boolean(),
+  publicSourceReady: z.boolean(),
+  uncertainOperations: z.number(),
+  nativeFallbackCount: z.literal(0),
+});
+
+const nativeStatusSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  kind: z.literal('jinn.native-operator-status-snapshot'),
+  generatedAt: z.string().min(1),
+  effectiveMode: z.enum(['legacy', 'native-v1']),
+  implVersion: z.string(),
+  reportedSourceSha: z.string(),
+  role: z.enum(['requester', 'solver', 'evaluator']),
+  readiness: z.enum([
+    'explicit-legacy', 'explicit-native-unvalidated', 'live-closure-missing', 'live-closure-validated',
+  ]),
+  health: nativeOperatorHealthSchema,
+  phaseDTransitionUsage: phaseDTransitionUsageDiagnosticsSchema,
+});
+
+function persistDurable(path: string, snapshot: NativeStatusSnapshot): void {
   // Mode 0600 (writeObservation's default): the snapshot carries roleKeyIds (identifiers, e.g.
   // did:key:..., never private key material) and an executableDigest, and is meant to be
   // mounted/shipped off-host by the deploy platform — restrict it like every other durable
   // secret-adjacent file in this repo.
-  writeObservation(path, contents);
+  writeObservation(path, nativeStatusSnapshotSchema, snapshot);
 }
 
 function buildSnapshot(input: {
@@ -114,7 +158,7 @@ export function writeNativeStatusSnapshot(input: {
     health: input.health,
     now: input.now ?? (() => new Date()),
   });
-  persistDurable(input.path, `${JSON.stringify(snapshot, null, 2)}\n`);
+  persistDurable(input.path, snapshot);
   return snapshot;
 }
 
