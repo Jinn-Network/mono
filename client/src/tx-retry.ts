@@ -887,14 +887,19 @@ async function withNonceLedgerInner<T>(
   }
 
   const nonce = args.nonce ?? await resolvePendingNonce(args.publicClient, args.from);
-  const key = { chainId, from: args.from, nonce };
   const context: NonceLedgerContext = {
     ledger,
     chainId,
     from: args.from,
     nonce,
+    // D0a round-2 minor: `feeResultForAttempt`/`recordSubmitted`/`markResolved` all read
+    // `context.nonce` HERE, at call time, rather than closing over the initial `nonce` local --
+    // `refreshNonce()` below only mutates `context.nonce`, so a closure that captured the initial
+    // value would keep operating on the pre-refresh nonce after a "nonce too low" retry
+    // (`executeSafeTxBatch`/`executeSafeTxDirect`), leaving a permanently-unresolved phantom ledger
+    // entry at the stale nonce and no entry at the nonce actually broadcast.
     async feeResultForAttempt(attemptIndex, options = {}) {
-      const previous = await ledger.getTxSubmission(key);
+      const previous = await ledger.getTxSubmission({ chainId, from: args.from, nonce: context.nonce });
       return viemFeeOverrideResultForAttempt(args.publicClient, attemptIndex, {
         previousFees: previous?.resolvedAtMs == null ? previous?.fees : undefined,
         forceEstimate: options.forceEstimate,
@@ -904,7 +909,7 @@ async function withNonceLedgerInner<T>(
       await ledger.recordTxSubmission({
         chainId,
         from: args.from,
-        nonce,
+        nonce: context.nonce,
         hash: entry.hash,
         logicalTx: entry.logicalTx,
         submittedAtMs: entry.submittedAtMs ?? Date.now(),
@@ -915,7 +920,12 @@ async function withNonceLedgerInner<T>(
       });
     },
     async markResolved(resolvedAtMs = Date.now()) {
-      await ledger.markTxSubmissionResolved({ chainId, from: args.from, nonce, resolvedAtMs });
+      await ledger.markTxSubmissionResolved({
+        chainId,
+        from: args.from,
+        nonce: context.nonce,
+        resolvedAtMs,
+      });
     },
     async refreshNonce() {
       const fresh = await resolvePendingNonce(args.publicClient, args.from);
