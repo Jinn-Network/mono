@@ -399,14 +399,22 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
         )
       : undefined;
 
-  // `as unknown as StatusV1Response`: the contract's z.looseObject schemas (§8 artifact 4's
-  // B1 fix — an additive-minor contract must tolerate, not silently strip, fields it
-  // doesn't recognize) infer a `[x: string]: unknown` index signature at every nesting
-  // level. Several nested values here (PortfolioV0Status, PredictionV1Status,
-  // TaskRunsStatus, ConfigMigrationStatus, and their own nested arrays) come from
-  // `export interface`s in other modules that don't declare that index signature, so a
-  // structural assignment check fails even though the values are exactly right — this is
-  // a TS-only mismatch between "has an index signature" and "doesn't", not a runtime one.
+  // The contract's z.looseObject schemas (§8 artifact 4's B1 fix — an additive-minor
+  // contract must tolerate, not silently strip, fields it doesn't recognize) infer a
+  // `[x: string]: unknown` index signature at every nesting level. A handful of the
+  // per-member `as StatusV1Response['<member>']` casts below bridge that against real
+  // `export interface`s from other modules that don't declare the index signature — the
+  // values are exactly right; only the two types' declared shape differs. Cast ONLY where
+  // needed (verified per-member, not blanket — a blanket `as unknown as StatusV1Response`
+  // on the whole return value was tried and reviewed off: it silently swallowed a deleted
+  // required field, a mistyped literal union, and a renamed property in an untested
+  // branch, because it disables the structural check on every OTHER member too, not just
+  // the colliding ones). The real colliders are `CostSurfaceStatus` (`costSurface`),
+  // `HarnessRollup` (`harness`), and the readonly-array member inside
+  // `PhaseDTransitionUsageCounter` (`phaseDTransitionUsage`); `portfolioV0`/`predictionV1`/
+  // `taskRuns` collide too via their own nested arrays (e.g. `InFlightTaskSummary[]`).
+  // `configMigration` does not collide and stays a plain assignment — casting it would only
+  // remove a check that already passes.
   return {
     contractVersion: CURRENT_CONTRACT_VERSION,
     statusMode: mode,
@@ -464,15 +472,26 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       hint: buildEarningsHint(raw, fleetSum),
     },
     nextActions: buildNextActions(raw, fleetSum),
-    costSurface: buildCostSurfaceStatus(process.env),
-    harness: raw.harnessRollup ?? DEFAULT_HARNESS_ROLLUP,
+    costSurface: buildCostSurfaceStatus(process.env) as StatusV1Response['costSurface'],
+    harness: (raw.harnessRollup ?? DEFAULT_HARNESS_ROLLUP) as StatusV1Response['harness'],
     security: { lastPasswordRotationAt: raw.passwordRotationAt ?? null },
-    ...(raw.portfolioV0 !== undefined ? { portfolioV0: raw.portfolioV0 } : {}),
-    ...(raw.predictionV1 !== undefined ? { predictionV1: raw.predictionV1 } : {}),
-    ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
+    ...(raw.portfolioV0 !== undefined
+      ? { portfolioV0: raw.portfolioV0 as StatusV1Response['portfolioV0'] }
+      : {}),
+    ...(raw.predictionV1 !== undefined
+      ? { predictionV1: raw.predictionV1 as StatusV1Response['predictionV1'] }
+      : {}),
+    ...(raw.taskRuns !== undefined
+      ? { taskRuns: raw.taskRuns as StatusV1Response['taskRuns'] }
+      : {}),
     ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
     ...(raw.phaseDTransitionUsage !== undefined
-      ? { phaseDTransitionUsage: { ...raw.phaseDTransitionUsage, class: 'observation' } }
+      ? {
+          phaseDTransitionUsage: {
+            ...raw.phaseDTransitionUsage,
+            class: 'observation',
+          } as StatusV1Response['phaseDTransitionUsage'],
+        }
       : {}),
-  } as unknown as StatusV1Response;
+  };
 }

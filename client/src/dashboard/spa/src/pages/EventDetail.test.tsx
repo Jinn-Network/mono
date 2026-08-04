@@ -120,6 +120,26 @@ describe('<EventDetailPage />', () => {
     }
   });
 
+  it('unknown-kind rule: renders server-supplied severity+title, never a raw kind string', async () => {
+    vi.mocked(api.getActivityEvent).mockResolvedValue(
+      event({
+        kind: 'a_kind_this_build_has_never_heard_of',
+        severity: 'warning',
+        title: 'A brand new thing happened',
+      }),
+    );
+    wrap('/events/42');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('event-detail-summary')).toBeTruthy();
+    });
+    // The heading (human-facing) renders the server-supplied title, not the raw kind — the
+    // "Details" card below it separately (and correctly) still shows the raw kind string,
+    // since that card's whole job is the unredacted raw payload.
+    expect(screen.getByRole('heading', { name: 'A brand new thing happened' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'a_kind_this_build_has_never_heard_of' })).toBeNull();
+  });
+
   it('shows a not-found state and exposes a back link', async () => {
     vi.mocked(api.getActivityEvent).mockRejectedValue(
       Object.assign(new Error('404 Not Found'), { status: 404 }),

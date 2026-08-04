@@ -4,9 +4,10 @@ import { LIFECYCLE_KINDS, type LifecycleKind } from '../api/contract/lifecycle-k
 
 /**
  * @deprecated Kept as an alias so existing importers don't need a rename. The vocabulary
- * itself now lives in `../api/contract/lifecycle-kind.ts`
- * (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 6) — that module,
- * not this one, is the source of truth both the daemon and the SPA import from.
+ * itself now lives in `../api/contract/lifecycle-kinds.const.ts`
+ * (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 6, one hop past
+ * `lifecycle-kind.ts`, which re-exports it alongside the Zod schema built from it) — that
+ * module, not this one, is the source of truth both the daemon and the SPA import from.
  */
 export const ALLOWED_LIFECYCLE_KINDS = LIFECYCLE_KINDS;
 
