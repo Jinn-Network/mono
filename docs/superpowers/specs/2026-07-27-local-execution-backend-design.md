@@ -603,6 +603,23 @@ The approved-but-unimplemented Evaluation Runner design (`integration/evidence-v
   which arrives to the harness as a `secrets/` reference-forward resolved from a
   `capabilityGrant` — a deliberate change from the Runner's host-controlled signer isolation
   (its §5.5/§23.4), now that signing happens inside the executor rather than a host-side Runner.
+
+  > **Amended 2026-08-03 (`25924bd4a`): this in-executor signing premise is reversed.** The
+  > sandbox holds no signing key — the evaluation harness launcher grants `secretForwards: []`
+  > (`evaluation-harness/src/launcher.ts:94-95`) and the composition layer rejects any grant
+  > on the evaluator-sealed input (`client/src/daemon/native-evaluator-composition.ts:291-293`)
+  > — because an untrusted sandbox is not a place to put signing capability. The sandbox instead
+  > writes an **unsigned** Result Evaluation statement to `out/verdict`; the **host** parses it,
+  > re-serializes it to canonical bytes, and refuses to seal/publish unless the reserialized
+  > bytes are byte-identical to what the sandbox wrote
+  > (`client/src/daemon/native-evaluator-composition.ts:343-345`, fail-closed on mismatch) —
+  > then the host seals the DSSE envelope with the evaluator Agent's key. This preserves the
+  > same integrity property (the delivered verdict is exactly what the sandboxed evaluation
+  > produced, unmodified) without ever handing signing capability to executor-controlled code.
+  > The reversal is sound and not reopened by this note; it is recorded here because two
+  > approved designs (this one and the
+  > [operator-daemon composition design](./2026-07-30-operator-daemon-composition-design.md#4-the-composed-operator-runtime--loop-map))
+  > still describe the superseded in-executor-signing shape.
 - **Superseded** (the host-orchestration half, all unimplemented): the durable-job premise
   (§1, §3.4), `EvaluationAttemptCheckpointStore` and the recovery ladder (§14.3, §15),
   `attemptId` idempotency (§8.1), `EvaluationReceiptV1` (§19), the
