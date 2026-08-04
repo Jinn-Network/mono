@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const PAYLOAD_TYPE = 'application/vnd.jinn.profile-manifest+json';
+export const SIGNATURE_FILE_NAME = 'manifest.dsse.json';
 
 export function preAuthenticationEncoding(payloadType, payload) {
   const typeBytes = Buffer.from(payloadType, 'utf8');
@@ -54,7 +55,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       if (!keyId) throw new Error('JINN_PROFILE_MANIFEST_KEY_ID is required alongside the signing key');
       const payload = readFileSync(join(root, 'manifest.json'));
       const envelope = signManifest(payload, privateKeyPem, keyId);
-      writeFileSync(join(root, 'manifest.dsse.json'), `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      writeFileSync(join(root, SIGNATURE_FILE_NAME), `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
       console.log(`signed manifest.json with key ${keyId}`);
     }
   } catch (error) {

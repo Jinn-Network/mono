@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -20,6 +20,7 @@ import {
   createVerificationReceipt,
   verificationGateConclusionIds,
 } from './platform-verification-receipt.mjs';
+import { SIGNATURE_FILE_NAME, signManifest } from './sign-profile-manifest.mjs';
 
 const SHA = 'c'.repeat(40);
 
@@ -321,6 +322,101 @@ test('missing, modified, or extra profile-root files cannot produce a receipt', 
     const args = receiptArgs(fixture, `receipt-profile-file-${name}.json`);
     try {
       mutate(fixture);
+      assert.throws(() => createVerificationReceipt(args), expected);
+      assert.equal(existsSync(args.outputPath), false);
+    } finally {
+      rmSync(fixture.repoRoot, { recursive: true, force: true });
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  }
+});
+
+function signProfileRoot(fixture, keyId = 'k1') {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const envelope = signManifest(
+    readFileSync(fixture.profileManifestPath),
+    privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+    keyId,
+  );
+  const signaturePath = join(fixture.profileRoot, SIGNATURE_FILE_NAME);
+  writeFileSync(signaturePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+  return signaturePath;
+}
+
+test('an unsigned profile root still produces a receipt recording no signature', () => {
+  const fixture = receiptFixture();
+  const args = receiptArgs(fixture, 'receipt-unsigned.json');
+  try {
+    assert.equal(existsSync(join(fixture.profileRoot, SIGNATURE_FILE_NAME)), false);
+    assert.equal(createVerificationReceipt(args).surfaces.profile.signature, null);
+  } finally {
+    rmSync(fixture.repoRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('a signed profile root records its key ids and sidecar digest on the receipt', () => {
+  const fixture = receiptFixture();
+  const args = receiptArgs(fixture, 'receipt-signed.json');
+  try {
+    const signaturePath = signProfileRoot(fixture);
+    const { signature } = createVerificationReceipt(args).surfaces.profile;
+    assert.deepEqual(signature.keyids, ['k1']);
+    assert.equal(signature.sha256, sha256(readFileSync(signaturePath)));
+  } finally {
+    rmSync(fixture.repoRoot, { recursive: true, force: true });
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('a signature that does not envelope the exact manifest bytes cannot produce a receipt', () => {
+  for (const [name, mutate, expected] of [
+    [
+      'foreign-payload',
+      (fixture, signaturePath) => {
+        const envelope = JSON.parse(readFileSync(signaturePath, 'utf8'));
+        envelope.payload = Buffer.from('{"version":1}\n', 'utf8').toString('base64');
+        writeFileSync(signaturePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      },
+      /profile manifest signature does not envelope the exact manifest bytes/u,
+    ],
+    [
+      'wrong-payload-type',
+      (fixture, signaturePath) => {
+        const envelope = JSON.parse(readFileSync(signaturePath, 'utf8'));
+        envelope.payloadType = 'application/json';
+        writeFileSync(signaturePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      },
+      /profile manifest signature payload type must be/u,
+    ],
+    [
+      'no-signatures',
+      (fixture, signaturePath) => {
+        const envelope = JSON.parse(readFileSync(signaturePath, 'utf8'));
+        envelope.signatures = [];
+        writeFileSync(signaturePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      },
+      /profile manifest signature must carry at least one signature/u,
+    ],
+    [
+      'unnamed-key',
+      (fixture, signaturePath) => {
+        const envelope = JSON.parse(readFileSync(signaturePath, 'utf8'));
+        delete envelope.signatures[0].keyid;
+        writeFileSync(signaturePath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      },
+      /profile manifest signature must name its key id/u,
+    ],
+    [
+      'not-json',
+      (fixture, signaturePath) => writeFileSync(signaturePath, 'not json\n', 'utf8'),
+      /profile manifest signature is not valid JSON/u,
+    ],
+  ]) {
+    const fixture = receiptFixture();
+    const args = receiptArgs(fixture, `receipt-signature-${name}.json`);
+    try {
+      mutate(fixture, signProfileRoot(fixture));
       assert.throws(() => createVerificationReceipt(args), expected);
       assert.equal(existsSync(args.outputPath), false);
     } finally {
