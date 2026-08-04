@@ -1,5 +1,15 @@
 # Cutover Stage 4 — Discovery Serving Implementation Plan
 
+> **Addendum 2026-08-04** (per the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
+> §6 and the composition design §6.2 amendment): the archive mounts on its **own listener
+> only** — the "mounted twice" shape below (main operator API + opt-in separate listener)
+> is superseded; the separate listener is mandatory and the operator-API mount is not
+> built. The SPA-fallback 404-guard task is re-planned accordingly (it guarded a mount
+> that no longer exists; local consumers reach the archive on the loopback-bound public
+> listener). Payload classes: the archive listener is `public`, everything on the operator
+> API is `operator`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Expose the operator's local record-discovery archive as a public, scope-limited HTTP surface (SSE tail + ETag head), retire the peer-sync loop, the ERC-8004 SolverNet registry client, and the whole of `client/src/discovery/`, and surface evidence/indexing health in the operator app.

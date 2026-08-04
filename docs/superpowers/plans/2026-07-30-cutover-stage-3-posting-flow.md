@@ -1,5 +1,13 @@
 # Cutover Stage 3 — Posting Flow Implementation Plan
 
+> **Addendum 2026-08-04** (per the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
+> §4.2): the posting surface is re-ruled — posting **status** joins the read plane
+> (receipts/status projection, versioned per §8); posting **mutations** are config +
+> `jinn tasks` (no mutating posting routes are built); the SPA delta this plan names is
+> limited to the read-only view, and the console inherits it at stage 6. This plan's
+> "mutation stays in the config file and the SPA" ruling is superseded accordingly.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Swap the operator runtime's requester side onto the marketplace stack — an extractable `client/src/requester/` work-client module (preflight core, posting, delivery await, requester-side adoption, requester-side evaluation sealing, lifecycle exits, evidence handles), the posting loop that drives it, the CLI and SPA surfaces it needs, and the retirement of the creator loop, launched-record generators, and lifecycle publishing.
