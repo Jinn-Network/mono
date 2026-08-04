@@ -932,6 +932,106 @@ describe('gatherStatusForApi — no staking reads on the hot path (#992)', () =>
   });
 });
 
+// Regression coverage for spec §14.2 item 2 / issue #2402: `maskRpcHost`
+// only ever ran on the boot/preflight *log* path. The status error path
+// returned a caught viem error's raw `.message` — and a viem
+// `HttpRequestError` embeds the full request URL — so a failing paid RPC
+// (key-in-path) leaked its key into the unauthenticated `/v1/status`
+// response, AND into the SQLite balance cache that gets replayed on later
+// status calls.
+describe('gather-status RPC error masking (spec §14.2 item 2, issue #2402)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.doUnmock('viem');
+    vi.resetModules();
+  });
+
+  const LEAKY_URL = 'https://base-mainnet.g.alchemy.com/v2/SECRETKEY123';
+
+  function mockLeakyViem(): void {
+    vi.doMock('viem', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('viem')>();
+      const throwLeaky = () => {
+        throw new actual.HttpRequestError({
+          url: LEAKY_URL,
+          body: { method: 'eth_call' },
+          details: 'fetch failed',
+        });
+      };
+      return {
+        ...actual,
+        createPublicClient: () => ({
+          getBlockNumber: async () => throwLeaky(),
+          getChainId: async () => throwLeaky(),
+          getBalance: async () => throwLeaky(),
+          readContract: async () => throwLeaky(),
+        }),
+        http: () => ({}),
+      };
+    });
+  }
+
+  it('masks the RPC key out of raw.rpc / masterGas / l1MasterGas / balances.eth.master and out of the persisted balance cache', async () => {
+    mockLeakyViem();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const earningDir = mkdtempSync(join(tmpdir(), 'jinn-mask-test-'));
+      const fleetStore = new FleetStateStore(earningDir);
+      const state = await fleetStore.load('base-sepolia');
+      await fleetStore.save({
+        ...state,
+        master_address: '0x1111111111111111111111111111111111111111',
+        services: [
+          {
+            index: 1,
+            agent_address: '0x2222222222222222222222222222222222222222',
+            safe_address: '0x3333333333333333333333333333333333333333',
+            service_id: 41,
+            mech_address: null,
+            staking_address: '0x5555555555555555555555555555555555555555',
+            step: 'complete',
+            error: null,
+          },
+        ],
+      });
+
+      const status = await gatherStatusForApi(store, {
+        earningDir,
+        rpcUrl: LEAKY_URL,
+        network: 'testnet',
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+
+      // Nothing in the serialized /v1/status response should ever contain
+      // the secret — this is the end-to-end assertion the issue asks for.
+      expect(JSON.stringify(status)).not.toContain('SECRETKEY123');
+
+      expect(status.rpc.ok).toBe(false);
+      expect(status.rpc.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.rpc.error).not.toContain('SECRETKEY123');
+
+      expect(status.masterGas.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.masterGas.error).not.toContain('SECRETKEY123');
+
+      expect(status.l1MasterGas?.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.l1MasterGas?.error).not.toContain('SECRETKEY123');
+
+      expect(status.balances.eth.master.error).toContain('base-mainnet.g.alchemy.com');
+      expect(status.balances.eth.master.error).not.toContain('SECRETKEY123');
+
+      // Mask-before-persistence: the balance cache row written during this
+      // call must already carry the masked message, not the raw one.
+      const cacheEntry = store
+        .getBalanceCache()
+        .find((e) => e.role === 'service.0.agent');
+      expect(cacheEntry?.error).toContain('base-mainnet.g.alchemy.com');
+      expect(cacheEntry?.error).not.toContain('SECRETKEY123');
+    });
+  });
+});
+
 describe('gather-status autoRestake gating (#651)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

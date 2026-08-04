@@ -70,6 +70,7 @@ import type {
   JoinedHarnessSpec,
 } from '../harnesses/readiness-registry.js';
 import { phaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 
 const ERC20_BALANCE_OF_ABI = [
   {
@@ -399,8 +400,19 @@ function predictionV1Unavailable(
   };
 }
 
+/**
+ * Sole choke point for turning a caught error into a string on the
+ * response/receipt path (spec §14.2 item 2, issue #2402). A failing RPC call
+ * (`client.getBlockNumber`, `readContract`, …) throws a viem
+ * `HttpRequestError` whose message embeds the full request URL — for an
+ * operator-configured paid primary that's a key-in-path secret. Masking here
+ * means every other call site in this file (and the balance-cache
+ * persistence path) inherits the redaction by construction instead of each
+ * needing its own `maskUrlsInMessage` call.
+ */
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const raw = error instanceof Error ? error.message : String(error); // lint:no-error-leak-allow — sole raw-message read; masked on the next line
+  return maskUrlsInMessage(raw);
 }
 
 export async function sumPendingStakingRewards(
@@ -455,7 +467,7 @@ export async function sumPendingStakingRewards(
       ? { sum: total.toString(), pendingByService, nextCheckpointAt }
       : { sum: total.toString(), pendingByService };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : String(e) };
+    return { error: errorMessage(e) };
   }
 }
 
@@ -513,7 +525,7 @@ async function gatherServiceBalances(
       cache.set(role, entry);
       return entry;
     } catch (error) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = errorMessage(error);
       const keepTs =
         cached &&
         hasUsefulCacheValues(cached, isAgentRole) &&
@@ -840,7 +852,7 @@ export async function gatherGatheredStatusRaw(
   } catch (e) {
     raw.rpc = {
       ok: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     };
   }
 
@@ -856,7 +868,7 @@ export async function gatherGatheredStatusRaw(
     } catch (e) {
       raw.master = {
         address: fleet.master_address,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       };
     }
   }
@@ -886,7 +898,7 @@ export async function gatherGatheredStatusRaw(
     } catch (e) {
       raw.l1Master = {
         address: fleet.master_address,
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       };
     }
   }

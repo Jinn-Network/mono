@@ -1573,9 +1573,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2822,
+      "discoveredFirstPartySurfaces": 2819,
       "generatedOutputSources": 1294,
-      "generatorSources": 571,
+      "generatorSources": 570,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -3974,6 +3974,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/check-no-error-leak.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/check-no-late-route-mount.mjs"
       },
       {
@@ -4095,16 +4105,6 @@
           "@ritsukai"
         ],
         "path": "client/scripts/gen-hl-signing-fixture.py"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/generate-openapi.ts"
       },
       {
         "categories": [
@@ -6324,6 +6324,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/status-error-masking.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/status-harness-rollup.test.ts"
       },
       {
@@ -6465,16 +6475,6 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/client-golden-envelope/regen-golden-envelope.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/architecture/contract-browser-safety.test.ts"
       },
       {
         "categories": [
@@ -13813,26 +13813,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/release/tier-1/T1.3-contract-conformance.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/release/tier-1/T1.3-contract-conformance.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/release/tier-2"
       },
       {
@@ -14216,17 +14196,6 @@
           "@ritsukai"
         ],
         "path": "client/test/scripts/external-consumer-acceptance.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces",
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/scripts/generate-openapi.test.ts"
       },
       {
         "categories": [

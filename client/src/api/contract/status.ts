@@ -399,7 +399,10 @@ export const statusV1ResponseSchema = z.looseObject({
   daemon: z.looseObject({
     shutdownState: z.string().nullable(),
     startedAt: z.string().nullable(),
-    dbPath: z.string(),
+    // No `dbPath` — deliberately not projected onto the unauthenticated /v1/status
+    // endpoint (spec §14.2 item 2, issue #2402): it's an absolute filesystem path (home
+    // dir, username). `GatheredStatusRaw.dbPath` stays available for the `jinn status`
+    // CLI roll-up (status-rollup-build.ts), a local, same-machine surface.
     timestamp: z.string(),
   }),
   rpc: z.looseObject({
