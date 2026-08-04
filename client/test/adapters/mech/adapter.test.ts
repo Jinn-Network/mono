@@ -396,6 +396,140 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('postTask carries executionRequest into the signed task.v1 document (issue #2039)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    await adapter.postTask({
+      id: 'prediction-task-execution-request',
+      description: 'Will the test market resolve YES?',
+      solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: 'bafyfixturecid',
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 25,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+      executionRequest: { harness: 'codex', model: 'gpt-5-codex', loadoutRef: 'arm-a' },
+    });
+
+    expect(uploadToIpfs).toHaveBeenCalledWith(
+      TEST_CONFIG.ipfsRegistryUrl,
+      expect.objectContaining({
+        executionRequest: { harness: 'codex', model: 'gpt-5-codex', loadoutRef: 'arm-a' },
+      }),
+    );
+
+    await adapter.stop();
+  });
+
+  it('postTask omits executionRequest from the signed document when the Task carries none', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { uploadToIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    await adapter.postTask({
+      id: 'prediction-task-no-execution-request',
+      description: 'Will the test market resolve YES?',
+      solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: 'bafyfixturecid',
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 25,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+    });
+
+    const uploaded = vi.mocked(uploadToIpfs).mock.calls.at(-1)?.[1] as Record<string, unknown>;
+    expect(uploaded).not.toHaveProperty('executionRequest');
+
+    await adapter.stop();
+  });
+
+  it('buildEvaluationTask strips restoration executionRequest (issue #2165)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const evaluationTask = (adapter as any).buildEvaluationTask({
+      task: {
+        id: 'prediction-task-1',
+        description: 'Will the test market resolve YES?',
+        solverType: 'prediction.v1',
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: 'bafyfixturecid',
+        role: 'restoration',
+        executionRequest: { harness: 'codex', version: '1.0.0', model: 'gpt-5-codex' },
+        window: { startTs: 0, endTs: 1 },
+        spec: {},
+      },
+      solutionRequestId: '0xsol',
+      attemptIndex: 0,
+      resultData: '{}',
+      solutionEnvelopeCid: 'bafysolution',
+      taskCid: 'bafytask',
+    });
+
+    expect(evaluationTask.role).toBe('evaluation');
+    expect(evaluationTask.executionRequest).toBeUndefined();
+    expect(evaluationTask.solverNetManifestCid).toBe('bafyfixturecid');
+
+    await adapter.stop();
+  });
+
+  it('buildEvaluationTask strips nested signedTask.executionRequest (issue #2169)', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { parseTask } = await import('../../../src/types/task.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const nestedSignedTask = {
+      ...signedTask(),
+      executionRequest: { harness: 'codex', version: '1.0.0', model: 'gpt-5-codex' },
+    };
+
+    const evaluationTask = (adapter as any).buildEvaluationTask({
+      task: {
+        id: 'prediction-task-1',
+        description: 'Will the test market resolve YES?',
+        solverType: 'prediction.v1',
+        contractId: 'prediction',
+        contractVersion: 'v1',
+        solverNetManifestCid: 'bafyfixturecid',
+        role: 'restoration',
+        signedTask: nestedSignedTask,
+        window: { startTs: 0, endTs: 1 },
+        spec: {},
+      },
+      solutionRequestId: '0xsol',
+      attemptIndex: 0,
+      resultData: '{}',
+      solutionEnvelopeCid: 'bafysolution',
+      taskCid: 'bafytask',
+    });
+
+    expect(evaluationTask.role).toBe('evaluation');
+    expect(evaluationTask.executionRequest).toBeUndefined();
+    expect(evaluationTask.signedTask?.executionRequest).toBeUndefined();
+    expect(parseTask(evaluationTask).executionRequest).toBeUndefined();
+
+    await adapter.stop();
+  });
+
   it('postTask refuses to sign and post a Task without solverNetManifestCid', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitTask } = await import('../../../src/adapters/mech/contracts.js');

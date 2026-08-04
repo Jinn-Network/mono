@@ -6,7 +6,7 @@ A drop-in plugin for any agent harness that supports skills + subagent dispatch 
 
 - **1 orchestrator skill** — `skills/learn/SKILL.md`. Drives the seven-phase pipeline end-to-end inside one harness session.
 - **7 sibling subagent prompts** — `skills/learn/<role>-prompt.md` for `explorer`, `strategist`, `planner`, `step-worker`, `analyst`, `promoter`, `consolidator`. Each is the prompt body the orchestrator passes to a fresh-context subagent dispatch.
-- **1 hook** — `hooks/session-start` initializes `implStateDir` as a git repo and sets author identity.
+- **2 hooks** — `hooks/session-start` initializes `implStateDir` as a git repo and sets author identity; `hooks/post-tool-use` appends failed-test working-tree diffs to `$WORKING_DIR/.execute/intermediate-failure-diffs.json` for harvest.
 
 ## Installing
 

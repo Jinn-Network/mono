@@ -23,6 +23,8 @@ import {
 } from '../../../src/harnesses/engine/engine.js';
 import type { PersistedTaskRun } from '../../../src/harnesses/engine/persistence.js';
 import type { Harness, Solution } from '../../../src/harnesses/types.js';
+import { getSolverNetContract } from '../../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../../src/solver-nets/registry.js';
 import type { Task } from '../../../src/types/task.js';
 import {
   makePredictionV1Task,
@@ -49,6 +51,39 @@ function stubHarness(overrides: Partial<Harness> = {}): Harness {
     run: async (): Promise<Solution> => ({ venueRef: { name: 'stub' }, gating: {} }),
     ...overrides,
   };
+}
+
+function fixtureSolverNetRegistry(): SolverNetRegistry {
+  const registry = new SolverNetRegistry();
+  const predictionContract = getSolverNetContract({ id: 'prediction', version: 'v1' });
+  const sweContract = getSolverNetContract({ id: 'swe-rebench-v2', version: 'v1' });
+  if (!predictionContract || !sweContract) throw new Error('fixture SolverNet contract missing');
+
+  for (const manifestCid of [LAUNCHER_A_CID, LAUNCHER_B_CID]) {
+    registry.register({
+      name: manifestCid,
+      manifestCid,
+      enabled: true,
+      solverType: 'prediction.v1',
+      roles: ['solving', 'evaluating'],
+      contract: predictionContract,
+      harness: 'prediction-v1-test-harness',
+      runtimePlugins: [],
+      taskGenerator: { enabled: false },
+    });
+  }
+  registry.register({
+    name: SWE_REBENCH_CID,
+    manifestCid: SWE_REBENCH_CID,
+    enabled: true,
+    solverType: 'swe-rebench-v2.v1',
+    roles: ['solving'],
+    contract: sweContract,
+    harness: 'prediction-v1-test-harness',
+    runtimePlugins: [],
+    taskGenerator: { enabled: false },
+  });
+  return registry;
 }
 
 describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () => {
@@ -92,6 +127,7 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubHarness({ canAttempt }) },
+      solverNetRegistry: fixtureSolverNetRegistry(),
       manifestResolver,
       ...(opts.joinedSolverNets ? { joinedSolverNets: opts.joinedSolverNets } : {}),
     });
@@ -473,16 +509,18 @@ describe('Task 28 — joinedSolverNets manifestDigest eligibility filter', () =>
   });
 
   describe('legacy / no-view path', () => {
-    it('skips the joined-eligibility filter when no view is wired', async () => {
+    it('preserves solverType fallback for a no-CID health-check when no view is wired', async () => {
       // Engine without joinedSolverNets — preserves existing test behaviour
-      // for unit tests that don't exercise per-launch attribution.
+      // for legacy health checks that don't exercise per-launch attribution.
       const engine = makeEngine({});
-      const task = makePredictionV1Task({ solverNetManifestCid: LAUNCHER_A_CID });
+      const task = {
+        ...makePredictionV1Task(),
+        solverNetManifestCid: undefined,
+      } as unknown as Task;
 
       const accept = await acceptRestorationViaClaim(engine, task);
 
-      // No filter → falls through to the legacy harness/manifest path,
-      // which accepts the task (resolver stub + stub harness).
+      // No manifest binding → falls through to the legacy solverType path.
       expect(accept).toEqual({ ok: true });
     });
   });

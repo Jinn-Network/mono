@@ -25,6 +25,8 @@ import {
   TaskRunPersistence,
   type PersistedTaskRunInput,
 } from '../../../src/harnesses/engine/persistence.js';
+import { getSolverNetContract } from '../../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../../src/solver-nets/registry.js';
 import type { Task } from '../../../src/types/task.js';
 import type { Harness, Solution, ReadyStatus } from '../../../src/harnesses/types.js';
 
@@ -49,6 +51,31 @@ function stubImpl(): Harness {
 // The gate itself is role-agnostic and unchanged, so this suite (originally 'restoration')
 // now probes it via taskRole: 'evaluation', which still reaches runnableFailureReason's
 // in-flight check unmodified.
+function fixtureSolverNetRegistry(): SolverNetRegistry {
+  const contract = getSolverNetContract({ id: 'swe-rebench-v2', version: 'v1' });
+  if (!contract) throw new Error('fixture SolverNet contract missing');
+  const registry = new SolverNetRegistry();
+  for (const manifestCid of [MANIFEST_A, MANIFEST_B, MANIFEST_C]) {
+    registry.register({
+      name: manifestCid,
+      manifestCid,
+      enabled: true,
+      solverType: ROUTING_KEY,
+      // Cutover stage 1 probes this suite via taskRole: 'evaluation' (see the
+      // comment above); dual-role registration keeps the fixture resolvable
+      // for both task roles rather than narrowing to the role the gate
+      // itself doesn't care about (the in-flight gate is role-scoped but
+      // role-agnostic about which role is under test).
+      roles: ['solving', 'evaluating'],
+      contract,
+      harness: 'stub-impl',
+      runtimePlugins: [],
+      taskGenerator: { enabled: false },
+    });
+  }
+  return registry;
+}
+
 function makeTask(opts: { id: string; manifestCid: string }): Task {
   return {
     id: opts.id,
@@ -101,6 +128,7 @@ describe('TaskEngine — single-flight gate scoped by solverNetManifestCid', () 
       store,
       paths: { workingDirRoot: join(dir, 'work'), implStateDirRoot: join(dir, 'impl-state') },
       implRegistry: { findFor: () => stubImpl() },
+      solverNetRegistry: fixtureSolverNetRegistry(),
     });
   }
 

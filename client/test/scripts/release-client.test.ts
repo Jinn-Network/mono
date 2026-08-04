@@ -7,6 +7,7 @@ import {
   parseStableVersion,
   redactSecrets,
   releaseGateSteps,
+  REQUIRED_SDK_VERSION,
   runRelease,
 } from '../../scripts/lib/release-client.mjs';
 
@@ -82,8 +83,8 @@ function makeRunner(overrides: Record<string, MockOverride> = {}) {
       return { status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
     }
     if (command === 'git' && args[0] === 'ls-remote') return { status: 0, stdout: '', stderr: '' };
-    if (command === 'npm' && args.join(' ') === 'view @jinn-network/sdk@0.1.1 version') {
-      return { status: 0, stdout: '0.1.1\n', stderr: '' };
+    if (command === 'npm' && args.join(' ') === `view @jinn-network/sdk@${REQUIRED_SDK_VERSION} version`) {
+      return { status: 0, stdout: `${REQUIRED_SDK_VERSION}\n`, stderr: '' };
     }
     if (command === 'npm' && args[0] === 'view') return { status: 1, stdout: '', stderr: 'not found' };
     if (command === 'gh' && args[0] === 'auth') return { status: 0, stdout: '', stderr: '' };
@@ -144,6 +145,24 @@ describe('release-client helpers', () => {
     expect(olasRailsSmoke?.args).toEqual(['release:olas-rails-smoke']);
     expect(releaseGateSteps(true).some((step: { id: string }) => step.id === 'gate-olas-rails-smoke')).toBe(false);
   });
+
+  it('derives REQUIRED_SDK_VERSION from the sdk manifest instead of a pinned literal', () => {
+    // A pinned literal here has the identical failure mode as the workflow
+    // literals it sits alongside (marketplace-surfaces design §6 R1): a
+    // stable client release would refuse or mispin the moment the sdk
+    // version bumps. Guard both the source shape and the runtime value.
+    const source = readFileSync(
+      new URL('../../scripts/lib/release-client.mjs', import.meta.url),
+      'utf8',
+    );
+    expect(source).not.toMatch(/REQUIRED_SDK_VERSION\s*=\s*['"`]\d+\.\d+\.\d+/);
+    expect(source).toMatch(/'packages',\s*'sdk',\s*'package\.json'/);
+
+    const sdkPackageJson = JSON.parse(
+      readFileSync(new URL('../../../packages/sdk/package.json', import.meta.url), 'utf8'),
+    ) as { version: string };
+    expect(REQUIRED_SDK_VERSION).toBe(sdkPackageJson.version);
+  });
 });
 
 describe('release-client runner', () => {
@@ -167,11 +186,11 @@ describe('release-client runner', () => {
     expect(report.tag).toBe('client-v1.2.3');
     expect(report.sdkVerification).toEqual({
       package: '@jinn-network/sdk',
-      version: '0.1.1',
+      version: REQUIRED_SDK_VERSION,
     });
     expect(report.consumerGate).toEqual({
       mode: 'local',
-      sdkVersion: '0.1.1',
+      sdkVersion: REQUIRED_SDK_VERSION,
       stepId: 'gate-pack-smoke',
     });
     expect(existsSync(report.reportPath)).toBe(true);
@@ -217,11 +236,11 @@ describe('release-client runner', () => {
     )).toBe(true);
   });
 
-  it('fails before release gates until SDK 0.1.1 exists on npm', async () => {
+  it('fails before release gates until the manifest-derived SDK version exists on npm', async () => {
     const { repoRoot, clientRoot } = makeRoots();
     writeClientPackage(clientRoot);
     const { calls, commandRunner } = makeRunner({
-      'npm view @jinn-network/sdk@0.1.1 version': {
+      [`npm view @jinn-network/sdk@${REQUIRED_SDK_VERSION} version`]: {
         status: 1,
         stderr: 'npm error E404',
       },
@@ -235,7 +254,7 @@ describe('release-client runner', () => {
       commandRunner,
       now: new Date('2026-04-26T12:00:00.000Z'),
       sleep: async () => undefined,
-    })).rejects.toThrow(/@jinn-network\/sdk@0\.1\.1/);
+    })).rejects.toThrow(new RegExp(`@jinn-network/sdk@${REQUIRED_SDK_VERSION.replace(/\./g, '\\.')}`));
 
     expect(calls.some((call) => call.command === 'yarn')).toBe(false);
   });
@@ -395,7 +414,7 @@ describe('release-client runner', () => {
     expect(resumed.status).toBe('completed');
     expect(resumed.consumerGate).toEqual({
       mode: 'registry',
-      sdkVersion: '0.1.1',
+      sdkVersion: REQUIRED_SDK_VERSION,
       clientVersion: '1.2.3',
       stepId: 'verify-external-consumer',
     });

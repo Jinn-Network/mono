@@ -28,6 +28,7 @@ describe('resolvePluginRoot', () => {
     expect(nodeFs.existsSync(join(root, 'skills', 'learn', 'SKILL.md'))).toBe(true);
     expect(nodeFs.existsSync(join(root, 'skills', 'learn', 'explorer-prompt.md'))).toBe(true);
     expect(nodeFs.existsSync(join(root, 'hooks', 'session-start'))).toBe(true);
+    expect(nodeFs.existsSync(join(root, 'hooks', 'post-tool-use'))).toBe(true);
     expect(nodeFs.existsSync(join(root, 'CLAUDE.md'))).toBe(true);
   });
 
@@ -59,6 +60,17 @@ describe('resolvePluginRoot', () => {
     });
     expect(() => resolvePluginRoot()).toThrowError(
       /missing hooks\/hooks\.json — plugin assets may be stale or incomplete; rebuild the plugin/,
+    );
+  });
+
+  it('throws with an actionable message when hooks/post-tool-use is missing', () => {
+    vi.mocked(existsSync).mockImplementation((p) => {
+      const path = String(p);
+      if (path.endsWith('hooks/post-tool-use')) return false;
+      return true;
+    });
+    expect(() => resolvePluginRoot()).toThrowError(
+      /missing hooks\/post-tool-use — plugin assets may be stale or incomplete; rebuild the plugin/,
     );
   });
 
