@@ -1573,9 +1573,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2804,
+      "discoveredFirstPartySurfaces": 2811,
       "generatedOutputSources": 1294,
-      "generatorSources": 573,
+      "generatorSources": 574,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -4304,6 +4304,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/phase-d-observation-collector.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/power.ts"
       },
       {
@@ -5485,6 +5495,16 @@
           "@ritsukai"
         ],
         "path": "client/test/_support/isolate-home.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/_support/native-config-fixture.ts"
       },
       {
         "categories": [
@@ -7074,6 +7094,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/run-native-config.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/run.test.ts"
       },
       {
@@ -7495,6 +7525,16 @@
           "@ritsukai"
         ],
         "path": "client/test/config/home-isolation.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/config/migrate-shape-v2-native-collision.test.ts"
       },
       {
         "categories": [
@@ -7964,6 +8004,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/daemon-startup-info.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/daemon.test.ts"
       },
       {
@@ -8144,6 +8194,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/native-config-path.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/native-construction-scope.test.ts"
       },
       {
@@ -8245,6 +8305,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-operator-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-phase-d-observability.test.ts"
       },
       {
         "categories": [
@@ -12944,6 +13014,16 @@
           "@ritsukai"
         ],
         "path": "client/test/monitoring/net-liveness.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/monitoring/phase-d-observation-window.test.ts"
       },
       {
         "categories": [
