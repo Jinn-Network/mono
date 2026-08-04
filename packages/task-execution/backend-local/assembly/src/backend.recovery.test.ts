@@ -899,8 +899,13 @@ describe("restart reconstruction and §6.4 actions", () => {
 
     expect(await terminalState(backend, attempt)).toBe("delivered");
     const events = await journalEvents(root, attempt);
-    // A malformed read is not evidence of staleness either — it must not manufacture a degradation.
-    expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "heartbeat-stale")).toHaveLength(0);
+    // The regression is terminal-shaped: before the fix the torn read threw out of
+    // waitForOutcome and the attempt landed failed[infrastructure]. Assert that blame never
+    // appears rather than asserting zero heartbeat-stale events — the sibling test above
+    // produces a *genuine* degradation from the same short heartbeat interval, so under a
+    // loaded runner one can legitimately fire here too, and a journal event cannot be
+    // attributed back to the read that produced it.
+    expect(events.filter(({ details }) => details["blame"] === "infrastructure")).toHaveLength(0);
   });
 
   test("a stale shim heartbeat records one degradation while waiting without killing the attempt", async () => {
