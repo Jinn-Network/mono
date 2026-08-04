@@ -673,6 +673,15 @@ export class IdentityPublisher {
     // which raced those loops and reverted "nonce too low" — the #525 launch
     // stall. encodeFunctionData reproduces the exact calldata writeContract
     // would have built.
+    //
+    // As of the P1 broadcast-lock unification (`tx-retry.ts`
+    // `setDefaultEoaBroadcastLock`), the "per-EOA broadcast lock" above is not
+    // just this module's own in-process queue: the composition root installs
+    // venue-base's durable, SQLite-backed `BroadcastLock` (the same lock
+    // `createSafeBroadcaster` holds for the creator/claim/deliver loops) as
+    // this module's default `EoaBroadcastLock`, so this setMetadata call and
+    // those Safe-mediated broadcasts serialize through the literal SAME
+    // critical section, not two independently-consistent ones.
     const data = encodeFunctionData({
       abi: IDENTITY_REGISTRY_SET_METADATA_ABI,
       functionName: 'setMetadata',

@@ -22,10 +22,11 @@
 
 import { getAddress, keccak256, toBytes, type Address, type Hex } from 'viem';
 import type { CommandContext } from '../command.js';
-import { writeJson } from './solver-plugins.js';
+import { writeJson, writeDaemonGuardBlocked } from './solver-plugins.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
 import { getReputationRegistryAddress } from '../../erc8004/addresses.js';
 import { DiscoveryUnavailableError } from '../../discovery/types.js';
+import { DaemonGuardBlockedError } from '../daemon-guard.js';
 
 // ── Shared option shapes ────────────────────────────────────────────────────
 
@@ -191,6 +192,10 @@ export async function preparePipeline(
 }
 
 function emitWriteError(ctx: CommandContext, err: unknown): void {
+  if (err instanceof DaemonGuardBlockedError) {
+    writeDaemonGuardBlocked(ctx, err);
+    return;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   if (msg.includes('Self-feedback not allowed')) {
     writeJson(ctx, {

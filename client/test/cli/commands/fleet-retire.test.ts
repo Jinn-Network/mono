@@ -56,6 +56,7 @@ function makeFakeDeps(raw: GatheredStatusRaw = mockRawTwo): FleetScaleDeps {
     retireFleetServiceOnChain: async () => ({ ok: true, message: 'retired', txHash: '0xabc' } as any),
     findServiceByDisplayIndex,
     isRecoverableTransactionError: () => false,
+    checkDaemonGuard: () => ({ blocked: false, pid: null, pidfilePath: '', reason: 'not-running' as const }),
   };
 }
 
