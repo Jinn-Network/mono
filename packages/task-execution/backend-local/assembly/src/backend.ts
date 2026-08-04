@@ -1753,7 +1753,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
       : this.journaledEvidenceLink(observedEvidence);
     if (input.capture !== undefined && observedEvidence === undefined) {
       try {
-        await input.capture.captureRuntimeObservation({ kind: "resource", entityId: "runtime/process-exit", name: "Harness process exit", value: input.execution.exitCode ?? input.execution.signal ?? "unknown", propertyId: "https://jinn.network/properties/process-exit", origin: { kind: "producer-observed", observer: this.config.source as `${string}:${string}` } });
+        await input.capture.captureRuntimeObservation({ kind: "resource", entityId: "runtime/process-exit", name: "Harness process exit", value: input.execution.exitCode ?? input.execution.signal ?? "unknown", propertyId: "https://spec.jinn.network/properties/process-exit", origin: { kind: "producer-observed", observer: this.config.source as `${string}:${string}` } });
         receipt = await input.capture.finalize({ harvest, outcome: interpreted.state === "delivered" ? "completed" : "failed", endedAt: this.now() });
       } catch (error) {
         if (input.capturePosture === "always") {
@@ -1810,7 +1810,7 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     }
     // Reserved keys win: `extensions` spreads first so no extension can shadow a canonical
     // Delivery field below.
-    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://jinn.network/profiles/task-execution/1.0", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
+    const deliveryBytes = sealDelivery({ ...extensions, protocol: "https://spec.jinn.network/profiles/task-execution/v1", attempt, task: documentDigest(input.taskBytes), outputs: harvest.manifest.map((artifact) => ({ name: artifact.path, ...(artifact.mediaType === undefined ? {} : { mediaType: artifact.mediaType }), digest: { sha256: String(artifact.sha256).replace(/^sha256:/u, "") } })), outcome: interpreted.outcome ?? "fulfilled", ...(receipt === undefined ? {} : { evidenceRecords: [receipt.record], executionIds: [receipt.executionId] }), createdAt: this.now() });
     // Finding E31: sign the Delivery's own already-sealed bytes exactly once, never re-seal --
     // see the module-level comment above `sealExecutorBindingEnvelope`. Additive: with no
     // delivery-signing key configured, `deliveryBytes` above is computed identically to before

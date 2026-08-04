@@ -58,7 +58,7 @@ describe("buildVerdictEnvelope — the delivered verdict IS the claim (design §
     const statement: ResultEvaluationStatement = {
       _type: "https://in-toto.io/Statement/v1",
       subject: [subjectTask, ...subjectResults],
-      predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+      predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
       predicate: {
         evaluatedAt: "2026-07-28T00:00:00Z",
         evaluator: { id: "urn:uuid:00000000-0000-4000-8000-000000000000" },

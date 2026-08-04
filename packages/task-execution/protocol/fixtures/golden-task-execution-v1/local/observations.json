@@ -7,11 +7,11 @@
     "time": "2026-07-28T00:00:00Z",
     "datacontenttype": "application/json",
     "sequence": "0000000000000001",
-    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
     "type": "network.jinn.task-execution.attempt-engaged.v1",
     "data": {
       "attempt": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
-      "task": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+      "task": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
       "submission": "urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
       "executor": "urn:jinn:agent:local-operator",
       "effectiveDeadline": "2026-07-29T00:00:00Z",
@@ -32,7 +32,7 @@
     "time": "2026-07-28T00:01:00Z",
     "datacontenttype": "application/json",
     "sequence": "0000000000000002",
-    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
     "type": "network.jinn.task-execution.attempt-started.v1",
     "data": {
       "startedAt": "2026-07-28T00:01:00Z",
@@ -47,10 +47,10 @@
     "time": "2026-07-28T00:05:00Z",
     "datacontenttype": "application/json",
     "sequence": "0000000000000003",
-    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
     "type": "network.jinn.task-execution.delivery-recorded.v1",
     "data": {
-      "digest": "sha256:7c75a5b04dca693d29c56bcf7213cea45338f32f8e0f2c2745775cb7e3c7cfdc"
+      "digest": "sha256:84a7367623136bbabda781b570080c704c129657bc250aedd7865dbc0c1180b5"
     }
   },
   {
@@ -61,7 +61,7 @@
     "time": "2026-07-28T00:05:30Z",
     "datacontenttype": "application/json",
     "sequence": "0000000000000004",
-    "taskdigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+    "taskdigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
     "type": "network.jinn.task-execution.attempt-terminal.v1",
     "data": {
       "state": "delivered"

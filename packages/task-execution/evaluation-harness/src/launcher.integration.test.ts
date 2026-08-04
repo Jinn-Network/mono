@@ -152,9 +152,9 @@ function documents(): Documents {
   const spec = specification();
   const sealedSpecification = sealEvaluationSpec(spec);
   const subjectTask = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "4".repeat(64) },
     },
     instructions: "Produce the subject result.",
@@ -172,7 +172,7 @@ function documents(): Documents {
   });
   const subjectResult = encoder.encode("diff --git a/control b/control\n");
   const subjectDelivery = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:11111111-1111-4111-8111-111111111111",
     task: documentDigest(subjectTask),
     outputs: [{
@@ -199,7 +199,7 @@ function documents(): Documents {
     evaluationSpecDigest: sealedSpecification.digest,
   }).bytes;
   const submission = sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${crypto.randomUUID()}`,
     task: {
       digest: {
@@ -244,7 +244,7 @@ function evaluatorRegistration(): EvaluatorRegistration {
     evaluationMethod: {
       name: "evaluation-harness-launcher-integration",
       digest: { sha256: "6".repeat(64) },
-      uri: "https://jinn.network/software/evaluation-harness/integration-v1",
+      uri: "https://spec.jinn.network/software/evaluation-harness/integration-v1",
     },
     specificationCompatibility: (value) =>
       value.family === "deterministic-process",
@@ -291,7 +291,7 @@ export const evaluationHarnessDeployment = {
     evaluationMethod: {
       name: "evaluation-harness-launcher-integration",
       digest: { sha256: "${"6".repeat(64)}" },
-      uri: "https://jinn.network/software/evaluation-harness/integration-v1",
+      uri: "https://spec.jinn.network/software/evaluation-harness/integration-v1",
     },
     specificationCompatibility(value) {
       return value.family === "deterministic-process";
@@ -326,8 +326,8 @@ export const evaluationHarnessDeployment = {
   const repository = new InMemoryEvidenceRepository();
   const backend = makeLocalTaskExecutionBackend({
     stateRoot: root,
-    source: "https://jinn.network/software/backend-local/evaluation-test",
-    executor: "https://jinn.network/software/evaluation-harness",
+    source: "https://spec.jinn.network/software/backend-local/evaluation-test",
+    executor: "https://spec.jinn.network/software/evaluation-harness",
     profileStore,
     launchers: [launcher],
     provisioner(input) {

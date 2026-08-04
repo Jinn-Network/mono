@@ -139,9 +139,9 @@ async function makeFixture(options: {
         digest: digestString(options.specificationBytes),
       };
   const subjectTaskBytes = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "4".repeat(64) },
     },
     instructions: "Return the requested patch.",
@@ -161,7 +161,7 @@ async function makeFixture(options: {
   });
   const resultBytes = encoder.encode("diff --git a/a b/a\n");
   const deliveryBytes = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
     task: documentDigest(subjectTaskBytes),
     outputs: [{
@@ -228,7 +228,7 @@ function registration(
     evaluationMethod: {
       name: "evaluation-harness-control",
       digest: { sha256: "5".repeat(64) },
-      uri: "https://jinn.network/software/evaluation-harness/control-v1",
+      uri: "https://spec.jinn.network/software/evaluation-harness/control-v1",
     },
     specificationCompatibility: (specification) =>
       specification.family === "deterministic-process",
@@ -516,13 +516,13 @@ describe("runEvaluationHarness", () => {
   test("refuses a canonical Delivery bound to a different subject Task", async () => {
     const fixture = await makeFixture();
     const foreignTask = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: { digest: { sha256: "a".repeat(64) } },
       instructions: "foreign task",
       outputs: [],
     });
     const foreignDelivery = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt: "urn:uuid:44444444-4444-4444-8444-444444444444",
       task: documentDigest(foreignTask),
       outputs: [{

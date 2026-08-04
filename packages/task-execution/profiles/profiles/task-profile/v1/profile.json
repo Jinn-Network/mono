@@ -1,5 +1,5 @@
 {
-  "profile": "https://jinn.network/profiles/task-profile/1.0",
+  "profile": "https://spec.jinn.network/profiles/task-profile/v1",
   "title": "Task Profile Format 1.0",
   "version": "1.0",
   "owner": "@jinn-network/task-execution-profiles",
@@ -9,5 +9,5 @@
     { "path": "task-profiles/prediction-forecast/1.0", "mediaType": "application/json" },
     { "path": "task-profiles/evaluation-task/1.0", "mediaType": "application/json" }
   ],
-  "digestAuthority": "https://jinn.network/manifest.json"
+  "digestAuthority": "https://spec.jinn.network/manifest.json"
 }

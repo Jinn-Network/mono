@@ -13,7 +13,7 @@ const method = {
   digest: {
     sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
   },
-  uri: "https://jinn.network/software/evaluation-harness/deterministic-v1",
+  uri: "https://spec.jinn.network/software/evaluation-harness/deterministic-v1",
 };
 
 function registration(

@@ -118,7 +118,7 @@ describe("local output artifact retrieval", () => {
   test("retrieves an exact harvested output from the digest-only Delivery descriptor", async () => {
     const backend = await fixture();
     const task = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: {
         uri: profile.profile,
         digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -127,7 +127,7 @@ describe("local output artifact retrieval", () => {
       outputs: [{ name: "prediction.txt", mediaType: "text/plain", required: true }],
     });
     const submission = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: "urn:uuid:10000000-0000-4000-8000-000000000099",
       task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
       requester: "urn:uuid:20000000-0000-4000-8000-000000000099",
