@@ -29,10 +29,23 @@ jobs:
       - name: Verify fixture immutability against the base
         env:
           BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          # DR-2026-08-04 authorizes one pre-publication fixture-manifest regeneration for
+          # the identifier re-seal. The carve-out is NOT a default: it is applied only when
+          # the head branch is a re-seal migration branch, and only ever with that one DR id.
+          # Component C2 deletes this variable, the case below, and the script flag once the
+          # re-seal waves have landed.
+          HEAD_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
           if [ -z "${BASE_REF}" ] || [ "${BASE_REF}" = "0000000000000000000000000000000000000000" ]; then
             echo "::notice::No base commit to compare against; skipping."
             exit 0
           fi
-          node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}"
+          RESEAL_FLAG=""
+          case "${HEAD_REF}" in
+            reseal/*)
+              RESEAL_FLAG="--allow-reseal DR-2026-08-04"
+              echo "::warning::DR-2026-08-04 re-seal carve-out active on ${HEAD_REF}: fixture digest changes are permitted on this branch; id removals are not."
+              ;;
+          esac
+          node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}" ${RESEAL_FLAG}
