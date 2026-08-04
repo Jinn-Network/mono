@@ -15,6 +15,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
+import { DaemonGuardBlockedError, daemonGuardEnvelope } from '../../../src/cli/daemon-guard.js';
 import type { DiscoveryAPI, PluginPublication } from '../../../src/discovery/types.js';
 import {
   withTempConfig,
@@ -103,6 +104,49 @@ describe('jinn solver-plugins endorse', () => {
     expect(out.pluginCid).toBe(cid);
     expect(out.targetAgentId).toBe('777');
     expect(exits).toEqual([]);
+  });
+
+  // D0a round-1 review (minor finding): a DaemonGuardBlockedError thrown from the lazy
+  // reputationClientFactory write closure must surface its full envelope through the shared
+  // emitWriteError helper, not collapse into publish_failed.
+  it('preserves the full daemon-guard envelope instead of collapsing it to publish_failed', async () => {
+    const configPath = withTempConfig();
+    const cid = 'bafyTestCid';
+    const row = fakePluginRow(cid, '777');
+    const guardEnvelope = daemonGuardEnvelope(
+      { blocked: true, pid: 987654, pidfilePath: '/tmp/e/daemon.pid', reason: 'alive' },
+      'jinn solver-plugins publish <source>',
+    );
+    const giveFeedback = vi.fn(async () => { throw new DaemonGuardBlockedError(guardEnvelope); });
+    const reputationClientFactory = vi.fn(() => ({
+      giveFeedback,
+      respondToFeedback: vi.fn(),
+      revokeFeedback: vi.fn(),
+      readAllFeedback: vi.fn(),
+      getSummary: vi.fn(),
+      getClients: vi.fn(),
+    }));
+
+    const command = createSolverPluginsCommand({
+      bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
+      discoveryApiFactory: () => discoveryWith([row]),
+      reputationClientFactory,
+      resolveCliPassword: () => ({ ok: true, password: 'test', source: 'env' } as any),
+    });
+
+    const { ctx, writes, exits } = makeCtx([
+      'endorse', cid,
+      '--score', '100',
+      '--score-decimals', '2',
+      '--config', configPath,
+    ]);
+    await command.run(ctx);
+
+    const out = parsedLine(writes) as any;
+    expect(out.error.code).toBe('invalid_invocation');
+    expect(out.error.message).toContain('987654');
+    expect(out.error.hint).toContain('JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON');
+    expect(exits).toEqual([11]);
   });
 
   it('emits keystore_missing envelope when resolveCliPassword fails', async () => {

@@ -19,6 +19,13 @@ export type {
   SolverNetManifestSummary,
   EnvelopeRef,
   CorpusQuery,
+  TaskLifecycleEvidence,
+  AuthoritativeTaskLifecycle,
+  AuthoritativeTaskRow,
+  AuthoritativeAttemptRow,
+  AuthoritativeVerdictRow,
+  AttemptEnvelopeCandidate,
+  VerdictEnvelopeCandidate,
 } from './types.js';
 
 export { DiscoveryUnavailableError } from './types.js';

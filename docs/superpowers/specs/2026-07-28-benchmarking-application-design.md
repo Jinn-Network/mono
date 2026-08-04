@@ -556,7 +556,14 @@ claim anyone can recompute and byte-compare.
   - `verification` — per core pinning axis (`harness`, `model`, `loadout`,
     `isolation`): `match | mismatch | unverifiable`, derived by comparing the
     arm's pinning against the evidence Runtime Observation / effective-
-    execution attestation (#2041); plus `checksFailed[]` naming any failed
+    execution attestation (#2041). *(Amended 2026-08-03, DF-2 of the C4
+    review: on venues whose backend **enforces** a pinning axis — admission
+    gate plus digest-verified materialization, per the policy
+    identity/outcomes design §4.3/§7 — the admission-gate leg is a valid
+    `match` source for that axis, corroborated by observation where one
+    exists. Attested venues still reach `match` only via a corroborating
+    Runtime Observation. The first producer implementing both legs is
+    `@jinn-network/benchmarking-local`.)* Plus `checksFailed[]` naming any failed
     named checks (including a non-gating independence failure under
     `independence: disclosed`).
   - `integrityTier` — `re-derivable | attested-only` (§8.4).

@@ -69,6 +69,14 @@
       "kind": "workflow",
       "path": ".github/workflows/task-supply-ci.yml"
     },
+    "policy-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/policy-ci.yml"
+    },
+    "policy-optimization-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/policy-optimization-ci.yml"
+    },
     "autopilot-ci": {
       "kind": "workflow",
       "path": ".github/workflows/autopilot-board-painter.yml"
@@ -112,7 +120,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 49,
+      "expectedPackageCount": 50,
       "publishPolicies": [
         "canary-only"
       ],
@@ -149,6 +157,25 @@
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
         "experimental-task-supply",
+        "platform-v1"
+      ],
+      "stackPublished": false,
+      "canary": false,
+      "stable": false
+    },
+    "experimental-policy": {
+      "expectedPackageCount": 2,
+      "publishPolicies": [
+        "disabled"
+      ],
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "allowedClassifications": [
+        "platform"
+      ],
+      "allowedDependencyReleaseGroups": [
+        "experimental-policy",
         "platform-v1"
       ],
       "stackPublished": false,
@@ -196,6 +223,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-policy",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1"
@@ -205,7 +233,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 8,
+      "expectedPackageCount": 9,
       "publishPolicies": [
         "private",
         "never"
@@ -218,6 +246,7 @@
         "indexer-ci",
         "indexer-enrichment-ci",
         "plugin-tree-ci",
+        "policy-optimization-ci",
         "task-supply-ci"
       ],
       "allowedClassifications": [
@@ -228,6 +257,7 @@
       ],
       "allowedDependencyReleaseGroups": [
         "experimental-environment-supply",
+        "experimental-policy",
         "experimental-task-supply",
         "legacy-product-lines",
         "platform-v1",
@@ -826,6 +856,49 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmarking-local",
+      "path": "packages/benchmarking/local",
+      "domain": "benchmarking",
+      "role": "local venue adapter",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md",
+            "status": "proposed"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmarking-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],
@@ -3413,6 +3486,127 @@
         "fixtures": [
           "fixtures"
         ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-identity",
+      "path": "packages/policy/identity",
+      "domain": "policy",
+      "role": "execution-policy identity and candidate manifest sealing",
+      "tier": 3,
+      "tierReason": "A pure identity/canonicalization substrate over protocol-layer shapes: it derives, seals, and validates two format-token documents, defines no record kind, and is imported by no tier-1 or tier-2 package.",
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-policy",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-outcomes",
+      "path": "packages/policy/outcomes",
+      "domain": "policy",
+      "role": "policy-keyed outcomes projection",
+      "tier": 3,
+      "classification": "platform",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "experimental-policy",
+      "publishPolicy": "disabled",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [
+          "fixtures"
+        ],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/policy-optimization",
+      "path": "packages/policy-optimization",
+      "domain": "policy",
+      "role": "policy optimization product",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "policy-optimization-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/policy-optimization-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
         "conformance": []
       },
       "supersedes": [],

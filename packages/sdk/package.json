@@ -1,6 +1,6 @@
 {
   "name": "@jinn-network/sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Stable SDK surface for Jinn SolverNets, Harnesses, plugins, and typed payloads.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -53,10 +53,6 @@
     "./checkpoint": {
       "import": "./dist/checkpoint.js",
       "types": "./dist/checkpoint.d.ts"
-    },
-    "./benchmarking": {
-      "import": "./dist/benchmarking.js",
-      "types": "./dist/benchmarking.d.ts"
     }
   },
   "files": [

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { keccak256, toBytes } from 'viem';
 import type { ZodIssue } from 'zod/v3';
-import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput } from './persistence.js';
+import { TaskRunPersistence, type PersistedTaskRun, type PersistedTaskRunInput, serializeIntermediateFailureDiffsJson } from './persistence.js';
 import { TaskRunState, MissingEvidenceHashError } from './state.js';
 import type { Store } from '../../store/store.js';
 import {
@@ -60,7 +60,7 @@ import {
 } from '../../adapters/mech/safe-revert.js';
 import { emitEvent } from '../../observability/emit-event.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.js';
+import type { Harness, HarnessContext, HarnessMode, RuntimePlugin, Solution } from '../types.js';
 import { SkippableError } from '../types.js';
 import type {
   ExecutionPayload,
@@ -78,6 +78,7 @@ import {
   encodeExecutionPayload,
   encodeExecutionPayloadV2,
   modeStringToFlag,
+  protocolExecutorMode,
 } from '../../erc8004/index.js';
 import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
@@ -97,7 +98,7 @@ import {
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
-import { harnessStateDirName } from '../names.js';
+import { harnessStateDirName, harnessNameMatches } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 import {
   AutopilotAdoptionReceiptSchema,
@@ -208,18 +209,39 @@ export class DeliveryDiscoveryAnchorUnavailableError extends Error {
  * `harnesses/engine/registry.ts` (`HarnessRegistry`).
  */
 export interface ImplRegistry {
-  findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined;
+  findFor(ctx: {
+    solverType: string;
+    role?: 'restoration' | 'evaluation';
+    /**
+     * Manifest-pinned Harness name (issue #2039) — the name from the
+     * specific joined SolverNet the caller resolved for this task's
+     * `solverNetManifestCid`. Takes priority over any boot-time static
+     * solverType→Harness map. Optional: callers without a task-specific
+     * SolverNet in hand (or `ImplRegistry` implementations that don't care)
+     * omit it and dispatch proceeds exactly as before.
+     */
+    harnessName?: string;
+  }): Harness | undefined;
 }
 
+type LoadedSolverNetView = {
+  name: string;
+  solverType: string;
+  harness: string;
+  model?: string;
+  provider?: import('../provider-ref.js').ProviderRef;
+  runtimePlugins: RuntimePlugin[];
+};
+
 export interface SolverNetRegistryLike {
-  forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): {
-    name: string;
-    solverType: string;
-    harness: string;
-    model?: string;
-    provider?: import('../provider-ref.js').ProviderRef;
-    runtimePlugins: RuntimePlugin[];
-  } | undefined;
+  forSolverType(solverType: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
+  /**
+   * Resolve by manifest CID rather than solverType registration order
+   * (issue #2039 AC2). Optional at the interface boundary so legacy
+   * no-manifest tasks and older mocks keep compiling; manifest-bound tasks
+   * fail closed when this method is unavailable.
+   */
+  forManifestCid?(manifestCid: string, taskRole?: 'restoration' | 'evaluation'): LoadedSolverNetView | undefined;
 }
 
 /**
@@ -252,6 +274,7 @@ export interface JoinedSolverNetsView {
 function joinedRoleForTaskRole(taskRole: 'restoration' | 'evaluation'): 'solver' | 'evaluator' {
   return taskRole === 'evaluation' ? 'evaluator' : 'solver';
 }
+
 
 /**
  * Build a `JoinedSolverNetsView` from the raw operator-config block.
@@ -471,12 +494,17 @@ export interface TaskEngineOptions {
    * 'train' (default): harness may mutate implStateDir — normal learning mode.
    * 'frozen': freeze-fence enforces read-only implStateDir; violations cause
    *   the envelope to be rejected and the task to fail.
+   * 'candidate': frozen enforcement on the active implStateDir, with the
+   *   harness's self-improvement phases writing to a candidate workspace and
+   *   the run emitting a sealed candidate manifest. The envelope reports this
+   *   run as `frozen` — see {@link protocolExecutorMode}.
    *
    * Defaults to 'train' when absent so existing callers are unaffected.
    *
    * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
+   *       docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md §10
    */
-  harnessMode?: 'train' | 'frozen';
+  harnessMode?: HarnessMode;
   /**
    * Working-directory reaper tuning (issue #320). Each task run provisions a
    * heavy scratch directory under `paths.workingDirRoot`; without cleanup an
@@ -591,7 +619,7 @@ export class TaskEngine {
    * Operator-configured harness mode. Defaults to 'train' when absent.
    * Propagated to HarnessContext.mode for each runImpl dispatch.
    */
-  protected readonly harnessMode: 'train' | 'frozen';
+  protected readonly harnessMode: HarnessMode;
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -1166,6 +1194,121 @@ export class TaskEngine {
   }
 
   /**
+   * Resolve the joined SolverNet for a task. Prefers `task.solverNetManifestCid`
+   * (issue #2039 AC2) — the specific manifest a task is pinned to — over
+   * `solverType` registry-order dispatch, so two joined SolverNets sharing a
+   * `solverType` can't silently substitute for one another. A manifest-bound
+   * task never falls back: missing exact lookup support, a missing/disabled
+   * CID, role ineligibility, or a solverType mismatch all resolve to
+   * `undefined`. `forSolverType` remains only for legacy/no-CID tasks (AC4).
+   */
+  private resolveSolverNetForTask(
+    fullTask: Task | null | undefined,
+    routingKey: string | undefined,
+    role: 'restoration' | 'evaluation',
+  ): LoadedSolverNetView | undefined {
+    const manifestCid = fullTask?.solverNetManifestCid;
+    if (manifestCid) {
+      const byManifest = this.solverNetRegistry?.forManifestCid?.(manifestCid, role);
+      // `forManifestCid` matches on CID alone (no solverType filter, unlike
+      // `forSolverType`). Cross-check against the task's own routing key so
+      // a task body whose `solverNetManifestCid` disagrees with its own
+      // `solverType`/`contractId`+`contractVersion` can't leak a foreign
+      // net's harness/model metadata into dispatch or execution-request
+      // validation.
+      if (byManifest && (!routingKey || byManifest.solverType === routingKey)) return byManifest;
+      return undefined;
+    }
+    if (!this.solverNetRegistry) return undefined;
+    return routingKey ? this.solverNetRegistry.forSolverType(routingKey, role) : undefined;
+  }
+
+  /**
+   * Harness name to pass into `HarnessRegistry.findFor` for a resolved SolverNet.
+   *
+   * Restoration keeps the exact pin (issue #2039 AC2). Evaluation must not:
+   * `registerJoinedNet` stores the **solver** harness on `LoadedSolverNet.harness`
+   * whenever roles include `solver` (the common dual-role join). `findFor`
+   * treats `harnessName` as fail-closed with no fallthrough, and production
+   * solver harnesses return `supports(... role: 'evaluation') === false`, so
+   * pinning that name breaks evaluation claim/run. Omitting the pin restores
+   * fallthrough to the contract evaluator harness (AC4).
+   */
+  private harnessNameForFind(
+    solverNet: LoadedSolverNetView | undefined,
+    role: 'restoration' | 'evaluation',
+  ): string | undefined {
+    if (role === 'evaluation') return undefined;
+    return solverNet?.harness;
+  }
+
+  /**
+   * Whether this task must resolve its manifest CID through the live SolverNet
+   * registry before any Harness dispatch or profile-sensitive state change.
+   *
+   * A wired registry makes the manifest binding authoritative even for legacy
+   * tasks. An execution request also requires exact resolution because its
+   * Harness/model/version assertions cannot be validated without the joined
+   * SolverNet profile. Callers must reject `executionRequest` without a
+   * `solverNetManifestCid` before consulting this helper — a profile pin
+   * without a CID cannot be bound to a specific net (issue #2039 AC3).
+   * Legacy tasks with no execution request retain the pre-registry dispatch
+   * path when no registry is wired (issue #2039 AC4).
+   */
+  private requiresExactSolverNetResolution(
+    fullTask: Task | null | undefined,
+  ): fullTask is Task & { solverNetManifestCid: string } {
+    return Boolean(
+      fullTask?.solverNetManifestCid
+      && (this.solverNetRegistry || fullTask.executionRequest),
+    );
+  }
+
+  /**
+   * Fail-closed guard for issue #2039 AC3: an execution-profile pin is only
+   * meaningful against a specific joined SolverNet. Without a manifest CID
+   * the pin would fall through to registry-order / first-match dispatch.
+   */
+  private executionRequestMissingManifestCid(
+    fullTask: Task | null | undefined,
+  ): string | null {
+    if (fullTask?.executionRequest && !fullTask.solverNetManifestCid) {
+      return 'execution request requires solverNetManifestCid';
+    }
+    return null;
+  }
+
+  /**
+   * Checks a task's execution-profile pin (issue #2039 AC3) against the
+   * already-resolved SolverNet/Harness for this task. `executionRequest` is
+   * an ASSERTION the task carries, not an override — it never widens what
+   * the operator's own config already allows; it only rejects when the
+   * resolved execution doesn't match what was pinned. `loadoutRef`/
+   * `isolation` are consumer-defined (e.g. a benchmark harness) and are not
+   * validated here — Core carries them without interpreting them.
+   *
+   * Evaluation never asserts the pin: it names the *solver* harness/model/
+   * version. Evaluation resolves a different Harness (issue #2165). Callers
+   * must skip this helper when `role === 'evaluation'`.
+   */
+  private validateExecutionRequest(
+    request: NonNullable<Task['executionRequest']>,
+    solverNet: LoadedSolverNetView | undefined,
+    impl: Harness,
+  ): string | null {
+    if (request.harness !== undefined && !harnessNameMatches(impl.name, request.harness)) {
+      return `execution request pins harness '${request.harness}' but the resolved Harness is '${impl.name}'`;
+    }
+    if (request.model !== undefined && solverNet?.model !== request.model) {
+      return `execution request pins model '${request.model}' but the resolved SolverNet model is '${solverNet?.model ?? '<unset>'}'`;
+    }
+    if (request.version !== undefined && impl.version !== request.version) {
+      return `execution request pins harness version '${request.version}' but the resolved Harness '${impl.name}' is version '${impl.version}'`;
+    }
+    return null;
+  }
+
+  /**
    * Resolve the task's `solverNetManifestCid` via the registry, fetch the
    * manifest, and validate the task body against `manifest.contract.schemas.task`.
    *
@@ -1363,6 +1506,9 @@ export class TaskEngine {
       if (eligibility) return eligibility;
     }
 
+    const missingCid = this.executionRequestMissingManifestCid(task);
+    if (missingCid) return missingCid;
+
     // Prefer the contract-derived routing alias when the task carries
     // `contractId`/`contractVersion` (Task 24); fall back to the explicit
     // `solverType` parameter for legacy pre-migration paths and PersistedTaskRun
@@ -1386,9 +1532,13 @@ export class TaskEngine {
     })) {
       return `another ${routingKey}/${role} task is already in flight`;
     }
-    const solverNet = this.solverNetRegistry && routingKey
-      ? this.solverNetRegistry.forSolverType(routingKey, role)
-      : undefined;
+    const solverNet = this.resolveSolverNetForTask(task, routingKey, role);
+    if (this.requiresExactSolverNetResolution(task) && !solverNet) {
+      return (
+        `no exact enabled SolverNet for manifest CID '${task.solverNetManifestCid}', ` +
+        `solverType '${routingKey ?? '<unknown>'}', and role '${role}'`
+      );
+    }
     if (this.solverNetRegistry && routingKey && !solverNet) {
       return `no enabled SolverNet for solverType '${routingKey}' and role '${role}'; run \`jinn solver-nets enable <name>\``;
     }
@@ -1407,7 +1557,11 @@ export class TaskEngine {
     }
     if (!this.implRegistry || !routingKey) return null;
 
-    const impl = this.implRegistry.findFor({ solverType: routingKey, role });
+    const impl = this.implRegistry.findFor({
+      solverType: routingKey,
+      role,
+      harnessName: this.harnessNameForFind(solverNet, role),
+    });
     if (!impl) {
       const setHarnessHint = solverNet
         ? `jinn solver-nets set-harness ${solverNet.name} <harness>`
@@ -1415,6 +1569,11 @@ export class TaskEngine {
       return `no Harness registered or enabled for solverType '${routingKey}'; run \`${setHarnessHint}\``;
     }
     if (task) {
+      // Solver execution-profile pins do not apply to evaluation (issue #2165).
+      if (task.executionRequest && role !== 'evaluation') {
+        const mismatch = this.validateExecutionRequest(task.executionRequest, solverNet, impl);
+        if (mismatch) return mismatch;
+      }
       if (this.operatorSafeAddress) {
         const synthetic = task.eligibility?.['syntheticProvenance'] as SyntheticTaskProvenance | undefined;
         const blocked = syntheticClaimBlocked(synthetic, this.operatorSafeAddress);
@@ -1453,8 +1612,26 @@ export class TaskEngine {
     // Resolve the impl via registry so implStateDir matches the path runImpl uses
     // (join(implStateDirRoot, impl.name, solverType)). Falls back to solverType then 'default'
     // when no impl is registered — legacy path preserved for health-check tasks.
+    // Resolves the SolverNet the same manifest-CID-preferred way `runImpl`
+    // does (issue #2039 AC2) so the persisted `implStateDir` agrees with the
+    // Harness that actually executes — two joined SolverNets sharing a
+    // solverType but configured with different harnesses must not share (or
+    // write into the wrong) implStateDir.
+    const preSnapshotSolverNet = run.solverType
+      ? this.resolveSolverNetForTask(run.task, run.solverType, run.taskRole ?? 'restoration')
+      : undefined;
+    if (this.requiresExactSolverNetResolution(run.task) && !preSnapshotSolverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${run.task.solverNetManifestCid}' during pre-snapshot`,
+      );
+    }
+    const preSnapshotRole = run.taskRole ?? 'restoration';
     const resolvedImpl = run.solverType
-      ? this.implRegistry?.findFor({ solverType: run.solverType, role: run.taskRole ?? 'restoration' }) ?? null
+      ? this.implRegistry?.findFor({
+          solverType: run.solverType,
+          role: preSnapshotRole,
+          harnessName: this.harnessNameForFind(preSnapshotSolverNet, preSnapshotRole),
+        }) ?? null
       : null;
     const implStateName = harnessStateDirName(run.implName ?? resolvedImpl?.name ?? run.solverType ?? 'default');
     const kindSeg = (run.solverType ?? '').replace(/[.:]/g, '_');
@@ -1507,10 +1684,32 @@ export class TaskEngine {
     // string-keyed harness map.
     const solverType = task.solverType ?? '';
     const role = task.taskRole ?? 'restoration';
-    const solverNet = solverType ? this.solverNetRegistry?.forSolverType(solverType, role) : undefined;
-    const impl = this.implRegistry?.findFor({ solverType, role });
+    const missingCid = this.executionRequestMissingManifestCid(task.task);
+    if (missingCid) {
+      throw new Error(`${missingCid} during execution`);
+    }
+    const solverNet = this.resolveSolverNetForTask(task.task, solverType, role);
+    if (this.requiresExactSolverNetResolution(task.task) && !solverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during execution`,
+      );
+    }
+    const impl = this.implRegistry?.findFor({
+      solverType,
+      role,
+      harnessName: this.harnessNameForFind(solverNet, role),
+    });
     if (!impl) {
       throw new NotImplementedError('runImpl');
+    }
+    // Re-check the profile pin at model-invocation time (issue #2039 AC3).
+    // Claim already validates, but RUNNING recovery / re-drive skips claim —
+    // a config change between claim and execution must still fail closed
+    // before Harness.run. Evaluation skips: the pin names the solver profile
+    // (issue #2165).
+    if (task.task?.executionRequest && role !== 'evaluation') {
+      const mismatch = this.validateExecutionRequest(task.task.executionRequest, solverNet, impl);
+      if (mismatch) throw new Error(mismatch);
     }
     const runtimePlugins: RuntimePlugin[] = solverNet?.runtimePlugins ?? [];
     // #1035: merge harness self-attributed plugins (e.g. claude-code-learner)
@@ -1698,18 +1897,22 @@ export class TaskEngine {
             artifacts: [],
           };
           this.solutionOutputs.set(task.requestId, skippedOutput);
-          this.modesByRequest.set(task.requestId, ctx.mode);
+          this.modesByRequest.set(task.requestId, protocolExecutorMode(ctx.mode));
           // Preserve trajectory for downstream pack() access (Task 6 regression fix).
           this.trajectoryCollectors.set(task.requestId, trajectory);
           // No codeDigest for skipped runs — leave map empty.
           // Fall through to persistence below via goto-equivalent pattern.
+          const nextSolutionOutputsJson = JSON.stringify(skippedOutput);
           this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
             postSnapshotCapturedAt: Date.now(),
             postSnapshotPayload: { capturedAt: Date.now(), hlTime: 0, payload: null },
             fillsPayload: [],
             gatingClaim: skippedOutput.gating,
             informationalClaim: skippedOutput.informational ?? null,
-            solutionOutputsJson: JSON.stringify(skippedOutput),
+            solutionOutputsJson: nextSolutionOutputsJson,
+            intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+              skippedOutput.intermediateFailureDiffs,
+            ),
             implName: impl.name,
             runtimePluginsJson: JSON.stringify(attributedPlugins),
             consumedRefsJson,
@@ -1739,7 +1942,7 @@ export class TaskEngine {
       // Store the codeDigest from the fence (post-run hash in train mode;
       // stable pre-hash in frozen mode) for use in pack().
       this.codeDigestsByRequest.set(task.requestId, `sha256:${fence.codeDigest}`);
-      this.modesByRequest.set(task.requestId, ctx.mode);
+      this.modesByRequest.set(task.requestId, protocolExecutorMode(ctx.mode));
 
       const output = fence.output;
       this.solutionOutputs.set(task.requestId, output);
@@ -1755,14 +1958,20 @@ export class TaskEngine {
       // the transition (RUNNING → POST_SNAPSHOT) but before pack() runs will
       // find the serialised output in the DB on restart. pack() will hydrate the
       // in-memory map from solutionOutputsJson if the map entry is absent (#6).
-      // Capture post-snapshot from impl output so data-driven advance fires
+      // Capture post-snapshot from impl output so data-driven advance fires.
+      // Persist harness-emitted intermediateFailureDiffs in the same transition
+      // (#1643 / spec §10 field 4).
+      const nextSolutionOutputsJson = JSON.stringify(output);
       this.persistence.transition(task.requestId, TaskRunState.POST_SNAPSHOT, {
         postSnapshotCapturedAt: Date.now(),
         postSnapshotPayload: output.postSnapshot ?? { capturedAt: Date.now(), hlTime: 0, payload: null },
         fillsPayload: output.fills ?? [],
         gatingClaim: output.gating,
         informationalClaim: output.informational ?? null,
-        solutionOutputsJson: JSON.stringify(output),
+        solutionOutputsJson: nextSolutionOutputsJson,
+        intermediateFailureDiffsJson: serializeIntermediateFailureDiffsJson(
+          output.intermediateFailureDiffs,
+        ),
         implName: impl.name,
         runtimePluginsJson: JSON.stringify(attributedPlugins),
         consumedRefsJson,
@@ -2097,9 +2306,12 @@ export class TaskEngine {
         }))
         .sort((a, b) => `${a.name}@${a.version}`.localeCompare(`${b.name}@${b.version}`));
     const implNameForEnvelope = task.implName ?? solverType;
-    const solverNet = solverType
-      ? this.solverNetRegistry?.forSolverType(solverType, task.taskRole ?? 'restoration')
-      : undefined;
+    const solverNet = this.resolveSolverNetForTask(task.task, solverType, task.taskRole ?? 'restoration');
+    if (this.requiresExactSolverNetResolution(task.task) && !solverNet) {
+      throw new Error(
+        `no exact enabled SolverNet for manifest CID '${task.task.solverNetManifestCid}' during packaging`,
+      );
+    }
     const runtimeBundleDigest = `sha256:${createHash('sha256')
       .update(JSON.stringify({
         harness: {

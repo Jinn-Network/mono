@@ -1,9 +1,15 @@
+import type { HarnessMode } from '../../types.js';
+import type { LearnerCandidateConfig } from './candidate.js';
+import type { LearnerRoutingConfig } from './routing.js';
+
 /**
  * Typed allowlist of env keys the learner may inject into the harness child
  * process. Adding a new key requires an explicit update here.
  */
 export type KnownAdapterEnvKey =
-  | 'LEARNER_PHASE_RANGE';
+  | 'LEARNER_PHASE_RANGE'
+  /** Candidate mode's write target — the provisioned candidate workspace. */
+  | 'JINN_LEARNER_CANDIDATE_DIR';
 
 /**
  * Inputs the shim derives from HarnessContext and hands to the
@@ -71,9 +77,11 @@ export interface TaskSessionInputs {
   adapterEnv?: Partial<Record<KnownAdapterEnvKey, string>>;
   /**
    * Harness execution mode forwarded from HarnessContext. The orchestrator
-   * skill gates Improve and Memory phase invocations on mode === 'train'.
+   * skill gates Improve and Memory phase invocations on the mode: `train`
+   * writes them to `implStateDir`, `candidate` writes them to the candidate
+   * workspace named by `JINN_LEARNER_CANDIDATE_DIR`, and `frozen` skips them.
    */
-  mode: 'train' | 'frozen';
+  mode: HarnessMode;
 }
 
 /**
@@ -142,4 +150,15 @@ export interface LearnerHarnessConfig {
    * `isReady()`. Defaults to 30s.
    */
   codexDoctorTimeoutMs?: number;
+  /**
+   * Explicit `supports()` routing (product design §10). Absent means this
+   * learner claims nothing; the shipped wrap-every-SolverType default survives
+   * only behind the compatibility flag.
+   */
+  routing?: LearnerRoutingConfig;
+  /**
+   * Candidate-mode settings — where candidate workspaces are provisioned, who
+   * the proposal is attributed to, and what evidence the proposer consumed.
+   */
+  candidate?: LearnerCandidateConfig;
 }

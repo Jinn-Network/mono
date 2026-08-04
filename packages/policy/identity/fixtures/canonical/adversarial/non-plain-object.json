@@ -1,0 +1,59 @@
+{
+  "note": "The refusal that closes a digest collision reachable from ordinary application code (BLOCKER B1). A Date, Map, Set, RegExp, class instance, and boxed String all have ZERO own enumerable string-keyed members, so a canonicalizer that walks own keys and emits an object serializes every one of them as `{}` — and two different instants, two different maps, two different regexes seal to ONE digest. For an identity substrate that is not a formatting bug, it is a policy identity that has stopped naming one treatment. The prototype must be Object.prototype or null. Values are described here by constructor rather than written literally because JSON cannot spell any of them; `canonical.test.ts` materializes each case, the same way the fork-healing fixtures describe a tree instead of being one.",
+  "input": {
+    "cases": [
+      {
+        "name": "date",
+        "construct": "Date",
+        "args": ["2026-08-03T12:00:00.000Z"],
+        "why": "The collision demonstration. Paired with `date-collision` below: two DIFFERENT instants, and under a walk-the-own-keys canonicalizer they seal to identical bytes."
+      },
+      {
+        "name": "date-collision",
+        "construct": "Date",
+        "args": ["1999-01-01T00:00:00.000Z"],
+        "why": "The second instant. If either of these is accepted, the two are one identity."
+      },
+      {
+        "name": "map",
+        "construct": "Map",
+        "args": [[["harness", "claude-code"]]],
+        "why": "A Map's entries are not own properties. Its contents are invisible to JSON.stringify and to any own-key walk, so a policy built from a Map seals as the empty object."
+      },
+      {
+        "name": "set",
+        "construct": "Set",
+        "args": [["alpha", "beta"]],
+        "why": "Same shape of defect as Map: membership lives where an own-key walk cannot see it."
+      },
+      {
+        "name": "regexp",
+        "construct": "RegExp",
+        "args": ["^claude-", "u"],
+        "why": "A RegExp is the plausible one: a constraint-shaped axis value written as a pattern rather than a string. It seals as `{}`, so every pattern is the same pattern."
+      },
+      {
+        "name": "class-instance",
+        "construct": "ClassInstance",
+        "args": [{ "id": "claude-code", "version": "2.1.34" }],
+        "why": "A class instance DOES carry its own enumerable fields, so this one seals to plausible-looking bytes rather than to `{}`. It is refused anyway: accepting it means the sealed form depends on which fields the class happens to expose today, and a later refactor that moves a field onto the prototype silently changes an identity that was supposed to be immutable."
+      },
+      {
+        "name": "boxed-string",
+        "construct": "BoxedString",
+        "args": ["unrestricted"],
+        "why": "`new String(\"unrestricted\")` is an object, not a string, so it takes the object branch and seals as an INDEXED object rather than as the string it reads as. Two spellings of one value that seal differently is the same defect as a collision, viewed from the other end."
+      }
+    ]
+  },
+  "expect": {
+    "ok": false,
+    "code": "invalid-document",
+    "path": "",
+    "andWhenNested": {
+      "why": "The same value one level down, as a tuple's profile-declared axis, must be refused with the axis named — the refusal has to be usable, not just correct.",
+      "axis": "retryPlan",
+      "path": "retryPlan"
+    }
+  }
+}

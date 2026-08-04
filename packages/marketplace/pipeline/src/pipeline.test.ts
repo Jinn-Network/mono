@@ -711,7 +711,7 @@ describe("pipeline import boundaries", () => {
       "@jinn-network/record-discovery-protocol",
       "@jinn-network/task-execution-testing",
     ];
-    const files = ["pipeline.ts", "engage.ts", "claim-predicate.ts", "caps.ts", "execution-wiring.ts", "preclaim.ts", "carve.ts"];
+    const files = ["pipeline.ts", "engage.ts", "claim-predicate.ts", "caps.ts", "execution-wiring.ts", "preclaim.ts"];
     for (const file of files) {
       const source = readFileSync(join(sourceDir, file), "utf8");
       for (const pkg of forbidden) {

@@ -57,7 +57,3 @@ export interface ExecutionWiringEntry {
   readonly isolationPolicy: string;
   readonly legacyManifestDigest?: string;
 }
-
-export type CarveOwner = "pipeline" | "embedded-backend" | "binding" | "application";
-
-export type TaskEngineFailedCause = "backend" | "venue";

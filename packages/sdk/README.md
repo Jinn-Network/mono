@@ -112,3 +112,14 @@ into externally-comparable artifacts; see
 `docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md` §5–6
 for the full design (trust stack, daemon enforcement, verified vs
 unverified frozen credibility tier).
+
+## Changelog
+
+### 0.2.0 (2026-07-30)
+
+Breaking (0.x policy: minor = breaking): the `./benchmarking` subpath is
+removed. Its schemas were superseded by the benchmarking application design;
+the successor surfaces will live in `@jinn-network/benchmarking-records`
+once the platform stack publishes. No in-repo importer remained at removal
+time. All other subpaths are unchanged; `@jinn-network/sdk@0.1.1` remains on
+the registry for pinned consumers.

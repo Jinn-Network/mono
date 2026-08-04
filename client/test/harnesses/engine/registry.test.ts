@@ -106,6 +106,39 @@ describe('HarnessRegistry', () => {
     expect(unsupported.findFor({ solverType: 'portfolio.v0' })?.name).toBe('alpha');
   });
 
+  it('ctx.harnessName wins over solverTypeHarnesses/default when it supports the request (issue #2039)', () => {
+    const reg = new HarnessRegistry({
+      solverTypeHarnesses: { 'prediction.v1': 'claude-code' },
+      default: 'claude-code',
+    });
+    reg.register(makeHarness('claude-code', ['prediction.v1']));
+    reg.register(makeHarness('codex', ['prediction.v1']));
+
+    expect(reg.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })?.name).toBe('codex');
+  });
+
+  it('fails closed when ctx.harnessName is missing, disabled, or unsupported', () => {
+    const missing = new HarnessRegistry({ solverTypeHarnesses: { 'prediction.v1': 'claude-code' } });
+    missing.register(makeHarness('claude-code', ['prediction.v1']));
+    expect(missing.findFor({ solverType: 'prediction.v1', harnessName: 'nonexistent' })).toBeUndefined();
+
+    const disabled = new HarnessRegistry({ disabled: ['codex'], default: 'claude-code' });
+    disabled.register(makeHarness('claude-code', ['prediction.v1']));
+    disabled.register(makeHarness('codex', ['prediction.v1']));
+    expect(disabled.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })).toBeUndefined();
+
+    const unsupported = new HarnessRegistry({ default: 'claude-code' });
+    unsupported.register(makeHarness('claude-code', ['prediction.v1']));
+    unsupported.register(makeHarness('codex', ['swe-rebench-v2.v1']));
+    expect(unsupported.findFor({ solverType: 'prediction.v1', harnessName: 'codex' })).toBeUndefined();
+  });
+
+  it('matches legacy learner aliases via ctx.harnessName', () => {
+    const reg = new HarnessRegistry();
+    reg.register(makeHarness('codex', ['swe-rebench-v2.v1']));
+    expect(reg.findFor({ solverType: 'swe-rebench-v2.v1', harnessName: 'codex-code-learner' })?.name).toBe('codex');
+  });
+
   it('dispatches restoration and evaluation by role without a universal wrapper', () => {
     const reg = new HarnessRegistry({ solverTypeHarnesses: { x: 'x-rest' } });
     reg.register(stubHarness('x-rest', ({ solverType, role }) => solverType === 'x' && role !== 'evaluation'));

@@ -4,6 +4,9 @@
  * §6.7 of spec/2026-04-17-portfolio-v0-design.md
  *
  * Dispatch priority:
+ *   0. ctx.harnessName — manifest-pinned Harness resolved by the caller from
+ *      a specific joined SolverNet (by manifestCid, issue #2039). This is an
+ *      exact binding: missing, disabled, or unsupported returns undefined.
  *   1. solverTypeHarnesses[task.solverType] — SolverNet-selected Harness
  *   2. config.default — named fallback impl
  *   3. First-match — iterate registered Harnesses, return first whose supports()
@@ -68,9 +71,22 @@ export class HarnessRegistry implements ImplRegistry {
    * Returns undefined if no suitable impl is found (all disabled, none
    * support the kind, or registry is empty).
    */
-  findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation' }): Harness | undefined {
+  findFor(ctx: { solverType: string; role?: 'restoration' | 'evaluation'; harnessName?: string }): Harness | undefined {
     const disabled = canonicalHarnessNameSet(this.config.disabled ?? []);
     const active = this.harnesses.filter((harness) => !disabled.has(canonicalHarnessName(harness.name)));
+
+    // 0. Manifest-pinned Harness — the caller resolved a specific joined
+    //    SolverNet for this task (by manifestCid, issue #2039) and is
+    //    telling us which Harness that net is configured to use. This takes
+    //    priority over the boot-time static solverType map so two joined
+    //    SolverNets sharing a solverType but configured with different
+    //    Harnesses don't collide on whichever one the static map happens to
+    //    name.
+    if (ctx.harnessName) {
+      const pinned = active.find((harness) => harnessNameMatches(harness.name, ctx.harnessName!));
+      if (pinned && pinned.supports(ctx)) return pinned;
+      return undefined;
+    }
 
     // 1. SolverNet-selected Harness — but ONLY honor it if the named Harness supports
     //    the requested ctx. Otherwise fall through (e.g., restoration Harness selected,

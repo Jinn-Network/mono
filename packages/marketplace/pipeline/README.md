@@ -1,10 +1,12 @@
 # @jinn-network/marketplace-pipeline (deprecated)
 
 This package is the frozen legacy daemon marketplace application: the pluggable operator claim predicate, execution wiring
-(work-kind → harness/model/plugins/credential config), spend/AI-unit self-protection caps, the
+(work-kind → harness/model/plugins/credential config), spend/AI-unit self-protection caps, and the
 two-party engagement composition of the marketplace binding's venue verbs with an embedded
-`TaskExecutionBackend` peer (ruling §7.18), and the §9 TaskEngine carve disposition as
-documentation-as-code — a composition LIBRARY proven by tests, not a live daemon cutover.
+`TaskExecutionBackend` peer (ruling §7.18) — a composition LIBRARY proven by tests, not a live daemon cutover.
+The §9 TaskEngine carve disposition table lived here as documentation-as-code until the
+`legacy-taskengine-carve` transition closed with zero runtime consumers; the table itself remains
+the design's §9 (DR-2026-08-04).
 
 Native mode does not enter this pipeline. New product code keeps claim, spend, capability,
 harness, model, credential and prioritisation choices in tier-4 composition, using neutral
@@ -17,7 +19,6 @@ the explicit legacy operator loop imports it; Phase D deletes it when that consu
 - `CLAIM_NOTHING`, `evaluateClaimPredicate`, `takeEveryRunnable`, `matchLegacyManifestDigest`
 - `checkCaps`, `resolveWiringEntry`, `runPinningConstraint`, `wiringHonorsPinning`
 - `buildEngagement`, `runPipeline` (claim → finalized gate → two-party submit → wait → converge → settle)
-- `TASK_ENGINE_CARVE`, `TASK_ENGINE_FAILED_CARVE`, `carveOwnerForFailed`
 
 Production code types against `TaskExecutionBackend` and `@jinn-network/marketplace-binding`
 venue verbs only. `@jinn-network/task-execution-backend-local` is declared for the assembly

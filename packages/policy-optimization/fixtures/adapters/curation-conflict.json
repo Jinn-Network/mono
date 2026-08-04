@@ -1,0 +1,66 @@
+[
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444201"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333201",
+      "announcementId": "ann-c8-conflict-201"
+    },
+    "entryTimestamp": "2026-08-03T04:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008201",
+    "statementVerdict": "pass",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111201",
+    "subjectTaskDigestFromStatementSubjects": "sha256:1111111111111111111111111111111111111111111111111111111111111202",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-a"
+  },
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444202"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333202",
+      "announcementId": "ann-c8-conflict-202"
+    },
+    "entryTimestamp": "2026-08-03T05:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008202",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111203"
+  },
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444203"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333203",
+      "announcementId": "ann-c8-conflict-203"
+    },
+    "entryTimestamp": "2026-08-03T06:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008203",
+    "statementVerdict": "fail",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111204",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-a",
+    "attributionFromStatementPredicate": "urn:jinn:agent:evaluator-b"
+  },
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444204"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333204",
+      "announcementId": "ann-c8-conflict-204"
+    },
+    "entryTimestamp": "2026-08-03T07:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008204",
+    "statementVerdict": "pass",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111205",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-c"
+  }
+]

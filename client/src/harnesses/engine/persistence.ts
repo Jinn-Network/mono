@@ -120,6 +120,11 @@ CREATE TABLE IF NOT EXISTS task_runs (
   --   RUNNING → PACKAGING transition. Enables pack() to recover solution outputs
   --   after a crash without re-executing the impl. NULL once pack() succeeds.
   solution_outputs_json       TEXT,
+  -- Additive column (#1643, intermediateFailureDiffs / spec §10 field 4):
+  -- intermediate_failure_diffs_json: JSON string[] of harness-emitted
+  --   failed working-tree diffs from in-session attempt boundaries,
+  --   written once at RUNNING → POST_SNAPSHOT. NULL when empty / absent.
+  intermediate_failure_diffs_json TEXT,
   runtime_plugins_json        TEXT,
 
   -- Additive column (#1393, corpus knowledge autoload):
@@ -224,6 +229,11 @@ export type TaskRunPatch = Partial<{
    * Added by WT-C for PACKAGING recovery fidelity.
    */
   solutionOutputsJson: string | null;
+  /**
+   * JSON string[] of harness-emitted intermediate failure diffs (#1643).
+   * Null clears / leaves empty (prefer null when no evidence).
+   */
+  intermediateFailureDiffsJson: string | null;
   runtimePluginsJson: string | null;
   /** Corpus knowledge refs consumed by this run (#1393). */
   consumedRefsJson: string | null;
@@ -279,6 +289,7 @@ interface RawRow {
   evidence_hash: string | null;
   task_payload: string | null;
   solution_outputs_json: string | null;
+  intermediate_failure_diffs_json: string | null;
   runtime_plugins_json: string | null;
   consumed_refs_json: string | null;
   executor_mode: string | null;
@@ -304,6 +315,7 @@ function runAdditiveMigrations(db: Database.Database): void {
     // Persists solution outputs so pack() can recover a deterministic manifest CID
     // after a process restart (otherwise in-memory solutionOutputs is lost).
     { column: 'solution_outputs_json',     ddl: 'ALTER TABLE task_runs ADD COLUMN solution_outputs_json TEXT' },
+    { column: 'intermediate_failure_diffs_json', ddl: 'ALTER TABLE task_runs ADD COLUMN intermediate_failure_diffs_json TEXT' },
     { column: 'runtime_plugins_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN runtime_plugins_json TEXT' },
     { column: 'consumed_refs_json',      ddl: 'ALTER TABLE task_runs ADD COLUMN consumed_refs_json TEXT' },
     { column: 'task_role',           ddl: 'ALTER TABLE task_runs ADD COLUMN task_role TEXT' },
@@ -385,6 +397,25 @@ function parseJson<T>(raw: string | null): T | null {
   return JSON.parse(raw) as T;
 }
 
+/**
+ * Sanitize harness-emitted failed diffs for §10 field 4 (#1643).
+ * Keeps non-empty strings only; first-seen order; drops duplicates.
+ */
+export function normalizeIntermediateFailureDiffs(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (typeof entry === 'string' && entry.length > 0) seen.add(entry);
+  }
+  return [...seen];
+}
+
+/** JSON column value for POST_SNAPSHOT — null when no evidence after normalize. */
+export function serializeIntermediateFailureDiffsJson(raw: unknown): string | null {
+  const diffs = normalizeIntermediateFailureDiffs(raw);
+  return diffs.length > 0 ? JSON.stringify(diffs) : null;
+}
+
 function rowToTaskRun(row: RawRow): PersistedTaskRun {
   return {
     requestId: row.request_id,
@@ -430,6 +461,7 @@ function rowToTaskRun(row: RawRow): PersistedTaskRun {
     evidenceHash: row.evidence_hash,
     task: parseJson<Task>(row.task_payload),
     solutionOutputsJson: row.solution_outputs_json,
+    intermediateFailureDiffsJson: row.intermediate_failure_diffs_json,
     runtimePluginsJson: row.runtime_plugins_json,
     consumedRefsJson: row.consumed_refs_json,
     executorMode: (row.executor_mode === 'train' || row.executor_mode === 'frozen')
@@ -634,6 +666,10 @@ export class TaskRunPersistence {
     if (patch.solutionOutputsJson !== undefined) {
       setClauses.push('solution_outputs_json = @solutionOutputsJson');
       params['solutionOutputsJson'] = patch.solutionOutputsJson;
+    }
+    if (patch.intermediateFailureDiffsJson !== undefined) {
+      setClauses.push('intermediate_failure_diffs_json = @intermediateFailureDiffsJson');
+      params['intermediateFailureDiffsJson'] = patch.intermediateFailureDiffsJson;
     }
     if (patch.runtimePluginsJson !== undefined) {
       setClauses.push('runtime_plugins_json = @runtimePluginsJson');

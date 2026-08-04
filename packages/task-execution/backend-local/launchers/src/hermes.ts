@@ -13,7 +13,7 @@ export function makeHermesLauncher(options: LauncherOptions = {}): LauncherContr
       { key: "effort", inventory: Object.keys(ITERATIONS) },
       { key: "harness", inventory: ["hermes"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-      { key: "loadout", inventory: ["jinn.skill.v1"] },
+      { key: "loadout", inventory: ["jinn.skill.v1", "jinn.harness-state.v1"] },
       { key: "model", inventory: ["pinned-id"] },
     ], true, SECRET_FORWARDS),
     probe: probeFrom(options, "hermes"),

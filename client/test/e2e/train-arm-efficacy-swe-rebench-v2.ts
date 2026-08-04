@@ -49,7 +49,7 @@ import type { Harness, HarnessContext, RuntimePlugin } from '../../src/harnesses
 import type { HarnessCheckpointManifest } from '@jinn-network/sdk/checkpoint';
 import { loadConfig } from '../../src/config.js';
 import { Store } from '../../src/store/store.js';
-import { hashImplStateDir } from '../../src/harnesses/freeze.js';
+import { hashImplStateDir, harnessHashOptions } from '../../src/harnesses/freeze.js';
 import { runHarnessWithFreezeFence } from '../../src/daemon/freeze-fence.js';
 import { provisionWorkingDir } from '../../src/harnesses/engine/packaging.js';
 import { TrajectoryCollector } from '../../src/trajectory/index.js';
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
   const rows: IntervalRow[] = [];
   let exitCode = 0;
   try {
-    const hashOpts = harness.freezeStateHashIgnore?.length ? { ignoreRelPaths: [...harness.freezeStateHashIgnore] } : undefined;
+    const hashOpts = harnessHashOptions(harness);
     const runInterval = async (cycleIndex: number, parentCheckpointCid: string): Promise<string> => {
       const codeDigest = `sha256:${await hashImplStateDir(implStateDir, hashOpts)}`;
       const checkpointCid = codeDigest;

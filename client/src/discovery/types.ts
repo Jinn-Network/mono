@@ -61,10 +61,15 @@ export type TaskOnchainStatus = 'open' | 'finalized' | 'expired' | 'unknown';
 
 /**
  * Per-task on-chain finalization snapshot, returned by `getTaskStatuses` keyed
- * by on-chain taskId (decimal string). `claimWindowEnd` is unix seconds and MAY
- * be null/undefined in the live indexer today (its call-trace decode is
- * pending), so a missing/invalid window degrades to 'unknown' rather than
- * guessing 'open'.
+ * by on-chain taskId (decimal string). On the HTTP path `finalized` is derived
+ * from co-fetched attempt/verdict spine rows (parity with
+ * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
+ * boolean only. When HTTP pagination hits the shared page cap on attempts or
+ * verdicts, spine rows may be incomplete and `finalized` can under-report —
+ * see `getTaskStatuses` for the DISPLAY truncation contract vs lifecycle's
+ * empty-Map rule. `claimWindowEnd` is unix seconds and MAY be null/undefined in
+ * the live indexer today (its call-trace decode is pending), so a missing/invalid
+ * window degrades to 'unknown' rather than guessing 'open'.
  */
 export interface TaskStatusSnapshot {
   taskId: string;
@@ -91,6 +96,103 @@ export interface TaskStatusSnapshot {
 export interface VerdictTallyResult {
   pass: number;
   fail: number;
+}
+
+/** Top-level evidence for one posted task (#2044). */
+export interface TaskLifecycleEvidence {
+  taskId: string;
+  /** Chain-derived facts only. Never populated from *EnvelopeMeta. */
+  authoritative: AuthoritativeTaskLifecycle;
+}
+
+export interface AuthoritativeTaskLifecycle {
+  task: AuthoritativeTaskRow;
+  /** Sorted by attemptIndex ascending. */
+  attempts: AuthoritativeAttemptRow[];
+}
+
+export interface AuthoritativeTaskRow {
+  taskId: string;
+  chainId: number;
+  manifestDigest: `0x${string}`;
+  taskCidDigest: `0x${string}`;
+  creator: `0x${string}`;
+  maxClaims: number;
+  requiredVerdicts: number;
+  createdAtBlock: number;
+  createdAtTx?: `0x${string}`;
+  finalized: boolean;
+  refunded: boolean;
+}
+
+export interface AuthoritativeAttemptRow {
+  taskId: string;
+  chainId: number;
+  attemptIndex: number;
+  /** MechMarketplace SOLVE requestId. */
+  requestId: `0x${string}`;
+  operator: `0x${string}`;
+  priorityMech: `0x${string}`;
+  deliveryRate: string;
+  createdAtBlock: number;
+  /** Sorted by verdictIndex ascending. */
+  verdicts: AuthoritativeVerdictRow[];
+  attemptEnvelopeCandidates: AttemptEnvelopeCandidate[];
+}
+
+export interface AuthoritativeVerdictRow {
+  taskId: string;
+  chainId: number;
+  attemptIndex: number;
+  verdictIndex: number;
+  /** MechMarketplace EVAL requestId (≠ attempt.requestId). */
+  requestId: `0x${string}`;
+  evaluator: `0x${string}`;
+  /** On-chain VerdictCode 0..4 only — not envelope actualPassed. */
+  verdictCode: number;
+  createdAtBlock: number;
+  verdictEnvelopeCandidates: VerdictEnvelopeCandidate[];
+}
+
+export interface AttemptEnvelopeCandidate {
+  requestId: `0x${string}`;
+  chainId: number;
+  manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: `0x${string}`;
+  enrichedAtBlock: number;
+  solverType?: string;
+  implName?: string;
+  implVersion?: string;
+  codeDigest?: string;
+  mode?: string;
+  pluginsJson?: string;
+  model?: string;
+  evidenceTier?: string;
+  sourcePublished?: boolean;
+  enrichmentStatus?: string;
+}
+
+export interface VerdictEnvelopeCandidate {
+  requestId: `0x${string}`;
+  chainId: number;
+  manifestCid: string;
+  publisherAgentId: string;
+  manifestHash: `0x${string}`;
+  enrichedAtBlock: number;
+  solverType?: string;
+  evidenceTier?: string;
+  actualPassed?: boolean;
+  actualScore?: string;
+  evaluatorVerdict?: string;
+  solutionRequestId?: string;
+  instanceId?: string;
+  solverNetManifestCid?: string;
+  enrichmentStatus?: string;
+  projectedTaskId?: string;
+  projectedAttemptIndex?: number;
+  projectedVerdictIndex?: number;
+  projectedEvaluator?: `0x${string}`;
 }
 
 /**
@@ -613,8 +715,11 @@ export interface DiscoveryAPI {
   /**
    * Returns the on-chain finalization snapshot for every task posted on the
    * SolverNet identified by `manifestCid`, keyed by on-chain taskId (decimal
-   * string). Backed by the indexer `task` table (`finalized`, `refunded`,
-   * `claimWindowEnd`), joined via `manifestDigest === keccak256(manifestCid)`.
+   * string). Tasks are joined via `manifestDigest === keccak256(manifestCid)`.
+   * On the HTTP path `finalized` is derived from co-fetched attempt/verdict
+   * spine rows via `applyTaskLifecycleTerminals` (parity with
+   * `getTaskLifecycleEvidence` / #2236); `refunded` comes from the task-row
+   * boolean only. `claimWindowEnd` is display-only from the task row.
    *
    * This is a DISPLAY/advisory signal (the Launcher "Recent posted Tasks"
    * status chip), NOT a correctness gate, so it is *tolerant*: like
@@ -627,6 +732,17 @@ export interface DiscoveryAPI {
    * `claimWindowEnd` (unix seconds) may be null/undefined in the live indexer
    * today (call-trace decode pending), so callers must treat a missing/invalid
    * window as `'unknown'` rather than guessing `'open'`.
+   *
+   * HTTP GraphQL legs share the same hard page cap as `getTaskLifecycleEvidence`
+   * (50 pages × 1000 rows per leg). Unlike lifecycle evidence, when attempts
+   * or verdicts pagination would exceed the cap this method silently stops
+   * paging and returns whatever task rows were already fetched with a partial
+   * spine — so `finalized` may under-report on very large SolverNets. That is
+   * acceptable for this DISPLAY chip: callers map absence to `'unknown'` and
+   * must never guess `'open'`; a false non-finalized is safer than inventing
+   * lifecycle authority from a truncated spine. Callers that need the stricter
+   * truncate policy (`absence > partial lie`) use `getTaskLifecycleEvidence`,
+   * which returns an empty Map when any leg would truncate.
    */
   getTaskStatuses(args: { manifestCid: string }): Promise<Map<string, TaskStatusSnapshot>>;
 
@@ -649,6 +765,30 @@ export interface DiscoveryAPI {
    * the richer poles later without permitting fabricated activity.
    */
   getVerdictTallies(args: { taskIds: string[] }): Promise<Map<string, VerdictTallyResult>>;
+
+  /**
+   * Returns authoritative task→attempt→verdict lifecycle evidence for the given
+   * on-chain taskIds (decimal strings), plus untrusted envelope-candidate bags
+   * nested under each attempt/verdict (#2044).
+   *
+   * Empty `taskIds` → empty Map, no I/O. Unknown taskIds are omitted.
+   * Tolerant under withFallback: indexer outage falls through to the on-chain
+   * floor (authoritative spine only; candidates empty). On-chain scans are
+   * hard-capped (50 × ~1999-block chunks); HTTP GraphQL legs are hard-capped
+   * at 50 pages × 1000 rows. If either cap would truncate a result set, the
+   * call returns an empty Map (absence > partial lie) rather than a partial spine.
+   *
+   * Separation rule: every field under `authoritative` is sourced exclusively
+   * from on-chain event projections. Every `*EnvelopeCandidates` entry is
+   * sourced exclusively from attempt/verdict envelope meta (HTTP only).
+   *
+   * `authoritative.task.refunded` is backing-specific: on-chain from
+   * `TaskBudgetRefunded` logs; HTTP from the indexer task-row boolean only
+   * (no refund-event GraphQL entity to cross-check).
+   */
+  getTaskLifecycleEvidence(args: {
+    taskIds: string[];
+  }): Promise<Map<string, TaskLifecycleEvidence>>;
 }
 
 // ── Error ────────────────────────────────────────────────────────────────────

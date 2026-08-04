@@ -1,0 +1,25 @@
+{
+  "_comment": "A held-out boundary in the shape product design §6.3 describes: a committed Benchmark record as the single go-forward representation, its revealed items projected onto the two axes the exclusion joins on (instance and repo) plus the identifiers the lexical scan looks for. Derived from the design's text and from the swe-rebench instance-id shape the shipped slate artifacts use; never from a product run.",
+  "source": {
+    "kind": "benchmark",
+    "ref": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "instanceIds": [
+    "astropy__astropy-12907",
+    "django__django-11099",
+    "matplotlib__matplotlib-23964"
+  ],
+  "repos": [
+    "astropy/astropy",
+    "django/django",
+    "matplotlib/matplotlib"
+  ],
+  "lexicalIdentifiers": [
+    "astropy__astropy-12907",
+    "django__django-11099",
+    "matplotlib__matplotlib-23964",
+    "astropy/astropy",
+    "django/django",
+    "matplotlib/matplotlib"
+  ]
+}

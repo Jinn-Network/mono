@@ -36,6 +36,8 @@ import { createJinnPublicClient, createJinnWalletClient, type JinnOnchainNetwork
 import { walletPrivateKeyAtIndex, decryptMnemonic } from '../../earning/wallet.js';
 import { FleetStateStore } from '../../earning/store.js';
 import { privateKeyToAccount } from 'viem/accounts';
+import { checkDaemonGuard, daemonGuardEnvelope, DaemonGuardBlockedError } from '../daemon-guard.js';
+import { EXIT_CODES } from '../../errors/envelope.js';
 import { publishHandler } from './solver-plugins-publish.js';
 import { revokeHandler } from './solver-plugins-revoke.js';
 import { endorseHandler, warnHandler, reviewHandler, respondHandler } from './solver-plugins-feedback.js';
@@ -132,6 +134,43 @@ export interface SolverPluginsDeps extends BaseCommandDeps {
   now: () => number;
 }
 
+/**
+ * D0a P3 (#525/#562/#897): refuse a solver-plugins write when a live jinn
+ * daemon is detected for this earning directory -- see `../daemon-guard.js`.
+ * Throws `DaemonGuardBlockedError` (D0a round-1 review) rather than a plain
+ * `Error`, so each write handler's top-level catch (see
+ * `solver-plugins-publish.ts`, `solver-plugins-revoke.ts`,
+ * `solver-plugins-feedback.ts`) can special-case it via
+ * `writeDaemonGuardBlocked` and preserve the full envelope (pid, pidfile
+ * path, opt-out hint) instead of collapsing it into a generic `*_failed`
+ * message.
+ */
+function assertNoLiveDaemon(earningDir: string): void {
+  const guard = checkDaemonGuard({ earningDir });
+  if (guard.blocked) {
+    throw new DaemonGuardBlockedError(daemonGuardEnvelope(guard, 'jinn solver-plugins publish <source>'));
+  }
+}
+
+/**
+ * Re-emit a caught `DaemonGuardBlockedError`'s full envelope (D0a round-1 review) instead of
+ * losing its pid / pidfile path / opt-out hint to a generic `*_failed` message wrap. Callers
+ * check `err instanceof DaemonGuardBlockedError` before falling back to their own mapping.
+ */
+export function writeDaemonGuardBlocked(ctx: CommandContext, err: DaemonGuardBlockedError): void {
+  const { envelope } = err;
+  writeJson(ctx, {
+    error: {
+      code: envelope.code,
+      message: envelope.message,
+      ...(envelope.hint !== undefined ? { hint: envelope.hint } : {}),
+      ...(envelope.exampleCli !== undefined ? { exampleCli: envelope.exampleCli } : {}),
+      ...(envelope.details !== undefined ? { details: envelope.details } : {}),
+    },
+  });
+  ctx.exit(EXIT_CODES[envelope.code]);
+}
+
 export const PRODUCTION_DEPS: SolverPluginsDeps = {
   loadConfig: defaultLoadConfig,
   getConfigPathFromArgs: defaultGetConfigPathFromArgs,
@@ -156,6 +195,10 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
     const getWalletClient = async () => {
       if (!walClientPromise) {
         walClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): `publish`/`revoke` sign via
+          // `createDirectSafeBroadcaster` below with this same agent EOA a
+          // running daemon uses, with no cross-process lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), args.password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);
@@ -228,6 +271,11 @@ export const PRODUCTION_DEPS: SolverPluginsDeps = {
         const password = args.password;
         const store = new FleetStateStore(args.earningDir);
         writeClientPromise = (async () => {
+          // D0a P3 (#525/#562/#897): writes below sign via
+          // `createDirectSafeBroadcaster` (when routed through a Safe) with
+          // this same agent EOA a running daemon uses, with no cross-process
+          // lock against it.
+          assertNoLiveDaemon(args.earningDir);
           const mnemonic = await decryptMnemonic(await store.loadMnemonicKeystore(), password);
           const agentKey = walletPrivateKeyAtIndex(mnemonic, 1);
           const account = privateKeyToAccount(agentKey);

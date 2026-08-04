@@ -28,15 +28,6 @@ export { buildEngagement } from "./engage.js";
 /** @deprecated Legacy operator compatibility type. */
 export type { EngagementClaim } from "./engage.js";
 
-/** @deprecated Historical TaskEngine carve documentation. */
-export {
-  carveOwnerForFailed,
-  TASK_ENGINE_CARVE,
-  TASK_ENGINE_FAILED_CARVE,
-} from "./carve.js";
-/** @deprecated Historical TaskEngine carve documentation. */
-export type { TaskEngineCarveState } from "./carve.js";
-
 /** @deprecated Legacy operator compatibility; native mode never enters this pipeline. */
 export {
   runPipeline,
@@ -56,11 +47,9 @@ export type {
 
 /** @deprecated Legacy operator compatibility types. */
 export type {
-  CarveOwner,
   ExecutionWiringEntry,
   OperatorCaps,
   SubmissionFacts,
-  TaskEngineFailedCause,
 } from "./types.js";
 
 /** @deprecated Legacy facts mapping; native facts are owned by the client product. */

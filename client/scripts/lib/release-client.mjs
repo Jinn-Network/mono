@@ -17,12 +17,19 @@ import {
 export const REPO_FULL_NAME = 'Jinn-Network/mono';
 export const PACKAGE_NAME = '@jinn-network/client';
 export const SDK_PACKAGE_NAME = '@jinn-network/sdk';
-export const REQUIRED_SDK_VERSION = '0.1.1';
 export const REPORT_SCHEMA_VERSION = 1;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_CLIENT_ROOT = resolve(__dirname, '..', '..');
 export const DEFAULT_REPO_ROOT = resolve(DEFAULT_CLIENT_ROOT, '..');
+
+// The stable client release requires the current sdk manifest version to be
+// published (marketplace-surfaces design §6 R1: the release train tracks the
+// sdk manifest, not a pinned literal, so this never redlines on a sdk bump).
+// Resolved from the script's own location, not the CWD.
+export const REQUIRED_SDK_VERSION = JSON.parse(
+  readFileSync(resolve(DEFAULT_REPO_ROOT, 'packages', 'sdk', 'package.json'), 'utf8'),
+).version;
 
 const SECRET_PATTERNS = [
   /sk-ant-[A-Za-z0-9_-]+/g,
