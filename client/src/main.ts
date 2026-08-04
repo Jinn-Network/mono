@@ -36,6 +36,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -327,21 +328,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // singleton here also runs the startup age-based cleanup of stale rotations.
   getFileLogger();
 
-  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening; §14.2) ────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
-  // require an `Authorization: Bearer <token>` header. Read from env when
-  // operators want a stable token (e.g. multi-process tools); otherwise
-  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
-  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
-  // so `acquire_artifact` and `submit_restoration_result` can authenticate
-  // their calls back to the daemon.
+  // and the `POST /api/stop-hook` compat path require an
+  // `Authorization: Bearer <token>` header. Read from env when operators
+  // want a stable token (e.g. multi-process tools); otherwise resolve the
+  // token persisted at `<earningDir>/daemon-api-token` (mode 0600),
+  // generating it once on first boot. Persistence (not a fresh random value
+  // per boot) is required so an externally-installed stop-hook — the only
+  // production consumer of the bearer on the stop-hook route — has a stable
+  // value it can resolve when `DAEMON_API_TOKEN` isn't already in its own
+  // environment; see `jinn-stop-hook.ts`'s file-fallback. Logged only as an
+  // 8-char prefix. The token is forwarded to the MCP subprocess via
+  // `DAEMON_API_TOKEN` env so `acquire_artifact` and
+  // `submit_restoration_result` can authenticate their calls back to the
+  // daemon.
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
-  const apiToken = envToken && envToken.length > 0
-    ? envToken
-    : cryptoRandomBytes(32).toString('hex');
-  if (!envToken) {
-    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
+  let apiToken: string;
+  if (envToken && envToken.length > 0) {
+    apiToken = envToken;
+  } else {
+    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
+    apiToken = resolved.token;
+    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
+    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
   }
 
   // The keystore-presence probe happens twice: once now (to decide initial

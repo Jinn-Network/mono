@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { normalizeStopHookPayload } from '../api/stop-hook.js';
+import { daemonApiTokenPath, readDaemonApiToken, resolveEarningDirFromEnv } from '../api/daemon-token.js';
 
 export interface StopHookCliOptions {
   argv?: string[];
@@ -11,22 +12,24 @@ export interface StopHookCliOptions {
 }
 
 /**
- * §14.1: `POST /api/stop-hook` now requires the `DAEMON_API_TOKEN` bearer
- * (see `client/src/api/server.ts`). Before this, a hook installed into an
- * operator's own harness config (outside the daemon-spawned subprocess
- * path, so no ambient `DAEMON_API_TOKEN`) silently posted unauthenticated —
- * `jinn-stop-hook` attached the header only when the var happened to be
- * set, and the server never checked it either way. Failing loudly here is
- * the deliberate fix: an operator whose hook stops working now gets a named,
- * actionable error instead of a quiet no-op ingest.
+ * §14.1/§14.2: `POST /api/stop-hook` now requires the `DAEMON_API_TOKEN`
+ * bearer (see `client/src/api/server.ts`). Before this, a hook installed
+ * into an operator's own harness config (outside the daemon-spawned
+ * subprocess path, so no ambient `DAEMON_API_TOKEN`) silently posted
+ * unauthenticated — `jinn-stop-hook` attached the header only when the var
+ * happened to be set, and the server never checked it either way. Failing
+ * loudly here is the deliberate fix: an operator whose hook stops working
+ * now gets a named, actionable error instead of a quiet no-op ingest.
  */
 export class MissingDaemonApiTokenError extends Error {
-  constructor() {
+  constructor(tokenFilePath: string) {
     super(
-      'DAEMON_API_TOKEN is not set. jinn-stop-hook refuses to POST an unauthenticated ' +
-      'stop-hook payload to the daemon. Set DAEMON_API_TOKEN in this hook\'s environment ' +
-      '(the daemon-spawned harness path already forwards it automatically; a hook installed ' +
-      'via `jinn integrations install` needs it exported in the shell/tool that runs the hook).',
+      'DAEMON_API_TOKEN is not set and no token was found at ' +
+      `${tokenFilePath}. jinn-stop-hook refuses to POST an unauthenticated ` +
+      'stop-hook payload to the daemon. Set DAEMON_API_TOKEN in this hook\'s ' +
+      'environment, or set JINN_EARNING_DIR to the daemon\'s earning dir so ' +
+      'the persisted token file can be resolved (the daemon writes it to ' +
+      '<earningDir>/daemon-api-token on first boot).',
     );
     this.name = 'MissingDaemonApiTokenError';
   }
@@ -53,9 +56,17 @@ export async function runStopHookCli(opts: StopHookCliOptions = {}): Promise<num
   const daemonUrl = (argValue(argv, '--daemon-url') ?? env['JINN_DAEMON_URL'] ?? 'http://127.0.0.1:7331')
     .replace(/\/+$/, '');
 
-  const daemonApiToken = env['DAEMON_API_TOKEN'];
+  // Resolution: env DAEMON_API_TOKEN (set by the daemon-spawned harness
+  // path, or an operator who wants a stable value) → the persisted token
+  // file beside daemon state (§14.2 — the daemon generates+persists this on
+  // first boot specifically so an externally-installed hook, which has no
+  // ambient DAEMON_API_TOKEN, can still resolve a stable credential) → loud
+  // named failure when neither exists.
+  const envToken = env['DAEMON_API_TOKEN']?.trim();
+  const tokenFilePath = daemonApiTokenPath(resolveEarningDirFromEnv(env));
+  const daemonApiToken = envToken && envToken.length > 0 ? envToken : readDaemonApiToken(tokenFilePath);
   if (!daemonApiToken) {
-    const error = new MissingDaemonApiTokenError();
+    const error = new MissingDaemonApiTokenError(tokenFilePath);
     stderr.write(`[jinn-stop-hook] ${error.message}\n`);
     return 3;
   }
