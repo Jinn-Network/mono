@@ -3,72 +3,78 @@
  * §8 artifact 4 "contract conformance test in the release tiers").
  *
  * Boot-less by design: unlike T1.1 (Anvil fork) and T1.2 (spawned daemon), this scenario
- * needs no daemon, no RPC, no filesystem state beyond the repo checkout itself. It validates
- * a captured/fixture `StatusV1Response` payload against `client/src/api/contract/status.ts`'s
- * schema, asserts `contractVersion` is present, and asserts the committed
- * `client/openapi.v1.json` regenerates clean (drift here means someone edited a contract
- * schema without regenerating the artifact — exactly what this gate exists to catch).
+ * needs no daemon, no RPC, no filesystem state beyond the repo checkout itself. Three checks:
+ *
+ * 1. The REAL producer (`assembleStatusV1`, not a test-authored fixture) is called against a
+ *    minimal `GatheredStatusRaw` and its output validated against `statusV1ResponseSchema`,
+ *    asserting the stamped `contractVersion` matches `CURRENT_CONTRACT_VERSION`. Building the
+ *    fixture from `CURRENT_CONTRACT_VERSION` and asserting equality against itself would be a
+ *    tautology (a review finding on an earlier version of this scenario) — this calls the
+ *    production code path so a producer that stops stamping `contractVersion`, or stamps the
+ *    wrong one, actually fails the test.
+ * 2. `CONTRACT_SHAPE_SHA` (`version.ts`) matches a live recompute of the schema's hash — a
+ *    forcing function: a shape change without updating that constant fails here, three lines
+ *    from `CURRENT_CONTRACT_VERSION`, prompting a version-bump decision.
+ * 3. The committed `openapi.v1.json` regenerates clean.
  */
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
+import { z } from 'zod/v4';
 import { statusV1ResponseSchema } from '../../../src/api/contract/status.js';
-import { CURRENT_CONTRACT_VERSION } from '../../../src/api/contract/version.js';
+import { CURRENT_CONTRACT_VERSION, CONTRACT_SHAPE_SHA } from '../../../src/api/contract/version.js';
+import { assembleStatusV1, type GatheredStatusRaw } from '../../../src/api/status-build.js';
 import { buildOpenApiDocument } from '../../../scripts/generate-openapi.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runScenario, type ScenarioVerdict, type ScenarioOptions } from '../../../scripts/release/scenario-types.js';
 
-/**
- * A captured-shaped `StatusV1Response` fixture — every required field present, the optional
- * per-vertical blocks omitted (a real daemon omits them too when the corresponding subsystem
- * isn't wired; see `status-build.ts`'s `assembleStatusV1`). Kept in this module (not a
- * separate JSON file) so a schema change and its fixture update land in the same diff.
- */
-function fixtureStatusV1Payload(): unknown {
+/** A minimal but real `GatheredStatusRaw` — the sqlite_only shape from status-build.test.ts. */
+function minimalGatheredStatusRaw(): GatheredStatusRaw {
   return {
-    contractVersion: { major: CURRENT_CONTRACT_VERSION.major, minor: CURRENT_CONTRACT_VERSION.minor },
-    statusMode: 'full',
-    version: '0.2.0',
-    latestVersion: null,
-    daemon: { shutdownState: null, startedAt: '2026-08-01T00:00:00.000Z', dbPath: '/tmp/jinn.db', timestamp: '2026-08-04T00:00:00.000Z' },
-    rpc: { ok: true, chainId: 8453, blockNumber: '12345678' },
-    fleet: { loaded: true, chain: 'base', stakingMode: 'standard', masterAddress: '0xmaster', services: [], stakedLikeCount: 0, completeCount: 0 },
-    autoRestake: { enabled: false, checkIntervalMs: 0 },
-    activity: { counts: {}, recent: [] },
-    rewards: { claimLoopIntervalMs: 0, lastClaimTickAt: null, claimedStakingRewardsWei: '0', claimedStakingRewardsLast24hWei: null },
-    balances: {
-      eth: {
-        master: { address: '0xmaster', balanceWei: '0' },
-        agent: { address: null, balanceWei: null },
-        safe: { address: null, balanceWei: null },
-      },
-    },
-    masterGas: { address: '0xmaster', dailyEstimateWei: '0' },
-    earnings: { hint: 'fixture' },
-    nextActions: [],
-    costSurface: { harnesses: {} },
-    harness: { ready: true, name: null, reason: null },
-    security: { lastPasswordRotationAt: null },
-    effectiveMode: 'legacy',
+    hintsScope: 'sqlite_only',
+    shutdownState: 'running',
+    dbPath: '/tmp/x.db',
+    activityCounts: {},
+    recentActivity: [],
+    lastRewardClaimTickAt: null,
+    rewardClaimIntervalMs: 0,
+    fleet: null,
+    rpc: { ok: true },
+    master: { address: null },
+    pollIntervalMs: 5000,
+    masterDailyEstimateWei: '1000',
   };
 }
 
 export async function runT13ContractConformance(opts: ScenarioOptions): Promise<ScenarioVerdict> {
   return runScenario('T1.3', opts, async ({ log }) => {
-    log('Phase 1: validate a fixture StatusV1 payload against statusV1ResponseSchema');
-    const fixture = fixtureStatusV1Payload();
-    const parsed = statusV1ResponseSchema.parse(fixture);
+    log('Phase 1: call the real assembleStatusV1() producer and validate its output');
+    const produced = assembleStatusV1(minimalGatheredStatusRaw());
+    const parsed = statusV1ResponseSchema.parse(produced);
     log('  parsed OK');
 
-    log('Phase 2: assert contractVersion is present and matches the current contract version');
+    log('Phase 2: assert the producer stamped contractVersion === CURRENT_CONTRACT_VERSION');
     if (parsed.contractVersion.major !== CURRENT_CONTRACT_VERSION.major
       || parsed.contractVersion.minor !== CURRENT_CONTRACT_VERSION.minor) {
       throw new Error(
-        `contractVersion mismatch: fixture=${JSON.stringify(parsed.contractVersion)} current=${JSON.stringify(CURRENT_CONTRACT_VERSION)}`,
+        `contractVersion mismatch: produced=${JSON.stringify(parsed.contractVersion)} current=${JSON.stringify(CURRENT_CONTRACT_VERSION)}`,
       );
     }
     log(`  contractVersion=${JSON.stringify(parsed.contractVersion)}`);
 
-    log('Phase 3: assert the committed openapi.v1.json regenerates clean');
+    log('Phase 3: assert CONTRACT_SHAPE_SHA matches a live recompute of the schema hash');
+    const jsonSchema = z.toJSONSchema(statusV1ResponseSchema, { target: 'draft-2020-12', unrepresentable: 'any' });
+    const liveSha = createHash('sha256').update(JSON.stringify(jsonSchema)).digest('hex');
+    if (liveSha !== CONTRACT_SHAPE_SHA) {
+      throw new Error(
+        `CONTRACT_SHAPE_SHA is stale: committed=${CONTRACT_SHAPE_SHA} live=${liveSha}. ` +
+        'The contract schema changed — update CONTRACT_SHAPE_SHA in src/api/contract/version.ts ' +
+        '(and consider whether CURRENT_CONTRACT_VERSION needs a bump).',
+      );
+    }
+    log(`  CONTRACT_SHAPE_SHA=${liveSha} matches`);
+
+    log('Phase 4: assert the committed openapi.v1.json regenerates clean');
     const openapiPath = fileURLToPath(new URL('../../../openapi.v1.json', import.meta.url));
     const committed = readFileSync(openapiPath, 'utf-8');
     const fresh = `${JSON.stringify(buildOpenApiDocument(), null, 2)}\n`;
