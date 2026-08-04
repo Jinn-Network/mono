@@ -90,8 +90,18 @@ function barrier(): Barrier {
 
 afterEach(async () => {
   for (const release of releaseBarriers.splice(0)) release();
-  await Promise.allSettled(backends.map((backend) => backend.shutdown()));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.allSettled(backends.splice(0).map(async (backend) => {
+    await backend.drain();
+    await backend.shutdown();
+  }));
+  // A just-reaped shim can briefly finish closing its heartbeat/cancellation file after
+  // shutdown returns. Retry only cleanup of the disposable test root.
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 async function stateRoot(name: string): Promise<string> {
@@ -834,7 +844,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const root = await stateRoot("relative-deadline-reset");
     const pause = barrier();
     const first = fixture(root, {
-      processDelayMs: 250,
+      processDelayMs: 30_000,
       completionBarrier: { phase: "before-outcome-wait", barrier: pause },
     });
     const { attempt } = await submit(first, undefined, 30_000);
@@ -842,7 +852,7 @@ describe("restart reconstruction and §6.4 actions", () => {
     const metadataPath = join(paths(root, attempt).meta, "attempt.json");
     const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
     await writeFile(metadataPath, JSON.stringify({ ...metadata, monotonicClockIdentity: "reset-boot" }));
-    const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 250 });
+    const recovered = await restartWhilePaused(root, first, pause, attempt, { processDelayMs: 30_000 });
     expect(await recovered.recover(attempt)).toEqual({ classification: "matching" });
     expect(await terminalState(recovered, attempt)).toBe("expired");
     const events = await journalEvents(root, attempt);
