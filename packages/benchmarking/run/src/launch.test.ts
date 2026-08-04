@@ -235,6 +235,11 @@ describe("launchAndWatch (§10.1 op 4 / §7.4)", () => {
         taskBytesFor: async () => new Uint8Array([1]),
         waitForTerminal: driveWaitPort(backend),
         requirementsOverride: { model: { id: "model-a" } },
+        // Pinned clock like every sibling test: the miniature fixture's closeAt
+        // (2026-08-04T00:00:00Z) is an absolute instant, and without this the
+        // test flips from rejecting to resolving the moment wall-clock passes
+        // it (it did, on 2026-08-04 — a time-bomb, not a code change).
+        clock: { now: () => new Date("2026-08-01T00:00:00Z") },
       })) {
         void _;
         break;
