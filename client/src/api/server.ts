@@ -38,7 +38,7 @@ import {
 } from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
 import { addHandshakeRoutes, requireUiToken } from './handshake.js';
-import { addAdminRoutes } from './admin-endpoint.js';
+import { addAdminRoutes, type AdminEndpointConfig } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
 import { addHarnessStatusRoutes, type HarnessStatusDeps } from './harness-status-endpoint.js';
@@ -123,10 +123,7 @@ export interface ApiServerConfig {
   /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
-  admin?: {
-    onRestartRequested: (opts: { forceRespawn?: boolean }) => void;
-    onStopRequested: () => void;
-  };
+  admin?: AdminEndpointConfig;
   /**
    * When set, mounts `GET /api/harness/status` under the UI token gate.
    * Powers the dashboard's HarnessStatusPanel (mode + codeDigest + lastModeSwitchAt).
