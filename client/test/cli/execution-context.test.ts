@@ -14,7 +14,7 @@ import {
   createCliSignerContext,
   pickPrimaryMechService,
 } from '../../src/cli/execution-context.js';
-import type { ServiceState } from '../../src/earning/types.js';
+import { createDefaultFleetState, type ServiceState } from '../../src/earning/types.js';
 import { FleetStateStore, STATE_FILE } from '../../src/earning/store.js';
 import { encryptMnemonic } from '../../src/earning/wallet.js';
 import {
@@ -169,13 +169,28 @@ describe('buildCliSignerContext daemon guard (D0a round 1)', () => {
     }
   });
 
-  it('createCliReadOnlySignerContext refuses when a live jinn daemon is detected', async () => {
+  // D0a round-2 correction: round-1 put the guard on `buildCliSignerContext` itself, which also
+  // reached `createCliReadOnlySignerContext` -- but that function's one production caller
+  // (`jinn tasks submit --dry-run`'s machine-request preflight, tasks.ts) never signs or
+  // broadcasts anything; it only reads fleet state to preview the plan. Guarding it produced a
+  // pure false positive in the ordinary operating configuration (operator's daemon running,
+  // operator previews a submission) whose only escape was
+  // `JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON=1` -- an opt-out that asks the operator to affirm
+  // something meaningless for a preview and trains them to leave it set, silently disarming the
+  // guard for the real `--yes` submit later. `createCliReadOnlySignerContext` is unguarded; the
+  // signing paths (`createCliSignerContext` / `createCliExecutionContext`) remain guarded above.
+  it('createCliReadOnlySignerContext does NOT block a dry-run preview when a live jinn daemon is detected', async () => {
     const earningDir = join(root, 'earning-ro');
     const store = new FleetStateStore(earningDir);
     await store.saveMnemonicKeystore(await encryptMnemonic(
       'test test test test test test test test test test test junk',
       'test-password',
     ));
+    // `makeConfig` below sets `network: 'testnet'`, i.e. networkChain 'base-sepolia' -- the
+    // read-only fleet-load path (`tryLoadExisting`) requires a persisted state file whose chain
+    // matches, or it treats the state as absent/mismatched and returns `ok: false` regardless of
+    // the daemon guard. Persist a valid default state so this test isolates the guard behavior.
+    await store.save(createDefaultFleetState('base-sepolia'));
     writeFileSync(join(earningDir, 'daemon.pid'), '987654\n', 'utf-8');
     __setExecSyncForTesting(() => 'node /opt/jinn/dist/bin/jinn.js run\n');
     const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true as never);
@@ -185,11 +200,7 @@ describe('buildCliSignerContext daemon guard (D0a round 1)', () => {
         argv: ['--config', makeConfig(earningDir)],
         env: { JINN_PASSWORD: 'test-password' },
       });
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.envelope.code).toBe('invalid_invocation');
-        expect(result.envelope.message).toContain('987654');
-      }
+      expect(result.ok).toBe(true);
     } finally {
       killSpy.mockRestore();
     }

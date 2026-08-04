@@ -57,6 +57,7 @@ export type CreateCliExecutionContextOptions = {
 async function buildCliSignerContext(
   opts: CreateCliExecutionContextOptions,
   readOnlyFleet = false,
+  willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
   const pw = resolveCliPassword(opts.argv, env);
@@ -84,15 +85,27 @@ async function buildCliSignerContext(
   // check this itself (after decrypting the mnemonic and loading fleet
   // state), which left `createCliSignerContext` callers (`jinn claim-rewards`)
   // unguarded — see the finding this comment replaces.
-  const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env });
-  if (daemonGuard.blocked) {
-    return {
-      ok: false,
-      envelope: daemonGuardEnvelope(
-        daemonGuard,
-        'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
-      ),
-    };
+  //
+  // D0a round-2 correction: the guard only makes sense when the caller will actually SIGN with
+  // that key material. `createCliReadOnlySignerContext` (its one production caller is `jinn tasks
+  // submit --dry-run`'s machine-request preflight) never signs or broadcasts — it only reads
+  // fleet state to preview a plan — so guarding it was a pure false positive that fired in the
+  // ordinary case of "operator's daemon is running, operator previews a submission" and had no
+  // real safe escape (`JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON=1`'s "you have verified it is safe to
+  // run concurrently" is meaningless for something that broadcasts nothing). `willBroadcast`
+  // lets a read-only, non-signing caller opt out explicitly instead of inheriting the guard by
+  // accident.
+  if (willBroadcast) {
+    const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env });
+    if (daemonGuard.blocked) {
+      return {
+        ok: false,
+        envelope: daemonGuardEnvelope(
+          daemonGuard,
+          'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        ),
+      };
+    }
   }
 
   const networkChain: NetworkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
@@ -175,11 +188,15 @@ export async function createCliSignerContext(
   return buildCliSignerContext(opts);
 }
 
-/** Password + signers + existing fleet JSON, with no fleet-file creation or migration. */
+/**
+ * Password + signers + existing fleet JSON, with no fleet-file creation or migration. Read-only —
+ * never signs or broadcasts (`willBroadcast: false`), so it is not subject to the live-daemon
+ * guard; see the D0a round-2 note on `buildCliSignerContext`.
+ */
 export async function createCliReadOnlySignerContext(
   opts: CreateCliExecutionContextOptions = {},
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
-  return buildCliSignerContext(opts, true);
+  return buildCliSignerContext(opts, true, false);
 }
 
 export async function createCliExecutionContext(
