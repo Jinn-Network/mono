@@ -177,7 +177,7 @@ export function buildArchitectureReport(repoRoot) {
           stackPublished: platformReleaseGroup.stackPublished,
           canary: platformReleaseGroup.canary,
           stable: platformReleaseGroup.stable,
-          stableBlocker: 'live https://jinn.network profile hosting verification',
+          stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
         },
       },
       experimentalEnvironmentSupply: experimental,
