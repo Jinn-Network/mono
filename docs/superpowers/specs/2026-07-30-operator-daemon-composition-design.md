@@ -109,6 +109,15 @@ Everything the walk confirmed as application-tier with no stack replacement desi
 corpus autoload, faucet, watchdog, SQLite activity store, the earning family — stays where
 it is, untouched except where a cutover stage forces a delta.
 
+> **Amended 2026-08-04: the "untouched" ruling above is superseded.** The application tier
+> is re-derived per surface by the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
+> (headless daemon, control/application route split, separate operator console, receipts +
+> versioned read contract). The re-derivation's surface execution is **stage 6** (§10
+> amendment below); its contract discipline binds stages 1–5's operator-app deltas
+> immediately. This paragraph's ruling was scope-bounding for the cutover, not a
+> derivation, and the finding is recorded there (§2).
+
 ## 4. The composed operator runtime — loop map
 
 Today's daemon runs eleven supervised loops plus one-shot recovery. The recomposition
@@ -250,6 +259,13 @@ bind available for operators who want the archive public and the dashboard priva
 Serving an archive from a residential operator discloses the operator's IP to consumers;
 the static-file layout exists precisely so a mirror or static host can serve it instead,
 and the operator app says so where the opt-in lives.
+
+> **Amended 2026-08-04: the mounted-by-default posture is reversed.** The public archive
+> is a **separate Hono app on a separate listener, mandatorily** — never a route prefix on
+> the operator API — effective at stage 4 so the split is built once. The archive-subtree
+> exposure invariant becomes structural rather than documented. Ruling and payload-class
+> model in the
+> [headless operator re-derivation design §6](../specs/2026-08-04-headless-operator-rederivation-design.md).
 
 ### 6.3 `packages/task-execution/evaluator-adapters/`
 
@@ -426,6 +442,21 @@ pinning the previous canary image.** No feature-flag matrix, no shadow mode.
 Operator-app deltas ride the stage that forces them: stage 1 the Claim policy & wiring page
 + migration message; stage 3 the posting surface; stage 4 the evidence/indexing status.
 
+> **Amended 2026-08-04** per the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md):
+> **(a)** every operator-app delta above builds against the versioned read contract (its
+> §8) so stage-6 relocation is cheap; **(b)** the stage-3 posting delta is re-ruled — posting
+> *status* joins the read plane, posting *mutations* are config + `jinn tasks`, no mutating
+> posting routes are built; **(c)** stage 4 mounts the public archive on its **own
+> listener** (§6.2 amendment above), and its SPA-fallback guard task is re-planned
+> accordingly; **(d)** stage 5 additionally flips the transition-manifest rows referencing
+> the `verticalMode` branch to `deleted` in the same PR that deletes the branch; **(e)** a
+> **stage 6** follows the rename: the SPA departs to the separate operator console,
+> application routes retire per that spec's §4, the CLI migrates onto the read
+> plane/control plane, and the tier-3-shaped extractions run — gated on that spec's §8
+> contract artifacts and on re-homing the `e2e:app-flow` / `e2e:funding-sequence` gates
+> onto the console's pipeline first.
+
 **Bridge-era document rules (stages 1–3).** Until stage 3, every claimable task is
 legacy-posted and carries no sealed Submission. The projector synthesizes the facts card
 for such tasks from the anchored task document under a `legacy` derivation annotation, and
@@ -471,6 +502,13 @@ Standing rules across all stages:
   the window is named here rather than discovered later.
 
 ## 11. Non-goals
+
+> **Amended 2026-08-04:** two non-goals below are narrowed by the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md):
+> "no operator-app redesign" becomes *no redesign beyond the deltas the cutover **and that
+> spec's stage-6 disposition** force*; "no earning/staking recomposition" becomes *no
+> recomposition beyond that spec's §11 surface repairs* — the earning family's tier-3
+> candidacy is named there, not scheduled.
 
 - **No operator-app redesign.** Only the deltas the cutover forces (§9).
 - **No public work-client package** (§8) — marketplace-surfaces session.

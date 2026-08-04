@@ -11,6 +11,14 @@ frontend, on their own domain, in under an hour — without asking anyone.
 
 ## The one thing to understand: frontend and daemon are one origin
 
+> **Amended 2026-08-04:** this daemon/SPA same-origin ruling is **superseded at cutover
+> stage 6** by the
+> [headless operator re-derivation design §9](docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md)
+> — the SPA departs to a separate operator console that connects via explicit base URL +
+> operator token under that section's remote-access preconditions. Until stage 6 lands,
+> everything below remains accurate. (Distinct from DR-2026-08-04's `spec.jinn.network`
+> one-origin ruling, which is about spec/identifier namespaces and stands.)
+
 The SPA talks to its daemon over **same-origin relative paths only**. It calls
 `/v1`, `/api`, `/auth`, and `/artifacts` with no host prefix; it opens the
 agent WebSocket at `/api/agent/ws` derived from `window.location.host`; every
