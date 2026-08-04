@@ -1573,9 +1573,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2812,
+      "discoveredFirstPartySurfaces": 2818,
       "generatedOutputSources": 1294,
-      "generatorSources": 575,
+      "generatorSources": 569,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -4114,66 +4114,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/scripts/install-hooks"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/claude-code.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/codex.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/common.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/cursor.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/gemini-cli.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/scripts/layer-live-deps.ts"
       },
       {
@@ -5914,6 +5854,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/admin-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/agent-binding-endpoint.test.ts"
       },
       {
@@ -5975,6 +5925,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/daemon-api-auth.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/daemon-token.test.ts"
       },
       {
         "categories": [
@@ -6384,6 +6344,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/stop-hook-server-gate.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/stop-hook.test.ts"
       },
       {
@@ -6435,6 +6405,16 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/_support/native-product-boundary.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/api-cli-boundary.test.ts"
       },
       {
         "categories": [
@@ -7035,6 +7015,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/commands/init.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/commands/integrations-hook-install.test.ts"
       },
       {
         "categories": [
@@ -13354,6 +13344,16 @@
           "@ritsukai"
         ],
         "path": "client/test/preflight"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/preflight/api-bind-host.test.ts"
       },
       {
         "categories": [

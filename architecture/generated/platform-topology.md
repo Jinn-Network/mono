@@ -1445,9 +1445,9 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2812 |
+| discoveredFirstPartySurfaces | 2818 |
 | generatedOutputSources | 1294 |
-| generatorSources | 575 |
+| generatorSources | 569 |
 | marketplaceControl | 2 |
 | requiredGates | 20 |
 | staticControl | 6 |
