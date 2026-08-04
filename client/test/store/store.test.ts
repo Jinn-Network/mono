@@ -406,4 +406,53 @@ describe('Store', () => {
     }
   });
 
+  // Regression coverage for spec §14.2 item 2 / issue #2402: a balance-cache
+  // row written before gather-status.ts's `errorMessage` choke point started
+  // masking RPC URLs can carry a raw key-in-path error string. It is REPLAYED
+  // verbatim on every later /v1/status call unless getBalanceCache() scrubs
+  // it on read.
+  it('scrubs an already-poisoned balance-cache error on read (one-shot scrub)', () => {
+    // Simulate a row persisted before the masking fix shipped — write it
+    // directly via upsertBalanceCache (which itself does not mask; masking
+    // before persistence is gather-status.ts's job) so the row genuinely
+    // carries the leaked URL, the way a pre-fix daemon would have left it.
+    store.upsertBalanceCache({
+      role: 'service.1.agent',
+      address: '0x1111111111111111111111111111111111111111',
+      nativeWei: null,
+      bondWei: null,
+      fetchedAt: new Date(0).toISOString(),
+      error:
+        'HTTP request failed.\n\nURL: https://base-mainnet.g.alchemy.com/v2/SECRETKEY123\nRequest body: {"method":"eth_getBalance"}',
+    });
+
+    const [entry] = store.getBalanceCache();
+
+    expect(entry?.error).toContain('base-mainnet.g.alchemy.com');
+    expect(entry?.error).not.toContain('SECRETKEY123');
+  });
+
+  it('leaves a balance-cache row with no error, or an error with no URL, unchanged on read', () => {
+    store.upsertBalanceCache({
+      role: 'service.1.agent',
+      address: '0x1111111111111111111111111111111111111111',
+      nativeWei: '0',
+      bondWei: null,
+      fetchedAt: new Date(0).toISOString(),
+      error: null,
+    });
+    store.upsertBalanceCache({
+      role: 'service.1.multisig',
+      address: '0x2222222222222222222222222222222222222222',
+      nativeWei: null,
+      bondWei: null,
+      fetchedAt: new Date(0).toISOString(),
+      error: 'connect ECONNREFUSED 127.0.0.1:0',
+    });
+
+    const byRole = new Map(store.getBalanceCache().map((e) => [e.role, e]));
+    expect(byRole.get('service.1.agent')?.error).toBeNull();
+    expect(byRole.get('service.1.multisig')?.error).toBe('connect ECONNREFUSED 127.0.0.1:0');
+  });
+
 });

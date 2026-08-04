@@ -25,6 +25,7 @@ import {
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
 import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
 import type { ArtifactSource } from '../types/envelope.js';
@@ -469,12 +470,17 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       const body = await gatherStatusForApi(store, statusConfig);
       return c.json(body);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // Mask any RPC URL embedded in the message and drop the filesystem
+      // path — this is the unauthenticated /v1/status endpoint (spec §14.2
+      // item 2, issue #2402). gather-status.ts already masks the errors it
+      // catches internally; this is defense-in-depth for anything that
+      // throws before reaching that layer.
+      const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
       return c.json(
         {
           error: 'status_gather_failed',
           message,
-          daemon: { shutdownState: store.getShutdownState(), dbPath: store.path },
+          daemon: { shutdownState: store.getShutdownState() },
         },
         500,
       );

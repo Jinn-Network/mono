@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 import type {
   EnvelopeProjection,
   EnvelopeProjectionMetadataValue,
@@ -2093,7 +2094,13 @@ export class Store {
       bondWei: r.bond_wei,
       assetExtraJson: r.asset_extra_json,
       fetchedAt: r.fetched_at,
-      error: r.error,
+      // One-shot scrub (issue #2402, spec §14.2 item 2): rows written before
+      // gather-status.ts's `errorMessage` choke point started masking RPC
+      // URLs can carry a raw key-in-path error string. Masking again here is
+      // idempotent (already-masked errors have no `http(s)://` substring
+      // left to match) and guarantees a poisoned row stops leaking on its
+      // very next read, without a schema migration.
+      error: r.error === null ? null : maskUrlsInMessage(r.error),
     }));
   }
 
