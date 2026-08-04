@@ -450,6 +450,14 @@ export class Daemon {
       // pause data and the spend-cap row never reach the dashboard.
       this.apiServer.setStatusConfig(this.config.status);
     } else {
+      // Self-start path (embedded adapters / tests that construct `Daemon`
+      // directly without a pre-built `config.apiServer`). No `ui` is passed
+      // here, but `this.apiToken` (generated above at construction time,
+      // exactly like main.ts's DAEMON_API_TOKEN resolution) is always
+      // present — the server constructor's operator-class gate (§14.3) is
+      // unconditional and accepts that bearer token, so this path is not
+      // left unauthenticated. See `test/api/daemon-api-auth.test.ts` for the
+      // gate coverage against this exact `startApiServer` argument shape.
       this.apiServer = await startApiServer({
         port: this.apiPort,
         store: this.store,
