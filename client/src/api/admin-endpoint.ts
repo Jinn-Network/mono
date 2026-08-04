@@ -22,9 +22,10 @@ export interface AdminRestartOptions {
 
 /**
  * Deps the claim-rewards intent module (`intents/claim-rewards.ts`) needs,
- * minus `strict` (the route always claims strictly, same as the CLI).
+ * minus `strict` (the route always claims strictly, same as the CLI) and
+ * `source` (the route always supplies the literal `'admin-route'`).
  */
-export type ClaimRewardsRouteContext = Omit<ClaimRewardsIntentInput, 'strict'>;
+export type ClaimRewardsRouteContext = Omit<ClaimRewardsIntentInput, 'strict' | 'source'>;
 
 export interface AdminEndpointConfig {
   onRestartRequested: (opts: AdminRestartOptions) => void;
@@ -93,7 +94,7 @@ export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
       );
     }
     try {
-      const result = await claimRewardsIntent({ ...routeCtx, strict: true });
+      const result = await claimRewardsIntent({ ...routeCtx, strict: true, source: 'admin-route' });
       return c.json({ ok: true, result }, 200);
     } catch (err) {
       return c.json(

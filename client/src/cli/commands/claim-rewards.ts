@@ -59,10 +59,14 @@ async function run(ctx: CommandContext): Promise<void> {
   // Store is injected into the intent module, not opened by it — the CLI
   // owns this handle's open/close lifecycle for its own one-shot invocation
   // (the HTTP route front-end instead reuses the daemon's already-open,
-  // longer-lived Store; see api/admin-endpoint.ts).
-  const jinnStore = new Store(config.dbPath);
+  // longer-lived Store; see api/admin-endpoint.ts). Opened inside the try so
+  // a construction failure (bad dbPath, disk full, permissions) gets the
+  // same envelope shape as any other failure in this verb, rather than an
+  // uncaught throw.
+  let jinnStore: Store | undefined;
   try {
     try {
+      jinnStore = new Store(config.dbPath);
       const result = await claimRewardsIntent({
         publicClient,
         masterWallet,
@@ -71,6 +75,7 @@ async function run(ctx: CommandContext): Promise<void> {
         distributorAddress: chainConfig.distributorAddress,
         strict: true,
         jinnStore,
+        source: 'claim-rewards',
       });
       emitResult(
         result,
@@ -116,7 +121,7 @@ async function run(ctx: CommandContext): Promise<void> {
       );
     }
   } finally {
-    jinnStore.close();
+    jinnStore?.close();
   }
 }
 
