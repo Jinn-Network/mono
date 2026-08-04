@@ -164,6 +164,23 @@ function baseOpts(
   };
 }
 
+/**
+ * Compile-time regression for the wall-clock time bomb: `clock` is REQUIRED on
+ * `LaunchOptions`, so a caller that forgets it is a type error rather than a run
+ * that silently reads wall-clock and detonates when a fixture instant passes.
+ *
+ * This is deliberately not a runtime test — once `clock` is required the fallback
+ * is unreachable, so there is no behaviour left to assert. The guard lives in the
+ * type system: re-optionalizing `clock` makes the `@ts-expect-error` below unused,
+ * which fails `yarn typecheck`.
+ */
+// @ts-expect-error — `clock` is required; omitting it must not compile.
+const _launchOptionsRequireClock: LaunchOptions = {
+  runDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  taskBytesFor: () => new Uint8Array(),
+};
+void _launchOptionsRequireClock;
+
 describe("computeCellDeadline (durationMs)", () => {
   test("clips nowMs + cellWindowMs to closeAt using calendar RFC3339 Z", () => {
     const deadline = computeCellDeadline(
