@@ -34,7 +34,8 @@
     "/CONTRIBUTING.md",
     "/CHANGELOG.md",
     "/README.md",
-    "/LICENSE"
+    "/LICENSE",
+    "/openapi.v1.json"
   ],
   "publishConfig": {
     "access": "public"
