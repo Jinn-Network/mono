@@ -17,7 +17,7 @@ import type {
   LauncherTasksResponse,
   RegistryManifestResponse,
   SolverNetManifestV1,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

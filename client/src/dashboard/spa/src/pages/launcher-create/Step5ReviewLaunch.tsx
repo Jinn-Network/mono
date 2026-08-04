@@ -6,7 +6,7 @@ import type {
   DraftSolverNetRecordPatch,
   LaunchActionPhase,
   LaunchedSolverNetRecord,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Alert, AlertDescription, AlertTitle } from '../../components/ui/alert.js';
 import { Button } from '../../components/ui/button.js';
 import { Card, CardContent } from '../../components/ui/card.js';

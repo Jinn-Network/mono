@@ -36,7 +36,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client.js';
-import type { BootstrapState } from '../api/types.js';
+import type { BootstrapState } from '../../../../api/contract/index.js';
 import { AwaitingFundingCard } from './AwaitingFundingCard.js';
 import { Agent } from './Agent.js';
 import { getFeatures } from '../lib/features.js';

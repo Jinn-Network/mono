@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
  *
  *   yarn release:tier-1:T1.1
  *   yarn release:tier-1:T1.2
+ *   yarn release:tier-1:T1.3
+ *
+ * T1.3 (contract conformance) is boot-less — no daemon, no RPC — so it also runs under
+ * the default `yarn test` (`test/release/**\/*.test.ts` is in `vitest.config.ts`'s
+ * `nodeInclude`); it's registered here too so `yarn release:tier-1:T1.3` works standalone.
  *
  * Prerequisites:
  *   - `anvil` in PATH (Foundry — https://getfoundry.sh/)
@@ -24,6 +29,7 @@ export default defineConfig({
     include: [
       'test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts',
       'test/release/tier-1/T1.2-harness-readiness-contract.test.ts',
+      'test/release/tier-1/T1.3-contract-conformance.test.ts',
     ],
     testTimeout: 120_000,
     hookTimeout: 120_000,

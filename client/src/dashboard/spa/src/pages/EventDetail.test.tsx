@@ -6,7 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { EventDetailPage } from './EventDetail.js';
 import { api } from '../api/client.js';
 import { EVENT_KIND_META, LIFECYCLE_KINDS } from '../lib/event-kinds.js';
-import type { ActivityEventRow } from '../api/types.js';
+import type { ActivityEventRow } from '../../../../api/contract/index.js';
 
 vi.mock('../api/client.js', () => ({
   api: {
@@ -26,6 +26,13 @@ function event(extra: Partial<ActivityEventRow> = {}): ActivityEventRow {
     solverType: 'prediction.v1',
     outcome: 'ok',
     detail: null,
+    credentialId: null,
+    costUsdMicros: null,
+    model: null,
+    aiUnits: null,
+    claimStatus: null,
+    estimatedCostUsdMicros: null,
+    actualCostUsdMicros: null,
     ...extra,
   };
 }
@@ -111,6 +118,26 @@ describe('<EventDetailPage />', () => {
       });
       unmount();
     }
+  });
+
+  it('unknown-kind rule: renders server-supplied severity+title, never a raw kind string', async () => {
+    vi.mocked(api.getActivityEvent).mockResolvedValue(
+      event({
+        kind: 'a_kind_this_build_has_never_heard_of',
+        severity: 'warning',
+        title: 'A brand new thing happened',
+      }),
+    );
+    wrap('/events/42');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('event-detail-summary')).toBeTruthy();
+    });
+    // The heading (human-facing) renders the server-supplied title, not the raw kind — the
+    // "Details" card below it separately (and correctly) still shows the raw kind string,
+    // since that card's whole job is the unredacted raw payload.
+    expect(screen.getByRole('heading', { name: 'A brand new thing happened' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'a_kind_this_build_has_never_heard_of' })).toBeNull();
   });
 
   it('shows a not-found state and exposes a back link', async () => {
