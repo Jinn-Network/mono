@@ -94,7 +94,8 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ## Repository Structure
 
 ```
-jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
+                 read-only reference (IMPORTANT: see below)
 
 client/          TypeScript daemon — the main runnable component
   src/
@@ -165,7 +166,7 @@ docs/            Design specs and implementation plans
 
 ## jinn-cli-agents Reference
 
-**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
 
 - `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
 - `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
@@ -315,6 +316,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_NET_LIVENESS_WEBHOOK_URL | unset — generic incoming-webhook URL (Slack-compatible) for the cron-driven net-liveness probe (#1044, `yarn net-liveness`, `docs/runbooks/net-liveness.md`). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_THRESHOLD_MINUTES | 30 — staleness threshold (minutes) for the net-liveness probe; converted to Base block-space at 30 blocks/min. |
 | _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/client` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
+| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-client/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`client/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
 
 `JINN_PASSWORD` is env-only — never in config files.
 

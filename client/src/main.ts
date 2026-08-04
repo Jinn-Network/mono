@@ -65,6 +65,12 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildDaemonStartupInfo,
+  resolveMainEntryEffectiveMode,
+  type DaemonStartupInfo,
+} from './daemon/daemon-startup-info.js';
+import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
@@ -211,6 +217,18 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
+// #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
+// native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
+// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
+// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
+// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
+// runs) with a loud warning on disagreement, rather than trusting the raw decision.
+const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
+const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
+  resolveMainEntryEffectiveMode(verticalDecision);
+if (verticalModeWarning !== undefined) {
+  console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
 // action-authority / plugin-scope shape is still in design. Set
@@ -272,20 +290,7 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
   }
 }
 
-export interface DaemonStartupInfo {
-  schemaVersion: 1;
-  generatedAt: string;
-  kind: 'daemon_started';
-  pid: number;
-  network: 'testnet' | 'mainnet';
-  phase: 'phase-1b' | 'phase-0';
-  apiPort: number;
-  masterAddress: `0x${string}`;
-  safeAddress: `0x${string}`;
-  mechAddress: `0x${string}`;
-  serviceIndex: number;
-  serviceId: number | null;
-}
+export type { DaemonStartupInfo };
 
 export interface SetupHaltedInfo {
   schemaVersion: 1;
@@ -2312,6 +2317,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the daemon's `evictionCheck` predicate (~line 2520 below).
       stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
+      // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+      effectiveMode: reportedEffectiveMode,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       rewardClaimIntervalMs: config.rewardClaimIntervalMs,
@@ -2630,20 +2637,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     versionCheckTimer.unref();
   }
 
-  return {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    kind: 'daemon_started',
+  return buildDaemonStartupInfo({
     pid: process.pid,
     network: config.network,
-    phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
     apiPort: config.apiPort,
     masterAddress,
     safeAddress,
     mechAddress,
     serviceIndex,
     serviceId,
-  };
+    // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+    effectiveMode: reportedEffectiveMode,
+    implVersion: buildInfo.implVersion,
+  });
 }
 
 // ── Harness readiness registry factory ───────────────────────────────────────
