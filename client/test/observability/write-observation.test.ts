@@ -7,7 +7,7 @@
  * against a caller-supplied schema before it touches the filesystem (F5, AC1: "versioned-Zod-
  * strict"). Everything else exercises the atomic-rename idiom itself.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -103,5 +103,18 @@ describe('writeObservation', () => {
     // The stale collision file is untouched — the fix must not depend on cleaning it up, only on
     // never generating the same name in the first place.
     expect(readFileSync(staleCollision, 'utf8')).toBe('unrelated leftover from another writer');
+  });
+
+  it('cleans up the temp file when the rename itself fails (F12)', () => {
+    // renameSync(tempFile, path) fails EISDIR when `path` is a non-empty directory — the write +
+    // fsync succeeded, but the rename that was supposed to make the write visible did not. The
+    // temp file must not be left behind just because the failure happened one step later than the
+    // write/fsync try/catch covers.
+    const path = join(dir, 'observation.json');
+    mkdirSync(path);
+    writeFileSync(join(path, 'occupant'), 'blocks an empty-directory rename');
+    expect(() => writeObservation(path, testSchema, { schemaVersion: 1, a: 1 })).toThrow();
+    expect(readdirSync(dir)).toEqual(['observation.json']);
+    expect(readdirSync(path)).toEqual(['occupant']);
   });
 });

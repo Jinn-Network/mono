@@ -59,7 +59,12 @@ export function writeObservation<T>(
     throw error;
   }
   closeSync(fd);
-  renameSync(temporaryPath, path);
+  try {
+    renameSync(temporaryPath, path);
+  } catch (error) {
+    rmSync(temporaryPath, { force: true });
+    throw error;
+  }
   // Independent of the open() mode above, which is subject to the process umask (a restrictive
   // umask like 0077 would otherwise silently mask group bits off an explicit override).
   chmodSync(path, mode);
