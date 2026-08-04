@@ -82,4 +82,68 @@ describe('native-only product entry', () => {
     })).rejects.toThrow(/health is not decision-ready/u);
     expect(host.close).toHaveBeenCalledOnce();
   });
+
+  it('records native-operator-composition once mode is selected, and starts the status snapshot loop only after health is decision-ready (#2380)', async () => {
+    const healthResult = {
+      mode: 'native-v1' as const, role: 'solver' as const, roleKeyIds: { 'solver-delivery': 'did:key:zSolver' }, sourceLag: 0, sourceLagBySource: {},
+      leaseOwned: true, venue: { canonicalBlock: '2', finalizedBlock: '1', caughtUp: true },
+      backendReady: true, backendRequired: true, evidenceReady: true, evidenceRequired: true, publicSourceReady: true,
+      uncertainOperations: 0, nativeFallbackCount: 0 as const,
+    };
+    const host = {
+      start: vi.fn(),
+      health: vi.fn(async () => healthResult),
+      close: vi.fn(),
+    };
+    const order: string[] = [];
+    const recordNativeComposition = vi.fn(() => { order.push('record'); });
+    const stop = vi.fn();
+    const startStatusSnapshotLoop = vi.fn((input: { refreshHealth: () => Promise<unknown> }) => {
+      order.push('snapshot-loop-started');
+      void input.refreshHealth();
+      return { stop };
+    });
+
+    await main({
+      loadConfig: vi.fn(() => nativeConfig()) as never,
+      buildHost: vi.fn(async () => { order.push('build-host'); return host; }),
+      installSignalHandlers: false,
+      recordNativeComposition,
+      startStatusSnapshotLoop,
+    });
+
+    expect(order).toEqual(['record', 'build-host', 'snapshot-loop-started']);
+    expect(recordNativeComposition).toHaveBeenCalledWith(nativeConfig());
+    expect(startStatusSnapshotLoop).toHaveBeenCalledWith(expect.objectContaining({
+      config: nativeConfig(),
+      decision: expect.objectContaining({ effectiveMode: 'native-v1' }),
+      refreshHealth: expect.any(Function),
+    }));
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('never starts the snapshot loop when post-start health is not decision-ready, and skips both hooks when absent (#2380)', async () => {
+    const host = {
+      start: vi.fn(),
+      health: vi.fn(async () => ({
+        mode: 'native-v1' as const, role: 'solver' as const, roleKeyIds: {}, sourceLag: 1, sourceLagBySource: {}, leaseOwned: true,
+        venue: { canonicalBlock: '1', finalizedBlock: '1', caughtUp: true },
+        backendReady: true, backendRequired: true, evidenceReady: true, evidenceRequired: true, publicSourceReady: true,
+        uncertainOperations: 0, nativeFallbackCount: 0 as const,
+      })),
+      close: vi.fn(),
+    };
+    const startStatusSnapshotLoop = vi.fn();
+
+    // Absent recordNativeComposition/startStatusSnapshotLoop must not throw — production wires
+    // both, but ad hoc test deps objects (like the two tests above this one) omit them safely.
+    await expect(main({
+      loadConfig: () => nativeConfig() as never,
+      buildHost: async () => host,
+      installSignalHandlers: false,
+      startStatusSnapshotLoop,
+    })).rejects.toThrow(/health is not decision-ready/u);
+    expect(startStatusSnapshotLoop).not.toHaveBeenCalled();
+    expect(host.close).toHaveBeenCalledOnce();
+  });
 });
