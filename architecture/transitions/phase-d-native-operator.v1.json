@@ -228,11 +228,7 @@
         "packages/marketplace/pipeline/README.md"
       ],
       "replacement": "Native task-execution backend and product-owned durable operation state.",
-      "consumers": [
-        "packages/marketplace/pipeline/src/carve.test.ts",
-        "packages/marketplace/pipeline/src/carve.ts",
-        "packages/marketplace/pipeline/src/index.test.ts"
-      ],
+      "consumers": [],
       "defaultMode": "not-applicable",
       "noNewUseGuard": {
         "path": ".github/scripts/phase-d-transition-deletion.test.mjs",
@@ -260,7 +256,7 @@
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
       "targetPullRequest": "Phase D2 pipeline deletion",
-      "status": "planned"
+      "status": "deleted"
     },
     {
       "id": "direct-public-posttask-composition",
