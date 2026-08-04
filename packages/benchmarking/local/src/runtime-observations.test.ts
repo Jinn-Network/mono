@@ -39,7 +39,7 @@ describe("axisObservationsFromRuntimeObservations", () => {
   test("skips captures that establish nothing", () => {
     expect(axisObservationsFromRuntimeObservations([
       { kind: "environment", propertyId: runPinningPropertyId("harness"), value: "x" },
-      { kind: "resource", propertyId: "https://jinn.network/properties/process-exit", value: 0 },
+      { kind: "resource", propertyId: "https://spec.jinn.network/properties/process-exit", value: 0 },
       { kind: "resource", value: "no property id" },
       { kind: "resource", propertyId: runPinningPropertyId("loadout") },
     ])).toEqual([]);
@@ -47,19 +47,19 @@ describe("axisObservationsFromRuntimeObservations", () => {
 
   test("publishes the requirements-vocabulary key, so isolation is isolationPolicy", () => {
     expect(runPinningPropertyId("isolation"))
-      .toBe("https://jinn.network/properties/run-pinning/isolationPolicy");
+      .toBe("https://spec.jinn.network/properties/run-pinning/isolationPolicy");
     expect(runPinningPropertyId("harness"))
-      .toBe("https://jinn.network/properties/run-pinning/harness");
+      .toBe("https://spec.jinn.network/properties/run-pinning/harness");
     expect(runPinningPropertyId("model"))
-      .toBe("https://jinn.network/properties/run-pinning/model");
+      .toBe("https://spec.jinn.network/properties/run-pinning/model");
     expect(runPinningPropertyId("loadout"))
-      .toBe("https://jinn.network/properties/run-pinning/loadout");
+      .toBe("https://spec.jinn.network/properties/run-pinning/loadout");
   });
 
   test("does not read the retired Matrix-name isolation IRI", () => {
     expect(axisObservationsFromRuntimeObservations([{
       kind: "resource",
-      propertyId: "https://jinn.network/properties/run-pinning/isolation",
+      propertyId: "https://spec.jinn.network/properties/run-pinning/isolation",
       value: "unrestricted",
     }])).toEqual([]);
   });

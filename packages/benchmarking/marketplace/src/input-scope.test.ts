@@ -224,7 +224,7 @@ function buildSealedSubmission(input: {
     ...input.extensionOverrides,
   };
   const doc = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUrn,
     task: { digest: { sha256: taskDigestHex } },
     requester: "urn:uuid:3333333333333333333333333333333333333333",

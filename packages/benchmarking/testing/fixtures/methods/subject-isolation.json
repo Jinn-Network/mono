@@ -5,7 +5,7 @@
   "verdictRule": "unanimous",
   "matrices": [
     {
-      "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
       "run": {
         "digest": {
           "sha256": "1a11111111111111111111111111111111111111111111111111111111111111"
@@ -69,7 +69,7 @@
       }
     },
     {
-      "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
       "run": {
         "digest": {
           "sha256": "2a22222222222222222222222222222222222222222222222222222222222222"

@@ -7,7 +7,7 @@
   "verdictRule": "unanimous",
   "matrices": [
     {
-      "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
       "run": {
         "digest": {
           "sha256": "c53f5227cce173f08860a1b60a002d746abf03a6c55cc96dfb2bd716241b259b"
@@ -325,10 +325,6 @@
           "093af2bd0fcdacbaada1f78198786285183dcc0e712665afa988f86021c43c41"
         ]
       }
-    },
-    "incompatible": {
-      "count": 0,
-      "tasks": []
     },
     "conflicted": {
       "count": 0,
