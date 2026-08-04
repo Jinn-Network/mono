@@ -109,7 +109,10 @@ The execution-policy identity is a derived, canonical form of the run-pinning ax
 sealed Submission, and the resolved task-profile document the Task pins by digest.**
 *(Amended 2026-08-03 from "input pair" — C1 kit finding F1: steps 1–2 require the profile's
 comparison classes and `requirementKeys`, which the Task carries only as a pin.)* The
-deriver MUST verify the supplied profile document against the Task's pin before use —
+deriver MUST verify the supplied profile document against the Task's pin before use — by
+**recomputing the digest over the profile's exact sealed bytes**; a self-asserted digest
+field on a projection is not verification *(clarified 2026-08-03, C1 review M1: the profile
+input carries its sealed bytes)* —
 handing two honest derivers different revisions of one profile URI is the quietest way to
 fork the identity space. Two honest derivers holding these three documents MUST produce
 identical bytes. The function, normatively:

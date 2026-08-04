@@ -23,35 +23,86 @@ const PRODUCT_PACKAGES = [
   ['.', '@jinn-network/policy-optimization'],
 ];
 
-// The approved runtime graph for sub-unit C7a (the campaign document + journal).
+// The approved runtime graph for sub-units C7a (the campaign document + journal) and C7b (the wave
+// engine).
 //
-// - `policy-identity` supplies canonicalization, digests, tuple validation, and manifest parsing.
-//   The campaign's `frozenAxes` are compared byte-for-byte against execution-policy tuples, so a
+// - `policy-identity` supplies canonicalization, digests, tuple validation, manifest parsing, and
+//   the §4.1 expression rule that turns a candidate's tuple into a Run arm's pinning. The
+//   campaign's `frozenAxes` are compared byte-for-byte against execution-policy tuples, so a
 //   second canonicalizer here would be a second answer to "are these the same bytes".
 // - `benchmarking-records` supplies the committed-benchmark machinery the `DRAFT -> EXPLORING`
-//   gate runs on (§6.3) and the calendar-strict RFC 3339 comparison the journal orders by.
+//   gate runs on (§6.3), the calendar-strict RFC 3339 comparison the journal orders by, and the
+//   Benchmark/Run/Matrix/Report records a wave is made of.
+// - `benchmarking-run` plans, launches, and assembles; `benchmarking-local` supplies the local
+//   venue's port bundle and the treatment-fidelity bridge; `benchmarking-aggregate` owns every
+//   statistic (program ruling R3). C7b composes all three and re-implements none of them.
+// - `task-execution-backend` is the **contract** the injected backend satisfies — a type, never a
+//   binding. `task-execution-testing` is dev-only: the conformance kit's in-memory fake.
 //
-// Later sub-units add `benchmarking-run`, `benchmarking-local`, `benchmarking-aggregate`, and
-// `policy-outcomes`. Each addition edits this map in the PR that needs it, so the graph is never
+// `policy-outcomes` is added by sub-unit C8 (the two observation adapters, program §1 C8):
+// the policy-outcomes adapter's output type (`PolicyOutcomeObservation`/`PolicyOutcomeInputRef`/
+// `PerAxisStatus`) is imported directly rather than mirrored, unlike the discovery/marketplace/
+// task-supply shapes those adapters otherwise mirror (source-boundary guard denies those three
+// trees outright). Each addition edits this map in the PR that needs it, so the graph is never
 // wider than the code.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['.', {
     dependencies: [
+      '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-local',
       '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
       '@jinn-network/policy-identity',
+      '@jinn-network/policy-outcomes',
+      '@jinn-network/task-execution-backend',
     ],
-    devDependencies: [], optionalDependencies: [], peerDependencies: [],
-    // `benchmarking-records` is itself a portal whose own runtime edge to
-    // `task-execution-protocol` must resolve inside this project; it is a transitive resolution,
-    // never an import of this package's own (the source-boundary guard bans importing it).
-    portalResolutions: ['@jinn-network/task-execution-protocol'],
+    devDependencies: ['@jinn-network/task-execution-testing'],
+    optionalDependencies: [], peerDependencies: [],
+    // Portals whose own edges must resolve inside this project. None of these is imported here --
+    // the source-boundary guard denies every one of them by name -- but a `portal:` dependency
+    // brings its own dependency graph, and an unresolved transitive Jinn package sends `install`
+    // to a registry version that does not exist.
+    //
+    // The tail of this list is FINDING F-C7b-4: `task-execution-testing` carries the local
+    // backend's conformance slice as *runtime* dependencies, so consuming the in-memory fake drags
+    // the assembly/launchers/supervisor/workspace packages and their evidence edges into a tier-4
+    // product's install graph. `benchmarking-run` takes the same medicine for the same reason.
+    portalResolutions: [
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-core',
+    ],
   }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
+  ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/policy-identity', join(root, 'packages', 'policy', 'identity')],
+  ['@jinn-network/policy-outcomes', join(root, 'packages', 'policy', 'outcomes')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-testing', join(root, 'packages', 'task-execution', 'testing')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ]);
 
 function readPackage(directory) {
