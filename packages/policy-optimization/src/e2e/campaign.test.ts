@@ -241,6 +241,24 @@ describe("the promotion discipline (§6.3)", () => {
     expect(sealed[0]!.payload["revealedItems"]).toBe(PROMOTION_INSTANCES.length);
   });
 
+  test("every promotion cell verifies per-axis, loadout included", () => {
+    // The program's stated acceptance for C9: per-axis `match` on the loadout axis in the
+    // *promotion* Matrix. No cell is swapped here — a gate run with a known-invalid cell would
+    // decide a recommendation on a treatment nobody verified.
+    expect(outcome.promotionMatrix.cells.length)
+      .toBe(outcome.promotionPlan.arms.length * PROMOTION_INSTANCES.length);
+    for (const cell of outcome.promotionMatrix.cells) {
+      expect(cell.verification, cell.cellKey).toEqual({
+        harness: "match",
+        model: "match",
+        loadout: "match",
+        isolation: "match",
+        checksFailed: [],
+      });
+      expect(cell.outcome, cell.cellKey).toBe("judged");
+    }
+  });
+
   test("pruning happened at the dev wave and not at the gate", () => {
     expect(outcome.pruned).toHaveLength(1);
     expect(outcome.promotionPlan.arms.length).toBe(outcome.participants.length - 1);
