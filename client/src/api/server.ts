@@ -13,6 +13,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { cors } from 'hono/cors';
+import { getCookie } from 'hono/cookie';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -37,7 +38,7 @@ import {
   type SolverNetsEndpointsDeps,
 } from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
-import { addHandshakeRoutes, requireUiToken } from './handshake.js';
+import { addHandshakeRoutes } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
@@ -120,7 +121,13 @@ export interface ApiServerConfig {
   /** When set, POST /v1/setup/agent-binding/retry is mounted so the SPA can
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
-  /** When set, /auth/handshake is mounted and SPA-only routes are gated by the token. */
+  /**
+   * When set, `/auth/handshake` is mounted and the SPA's cookie/header
+   * session token becomes an additional accepted credential on operator-
+   * class routes. The gate itself is unconditional (§14.3) — the SPA-only
+   * route families and `/v1/events` / `/v1/activity-events` are token-gated
+   * even when `ui` is absent, via the bearer `apiToken` fallback.
+   */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
   admin?: {
@@ -382,9 +389,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // the server is already up. See `setStatusConfig` on the returned object.
   let liveStatus: StatusGatherConfig | undefined = config.status;
 
-  app.use(cors());
+  // Global CORS EXCEPT `/api/stop-hook` (§14.1): that route now requires the
+  // `DAEMON_API_TOKEN` bearer (see the gate below), but a bearer credential
+  // isn't ambiently attached to cross-origin fetches the way a cookie is —
+  // scoping CORS away from it is defense-in-depth, not the auth boundary.
+  app.use(async (c, next) => {
+    if (c.req.path === '/api/stop-hook') return next();
+    return cors()(c, next);
+  });
 
-  // ── Bearer-token gate for cost-mutating routes ─────────────────────────────
+  // ── Bearer-token check for cost-mutating / operator-class routes ────────────
   //
   // `POST /artifacts` and `POST /v1/artifacts/acquire` both have side effects
   // (artifact insert; outbound fetch of an arbitrary `access.endpoint` plus a
@@ -398,22 +412,55 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // never set in prod) layers on top of this.
   const expectedAuth = `Bearer ${config.apiToken}`;
   const expectedBuf = Buffer.from(expectedAuth);
-  const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+  const bearerValid = (c: Context): boolean => {
     const provided = c.req.header('Authorization') ?? '';
     const providedBuf = Buffer.from(provided);
-    let ok = false;
-    if (providedBuf.length === expectedBuf.length) {
-      try {
-        ok = timingSafeEqual(providedBuf, expectedBuf);
-      } catch {
-        ok = false;
-      }
+    if (providedBuf.length !== expectedBuf.length) return false;
+    try {
+      return timingSafeEqual(providedBuf, expectedBuf);
+    } catch {
+      return false;
     }
-    if (!ok) {
+  };
+  const requireBearer = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+    if (!bearerValid(c)) {
       return c.json({ error: 'unauthorized', reason: 'bearer_required' }, 401);
     }
     await next();
     return;
+  };
+
+  // ── Unconditional operator-class auth gate (§4.3 / §14.3) ───────────────
+  //
+  // Every route on this listener is `operator`-class (token-gated,
+  // regardless of bind address) except a fixed allowlist: `/`, `/assets/*`,
+  // `/auth/handshake`, `/artifacts*` (the bearer regime above), and — for
+  // now — `GET /v1/status` (its exemption is removed by a LATER package
+  // per §14.5, once `/health` + `/ready` land as the unauthenticated-safe
+  // liveness surface; do NOT gate it here).
+  //
+  // This block runs UNCONDITIONALLY — independent of whether `config.ui`
+  // was supplied — so a construction path that skips `ui` (`daemon.ts`'s
+  // self-start branch when `config.apiServer` is absent, or a bare
+  // `startApiServer({ apiToken })` test/embedded call) does not leave the
+  // SPA-only route families (nor `/v1/events` / `/v1/activity-events`,
+  // which used to be mounted OUTSIDE this block entirely) unauthenticated.
+  // The gate accepts EITHER credential: the bearer `apiToken` (always
+  // present on every construction path), or — when `config.ui` is
+  // configured — the SPA's cookie/`x-jinn-ui-token` header session token.
+  const uiTokenValid = (c: Context): boolean => {
+    if (!config.ui) return false;
+    const cookie = getCookie(c, 'jinn_ui_token');
+    const header = c.req.header('x-jinn-ui-token');
+    const supplied = cookie ?? header;
+    return supplied !== undefined && supplied === config.ui.token;
+  };
+  const requireOperatorToken = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
+    if (bearerValid(c) || uiTokenValid(c)) {
+      await next();
+      return;
+    }
+    return c.json({ error: 'unauthorized', reason: 'bearer_required' }, 401);
   };
 
   // SPA index at /
@@ -483,37 +530,49 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   if (config.ui) {
     addHandshakeRoutes(app, config.ui);
-    // Gate SPA-only routes (do NOT gate /v1/status or /artifacts/*).
-    app.use('/v1/events', requireUiToken(config.ui.token));
-    app.use('/v1/events/*', requireUiToken(config.ui.token));
-    app.use('/v1/activity-events', requireUiToken(config.ui.token));
-    app.use('/v1/activity-events/*', requireUiToken(config.ui.token));
-    app.use('/v1/bootstrap', requireUiToken(config.ui.token));
-    app.use('/v1/rewards', requireUiToken(config.ui.token));
-    app.use('/v1/solvernets', requireUiToken(config.ui.token));
-    app.use('/v1/solvernets/*', requireUiToken(config.ui.token));
-    app.use('/v1/auth/*', requireUiToken(config.ui.token));
-    app.use('/v1/setup/*', requireUiToken(config.ui.token));
-    app.use('/v1/operator', requireUiToken(config.ui.token));
-    app.use('/v1/operator/*', requireUiToken(config.ui.token));
-    app.use('/v1/launcher', requireUiToken(config.ui.token));
-    app.use('/v1/launcher/*', requireUiToken(config.ui.token));
-    app.use('/v1/discovery', requireUiToken(config.ui.token));
-    app.use('/v1/discovery/*', requireUiToken(config.ui.token));
-    app.use('/api/admin/*', requireUiToken(config.ui.token));
-    app.use('/api/harness/*', requireUiToken(config.ui.token));
-    app.use('/api/hermes/*', requireUiToken(config.ui.token));
-    app.use('/api/codex/*', requireUiToken(config.ui.token));
-    app.use('/api/captures/*', requireUiToken(config.ui.token));
-    app.use('/v1/harnesses/*', requireUiToken(config.ui.token));
-    app.use('/v1/debug-report', requireUiToken(config.ui.token));
-    app.use('/v1/debug-report/*', requireUiToken(config.ui.token));
   }
+
+  // Operator-class gate — unconditional, see `requireOperatorToken` above.
+  // `/v1/events` and `/v1/activity-events` are included here even though
+  // their routes are mounted unconditionally below (`addEventsRoutes` /
+  // `addActivityEventsRoutes` run regardless of `config.ui`) — this is the
+  // exact gap §14.3 closes.
+  app.use('/v1/events', requireOperatorToken);
+  app.use('/v1/events/*', requireOperatorToken);
+  app.use('/v1/activity-events', requireOperatorToken);
+  app.use('/v1/activity-events/*', requireOperatorToken);
+  app.use('/v1/bootstrap', requireOperatorToken);
+  app.use('/v1/rewards', requireOperatorToken);
+  app.use('/v1/solvernets', requireOperatorToken);
+  app.use('/v1/solvernets/*', requireOperatorToken);
+  app.use('/v1/auth/*', requireOperatorToken);
+  app.use('/v1/setup/*', requireOperatorToken);
+  app.use('/v1/operator', requireOperatorToken);
+  app.use('/v1/operator/*', requireOperatorToken);
+  app.use('/v1/launcher', requireOperatorToken);
+  app.use('/v1/launcher/*', requireOperatorToken);
+  app.use('/v1/discovery', requireOperatorToken);
+  app.use('/v1/discovery/*', requireOperatorToken);
+  app.use('/api/admin/*', requireOperatorToken);
+  app.use('/api/harness/*', requireOperatorToken);
+  app.use('/api/hermes/*', requireOperatorToken);
+  app.use('/api/codex/*', requireOperatorToken);
+  app.use('/api/captures/*', requireOperatorToken);
+  app.use('/v1/harnesses/*', requireOperatorToken);
+  app.use('/v1/debug-report', requireOperatorToken);
+  app.use('/v1/debug-report/*', requireOperatorToken);
 
   addEventsRoutes(app);
   addActivityEventsRoutes(app, { store });
 
   if (config.stopHook) {
+    // §14.1: the stop-hook route is an "Application (external tool)" route,
+    // not an `operator`-class one — it's driven by harness subprocesses that
+    // only ever carry the bearer `DAEMON_API_TOKEN` (see
+    // `client/src/runner/claude.ts`, the learner adapters, and Hermes'
+    // bootstrap env), never a UI session. Bearer-only, not
+    // `requireOperatorToken` (which would also accept the ui-token).
+    app.use('/api/stop-hook', requireBearer);
     addStopHookRoutes(app, config.stopHook);
   }
 
