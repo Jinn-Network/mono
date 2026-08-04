@@ -3,10 +3,12 @@ import {
   type MarketplaceChainConfig,
 } from '@jinn-network/marketplace-binding';
 import type { ValidatedPhaseBClosureManifest } from './phase-b-closure-manifest.js';
+// Defined in the neutral types/ home (#2380) so src/api/ can reference it without crossing the
+// api -> daemon architecture boundary (#1584). Re-exported below so existing daemon-layer imports
+// of `OperatorVerticalMode` from this module keep working unchanged.
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
-// Re-exported from the neutral types/ home (#2380) so existing daemon-layer imports of
-// `OperatorVerticalMode` from this module keep working unchanged.
-export type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
+export type { OperatorVerticalMode };
 
 export type NativeVerticalReadinessReason =
   | 'live-closure-missing'
