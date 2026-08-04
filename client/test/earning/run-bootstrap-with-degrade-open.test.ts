@@ -112,24 +112,32 @@ describe('runBootstrapWithDegradeOpen ordering (#2407 M3)', () => {
     expect(calls).not.toContain('degraded');
   });
 
-  it('does not call stop() when startDegraded returned null', async () => {
+  it('does not attempt stop() when startDegraded returned null (#2407 R7 — real assertion, not a spy wired to nothing)', async () => {
+    // Two halts: the first startDegraded() call returns null (no handle);
+    // the second returns a real handle. If the implementation ever called
+    // `.stop()` on the first (null) result it would throw synchronously —
+    // the whole runBootstrapWithDegradeOpen call would reject instead of
+    // resolving 'ok'. `stop` being called exactly once (for the SECOND
+    // halt's real handle) proves the null case was never touched.
     let attempt = 0;
+    const stop = vi.fn();
+    const startDegraded = vi.fn().mockImplementation(() => (attempt === 1 ? null : { stop }));
     const runBootstrap = vi.fn().mockImplementation(async () => {
       attempt += 1;
-      if (attempt === 1) throw haltError();
+      if (attempt <= 2) throw haltError();
       return 'ok';
     });
-    const stop = vi.fn();
 
-    // startDegraded returns null on the only halt, so stop must never fire.
-    await runBootstrapWithDegradeOpen({
+    const result = await runBootstrapWithDegradeOpen({
       runBootstrap,
-      startDegraded: () => null,
+      startDegraded,
       setReadiness: () => {},
       awaitRetry: async () => {},
     });
 
-    expect(stop).not.toHaveBeenCalled();
+    expect(result).toBe('ok');
+    expect(startDegraded).toHaveBeenCalledTimes(2);
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it('propagates any error that is not SetupBootstrapHalted', async () => {
