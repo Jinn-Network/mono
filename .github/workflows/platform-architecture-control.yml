@@ -43,6 +43,29 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  platform-release-surface:
+    name: platform-release-surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Validate the profile root, publish path, and their workflow shapes
+        run: |
+          node --test \
+            .github/scripts/build-profile-root.test.mjs \
+            .github/scripts/sign-profile-manifest.test.mjs \
+            .github/scripts/public-surface-assets.test.mjs \
+            .github/scripts/platform-verification-receipt.test.mjs \
+            .github/scripts/platform-verification-workflow.test.mjs \
+            .github/scripts/stack-publish-workflow.test.mjs \
+            .github/scripts/stack-publication-surface.test.mjs \
+            .github/scripts/stack-trusted-publishers.test.mjs \
+            .github/scripts/generate-architecture.test.mjs
+
   platform-verification-reusable:
     name: platform-verification-reusable
     permissions:

@@ -274,11 +274,7 @@ test('receipt attestation downloads only the completed receipt and executes no r
 
 test('the experimental environment-supply group remains continuously represented and disabled', () => {
   const group = catalog.releaseGroups['experimental-environment-supply'];
-  assert.deepEqual(group.requiredGateIds, [
-    'environments-ci',
-    'record-discovery-ci',
-    'task-supply-ci',
-  ]);
+  assert.deepEqual(group.requiredGateIds, ['environments-ci', 'record-discovery-ci']);
   assert.deepEqual(group.publishPolicies, ['disabled']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);
