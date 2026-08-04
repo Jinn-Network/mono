@@ -182,10 +182,23 @@ export function deriveInstanceEntry(input: {
  *  a fleet that was scraped once and never again. */
 export const DEFAULT_MAX_COVERAGE_GAP_MS = 2 * 24 * 60 * 60 * 1000;
 
+/** A real approved observation window must span at least a full day — the collector runs daily,
+ *  so anything shorter can never have even one legitimate collection cycle. Below this (including
+ *  a zero-length or inverted `startedAt >= endedAt` window), `hasCoverageGap` refuses to certify
+ *  coverage regardless of how many snapshots exist — review #2380 rereview: a single lucky reading
+ *  against a degenerate window must not be able to certify it. */
+export const MIN_WINDOW_SPAN_MS = 24 * 60 * 60 * 1000;
+
 /**
  * True when `snapshotTimes` (unsorted) leaves any gap wider than `maxGapMs` — before the first
  * collection (relative to `startedAt`), between two consecutive collections, or after the last
  * collection (relative to `endedAt`). An instance with zero snapshots is always a total gap.
+ *
+ * Fails closed (returns `true`, i.e. "there is a gap") on anything that can't be trusted as a real
+ * window or a real timestamp: an unparseable `startedAt`/`endedAt` (`Date.parse` yields `NaN`,
+ * and every `NaN > x` comparison is silently `false` — the bug this guards against), a window
+ * shorter than `MIN_WINDOW_SPAN_MS` or inverted, or any unparseable snapshot `at`. The gate must
+ * be safe regardless of whether its caller validated its inputs first.
  */
 function hasCoverageGap(input: {
   readonly snapshotTimes: readonly string[];
@@ -195,8 +208,12 @@ function hasCoverageGap(input: {
 }): boolean {
   const started = Date.parse(input.startedAt);
   const ended = Date.parse(input.endedAt);
-  const times = [...input.snapshotTimes].map((iso) => Date.parse(iso)).sort((a, b) => a - b);
-  if (times.length === 0) return true;
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended - started < MIN_WINDOW_SPAN_MS) {
+    return true;
+  }
+  const parsedTimes = input.snapshotTimes.map((iso) => Date.parse(iso));
+  if (parsedTimes.length === 0 || parsedTimes.some((t) => !Number.isFinite(t))) return true;
+  const times = [...parsedTimes].sort((a, b) => a - b);
   if (times[0]! - started > input.maxGapMs) return true;
   if (ended - times.at(-1)! > input.maxGapMs) return true;
   for (let i = 1; i < times.length; i += 1) {
@@ -205,6 +222,16 @@ function hasCoverageGap(input: {
   return false;
 }
 
+/**
+ * `signalsCovered` is satisfied by any single instance's latest snapshot reporting
+ * `durable: true` — a per-fleet "was the mechanism confirmed live anywhere" signal, not a
+ * per-instance one. Review #2380 rereview flagged this as arguably surprising (1-of-8 durable
+ * reports full coverage) and suggested requiring every instance instead, explicitly as a
+ * non-blocking, "your call" note — it cannot inflate `zeroUse`, which already independently
+ * requires every instance `complete` (a stronger, coverage-gated condition than mere durability).
+ * Left as "any" to match the existing verified contract; revisit if `signalsCovered` grows a use
+ * beyond backing `zeroUse`.
+ */
 function computeSignalsCovered(instances: readonly PhaseDObservationInstanceEntry[]): readonly string[] {
   const covered = new Set<string>();
   for (const instance of instances) {
@@ -282,6 +309,50 @@ const MISSING_SNAPSHOT = (at: string): PhaseDObservationSnapshotEntry => (
 );
 
 /**
+ * Conservatively merges duplicate fetch results for the same `instanceId` within one collection
+ * round (a copy-pasted fleet-manifest entry, most plausibly). "Refuse to overwrite" rather than
+ * "last write wins": any `ok: false` among the duplicates, or duplicates that disagree about
+ * `observationWindowStartedAt` (an unresolvable ambiguity — which one is real?), makes the whole
+ * merge untrustworthy. Otherwise each signal's count is the MAX across the duplicates — the
+ * durable counter file is monotonic, so the higher reading is never less true than the lower one,
+ * and this can never silently drop non-zero evidence the way a naive last-write-wins Map would
+ * (review #2380 rereview P1c).
+ */
+function mergeDuplicateFetches(duplicates: readonly PhaseDObservationFetch[]): PhaseDObservationFetch {
+  const [first, ...rest] = duplicates;
+  const instanceId = first!.instanceId;
+  if (duplicates.length === 1) return first!;
+  const results = duplicates.map((entry) => entry.result);
+  const merged: PhaseDObservationFetchResult = (() => {
+    if (results.some((result) => !result.ok)) return { ok: false };
+    const oks = results as Extract<PhaseDObservationFetchResult, { ok: true }>[];
+    const windowStarts = new Set(oks.map((result) => result.observationWindowStartedAt));
+    if (windowStarts.size > 1) return { ok: false };
+    const countsBySignal = new Map<string, number>();
+    for (const result of oks) {
+      for (const counter of result.counters) {
+        countsBySignal.set(counter.signal, Math.max(countsBySignal.get(counter.signal) ?? 0, counter.count));
+      }
+    }
+    return {
+      ok: true,
+      durable: oks.every((result) => result.durable),
+      observationWindowStartedAt: [...windowStarts][0]!,
+      counters: [...countsBySignal.entries()]
+        .map(([signal, count]) => ({ signal, count }))
+        .sort((a, b) => (a.signal < b.signal ? -1 : a.signal > b.signal ? 1 : 0)),
+    };
+  })();
+  return {
+    instanceId,
+    imageDigest: first!.imageDigest ?? rest.find((entry) => entry.imageDigest !== null)?.imageDigest ?? null,
+    reportedSourceSha: first!.reportedSourceSha
+      ?? rest.find((entry) => entry.reportedSourceSha !== null)?.reportedSourceSha ?? null,
+    result: merged,
+  };
+}
+
+/**
  * Merges today's fetch results into an existing (or brand-new) receipt. Stateful in the sense
  * that it reads `existing.instances` to append rather than overwrite each instance's snapshot
  * history — the collector runs on a daily cadence and this is what turns repeated single-day
@@ -329,7 +400,19 @@ export function appendDailyObservation(input: {
   const priorByInstance = new Map(
     (input.existing?.instances ?? []).map((entry) => [entry.instanceId, entry] as const),
   );
-  const fetchedByInstance = new Map(input.fetched.map((fetch) => [fetch.instanceId, fetch] as const));
+  // Group before building the lookup Map: a naive `new Map(fetched.map(...))` silently keeps only
+  // the last entry for a duplicate instanceId (a copy-pasted fleet-manifest entry), which can drop
+  // real non-zero evidence exactly like the fleet-shrinkage hazard this module otherwise defends
+  // against (review #2380 rereview P1c) — merge conservatively instead, see mergeDuplicateFetches.
+  const fetchGroups = new Map<string, PhaseDObservationFetch[]>();
+  for (const fetch of input.fetched) {
+    const group = fetchGroups.get(fetch.instanceId);
+    if (group === undefined) fetchGroups.set(fetch.instanceId, [fetch]);
+    else group.push(fetch);
+  }
+  const fetchedByInstance = new Map(
+    [...fetchGroups.entries()].map(([instanceId, group]) => [instanceId, mergeDuplicateFetches(group)] as const),
+  );
   // Union, not just today's fetch: an instance that has ever appeared stays represented forever
   // within this window, even once it drops out of the fleet manifest — see the docstring above.
   const allInstanceIds = [...new Set([...priorByInstance.keys(), ...fetchedByInstance.keys()])].sort();
@@ -366,12 +449,35 @@ export function appendDailyObservation(input: {
   };
 }
 
+function isValidSnapshotEntry(value: unknown): value is PhaseDObservationSnapshotEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Partial<PhaseDObservationSnapshotEntry>;
+  return typeof entry.at === 'string'
+    && (entry.observationWindowStartedAt === null || typeof entry.observationWindowStartedAt === 'string')
+    && typeof entry.durable === 'boolean'
+    && Array.isArray(entry.counters);
+}
+
+function isValidInstanceEntry(value: unknown): value is PhaseDObservationInstanceEntry {
+  if (typeof value !== 'object' || value === null) return false;
+  const entry = value as Partial<PhaseDObservationInstanceEntry>;
+  return typeof entry.instanceId === 'string' && entry.instanceId.length > 0
+    && (entry.imageDigest === null || typeof entry.imageDigest === 'string')
+    && (entry.reportedSourceSha === null || typeof entry.reportedSourceSha === 'string')
+    && Array.isArray(entry.snapshots) && entry.snapshots.every(isValidSnapshotEntry)
+    && typeof entry.complete === 'boolean'
+    && typeof entry.resets === 'number'
+    && typeof entry.regressions === 'number';
+}
+
 /**
  * Validates a JSON value loaded from disk is a well-formed `PhaseDObservationReceipt` before the
  * collector trusts it as the window's history. A structurally valid but wrong-shaped file (right
- * `windowId`, empty or missing `instances`) must never be silently accepted as "the existing
- * receipt" — that would discard real history exactly like the fleet-shrinkage hazard this module
- * otherwise defends against.
+ * `windowId`, an empty or junk-entry `instances` array) must never be silently accepted as "the
+ * existing receipt" — that would discard or fabricate history exactly like the fleet-shrinkage
+ * hazard this module otherwise defends against. Requires at least one well-formed instance entry
+ * (each validated down to its snapshot shape, not just `Array.isArray`) — a receipt that has
+ * genuinely observed nothing yet should not exist as a file; `existing` should be `undefined`.
  */
 export function parseExistingReceipt(raw: unknown): PhaseDObservationReceipt {
   if (typeof raw !== 'object' || raw === null) {
@@ -383,7 +489,8 @@ export function parseExistingReceipt(raw: unknown): PhaseDObservationReceipt {
     || typeof candidate.windowId !== 'string' || candidate.windowId.length === 0
     || typeof candidate.approvedBy !== 'string' || candidate.approvedBy.length === 0
     || typeof candidate.startedAt !== 'string'
-    || !Array.isArray(candidate.instances)) {
+    || !Array.isArray(candidate.instances) || candidate.instances.length === 0
+    || !candidate.instances.every(isValidInstanceEntry)) {
     throw new Error('observation receipt has an invalid or unrecognized shape');
   }
   return candidate as PhaseDObservationReceipt;

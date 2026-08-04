@@ -130,10 +130,11 @@ describe('deriveInstanceEntry (#2380)', () => {
 });
 
 describe('deriveVerdict (#2380)', () => {
-  // A single-day, zero-width window (startedAt === endedAt === the instance's snapshot `at`)
-  // keeps coverage trivially satisfied so these tests can focus on the zero/non-zero signal logic
-  // rather than window-span math (covered separately below).
-  const WINDOW = { startedAt: '2026-08-04T00:00:00.000Z', endedAt: '2026-08-04T00:00:00.000Z' };
+  // A minimal one-day window (the shortest span MIN_WINDOW_SPAN_MS accepts), with the instance's
+  // snapshot `at` sitting at its start — keeps coverage trivially satisfied so these tests can
+  // focus on the zero/non-zero signal logic rather than window-span math (covered separately
+  // below, including the zero-length/inverted/unparseable-date degenerate cases).
+  const WINDOW = { startedAt: '2026-08-04T00:00:00.000Z', endedAt: '2026-08-05T00:00:00.000Z' };
 
   function completeInstance(counters: PhaseDObservationSnapshotEntry['counters']) {
     return deriveInstanceEntry({
@@ -245,6 +246,70 @@ describe('deriveVerdict (#2380)', () => {
       });
       expect(verdict.zeroUse).toBe(false);
     });
+
+    // Rereview #2380: Date.parse yields NaN for a malformed timestamp, and every `NaN > x`
+    // comparison is silently false — so an unvalidated startedAt/endedAt/snapshot `at` could
+    // silently disable coverage checking entirely (P9 re-entering through a different door). The
+    // gate must fail closed on all of these regardless of whether an upstream caller validated.
+    it('rejects a zero-length window (startedAt === endedAt) even with a single matching snapshot', () => {
+      const verdict = deriveVerdict({
+        instances: [deriveInstanceEntry({
+          instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+          snapshots: [snapshot({ at: '2026-08-01T00:00:00.000Z' })],
+        })],
+        startedAt: '2026-08-01T00:00:00.000Z',
+        endedAt: '2026-08-01T00:00:00.000Z',
+      });
+      expect(verdict.zeroUse).toBe(false);
+    });
+
+    it('rejects an inverted window (endedAt before startedAt)', () => {
+      const verdict = deriveVerdict({
+        instances: [deriveInstanceEntry({
+          instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+          snapshots: [snapshot({ at: '2026-08-09T00:00:00.000Z' })],
+        })],
+        startedAt: '2026-08-10T00:00:00.000Z',
+        endedAt: '2026-08-01T00:00:00.000Z',
+      });
+      expect(verdict.zeroUse).toBe(false);
+    });
+
+    it('rejects a window shorter than the minimum span, even though technically startedAt < endedAt', () => {
+      const verdict = deriveVerdict({
+        instances: [deriveInstanceEntry({
+          instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+          snapshots: [snapshot({ at: '2026-08-01T00:00:00.000Z' })],
+        })],
+        startedAt: '2026-08-01T00:00:00.000Z',
+        endedAt: '2026-08-01T01:00:00.000Z', // 1 hour — below MIN_WINDOW_SPAN_MS (1 day)
+      });
+      expect(verdict.zeroUse).toBe(false);
+    });
+
+    it('rejects unparseable startedAt/endedAt — fails closed rather than treating NaN comparisons as "no gap"', () => {
+      const verdict = deriveVerdict({
+        instances: [deriveInstanceEntry({
+          instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+          snapshots: [snapshot({ at: '2026-08-01T00:00:00.000Z' })],
+        })],
+        startedAt: 'garbage',
+        endedAt: 'also-garbage',
+      });
+      expect(verdict.zeroUse).toBe(false);
+    });
+
+    it('rejects an unparseable snapshot `at` — a malformed collection timestamp cannot vouch for coverage', () => {
+      const verdict = deriveVerdict({
+        instances: [deriveInstanceEntry({
+          instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+          snapshots: [snapshot({ at: 'nonsense' })],
+        })],
+        startedAt: '2026-08-01T00:00:00.000Z',
+        endedAt: '2026-08-30T00:00:00.000Z',
+      });
+      expect(verdict.zeroUse).toBe(false);
+    });
   });
 });
 
@@ -255,7 +320,7 @@ describe('appendDailyObservation (#2380)', () => {
       windowId: 'phase-d-2026-08-04',
       approvedBy: 'ritsuKai2000',
       startedAt: '2026-08-04T00:00:00.000Z',
-      endedAt: '2026-08-04T01:00:00.000Z',
+      endedAt: '2026-08-05T01:00:00.000Z',
       collectedAt: '2026-08-04T01:00:00.000Z',
       fetched: [
         {
@@ -278,7 +343,7 @@ describe('appendDailyObservation (#2380)', () => {
       windowId: 'phase-d-2026-08-04',
       approvedBy: 'ritsuKai2000',
       startedAt: '2026-08-04T00:00:00.000Z',
-      endedAt: '2026-08-04T01:00:00.000Z',
+      endedAt: '2026-08-05T01:00:00.000Z',
       supportBoundary: { claim: 'first-party-operational', disclaims: ['unknown-independent-operators'] },
       instances: [{
         instanceId: 'op-a',
@@ -421,15 +486,71 @@ describe('appendDailyObservation (#2380)', () => {
     expect(carried.complete).toBe(false);
     expect(day2.verdict.zeroUse).toBe(false);
   });
+
+  // Rereview #2380 (P1c): a naive `new Map(fetched.map(...))` silently keeps only the last entry
+  // for a duplicate instanceId within one fetch batch (a copy-pasted fleet-manifest entry) —
+  // exactly the population-integrity hazard fix 1 exists to prevent, arriving via the fetch list
+  // instead of the receipt.
+  it('conservatively merges a duplicate instanceId within one fetch batch rather than last-write-wins dropping non-zero evidence (#2380 review IMPORTANT / P1c)', () => {
+    const receipt = appendDailyObservation({
+      existing: undefined,
+      windowId: 'w-p1c', approvedBy: 'ritsu', startedAt: '2026-08-01T00:00:00.000Z', endedAt: '2026-08-02T00:00:00.000Z',
+      collectedAt: '2026-08-01T00:00:00.000Z',
+      fetched: [
+        {
+          instanceId: 'dup', imageDigest: null, reportedSourceSha: null,
+          result: {
+            ok: true, durable: true, observationWindowStartedAt: '2026-08-01T00:00:00.000Z',
+            counters: [{ signal: 'legacy-operator-composition', count: 9 }],
+          },
+        },
+        {
+          instanceId: 'dup', imageDigest: null, reportedSourceSha: null,
+          result: { ok: true, durable: true, observationWindowStartedAt: '2026-08-01T00:00:00.000Z', counters: [] },
+        },
+      ],
+    });
+    expect(receipt.instances).toHaveLength(1);
+    const merged = receipt.instances[0]!;
+    // The count:9 row must survive the merge — a naive Map would have kept only the second,
+    // empty-counters fetch (last write wins) and silently dropped the non-zero evidence.
+    expect(merged.snapshots.at(-1)?.counters).toEqual([{ signal: 'legacy-operator-composition', count: 9 }]);
+    expect(receipt.verdict.zeroUse).toBe(false);
+  });
+
+  it('refuses to merge duplicates that disagree about observationWindowStartedAt — an unresolvable ambiguity, not evidence', () => {
+    const receipt = appendDailyObservation({
+      existing: undefined,
+      windowId: 'w-p1c2', approvedBy: 'ritsu', startedAt: '2026-08-01T00:00:00.000Z', endedAt: '2026-08-02T00:00:00.000Z',
+      collectedAt: '2026-08-01T00:00:00.000Z',
+      fetched: [
+        {
+          instanceId: 'dup', imageDigest: null, reportedSourceSha: null,
+          result: { ok: true, durable: true, observationWindowStartedAt: '2026-08-01T00:00:00.000Z', counters: [] },
+        },
+        {
+          instanceId: 'dup', imageDigest: null, reportedSourceSha: null,
+          result: { ok: true, durable: true, observationWindowStartedAt: '2026-07-15T00:00:00.000Z', counters: [] },
+        },
+      ],
+    });
+    expect(receipt.instances).toHaveLength(1);
+    expect(receipt.instances[0]?.complete).toBe(false);
+    expect(receipt.instances[0]?.snapshots.at(-1)).toEqual({
+      at: '2026-08-01T00:00:00.000Z', observationWindowStartedAt: null, durable: false, counters: [],
+    });
+  });
 });
 
 describe('parseExistingReceipt (#2380 review IMPORTANT — receipt provenance)', () => {
   it('accepts a well-formed receipt', () => {
+    // Must carry at least one instance — a receipt with no instances yet should not exist as a
+    // file (parseExistingReceipt rejects an empty instances array; see the dedicated test below).
     const receipt = appendDailyObservation({
       existing: undefined,
       windowId: 'w1', approvedBy: 'ritsu', startedAt: '2026-08-01T00:00:00.000Z', endedAt: null,
       collectedAt: '2026-08-01T00:00:00.000Z',
-      fetched: [],
+      fetched: [{ instanceId: 'op-a', imageDigest: null, reportedSourceSha: null, result: { ok: false } }],
     });
     expect(parseExistingReceipt(JSON.parse(JSON.stringify(receipt)))).toEqual(receipt);
   });
@@ -445,6 +566,30 @@ describe('parseExistingReceipt (#2380 review IMPORTANT — receipt provenance)',
     expect(() => parseExistingReceipt({
       schemaVersion: 1, kind: 'jinn.phase-d-observation-window',
       windowId: 'w1', approvedBy: 'ritsu', startedAt: '2026-08-01T00:00:00.000Z',
+    })).toThrow(/invalid or unrecognized shape/u);
+  });
+
+  // Rereview #2380 minor: the prior round's docstring claimed a truncated/junk instances array
+  // "must never be silently trusted", but the check was only Array.isArray — instances: [] and
+  // instances: [{nonsense: true}] both passed. Fixed to actually validate.
+  it('rejects an empty instances array or an instances array containing junk (non-instance-shaped) entries', () => {
+    const shell = {
+      schemaVersion: 1 as const, kind: 'jinn.phase-d-observation-window' as const,
+      windowId: 'w1', approvedBy: 'ritsu', startedAt: '2026-08-01T00:00:00.000Z', endedAt: null,
+      supportBoundary: { claim: 'first-party-operational' as const, disclaims: ['unknown-independent-operators'] as const },
+      verdict: { zeroUse: false, signalsCovered: [] },
+    };
+    expect(() => parseExistingReceipt({ ...shell, instances: [] }))
+      .toThrow(/invalid or unrecognized shape/u);
+    expect(() => parseExistingReceipt({ ...shell, instances: [{ nonsense: true }] }))
+      .toThrow(/invalid or unrecognized shape/u);
+    // A real instance entry with a junk snapshot inside it must also be rejected.
+    expect(() => parseExistingReceipt({
+      ...shell,
+      instances: [{
+        instanceId: 'op-a', imageDigest: null, reportedSourceSha: null,
+        snapshots: [{ nonsense: true }], complete: true, resets: 0, regressions: 0,
+      }],
     })).toThrow(/invalid or unrecognized shape/u);
   });
 });
