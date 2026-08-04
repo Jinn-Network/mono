@@ -91,7 +91,7 @@ test('only deleted transitions may have an empty consumer inventory', () => {
   assert.deepEqual(validateTransitionManifest(manifest({ transitions: [transition({
     status: 'deleted',
     consumers: [],
-    evidenceCitation: 'PRINCIPLES.md',
+    evidenceCitation: 'log/decisions/2026-08-04-legacy-taskengine-carve-archival.md',
   })] }), { repoRoot }), []);
   const errors = validateTransitionManifest(manifest({ transitions: [transition({
     consumers: [],
@@ -116,16 +116,63 @@ test('a deleted transition must cite Class A evidence (spec §7 human-gate rule)
   const cited = validateTransitionManifest(manifest({ transitions: [transition({
     status: 'deleted',
     consumers: [],
-    evidenceCitation: 'PRINCIPLES.md',
+    evidenceCitation: 'log/decisions/2026-08-04-legacy-taskengine-carve-archival.md',
   })] }), { repoRoot });
   assert.deepEqual(cited, []);
 });
 
 test('evidenceCitation is only allowed on a deleted transition', () => {
   const errors = validateTransitionManifest(manifest({ transitions: [transition({
-    evidenceCitation: 'PRINCIPLES.md',
+    evidenceCitation: 'log/decisions/2026-08-04-legacy-taskengine-carve-archival.md',
   })] }), { repoRoot });
   assert.ok(errors.some((error) => error.includes("evidenceCitation is only allowed when status is 'deleted'")));
+});
+
+test('evidenceCitation must be Class A (a decision record or spec), not merely a path that resolves', () => {
+  // Proof by construction: a resolving path outside log/decisions/ or docs/superpowers/specs/ is
+  // not Class A evidence — in particular, citing the Class O reader itself (the counters that may
+  // have informed the decision) must never pass as the cited basis.
+  const errors = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+    evidenceCitation: 'client/src/compatibility/phase-d-transition-usage.ts',
+  })] }), { repoRoot });
+  assert.ok(errors.some((error) => error.includes('evidenceCitation must live under')));
+
+  // A random top-level document that resolves is also not Class A evidence.
+  const arbitrary = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+    evidenceCitation: 'PRINCIPLES.md',
+  })] }), { repoRoot });
+  assert.ok(arbitrary.some((error) => error.includes('evidenceCitation must live under')));
+});
+
+test('evidenceCitation must not equal a usageSignal.sourceFile declared anywhere in the manifest', () => {
+  // A spec document doubling as some transition's usageSignal.sourceFile is exactly the
+  // Class-O-cited-as-Class-A failure mode the rule exists to catch, even though the path itself
+  // sits under an allowed evidence root and resolves.
+  const sharedPath = 'docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md';
+  const errors = validateTransitionManifest(manifest({
+    transitions: [
+      transition({
+        id: 'legacy-marketplace-pipeline',
+        usageSignal: {
+          name: 'marketplace_pipeline_invocations',
+          sourceFile: sharedPath,
+          sourceDescription: 'stand-in for test purposes',
+          zeroDefinition: 'No production invocation during the approved observation window.',
+        },
+      }),
+      transition({
+        id: 'legacy-taskengine-carve',
+        status: 'deleted',
+        consumers: [],
+        evidenceCitation: sharedPath,
+      }),
+    ],
+  }), { repoRoot });
+  assert.ok(errors.some((error) => error.includes('must not equal a declared usageSignal.sourceFile')));
 });
 
 test('validator rejects a usageSignal file reference that does not exist in the repository', () => {

@@ -196,8 +196,9 @@
           "enum": ["planned", "migrating", "ready-for-deletion", "deleted", "blocked"]
         },
         "evidenceCitation": {
-          "description": "Only meaningful when status is 'deleted' (spec §7 human-gate rule): repository-relative path to the Class A evidence (e.g. a decision record) cited as the basis for the deletion flip. Class O counters may inform the decision but may never be the cited basis.",
-          "$ref": "#/$defs/repoPath"
+          "description": "Only meaningful when status is 'deleted' (spec §7 human-gate rule): repository-relative path under log/decisions/ or docs/superpowers/specs/ to the Class A evidence (a decision record or design spec) cited as the basis for the deletion flip. Class O counters (a declared usageSignal.sourceFile) may inform the decision but may never be the cited basis — the JS validator (transition-manifest.mjs) additionally rejects a citation equal to any transition's usageSignal.sourceFile.",
+          "type": "string",
+          "pattern": "^(?=log/decisions/|docs/superpowers/specs/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
         }
       },
       "allOf": [

@@ -14,6 +14,10 @@ const STATUSES = new Set(['planned', 'migrating', 'ready-for-deletion', 'deleted
 // have informed the decision. Kept out of REQUIRED_TRANSITION (unconditionally required) because
 // it is conditionally required — see the status === 'deleted' check below.
 const OPTIONAL_TRANSITION_FIELDS = ['evidenceCitation'];
+// Where Class A evidence lives in this repository: decision records and design specs. A path
+// that merely exists is not enough — "exists" alone would let a citation point at the Class O
+// reader itself, which is exactly the counters this rule exists to keep out of the cited basis.
+const EVIDENCE_CITATION_ROOTS = ['log/decisions/', 'docs/superpowers/specs/'];
 
 function object(value, label, errors) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -105,6 +109,16 @@ export function validateTransitionManifest(manifest, { repoRoot = process.cwd() 
     return errors;
   }
 
+  // Collected up front (not inside the per-transition loop below) because a citation is checked
+  // against every declared usageSignal.sourceFile in the manifest, not just its own transition's.
+  const usageSignalSourceFiles = new Set(
+    root.transitions
+      .filter((candidate) => typeof candidate === 'object' && candidate !== null
+        && typeof candidate.usageSignal === 'object' && candidate.usageSignal !== null)
+      .map((candidate) => candidate.usageSignal.sourceFile)
+      .filter((sourceFile) => typeof sourceFile === 'string'),
+  );
+
   const ids = new Set();
   root.transitions.forEach((candidate, index) => {
     const label = `manifest.transitions[${index}]`;
@@ -146,6 +160,16 @@ export function validateTransitionManifest(manifest, { repoRoot = process.cwd() 
     // forbidden outside status 'deleted' rather than left as free-floating optional metadata.
     if (transition.status === 'deleted') {
       repoPath(transition.evidenceCitation, `${label}.evidenceCitation`, repoRoot, errors);
+      if (typeof transition.evidenceCitation === 'string' && transition.evidenceCitation.length > 0) {
+        if (!EVIDENCE_CITATION_ROOTS.some((prefix) => transition.evidenceCitation.startsWith(prefix))) {
+          errors.push(`${label}.evidenceCitation must live under ${EVIDENCE_CITATION_ROOTS.join(' or ')} `
+            + `(a decision record or spec — a resolving path alone is not Class A evidence)`);
+        }
+        if (usageSignalSourceFiles.has(transition.evidenceCitation)) {
+          errors.push(`${label}.evidenceCitation must not equal a declared usageSignal.sourceFile `
+            + `(that is the Class O counter, never the cited basis): ${transition.evidenceCitation}`);
+        }
+      }
     } else if (Object.hasOwn(transition, 'evidenceCitation')) {
       errors.push(`${label}.evidenceCitation is only allowed when status is 'deleted'`);
     }
