@@ -1,16 +1,16 @@
 # Agent Artifacts as the Replacement for `jinn integrations`
 
-- **Version:** 0.3
+- **Version:** 1.0
 - **Date:** 2026-08-04
-- **Status:** Draft — **revised per operator rulings 2026-08-04** (two rounds); pending operator
-  ratification of this revision. Phase 1 (design) of DevX Re-Seal component C5
-  ([#2396](https://github.com/Jinn-Network/mono/issues/2396)); the build phase is gated on
-  ratification.
+- **Status:** **Ruled — all dispositions decided by the operator (Ritsu), 2026-08-04**, across
+  three rounds recorded in §0. Phase 1 (design) of DevX Re-Seal component C5
+  ([#2396](https://github.com/Jinn-Network/mono/issues/2396)). No open questions remain; the
+  build phase executes against §8. The document travels with the operator's formal sign-off.
 - **Shape:** `design`
 - **Scope:** the **host skills** as the canonical published onboarding artifact, the **host
   plugin** as their distribution bundle, the requester surface as a **new tier-4 product**, the
   transition-manifest entry that sunsets the legacy `jinn integrations` surface whole, the test
-  tiers, and the build-phase breakdown split across the work-client-mint trigger.
+  tiers, and the build-phase breakdown.
 - **Out of scope:** the apex website (C4), the `spec.jinn.network` host and deploy-bundle
   generator (C3), the re-seal itself (C0–C2); the legacy `jinn mcp` operator server and its
   21 tools (**reference only** — untouched, audit filed as a follow-up, §7); `plugin/frozen/`
@@ -62,9 +62,24 @@
 10. **The catalog package is renamed for what it now carries** — onboarding skills, not prompts —
     keeping the publication mechanics already validated.
 
-**Consequences of the collapse, flagged rather than absorbed silently:**
-- The **tool list is 10, not 11** (`jinn_init` has no referent in a signer-injection-only
-  product — §2, §7 (1)); carried from v0.2.
+**Round 3 rulings (v1.0)** — the two carried-open items are decided and the design closes:
+
+11. **Custody: injection *plus* an explicitly designated CLI-keystore source.** The product stays
+    keyless — no product-owned keystore, `jinn_init` stays dropped, the 10-tool list stands.
+    Signer injection remains the mechanism, and one *named* signer source is the `jinn` CLI's
+    existing keystore, used only when the user explicitly configures the server to point at it.
+    Full disposition and the C2 argument in §2.
+12. **Mint cycle: design counts; co-develop.** A ratified consumer design with a concrete tool
+    surface counts as consumer #2 for lifting DR-2026-08-03 decision 3's deferral. The work
+    client and the requester product build **together**, the product developing against the
+    minting client. B6 is no longer indefinitely blocked. Dated amendment note in §2.
+13. **The three v0.3 judgment calls are accepted** under the standing rulings: the
+    generated-table polarity flip, the operator-skill duplication across the sunset window, and
+    the migration cleanup folded into the skills.
+
+**Consequences carried forward, flagged rather than absorbed silently:**
+- The **tool list is 10, not 11** — `jinn_init` has no referent: the product never *creates* a
+  keystore, because creation stays the CLI's first-touch job (§2). Ruled, not assumed.
 - The migrate-integrations artifact **is no longer its own record**; cleanup folds into both
   skills as a step (§3).
 - **The generated-table discipline changes polarity at publication** (§4) — a generator before
@@ -98,36 +113,88 @@ server with its own package — but nothing of its content carries over. Tool na
 collide in a host that has both while the legacy surface sunsets.
 
 **Engine: it composes the ratified posting authority through the work client — never around
-it.** DR-2026-08-03 decision 3 declined to mint a work-client package now and made
-`@jinn-network/marketplace-binding`'s hardened requester backend, recovering through the one
-posting WAL, the ratified posting authority in the meantime. Marketplace surfaces §4.3 step 3
-is the mint event: the work client packages that requester module. **This product is built on
-the work client, after the mint.** It does not shell the `jinn` CLI, does not import binding's
-write legs directly, and does not become a second posting stack — the three ways the "ship
-something now" pressure would have been paid for later.
+it.** DR-2026-08-03 decision 3 made `@jinn-network/marketplace-binding`'s hardened requester
+backend, recovering through the one posting WAL, the ratified posting authority. Marketplace
+surfaces §4.3 step 3 is the mint event: the work client packages that requester module. **This
+product is built on the work client.** It does not shell the `jinn` CLI, does not import
+binding's write legs directly, and does not become a second posting stack — the three ways the
+"ship something now" pressure would have been paid for later.
 
-**Mint trigger, stated so it is checkable:** DR-2026-08-03 rejected "mint a work-client now"
-with a reason — *"only posting/recovery is proven shared; the broader lifecycle lacks two
-independent consumers."* The trigger is that rejection being lifted on its own terms: a second
-independent consumer proving the broader requester lifecycle, at which point marketplace
-surfaces §4.3 step 3 executes. Build task B6 (§8) is gated on that event and nothing else.
-*A chicken-and-egg worth the operator's eye is flagged in §7 (2).*
+### 2.1 Dated amendment note — DR-2026-08-03 decision 3 (2026-08-04)
 
-**Custody: signer-injection only; no key material, no ambient authority, C1–C5 unamended.**
-The product accepts a signer through the work client's injection seam (C3) and holds no
-keystore of its own. This is what keeps "no new custody surface" true: a tier-4 product *may*
-lawfully load keys under C2, but doing so here would mint a second machine-local keystore for
-the same user — a new custody surface in everything but name.
+> **Amendment note, 2026-08-04.** DR-2026-08-03 decision 3 declined to mint a work-client
+> package, rejecting "mint a work-client now" with a stated reason: *"Only posting/recovery is
+> proven shared; the broader lifecycle lacks two independent consumers."* The deferral's own
+> test is therefore **two independent consumers proving the broader lifecycle**, and its worry
+> is a shared abstraction shaped by a single consumer's needs.
+>
+> **That test is now satisfied on its own terms.** Consumer #1 is the operator's extractable
+> requester module — posting and recovery, proven. Consumer #2 is this design: a **ratified
+> consumer design with a concrete, enumerated tool surface** (§2's ten tools) spanning exactly
+> the breadth the deferral called unproven — funding preflight, posting, observation to a
+> terminal state, evidence retrieval, and withdrawal. An enumerated surface constrains the
+> abstraction the same way a shipped consumer does, and it does so *before* the client's shape
+> is fixed rather than after.
+>
+> **Operator ruling (Ritsu, 2026-08-04): design counts; co-develop.** The work-client mint and
+> the requester product build together, the product developing against the minting client.
+> Marketplace surfaces §4.3 step 3 executes on that basis; §4.3 step 4 (the CLI converging by
+> importing the work client) is unaffected and still follows the mint.
+>
+> **Reviewer action at train-merge:** reference this note from
+> `log/decisions/2026-08-03-phase-c-capability-boundaries.md` decision 3, so the DR carries its
+> own amendment pointer rather than leaving the lift discoverable only here.
 
-**The class-1 first-touch path is therefore not this product — it is the `jinn` CLI requester
-verbs**, the ratified first-touch surface (marketplace surfaces §4.2 class 1, §4.4: "the CLI
-remains the only such surface offered to external consumers"). The published builder skill
-drives *those verbs*. That split is load-bearing: **class 1 is served by the CLI journey now;
-class 3 is served by the injected-signer MCP product at mint** — which is why the skills and
-the deterministic test tier are buildable today while the product waits. The CLI requester verbs
+Build task B6 (§8) is therefore **co-scheduled with the mint, not blocked behind it**. The
+sequencing constraint that remains is technical, not procedural: the product's two spending
+tools cannot go green until the client's posting path does.
+
+### 2.2 Custody — injection, plus one explicitly designated source
+
+**Ruled: the product is keyless; signer injection is the mechanism; the `jinn` CLI's existing
+keystore is a *named, user-designated* source.** C1–C5 unamended.
+
+- **The product owns no keystore and creates none.** Keystore creation stays the CLI's
+  first-touch job, which is why `jinn_init` has no referent here and the list is ten tools.
+- **Injection is the mechanism.** Write capability reaches the platform stack only as an
+  injected signer object through the work client's seam (C3). No published package API in the
+  path accepts a private key, mnemonic, or seed in any parameter position.
+- **One named source, designated by the user.** The server may resolve its signer from the
+  `jinn` CLI's existing keystore **only when the user explicitly configures it to** — a config
+  value naming the keystore path or handle. **No default. No discovery. No fallback.** With no
+  such value configured there is no signer, and the two spending tools return a structured
+  "no signer configured" result rather than searching `~/.jinn-client` or anywhere else.
+- **Organizations inject instead.** A KMS/HSM/MPC holder configures a signer of its own and
+  never touches the CLI keystore path — the class-3 posture, unchanged.
+
+**Why this satisfies C2.** C2 forbids *ambient authority acquisition* by published packages —
+"no reading keystores, disk, env, or config for signing authority" — and then names its own
+carve-out: "key-loading code lives only in tier-4 products (the `jinn` CLI, the operator
+runtime) — end-user tools, not dependencies." Three facts land this design inside that line:
+
+1. `@jinn-network/requester-mcp` is a **tier-4 end-user product**, the same station as the
+   `jinn` CLI, not a dependency anything else imports.
+2. The distinction C2 actually draws is **who decides where authority comes from**. Ambient
+   acquisition is the software deciding; here the **user designates** the source per install,
+   explicitly, with no default to fall back on. A configured path is not a discovered one.
+3. **No published package below tier 4 reads a keystore.** The platform stack still receives
+   only an injected signer object; the C2 CI tripwire over signer-accepting packages is
+   unaffected, because nothing in its scope changes.
+
+**The "no new custody surface" mandate holds, by counting.** Earlier revisions argued that
+letting this product load keys would mint a second machine-local keystore. The ruling threads
+that needle exactly: it is not a *new* keystore, it is the *existing* one, pointed at on
+purpose. **One keystore per user, ever.** The practical consequence is the point of the ruling —
+**after CLI first-touch, MCP-only spending becomes possible**: a user need not return to the
+terminal to post, and there is still only one place their key has ever lived.
+
+**Class 1 remains the CLI journey.** The published builder skill drives the `jinn` CLI requester
+verbs — the ratified first-touch surface (marketplace surfaces §4.2 class 1, §4.4: "the CLI
+remains the only such surface offered to external consumers"). Those verbs
 (`tasks submit|watch|list|show`, `evidence find|show`) are a distinct, ratified surface: neither
-the legacy integrations installer nor the legacy operator MCP server. Depending on them is not
-depending on legacy.
+the legacy integrations installer nor the legacy operator MCP server, so depending on them is
+not depending on legacy. This is what makes the skills and the deterministic test tier
+independently shippable ahead of B6.
 
 **Tool list (10 tools).** Eight read tools carry `readOnlyHint: true`; two value-moving tools
 require `confirm: true` and otherwise return a preview envelope naming the exact follow-up call
@@ -267,8 +334,10 @@ and a published skill is immutable — so the same mechanism cannot keep writing
 - **After publication** `yarn skill:check` becomes a **red guard**: drift between the live
   registry and the sealed bytes fails CI and the fix is to **mint `v2`**, never to edit `v1`.
 
-That is the honest reconciliation of "skills are records" with "skill tables are generated," and
-it is new in v0.3.
+**Accepted by operator ruling**, with its consequence stated plainly rather than softened: after
+publication, a routine CLI verb or flag rename **forces a `v2` mint** — the sealed bytes cannot
+be regenerated in place. That is not a defect to be engineered around; it is "skills are records"
+working as designed, and it prices renames honestly at the moment they are proposed.
 
 **The five guardrails**, verbatim in every published skill and machine-asserted:
 
@@ -340,30 +409,28 @@ transition. This design creates no new dependency on it and no path that keeps i
   returning the delivered result), never from the agent's own narration. **Skips green when the
   credential is absent**, so forks and credential-less runs are not red.
 
-## 7. Genuinely contested choices — operator input wanted
+## 7. Dispositions of record — no open questions
 
-Closed by ruling across the two rounds: skill hosting, package placement, `doctor`, the
-bare-`jinn mcp` default (dissolved), the 21-tool audit (deferred), and the prompt-vs-skill
-taxonomy. What remains:
+Every question this design raised has been decided. Recorded so a later reader sees what was
+weighed, not merely what was chosen:
 
-1. **The tool list is 10, not 11.** `jinn_init` is gone: it created the CLI's machine-local
-   keystore, and a signer-injection-only product has no keystore to create. If you intended the
-   requester product to own a keystore for first-touch users, that is a different custody
-   posture than §2 and I should redesign rather than assume.
-2. **The mint trigger has a chicken-and-egg.** DR-2026-08-03 defers the work client until "two
-   independent consumers prove the broader lifecycle." The requester MCP product is exactly such
-   a consumer — but a consumer that cannot be built until the mint cannot count toward the mint.
-   Someone has to decide whether a designed-and-ratified second consumer counts, or whether B6
-   waits for a consumer arriving by another route. **This is the one place I would rather stop
-   than guess.**
-3. **The published operator skill duplicates `client/skills/jinn-operator/`** for the length of
-   the legacy client's sunset — a host-neutral published document beside an in-package legacy
-   one. The alternative is regenerating or moving the legacy file, which touches the surface the
-   rulings put off-limits. I chose duplication with a sunset date; say if that reads badly.
-4. **The `skill:check` polarity flip (§4) is a new mechanism**, not a ratified one. It is the
-   minimum that makes generated tables and immutable records coexist, but it means a routine CLI
-   rename after publication forces a `v2` mint rather than a silent regeneration. That is
-   correct under the identifier law and mildly annoying in practice; worth your explicit nod.
+| Question | Disposition |
+|---|---|
+| Requester surface: role of `jinn mcp` vs new product | **New tier-4 product.** Legacy is reference only. |
+| The bare-`jinn mcp` default during a window | **Dissolved** — nothing is added to that binary. |
+| Keep `jinn integrations doctor` as a diagnostic | **No.** The surface is sunset whole. |
+| Skill bytes at the apex vs `spec.jinn.network` | **`spec.jinn.network`**, signed manifest. |
+| Documents-only catalog package in `platform-v1` | **Accepted**, canary-only npm side effect and all. |
+| `latest` alias for the newest skill | **No.** Append-only; a mutable name in an immutable root is forbidden. |
+| Pasteable prompt as its own artifact family | **Dropped.** The host skill is canonical; the paste is a rendered one-liner. |
+| "Plugin" for the onboarding bundle | **"Host plugin", always** — `records/plugin` already holds the SolverPlugin sense. |
+| Tool list: 10 or 11 | **10.** The product never creates a keystore; creation stays the CLI's first-touch job. |
+| Custody: keyless, or a product keystore | **Keyless, with one user-designated source** (§2.2). One keystore per user, ever. |
+| Mint cycle: does a ratified design count as consumer #2 | **Yes — design counts; co-develop** (§2.1). |
+| `skill:check` polarity flip at publication | **Accepted**, with the `v2`-mint consequence stated plainly (§4). |
+| Operator-skill duplication across the sunset window | **Accepted** — duplication with a sunset date beats touching the off-limits legacy file. |
+| Migration cleanup as its own record | **No** — folded into both skills as a step (§3). |
+| Legacy operator server's 21-tool audit | **Out of scope**, filed as a follow-up. |
 
 **Named dependency, not papered over:** the skill URIs must be minted at `spec.jinn.network`
 from birth. Build task B2 sequences **after** C1's catalog/topology wave lands the origin move;
@@ -385,11 +452,12 @@ ruling; it belongs to whoever owns the legacy client's sunset.
 | B4 | T1 deterministic skill-command test against Anvil + stubs, over the class-1 CLI requester journey | ratified surface; not gated on the mint |
 | B5 | Extend `skill-generate.ts` to the onboarding skills with the pre/post-publication polarity rule (§4) | writer before sealing, red guard after |
 
-**Gated on the work-client mint** (marketplace surfaces §4.3 step 3; trigger in §2):
+**Co-developed with the work-client mint** (marketplace surfaces §4.3 step 3; the deferral lifted
+by §2.1's amendment note — B6 is schedulable, not blocked):
 
-| # | Task |
-|---|---|
-| B6 | `@jinn-network/requester-mcp` — the tier-4 product: 10 tools, signer injection, confirm-gated previews, composed on the work client. Mint the host-plugin manifest at `host-plugins/jinn/v1` bundling the skills and the MCP server descriptor; mint skill `v2` carrying the real descriptor in place of the interim note. |
+| # | Task | Notes |
+|---|---|---|
+| B6 | `@jinn-network/requester-mcp` — the tier-4 product: the 10 tools, signer injection plus the user-designated CLI-keystore source (§2.2), confirm-gated previews, composed on the work client. Mint the host-plugin manifest at `host-plugins/jinn/v1` bundling the skills and the MCP server descriptor; mint skill `v2` carrying the real descriptor in place of the interim note. | Starts **with** the mint, developing against the minting client — the product's enumerated surface is what the client is shaped against. The only ordering constraint is technical: the two spending tools go green when the client's posting path does. Read tools resolve through Record Discovery and can land first. |
 
 **Last** (needs the live spec host):
 
@@ -414,7 +482,7 @@ ruling; it belongs to whoever owns the legacy client's sunset.
       "entryPoints": [
         "client/src/cli/commands/integrations.ts"
       ],
-      "replacement": "The published onboarding host skills at https://spec.jinn.network/skills/<journey>/v1.md, fetched and self-installed by the agent, driving the ratified class-1 `jinn` CLI requester verbs (tasks submit|watch|list|show, evidence find|show). Post-mint the same content is bundled as the host plugin at https://spec.jinn.network/host-plugins/jinn/v1, adding the MCP server descriptor for the new tier-4 product @jinn-network/requester-mcp. Both are gated on the work-client mint (marketplace surfaces 2026-07-30 section 4.3 step 3), which DR-2026-08-03 decision 3 defers until a second independent consumer proves the broader requester lifecycle. The agent installs into its own host; Jinn writes no host configuration. Host plugin here means the onboarding bundle, never a SolverPlugin.",
+      "replacement": "The published onboarding host skills at https://spec.jinn.network/skills/<journey>/v1.md, fetched and self-installed by the agent, driving the ratified class-1 `jinn` CLI requester verbs (tasks submit|watch|list|show, evidence find|show). The same content is bundled as the host plugin at https://spec.jinn.network/host-plugins/jinn/v1, adding the MCP server descriptor for the new tier-4 product @jinn-network/requester-mcp, which is keyless: signer injection plus one user-designated source, never ambient discovery. That product co-develops with the work-client mint (marketplace surfaces 2026-07-30 section 4.3 step 3); DR-2026-08-03 decision 3's deferral is lifted by the dated 2026-08-04 amendment note in the C5 design, on the ground that a ratified consumer design with an enumerated tool surface is the second independent consumer its own reason required. The agent installs into its own host; Jinn writes no host configuration. Host plugin here means the onboarding bundle, never a SolverPlugin.",
       "consumers": [
         "client/src/cli/index.ts",
         "client/src/mcp/operator-server.ts",
@@ -528,10 +596,23 @@ rest on:
   `pull_request`, human-provisioned protected environment, singleton concurrency, verdict posted
   as a check-run by a script rather than asserted by the runner.
 
-Produced by DevX Re-Seal component C5, phase 1. v0.1 designed the requester surface as a role of
-the legacy `jinn mcp` binary, with a CLI-shelling interim and a deprecation window for
-`jinn integrations remove|doctor`; the operator's first round of 2026-08-04 rulings rejected all
-three and ratified the publication design (v0.2). The second round collapsed the artifact
-taxonomy — the pasteable prompt family dropped, the host skill made canonical, the host plugin
-made the bundle, the paste reduced to a rendered one-liner, and the "plugin" word disambiguated
-(v0.3). No implementation was written; the build phase is gated on ratification of this revision.
+Produced by DevX Re-Seal component C5, phase 1, over three rounds of operator rulings on
+2026-08-04.
+
+- **v0.1** designed the requester surface as a role of the legacy `jinn mcp` binary, with a
+  CLI-shelling interim and a deprecation window for `jinn integrations remove|doctor`.
+- **v0.2** — round 1 rejected all three: legacy is reference only, the requester surface is a new
+  tier-4 product, nothing of `jinn integrations` survives. The publication design was ratified.
+- **v0.3** — round 2 collapsed the artifact taxonomy: the pasteable prompt family dropped, the
+  host skill made canonical, the host plugin made the bundle, the paste reduced to a rendered
+  one-liner, and the "plugin" word disambiguated against the SolverPlugin sense.
+- **v1.0** — round 3 closed the two carried-open items (custody: keyless with one user-designated
+  source; mint cycle: design counts, co-develop) and accepted the three judgment calls. All
+  dispositions are recorded in §7.
+
+No implementation was written. The build phase executes against §8; the only external
+prerequisite it carries is C1's origin wave, which B2 sequences behind.
+
+**One reviewer action travels with this document:** at train-merge, reference §2.1's dated
+amendment note from `log/decisions/2026-08-03-phase-c-capability-boundaries.md` decision 3, so
+the DR carries its own pointer to the lift rather than leaving it discoverable only here.
