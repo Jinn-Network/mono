@@ -23,125 +23,30 @@ import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
 import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
 import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
+import { CURRENT_CONTRACT_VERSION } from './contract/version.js';
+import type {
+  StatusV1Response,
+  SpendStatus,
+  AiUnitsStatus,
+  AiUnitsPausedWindow,
+  ConfigMigrationStatus,
+  PhaseDTransitionUsageStatus,
+} from './contract/status.js';
+
+// Re-exported for existing importers (`cli/introspection-context.ts`, `gather-status.ts`) —
+// the contract module (`./contract/status.ts`) is the canonical definition per
+// spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 2.
+export type { StatusV1Response, SpendStatus, AiUnitsStatus, AiUnitsPausedWindow, ConfigMigrationStatus };
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
-/**
- * `phaseDTransitionUsage` on the wire, tagged Class O — observation
- * (docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md §7). The tag rides
- * on the response payload so a consumer cannot silently promote this subtree to a gate input; it
- * is never present on `GatheredStatusRaw`, only on the assembled response.
- */
-export interface PhaseDTransitionUsageStatus extends PhaseDTransitionUsageDiagnostics {
-  readonly class: 'observation';
-}
+// `PhaseDTransitionUsageStatus`, `SpendStatus`, `AiUnitsStatus`, `ConfigMigrationStatus` moved to
+// `./contract/status.ts` (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 2)
+// and are re-exported above for existing importers.
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
   multisig?: string;
-}
-
-/** Per-credential daily spend row exposed on /v1/status. */
-export interface SpendCredentialRow {
-  credentialId: string;
-  capUsd: number;
-  spentTodayUsd: number;
-  paused: boolean;
-  resetsAt: string;
-}
-
-/** Per-credential daily spend block; present on /v1/status when caps are configured. */
-export interface SpendStatus {
-  credentials: SpendCredentialRow[];
-}
-
-/** The AI-units window a paused credential is binding on, or `null` when not paused. */
-export type AiUnitsPausedWindow = 'block' | 'week' | null;
-
-/** Per-credential AI-units row exposed on /v1/status (issues #815, #1004). */
-export interface AiUnitsCredentialRow {
-  credentialId: string;
-  // #1006: legacy unit-denominated fields the SPA reads today. Derived from
-  // the USD accumulator via the GPT-5.4-mini peg so they track the real gate.
-  // Remove when #1006 migrates the SPA to the USD fields below.
-  unitsThisBlock: number;
-  unitsThisWeek: number;
-  capPerBlock: number;
-  capPerWeek: number;
-  /** Actual USD spend this 6h block, in micros (issue #1004). */
-  usdMicrosThisBlock: number;
-  /** Actual USD spend this 7d window, in micros (issue #1004). */
-  usdMicrosThisWeek: number;
-  /** USD ceiling for the block / week, in micros (issue #1004). */
-  capPerBlockUsdMicros: number;
-  capPerWeekUsdMicros: number;
-  /**
-   * True when the summed figure includes any estimate-backed cost: a
-   * telemetry-less/heuristic harness such as Hermes (whose delivered actual
-   * cost is itself a heuristic), or an in-flight claimed row not yet
-   * harvested. False only when every contributing row is harvested actual
-   * telemetry. Issue #1004 (AC4).
-   */
-  estimated: boolean;
-  /**
-   * True when at least one known configured task projection would make the
-   * block or week sum exceed its cap. Unknown projections fail open.
-   */
-  paused: boolean;
-  /**
-   * True when this credential has recorded spend in the current 7d window —
-   * i.e. it is the credential the daemon is actually working against, not a
-   * configured-but-idle one. Distinguishes an active harness from a merely
-   * enrolled one in the /v1/status footprint (issue #891).
-   */
-  active: boolean;
-  /**
-   * The binding window when `paused` is true, using the daemon gate's shared
-   * projected-debit classifier. Across multiple tasks on one credential,
-   * block wins if any known projection is block-gated; otherwise week wins
-   * when any known projection is week-gated. `null` when no known projection
-   * is blocked. Lets the SPA render the pause reason without re-deriving the
-   * decision locally (issue #830, item 2).
-   */
-  pausedWindow: AiUnitsPausedWindow;
-  /** ISO timestamp of the next 6h block boundary (00:00 / 06:00 / 12:00 / 18:00 UTC). */
-  blockResetsAt: string;
-  /**
-   * ISO timestamp claims resume for the 7d window. When the week window is
-   * binding, this is the accurate rolling-window resume instant for the
-   * credential's largest known configured projection (the moment enough
-   * in-window spend expires that `remaining + projected <= cap`; see
-   * `Store.weekWindowResumeAt`). `null` means the projection alone exceeds
-   * the weekly cap, so no spend expiry can schedule a resume without a model
-   * or cap change. Otherwise this falls back to the coarse
-   * `weekResetsAtUtc(now)` (`now + 7d`) instant, which is not
-   * operator-relevant in that case (issue #830, item 1).
-   */
-  weekResetsAt: string | null;
-}
-
-/** Per-credential AI-units block; present on /v1/status when AI-units gating is on. */
-export interface AiUnitsStatus {
-  credentials: AiUnitsCredentialRow[];
-}
-
-/**
- * One-time shape-v2 config migration report, present only on the boot where
- * `migrateConfigShapeV2` produced a report with `migrated === true` (see
- * `client/src/config/migrate-shape-v2.ts`, `getLastConfigMigrationReport`).
- *
- * `capsUnset` is true when the migrated `claimPolicy` is missing or its
- * `spendCapWei`/`aiUnitCap` are unset. Per coordinator amendment 1 (F7
- * reversed), this is informational, not action-required: the host's USD
- * spend gates (spec §6.5) remain the operative bound whether or not
- * per-claim caps are set — exactly today's behavior (spec §9).
- */
-export interface ConfigMigrationStatus {
-  readonly shapeVersion: 2;
-  readonly wiringEntries: number;
-  readonly postingEntries: number;
-  readonly backupPath?: string;
-  readonly capsUnset: boolean;
 }
 
 export interface GatheredStatusRaw {
@@ -273,151 +178,7 @@ export interface GatheredStatusRaw {
   configMigration?: ConfigMigrationStatus;
 }
 
-export interface StatusV1Response {
-  statusMode: 'full' | 'sqlite_only';
-  /** Running client version (issue #641). */
-  version: string;
-  /**
-   * Latest published `@jinn-network/client` version from the npm registry, or
-   * `null` when the start-time check hasn't resolved / is disabled. The SPA's
-   * `useNotifications` adapter fires `update_available` when it differs from
-   * `version` (issue #641).
-   */
-  latestVersion: string | null;
-  daemon: {
-    shutdownState: string | null;
-    startedAt: string | null;
-    dbPath: string;
-    timestamp: string;
-  };
-  rpc: GatheredStatusRaw['rpc'];
-  fleet: {
-    loaded: boolean;
-    chain?: string;
-    stakingMode?: string;
-    masterAddress?: string | null;
-    services: Array<{
-      index: number;
-      step: string;
-      serviceId: number | null;
-      safeAddress: string | null;
-      mechAddress: string | null;
-      stakingAddress: string | null;
-      agentId: string | null;
-      identityRegistryAddress: string | null;
-      safeBoundToAgent: boolean;
-      identityBindingStatus: 'bound' | 'pending' | 'not_applicable';
-    }>;
-    stakedLikeCount: number;
-    completeCount: number;
-  };
-  /**
-   * Auto-restake (EvictionLoop) feature gating. Mirrors `main.ts`'s
-   * `evictionCheck` predicate. Observability on `/v1/status` (issue #773).
-   */
-  autoRestake: {
-    enabled: boolean;
-    checkIntervalMs: number;
-  };
-  activity: {
-    counts: Record<string, number>;
-    recent: GatheredStatusRaw['recentActivity'];
-  };
-  rewards: {
-    claimLoopIntervalMs: number;
-    lastClaimTickAt: string | null;
-    claimedStakingRewardsWei: string;
-    claimedStakingRewardsLast24hWei: string | null;
-  };
-  /** Per-role ETH balance (master / agent / Safe). Wei strings, base-10. */
-  balances: {
-    eth: {
-      master: { address: string | null; balanceWei: string | null; error?: string };
-      agent:  { address: string | null; balanceWei: string | null; error?: string };
-      safe:   { address: string | null; balanceWei: string | null; error?: string };
-    };
-  };
-  masterGas: {
-    address: string | null;
-    balanceWei?: string;
-    dailyEstimateWei: string;
-    /** Approximate days of excess ETH above minimum at daily estimate (if computable). */
-    runwayDaysExcess?: string;
-    minEthWei?: string;
-    error?: string;
-  };
-  /**
-   * L1 (Ethereum Sepolia) master gas runway — parallel to `masterGas` but for
-   * the L1 governance chain (#1296). Present only when the L1 master balance
-   * was gathered (testnet with an ethereumRpcUrl); omitted on mainnet /
-   * sqlite-only / older callers.
-   */
-  l1MasterGas?: {
-    address: string | null;
-    balanceWei?: string;
-    dailyEstimateWei: string;
-    runwayDaysExcess?: string;
-    minEthWei?: string;
-    error?: string;
-  };
-  earnings: {
-    hint: string;
-  };
-  nextActions: string[];
-  /** portfolio.v0 lifecycle data — optional, absent when not available. */
-  portfolioV0?: PortfolioV0Status;
-  /** prediction.v1 operator/lifecycle data — optional, absent when not available. */
-  predictionV1?: PredictionV1Status;
-  /** Generic task-run lifecycle data across all SolverNets. */
-  taskRuns?: TaskRunsStatus;
-  /**
-   * Loop-completion rollup over task_runs.solution_outputs_json gating phases
-   * (#959). Always present — defaults to all-zero when there are no rows.
-   */
-  loopCompletion?: LoopCompletionStatus;
-  /**
-   * Per-repo impl-state commit cadence under the impl-state root (#959).
-   * Present only when an impl-state root was threaded through the gather
-   * config; `repos` is empty when the root is absent / has no git repos.
-   */
-  implStateCadence?: ImplStateCadenceStatus;
-  /**
-   * Evidence indexing-failure rollup, fed by the `EvidenceDriverLoop` (Task
-   * 11). Present only when the composition root threads a live driver
-   * through `StatusGatherConfig.evidenceDriver`.
-   */
-  evidenceIndexing?: EvidenceIndexingStatus;
-  /** Per-credential daily spend block — present when caps are configured. */
-  spend?: SpendStatus;
-  /** Per-credential AI-units 6h-block + 7d-window block — issue #815. */
-  aiUnits?: AiUnitsStatus;
-  /** Per-harness billing path for join/settings cost UI (#474). */
-  costSurface: CostSurfaceStatus;
-  /**
-   * Harness readiness rollup — always present (default-ready when no rollup
-   * input was threaded through gather-status). Consumed by the SPA's
-   * `useNotifications` adapter to fire `harness_not_ready` when any joined
-   * SolverNet's harness is unready. See `status-harness-rollup.ts`.
-   */
-  harness: HarnessRollup;
-  /**
-   * Security posture sub-object — always present. `lastPasswordRotationAt`
-   * is the ISO mtime of the on-disk keystore-password file (the proxy for
-   * "when the password was last set/rotated"), or `null` when the password
-   * is env-sourced (`JINN_PASSWORD`, no file) or the file is missing /
-   * unreadable. Consumed by the operator-app `password_rotation_due`
-   * notification (issue #441).
-   */
-  security: { lastPasswordRotationAt: string | null };
-  /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
-  configMigration?: ConfigMigrationStatus;
-  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates.
-   *  Tagged Class O — observation (§7): never a gate input. */
-  phaseDTransitionUsage?: PhaseDTransitionUsageStatus;
-  /** The daemon's resolved product mode (#2380) — see `GatheredStatusRaw.effectiveMode`. Always
-   *  present; defaults to `'legacy'` when the gatherer didn't thread a value. */
-  effectiveMode: OperatorVerticalMode;
-}
+// `StatusV1Response` moved to `./contract/status.ts` (§8 artifact 2); re-exported above.
 
 /**
  * Resolve the master daily gas estimate used by the operator dashboard's
@@ -639,6 +400,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
       : undefined;
 
   return {
+    contractVersion: CURRENT_CONTRACT_VERSION,
     statusMode: mode,
     version: raw.version ?? buildInfo.implVersion,
     effectiveMode: raw.effectiveMode ?? 'legacy',
