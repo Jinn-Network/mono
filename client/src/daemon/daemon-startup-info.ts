@@ -22,9 +22,12 @@ export interface DaemonStartupInfo {
   serviceIndex: number;
   serviceId: number | null;
   /**
-   * The daemon's resolved product mode (#2380). Computed by `main.ts` via
-   * `resolveConfiguredOperatorVerticalMode` — the same resolver `cli/commands/run.ts` uses to
-   * route between `main.ts` and `native-main.ts` — never re-derived here.
+   * The daemon's resolved product mode (#2380). `main.ts` computes this via
+   * `resolveMainEntryEffectiveMode`, which clamps to `'legacy'` — the same value
+   * `resolveConfiguredOperatorVerticalMode` (the resolver `cli/commands/run.ts` uses to route
+   * between `main.ts` and `native-main.ts`) would produce for every `jinn run` invocation, but
+   * unconditionally so for every caller of `main.ts` (`jinn quickstart` reaches it directly,
+   * unrouted). Never a raw, unclamped re-derivation.
    */
   effectiveMode: OperatorVerticalMode;
   /** This build's implementation version (`buildInfo.implVersion`). */
