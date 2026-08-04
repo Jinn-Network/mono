@@ -1278,6 +1278,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   };
   process.on('exit', removePidfile);
 
+  // #2407 R2: a SIGINT/SIGTERM delivered during the bootstrap retry loop or
+  // the degrade-open window (before the full Daemon's own graceful
+  // SIGINT/SIGTERM handlers exist, further down) hits Node's default signal
+  // disposition, which terminates the process WITHOUT running
+  // `process.on('exit', ...)` handlers — `exit` fires for a clean return or
+  // `process.exit()`, not for a bare signal termination. Without this, a
+  // stale `daemon.pid` survives the process: on a normal host it
+  // self-heals (`checkPidfileLiveness`'s ESRCH branch), but in a container
+  // the daemon is PID 1 and `checkDaemonGuard` deliberately treats a
+  // pid-1 record as BLOCKING (preflight/pidfile-liveness.ts's
+  // self-or-pid1-container inversion, cli/daemon-guard.ts's docstring) —
+  // every CLI verb would refuse until a daemon happened to rewrite the
+  // file. This minimal early handler is superseded by the real graceful
+  // shutdown handlers once the full Daemon is constructed (see
+  // `process.removeListener` calls right before those are installed,
+  // further down) — it exists only to cover the window between here and
+  // there.
+  const removePidfileOnEarlySignal = (): void => {
+    removePidfile();
+    process.exit(0);
+  };
+  process.once('SIGINT', removePidfileOnEarlySignal);
+  process.once('SIGTERM', removePidfileOnEarlySignal);
+
   // hjex.6: halt-and-resume loop for bootstrap retries, extracted into
   // `runBootstrapWithDegradeOpen` (earning/bootstrap-run.ts, #2407 M3) so its
   // ORDERING — degraded loops start before readiness flips 'degraded'; on
@@ -1292,16 +1316,21 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // every time, and deriving it eagerly keeps `startDegraded` below
   // synchronous, matching `runBootstrapWithDegradeOpen`'s sync
   // `startDegraded` contract without threading async through it.
-  const degradedMnemonic = await decryptMnemonic(
-    await new FleetStateStore(config.earningDir).loadMnemonicKeystore(),
-    PASSWORD,
-  );
-  const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
-  const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
-  const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
-
+  //
+  // #2407 R8: this derivation (specifically `decryptMnemonic`, which throws
+  // on a wrong JINN_PASSWORD) must stay INSIDE the try below — outside it,
+  // a bad password would propagate past the setupApiServer/store teardown
+  // this try's catch performs, leaving the listener bound and SQLite open.
   let bootstrapResult;
   try {
+    const degradedMnemonic = await decryptMnemonic(
+      await new FleetStateStore(config.earningDir).loadMnemonicKeystore(),
+      PASSWORD,
+    );
+    const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
+    const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
+    const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
+
     bootstrapResult = await runBootstrapWithDegradeOpen({
       runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
       setReadiness: setDaemonReadiness,
@@ -1340,7 +1369,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               // funding_required halt is pending — it drains the exact
               // balance the funding poller below is waiting to see cross
               // the threshold (an absorbing state). See
-              // isPendingMasterFundingHalt's docstring.
+              // isPendingMasterFundingHalt's docstring. This exact
+              // predicate-to-interval-zero wiring join is inspection-covered,
+              // not independently unit-tested: isPendingMasterFundingHalt
+              // itself is tested (bootstrap-halt-classification.test.ts) and
+              // startDegradedRecoveryLoops' 0-disables-the-loop behavior is
+              // tested (degraded-recovery.test.ts) separately.
               balanceTopupIntervalMs: isPendingMasterFundingHalt(envelope) ? 0 : config.balanceTopupIntervalMs,
               rewardClaimIntervalMs: config.rewardClaimIntervalMs,
             },
@@ -2753,6 +2787,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     return shutdownPromise;
   };
 
+  // #2407 R2: the early signal handler installed right after the pidfile
+  // write (bootstrap-retry-loop window) is superseded here — remove it
+  // before installing the real graceful handlers so a signal from this
+  // point on always drains through `shutdown()` (Daemon.stop(), file
+  // logger flush, etc.) rather than racing an immediate `process.exit(0)`.
+  process.removeListener('SIGINT', removePidfileOnEarlySignal);
+  process.removeListener('SIGTERM', removePidfileOnEarlySignal);
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
