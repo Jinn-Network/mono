@@ -1,12 +1,6 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+
+import { writeObservation } from '../observability/write-observation.js';
 
 /**
  * Durable, monotonic compatibility diagnostics for Phase D deletion gates.
@@ -74,18 +68,11 @@ function parseState(path: string): PhaseDTransitionUsageState | undefined {
 
 function persist(): void {
   if (storagePath === undefined) return;
-  mkdirSync(dirname(storagePath), { recursive: true });
-  const temporaryPath = `${storagePath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify({
-      schemaVersion: 1,
-      observationWindowStartedAt,
-      counters: phaseDTransitionUsageSnapshot(),
-    } satisfies PhaseDTransitionUsageState, null, 2)}\n`, { flag: 'wx' });
-    renameSync(temporaryPath, storagePath);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  writeObservation(storagePath, `${JSON.stringify({
+    schemaVersion: 1,
+    observationWindowStartedAt,
+    counters: phaseDTransitionUsageSnapshot(),
+  } satisfies PhaseDTransitionUsageState, null, 2)}\n`);
 }
 
 /** Configure (or reload) the durable observation window used by this process. */

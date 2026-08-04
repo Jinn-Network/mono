@@ -91,11 +91,41 @@ test('only deleted transitions may have an empty consumer inventory', () => {
   assert.deepEqual(validateTransitionManifest(manifest({ transitions: [transition({
     status: 'deleted',
     consumers: [],
+    evidenceCitation: 'PRINCIPLES.md',
   })] }), { repoRoot }), []);
   const errors = validateTransitionManifest(manifest({ transitions: [transition({
     consumers: [],
   })] }), { repoRoot });
   assert.ok(errors.some((error) => error.includes('must be non-empty until the transition is deleted')));
+});
+
+test('a deleted transition must cite Class A evidence (spec §7 human-gate rule)', () => {
+  const missing = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+  })] }), { repoRoot });
+  assert.ok(missing.some((error) => error.includes('evidenceCitation must be a non-empty string')));
+
+  const nonExistent = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+    evidenceCitation: 'log/decisions/does-not-exist.md',
+  })] }), { repoRoot });
+  assert.ok(nonExistent.some((error) => error.includes('evidenceCitation does not exist')));
+
+  const cited = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+    evidenceCitation: 'PRINCIPLES.md',
+  })] }), { repoRoot });
+  assert.deepEqual(cited, []);
+});
+
+test('evidenceCitation is only allowed on a deleted transition', () => {
+  const errors = validateTransitionManifest(manifest({ transitions: [transition({
+    evidenceCitation: 'PRINCIPLES.md',
+  })] }), { repoRoot });
+  assert.ok(errors.some((error) => error.includes("evidenceCitation is only allowed when status is 'deleted'")));
 });
 
 test('validator rejects a usageSignal file reference that does not exist in the repository', () => {

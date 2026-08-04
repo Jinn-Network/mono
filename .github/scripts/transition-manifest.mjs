@@ -9,6 +9,11 @@ const REQUIRED_TRANSITION = [
 ];
 const DEFAULT_MODES = new Set(['legacy', 'native', 'explicit-only', 'not-applicable']);
 const STATUSES = new Set(['planned', 'migrating', 'ready-for-deletion', 'deleted', 'blocked']);
+// Only meaningful when status is 'deleted' (spec §7 human-gate rule): the PR that flips a
+// transition to deleted must cite Class A evidence, never just the Class O counters that may
+// have informed the decision. Kept out of REQUIRED_TRANSITION (unconditionally required) because
+// it is conditionally required — see the status === 'deleted' check below.
+const OPTIONAL_TRANSITION_FIELDS = ['evidenceCitation'];
 
 function object(value, label, errors) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -18,13 +23,14 @@ function object(value, label, errors) {
   return value;
 }
 
-function closed(record, required, label, errors) {
+function closed(record, required, label, errors, optional = []) {
   if (record === undefined) return;
   for (const field of required) {
     if (!Object.hasOwn(record, field)) errors.push(`${label} missing required field ${field}`);
   }
+  const allowed = new Set([...required, ...optional]);
   for (const field of Object.keys(record)) {
-    if (!required.includes(field)) errors.push(`${label} has unknown field ${field}`);
+    if (!allowed.has(field)) errors.push(`${label} has unknown field ${field}`);
   }
 }
 
@@ -103,7 +109,7 @@ export function validateTransitionManifest(manifest, { repoRoot = process.cwd() 
   root.transitions.forEach((candidate, index) => {
     const label = `manifest.transitions[${index}]`;
     const transition = object(candidate, label, errors);
-    closed(transition, REQUIRED_TRANSITION, label, errors);
+    closed(transition, REQUIRED_TRANSITION, label, errors, OPTIONAL_TRANSITION_FIELDS);
     if (transition === undefined) return;
     nonEmptyString(transition.id, `${label}.id`, errors);
     if (typeof transition.id === 'string' && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(transition.id)) {
@@ -134,6 +140,15 @@ export function validateTransitionManifest(manifest, { repoRoot = process.cwd() 
     if (!DEFAULT_MODES.has(transition.defaultMode)) errors.push(`${label}.defaultMode is invalid`);
     if (!STATUSES.has(transition.status)) errors.push(`${label}.status is invalid`);
     nonEmptyString(transition.targetPullRequest, `${label}.targetPullRequest`, errors);
+    // Spec §7 human-gate rule: a PR that flips a row to `deleted` must cite Class A evidence in
+    // its body, and that citation must resolve — Class O counters may inform the decision but may
+    // never be the cited basis. `evidenceCitation` only means something at that moment, so it is
+    // forbidden outside status 'deleted' rather than left as free-floating optional metadata.
+    if (transition.status === 'deleted') {
+      repoPath(transition.evidenceCitation, `${label}.evidenceCitation`, repoRoot, errors);
+    } else if (Object.hasOwn(transition, 'evidenceCitation')) {
+      errors.push(`${label}.evidenceCitation is only allowed when status is 'deleted'`);
+    }
 
     const guard = nested(transition.noNewUseGuard, ['path', 'assertion'], `${label}.noNewUseGuard`, errors);
     if (guard !== undefined) repoPath(guard.path, `${label}.noNewUseGuard.path`, repoRoot, errors);

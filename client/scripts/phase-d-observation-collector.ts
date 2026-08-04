@@ -19,8 +19,7 @@
  * contract, and cron setup.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   appendDailyObservation,
   fetchHttpStatusSnapshot,
@@ -30,6 +29,7 @@ import {
   type PhaseDObservationFetchResult,
   type PhaseDObservationReceipt,
 } from '../src/monitoring/phase-d-observation-window.js';
+import { writeObservation } from '../src/observability/write-observation.js';
 
 interface FleetInstanceConfig {
   readonly instanceId: string;
@@ -126,14 +126,7 @@ async function fetchInstance(instance: FleetInstanceConfig, collectedAt: string)
 }
 
 function persistReceiptAtomic(path: string, receipt: PhaseDObservationReceipt): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: 'wx' });
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  writeObservation(path, `${JSON.stringify(receipt, null, 2)}\n`);
 }
 
 async function main(): Promise<void> {

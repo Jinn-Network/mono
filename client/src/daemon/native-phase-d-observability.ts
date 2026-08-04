@@ -19,8 +19,8 @@
  *      surface of that invariant for no durability benefit over a file.
  */
 
-import { join, dirname } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { buildInfo } from '../build-info.js';
 import {
@@ -29,6 +29,7 @@ import {
   recordPhaseDTransitionUse,
   type PhaseDTransitionUsageDiagnostics,
 } from '../compatibility/phase-d-transition-usage.js';
+import { writeObservation } from '../observability/write-observation.js';
 import type { OperatorVerticalDecision } from './native-vertical-mode.js';
 import type { NativeOperatorHealth } from './native-operator-host.js';
 import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
@@ -74,17 +75,11 @@ export interface NativeStatusSnapshot {
 }
 
 function persistDurable(path: string, contents: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    // Mode 0600: the snapshot carries roleKeyIds (identifiers, e.g. did:key:..., never private key
-    // material) and an executableDigest, and is meant to be mounted/shipped off-host by the deploy
-    // platform — restrict it like every other durable secret-adjacent file in this repo.
-    writeFileSync(temporaryPath, contents, { flag: 'wx', mode: 0o600 });
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  // Mode 0600 (writeObservation's default): the snapshot carries roleKeyIds (identifiers, e.g.
+  // did:key:..., never private key material) and an executableDigest, and is meant to be
+  // mounted/shipped off-host by the deploy platform — restrict it like every other durable
+  // secret-adjacent file in this repo.
+  writeObservation(path, contents);
 }
 
 function buildSnapshot(input: {

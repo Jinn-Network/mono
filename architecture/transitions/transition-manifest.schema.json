@@ -194,8 +194,19 @@
         },
         "status": {
           "enum": ["planned", "migrating", "ready-for-deletion", "deleted", "blocked"]
+        },
+        "evidenceCitation": {
+          "description": "Only meaningful when status is 'deleted' (spec §7 human-gate rule): repository-relative path to the Class A evidence (e.g. a decision record) cited as the basis for the deletion flip. Class O counters may inform the decision but may never be the cited basis.",
+          "$ref": "#/$defs/repoPath"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "deleted" } }, "required": ["status"] },
+          "then": { "required": ["evidenceCitation"] },
+          "else": { "not": { "required": ["evidenceCitation"] } }
+        }
+      ]
     }
   }
 }

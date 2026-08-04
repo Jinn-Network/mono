@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -64,6 +64,20 @@ describe('Phase D transition usage diagnostics', () => {
           lastObservedAt: '2026-08-03T01:01:00.000Z',
         }],
       });
+    } finally {
+      configurePhaseDTransitionUsage(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('writes the durable state file with mode 0600 (Class O container profile, #2409)', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'jinn-phase-d-usage-mode-'));
+    const path = join(directory, 'usage.v1.json');
+    try {
+      configurePhaseDTransitionUsage(path, new Date('2026-08-04T00:00:00.000Z'));
+      recordPhaseDTransitionUse('legacy-wiring-config-field', new Date('2026-08-04T00:00:01.000Z'));
+      const mode = statSync(path).mode & 0o777;
+      expect(mode).toBe(0o600);
     } finally {
       configurePhaseDTransitionUsage(undefined);
       rmSync(directory, { recursive: true, force: true });
