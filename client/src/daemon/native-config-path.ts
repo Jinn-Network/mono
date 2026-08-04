@@ -17,19 +17,11 @@
  * Both `jinn run` (`client/src/cli/commands/run.ts`) and the native-only
  * entry (`client/src/native-main.ts`) import this module so the path they
  * resolve — and the loader they call — can never disagree.
- *
- * `NativeProductFileSchema` is imported lazily, inside `loadNativeProductConfigFile`,
- * rather than at module top level. `getNativeConfigPathFromArgs`/`resolveNativeConfigPath`
- * are cheap and run on every `jinn run` invocation (including plain legacy boots) to decide
- * which product to load; a top-level import here would otherwise pull
- * `@jinn-network/trust-core` + `@jinn-network/marketplace-binding` + `zod` into every legacy
- * run too, which is exactly the static-import discipline `native-vertical-config.ts`
- * (this module's sibling, consumed the same way) already keeps.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { NativeProductConfig } from './native-product-config.js';
+import { NativeProductFileSchema, type NativeProductConfig } from './native-product-config.js';
 
 const NATIVE_CONFIG_FLAG = '--native-config';
 const NATIVE_CONFIG_FLAG_EQUALS = `${NATIVE_CONFIG_FLAG}=`;
@@ -90,13 +82,8 @@ export class NativeConfigLoadError extends Error {}
  * Throws `NativeConfigLoadError` (never returns a partial/legacy-fallback
  * result) on a missing file, invalid JSON, or a schema violation — including
  * a legacy-shaped file pointed at by mistake.
- *
- * Async so the schema import above can stay lazy (a dynamic `import()` is
- * always asynchronous) — this only executes once a caller has already
- * decided to load a native file, at which point the schema's dependency
- * weight is expected, not incurred on every legacy run.
  */
-export async function loadNativeProductConfigFile(path: string): Promise<NativeProductConfig> {
+export function loadNativeProductConfigFile(path: string): NativeProductConfig {
   if (!existsSync(path)) {
     throw new NativeConfigLoadError(`native-v1 structured config is missing: ${path}`);
   }
@@ -106,7 +93,6 @@ export async function loadNativeProductConfigFile(path: string): Promise<NativeP
   } catch (cause) {
     throw new NativeConfigLoadError(`native-v1 structured config is not JSON: ${String(cause)}`);
   }
-  const { NativeProductFileSchema } = await import('./native-product-config.js');
   const parsed = NativeProductFileSchema.safeParse(raw);
   if (!parsed.success) {
     throw new NativeConfigLoadError(`native-v1 structured config is invalid: ${parsed.error.message}`);

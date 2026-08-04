@@ -52,35 +52,31 @@ describe('resolveNativeConfigPath', () => {
 });
 
 describe('loadNativeProductConfigFile', () => {
-  // Async — the NativeProductFileSchema import inside is deliberately lazy (dynamic
-  // import()), so every assertion here awaits the rejection/resolution rather than
-  // expecting a synchronous throw. See the module doc comment for why.
-
-  it('throws NativeConfigLoadError when the file is missing', async () => {
+  it('throws NativeConfigLoadError when the file is missing', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-native-config-path-'));
-    await expect(loadNativeProductConfigFile(join(dir, 'missing.json'))).rejects.toThrow(NativeConfigLoadError);
+    expect(() => loadNativeProductConfigFile(join(dir, 'missing.json'))).toThrow(NativeConfigLoadError);
   });
 
-  it('throws NativeConfigLoadError on invalid JSON', async () => {
+  it('throws NativeConfigLoadError on invalid JSON', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-native-config-path-'));
     const path = join(dir, 'bad.json');
     writeFileSync(path, '{not json', 'utf-8');
-    await expect(loadNativeProductConfigFile(path)).rejects.toThrow(NativeConfigLoadError);
+    expect(() => loadNativeProductConfigFile(path)).toThrow(NativeConfigLoadError);
   });
 
-  it('throws NativeConfigLoadError on a legacy-shaped file (unrecognized keys)', async () => {
+  it('throws NativeConfigLoadError on a legacy-shaped file (unrecognized keys)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-native-config-path-'));
     const path = join(dir, 'legacy.json');
     writeFileSync(path, JSON.stringify({ network: 'testnet', rpcUrl: 'https://sepolia.base.org', tasks: [], apiPort: 7331 }), 'utf-8');
-    await expect(loadNativeProductConfigFile(path)).rejects.toThrow(NativeConfigLoadError);
+    expect(() => loadNativeProductConfigFile(path)).toThrow(NativeConfigLoadError);
   });
 
-  it('returns the strictly-parsed config on success', async () => {
+  it('returns the strictly-parsed config on success', () => {
     const dir = mkdtempSync(join(tmpdir(), 'jinn-native-config-path-'));
     mkdirSync(dir, { recursive: true });
     const path = join(dir, 'native-config.json');
     writeFileSync(path, JSON.stringify(validNativeProductFileContent(), null, 2), 'utf-8');
-    const config = await loadNativeProductConfigFile(path);
+    const config = loadNativeProductConfigFile(path);
     expect(config.network).toBe('testnet');
     expect(config.operator.verticalMode).toBe('native-v1');
     expect(config.operator.native.role).toBe('solver');

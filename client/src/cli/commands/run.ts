@@ -280,7 +280,7 @@ Failure example (funding gate):
 
       if (useNativeConfig) {
         try {
-          nativeConfig = await deps.loadNativeConfig(nativeConfigPath);
+          nativeConfig = deps.loadNativeConfig(nativeConfigPath);
         } catch (err) {
           emitEnvelope(
             {
