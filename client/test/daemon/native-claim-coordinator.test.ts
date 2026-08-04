@@ -25,7 +25,7 @@ function queued(id = 1, sequence = '0000000000000001'): NativeDiscoveryQueuedCar
     id,
     announcementId: `announcement-${id}`,
     card: {
-      record: { kind: 'https://jinn.network/records/task-execution/submission/1.0', digest: SUBMISSION_DIGEST },
+      record: { kind: 'https://jinn.network/records/submission/1.0', digest: SUBMISSION_DIGEST },
       facts: {
         taskDigest: TASK_DIGEST,
         taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',

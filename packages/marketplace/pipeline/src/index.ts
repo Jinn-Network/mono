@@ -54,7 +54,11 @@ export type {
 
 /** @deprecated Legacy facts mapping; native facts are owned by the client product. */
 export { mapAnnouncedSubmissionToFacts } from "./facts-mapper.js";
-/** @deprecated Use `RECORD_KINDS.submission` from Record Discovery Protocol. */
+/**
+ * @deprecated Frozen bridge-era legacy kind, not a native record kind. Native cards use
+ * `RECORD_KINDS.submission` from Record Discovery Protocol; this value is intentionally
+ * distinct from it and outside the record-kind grammar.
+ */
 export { RECORD_KINDS_SUBMISSION } from "./facts-mapper-kinds.js";
 /** @deprecated Use the policy-neutral helpers from task-execution-backend. */
 export {

@@ -74,7 +74,7 @@ describe("facts → SubmissionFacts mapper", () => {
   it("refuses a delivery record announced as a submission", () => {
     expect(
       mapAnnouncedSubmissionToFacts(
-        { ...CHAIN_CARD, record: { ...CHAIN_CARD.record, kind: "https://jinn.network/records/task-execution/delivery/1.0" } },
+        { ...CHAIN_CARD, record: { ...CHAIN_CARD.record, kind: "https://jinn.network/records/delivery/1.0" } },
         options,
       ),
     ).toEqual({ ok: false, reason: "wrong-record-kind" });

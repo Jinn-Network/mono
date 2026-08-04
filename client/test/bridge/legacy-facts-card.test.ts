@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { RECORD_KINDS, assertRecordKindUri } from '@jinn-network/record-discovery-protocol';
+import { RECORD_KINDS_SUBMISSION } from '@jinn-network/marketplace-pipeline';
 import { REPOSITORY_WORK_PROFILE_URI } from '@jinn-network/task-execution-profiles';
 import { synthesizeLegacyFactsCard, LEGACY_ENVELOPE_EXTENSION_KEY, signedEnvelopeJsonFromDeliveryOrRaw } from '../../src/daemon/bridge-legacy-delivery.js';
-import { mapAnnouncedSubmissionToFacts } from '../../src/daemon/native-submission-facts.js';
+import {
+  LEGACY_SUBMISSION_RECORD_KIND,
+  mapAnnouncedSubmissionToFacts,
+} from '../../src/daemon/native-submission-facts.js';
 
 const ANCHORED_TASK = {
   taskId: 77n,
@@ -12,6 +17,36 @@ const ANCHORED_TASK = {
   ),
   solutionBudgetWei: 1_000_000_000_000n,
 };
+
+// The equality test `facts-mapper-kinds.ts` promises. The frozen bridge-era kind is Phase C
+// legacy behavior (spec 2026-08-03-phase-c-capability-boundaries.md §3, §5): it stays in
+// lock-step with the pipeline's duplicated-by-value constant, is deliberately NOT the native
+// `RECORD_KINDS.submission`, and is deliberately outside the record-kind grammar so it can
+// never collide with a native record kind.
+describe('bridge-era legacy record kind invariants', () => {
+  it('stays frozen at the bridge-era value', () => {
+    expect(LEGACY_SUBMISSION_RECORD_KIND).toBe(
+      'https://jinn.network/records/task-execution/submission/1.0',
+    );
+  });
+
+  it('stays in lock-step with the pipeline duplicated-by-value constant', () => {
+    expect(RECORD_KINDS_SUBMISSION).toBe(LEGACY_SUBMISSION_RECORD_KIND);
+  });
+
+  it('is not the native submission record kind', () => {
+    expect(LEGACY_SUBMISSION_RECORD_KIND).not.toBe(RECORD_KINDS.submission);
+  });
+
+  it('is deliberately outside the native record-kind grammar', () => {
+    expect(() => assertRecordKindUri(LEGACY_SUBMISSION_RECORD_KIND)).toThrow();
+  });
+
+  it('the native submission and delivery kinds are grammar-valid', () => {
+    expect(() => assertRecordKindUri(RECORD_KINDS.submission)).not.toThrow();
+    expect(() => assertRecordKindUri(RECORD_KINDS.delivery)).not.toThrow();
+  });
+});
 
 describe('bridge-era legacy facts card', () => {
   it('synthesizes a submission card under the legacy derivation annotation', () => {

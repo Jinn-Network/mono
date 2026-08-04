@@ -194,7 +194,7 @@ function queued(): NativeDiscoveryQueuedCard {
     id: 1,
     announcementId: 'announcement-B801',
     card: {
-      record: { kind: 'https://jinn.network/records/task-execution/submission/1.0', digest: SUBMISSION_DIGEST },
+      record: { kind: 'https://jinn.network/records/submission/1.0', digest: SUBMISSION_DIGEST },
       facts: {
         taskDigest: TASK_DIGEST,
         taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
