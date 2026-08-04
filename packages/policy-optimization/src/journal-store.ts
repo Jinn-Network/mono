@@ -18,6 +18,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { compareCalendarStrictRfc3339Instants } from "@jinn-network/benchmarking-records";
 import { prefixedDigest } from "@jinn-network/policy-identity";
+import type { CampaignBenchmarkBytes } from "./benchmark-disjointness.js";
 import { parseExactCampaign, sealCampaign } from "./campaign.js";
 import { issue, refuse, refuseAll } from "./errors.js";
 import { checkExploringEntry, type ExploringEntryInput } from "./exploring-entry.js";
@@ -54,6 +55,11 @@ export interface CreateCampaignInput {
   readonly campaign: CampaignDocument;
   /** The seed referents, so the §5.1 sealing-time frozen-axis check can actually run. */
   readonly seedResolutions: readonly SeedResolution[];
+  /**
+   * The two slates' exact bytes, when the creator holds them — review disposition M4's
+   * sealing-time leg. Optional here and mandatory at `DRAFT → EXPLORING`.
+   */
+  readonly benchmarks?: CampaignBenchmarkBytes;
   readonly createdAt: string;
   readonly payload?: CampaignJournalEntryInput["payload"];
 }
@@ -178,7 +184,7 @@ function replay(campaignDigest: string, text: string): {
  * instead, through exactly the same idempotent-replay path an ordinary append uses.
  */
 export function createCampaign(input: CreateCampaignInput): CampaignHandle {
-  const sealed = sealCampaign(input.campaign, input.seedResolutions);
+  const sealed = sealCampaign(input.campaign, input.seedResolutions, input.benchmarks);
   const created = {
     seq: 1,
     type: "created",

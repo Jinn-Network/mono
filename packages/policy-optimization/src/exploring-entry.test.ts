@@ -20,11 +20,26 @@ function benchmark(reveal: Record<string, unknown>, items = [itemDigest, otherIt
 
 const AFTER_RUN = { kind: "after-run", trustedRunNotClosed: true } as const;
 
-function campaignFor(sealedDigest: string) {
+/**
+ * A real development slate, item-disjoint from the promotion gate's `a`/`b`.
+ *
+ * Review disposition M4 made the development bytes a required input, so a synthetic digest with no
+ * referent no longer stands in: the gate re-digests what it is handed.
+ */
+const DEVELOPMENT = sealBenchmark({
+  protocol: "https://jinn.network/protocols/benchmarking/1.0",
+  name: "development",
+  description: "the slate dev waves run against",
+  version: "1.0.0",
+  items: [{ task: { digest: { sha256: "c".repeat(64) } } }],
+  reveal: { policy: "immediate" },
+});
+
+function campaignFor(sealedDigest: string, developmentDigest: string = DEVELOPMENT.digest) {
   return campaignWith({
     target: {
       taskProfile: "https://profiles.jinn.network/repository-work/1.0",
-      developmentBenchmark: digestOf("d"),
+      developmentBenchmark: developmentDigest,
       promotionBenchmark: sealedDigest,
     },
   });
@@ -35,6 +50,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "after-run" });
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
     });
     expect(result.ok).toBe(true);
@@ -48,10 +64,12 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "scheduled", notBefore: "2026-09-01T00:00:00Z" });
     expect(checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: { kind: "scheduled", trustedAtTime: "2026-08-03T00:00:00Z" },
     }).ok).toBe(true);
     const opened = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: { kind: "scheduled", trustedAtTime: "2026-09-01T00:00:00Z" },
     });
     expect(opened.ok).toBe(false);
@@ -62,6 +80,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "immediate" });
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
     });
     expect(result.ok).toBe(false);
@@ -72,6 +91,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "after-run" });
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: { kind: "scheduled", trustedAtTime: "2026-08-03T00:00:00Z" },
     });
     expect(result.ok).toBe(false);
@@ -82,6 +102,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "scheduled", notBefore: "2026-09-01T00:00:00Z" });
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: { kind: "scheduled", trustedAtTime: "yesterday" },
     });
     expect(result.ok).toBe(false);
@@ -92,6 +113,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "scheduled" });
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: { kind: "scheduled", trustedAtTime: "2026-08-03T00:00:00Z" },
     });
     expect(result.ok).toBe(false);
@@ -102,6 +124,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "after-run" });
     const result = checkExploringEntry(campaignFor(digestOf("f")), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
     });
     expect(result.ok).toBe(false);
@@ -111,6 +134,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
   it("refuses bytes that are not a Benchmark record at all", () => {
     const result = checkExploringEntry(campaignFor(digestOf("f")), {
       benchmarkBytes: new TextEncoder().encode("{}"),
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
     });
     expect(result.ok).toBe(false);
@@ -121,6 +145,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const empty = benchmark({ policy: "after-run" }, []);
     const emptyResult = checkExploringEntry(campaignFor(empty.digest), {
       benchmarkBytes: empty.bytes, revealContext: AFTER_RUN,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
     });
     expect(emptyResult.ok).toBe(false);
     if (!emptyResult.ok) expect(emptyResult.reason).toBe("invalid-benchmark");
@@ -128,6 +153,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const duplicated = benchmark({ policy: "after-run" }, [itemDigest, itemDigest]);
     const duplicateResult = checkExploringEntry(campaignFor(duplicated.digest), {
       benchmarkBytes: duplicated.bytes, revealContext: AFTER_RUN,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
     });
     expect(duplicateResult.ok).toBe(false);
     if (!duplicateResult.ok) expect(duplicateResult.reason).toBe("invalid-benchmark");
@@ -138,6 +164,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const revealedBytes = new TextEncoder().encode("x");
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
       // The bytes do not hash to the committed digest, so this is the tampering leg of
       // `reveal-consistency` rather than an honest reveal — either way the gate is contaminated.
@@ -153,10 +180,48 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
     const sealed = benchmark({ policy: "after-run" }, [digest, otherItemDigest]);
     const result = checkExploringEntry(campaignFor(sealed.digest), {
       benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
       revealContext: AFTER_RUN,
       revealed: new Map([[digest, bytes]]),
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe("already-revealed");
+  });
+
+  // --- review disposition M4: item disjointness ---
+
+  it("refuses a gate sharing an item with the development slate, unrevealed or not", () => {
+    const overlapping = sealBenchmark({
+      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      name: "development",
+      description: "a slate that leaks one gate item",
+      version: "1.0.0",
+      // `itemDigest` is also the first item of the promotion gate below.
+      items: [{ task: { digest: { sha256: "c".repeat(64) } } }, { task: { digest: { sha256: itemDigest } } }],
+      reveal: { policy: "immediate" },
+    });
+    const sealed = benchmark({ policy: "after-run" });
+    const result = checkExploringEntry(campaignFor(sealed.digest, overlapping.digest), {
+      benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: overlapping.bytes,
+      revealContext: AFTER_RUN,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("development-overlap");
+      expect(result.detail).toContain(itemDigest);
+    }
+  });
+
+  it("refuses development bytes that do not digest to what the campaign names", () => {
+    const sealed = benchmark({ policy: "after-run" });
+    const result = checkExploringEntry(campaignFor(sealed.digest, digestOf("9")), {
+      benchmarkBytes: sealed.bytes,
+      developmentBenchmarkBytes: DEVELOPMENT.bytes,
+      revealContext: AFTER_RUN,
+    });
+    expect(result.ok).toBe(false);
+    // Substituting a genuinely disjoint slate for the one the campaign names must not buy a pass.
+    if (!result.ok) expect(result.reason).toBe("digest-mismatch");
   });
 });

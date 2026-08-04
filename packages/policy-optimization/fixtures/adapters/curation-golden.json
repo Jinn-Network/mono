@@ -1,0 +1,53 @@
+[
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444101"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333101",
+      "announcementId": "ann-c8-golden-101"
+    },
+    "entryTimestamp": "2026-08-03T01:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008101",
+    "statementVerdict": "pass",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111101",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-a"
+  },
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444102"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333102",
+      "announcementId": "ann-c8-golden-102"
+    },
+    "entryTimestamp": "2026-08-03T02:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008102",
+    "statementVerdict": "fail",
+    "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111102",
+    "subjectTaskDigestFromStatementSubjects": "sha256:1111111111111111111111111111111111111111111111111111111111111102",
+    "attributionFromChainEvent": "urn:jinn:agent:evaluator-b",
+    "attributionFromStatementPredicate": "urn:jinn:agent:evaluator-b",
+    "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+  },
+  {
+    "record": {
+      "kind": "https://jinn.network/records/delivery/1.0",
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444103"
+    },
+    "provenance": {
+      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333103",
+      "announcementId": "ann-c8-golden-103"
+    },
+    "entryTimestamp": "2026-08-03T03:00:00Z",
+    "attemptUri": "urn:uuid:0189d1c2-0000-7000-8000-000000008103",
+    "statementVerdict": "inconclusive",
+    "subjectTaskDigestFromStatementSubjects": "sha256:1111111111111111111111111111111111111111111111111111111111111101",
+    "attributionFromStatementPredicate": "urn:jinn:agent:evaluator-a"
+  }
+]
