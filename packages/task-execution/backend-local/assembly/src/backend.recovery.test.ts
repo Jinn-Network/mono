@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import {
   mkdtemp,
   mkdir,
@@ -29,6 +30,7 @@ import {
   listProcessGroupPids,
   probeShimAlive,
   readShimFingerprint,
+  writeOutcomeFile,
   type JournalEvent,
 } from "@jinn-network/task-execution-supervisor";
 import type {
@@ -40,6 +42,7 @@ import type {
 import { afterEach, describe, expect, test } from "vitest";
 import {
   makeLocalTaskExecutionBackend,
+  resolveOutcomeAfterShimDeath,
   type LocalProvisionerInput,
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
@@ -859,6 +862,47 @@ describe("restart reconstruction and §6.4 actions", () => {
     expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "relative-deadline-monotonic-unavailable")).toHaveLength(1);
   });
 
+  test("a malformed shim heartbeat is not an outcome and does not terminalize the attempt", async () => {
+    const root = await stateRoot("heartbeat-malformed");
+    const ready = join(root, "harness-ready");
+    const release = join(root, "harness-release");
+    // The harness's lifetime is causal on this test, so the malformed heartbeat is provably on
+    // disk while waitForOutcome is still polling rather than racing the shim's outcome write.
+    const backend = fixture(root, {
+      plan: (_view, workspace) => ({
+        argv: [
+          process.execPath,
+          "-e",
+          `const fs = require('node:fs');`
+          + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+          + `const timer = setInterval(() => {`
+          + ` if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+          + `}, 10);`,
+        ],
+        env: {},
+        cwd: workspace.work,
+        validExitCodes: [0],
+        resultContract: { envelopeFormat: "recovery-fixture" },
+        interruptionBehavior: "repeatable",
+      }),
+    });
+    const { attempt } = await submit(backend);
+    await waitFor(() => existsSync(ready), "harness did not start");
+    // A torn executor-owned heartbeat: JSON.parse throws on it. That read must sit inside
+    // recordHeartbeatStaleness's own guard, or the throw escapes waitForOutcome and a healthy
+    // attempt is terminalized failed[infrastructure].
+    await writeFile(join(paths(root, attempt).meta, "heartbeat"), '{"monotonicMs":"0","wallCl');
+    // Span many 25 ms waitForOutcome polls before releasing, so the malformed file is read while
+    // the attempt is still waiting.
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    await writeFile(release, "1");
+
+    expect(await terminalState(backend, attempt)).toBe("delivered");
+    const events = await journalEvents(root, attempt);
+    // A malformed read is not evidence of staleness either — it must not manufacture a degradation.
+    expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "heartbeat-stale")).toHaveLength(0);
+  });
+
   test("a stale shim heartbeat records one degradation while waiting without killing the attempt", async () => {
     const root = await stateRoot("heartbeat-stale");
     const backend = fixture(root, { processDelayMs: 150, heartbeatIntervalMs: 10_000 });
@@ -869,5 +913,53 @@ describe("restart reconstruction and §6.4 actions", () => {
     expect(await terminalState(backend, attempt)).toBe("delivered");
     const events = await journalEvents(root, attempt);
     expect(events.filter(({ type, details }) => type === "progress" && details["degradation"] === "heartbeat-stale")).toHaveLength(1);
+  });
+});
+
+// waitForOutcome polls "read the outcome, else probe liveness". The shim can write outcome.json
+// and exit(0) between those two adjacent synchronous reads, so observing death is not by itself
+// evidence that nothing was delivered — the wait must re-read before it concludes.
+//
+// That interleaving is not reproducible from outside the process: nothing can be scheduled
+// between the two statements, and manufacturing the window would mean adding a fault seam to the
+// terminalization path itself. These cases therefore cover the post-death branch directly, which
+// is why it is a named export rather than an inline throw. They do not claim to demonstrate the
+// race; they pin the behavior the race depends on.
+describe("outcome resolution after the shim is observed dead", () => {
+  test("returns an outcome that landed after the poll's read but before the liveness probe", async () => {
+    const root = await stateRoot("outcome-toctou-hit");
+    const meta = join(root, "meta");
+    await mkdir(meta, { recursive: true });
+    writeOutcomeFile(meta, { attemptId: "attempt-toctou", nonce: "nonce-toctou", exitCode: 0, termSignal: null, startedAt: "2026-08-04T00:00:00.000Z", finishedAt: "2026-08-04T00:00:01.000Z" });
+
+    expect(resolveOutcomeAfterShimDeath(meta, "nonce-toctou")).toEqual({ exitCode: 0 });
+  });
+
+  test("still fails when the re-read also misses, which is the only proof the shim never delivered", async () => {
+    const root = await stateRoot("outcome-toctou-miss");
+    const meta = join(root, "meta");
+    await mkdir(meta, { recursive: true });
+
+    expect(() => resolveOutcomeAfterShimDeath(meta, "nonce-toctou"))
+      .toThrow("shim exited without a nonce-matching outcome");
+  });
+
+  test("treats a foreign-nonce outcome as absent, so a stale attempt is never adopted", async () => {
+    const root = await stateRoot("outcome-toctou-foreign");
+    const meta = join(root, "meta");
+    await mkdir(meta, { recursive: true });
+    writeOutcomeFile(meta, { attemptId: "attempt-toctou", nonce: "someone-elses-nonce", exitCode: 0, termSignal: null, startedAt: "2026-08-04T00:00:00.000Z", finishedAt: "2026-08-04T00:00:01.000Z" });
+
+    expect(() => resolveOutcomeAfterShimDeath(meta, "nonce-toctou"))
+      .toThrow("shim exited without a nonce-matching outcome");
+  });
+
+  test("carries a terminating signal through the post-death re-read", async () => {
+    const root = await stateRoot("outcome-toctou-signal");
+    const meta = join(root, "meta");
+    await mkdir(meta, { recursive: true });
+    writeOutcomeFile(meta, { attemptId: "attempt-toctou", nonce: "nonce-toctou", exitCode: null, termSignal: "SIGTERM", startedAt: "2026-08-04T00:00:00.000Z", finishedAt: "2026-08-04T00:00:01.000Z" });
+
+    expect(resolveOutcomeAfterShimDeath(meta, "nonce-toctou")).toEqual({ signal: "SIGTERM" });
   });
 });
