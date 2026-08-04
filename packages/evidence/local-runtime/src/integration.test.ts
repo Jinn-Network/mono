@@ -352,7 +352,7 @@ describe("local evidence runtime producer integration", () => {
     const verifications = await runtime.catalog.findVerifications({
       executionId: "urn:uuid:22222222-2222-4222-8222-222222222222",
       subjectRecordDigest:
-        "sha256:dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
+        "sha256:7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
       verifierId: "urn:uuid:66666666-6666-4666-8666-666666666666",
       verdict: "verified",
     });

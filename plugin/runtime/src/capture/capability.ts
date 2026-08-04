@@ -13,11 +13,11 @@ import type {
   EvidenceRecordReference,
 } from "@jinn-network/evidence-repository";
 import {
-  TRAJECTORY_VOCABULARY_PROFILE,
-  buildTrajectoryDerivationStatement,
+  TRACE_VOCABULARY_PROFILE,
+  buildTraceDerivationStatement,
   documentDigest,
-  sealTrajectoryDerivationAttestation,
-} from "@jinn-network/evidence-trajectory";
+  sealTraceDerivationAttestation,
+} from "@jinn-network/evidence-trace";
 import {
   type CaptureDiagnostic,
   type ExecutionId,
@@ -42,8 +42,8 @@ import {
   PRODUCER_IRI,
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
-  TRAJECTORY_BUILDER_ID,
-  TRAJECTORY_BUILDER_VERSION,
+  TRACE_BUILDER_ID,
+  TRACE_BUILDER_VERSION,
 } from "./identity.js";
 import {
   type TrajectoryDerivationAttestationLink,
@@ -250,20 +250,20 @@ export function createCaptureCapability(
     const executionDigest = finalized.receipt.record.digest;
     const derivedAt = outcome.endedAt;
 
-    const statement = buildTrajectoryDerivationStatement({
+    const statement = buildTraceDerivationStatement({
       producerId: PRODUCER_IRI,
       executionDigest,
-      trajectoryDigest: trajectory.digest,
+      traceDigest: trajectory.digest,
       nativeTraceDigest,
       formatIri: SESSION_FEED_FORMAT_IRI,
-      decoderId: TRAJECTORY_BUILDER_ID,
-      decoderVersion: TRAJECTORY_BUILDER_VERSION,
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      decoderId: TRACE_BUILDER_ID,
+      decoderVersion: TRACE_BUILDER_VERSION,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
       timebase: "source-epoch-ns",
       linkageMode: "forward-linked",
       derivedAt,
     });
-    const attestation = await sealTrajectoryDerivationAttestation({
+    const attestation = await sealTraceDerivationAttestation({
       statement,
       signer: options.signer,
       ...(input.signal === undefined ? {} : { signal: input.signal }),

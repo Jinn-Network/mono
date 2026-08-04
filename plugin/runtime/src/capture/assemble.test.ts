@@ -10,7 +10,7 @@ import {
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_ID_PROPERTY,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
 } from "./identity.js";
 import {
   buildFinalizeInput,
@@ -19,7 +19,7 @@ import {
   sessionSummary,
 } from "./assemble.js";
 
-const TRAJECTORY_DIGEST = `sha256:${"c".repeat(64)}` as const;
+const TRACE_DIGEST = `sha256:${"c".repeat(64)}` as const;
 
 const assembly = async () => {
   const feed = parseSessionFeed(
@@ -31,7 +31,7 @@ const assembly = async () => {
     workspaceDir: "/home/op/capture/workspaces/s-golden",
     producerVersion: "0.1.0",
     outcome: resolveSessionOutcome(feed),
-    trajectoryDigest: TRAJECTORY_DIGEST,
+    trajectoryDigest: TRACE_DIGEST,
   };
 };
 
@@ -236,7 +236,7 @@ describe("buildFinalizeInput", () => {
   test("links the trajectory record forward as an identifier on the trace entity", async () => {
     const finalize = buildFinalizeInput(await assembly());
     expect(finalize.nativeTrace?.artifact.identifiers).toEqual([
-      { propertyId: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY, value: TRAJECTORY_DIGEST },
+      { propertyId: TRACE_RECORD_IDENTIFIER_PROPERTY, value: TRACE_DIGEST },
     ]);
   });
 });

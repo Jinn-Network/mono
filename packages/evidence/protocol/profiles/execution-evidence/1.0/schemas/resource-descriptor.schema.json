@@ -44,5 +44,5 @@
     "digest"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
 }

@@ -133,7 +133,7 @@ const manifestBytes = canonicalizeEvidenceOciManifest(manifest);
 if (validateEvidenceOciManifest(manifestBytes, reference).contentSize !== bytes.byteLength) {
   throw new Error("packed manifest mapping failed");
 }
-if (OCI_EVIDENCE_PROFILE_URI !== "https://jinn.network/profiles/evidence-repository-oci/1.0") {
+if (OCI_EVIDENCE_PROFILE_URI !== "https://spec.jinn.network/profiles/evidence-repository-oci/v1") {
   throw new Error("profile constant missing");
 }
 await readFile(new URL(import.meta.resolve("@jinn-network/evidence-repository-oci/profiles/evidence-repository-oci/1.0/specification.md")));

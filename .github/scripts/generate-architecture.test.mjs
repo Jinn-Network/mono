@@ -116,7 +116,7 @@ test('release, public-surface, ownership, and transition views reuse their canon
   );
   assert.deepEqual(report.release.experimentalEnvironmentSupply.publishPolicies, ['disabled']);
   assert.ok(report.publicSurfaces.packages.some(({ name, schemas }) => (
-    name === '@jinn-network/evidence-trajectory' && schemas.includes('schemas')
+    name === '@jinn-network/evidence-trace' && schemas.includes('schemas')
   )));
   assert.equal(new Set(report.publicSurfaces.selfIdentifyingClaims.map(({ identifier }) => identifier)).size,
     report.publicSurfaces.selfIdentifyingClaims.length);
@@ -139,29 +139,29 @@ test('release, public-surface, ownership, and transition views reuse their canon
   );
   assert.deepEqual(
     report.publicSurfaces.assets.find(({ path }) => (
-      path === 'packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json'
+      path === 'packages/evidence/trace/fixtures/derivation/execution-golden-base.json'
     )),
     {
       claim: null,
       export: null,
       kind: 'fixtures',
-      package: '@jinn-network/evidence-trajectory',
+      package: '@jinn-network/evidence-trace',
       packedTargets: [],
-      path: 'packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json',
+      path: 'packages/evidence/trace/fixtures/derivation/execution-golden-base.json',
       relativeSource: 'fixtures/derivation/execution-golden-base.json',
     },
   );
   assert.deepEqual(
     report.publicSurfaces.assets.find(({ path, export: exportKey }) => (
-      path === 'packages/evidence/trajectory/src/testing.ts' && exportKey === './testing'
+      path === 'packages/evidence/trace/src/testing.ts' && exportKey === './testing'
     )),
     {
       claim: null,
       export: './testing',
       kind: 'conformance',
-      package: '@jinn-network/evidence-trajectory',
+      package: '@jinn-network/evidence-trace',
       packedTargets: ['./dist/testing.d.ts', './dist/testing.js'],
-      path: 'packages/evidence/trajectory/src/testing.ts',
+      path: 'packages/evidence/trace/src/testing.ts',
       relativeSource: 'src/testing.ts',
     },
   );

@@ -1,20 +1,20 @@
 import { readFile } from "node:fs/promises";
 
 import {
-  TRAJECTORY_PROTOCOL,
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_PROTOCOL,
+  TRACE_VOCABULARY_PROFILE,
   deriveTraceId,
   documentDigest,
-  parseTrajectory,
-} from "@jinn-network/evidence-trajectory";
+  parseTrace,
+} from "@jinn-network/evidence-trace";
 import { describe, expect, test } from "vitest";
 
 import { parseSessionFeed } from "./feed.js";
 import {
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
-  TRAJECTORY_BUILDER_ID,
-  TRAJECTORY_BUILDER_VERSION,
+  TRACE_BUILDER_ID,
+  TRACE_BUILDER_VERSION,
 } from "./identity.js";
 import { buildTrajectoryRecord } from "./trajectory.js";
 
@@ -25,8 +25,8 @@ describe("buildTrajectoryRecord", () => {
   test("seals a record that re-parses under C1's schema", async () => {
     const bytes = await goldenBytes();
     const built = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
-    const record = parseTrajectory(built.bytes);
-    expect(record.protocol).toBe(TRAJECTORY_PROTOCOL);
+    const record = parseTrace(built.bytes);
+    expect(record.protocol).toBe(TRACE_PROTOCOL);
     expect(record.timebase).toBe("source-epoch-ns");
     expect(record.spans).toHaveLength(built.spanCount);
     expect(record.completeness).toEqual({ decoded: "full" });
@@ -34,7 +34,7 @@ describe("buildTrajectoryRecord", () => {
 
   test("declares the feed as its source, by digest and format IRI", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrajectory(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.source.formatIri).toBe(SESSION_FEED_FORMAT_IRI);
     expect(record.source.nativeTrace.mediaType).toBe(SESSION_FEED_MEDIA_TYPE);
     expect(record.source.nativeTrace.name).toBe("feed.ndjson");
@@ -43,11 +43,11 @@ describe("buildTrajectoryRecord", () => {
 
   test("declares the builder identity and the vocabulary profile", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrajectory(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.derivation).toEqual({
-      decoderId: TRAJECTORY_BUILDER_ID,
-      decoderVersion: TRAJECTORY_BUILDER_VERSION,
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      decoderId: TRACE_BUILDER_ID,
+      decoderVersion: TRACE_BUILDER_VERSION,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
     });
   });
 
@@ -58,16 +58,16 @@ describe("buildTrajectoryRecord", () => {
       deriveTraceId({
         sourceDigest: documentDigest(bytes),
         formatIri: SESSION_FEED_FORMAT_IRI,
-        decoderId: TRAJECTORY_BUILDER_ID,
-        decoderVersion: TRAJECTORY_BUILDER_VERSION,
-        vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+        decoderId: TRACE_BUILDER_ID,
+        decoderVersion: TRACE_BUILDER_VERSION,
+        vocabularyProfile: TRACE_VOCABULARY_PROFILE,
       }),
     );
   });
 
   test("omits source.execution, and says so by carrying no execution key", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrajectory(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.source).not.toHaveProperty("execution");
   });
 
@@ -97,7 +97,7 @@ describe("buildTrajectoryRecord", () => {
     const other = new TextEncoder().encode("{}\n");
     // Building against the wrong bytes derives a trace id C1 will not accept for that source.
     expect(() => buildTrajectoryRecord(parseSessionFeed(bytes), other)).not.toThrow();
-    const record = parseTrajectory(buildTrajectoryRecord(parseSessionFeed(bytes), other).bytes);
+    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), other).bytes);
     expect(`sha256:${record.source.nativeTrace.digest.sha256}`).toBe(documentDigest(other));
   });
 
@@ -107,6 +107,6 @@ describe("buildTrajectoryRecord", () => {
     );
     const built = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
     expect(built.spanCount).toBe(1);
-    expect(parseTrajectory(built.bytes).completeness).toEqual({ decoded: "full" });
+    expect(parseTrace(built.bytes).completeness).toEqual({ decoded: "full" });
   });
 });

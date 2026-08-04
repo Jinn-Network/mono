@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, test, afterEach, beforeEach } from "vitest";
 
-import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trajectory";
+import { TRACE_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trace";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 
 import { PluginRuntimeError } from "../errors.js";
@@ -40,7 +40,7 @@ const crate = (identifier: unknown): Uint8Array =>
 describe("trajectoryReferenceFromRecordBytes", () => {
   test("reads the digest from the trace entity's identifier", () => {
     const bytes = crate([
-      { "@type": "PropertyValue", propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY, value: DIGEST },
+      { "@type": "PropertyValue", propertyID: TRACE_RECORD_IDENTIFIER_PROPERTY, value: DIGEST },
     ]);
     expect(trajectoryReferenceFromRecordBytes(bytes)).toEqual({ digest: DIGEST });
   });
@@ -48,7 +48,7 @@ describe("trajectoryReferenceFromRecordBytes", () => {
   test("accepts a single identifier object as well as a list", () => {
     const bytes = crate({
       "@type": "PropertyValue",
-      propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+      propertyID: TRACE_RECORD_IDENTIFIER_PROPERTY,
       value: DIGEST,
     });
     expect(trajectoryReferenceFromRecordBytes(bytes)).toEqual({ digest: DIGEST });
@@ -75,7 +75,7 @@ describe("trajectoryReferenceFromRecordBytes", () => {
         crate([
           {
             "@type": "PropertyValue",
-            propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+            propertyID: TRACE_RECORD_IDENTIFIER_PROPERTY,
             value: "sha256:not-a-digest",
           },
         ]),
@@ -109,14 +109,14 @@ describe("loadTrajectoryRecord", () => {
 });
 
 const EXECUTION_DIGEST = `sha256:${"b".repeat(64)}` as const;
-const TRAJECTORY_DIGEST = `sha256:${"c".repeat(64)}` as const;
+const TRACE_DIGEST = `sha256:${"c".repeat(64)}` as const;
 const ATTESTATION_DIGEST = `sha256:${"a".repeat(64)}` as const;
 const NATIVE_DIGEST = `sha256:${"d".repeat(64)}` as const;
 
 const sampleLink = () => ({
   version: 1 as const,
   executionDigest: EXECUTION_DIGEST,
-  trajectoryDigest: TRAJECTORY_DIGEST,
+  trajectoryDigest: TRACE_DIGEST,
   attestationDigest: ATTESTATION_DIGEST,
   nativeTraceDigest: NATIVE_DIGEST,
   derivedAt: "2026-07-30T09:00:06Z",
@@ -170,22 +170,22 @@ describe("derivation attestation link", () => {
   });
 
   test("loads attestation bytes and statement from the archive", async () => {
-    const { buildTrajectoryDerivationStatement, sealTrajectoryDerivationAttestation, TRAJECTORY_VOCABULARY_PROFILE } =
-      await import("@jinn-network/evidence-trajectory");
-    const statement = buildTrajectoryDerivationStatement({
+    const { buildTraceDerivationStatement, sealTraceDerivationAttestation, TRACE_VOCABULARY_PROFILE } =
+      await import("@jinn-network/evidence-trace");
+    const statement = buildTraceDerivationStatement({
       producerId: "https://jinn.network/software/plugin-runtime",
       executionDigest: EXECUTION_DIGEST,
-      trajectoryDigest: TRAJECTORY_DIGEST,
+      traceDigest: TRACE_DIGEST,
       nativeTraceDigest: NATIVE_DIGEST,
       formatIri: "https://jinn.network/formats/agent-session-feed/v1",
       decoderId: "agent-session-feed",
       decoderVersion: "1.0.0",
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
       timebase: "source-epoch-ns",
       linkageMode: "forward-linked",
       derivedAt: "2026-07-30T09:00:06Z",
     });
-    const sealed = await sealTrajectoryDerivationAttestation({
+    const sealed = await sealTraceDerivationAttestation({
       statement,
       signer: async () => [{ signature: new Uint8Array([9]), keyid: "k" }],
     });

@@ -6,7 +6,7 @@ import {
   SpanSchema,
   compareCodeUnitStrings,
   deriveSpanId,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 import { describe, expect, test } from "vitest";
 
 import { parseSessionFeed } from "./feed.js";

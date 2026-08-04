@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, test } from "vitest";
-import { GEN_AI_ATTRIBUTES, JINN_ATTRIBUTES, SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trajectory";
-import type { Span } from "@jinn-network/evidence-trajectory";
+import { GEN_AI_ATTRIBUTES, JINN_ATTRIBUTES, SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trace";
+import type { Span } from "@jinn-network/evidence-trace";
 
 import { excerptsFromSpans, spanAttribute } from "./excerpts-local.js";
 

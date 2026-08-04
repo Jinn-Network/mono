@@ -37,7 +37,7 @@ describe("artifact integrity", () => {
     expect(byId.get("results/slug-normalization.patch")).toMatchObject({
       status: "mismatch",
     });
-    expect(byId.get("trace/trajectory.jsonl")).toMatchObject({
+    expect(byId.get("trace/trace.jsonl")).toMatchObject({
       status: "unavailable",
     });
     expect(report.verified).toBe(1);

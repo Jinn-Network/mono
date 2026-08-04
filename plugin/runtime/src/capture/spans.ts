@@ -10,7 +10,7 @@ import {
   type Span,
   compareCodeUnitStrings,
   deriveSpanId,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 
 import type { FeedLine, ParsedSessionFeed } from "./feed.js";
 

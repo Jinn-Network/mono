@@ -52,14 +52,49 @@ const contextObjects = privateDocument["@context"].filter(
   (value) => typeof value === "object" && value !== null,
 );
 if (!contextObjects.some((value) => value.jinn)) {
-  contextObjects[0].jinn = "https://jinn.network/terms/";
+  contextObjects[0].jinn = "https://spec.jinn.network/terms/";
 }
 findEntity(privateDocument, executionId).subjectOf = {
-  "@id": "trace/trajectory.jsonl",
+  "@id": "trace/trace.jsonl",
 };
 const privateMetadataBytes = json(privateDocument);
 await write(privateMetadataPath, privateMetadataBytes);
 const privateMetadataDigest = digest(privateMetadataBytes);
+
+const payloadType = "application/vnd.in-toto+json";
+
+function signStatement(statementBytes, seedString) {
+  const seed = createHash("sha256").update(seedString).digest();
+  const privateKey = createPrivateKey({
+    key: Buffer.concat([
+      Buffer.from("302e020100300506032b657004220420", "hex"),
+      seed,
+    ]),
+    format: "der",
+    type: "pkcs8",
+  });
+  const publicKey = createPublicKey(privateKey);
+  const publicKeyDer = publicKey.export({ format: "der", type: "spki" });
+  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
+  const typeBytes = Buffer.from(payloadType);
+  const pae = Buffer.concat([
+    Buffer.from(`DSSEv1 ${typeBytes.length} `),
+    typeBytes,
+    Buffer.from(` ${statementBytes.length} `),
+    statementBytes,
+  ]);
+  const envelope = {
+    payloadType,
+    payload: statementBytes.toString("base64"),
+    signatures: [
+      {
+        keyid: digest(publicKeyDer),
+        sig: sign(null, pae, privateKey).toString("base64"),
+      },
+    ],
+  };
+  return { envelope, publicKeyPem };
+}
 
 const statementPath = join(verificationRoot, "statement.json");
 const verificationStatement = JSON.parse(await readFile(statementPath, "utf8"));
@@ -72,43 +107,30 @@ verificationStatement.subject = [
 const statementBytes = Buffer.from(json(verificationStatement));
 await write(statementPath, statementBytes);
 
-const seed = createHash("sha256")
-  .update("jinn execution verification fixture key v1")
-  .digest();
-const privateKey = createPrivateKey({
-  key: Buffer.concat([
-    Buffer.from("302e020100300506032b657004220420", "hex"),
-    seed,
-  ]),
-  format: "der",
-  type: "pkcs8",
-});
-const publicKey = createPublicKey(privateKey);
-const publicKeyDer = publicKey.export({ format: "der", type: "spki" });
-const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
-await write(join(verificationRoot, "public-key.pem"), publicKeyPem);
-
-const payloadType = "application/vnd.in-toto+json";
-const typeBytes = Buffer.from(payloadType);
-const pae = Buffer.concat([
-  Buffer.from(`DSSEv1 ${typeBytes.length} `),
-  typeBytes,
-  Buffer.from(` ${statementBytes.length} `),
+const { envelope, publicKeyPem } = signStatement(
   statementBytes,
-]);
-const envelope = {
-  payloadType,
-  payload: statementBytes.toString("base64"),
-  signatures: [
-    {
-      keyid: digest(publicKeyDer),
-      sig: sign(null, pae, privateKey).toString("base64"),
-    },
-  ],
-};
+  "jinn execution verification fixture key v1",
+);
+await write(join(verificationRoot, "public-key.pem"), publicKeyPem);
 await write(
   join(verificationRoot, "execution-verification.dsse.json"),
   json(envelope),
+);
+
+const evaluationRoot = join(fixtureRoot, "claims", "result-evaluation");
+const evaluationStatementPath = join(evaluationRoot, "statement.json");
+const evaluationStatementBytes = Buffer.from(
+  await readFile(evaluationStatementPath),
+);
+const { envelope: evaluationEnvelope, publicKeyPem: evaluationPublicKeyPem } =
+  signStatement(
+    evaluationStatementBytes,
+    "jinn result evaluation fixture key v1",
+  );
+await write(join(evaluationRoot, "public-key.pem"), evaluationPublicKeyPem);
+await write(
+  join(evaluationRoot, "result-evaluation.dsse.json"),
+  json(evaluationEnvelope),
 );
 
 const publicTrace = [
@@ -127,7 +149,7 @@ const publicTraceBytes = Buffer.from(
   publicTrace.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
 );
 await write(
-  join(publicRoot, "trace", "trajectory.public.jsonl"),
+  join(publicRoot, "trace", "trace.public.jsonl"),
   publicTraceBytes,
 );
 const publicTraceDigest = digest(publicTraceBytes);
@@ -148,7 +170,7 @@ const policyDigest = digest(policyBytes);
 
 const privateTraceDigest = findEntity(
   privateDocument,
-  "trace/trajectory.jsonl",
+  "trace/trace.jsonl",
 ).sha256;
 const receipt = {
   schemaVersion: "jinn.fixture.scrub-receipt.v1",
@@ -192,7 +214,7 @@ const publicDocument = structuredClone(privateDocument);
 const publicContext = publicDocument["@context"].find(
   (value) => typeof value === "object" && value !== null,
 );
-publicContext.jinn = "https://jinn.network/terms/";
+publicContext.jinn = "https://spec.jinn.network/terms/";
 const publicRootEntity = findEntity(publicDocument, "./");
 publicRootEntity.name = "Golden synthetic public Execution Evidence v1 derivative";
 publicRootEntity.description =
@@ -206,7 +228,7 @@ publicRootEntity["prov:wasDerivedFrom"] = {
 publicRootEntity["prov:wasGeneratedBy"] = { "@id": scrubActivityId };
 for (const id of [
   "private/ro-crate-metadata.json",
-  "trace/trajectory.public.jsonl",
+  "trace/trace.public.jsonl",
   "scrub/public-execution-policy.json",
   "scrub/scrub-receipt.json",
 ]) {
@@ -223,16 +245,16 @@ upsertEntity(publicDocument, {
   sha256: privateMetadataDigest,
 });
 upsertEntity(publicDocument, {
-  "@id": "trace/trajectory.public.jsonl",
+  "@id": "trace/trace.public.jsonl",
   "@type": "File",
   name: "Structure-aware scrubbed trace projection",
   encodingFormat: "application/x-ndjson",
   sha256: publicTraceDigest,
   conformsTo: {
-    "@id": "https://jinn.network/formats/fixture-trajectory/1.0",
+    "@id": "https://spec.jinn.network/formats/fixture-trace/v1",
   },
   about: { "@id": executionId },
-  "prov:wasDerivedFrom": { "@id": "trace/trajectory.jsonl" },
+  "prov:wasDerivedFrom": { "@id": "trace/trace.jsonl" },
   "prov:wasGeneratedBy": { "@id": scrubActivityId },
 });
 upsertEntity(publicDocument, {
@@ -260,19 +282,19 @@ for (const [id, name, propertyID, value] of [
   [
     "#disposition-absolute-path-redact",
     "absolute-path:redact",
-    "https://jinn.network/terms/dispositions/absolute-path/redact",
+    "https://spec.jinn.network/terms/dispositions/absolute-path/redact",
     1,
   ],
   [
     "#disposition-credential-redact",
     "credential:redact",
-    "https://jinn.network/terms/dispositions/credential/redact",
+    "https://spec.jinn.network/terms/dispositions/credential/redact",
     1,
   ],
   [
     "#disposition-reject",
     "reject",
-    "https://jinn.network/terms/dispositions/reject",
+    "https://spec.jinn.network/terms/dispositions/reject",
     0,
   ],
 ]) {
@@ -311,8 +333,8 @@ report.publicDerivative = {
   record: "public/ro-crate-metadata.json",
   sha256: publicMetadataDigest,
   sameExecutionId: executionId,
-  unavailableExactArtifact: "public/trace/trajectory.jsonl",
-  publishedDerivative: "public/trace/trajectory.public.jsonl",
+  unavailableExactArtifact: "public/trace/trace.jsonl",
+  publishedDerivative: "public/trace/trace.public.jsonl",
   transferredPrivateVerification: false,
 };
 report.publicationCheck = {
@@ -335,7 +357,7 @@ const publicFiles = [
   ["public/ro-crate-metadata.json", "Conforming public Execution Evidence metadata", "application/ld+json"],
   ["public/task/task.md", "Unchanged public Task", "text/markdown"],
   ["public/results/slug-normalization.patch", "Unchanged public Result", "text/x-diff"],
-  ["public/trace/trajectory.public.jsonl", "Scrubbed public trace projection", "application/x-ndjson"],
+  ["public/trace/trace.public.jsonl", "Scrubbed public trace projection", "application/x-ndjson"],
   ["public/scrub/public-execution-policy.json", "Public derivation policy", "application/json"],
   ["public/scrub/scrub-receipt.json", "Public derivation receipt", "application/json"],
 ];

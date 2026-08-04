@@ -4,7 +4,7 @@ import {
   JINN_ATTRIBUTES,
   STATUS_CODE,
   type Span,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 import type { Sha256Digest } from "@jinn-network/evidence-repository";
 
 import { MAX_INDEXED_EXCERPTS, type IndexableExcerpt } from "./index-store.js";

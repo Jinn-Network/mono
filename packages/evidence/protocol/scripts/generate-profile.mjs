@@ -82,11 +82,11 @@ async function expectedAssets() {
         mainEntity: { "@id": "specification.md" },
         hasPart: parts.map(({ "@id": id }) => ({ "@id": id })),
         about: {
-          "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+          "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
         },
       },
       {
-        "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
         "@type": ["CreativeWork", "Profile"],
         name: "Jinn Execution Evidence Profile 1.0",
         version: "1.0.0",

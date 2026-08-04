@@ -53,11 +53,11 @@
         }
       ],
       "about": {
-        "@id": "https://jinn.network/profiles/execution-evidence/1.0"
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1"
       }
     },
     {
-      "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+      "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
       "@type": [
         "CreativeWork",
         "Profile"
@@ -88,49 +88,49 @@
       "@type": "File",
       "name": "specification.md",
       "encodingFormat": "text/markdown",
-      "sha256": "7295e98cecf49946c76428cead52d8be96af9f20efcd68cfa45a9ddfcfb4294a"
+      "sha256": "59fef2e4ebf2231821bafcf4fe13521734cb3a020c0f878f6732447ee6056aee"
     },
     {
       "@id": "vocabulary.jsonld",
       "@type": "File",
       "name": "vocabulary.jsonld",
       "encodingFormat": "application/ld+json",
-      "sha256": "47e8f24f58997911dd9bde38705cd86eaca0c0d75c4e76bfebfb122f3fa53673"
+      "sha256": "ee8dd187742dd020056e6c35b07630e77f7bb8f30b1e3740a95e5d28adda6469"
     },
     {
       "@id": "schemas/dsse-envelope.schema.json",
       "@type": "File",
       "name": "schemas/dsse-envelope.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "a6f82709e8e836cce6130e96d3bc43e53a2e7f84d6e236fd93899dcf247b5901"
+      "sha256": "f2da8854900fe7800974f9ca85d9f69d5a51428b9e048805cd8c6a2989405e01"
     },
     {
       "@id": "schemas/execution-evidence-document.schema.json",
       "@type": "File",
       "name": "schemas/execution-evidence-document.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "c0d732b40c3f87d03f9caa1b2571e19ebc34a3be1fc6e3c4c8830f99c0da4a11"
+      "sha256": "910ae22df1864ae8887b4ef7c1ce8268cd0e7ee264424721021d6135865c389e"
     },
     {
       "@id": "schemas/execution-verification-statement.schema.json",
       "@type": "File",
       "name": "schemas/execution-verification-statement.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "b6a75273d2ef8e90b10eb2a80e3746ab3ba2e980b3a2d0ced21edf1399371315"
+      "sha256": "e2f4e642dbe9f6e27970c063345071cc95684b8ea05c37688e58930742f6757f"
     },
     {
       "@id": "schemas/resource-descriptor.schema.json",
       "@type": "File",
       "name": "schemas/resource-descriptor.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "0465626bdf205211b2a7bffa38027b5ba3b4e32f974098b8d17c41c1e6103c1a"
+      "sha256": "c00ae4d4ea6cef0170dfc36fa293f71537b42b126b164cd0476064a28d03b5a0"
     },
     {
       "@id": "schemas/result-evaluation-statement.schema.json",
       "@type": "File",
       "name": "schemas/result-evaluation-statement.schema.json",
       "encodingFormat": "application/schema+json",
-      "sha256": "8c9dff1f77f54b35d97b31e3747986c8f599530c8357c3c9dce43d89cea63d65"
+      "sha256": "97c81ca33e4b6daae3d4a15113aaacc09be2bbfde9c0f9f17517a93a2ad88e69"
     }
   ]
 }

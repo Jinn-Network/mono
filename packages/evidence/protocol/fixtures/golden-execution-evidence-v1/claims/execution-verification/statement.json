@@ -4,11 +4,11 @@
     {
       "name": "ro-crate-metadata.json",
       "digest": {
-        "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf"
+        "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf"
       }
     }
   ],
-  "predicateType": "https://jinn.network/attestations/execution-verification/v1",
+  "predicateType": "https://spec.jinn.network/attestations/execution-verification/v1",
   "predicate": {
     "verifiedAt": "2026-07-23T16:05:00Z",
     "verifier": {
@@ -35,9 +35,9 @@
         "explanation": "The native trace has a complete ordered sequence from execution start through completion.",
         "evidence": [
           {
-            "name": "execution/trace/trajectory.jsonl",
+            "name": "execution/trace/trace.jsonl",
             "digest": {
-              "sha256": "c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483"
+              "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
             }
           }
         ]
@@ -54,9 +54,9 @@
             }
           },
           {
-            "name": "execution/trace/trajectory.jsonl",
+            "name": "execution/trace/trace.jsonl",
             "digest": {
-              "sha256": "c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483"
+              "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
             }
           }
         ]

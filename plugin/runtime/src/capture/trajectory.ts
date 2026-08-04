@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  TRAJECTORY_MEDIA_TYPE,
-  TRAJECTORY_PROTOCOL,
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_MEDIA_TYPE,
+  TRACE_PROTOCOL,
+  TRACE_VOCABULARY_PROFILE,
   deriveTraceId,
   documentDigest,
-  sealTrajectory,
-} from "@jinn-network/evidence-trajectory";
+  sealTrace,
+} from "@jinn-network/evidence-trace";
 
 import type { ParsedSessionFeed } from "./feed.js";
 import {
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
-  TRAJECTORY_BUILDER_ID,
-  TRAJECTORY_BUILDER_VERSION,
+  TRACE_BUILDER_ID,
+  TRACE_BUILDER_VERSION,
 } from "./identity.js";
 import { buildTrajectorySpans } from "./spans.js";
 
-export const TRAJECTORY_ARTIFACT_MEDIA_TYPE = TRAJECTORY_MEDIA_TYPE;
+export const TRACE_ARTIFACT_MEDIA_TYPE = TRACE_MEDIA_TYPE;
 
 export interface BuiltTrajectory {
   readonly bytes: Uint8Array;
@@ -45,14 +45,14 @@ export function buildTrajectoryRecord(
   const traceId = deriveTraceId({
     sourceDigest,
     formatIri: SESSION_FEED_FORMAT_IRI,
-    decoderId: TRAJECTORY_BUILDER_ID,
-    decoderVersion: TRAJECTORY_BUILDER_VERSION,
-    vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+    decoderId: TRACE_BUILDER_ID,
+    decoderVersion: TRACE_BUILDER_VERSION,
+    vocabularyProfile: TRACE_VOCABULARY_PROFILE,
   });
   const spans = buildTrajectorySpans({ feed, traceId });
 
-  const sealed = sealTrajectory({
-    protocol: TRAJECTORY_PROTOCOL,
+  const sealed = sealTrace({
+    protocol: TRACE_PROTOCOL,
     timebase: "source-epoch-ns",
     source: {
       nativeTrace: {
@@ -63,9 +63,9 @@ export function buildTrajectoryRecord(
       formatIri: SESSION_FEED_FORMAT_IRI,
     },
     derivation: {
-      decoderId: TRAJECTORY_BUILDER_ID,
-      decoderVersion: TRAJECTORY_BUILDER_VERSION,
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      decoderId: TRACE_BUILDER_ID,
+      decoderVersion: TRACE_BUILDER_VERSION,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
     },
     traceId,
     spans,

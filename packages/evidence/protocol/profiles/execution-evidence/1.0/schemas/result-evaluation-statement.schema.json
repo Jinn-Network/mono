@@ -58,7 +58,7 @@
     },
     "predicateType": {
       "type": "string",
-      "const": "https://jinn.network/attestations/result-evaluation/v1"
+      "const": "https://spec.jinn.network/attestations/result-evaluation/v1"
     },
     "predicate": {
       "type": "object",
@@ -403,5 +403,5 @@
     "predicate"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
 }

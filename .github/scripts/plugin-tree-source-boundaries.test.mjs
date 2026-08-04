@@ -51,7 +51,7 @@ const PERMITTED_PACKAGES = [
   '@jinn-network/evidence-repository-ipfs',
   '@jinn-network/evidence-retrieval',
   '@jinn-network/evidence-trace-decode',
-  '@jinn-network/evidence-trajectory',
+  '@jinn-network/evidence-trace',
   '@jinn-network/execution-recorder',
   '@jinn-network/record-discovery-client',
   '@jinn-network/record-discovery-protocol',

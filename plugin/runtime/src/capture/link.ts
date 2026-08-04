@@ -11,15 +11,15 @@ import type {
 import {
   type JsonValue,
   type RepositorySha256Digest,
-  type TrajectoryDerivationStatement,
-  TrajectoryDerivationStatementSchema,
-  type TrajectoryRecord,
+  type TraceDerivationStatement,
+  TraceDerivationStatementSchema,
+  type TraceRecord,
   documentDigest,
-  parseTrajectory,
+  parseTrace,
   serializeCanonicalJson,
   toBareSha256Hex,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-} from "@jinn-network/evidence-trajectory";
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
+} from "@jinn-network/evidence-trace";
 import { DSSE_PAYLOAD_TYPE, parseSignedRecordEnvelope } from "@jinn-network/trust-core";
 
 import { PluginRuntimeError } from "../errors.js";
@@ -157,7 +157,7 @@ export async function readTrajectoryDerivationAttestationLink(
 export async function loadTrajectoryDerivationAttestation(
   repository: EvidenceRepository,
   link: TrajectoryDerivationAttestationLink,
-): Promise<{ envelopeBytes: Uint8Array; statement: TrajectoryDerivationStatement }> {
+): Promise<{ envelopeBytes: Uint8Array; statement: TraceDerivationStatement }> {
   const envelopeBytes = await repository.getArtifact(
     { digest: link.attestationDigest },
     undefined,
@@ -178,7 +178,7 @@ export async function loadTrajectoryDerivationAttestation(
       "The derivation attestation payload is not valid UTF-8 JSON.",
     );
   }
-  const parsed = TrajectoryDerivationStatementSchema.safeParse(decoded);
+  const parsed = TraceDerivationStatementSchema.safeParse(decoded);
   if (!parsed.success) {
     throw new PluginRuntimeError(
       "capture-derivation-attestation-invalid",
@@ -224,7 +224,7 @@ export function trajectoryReferenceFromRecordBytes(
     for (const identifier of asArray((entity as Record<string, unknown>).identifier)) {
       if (identifier === null || typeof identifier !== "object") continue;
       const candidate = identifier as Record<string, unknown>;
-      if (candidate.propertyID !== TRAJECTORY_RECORD_IDENTIFIER_PROPERTY) continue;
+      if (candidate.propertyID !== TRACE_RECORD_IDENTIFIER_PROPERTY) continue;
       const value = candidate.value;
       if (typeof value === "string" && SHA256_REFERENCE.test(value)) {
         return { digest: value as `sha256:${string}` };
@@ -239,7 +239,7 @@ export async function loadTrajectoryRecord(
   repository: EvidenceRepository,
   reference: EvidenceArtifactReference,
   options?: { readonly signal?: AbortSignal },
-): Promise<TrajectoryRecord> {
+): Promise<TraceRecord> {
   const bytes = await repository.getArtifact(reference, options);
   if (bytes === null) {
     throw new PluginRuntimeError(
@@ -247,5 +247,5 @@ export async function loadTrajectoryRecord(
       `The trajectory record ${reference.digest} is not present in this archive.`,
     );
   }
-  return parseTrajectory(bytes);
+  return parseTrace(bytes);
 }

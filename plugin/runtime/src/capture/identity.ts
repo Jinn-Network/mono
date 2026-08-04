@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trajectory";
+import { TRACE_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trace";
 
 import { PluginRuntimeError } from "../errors.js";
 
@@ -22,12 +22,12 @@ export const SESSION_FEED_VERSION = 1 as const;
 
 /**
  * The trajectory producer's identity. `decoderId` must be a lowercase slug
- * (`DerivationSchema` in `@jinn-network/evidence-trajectory`), and `decoderVersion` is the
+ * (`DerivationSchema` in `@jinn-network/evidence-trace`), and `decoderVersion` is the
  * span-building rule's own version — deliberately independent of the package version, so a
  * release that does not change span construction does not invalidate earlier records.
  */
-export const TRAJECTORY_BUILDER_ID = "agent-session-feed" as const;
-export const TRAJECTORY_BUILDER_VERSION = "1.0.0" as const;
+export const TRACE_BUILDER_ID = "agent-session-feed" as const;
+export const TRACE_BUILDER_VERSION = "1.0.0" as const;
 
 export const PRODUCER_IRI = "https://jinn.network/software/plugin-runtime" as const;
 export const PRODUCER_NAME = "Jinn plugin runtime" as const;
@@ -42,7 +42,7 @@ export const SESSION_ID_PROPERTY =
  * a record because `EVIDENCE_RECORD_FAMILIES` is a closed set
  * (`packages/evidence/repository/src/types.ts:1-5`).
  */
-export { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY };
+export { TRACE_RECORD_IDENTIFIER_PROPERTY };
 
 export const CAPTURE_LICENSE = "https://spdx.org/licenses/Apache-2.0.html" as const;
 

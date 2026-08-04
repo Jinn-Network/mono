@@ -1,6 +1,6 @@
 {
   "@context": {
-    "jinn": "https://jinn.network/terms/",
+    "jinn": "https://spec.jinn.network/terms/",
     "dispositionCount": {
       "@id": "jinn:dispositionCount",
       "@type": "@id"
@@ -8,12 +8,12 @@
   },
   "@graph": [
     {
-      "@id": "https://jinn.network/terms/AbandonedActionStatus",
+      "@id": "https://spec.jinn.network/terms/AbandonedActionStatus",
       "@type": "http://www.w3.org/2000/01/rdf-schema#Resource",
       "http://www.w3.org/2000/01/rdf-schema#label": "Abandoned Action Status"
     },
     {
-      "@id": "https://jinn.network/terms/dispositionCount",
+      "@id": "https://spec.jinn.network/terms/dispositionCount",
       "@type": "http://www.w3.org/1999/02/22-rdf-syntax-ns#Property",
       "http://www.w3.org/2000/01/rdf-schema#label": "disposition count"
     }

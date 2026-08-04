@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
-import { parseTrajectory } from "@jinn-network/evidence-trajectory";
+import { parseTrace } from "@jinn-network/evidence-trace";
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -12,7 +12,7 @@ import { resolveRuntimeConfig } from "../config.js";
 import { createCaptureCapability } from "./capability.js";
 import {
   SESSION_FEED_FORMAT_IRI,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
 } from "./identity.js";
 import {
   derivationLinkPath,
@@ -147,7 +147,7 @@ describe("capture end to end", () => {
     const identifiers = Array.isArray(trace?.identifier) ? trace.identifier : [trace?.identifier];
     expect(identifiers).toContainEqual({
       "@type": "PropertyValue",
-      propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+      propertyID: TRACE_RECORD_IDENTIFIER_PROPERTY,
       value: result.capture.trajectory.digest,
     });
   }, 60_000);
@@ -225,7 +225,7 @@ describe("capture end to end", () => {
       await runtime.close();
     }
     // Sealing bytes and stored bytes are the same bytes.
-    expect(parseTrajectory(result.capture.trajectory.bytes).traceId).toBe(
+    expect(parseTrace(result.capture.trajectory.bytes).traceId).toBe(
       result.capture.trajectory.traceId,
     );
   }, 60_000);

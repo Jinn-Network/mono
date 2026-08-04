@@ -15,7 +15,7 @@ import {
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_ID_PROPERTY,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
   executorIri,
 } from "./identity.js";
 
@@ -227,7 +227,7 @@ export function buildFinalizeInput(input: CaptureAssemblyInput): FinalizeExecuti
         // The forward link to the trajectory record, sealed inside the execution record.
         identifiers: [
           {
-            propertyId: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+            propertyId: TRACE_RECORD_IDENTIFIER_PROPERTY,
             value: input.trajectoryDigest,
           },
         ],

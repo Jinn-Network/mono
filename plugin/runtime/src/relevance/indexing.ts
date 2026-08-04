@@ -5,7 +5,7 @@ import type {
   EvidenceRecordReference,
   Sha256Digest,
 } from "@jinn-network/evidence-repository";
-import type { Span } from "@jinn-network/evidence-trajectory";
+import type { Span } from "@jinn-network/evidence-trace";
 
 import { loadTrajectoryRecord, trajectoryReferenceFromRecordBytes } from "../capture/link.js";
 import type { CorpusReader } from "../corpus/read.js";
