@@ -1,15 +1,13 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import {
   type NativeOperatorHealth,
   type NativeOperatorHost,
 } from './daemon/native-operator-host.js';
+import type { NativeProductConfig } from './daemon/native-product-config.js';
 import {
-  NativeProductFileSchema,
-  type NativeProductConfig,
-} from './daemon/native-product-config.js';
+  loadNativeProductConfigFile,
+  resolveNativeConfigPath,
+} from './daemon/native-config-path.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import type { OperatorVerticalDecision } from './daemon/native-vertical-mode.js';
 
@@ -24,19 +22,14 @@ export interface NativeMainDeps {
   readonly installSignalHandlers?: boolean;
 }
 
+/**
+ * Resolves and loads via `daemon/native-config-path.js` — its own file,
+ * its own `--native-config` flag, never `--config` / the legacy default
+ * (see issue #2378). `jinn run` resolves the identical path before
+ * deciding to invoke this entry, so the two can never disagree.
+ */
 function loadNativeProductConfig(): NativeProductConfig {
-  const index = process.argv.indexOf('--config');
-  const path = index >= 0 && process.argv[index + 1]
-    ? process.argv[index + 1]!
-    : join(homedir(), '.jinn-client', 'config.json');
-  if (!existsSync(path)) throw new Error(`native-v1 structured config is missing: ${path}`);
-  let raw: unknown;
-  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (cause) {
-    throw new Error(`native-v1 structured config is not JSON: ${String(cause)}`);
-  }
-  const parsed = NativeProductFileSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(`native-v1 structured config is invalid: ${parsed.error.message}`);
-  return parsed.data;
+  return loadNativeProductConfigFile(resolveNativeConfigPath());
 }
 
 async function buildProductionHost(input: NativeDeploymentFactoryInput): Promise<NativeOperatorHost> {
