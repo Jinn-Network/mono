@@ -20,7 +20,7 @@ describe("chain-environment facts profile (CF4)", () => {
   it("binds a record kind discovery's own grammar accepts", () => {
     expect(() => assertRecordKindUri(CHAIN_ENVIRONMENT_KIND)).not.toThrow();
     expect(chainEnvironmentFactsProfile.kind).toBe(CHAIN_ENVIRONMENT_KIND);
-    expect(chainEnvironmentFactsProfile.profile).toBe(`${CHAIN_ENVIRONMENT_KIND}/facts/1.0`);
+    expect(chainEnvironmentFactsProfile.profile).toBe("https://spec.jinn.network/facts/chain-environment/v1");
   });
 
   it("names exactly the fields the leaf declares", () => {
@@ -64,7 +64,7 @@ describe("crypto-environment facts profile", () => {
   it("binds the composite kind", () => {
     expect(() => assertRecordKindUri(CRYPTO_ENVIRONMENT_KIND)).not.toThrow();
     expect(cryptoEnvironmentFactsProfile.kind).toBe(CRYPTO_ENVIRONMENT_KIND);
-    expect(cryptoEnvironmentFactsProfile.profile).toBe(`${CRYPTO_ENVIRONMENT_KIND}/facts/1.0`);
+    expect(cryptoEnvironmentFactsProfile.profile).toBe("https://spec.jinn.network/facts/crypto-environment/v1");
   });
 
   it("names exactly the fields the leaf declares", () => {

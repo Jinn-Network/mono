@@ -4,7 +4,7 @@
   "properties": {
     "kind": {
       "type": "string",
-      "const": "https://jinn.network/records/information-world/1.0"
+      "const": "https://spec.jinn.network/records/information-world/v1"
     },
     "requestKeyPolicy": {
       "type": "object",
@@ -450,7 +450,7 @@
     "capture"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/records/information-world/1.0/schema",
+  "$id": "https://spec.jinn.network/schemas/information-world/v1",
   "title": "Jinn information world 1.0",
   "description": "A sealed corpus of digest-pinned captured responses, the canonical request key that maps a request to an entry, the fail-closed miss response an uncaptured request receives, and the capture provenance and fidelity class the author declares. The fidelity class is a declaration: this schema makes no claim that any source returned these bytes.",
   "propertyNames": {

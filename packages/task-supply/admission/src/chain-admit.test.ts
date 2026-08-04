@@ -26,7 +26,7 @@ describe("admitChainCandidate", () => {
       return scriptedChainPort()(request as never);
     };
     const result = await admitChainCandidate(
-      { issuer: "https://jinn.network/agents/a", observeChain: port },
+      { issuer: "https://spec.jinn.network/agents/a", observeChain: port },
       goldenChainCandidate(),
       goldenChainReceipt().environment.compositeRecordDigest as `sha256:${string}`,
     );

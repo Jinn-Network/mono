@@ -25,7 +25,7 @@ export type Sha256Digest = `sha256:${string}`;
 /**
  * The three-valued verdict vocabulary, as surfaced by the marketplace projection source's
  * verdict-correspondence facts card
- * ("https://jinn.network/facts/marketplace-verdict-correspondence/1.0" in
+ * ("https://spec.jinn.network/facts/marketplace-verdict-correspondence/v1" in
  * `packages/marketplace/projector/src/announce.ts`), which is itself the evaluator-signed
  * Result Evaluation Statement's `verdict` (task-profiles design section 9.2).
  */

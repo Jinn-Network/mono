@@ -113,7 +113,7 @@ import { test } from "vitest";
 test("packed chain-environment-verification exposes its distribution contract", () => {
   assert.equal(
     CHAIN_ENVIRONMENT_VERIFICATION_PREDICATE_TYPE,
-    "https://jinn.network/attestations/chain-environment-verification/v1",
+    "https://spec.jinn.network/attestations/chain-environment-verification/v1",
   );
   for (const fn of [verifyChainEnvironment, verifyCryptoEnvironment, createAnvilMaterializer,
     createProbeExecutor, createScriptReplayer, describeChainVerificationConformance,

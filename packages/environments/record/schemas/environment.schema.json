@@ -4,7 +4,7 @@
   "properties": {
     "kind": {
       "type": "string",
-      "const": "https://jinn.network/records/environment/1.0"
+      "const": "https://spec.jinn.network/records/environment/v1"
     },
     "source": {
       "type": "object",
@@ -348,7 +348,7 @@
     "rights"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/records/environment/1.0/schema",
+  "$id": "https://spec.jinn.network/schemas/environment/v1",
   "title": "Jinn environment record",
   "description": "A sealed description of one execution environment: one (source, image, platform, invocations, parser) binding. The document asserts what the environment is, never that it works — behavior claims live in separately published verification attestations.",
   "propertyNames": {

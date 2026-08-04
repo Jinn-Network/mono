@@ -2,7 +2,7 @@
 
 /** Names the pipeline this package implements (design §7). Not a claim. */
 export const CHAIN_EXTRACTION_PROTOCOL_URI =
-  "https://jinn.network/protocols/chain-state-extraction/v1" as const;
+  "https://spec.jinn.network/protocols/chain-state-extraction/v1" as const;
 
 /**
  * The connected baseline is established twice on independent fork instances. Two is

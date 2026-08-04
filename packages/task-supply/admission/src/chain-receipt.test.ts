@@ -43,7 +43,7 @@ const golden = {
   schemaVersion: CHAIN_ADMISSION_RECEIPT_SCHEMA_VERSION,
   admissionPolicyVersion: CHAIN_ADMISSION_POLICY_V1.admissionPolicyVersion,
   family: "state-predicate" as const,
-  issuer: "https://jinn.network/agents/admission-1",
+  issuer: "https://spec.jinn.network/agents/admission-1",
   task: {
     documentDigest: D("1"),
     evaluationSpecDigest: D("2"),

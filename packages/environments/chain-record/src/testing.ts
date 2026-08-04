@@ -56,9 +56,9 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 export function describeChainEnvironmentRecordConformance(): void {
   describe("Chain environment record conformance", () => {
     test("the pinned identifiers are exactly the design's strings", () => {
-      expect(CHAIN_ENVIRONMENT_KIND).toBe("https://jinn.network/records/chain-environment/1.0");
+      expect(CHAIN_ENVIRONMENT_KIND).toBe("https://spec.jinn.network/records/chain-environment/v1");
       expect(CHAIN_ENVIRONMENT_MEDIA_TYPE).toBe("application/vnd.jinn.chain-environment.v1+json");
-      expect(CRYPTO_ENVIRONMENT_KIND).toBe("https://jinn.network/records/crypto-environment/1.0");
+      expect(CRYPTO_ENVIRONMENT_KIND).toBe("https://spec.jinn.network/records/crypto-environment/v1");
       expect(CRYPTO_ENVIRONMENT_MEDIA_TYPE).toBe("application/vnd.jinn.crypto-environment.v1+json");
     });
 

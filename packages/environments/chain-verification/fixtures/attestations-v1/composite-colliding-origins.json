@@ -4,19 +4,19 @@
     {
       "name": "crypto-environment",
       "digest": {
-        "sha256": "bbdd1bd123c131dbbaf42f38d9df3879ef78fa16074931d12198c5782bb33ccf"
+        "sha256": "65ef0dc3838506a80c51deba84fe5225fb40793351c3f6bc9c45e1f0849bd06b"
       }
     },
     {
       "name": "chain-world",
       "digest": {
-        "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+        "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
       }
     }
   ],
-  "predicateType": "https://jinn.network/attestations/chain-environment-verification/v1",
+  "predicateType": "https://spec.jinn.network/attestations/chain-environment-verification/v1",
   "predicate": {
-    "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
+    "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
     "scope": "composite",
     "outcome": "capability-mismatch",
     "window": {
@@ -24,7 +24,7 @@
       "endedAt": "2026-07-31T09:04:00.000Z"
     },
     "verifier": {
-      "id": "https://jinn.network/chain-environment-verification/conformance-verifier",
+      "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
       "version": "0.1.0",
       "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
     },
@@ -32,7 +32,7 @@
       {
         "name": "chain-world-record",
         "digest": {
-          "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+          "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
         }
       },
       {
@@ -118,12 +118,12 @@
         "name": "resolution-log",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "a9811f3f76d6efeba8d358a0feac249c47303aea49b8c208b7306b5c3d87ba57"
+          "sha256": "3c27ab1442290187bb345860974e71d29900820ff6c7b2ec460644180ddc12eb"
         }
       }
     },
     "cost": {
-      "artifactBytes": 4707,
+      "artifactBytes": 4711,
       "artifactCount": 3,
       "wallSeconds": 0
     },
@@ -161,7 +161,7 @@
       "components": [
         {
           "role": "chain-world",
-          "record": "sha256:be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+          "record": "sha256:7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
         },
         {
           "role": "information-world",

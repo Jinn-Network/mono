@@ -86,7 +86,7 @@ test('drift: the mirrored upstream shapes still carry the fields this package as
     assert.ok(item.includes(field), `discovery AnnouncedItem/SourceIdentity lost "${field}"`);
   }
   const profile = JSON.parse(readFileSync(
-    join(root, 'packages/discovery/facts/task-execution/profiles/delivery.1.0.json'), 'utf8'));
+    join(root, 'packages/discovery/facts/task-execution/profiles/delivery.v1.json'), 'utf8'));
   const names = profile.fields.map((f) => f.name);
   for (const field of ['taskDigest', 'attemptUri', 'benchrun']) {
     assert.ok(names.includes(field), `delivery facts profile lost "${field}"`);

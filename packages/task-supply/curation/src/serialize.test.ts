@@ -14,7 +14,7 @@ const observation = (verdict: "pass" | "fail", n: string): CurationObservation =
   observedAt: `2026-07-31T0${n}:00:00Z`,
   attribution: "urn:jinn:agent:solver-a",
   ref: {
-    source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+    source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
     entry: `sha256:${"a".repeat(63)}${n}`,
     announcementId: `ann-${n}`,
     record: `sha256:${"b".repeat(63)}${n}`,
@@ -43,7 +43,7 @@ describe("serializeCurationProjection", () => {
     const parsed = JSON.parse(serializeCurationProjection(projection)) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual(["format", "rows"]);
     expect(parsed.format).toBe(CURATION_PROJECTION_FORMAT);
-    expect(String(parsed.format).startsWith("https://jinn.network/records/")).toBe(false);
+    expect(String(parsed.format).startsWith("https://spec.jinn.network/records/")).toBe(false);
     for (const key of ["kind", "protocol", "digest", "signatures", "payloadType", "mediaType"]) {
       expect(key in parsed).toBe(false);
     }

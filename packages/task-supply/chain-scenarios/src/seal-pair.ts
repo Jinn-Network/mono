@@ -28,7 +28,7 @@ import type { ChainDerivationEnvironment, ChainScenarioCandidate } from "./templ
  * document is built against profiles' schema exactly the way `buildRepositoryWorkProfile`
  * is; adding the URI to profiles' reserved list is proposed at the program review.
  */
-export const CHAIN_WORK_PROFILE_URI = "https://jinn.network/task-profiles/chain-work/1.0" as const;
+export const CHAIN_WORK_PROFILE_URI = "https://spec.jinn.network/task-profiles/chain-work/1.0" as const;
 
 export const CHAIN_SCENARIO_ENVELOPE_VIOLATION_CLASS = "envelope-violation" as const;
 export const CHAIN_SCENARIO_REPLAY_INFRASTRUCTURE_CLASS = "replay-infrastructure-failure" as const;

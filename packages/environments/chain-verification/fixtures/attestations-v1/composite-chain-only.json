@@ -4,19 +4,19 @@
     {
       "name": "crypto-environment",
       "digest": {
-        "sha256": "c938bb85daf9fb99cb5d3a31761e7e296eb9fd2bc860360006e57a95702c760d"
+        "sha256": "a5b2fd1cedff6099906c1eaaf420fcb976defc0244c08c6ce822fe87ae5ac9e9"
       }
     },
     {
       "name": "chain-world",
       "digest": {
-        "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+        "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
       }
     }
   ],
-  "predicateType": "https://jinn.network/attestations/chain-environment-verification/v1",
+  "predicateType": "https://spec.jinn.network/attestations/chain-environment-verification/v1",
   "predicate": {
-    "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
+    "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
     "scope": "composite",
     "outcome": "closed-reproducible",
     "window": {
@@ -24,7 +24,7 @@
       "endedAt": "2026-07-31T09:04:00.000Z"
     },
     "verifier": {
-      "id": "https://jinn.network/chain-environment-verification/conformance-verifier",
+      "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
       "version": "0.1.0",
       "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
     },
@@ -32,7 +32,7 @@
       {
         "name": "chain-world-record",
         "digest": {
-          "sha256": "be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+          "sha256": "7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
         }
       },
       {
@@ -125,31 +125,31 @@
     },
     "runs": {
       "count": 5,
-      "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+      "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
       "perRun": [
         {
-          "instanceId": "c938bb85d-run-0",
-          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+          "instanceId": "a5b2fd1ce-run-0",
+          "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
           "wallSeconds": 0
         },
         {
-          "instanceId": "c938bb85d-run-1",
-          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+          "instanceId": "a5b2fd1ce-run-1",
+          "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
           "wallSeconds": 0
         },
         {
-          "instanceId": "c938bb85d-run-2",
-          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+          "instanceId": "a5b2fd1ce-run-2",
+          "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
           "wallSeconds": 0
         },
         {
-          "instanceId": "c938bb85d-run-3",
-          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+          "instanceId": "a5b2fd1ce-run-3",
+          "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
           "wallSeconds": 0
         },
         {
-          "instanceId": "c938bb85d-run-4",
-          "observationDigest": "sha256:ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670",
+          "instanceId": "a5b2fd1ce-run-4",
+          "observationDigest": "sha256:506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b",
           "wallSeconds": 0
         }
       ],
@@ -162,7 +162,7 @@
         "name": "observation",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "ac86343e1b0c578ae268eff020f54407f6315495167e5d7a46848ed0f00a5670"
+          "sha256": "506719c5667e669834d44ab48e0e3fff15e252ddc437bcf9d10daf40c6a74c4b"
         }
       }
     },
@@ -193,12 +193,12 @@
         "name": "resolution-log",
         "mediaType": "application/json",
         "digest": {
-          "sha256": "6def0b6f6e8ad73fa7cca6d6cd7ec3bc1aeda11ae3b2f11dbd578840d60aa24f"
+          "sha256": "519cc268f45aa9df8a1efd26ab4135edac3a8a6ecf14db025ae3a7363c7feced"
         }
       }
     },
     "cost": {
-      "artifactBytes": 5355,
+      "artifactBytes": 5359,
       "artifactCount": 8,
       "wallSeconds": 0
     },
@@ -215,7 +215,7 @@
       "components": [
         {
           "role": "chain-world",
-          "record": "sha256:be656cf6b66bbcf9ca025fb2ae8088c51856c282cf13aec98b5c311573eae4f9"
+          "record": "sha256:7af769839ecfc0a7fe4e1344a78b031dddac3511f7e8207530a295de71b3843e"
         }
       ],
       "wholeWorldOfflineBoot": true
