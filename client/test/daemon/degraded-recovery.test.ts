@@ -63,7 +63,7 @@ describe('startDegradedRecoveryLoops', () => {
     vi.restoreAllMocks();
   });
 
-  it('starts all four always-admission loops when intervals are positive and staking mode is standard', () => {
+  it('starts all four always-admission loops when intervals are positive and staking mode is standard', async () => {
     const evictionStop = vi.spyOn(EvictionLoop.prototype, 'stop');
     const checkpointStop = vi.spyOn(CheckpointLoop.prototype, 'stop');
     const topupStop = vi.spyOn(BalanceTopupLoop.prototype, 'stop');
@@ -75,12 +75,30 @@ describe('startDegradedRecoveryLoops', () => {
     expect(BalanceTopupLoop.prototype.run).toHaveBeenCalledOnce();
     expect(RewardClaimLoop.prototype.run).toHaveBeenCalledOnce();
 
-    handle.stop();
+    await handle.stop();
     expect(evictionStop).toHaveBeenCalledOnce();
     expect(checkpointStop).toHaveBeenCalledOnce();
     expect(topupStop).toHaveBeenCalledOnce();
     expect(claimStop).toHaveBeenCalledOnce();
   });
+
+  it('L1: stop() resolves once every loop\'s run() promise settles (fast path)', async () => {
+    const handle = startDegradedRecoveryLoops(baseDeps());
+    // All four run() mocks resolve immediately (beforeEach), so stop() must
+    // resolve well before the STOP_SETTLE_TIMEOUT_MS bound.
+    const start = Date.now();
+    await handle.stop();
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
+  it('L1: stop() is bounded — resolves even when a loop never settles after stop() is called', async () => {
+    // Simulate EvictionLoop/CheckpointLoop's real shape: stop flag checked
+    // only at the top of the next iteration, so run() keeps the process
+    // alive past its stop() call for longer than the settle bound.
+    vi.spyOn(EvictionLoop.prototype, 'run').mockImplementation(() => new Promise(() => {}));
+    const handle = startDegradedRecoveryLoops(baseDeps());
+    await expect(handle.stop()).resolves.toBeUndefined();
+  }, 10_000);
 
   it('never constructs a claim/work-path loop (creator, engine-tick, work) — ready-only stays off by construction', () => {
     // No creator/engine/work module is even imported by degraded-recovery.ts;
@@ -119,6 +137,6 @@ describe('startDegradedRecoveryLoops', () => {
     const handle = startDegradedRecoveryLoops(baseDeps());
     // let the rejected promise's .catch() run
     await new Promise((r) => setTimeout(r, 10));
-    expect(() => handle.stop()).not.toThrow();
+    await expect(handle.stop()).resolves.toBeUndefined();
   });
 });

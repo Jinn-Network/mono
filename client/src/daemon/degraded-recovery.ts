@@ -28,6 +28,20 @@
  * doesn't exist pre-bootstrap. Ready-only stays off by construction, not
  * by a runtime admission check (this module doesn't import those loop
  * classes at all).
+ *
+ * B2: `intervals.balanceTopupIntervalMs` is the SAME "0 disables" knob
+ * `BalanceTopupLoop` already honors in production wiring — this module adds
+ * no new on/off mechanism. The caller (main.ts) passes `0` specifically
+ * while a master-EOA `funding_required` halt is pending: balance-topup
+ * sends ETH FROM the master wallet, so running it degraded would compete
+ * with the funding poller for the exact balance the poller is waiting to
+ * see cross the threshold — an absorbing state where top-up spends what
+ * just arrived. See `isPendingMasterFundingHalt`
+ * (`earning/bootstrap-halt-classification.ts`).
+ *
+ * `jinn_loop_admitted{loop}` / readiness surfacing on the read plane (spec
+ * §6.2) is issue #2404 (WP7)'s scope, not this module's — this file only
+ * starts/stops the loops; it emits no metrics of its own.
  */
 import { getAddress, type PublicClient, type WalletClient } from 'viem';
 import type { ChainConfig } from '../earning/contracts.js';
@@ -46,7 +60,15 @@ export interface DegradedRecoveryDeps {
   network: JinnOnchainNetwork;
   publicClient: PublicClient;
   masterWallet: WalletClient;
-  /** Decrypted master mnemonic — needed by `recoverEvictedServiceFn`, which derives its own signer. */
+  /**
+   * Decrypted master mnemonic — needed by `recoverEvictedServiceFn`, which
+   * derives its own signer per call. Held in memory for the lifetime of the
+   * degraded window (main.ts derives it fresh at halt time and drops its
+   * reference once `stop()` resolves) — a strictly narrower lifetime than
+   * the daemon's own long-lived in-memory mnemonic use post-bootstrap, but
+   * wider than the single-call scope `recoverEvictedServiceFn` itself uses
+   * it for. No new persistence: never written to disk here.
+   */
   mnemonic: string;
   rpcUrl: string;
   chainConfig: Pick<
@@ -56,9 +78,21 @@ export interface DegradedRecoveryDeps {
   intervals: {
     evictionCheckIntervalMs: number;
     checkpointIntervalMs: number;
+    /** 0 while a master-EOA funding_required halt is pending — see B2 note above. */
     balanceTopupIntervalMs: number;
     rewardClaimIntervalMs: number;
   };
+  /**
+   * From `config.stakingMode` (the operator's configured mode), NOT the
+   * persisted `FleetState.staking_mode` field `FleetStateStore.load()` would
+   * return — the two are expected to agree (bootstrap always writes the
+   * fleet state's mode from config at fleet-creation time and the config
+   * value is not meant to change under an existing fleet), but this module
+   * takes the config value because it's already resolved and available at
+   * halt time without an extra disk read; it gates loop *construction*
+   * (standard-only loops), while each loop's own tick still reads the
+   * fleet's persisted state fresh regardless.
+   */
   stakingMode: 'standard' | 'self-bond';
   /** Daemon observability store for loop heartbeats; omit in tests with no Store. */
   jinnStore?: Store;
@@ -66,19 +100,25 @@ export interface DegradedRecoveryDeps {
 
 export interface DegradedRecoveryHandle {
   /**
-   * Signals every running loop to stop. Deliberately fire-and-forget (does
-   * NOT await the loops' `.run()` promises settling): `EvictionLoop` and
-   * `CheckpointLoop` only check their stop flag at the top of each
-   * iteration, so awaiting them here could block a bootstrap-retry
-   * transition for up to their full interval (5 min for checkpoint). A
-   * brief overlap between a stopped degraded-mode loop finishing its
-   * current tick and the freshly-constructed full `Daemon`'s own loop
-   * starting is bounded and self-correcting (both read fresh fleet state
-   * every tick; `withEoaBroadcastLock` already serializes actual sends
-   * from the same EOA regardless of which loop instance calls it).
+   * Signals every running loop to stop, then waits — bounded by
+   * `STOP_SETTLE_TIMEOUT_MS`, not unconditionally — for their `.run()`
+   * promises to settle before resolving. `EvictionLoop` and `CheckpointLoop`
+   * only check their stop flag at the top of each iteration (up to their
+   * full interval — 5 min for checkpoint), so this races the settle against
+   * a short timeout rather than awaiting it unconditionally: the caller
+   * (`runBootstrapWithDegradeOpen`, `earning/bootstrap-run.ts`) needs a
+   * bounded transition before re-running bootstrap, not a guaranteed-clean
+   * one. Any overlap between a still-finishing degraded-mode tick and the
+   * freshly-constructed full `Daemon`'s own loop is self-correcting (both
+   * read fresh fleet state every tick; `withEoaBroadcastLock` already
+   * serializes actual sends from the same EOA regardless of which loop
+   * instance calls it).
    */
-  stop(): void;
+  stop(): Promise<void>;
 }
+
+/** Bound on how long `stop()` waits for in-flight ticks to settle (#2407 L1). */
+const STOP_SETTLE_TIMEOUT_MS = 3_000;
 
 const CHECKPOINT_ABI = [
   {
@@ -180,18 +220,22 @@ export function startDegradedRecoveryLoops(deps: DegradedRecoveryDeps): Degraded
     );
   }
 
-  for (const runner of runners) {
-    void runner.run().catch((err) => {
+  const runPromises = runners.map((runner) =>
+    runner.run().catch((err) => {
       console.error(
         '[degraded-recovery] loop crashed (non-fatal — the full Daemon will construct a fresh instance once bootstrap completes):',
         err instanceof Error ? err.message : err,
       );
-    });
-  }
+    }),
+  );
 
   return {
-    stop(): void {
+    async stop(): Promise<void> {
       for (const runner of runners) runner.stop();
+      await Promise.race([
+        Promise.all(runPromises),
+        new Promise<void>((resolve) => setTimeout(resolve, STOP_SETTLE_TIMEOUT_MS)),
+      ]);
     },
   };
 }
