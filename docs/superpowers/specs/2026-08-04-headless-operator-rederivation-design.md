@@ -187,6 +187,14 @@ would convert every self-healing economic condition into an absorbing state. Nat
 current all-or-nothing readiness gate is re-derived into this model when its machinery
 is swapped in.
 
+> **Scope note (2026-08-05, from PR #2420 review finding R4):** degrade-open boot
+> engages only where a bootstrap halt is *raised* rather than fatal — i.e. interactive
+> and local operators. Hosted headless fleets (`JINN_NO_UI=1`) take the fatal-exit path
+> and rely on supervisor restart (`ON_FAILURE`) as their recovery loop; that is the
+> intended headless answer, not a gap — the supervisor restart re-enters the same
+> idempotent bootstrap. The two mechanisms are the same invariant ("an economic halt
+> must not produce a dead node") realized per deployment shape.
+
 ## 6. The read plane
 
 **Receipts are the truth; the API is a projection of them — plus a declared live-health
