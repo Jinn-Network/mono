@@ -6,7 +6,7 @@ Each concept below is anchored in its canonical machine-learning / reinforcement
 
 Production applications already live elsewhere:
 
-- **SWE-side harness learning** — [`spec/2026-05-28-harness-as-policy-learning-architecture.md`](../spec/2026-05-28-harness-as-policy-learning-architecture.md) is the canonical roadmap (the ratified L0–L5 ladder, the seven-tier promoter action surface, the held-out exam, the federation plan).
+- **SWE-side harness learning** — [`docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md`](superpowers/specs/2026-08-03-policy-optimization-product-design.md) (with its substrate, [`2026-08-03-policy-identity-and-outcomes-design.md`](superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md)) is the current design authority; [`spec/2026-05-28-harness-as-policy-learning-architecture.md`](../spec/2026-05-28-harness-as-policy-learning-architecture.md) remains the source of the L0–L5 ladder (its underlying DRs are ratified; the consolidating spec itself is `proposed`, and its roadmap sections are superseded per the product design §15.3), the seven-tier promoter action surface, and the held-out exam.
 - **Growth** — [`GROWTH.md`](../GROWTH.md) applies the framework to recruiting and distribution.
 
 ## Generalized Policy Iteration in two operations

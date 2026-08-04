@@ -1,0 +1,82 @@
+{
+  "note": "Substrate §5.1/§5.3 — namespaced extensions are unknown-field-tolerant, never override core fields, and MUST survive validation byte-for-byte. Both TEP §21.3 spellings appear: reverse-DNS (`network.example.proposerNotes`) and an absolute URI (`https://example.org/vocab/campaign`). `expect.preservedExtensions` names them so a validator that reconstructs the manifest from a known-field allow-list — the natural implementation, and the wrong one — fails here. Note the standing consumer rule this cannot enforce: extension-borne self-assessment is a consumer-MUST-IGNORE, not a validation error (§5.3).",
+  "input": {
+    "formatToken": "network.jinn.policy.candidate/1.0",
+    "policy": {
+      "formatToken": "network.jinn.policy.execution-tuple/1.0",
+      "harness": {
+        "id": "claude-code",
+        "version": "2.1.34"
+      },
+      "model": {
+        "provider": "anthropic",
+        "id": "claude-haiku-4-5"
+      },
+      "loadout": {
+        "kind": "jinn.harness-state.v1",
+        "name": "learner-alpha",
+        "digest": "sha256:90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8"
+      },
+      "isolationPolicy": "unrestricted",
+      "effort": "high"
+    },
+    "parents": [
+      {
+        "kind": "tuple",
+        "digest": "sha256:2c90270f1c5afb29879f768aeb2173c0a371fedfa98f1aaf2371ab095f4aff83"
+      }
+    ],
+    "proposer": "urn:jinn:agent:policy-c1-kit-reference-proposer",
+    "evidenceProvenance": {
+      "savedQueryDigest": "sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d",
+      "snapshotReceipt": {
+        "savedQueryDigest": "sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d",
+        "sourceSet": {
+          "id": "local-evidence-repository",
+          "version": "1.0"
+        },
+        "sources": [
+          {
+            "source": {
+              "id": "local-evidence-repository",
+              "version": "1.0"
+            },
+            "checkpoint": {
+              "source": {
+                "id": "local-evidence-repository",
+                "version": "1.0"
+              },
+              "value": {
+                "cursor": "0000000000000117"
+              },
+              "replayable": true
+            }
+          }
+        ],
+        "evaluatedAt": "2026-08-03T12:00:00Z",
+        "reproducibility": "replayable"
+      },
+      "recordListDigest": "sha256:97b38c002087ff9f583f548835e129262dd06dbbe5549399809de16ea7c01e61"
+    },
+    "declaredChanges": {
+      "summary": "Ablate one skill from the parent loadout.",
+      "touchedComponents": [
+        "loadout"
+      ]
+    },
+    "network.example.proposerNotes": {
+      "generation": 7,
+      "strategy": "deterministic-ablation"
+    },
+    "https://example.org/vocab/campaign": "wave-3"
+  },
+  "expect": {
+    "ok": true,
+    "digest": "sha256:635ca56fdb0c271ffab06a39036adb845adacfc4abe31d5f070a96a2d1ba7980",
+    "canonical": "{\"declaredChanges\":{\"summary\":\"Ablate one skill from the parent loadout.\",\"touchedComponents\":[\"loadout\"]},\"evidenceProvenance\":{\"recordListDigest\":\"sha256:97b38c002087ff9f583f548835e129262dd06dbbe5549399809de16ea7c01e61\",\"savedQueryDigest\":\"sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d\",\"snapshotReceipt\":{\"evaluatedAt\":\"2026-08-03T12:00:00Z\",\"reproducibility\":\"replayable\",\"savedQueryDigest\":\"sha256:ef67f927c119178457bb1c92ef9a0e3bec649374015f6f636e4ae4487f77c87d\",\"sourceSet\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"},\"sources\":[{\"checkpoint\":{\"replayable\":true,\"source\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"},\"value\":{\"cursor\":\"0000000000000117\"}},\"source\":{\"id\":\"local-evidence-repository\",\"version\":\"1.0\"}}]}},\"formatToken\":\"network.jinn.policy.candidate/1.0\",\"https://example.org/vocab/campaign\":\"wave-3\",\"network.example.proposerNotes\":{\"generation\":7,\"strategy\":\"deterministic-ablation\"},\"parents\":[{\"digest\":\"sha256:2c90270f1c5afb29879f768aeb2173c0a371fedfa98f1aaf2371ab095f4aff83\",\"kind\":\"tuple\"}],\"policy\":{\"effort\":\"high\",\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:90b25998166464fbb356ce7738149e7f173a78b6bff4d6896aaa96445e89abd8\",\"kind\":\"jinn.harness-state.v1\",\"name\":\"learner-alpha\"},\"model\":{\"id\":\"claude-haiku-4-5\",\"provider\":\"anthropic\"}},\"proposer\":\"urn:jinn:agent:policy-c1-kit-reference-proposer\"}",
+    "preservedExtensions": [
+      "network.example.proposerNotes",
+      "https://example.org/vocab/campaign"
+    ]
+  }
+}

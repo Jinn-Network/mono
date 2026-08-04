@@ -1,0 +1,10 @@
+{
+  "note": "Substrate §4.1 step 5 — validation FAILS CLOSED on an omitted core axis key: omission is invalid input, not a different identity. Without this rule a producer could mint a second, cheaper identity for the same treatment by leaving the axis out, and every consumer keying on tupleDigest would silently split its population.",
+  "input": {
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "loadout": null,
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": { "ok": false, "code": "omitted-core-axis", "path": "harness" }
+}

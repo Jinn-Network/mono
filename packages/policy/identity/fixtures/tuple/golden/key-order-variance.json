@@ -1,0 +1,28 @@
+{
+  "note": "Substrate §8 — key-order variance MUST NOT change the digest. This is `all-axes.json` with every object's members written in a different order (including the nested harness/loadout/model objects). Its expected canonical text and digest are byte-identical to that fixture's; `tuple.test.ts` asserts the equality across the two files directly, so a canonicalizer that trusts insertion order fails here rather than in production.",
+  "input": {
+    "model": { "id": "anthropic/claude-haiku-4-5" },
+    "harness": { "id": "claude-code", "version": "2.1.34" },
+    "formatToken": "network.jinn.policy.execution-tuple/1.0",
+    "loadout": {
+      "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7",
+      "name": "alpha",
+      "kind": "jinn.skill.v1"
+    },
+    "isolationPolicy": "unrestricted"
+  },
+  "expect": {
+    "canonical": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7\",\"kind\":\"jinn.skill.v1\",\"name\":\"alpha\"},\"model\":{\"id\":\"anthropic/claude-haiku-4-5\"}}",
+    "digest": "sha256:46a375359250aa1ce97d1b329fd138d945b944c104a12b50712c5bf685e29a85",
+    "runPinning": {
+      "harness": { "id": "claude-code", "version": "2.1.34" },
+      "isolationPolicy": "unrestricted",
+      "loadout": {
+        "digest": "sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7",
+        "kind": "jinn.skill.v1",
+        "name": "alpha"
+      },
+      "model": { "id": "anthropic/claude-haiku-4-5" }
+    }
+  }
+}

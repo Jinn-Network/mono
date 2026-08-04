@@ -1,0 +1,76 @@
+{
+  "name": "@jinn-network/policy-optimization",
+  "version": "0.1.0",
+  "description": "The Policy Optimization product: the sealed campaign document, its append-only lifecycle journal, and the wave engine that composes benchmarking Runs over a candidate population.",
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/policy-optimization"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": "./dist/cli/bin.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "restricted"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/benchmarking-aggregate": "0.1.0",
+    "@jinn-network/benchmarking-local": "0.1.0",
+    "@jinn-network/benchmarking-records": "0.1.0",
+    "@jinn-network/benchmarking-run": "0.1.0",
+    "@jinn-network/policy-identity": "0.1.0",
+    "@jinn-network/policy-outcomes": "0.1.0",
+    "@jinn-network/task-execution-backend": "0.1.0",
+    "zod": "4.4.3"
+  },
+  "resolutions": {
+    "@jinn-network/benchmarking-aggregate": "portal:../benchmarking/aggregate",
+    "@jinn-network/benchmarking-local": "portal:../benchmarking/local",
+    "@jinn-network/benchmarking-records": "portal:../benchmarking/records",
+    "@jinn-network/benchmarking-run": "portal:../benchmarking/run",
+    "@jinn-network/evidence-discovery": "portal:../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../evidence/execution-recorder",
+    "@jinn-network/policy-identity": "portal:../policy/identity",
+    "@jinn-network/policy-outcomes": "portal:../policy/outcomes",
+    "@jinn-network/task-execution-backend": "portal:../task-execution/backend",
+    "@jinn-network/task-execution-backend-local": "portal:../task-execution/backend-local/assembly",
+    "@jinn-network/task-execution-launchers": "portal:../task-execution/backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../task-execution/protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../task-execution/backend-local/supervisor",
+    "@jinn-network/task-execution-testing": "portal:../task-execution/testing",
+    "@jinn-network/task-execution-workspace": "portal:../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../trust/core"
+  },
+  "devDependencies": {
+    "@jinn-network/task-execution-testing": "0.1.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

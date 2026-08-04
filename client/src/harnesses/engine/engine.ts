@@ -60,7 +60,7 @@ import {
 } from '../../adapters/mech/safe-revert.js';
 import { emitEvent } from '../../observability/emit-event.js';
 import { isRecoverableTransactionError } from '../../tx-retry.js';
-import type { Harness, HarnessContext, RuntimePlugin, Solution } from '../types.js';
+import type { Harness, HarnessContext, HarnessMode, RuntimePlugin, Solution } from '../types.js';
 import { SkippableError } from '../types.js';
 import type {
   ExecutionPayload,
@@ -78,6 +78,7 @@ import {
   encodeExecutionPayload,
   encodeExecutionPayloadV2,
   modeStringToFlag,
+  protocolExecutorMode,
 } from '../../erc8004/index.js';
 import type { ArtifactSource, Role } from '../../types/envelope.js';
 import type { Task } from '../../types/task.js';
@@ -252,6 +253,7 @@ export interface JoinedSolverNetsView {
 function joinedRoleForTaskRole(taskRole: 'restoration' | 'evaluation'): 'solver' | 'evaluator' {
   return taskRole === 'evaluation' ? 'evaluator' : 'solver';
 }
+
 
 /**
  * Build a `JoinedSolverNetsView` from the raw operator-config block.
@@ -471,12 +473,17 @@ export interface TaskEngineOptions {
    * 'train' (default): harness may mutate implStateDir — normal learning mode.
    * 'frozen': freeze-fence enforces read-only implStateDir; violations cause
    *   the envelope to be rejected and the task to fail.
+   * 'candidate': frozen enforcement on the active implStateDir, with the
+   *   harness's self-improvement phases writing to a candidate workspace and
+   *   the run emitting a sealed candidate manifest. The envelope reports this
+   *   run as `frozen` — see {@link protocolExecutorMode}.
    *
    * Defaults to 'train' when absent so existing callers are unaffected.
    *
    * Spec: docs/superpowers/specs/2026-05-06-agent-harness-solvernet-design.md §6.3
+   *       docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md §10
    */
-  harnessMode?: 'train' | 'frozen';
+  harnessMode?: HarnessMode;
   /**
    * Working-directory reaper tuning (issue #320). Each task run provisions a
    * heavy scratch directory under `paths.workingDirRoot`; without cleanup an
@@ -591,7 +598,7 @@ export class TaskEngine {
    * Operator-configured harness mode. Defaults to 'train' when absent.
    * Propagated to HarnessContext.mode for each runImpl dispatch.
    */
-  protected readonly harnessMode: 'train' | 'frozen';
+  protected readonly harnessMode: HarnessMode;
   /** Local SQLite-backed store; used to emit `restoration-result` /
    *  `evaluation-verdict` artifact rows when a cycle completes via a
    *  deterministic impl (the legacy claude/MCP path writes them itself). */
@@ -1698,7 +1705,7 @@ export class TaskEngine {
             artifacts: [],
           };
           this.solutionOutputs.set(task.requestId, skippedOutput);
-          this.modesByRequest.set(task.requestId, ctx.mode);
+          this.modesByRequest.set(task.requestId, protocolExecutorMode(ctx.mode));
           // Preserve trajectory for downstream pack() access (Task 6 regression fix).
           this.trajectoryCollectors.set(task.requestId, trajectory);
           // No codeDigest for skipped runs — leave map empty.
@@ -1739,7 +1746,7 @@ export class TaskEngine {
       // Store the codeDigest from the fence (post-run hash in train mode;
       // stable pre-hash in frozen mode) for use in pack().
       this.codeDigestsByRequest.set(task.requestId, `sha256:${fence.codeDigest}`);
-      this.modesByRequest.set(task.requestId, ctx.mode);
+      this.modesByRequest.set(task.requestId, protocolExecutorMode(ctx.mode));
 
       const output = fence.output;
       this.solutionOutputs.set(task.requestId, output);
