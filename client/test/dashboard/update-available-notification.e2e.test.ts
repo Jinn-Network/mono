@@ -96,6 +96,7 @@ async function overrideStatusVersions(
   page: import('@playwright/test').Page,
   version: string,
   latestVersion: string | null,
+  extra: Record<string, unknown> = {},
 ): Promise<void> {
   await page.route(
     (url) => url.pathname === '/v1/status',
@@ -106,6 +107,7 @@ async function overrideStatusVersions(
           ...DEFAULT_STATUS_PAYLOAD,
           version,
           latestVersion,
+          ...extra,
         }),
       }),
   );
@@ -128,14 +130,20 @@ test('update_available banner shows when latestVersion is strictly newer than ve
 
 test('no update_available banner when latestVersion is null (issue #641)', async ({ page }) => {
   await mockDaemonApi(page);
-  await overrideStatusVersions(page, '0.1.6', null);
+  // The negative case needs a POSITIVE sentinel from the SAME snapshot, so the
+  // absence of `update_available` is a real negative rather than a
+  // not-yet-rendered race. Drive `funding_low` explicitly from this payload
+  // (runwayDaysExcess below the deriver's 3-day threshold, balance at/above
+  // minEthWei so the stronger `funding_empty` does not supersede it) instead of
+  // relying on whatever the shared default happens to derive — that coupling is
+  // exactly what broke this test when #1296 moved `funding_empty` behind
+  // `minEthWei`.
+  await overrideStatusVersions(page, '0.1.6', null, {
+    masterGas: { balanceWei: '5000000000000000', minEthWei: '1000000000000000', runwayDaysExcess: '1' },
+  });
 
   await page.goto(handshakeUrl ?? `http://127.0.0.1:${PORT}/`);
 
-  // Wait for a snapshot-derived notification to render (the default mocked
-  // /v1/status reports zero gas → funding_low). Once that's visible we know the
-  // deriver has run, so the absence of update_available is a real negative,
-  // not a not-yet-rendered race.
   await expect(page.locator('[data-kind="funding_low"]')).toBeVisible({
     timeout: 15_000,
   });

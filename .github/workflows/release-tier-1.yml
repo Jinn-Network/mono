@@ -1,0 +1,79 @@
+name: release-tier-1
+
+# Release Tier 1 scenarios T1.1 + T1.2 (client/test/release/tier-1/).
+#
+# These are excluded from `vitest.config.ts` because they need prerequisites a
+# clean-checkout `yarn test` cannot assume — T1.1 forks live Base mainnet and
+# T1.2 spawns a built `dist/bin/jinn.js`. That exclusion was correct; what was
+# missing is that NO workflow invoked `yarn release:tier-1*` either, so both
+# scenarios could rot silently between manual release-prep runs. This workflow
+# is that missing home.
+#
+# NON-BLOCKING BY CONSTRUCTION: schedule + manual dispatch only, never
+# `pull_request`. T1.1 forks a live third-party chain, which is exactly the
+# network flakiness the two-gate redesign
+# (docs/superpowers/specs/2026-05-31-release-pipeline-two-gate-redesign.md)
+# removed from the per-PR surface. Deterministic per-PR coverage of the same
+# code lives in hermetic-gate.yml against the pinned Anvil snapshot. A red here
+# means "investigate before the next release cut", not "block this PR".
+#
+# KNOWN RED — T1.1, as of 2026-08-04:
+#   `distributor.stake()` reverts `UnauthorizedMultisig(0xFbBEc0C8b13B38a9aC0499694A69a10204c5E2aB)`.
+#   The stOLAS ExternalStakingDistributor (0x40abf47B926181148000DbCC7c8DE76A3a61a66f)
+#   returns that address from `safeSameAddressMultisig()`, and the OLAS
+#   ServiceRegistry (0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE) reports
+#   `mapMultisigs(0xFbBEc0C8…) == false` at live Base mainnet head. It is live
+#   third-party registry state, reproducible with two `cast call`s, and not
+#   fixable from this repo. Do NOT "fix" T1.1 by weakening its assertion — the
+#   scenario is reporting the truth about mainnet.
+
+on:
+  schedule:
+    # Mondays 06:00 UTC — ahead of the Monday named cut, so a release-tier
+    # regression is visible before the tag rather than during release prep.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: client
+
+# CPU-only job; keep the onnxruntime installers from fetching CUDA binaries.
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+  ONNXRUNTIME_NODE_INSTALL_CUDA: skip
+
+jobs:
+  tier-1:
+    name: Release Tier 1 (T1.1 fresh-Anvil bootstrap, T1.2 harness readiness)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+
+      # Foundry provides `anvil` — T1.1 forks Base mainnet through it.
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-1c7c4bebce1e075989780fd401bf6bffcb424746
+
+      # T1.2 spawns dist/bin/jinn.js and probes /v1/harnesses/readiness.
+      - run: yarn build
+
+      # Run T1.2 first: it is the cheap, deterministic one, so its verdict is
+      # not hidden behind T1.1's ~4 minutes of fork traffic.
+      - name: T1.2 — harness readiness contract
+        run: yarn release:tier-1:T1.2
+
+      # T1.1 reads BASE_RPC_URL. Its own default is applied with `??`, which an
+      # unset-secret empty string would defeat, so the fallback is spelled out
+      # here. Set the BASE_RPC_URL secret to a paid endpoint if the public
+      # node's rate limits start producing fork-setup failures.
+      - name: T1.1 — bootstrap on a fresh Anvil fork of Base
+        run: yarn release:tier-1:T1.1
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL || 'https://mainnet.base.org' }}
