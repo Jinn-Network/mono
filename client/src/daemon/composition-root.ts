@@ -363,6 +363,27 @@ export interface CompositionRootInput {
   /** Projector poll interval (ms). Defaults to 5000, matching `LOOP_REGISTRY`'s entry. */
   readonly projectorPollIntervalMs?: number;
   readonly logger?: { info(m: string): void; warn(m: string): void };
+  /**
+   * D0a round-2 critical fix: whether this call installs its venue lock as the process-wide
+   * default for `client/src/tx-retry.ts`'s `withEoaBroadcastLock`/`withNonceLedger` (see the
+   * `setDefaultEoaBroadcastLock` call below). Defaults to `true`, unchanged for the ordinary
+   * one-composition-per-process host.
+   *
+   * A process that legitimately composes MORE THAN ONE venue (the e2e harness's two-daemon
+   * scripts, any future multi-Safe host) must pass `false` for every composition after the
+   * first: `setDefaultEoaBroadcastLock` throws on a second, DIFFERENT key rather than silently
+   * clobbering the first composition's lock (D0a round-1), so an unconditional install here made
+   * that legitimate topology impossible to compose at all. Passing `false` opts a composition out
+   * of the shared default explicitly — its own `venue.safe.execute` broadcasts remain fully
+   * correct (they always go through this composition's OWN `venue.safe`, never the global), but
+   * any EOA-DIRECT write this composition's host makes outside the venue (setMetadata, eviction
+   * recovery, `executeSafeTxDirect`/`executeSafeTxBatch` off the earning module) will serialize
+   * against the in-process queue (or whichever OTHER composition's lock is installed) rather than
+   * THIS composition's own durable, cross-process Safe lock. That is a real, accepted reduction in
+   * the #525/#562/#897 cross-domain guarantee for every composition after the first — acceptable
+   * for the test/harness hosts this exists for today, not a general N-venue production posture.
+   */
+  readonly installDefaultEoaBroadcastLock?: boolean;
 }
 
 /** Pure: operator claim policy config -> the pipeline's ClaimPredicate. */
@@ -1147,10 +1168,17 @@ export async function buildOperatorComposition(
   // D0a round-1 review: keyed by chainId + state path so a SECOND composition in the same
   // process (e2e harness, multi-daemon tests) cannot silently steal this global out from under
   // this one — `setDefaultEoaBroadcastLock` throws on a conflicting key instead.
-  setDefaultEoaBroadcastLock(
-    { withSender: (sender, fn) => venue.broadcastLock.withSender(input.chain.chainId, sender, fn) },
-    `${input.chain.chainId}:${input.venueStateDbPath}`,
-  );
+  //
+  // D0a round-2 critical fix: that throw made the legitimate "two venues in one process" topology
+  // (the exact one round-1 named) impossible to compose at all — see `installDefaultEoaBroadcastLock`'s
+  // doc above. A host that already knows it is composing more than one venue in this process opts
+  // subsequent compositions out explicitly instead of hitting the throw.
+  if (input.installDefaultEoaBroadcastLock ?? true) {
+    setDefaultEoaBroadcastLock(
+      { withSender: (sender, fn) => venue.broadcastLock.withSender(input.chain.chainId, sender, fn) },
+      `${input.chain.chainId}:${input.venueStateDbPath}`,
+    );
+  }
 
   const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
     ? {
