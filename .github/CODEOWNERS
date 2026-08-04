@@ -30,6 +30,12 @@
 /packages/indexer/explorer/src/components/ @oaksprout @ritsukai
 /packages/indexer/explorer/src/styles/     @oaksprout @ritsukai
 
+# jinn.network website (apps/website) — per render directory
+/apps/website/app/        @oaksprout @ritsukai
+/apps/website/components/ @oaksprout @ritsukai
+/apps/website/content/    @oaksprout @ritsukai
+/apps/website/styles/     @oaksprout @ritsukai
+
 # Engineering governance — the handbook defines the AI workflow rules (including
 # the auto-merge carve-outs) and the decision log records the decisions the
 # autopilot enforces. These must NOT be auto-mergeable under the very rules they
