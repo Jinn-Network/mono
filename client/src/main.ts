@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
@@ -507,7 +508,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
-  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  // §14.4: env override wins, else the config-file value, else loopback.
+  // Previously this only ever read the env var, so `apiBindHost` written
+  // into the config file was silently dead — the auth gate (§14.3) must be
+  // unconditional BEFORE this activates, since a non-loopback bind now
+  // actually exposes operator-class routes to the network (bearer/token-
+  // gated, but reachable).
+  const apiBindHost = resolveApiBindHost(config.apiBindHost);
+  if (!isLoopbackBindHost(apiBindHost)) {
+    console.warn(
+      `[main] WARNING: apiBindHost is "${apiBindHost}" (non-loopback) — the daemon API ` +
+      'is reachable from other hosts on the network, not just this machine. Operator-class ' +
+      'routes are token-gated, but the bind host is your outer firewall — make sure this is intentional.',
+    );
+  }
   const operatorArtifactsConfig = {
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
