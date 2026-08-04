@@ -7,6 +7,11 @@ import { platform, homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { DEFAULT_STOP_HOOK_COMMAND, fileContainsHookCommand } from '../hook-installers/common.js';
+import { patchClaudeCodeSettingsJson, removeClaudeCodeHookJson } from '../hook-installers/claude-code.js';
+import { patchCodexConfigJson, removeCodexHookJson } from '../hook-installers/codex.js';
+import { patchCursorHooksJson, removeCursorHookJson } from '../hook-installers/cursor.js';
+import { patchGeminiCliSettingsJson, removeGeminiCliHookJson } from '../hook-installers/gemini-cli.js';
 
 // ---------------------------------------------------------------------------
 // Skill content resolution
@@ -113,6 +118,86 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
     .trim() + '\n';
   writeFileSync(filePath, updated, 'utf-8');
   return { ok: true, detail: `Removed MCP entry from ${filePath}` };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — stop-hook config (§14.1 of
+// docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md)
+//
+// `scripts/install-hooks/*` (moved to `src/cli/hook-installers/` in this
+// change so it can be imported here and shipped in `dist/`) had zero
+// production callers — the patcher functions existed but nothing ever wrote
+// a hook config file. This wires them into the real installer surface.
+//
+// File-path confidence varies by tool:
+//   - claude-code: `.claude/settings.json` (`hooks.Stop`) — this repo's own
+//     convention (see CLAUDE.md's `.claude/settings.json` references), high
+//     confidence.
+//   - gemini-cli: reuses the same `settings.json` MCP already writes to
+//     (`hooks.SessionEnd` alongside `mcpServers`) — Gemini CLI's real
+//     hooks-in-settings.json surface, high confidence.
+//   - codex / cursor: dedicated `hooks.json` next to each tool's existing
+//     config dir. codex's real MCP config is TOML (`config.toml`), which
+//     can't hold the JSON `hooks.stop` shape the pre-existing patcher
+//     assumed — a separate JSON file sidesteps the format clash. This
+//     assumption is NOT independently verified against either tool's
+//     current hook documentation; treat it as best-effort until an
+//     operator confirms it's picked up.
+// ---------------------------------------------------------------------------
+
+export function claudeCodeHookFilePath(scope: 'user' | 'project'): string {
+  return scope === 'user'
+    ? join(homedir(), '.claude', 'settings.json')
+    : join(process.cwd(), '.claude', 'settings.json');
+}
+
+export function geminiCliHookFilePath(scope: 'user' | 'project'): string {
+  return scope === 'user'
+    ? join(homedir(), '.gemini', 'settings.json')
+    : join(process.cwd(), '.gemini', 'settings.json');
+}
+
+export function codexHookFilePath(scope: 'user' | 'project'): string {
+  return scope === 'user'
+    ? join(homedir(), '.codex', 'hooks.json')
+    : join(process.cwd(), '.codex', 'hooks.json');
+}
+
+export function cursorHookFilePath(scope: 'user' | 'project'): string {
+  return scope === 'user'
+    ? join(homedir(), '.cursor', 'hooks.json')
+    : join(process.cwd(), '.cursor', 'hooks.json');
+}
+
+export function isHookFileConfigured(filePath: string, command: string): boolean {
+  if (!existsSync(filePath)) return false;
+  return fileContainsHookCommand(readFileSync(filePath, 'utf-8'), command);
+}
+
+export function installHookFile(
+  filePath: string,
+  command: string,
+  patchFn: (raw: string) => string,
+): { ok: boolean; detail: string } {
+  if (isHookFileConfigured(filePath, command)) {
+    return { ok: true, detail: `Already configured in ${filePath}` };
+  }
+  const raw = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, patchFn(raw), 'utf-8');
+  return { ok: true, detail: `Wrote stop-hook entry to ${filePath}` };
+}
+
+export function removeHookFile(
+  filePath: string,
+  command: string,
+  removeFn: (raw: string) => string,
+): { ok: boolean; detail: string } {
+  if (!isHookFileConfigured(filePath, command)) {
+    return { ok: true, detail: existsSync(filePath) ? 'Not configured' : 'Config file does not exist' };
+  }
+  writeFileSync(filePath, removeFn(readFileSync(filePath, 'utf-8')), 'utf-8');
+  return { ok: true, detail: `Removed stop-hook entry from ${filePath}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +353,14 @@ interface PluginTarget {
   installSkill(scope: 'user' | 'project', skillContent: string): Promise<TargetResult>;
   removeMcp(scope: 'user' | 'project'): Promise<TargetResult>;
   removeSkill(scope: 'user' | 'project'): Promise<TargetResult>;
+  /**
+   * §14.1 stop-hook wiring. Optional — only defined for targets with a known
+   * stop/session-end hook surface (claude-code, codex, cursor, gemini-cli).
+   * Absent on claude-desktop / vscode / antigravity.
+   */
+  isHookConfigured?(scope: 'user' | 'project'): boolean;
+  installHook?(scope: 'user' | 'project'): Promise<TargetResult>;
+  removeHook?(scope: 'user' | 'project'): Promise<TargetResult>;
 }
 
 function claudeSkillDir(scope: 'user' | 'project'): string {
@@ -323,6 +416,15 @@ const TARGETS: PluginTarget[] = [
     },
     async removeSkill(scope) {
       return removeClaudeSkill(claudeSkillDir(scope));
+    },
+    isHookConfigured(scope) {
+      return isHookFileConfigured(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`);
+    },
+    async installHook(scope) {
+      return installHookFile(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`, patchClaudeCodeSettingsJson);
+    },
+    async removeHook(scope) {
+      return removeHookFile(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`, removeClaudeCodeHookJson);
     },
   },
 
@@ -408,6 +510,15 @@ const TARGETS: PluginTarget[] = [
         ? join(homedir(), '.cursor', 'rules', 'jinn.md')
         : join(process.cwd(), '.cursor', 'rules', 'jinn.md');
       return removeCursorRule(rulePath);
+    },
+    isHookConfigured(scope) {
+      return isHookFileConfigured(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`);
+    },
+    async installHook(scope) {
+      return installHookFile(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`, patchCursorHooksJson);
+    },
+    async removeHook(scope) {
+      return removeHookFile(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`, removeCursorHookJson);
     },
   },
 
@@ -515,6 +626,15 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), 'GEMINI.md');
       return removeSkillBlock(instrPath);
     },
+    isHookConfigured(scope) {
+      return isHookFileConfigured(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`);
+    },
+    async installHook(scope) {
+      return installHookFile(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`, patchGeminiCliSettingsJson);
+    },
+    async removeHook(scope) {
+      return removeHookFile(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`, removeGeminiCliHookJson);
+    },
   },
 
   // ---- antigravity ----
@@ -600,6 +720,15 @@ const TARGETS: PluginTarget[] = [
         ? join(homedir(), '.codex', 'AGENTS.md')
         : join(process.cwd(), 'AGENTS.md');
       return removeSkillBlock(instrPath);
+    },
+    isHookConfigured(scope) {
+      return isHookFileConfigured(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`);
+    },
+    async installHook(scope) {
+      return installHookFile(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`, patchCodexConfigJson);
+    },
+    async removeHook(scope) {
+      return removeHookFile(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`, removeCodexHookJson);
     },
   },
 ];
@@ -714,6 +843,7 @@ interface ResultEntry {
   target: string;
   mcp: { status: string; detail: string };
   skill: { status: string; detail: string };
+  hook: { status: string; detail: string };
 }
 
 async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = false): Promise<void> {
@@ -841,6 +971,7 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
           target: target.id,
           mcp: { status: 'not_found', detail: `${target.name} not detected` },
           skill: { status: 'not_found', detail: `${target.name} not detected` },
+          hook: { status: 'not_found', detail: `${target.name} not detected` },
         });
       }
       continue;
@@ -867,7 +998,20 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
       skillResult = { status: sr.ok ? 'configured' : 'error', detail: sr.detail };
     }
 
-    results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
+    // §14.1: wire the stop-hook installer in alongside MCP/skill. Not gated
+    // by --mcp-only / --skill-only — it's its own concern, always attempted
+    // when the target supports it.
+    let hookResult: { status: string; detail: string };
+    if (!target.installHook) {
+      hookResult = { status: 'not_applicable', detail: 'No stop-hook surface for this target' };
+    } else if (target.isHookConfigured?.(scope)) {
+      hookResult = { status: 'skipped', detail: 'Already configured' };
+    } else {
+      const hr = await target.installHook(scope);
+      hookResult = { status: hr.ok ? 'configured' : 'error', detail: hr.detail };
+    }
+
+    results.push({ target: target.id, mcp: mcpResult, skill: skillResult, hook: hookResult });
   }
 
   emitResult(
@@ -882,7 +1026,7 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
       if (data.results.length === 0) return 'No targets detected.';
       const maxLen = Math.max(...data.results.map((r) => r.target.length));
       return data.results
-        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status}`)
+        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status.padEnd(12)}Hook: ${r.hook.status}`)
         .join('\n');
     },
     {
@@ -954,6 +1098,7 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
           target: target.id,
           mcp: { status: 'not_found', detail: `${target.name} not detected` },
           skill: { status: 'not_found', detail: `${target.name} not detected` },
+          hook: { status: 'not_found', detail: `${target.name} not detected` },
         });
       }
       continue;
@@ -975,7 +1120,17 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
       skillResult = { status: r.ok ? 'removed' : 'error', detail: r.detail };
     }
 
-    results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
+    let hookResult: { status: string; detail: string };
+    if (!target.removeHook) {
+      hookResult = { status: 'not_applicable', detail: 'No stop-hook surface for this target' };
+    } else if (!target.isHookConfigured?.(scope)) {
+      hookResult = { status: 'skipped', detail: 'Not configured' };
+    } else {
+      const r = await target.removeHook(scope);
+      hookResult = { status: r.ok ? 'removed' : 'error', detail: r.detail };
+    }
+
+    results.push({ target: target.id, mcp: mcpResult, skill: skillResult, hook: hookResult });
   }
 
   emitResult(
@@ -990,7 +1145,7 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
       if (data.results.length === 0) return 'No targets detected.';
       const maxLen = Math.max(...data.results.map((r) => r.target.length));
       return data.results
-        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status}`)
+        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status.padEnd(12)}Hook: ${r.hook.status}`)
         .join('\n');
     },
     {

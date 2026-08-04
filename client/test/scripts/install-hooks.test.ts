@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { patchClaudeCodeSettingsJson } from '../../scripts/install-hooks/claude-code.js';
-import { patchCodexConfigJson } from '../../scripts/install-hooks/codex.js';
-import { patchGeminiCliSettingsJson } from '../../scripts/install-hooks/gemini-cli.js';
-import { patchCursorHooksJson } from '../../scripts/install-hooks/cursor.js';
+import { patchClaudeCodeSettingsJson, removeClaudeCodeHookJson } from '../../src/cli/hook-installers/claude-code.js';
+import { patchCodexConfigJson, removeCodexHookJson } from '../../src/cli/hook-installers/codex.js';
+import { patchGeminiCliSettingsJson, removeGeminiCliHookJson } from '../../src/cli/hook-installers/gemini-cli.js';
+import { patchCursorHooksJson, removeCursorHookJson } from '../../src/cli/hook-installers/cursor.js';
 
 describe('stop-hook installers', () => {
   it('patches Claude Code settings idempotently without removing existing hooks', () => {
@@ -43,5 +43,31 @@ describe('stop-hook installers', () => {
       'old',
       'jinn-stop-hook --tool cursor',
     ]);
+  });
+
+  it('removes the Claude Code stop-hook entry without touching other hooks', () => {
+    const withHook = patchClaudeCodeSettingsJson(JSON.stringify({ hooks: { Stop: [{ command: 'operator-existing' }] } }));
+    const removed = JSON.parse(removeClaudeCodeHookJson(withHook)) as { hooks: { Stop: Array<{ command: string }> } };
+    expect(removed.hooks.Stop.map((h) => h.command)).toEqual(['operator-existing']);
+  });
+
+  it('removes the Codex stop-hook entry idempotently', () => {
+    const withHook = patchCodexConfigJson('{"hooks":{"stop":["old"]}}');
+    const removed = JSON.parse(removeCodexHookJson(removeCodexHookJson(withHook))) as { hooks: { stop: string[] } };
+    expect(removed.hooks.stop).toEqual(['old']);
+  });
+
+  it('removes the Gemini SessionEnd hook entry idempotently', () => {
+    const withHook = patchGeminiCliSettingsJson('{}');
+    const removed = JSON.parse(removeGeminiCliHookJson(removeGeminiCliHookJson(withHook))) as { hooks: { SessionEnd: string[] } };
+    expect(removed.hooks.SessionEnd).toEqual([]);
+  });
+
+  it('removes the Cursor sessionEnd hook entry idempotently', () => {
+    const withHook = patchCursorHooksJson('{"sessionEnd":[{"command":"old"}]}');
+    const removed = JSON.parse(removeCursorHookJson(removeCursorHookJson(withHook))) as {
+      sessionEnd: Array<{ command: string }>;
+    };
+    expect(removed.sessionEnd.map((entry) => entry.command)).toEqual(['old']);
   });
 });
