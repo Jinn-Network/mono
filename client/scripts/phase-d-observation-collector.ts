@@ -24,6 +24,7 @@ import { dirname } from 'node:path';
 import {
   appendDailyObservation,
   fetchHttpStatusSnapshot,
+  parseExistingReceipt,
   readFileStatusSnapshot,
   type PhaseDObservationFetch,
   type PhaseDObservationFetchResult,
@@ -78,21 +79,31 @@ function loadFleetManifest(path: string): FleetManifest {
 
 function loadExistingReceipt(path: string): PhaseDObservationReceipt | undefined {
   if (!existsSync(path)) return undefined;
+  let raw: unknown;
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as PhaseDObservationReceipt;
+    raw = JSON.parse(readFileSync(path, 'utf8'));
   } catch (cause) {
     // A corrupt receipt is a collector-setup failure, not a per-instance fetch failure — silently
     // starting a fresh receipt would erase prior days' snapshot history without anyone noticing.
     throw new CollectorSetupError(`existing receipt is corrupt: ${path} (${String(cause)}). Move or repair it before re-running.`);
   }
+  try {
+    // parseExistingReceipt validates schemaVersion/kind/instances shape — a well-formed JSON file
+    // with the right windowId but a truncated/missing instances array must never be silently
+    // trusted as "the existing receipt": that would discard real history the same way the
+    // fleet-shrinkage hazard would, just via the file instead of the fetch.
+    return parseExistingReceipt(raw);
+  } catch (cause) {
+    throw new CollectorSetupError(`existing receipt has an unexpected shape: ${path} (${String(cause)}). Move or repair it before re-running.`);
+  }
 }
 
-async function fetchInstance(instance: FleetInstanceConfig): Promise<PhaseDObservationFetchResult> {
+async function fetchInstance(instance: FleetInstanceConfig, collectedAt: string): Promise<PhaseDObservationFetchResult> {
   if (instance.source.kind === 'http-status') {
     const token = instance.source.tokenEnv ? process.env[instance.source.tokenEnv] : undefined;
     return fetchHttpStatusSnapshot({ url: instance.source.url, ...(token ? { token } : {}) });
   }
-  return readFileStatusSnapshot({ path: instance.source.path });
+  return readFileStatusSnapshot({ path: instance.source.path, collectedAt });
 }
 
 function persistReceiptAtomic(path: string, receipt: PhaseDObservationReceipt): void {
@@ -123,7 +134,7 @@ async function main(): Promise<void> {
       instanceId: instance.instanceId,
       imageDigest: instance.imageDigest ?? null,
       reportedSourceSha: instance.reportedSourceSha ?? null,
-      result: await fetchInstance(instance),
+      result: await fetchInstance(instance, collectedAt),
     })),
   );
 
@@ -144,7 +155,7 @@ async function main(): Promise<void> {
   for (const instance of receipt.instances) {
     const latest = instance.snapshots.at(-1);
     console.log(`[phase-d-observe]   ${instance.instanceId}: complete=${instance.complete} `
-      + `resets=${instance.resets} durable=${latest?.durable ?? false} `
+      + `resets=${instance.resets} regressions=${instance.regressions} durable=${latest?.durable ?? false} `
       + `observationWindowStartedAt=${latest?.observationWindowStartedAt ?? 'null'}`);
   }
   console.log(`[phase-d-observe] wrote ${receiptPath}`);
