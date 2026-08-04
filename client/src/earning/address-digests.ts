@@ -18,9 +18,16 @@
  * after a redeploy, not a hash AND a plaintext copy that can drift apart.
  * Re-derive after any redeploy by running `getChainConfig(chain)` and
  * copying its five fields here — never hand-type an address.
+ *
+ * This module's mismatch is checked at boot, BEFORE the bootstrap retry
+ * loop even starts (main.ts) — it never surfaces as a `SetupBootstrapHalted`
+ * and is exactly the "integrity" case
+ * `earning/bootstrap-halt-classification.ts` distinguishes from the
+ * economic halts that ARE allowed to degrade open.
  */
 import { createHash } from 'node:crypto';
 import type { ChainConfig } from './contracts.js';
+import { getJinnRouterAddress } from '../contracts/addresses.js';
 
 export interface BroadcastTargetAddressSet {
   stakingProxy: string;
@@ -30,13 +37,23 @@ export interface BroadcastTargetAddressSet {
   olasToken: string;
 }
 
-/** Build the broadcast-target address set from a resolved ChainConfig. */
+/**
+ * Build the broadcast-target address set from a resolved ChainConfig.
+ *
+ * #2407 L2: `router` applies the SAME `jinnRouter ?? getJinnRouterAddress(chainId)`
+ * fallback main.ts's module-level `ROUTER_ADDRESS` constant applies before
+ * ever calling `verifyBroadcastTargetAddressSet` — this is the one function
+ * both main.ts's boot check AND this module's own tests call, so there is
+ * exactly one place that fallback can drift, and the test suite (which
+ * calls this same helper against `getChainConfig(...)`) genuinely covers
+ * what production resolves rather than a narrower reconstruction of it.
+ */
 export function addressSetFromChainConfig(config: ChainConfig): BroadcastTargetAddressSet {
   return {
     stakingProxy: config.stakingContract,
     distributor: config.distributorAddress,
     marketplace: config.mechMarketplace,
-    router: config.jinnRouter,
+    router: config.jinnRouter ?? getJinnRouterAddress(config.chainId) ?? undefined,
     olasToken: config.olasToken,
   };
 }

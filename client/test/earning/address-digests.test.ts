@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   PINNED_ADDRESS_SETS,
+  addressSetFromChainConfig,
   hashBroadcastTargetAddressSet,
   isAddressDigestCheckOverridden,
   verifyBroadcastTargetAddressSet,
@@ -17,16 +18,38 @@ import {
 } from '../../src/earning/address-digests.js';
 import { getChainConfig } from '../../src/earning/contracts.js';
 
+// #2407 L2: use the SAME helper main.ts calls (addressSetFromChainConfig),
+// not a locally-reconstructed copy — a local copy that omits the router
+// fallback (`jinnRouter ?? getJinnRouterAddress(chainId)`) would test a
+// narrower set than production actually checks and silently stop covering
+// the fallback path if `getChainConfig` ever stops populating `jinnRouter`
+// directly for one of these chains.
 function setFromChainConfig(chain: 'base' | 'base-sepolia'): BroadcastTargetAddressSet {
-  const cfg = getChainConfig(chain);
-  return {
-    stakingProxy: cfg.stakingContract,
-    distributor: cfg.distributorAddress,
-    marketplace: cfg.mechMarketplace,
-    router: cfg.jinnRouter,
-    olasToken: cfg.olasToken,
-  };
+  return addressSetFromChainConfig(getChainConfig(chain));
 }
+
+describe('addressSetFromChainConfig router fallback (#2407 L2)', () => {
+  it('falls back to getJinnRouterAddress(chainId) when jinnRouter is absent', () => {
+    const config = { ...getChainConfig('base'), jinnRouter: undefined };
+    const set = addressSetFromChainConfig(config);
+    // Base mainnet's static default (contracts/addresses.ts JINN_ROUTER_ADDRESSES) —
+    // the same value BASE_CONFIG.jinnRouter is set to directly, so the
+    // fallback resolves to an identical address in production.
+    expect(set.router).toBe('0xfFa7118A3D820cd4E820010837D65FAfF463181B');
+  });
+
+  it('uses jinnRouter directly when present, without consulting the fallback', () => {
+    const config = { ...getChainConfig('base'), jinnRouter: '0x0000000000000000000000000000000000dEaD' as const };
+    const set = addressSetFromChainConfig(config);
+    expect(set.router).toBe('0x0000000000000000000000000000000000dEaD');
+  });
+
+  it('is undefined (not null) when neither jinnRouter nor a static fallback exists', () => {
+    const config = { ...getChainConfig('base-sepolia'), jinnRouter: undefined, chainId: 999_999 };
+    const set = addressSetFromChainConfig(config);
+    expect(set.router).toBeUndefined();
+  });
+});
 
 describe('hashBroadcastTargetAddressSet', () => {
   it('is stable regardless of key order and address casing', () => {
