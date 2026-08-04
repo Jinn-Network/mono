@@ -41,4 +41,4 @@ export const CURRENT_CONTRACT_VERSION: ContractVersion = { major: 1, minor: 0 };
  * { target: 'draft-2020-12', unrepresentable: 'any' }))).digest('hex')` and paste the
  * result here alongside the version bump the change warrants.
  */
-export const CONTRACT_SHAPE_SHA = '9c7aa514d6762048200fe0b0ff2661a82b555cd8d8cf756f06cf4351bb939833';
+export const CONTRACT_SHAPE_SHA = '699c0231de6e6d8084d62c632672ed4900387c07bdfbc6ecfd068db297db026b';

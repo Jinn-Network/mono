@@ -81,9 +81,6 @@
                             }
                           ]
                         },
-                        "dbPath": {
-                          "type": "string"
-                        },
                         "timestamp": {
                           "type": "string"
                         }
@@ -91,7 +88,6 @@
                       "required": [
                         "shutdownState",
                         "startedAt",
-                        "dbPath",
                         "timestamp"
                       ],
                       "additionalProperties": {}
