@@ -49,6 +49,7 @@ import {
   type ExecFileAsync,
 } from '../setup/claude-code-install.js';
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
+import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 
@@ -917,17 +918,24 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
   // side on ≥1 join AND a ready solver harness AND a selected model). Persists
   // the flag to disk and mutates the in-memory config so GET /v1/bootstrap
   // reflects it live; App.tsx then drops the takeover for <Operating>.
-  app.post('/v1/operator/onboarding-complete', (c) => {
+  //
+  // Thin front-end over `intents/onboarding-complete.ts` per spec §4.1/§11 —
+  // the CLI verb (`cli/commands/onboarding-complete.ts`) is the other
+  // front-end, running the same intent standalone (see that module's
+  // docstring for why it can, unlike bootstrap-retry).
+  app.post('/v1/operator/onboarding-complete', async (c) => {
     const cfgPath = config.configPath ?? DEFAULT_CONFIG_PATH;
-    try {
-      persistConfigValue('onboardingComplete', true, cfgPath);
-    } catch (err) {
-      return c.json({
-        error: 'config_write_failed',
-        detail: errorMessage(err),
-      }, 500);
+    const result = await onboardingCompleteIntent({
+      configPath: cfgPath,
+      persistConfigValue,
+      markOnboardingComplete: config.markOnboardingComplete,
+    });
+    if (!result.ok) {
+      // errorMessage() keeps #2402's masking on this path across the intent
+      // refactor — the intent's error string is produced outside this file's
+      // choke point.
+      return c.json({ error: 'config_write_failed', detail: errorMessage(result.error) }, 500);
     }
-    config.markOnboardingComplete?.();
     return c.json({ ok: true, onboardingComplete: true });
   });
 

@@ -158,6 +158,29 @@ jobs:
           path: client/test-results/
           retention-days: 7
 
+  degraded-daemon-guard-e2e:
+    # Issue #2407 B1/R2/R3 — spawns the REAL built binary against a loopback
+    # RPC stub to prove: (B1) checkDaemonGuard reports blocked while a halted
+    # daemon runs its degraded recovery loops; (R2) a SIGTERM delivered
+    # during that window still removes the pidfile; (R3) JINN_NO_DAEMON=1
+    # acquires and cleans up the pidfile on its own exit path too. Plain
+    # node subprocess test, no browser — needs `yarn build` first (that's
+    # why it's `test/main/*.e2e.test.ts`, auto-excluded from the `check`
+    # job's `yarn test`, which runs before `yarn build`), so this job builds
+    # via `yarn e2e:degraded-daemon-guard` itself, same pattern as
+    # `funding-sequence-e2e` above.
+    name: Degraded Daemon Guard E2E
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn e2e:degraded-daemon-guard
+
   task-creator-marketplace-e2e:
     # Task Creator marketplace-leg e2e (WP6) — SOFT GATE, not PR-blocking.
     # Runs only on manual workflow_dispatch (see `on:` comment above). Anvil

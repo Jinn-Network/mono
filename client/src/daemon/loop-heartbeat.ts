@@ -29,29 +29,73 @@ export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
  * This registry is the single source of truth: LOOP_NAMES, the LoopName union,
  * and the daemon's watchdog registrations are all derived from it. Order is
  * load-bearing (LOOP_NAMES preserves it).
+ *
+ * `admission` (#2407, spec §5) classes each loop for degrade-open boot:
+ * `ready-only` loops are the claim/work path and do not tick while daemon
+ * readiness is `degraded`; `always` loops are the self-healing economic
+ * loops (eviction recovery, checkpoint, balance top-up, reward claim, …)
+ * plus the two adapter-driven "watchdog-adjacent" loops (engine-watcher,
+ * delivery-watcher) — they keep running so a degraded condition can clear on
+ * its own. See `runLoop` below for where this is consulted.
  */
 export const LOOP_REGISTRY = [
-  { name: 'creator', intervalMs: 5000 },
-  { name: 'engine-tick', intervalMs: 5000 },
-  { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
-  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000 },
-  { name: 'reward-claim', intervalMs: 5000 },
-  { name: 'balance-topup', intervalMs: 5000 },
-  { name: 'eviction-check', intervalMs: 60_000 },
-  { name: 'checkpoint', intervalMs: 300_000 },
+  { name: 'creator', intervalMs: 5000, admission: 'ready-only' },
+  { name: 'engine-tick', intervalMs: 5000, admission: 'ready-only' },
+  { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
+  { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
+  { name: 'reward-claim', intervalMs: 5000, admission: 'always' },
+  { name: 'balance-topup', intervalMs: 5000, admission: 'always' },
+  { name: 'eviction-check', intervalMs: 60_000, admission: 'always' },
+  { name: 'checkpoint', intervalMs: 300_000, admission: 'always' },
   // Commit-echo harvest loop (task-creator v0). Interval mirrors the config
   // default (config.ts `harvest.intervalMs`); the daemon only registers it
   // with the watchdog when config.harvest is enabled with repos.
-  { name: 'harvest', intervalMs: 60 * 60 * 1000 },
-  { name: 'peer-sync', intervalMs: 60_000 },
-  { name: 'projector', intervalMs: 5000, floorMs: 300_000 },
-  { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000 },
-  { name: 'work', intervalMs: 5000, floorMs: 300_000 },
-] as const;
+  { name: 'harvest', intervalMs: 60 * 60 * 1000, admission: 'always' },
+  { name: 'peer-sync', intervalMs: 60_000, admission: 'always' },
+  { name: 'projector', intervalMs: 5000, floorMs: 300_000, admission: 'always' },
+  { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000, admission: 'always' },
+  { name: 'work', intervalMs: 5000, floorMs: 300_000, admission: 'ready-only' },
+] as const satisfies readonly { name: string; intervalMs: number; floorMs?: number; admission: 'always' | 'ready-only' }[];
 
 export const LOOP_NAMES = LOOP_REGISTRY.map(r => r.name);
 
 export type LoopName = (typeof LOOP_REGISTRY)[number]['name'];
+export type LoopAdmission = 'always' | 'ready-only';
+
+const LOOP_ADMISSION = new Map<LoopName, LoopAdmission>(
+  LOOP_REGISTRY.map(r => [r.name, r.admission]),
+);
+
+/** The registered admission class for a loop. */
+export function getLoopAdmission(name: LoopName): LoopAdmission {
+  return LOOP_ADMISSION.get(name) ?? 'always';
+}
+
+// ── Daemon readiness (#2407, spec §5) ───────────────────────────────────────
+//
+// `bootstrapping` — before the fleet bootstrap machine has resolved.
+// `ready`         — bootstrap completed; every loop is admitted.
+// `degraded`      — bootstrap halted on an economic/degraded-class cause
+//                    (funding shortfall, incomplete fleet, …); `ready-only`
+//                    loops are not admitted until this returns to `ready`.
+//
+// A shared module-level holder, not a constructor-injected singleton: every
+// `runLoop` call site already imports this module for `recordLoopTick`, and
+// most loops are constructed well before the daemon knows whether it booted
+// `ready` or `degraded` (main.ts's halt-recovery path in particular runs
+// loops standalone, well before `Daemon` is ever instantiated). Defaults to
+// `ready` so every existing caller that doesn't touch this is unaffected.
+export type DaemonReadiness = 'bootstrapping' | 'ready' | 'degraded';
+
+let sharedDaemonReadiness: DaemonReadiness = 'ready';
+
+export function setDaemonReadiness(readiness: DaemonReadiness): void {
+  sharedDaemonReadiness = readiness;
+}
+
+export function getDaemonReadiness(): DaemonReadiness {
+  return sharedDaemonReadiness;
+}
 
 /** The config-row key for a given loop's heartbeat. */
 export function loopHeartbeatKey(name: LoopName): string {
@@ -84,9 +128,19 @@ export function getLoopTick(store: Store, name: LoopName): number | null {
  * The two for-await polling loops (engine-watcher, delivery-watcher) are NOT
  * routed through here: their heartbeat is stamped inside the mech adapter so an
  * idle-but-polling loop stays fresh. They only carry a LOOP_REGISTRY entry.
+ * Both are `admission: 'always'` (§5), so their not routing through this
+ * function's admission check is inert today — an `always` loop has nothing
+ * to gate. If either is ever reclassified `ready-only`, their for-await
+ * drivers in the mech adapter need the same `getLoopAdmission`/readiness
+ * check added inline (#2407 caveat i).
  *
  * The `intervalMs <= 0` disable guard is intentionally NOT here — it stays in
- * each caller's run() (reward-claim / balance-topup).
+ * each caller's run() (reward-claim / balance-topup). That precedent is
+ * deliberately NOT extended to admission (#2407 caveat ii): the disable guard
+ * is a per-caller static config decision made once at construction, while
+ * admission is a dynamic, shared, cross-cutting readiness signal every loop
+ * must observe the same way — so it is centralized here rather than
+ * duplicated into each caller's run().
  */
 export interface RunLoopOptions {
   name: LoopName;
@@ -98,24 +152,39 @@ export interface RunLoopOptions {
   onError?: (err: unknown) => void;
   emitSource: string;
   afterTick?: () => void;
+  /**
+   * Readiness getter consulted against this loop's registered admission
+   * (#2407, spec §5). Defaults to the shared `getDaemonReadiness` holder so
+   * existing callers need no change — most loops run in a daemon that is
+   * simply `ready`, and the shared holder's default is `ready`.
+   */
+  getReadiness?: () => DaemonReadiness;
 }
 
 export async function runLoop(opts: RunLoopOptions): Promise<void> {
+  const admission = getLoopAdmission(opts.name);
+  const getReadiness = opts.getReadiness ?? getDaemonReadiness;
   while (!opts.stopSignal()) {
-    try {
-      await opts.tick();
-    } catch (err) {
-      if (opts.onError) {
-        opts.onError(err);
-      } else {
-        emitEvent(opts.store, {
-          kind: 'tick_error',
-          outcome: 'failed',
-          detail: err instanceof Error ? err.message : String(err),
-        }, opts.emitSource);
+    const admitted = admission === 'always' || getReadiness() === 'ready';
+    if (admitted) {
+      try {
+        await opts.tick();
+      } catch (err) {
+        if (opts.onError) {
+          opts.onError(err);
+        } else {
+          emitEvent(opts.store, {
+            kind: 'tick_error',
+            outcome: 'failed',
+            detail: err instanceof Error ? err.message : String(err),
+          }, opts.emitSource);
+        }
       }
+      opts.afterTick?.();
     }
-    opts.afterTick?.();
+    // Heartbeat stamps regardless of admission: a ready-only loop sitting
+    // out a degraded window is intentionally paused, not stale, and must
+    // not trip the watchdog.
     recordLoopTick(opts.store, opts.name);
     if (opts.stopSignal()) break;
     const delay = typeof opts.intervalMs === 'function' ? opts.intervalMs() : opts.intervalMs;

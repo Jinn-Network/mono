@@ -51,6 +51,8 @@ import codedigestRevertCheckCommand from './commands/codedigest-revert-check.js'
 import evalCommand from './commands/eval.js';
 import scrubCommand from './commands/scrub.js';
 import nativeRequesterCommand from './commands/native-requester.js';
+import bootstrapRetryCommand from './commands/bootstrap-retry.js';
+import onboardingCompleteCommand from './commands/onboarding-complete.js';
 
 const COMMANDS: CommandModule[] = [
   versionCommand,
@@ -59,6 +61,8 @@ const COMMANDS: CommandModule[] = [
   quickstartCommand,
   authCommand,
   bootstrapCommand,
+  bootstrapRetryCommand,
+  onboardingCompleteCommand,
   fundRequirementsCommand,
   runCommand,
   stopCommand,
