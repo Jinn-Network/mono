@@ -26,7 +26,7 @@ import { contractVersionSchema } from './version.js';
 
 // ── fleet ──────────────────────────────────────────────────────────────────
 
-const fleetServiceSchema = z.object({
+const fleetServiceSchema = z.looseObject({
   index: z.number(),
   step: z.string(),
   serviceId: z.number().nullable(),
@@ -39,7 +39,7 @@ const fleetServiceSchema = z.object({
   identityBindingStatus: z.enum(['bound', 'pending', 'not_applicable']),
 });
 
-const fleetSchema = z.object({
+const fleetSchema = z.looseObject({
   loaded: z.boolean(),
   chain: z.string().optional(),
   stakingMode: z.string().optional(),
@@ -51,13 +51,13 @@ const fleetSchema = z.object({
 
 // ── balances / gas ───────────────────────────────────────────────────────────
 
-const ethBalanceEntrySchema = z.object({
+const ethBalanceEntrySchema = z.looseObject({
   address: z.string().nullable(),
   balanceWei: z.string().nullable(),
   error: z.string().optional(),
 });
 
-const gasBlockSchema = z.object({
+const gasBlockSchema = z.looseObject({
   address: z.string().nullable(),
   balanceWei: z.string().optional(),
   dailyEstimateWei: z.string(),
@@ -68,7 +68,7 @@ const gasBlockSchema = z.object({
 
 // ── activity ─────────────────────────────────────────────────────────────────
 
-const recentActivityEntrySchema = z.object({
+const recentActivityEntrySchema = z.looseObject({
   id: z.number(),
   ts: z.string().nullable(),
   kind: z.string(),
@@ -81,19 +81,19 @@ const recentActivityEntrySchema = z.object({
 
 // ── cost surface (client/src/spend/cost-surface-status.ts) ───────────────────
 
-const costSurfaceHarnessStatusSchema = z.object({
+const costSurfaceHarnessStatusSchema = z.looseObject({
   credentialId: z.string().nullable(),
   usesPaidApiKey: z.boolean(),
 });
 
-export const costSurfaceStatusSchema = z.object({
+export const costSurfaceStatusSchema = z.looseObject({
   harnesses: z.record(z.string(), costSurfaceHarnessStatusSchema),
 });
 export type CostSurfaceStatus = z.infer<typeof costSurfaceStatusSchema>;
 
 // ── harness rollup (client/src/api/status-harness-rollup.ts) ─────────────────
 
-export const harnessRollupSchema = z.object({
+export const harnessRollupSchema = z.looseObject({
   ready: z.boolean(),
   name: z.string().nullable(),
   reason: z.string().nullable(),
@@ -102,7 +102,7 @@ export type HarnessRollup = z.infer<typeof harnessRollupSchema>;
 
 // ── spend / AI-units (client/src/api/status-build.ts) ────────────────────────
 
-const spendCredentialRowSchema = z.object({
+const spendCredentialRowSchema = z.looseObject({
   credentialId: z.string(),
   capUsd: z.number(),
   spentTodayUsd: z.number(),
@@ -110,7 +110,7 @@ const spendCredentialRowSchema = z.object({
   resetsAt: z.string(),
 });
 
-export const spendStatusSchema = z.object({
+export const spendStatusSchema = z.looseObject({
   credentials: z.array(spendCredentialRowSchema),
 });
 export type SpendStatus = z.infer<typeof spendStatusSchema>;
@@ -118,7 +118,7 @@ export type SpendStatus = z.infer<typeof spendStatusSchema>;
 const aiUnitsPausedWindowSchema = z.enum(['block', 'week']).nullable();
 export type AiUnitsPausedWindow = z.infer<typeof aiUnitsPausedWindowSchema>;
 
-const aiUnitsCredentialRowSchema = z.object({
+const aiUnitsCredentialRowSchema = z.looseObject({
   credentialId: z.string(),
   unitsThisBlock: z.number(),
   unitsThisWeek: z.number(),
@@ -136,14 +136,14 @@ const aiUnitsCredentialRowSchema = z.object({
   weekResetsAt: z.string().nullable(),
 });
 
-export const aiUnitsStatusSchema = z.object({
+export const aiUnitsStatusSchema = z.looseObject({
   credentials: z.array(aiUnitsCredentialRowSchema),
 });
 export type AiUnitsStatus = z.infer<typeof aiUnitsStatusSchema>;
 
 // ── config migration (client/src/api/status-build.ts) ────────────────────────
 
-export const configMigrationStatusSchema = z.object({
+export const configMigrationStatusSchema = z.looseObject({
   shapeVersion: z.literal(2),
   wiringEntries: z.number(),
   postingEntries: z.number(),
@@ -163,7 +163,7 @@ const phaseDTransitionSignalSchema = z.enum([
   'native-operator-composition',
 ]);
 
-const phaseDTransitionUsageCounterSchema = z.object({
+const phaseDTransitionUsageCounterSchema = z.looseObject({
   signal: phaseDTransitionSignalSchema,
   count: z.number().int(),
   firstObservedAt: z.string(),
@@ -171,7 +171,7 @@ const phaseDTransitionUsageCounterSchema = z.object({
 });
 
 /** Tagged `class: 'observation'` (§7 Class O) so a consumer cannot treat this as a gate input. */
-export const phaseDTransitionUsageStatusSchema = z.object({
+export const phaseDTransitionUsageStatusSchema = z.looseObject({
   schemaVersion: z.literal(1),
   durable: z.boolean(),
   observationWindowStartedAt: z.string(),
@@ -187,7 +187,7 @@ export type OperatorVerticalMode = z.infer<typeof operatorVerticalModeSchema>;
 
 // ── portfolio.v0 (client/src/api/portfolio-v0-build.ts) ──────────────────────
 
-const inFlightTaskSummarySchema = z.object({
+const inFlightTaskSummarySchema = z.looseObject({
   requestId: z.string(),
   state: z.string(),
   solverType: z.string().nullable(),
@@ -198,7 +198,7 @@ const inFlightTaskSummarySchema = z.object({
   lastError: z.string().nullable(),
 });
 
-const verdictSummarySchema = z.object({
+const verdictSummarySchema = z.looseObject({
   requestId: z.string(),
   state: z.enum(['COMPLETE', 'FAILED', 'RACE_LOST']),
   implName: z.string().nullable(),
@@ -211,7 +211,7 @@ const verdictSummarySchema = z.object({
   deliveryTxHash: z.string().nullable(),
 });
 
-const snapshotSummarySchema = z.object({
+const snapshotSummarySchema = z.looseObject({
   id: z.string(),
   requestId: z.string(),
   title: z.string(),
@@ -219,7 +219,7 @@ const snapshotSummarySchema = z.object({
   createdAt: z.string(),
 });
 
-const claudeOutcomeSummarySchema = z.object({
+const claudeOutcomeSummarySchema = z.looseObject({
   requestId: z.string(),
   sessionId: z.string(),
   startedAt: z.number(),
@@ -231,7 +231,7 @@ const claudeOutcomeSummarySchema = z.object({
   fillsQueryError: z.string().optional(),
 });
 
-const portfolioV0TotalsSchema = z.object({
+const portfolioV0TotalsSchema = z.looseObject({
   delivered: z.number(),
   failed: z.number(),
   settledFailed: z.number(),
@@ -240,7 +240,7 @@ const portfolioV0TotalsSchema = z.object({
   active: z.number(),
 });
 
-export const portfolioV0StatusSchema = z.object({
+export const portfolioV0StatusSchema = z.looseObject({
   totals: portfolioV0TotalsSchema,
   inFlight: z.array(inFlightTaskSummarySchema),
   recentVerdicts: z.array(verdictSummarySchema),
@@ -251,7 +251,7 @@ export type PortfolioV0Status = z.infer<typeof portfolioV0StatusSchema>;
 
 // ── prediction.v1 (client/src/api/prediction-v1-build.ts) ────────────────────
 
-const predictionV1TaskRunSummarySchema = z.object({
+const predictionV1TaskRunSummarySchema = z.looseObject({
   requestId: z.string(),
   taskId: z.string().nullable(),
   taskCid: z.string(),
@@ -267,7 +267,7 @@ const predictionV1TaskRunSummarySchema = z.object({
   failureReason: z.string().nullable(),
 });
 
-const predictionV1TotalsSchema = z.object({
+const predictionV1TotalsSchema = z.looseObject({
   observedTasks: z.number(),
   activeTaskRuns: z.number(),
   solutions: z.number(),
@@ -288,11 +288,11 @@ const predictionOperatorStatusForApiSchema = z.custom<Record<string, unknown>>(
   { message: 'operator must be an object' },
 );
 
-export const predictionV1StatusSchema = z.object({
+export const predictionV1StatusSchema = z.looseObject({
   operator: predictionOperatorStatusForApiSchema.nullable(),
   operatorError: z.string().optional(),
   totals: predictionV1TotalsSchema,
-  latest: z.object({
+  latest: z.looseObject({
     taskAt: z.number().nullable(),
     solutionAt: z.number().nullable(),
     verdictAt: z.number().nullable(),
@@ -307,7 +307,7 @@ export type PredictionV1Status = z.infer<typeof predictionV1StatusSchema>;
 
 const runOutcomeSchema = z.enum(['pass', 'fail', 'awaiting', 'accepted', 'rejected']).nullable();
 
-const taskRunSummarySchema = z.object({
+const taskRunSummarySchema = z.looseObject({
   requestId: z.string(),
   taskId: z.string().nullable(),
   taskCid: z.string(),
@@ -325,8 +325,8 @@ const taskRunSummarySchema = z.object({
   outcome: runOutcomeSchema,
 });
 
-export const taskRunsStatusSchema = z.object({
-  totals: z.object({
+export const taskRunsStatusSchema = z.looseObject({
+  totals: z.looseObject({
     observedTasks: z.number(),
     activeTaskRuns: z.number(),
     completed: z.number(),
@@ -344,7 +344,7 @@ export type TaskRunsStatus = z.infer<typeof taskRunsStatusSchema>;
 
 // ── loop completion + impl-state cadence (client/src/api/loop-completion-build.ts) ──
 
-export const loopCompletionStatusSchema = z.object({
+export const loopCompletionStatusSchema = z.looseObject({
   total: z.number(),
   delivered: z.number(),
   withGating: z.number(),
@@ -356,11 +356,11 @@ export const loopCompletionStatusSchema = z.object({
 });
 export type LoopCompletionStatus = z.infer<typeof loopCompletionStatusSchema>;
 
-const implStateRepoCadenceSchema = z.object({
+const implStateRepoCadenceSchema = z.looseObject({
   name: z.string(),
   commits: z.number(),
   lastCommit: z
-    .object({
+    .looseObject({
       shortHash: z.string(),
       timestamp: z.number(),
       date: z.string(),
@@ -368,7 +368,7 @@ const implStateRepoCadenceSchema = z.object({
     .nullable(),
 });
 
-export const implStateCadenceStatusSchema = z.object({
+export const implStateCadenceStatusSchema = z.looseObject({
   repos: z.array(implStateRepoCadenceSchema),
   error: z.string().optional(),
 });
@@ -376,13 +376,13 @@ export type ImplStateCadenceStatus = z.infer<typeof implStateCadenceStatusSchema
 
 // ── evidence indexing (client/src/types/evidence-indexing.ts) ────────────────
 
-const evidenceIndexingFailureSummarySchema = z.object({
+const evidenceIndexingFailureSummarySchema = z.looseObject({
   reference: z.string(),
   category: z.string(),
   message: z.string(),
 });
 
-export const evidenceIndexingStatusSchema = z.object({
+export const evidenceIndexingStatusSchema = z.looseObject({
   failures: z.array(evidenceIndexingFailureSummarySchema).readonly(),
   pending: z.number(),
 });
@@ -390,41 +390,41 @@ export type EvidenceIndexingStatus = z.infer<typeof evidenceIndexingStatusSchema
 
 // ── the envelope ───────────────────────────────────────────────────────────
 
-export const statusV1ResponseSchema = z.object({
+export const statusV1ResponseSchema = z.looseObject({
   /** Read-contract handshake (§8 artifact 1). */
   contractVersion: contractVersionSchema,
   statusMode: z.enum(['full', 'sqlite_only']),
   version: z.string(),
   latestVersion: z.string().nullable(),
-  daemon: z.object({
+  daemon: z.looseObject({
     shutdownState: z.string().nullable(),
     startedAt: z.string().nullable(),
     dbPath: z.string(),
     timestamp: z.string(),
   }),
-  rpc: z.object({
+  rpc: z.looseObject({
     ok: z.boolean(),
     chainId: z.number().optional(),
     blockNumber: z.string().optional(),
     error: z.string().optional(),
   }),
   fleet: fleetSchema,
-  autoRestake: z.object({
+  autoRestake: z.looseObject({
     enabled: z.boolean(),
     checkIntervalMs: z.number(),
   }),
-  activity: z.object({
+  activity: z.looseObject({
     counts: z.record(z.string(), z.number()),
     recent: z.array(recentActivityEntrySchema),
   }),
-  rewards: z.object({
+  rewards: z.looseObject({
     claimLoopIntervalMs: z.number(),
     lastClaimTickAt: z.string().nullable(),
     claimedStakingRewardsWei: z.string(),
     claimedStakingRewardsLast24hWei: z.string().nullable(),
   }),
-  balances: z.object({
-    eth: z.object({
+  balances: z.looseObject({
+    eth: z.looseObject({
       master: ethBalanceEntrySchema,
       agent: ethBalanceEntrySchema,
       safe: ethBalanceEntrySchema,
@@ -432,7 +432,7 @@ export const statusV1ResponseSchema = z.object({
   }),
   masterGas: gasBlockSchema,
   l1MasterGas: gasBlockSchema.optional(),
-  earnings: z.object({
+  earnings: z.looseObject({
     hint: z.string(),
   }),
   nextActions: z.array(z.string()),
@@ -446,7 +446,7 @@ export const statusV1ResponseSchema = z.object({
   aiUnits: aiUnitsStatusSchema.optional(),
   costSurface: costSurfaceStatusSchema,
   harness: harnessRollupSchema,
-  security: z.object({
+  security: z.looseObject({
     lastPasswordRotationAt: z.string().nullable(),
   }),
   configMigration: configMigrationStatusSchema.optional(),

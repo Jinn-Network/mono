@@ -28,4 +28,11 @@ describe('openapi.v1.json generation', () => {
     expect(Object.keys(statusSchema.properties ?? {}).length).toBeGreaterThan(20);
     expect(statusSchema.properties?.contractVersion).toBeTruthy();
   });
+
+  it('contains no `additionalProperties: false` (B1: an additive-minor contract must not ' +
+    'render every object closed — that both breaks the promise and papers over the fact ' +
+    'that the runtime parse already tolerates unknown fields via z.looseObject)', () => {
+    const committed = readFileSync(artifactPath, 'utf-8');
+    expect(committed).not.toContain('"additionalProperties": false');
+  });
 });

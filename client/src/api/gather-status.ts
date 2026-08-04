@@ -922,11 +922,18 @@ export async function gatherStatusForApi(
   const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
+  //
+  // The `as StatusV1Response[...]` casts below bridge a real TS-only friction, not a
+  // runtime one: the contract schemas use z.looseObject (§8 artifact 4's B1 fix — an
+  // additive-minor contract must not silently strip fields it doesn't know about), whose
+  // inferred type carries a `[x: string]: unknown` index signature that a plain
+  // `export interface` from these owning modules doesn't declare. The values are
+  // identical; only the two types' declared shape differs.
   body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(), {
     cacheKey: store.db,
-  });
+  }) as StatusV1Response['loopCompletion'];
   if (status?.engine?.implStateDirRoot) {
-    body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot);
+    body.implStateCadence = gatherImplStateCadence(status.engine.implStateDirRoot) as StatusV1Response['implStateCadence'];
   }
   // Evidence indexing-failure rollup (Task 11). Best-effort: absent driver ⇒
   // no evidenceIndexing block; never blocks the status endpoint.
@@ -935,7 +942,7 @@ export async function gatherStatusForApi(
     body.evidenceIndexing = {
       failures: await evidenceDriver.failures(),
       pending: evidenceDriver.pending(),
-    };
+    } as StatusV1Response['evidenceIndexing'];
   }
   const caps = status?.spendCaps;
   if (caps && Object.keys(caps).length > 0) {

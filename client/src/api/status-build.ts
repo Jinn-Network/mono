@@ -399,6 +399,14 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
         )
       : undefined;
 
+  // `as unknown as StatusV1Response`: the contract's z.looseObject schemas (§8 artifact 4's
+  // B1 fix — an additive-minor contract must tolerate, not silently strip, fields it
+  // doesn't recognize) infer a `[x: string]: unknown` index signature at every nesting
+  // level. Several nested values here (PortfolioV0Status, PredictionV1Status,
+  // TaskRunsStatus, ConfigMigrationStatus, and their own nested arrays) come from
+  // `export interface`s in other modules that don't declare that index signature, so a
+  // structural assignment check fails even though the values are exactly right — this is
+  // a TS-only mismatch between "has an index signature" and "doesn't", not a runtime one.
   return {
     contractVersion: CURRENT_CONTRACT_VERSION,
     statusMode: mode,
@@ -466,5 +474,5 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.phaseDTransitionUsage !== undefined
       ? { phaseDTransitionUsage: { ...raw.phaseDTransitionUsage, class: 'observation' } }
       : {}),
-  };
+  } as unknown as StatusV1Response;
 }

@@ -12,7 +12,7 @@
  */
 import { z } from 'zod/v4';
 
-export const contractVersionSchema = z.object({
+export const contractVersionSchema = z.looseObject({
   major: z.number().int().nonnegative(),
   minor: z.number().int().nonnegative(),
 });
