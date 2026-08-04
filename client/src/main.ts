@@ -58,6 +58,7 @@ import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
 import { runFleetBootstrap, SetupBootstrapHalted } from './earning/bootstrap-run.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
+import { isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
 import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
@@ -386,6 +387,34 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // fail-loud on chain-id mismatch against the head provider.
   lastL2Probe = await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
+
+  // Pinned broadcast-target address-set digest (#2407, spec §5). Integrity
+  // class — fail closed, never degrade-open: a resolved
+  // {staking proxy, distributor, marketplace, router, OLAS token} set that
+  // doesn't match the checked-in per-network digest means this daemon would
+  // broadcast against unexpected contracts (deployment-artifact paths are
+  // env-overridable; address fields are otherwise only presence-checked).
+  if (isAddressDigestCheckOverridden()) {
+    console.warn(
+      '[main] JINN_ADDRESS_DIGEST_OVERRIDE is set — skipping the pinned broadcast-target ' +
+        'address-set digest check. Only use this for a local Anvil fork or another deployment ' +
+        'deliberately not matching the pinned production address set.',
+    );
+  } else {
+    const addressSetCheck = verifyBroadcastTargetAddressSet({
+      chainId: CHAIN_CONFIG.chainId,
+      set: { stakingProxy: CHAIN_CONFIG.stakingContract, distributor: CHAIN_CONFIG.distributorAddress, marketplace: MARKETPLACE_ADDRESS, router: ROUTER_ADDRESS, olasToken: CHAIN_CONFIG.olasToken },
+    });
+    if (!addressSetCheck.ok) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: addressSetCheck.message,
+        hint: 'Verify the resolved deployment-artifact paths (testnetL2DeploymentPath / testnetMechDeploymentPath / testnetStolasDeploymentPath / JINN_TESTNET_*_DEPLOYMENT), or set JINN_ADDRESS_DIGEST_OVERRIDE=1 for a deliberately non-production deployment (e.g. a local Anvil fork).',
+        exampleCli: 'jinn doctor --human',
+        details: { field: 'addressSetDigest', chainId: CHAIN_CONFIG.chainId, diverged: addressSetCheck.diverged },
+      });
+    }
+  }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
   if (!portPreflight.ok) {
