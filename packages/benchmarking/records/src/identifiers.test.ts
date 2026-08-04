@@ -26,7 +26,12 @@ const RECORD_KINDS = [BENCHMARK_RECORD_KIND, RUN_RECORD_KIND, MATRIX_RECORD_KIND
 // segment matches SOURCE_NAME_GRAMMAR). `records` is protocol-only (Finding F3) and cannot
 // import discovery's own `assertRecordKindUri`; the authoritative check is re-applied in the
 // facts leaf (M6) at the Phase 3 merge.
-const RECORD_KIND_GRAMMAR = /^https:\/\/jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/\d+\.\d+$/;
+// DUAL-ACCEPT (DR-2026-08-04 transition window): canonical
+// `https://spec.jinn.network/records/<segment>/v<major>` and the legacy
+// `https://jinn.network/records/<segment>/<major>.<minor>` this constant still
+// spells. Reference implementation: packages/discovery/protocol/src/origins.ts.
+// Component C2 narrows this to the canonical arm once the re-seal has landed.
+const RECORD_KIND_GRAMMAR = /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/(?:v[1-9]\d*|\d+\.\d+)$/;
 
 describe("pinned identifiers", () => {
   test("protocol is the https URL form (Addendum 2026-07-28-c)", () => {
@@ -79,5 +84,23 @@ describe("pinned identifiers", () => {
   test("trust-policy purposes are pinned strings", () => {
     expect(TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER).toBe("benchmark-publisher");
     expect(TRUST_POLICY_PURPOSE_RUN_OWNER).toBe("run-owner");
+  });
+
+  // The mirrored grammar must already accept the spelling the re-seal will mint, because
+  // C1's wave flips this package's constants and nothing else may need to move with them.
+  // No constant here uses the canonical arm yet, so only this asserts it.
+  test("the mirrored grammar accepts the canonical re-seal spelling", () => {
+    expect("https://spec.jinn.network/records/benchmark/v1").toMatch(RECORD_KIND_GRAMMAR);
+    expect("https://spec.jinn.network/records/benchmark/v2").toMatch(RECORD_KIND_GRAMMAR);
+    expect("https://jinn.network/records/benchmark/1.0").toMatch(RECORD_KIND_GRAMMAR);
+    for (const rejected of [
+      "https://spec.jinn.network/records/benchmark/v0",
+      "https://spec.jinn.network/records/benchmark/1",
+      "https://spec.jinn.network/records/benchmark/v1/facts/v1",
+      "https://evil.jinn.network/records/benchmark/v1",
+      "https://jinn.network.evil.example/records/benchmark/v1",
+    ]) {
+      expect(rejected).not.toMatch(RECORD_KIND_GRAMMAR);
+    }
   });
 });

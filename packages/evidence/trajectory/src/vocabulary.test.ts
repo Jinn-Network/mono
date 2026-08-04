@@ -8,10 +8,17 @@ import {
 } from "./identifiers.js";
 import { GEN_AI_ATTRIBUTES, JINN_ATTRIBUTES, OPERATION_NAMES, VOCABULARY_UPSTREAM } from "./vocabulary.js";
 
+// DUAL-ACCEPT (DR-2026-08-04 transition window): canonical
+// `https://spec.jinn.network/records/<segment>/v<major>` and the legacy
+// `https://jinn.network/records/<segment>/<major>.<minor>` this constant still
+// spells. Reference implementation: packages/discovery/protocol/src/origins.ts.
+// Component C2 narrows this to the canonical arm once the re-seal has landed.
+const RECORD_KIND_GRAMMAR = /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z][a-z0-9-]*\/(?:v[1-9]\d*|\d+\.\d+)$/;
+
 describe("identifiers", () => {
   test("the record kind follows the platform URI grammar", () => {
     expect(TRAJECTORY_RECORD_KIND).toMatch(
-      /^https:\/\/jinn\.network\/records\/[a-z][a-z0-9-]*\/\d+\.\d+$/,
+      RECORD_KIND_GRAMMAR,
     );
   });
 
@@ -24,6 +31,24 @@ describe("identifiers", () => {
     expect(TRAJECTORY_VOCABULARY_PROFILE).toBe(
       "https://jinn.network/profiles/trajectory-vocabulary/1.0",
     );
+  });
+
+  // The mirrored grammar must already accept the spelling the re-seal will mint, because
+  // C1's wave flips this package's constants and nothing else may need to move with them.
+  // No constant here uses the canonical arm yet, so only this asserts it.
+  test("the mirrored grammar accepts the canonical re-seal spelling", () => {
+    expect("https://spec.jinn.network/records/trajectory/v1").toMatch(RECORD_KIND_GRAMMAR);
+    expect("https://spec.jinn.network/records/trajectory/v2").toMatch(RECORD_KIND_GRAMMAR);
+    expect("https://jinn.network/records/trajectory/1.0").toMatch(RECORD_KIND_GRAMMAR);
+    for (const rejected of [
+      "https://spec.jinn.network/records/trajectory/v0",
+      "https://spec.jinn.network/records/trajectory/1",
+      "https://spec.jinn.network/records/trajectory/v1/facts/v1",
+      "https://evil.jinn.network/records/trajectory/v1",
+      "https://jinn.network.evil.example/records/trajectory/v1",
+    ]) {
+      expect(rejected).not.toMatch(RECORD_KIND_GRAMMAR);
+    }
   });
 });
 

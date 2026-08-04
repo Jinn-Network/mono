@@ -71,8 +71,13 @@ export const ExactSemanticVersion = z
 export const RecordKindUri = z
   .string()
   .regex(
-    /^https:\/\/jinn\.network\/records\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d+\.\d+$/,
-    "expected https://jinn.network/records/<segment>/<major>.<minor>",
+    // DUAL-ACCEPT (DR-2026-08-04 transition window): canonical
+    // `https://spec.jinn.network/records/<segment>/v<major>` and the legacy
+    // `https://jinn.network/records/<segment>/<major>.<minor>` this constant still
+    // spells. Reference implementation: packages/discovery/protocol/src/origins.ts.
+    // Component C2 narrows this to the canonical arm once the re-seal has landed.
+    /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z0-9]+(?:-[a-z0-9]+)*\/(?:v[1-9]\d*|\d+\.\d+)$/,
+    "expected https://spec.jinn.network/records/<segment>/v<major> (or the legacy https://jinn.network/records/<segment>/<major>.<minor>)",
   );
 
 /**
