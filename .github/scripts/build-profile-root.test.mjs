@@ -267,6 +267,36 @@ test('a .jsonld document is served as application/ld+json', () => {
   }
 });
 
+test('every registered resolvable identifier resolves in the real platform-v1 tree', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-register-'));
+  try {
+    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
+    const manifest = buildProfileRoot({
+      repoRoot,
+      outDir,
+      commit: SHA,
+      releaseGroup: 'platform-v1',
+      packages,
+    });
+    const paths = new Set(manifest.documents.map(({ path }) => path));
+    const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
+    const register = catalog.resolvableIdentifiers ?? [];
+    assert.ok(register.length > 0, 'the catalog must declare which identifiers dereference');
+    for (const entry of register) {
+      assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
+      if (entry.resolution === 'prefix') {
+        assert.equal(
+          paths.has(entry.identifier.replace('https://jinn.network/', '')),
+          false,
+          `${entry.identifier} is a prefix and must not also be a document`,
+        );
+      }
+    }
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
 // Scoped to profile crates. A fixture crate describes a captured evidence bundle, so its
 // encodingFormat names the original source file's type, not how the served fixture copy
 // is typed -- fixture bytes are served opaquely on purpose.

@@ -22,8 +22,9 @@ import { catalogSha256 } from './build-prepublication-bundle.mjs';
 import {
   PLATFORM_CATALOG_PATH,
   loadCatalogPackages,
+  loadPlatformCatalog,
 } from './platform-catalog.mjs';
-import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
+import { enumeratePublicSurfaceAssets, jinnIdentifierServedPath } from './public-surface-assets.mjs';
 
 const MEDIA_TYPES = new Map([
   ['.schema.json', 'application/schema+json'],
@@ -53,6 +54,32 @@ function assertNoPrefixCollision(documents) {
       if (paths.has(ancestor)) {
         throw new Error(`${ancestor} is both a document and a directory prefix of ${path}`);
       }
+    }
+  }
+}
+
+// Most https://jinn.network/ URIs in the tree are names, not locators -- discriminator
+// values that no one fetches. The register declares the ones that must dereference, so
+// "does this URI resolve" is a checked claim rather than an argument. Entries owned by
+// packages outside the release group under build are another group's concern.
+function assertRegisteredIdentifiersResolve(catalog, documents, packageNames) {
+  const paths = new Set(documents.map(({ path }) => path));
+  for (const entry of catalog.resolvableIdentifiers ?? []) {
+    if (!packageNames.has(entry.owner)) continue;
+    const servedPath = jinnIdentifierServedPath(
+      entry.identifier,
+      `resolvableIdentifiers ${entry.identifier}`,
+    );
+    if (servedPath !== entry.entryPoint && entry.resolution === 'document') {
+      throw new Error(
+        `${entry.identifier} is registered as a document but its entry point ${entry.entryPoint} is not its served path ${servedPath}`,
+      );
+    }
+    if (!paths.has(entry.entryPoint)) {
+      throw new Error(`${entry.identifier} resolves to no served document at ${entry.entryPoint}`);
+    }
+    if (entry.resolution === 'prefix' && paths.has(servedPath)) {
+      throw new Error(`${entry.identifier} is registered as a prefix but a document is served at it`);
     }
   }
 }
@@ -187,6 +214,11 @@ export function buildProfileRoot({
   }
   documents.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
   assertNoPrefixCollision(documents);
+  assertRegisteredIdentifiersResolve(
+    loadPlatformCatalog(repoRoot),
+    documents,
+    new Set(packages.map(({ name }) => name)),
+  );
   const manifest = {
     version: 1,
     generatedFrom: { repository: 'Jinn-Network/mono', commit },
