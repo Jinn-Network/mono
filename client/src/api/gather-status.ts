@@ -38,6 +38,7 @@ import {
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,
@@ -158,6 +159,13 @@ export interface StatusGatherConfig {
    */
   stOlasDistributorAddress?: string;
   network: 'mainnet' | 'testnet';
+  /**
+   * The daemon's resolved product mode (#2380), computed once at boot by `main.ts` via
+   * `resolveConfiguredOperatorVerticalMode` — threaded through rather than re-derived here.
+   * Absent ⇒ `/v1/status` reports `'legacy'` (this gather function only ever runs on the legacy
+   * entry point; native mode has no `/v1/status` — see `native-phase-d-observability.ts`).
+   */
+  effectiveMode?: OperatorVerticalMode;
   pollIntervalMs: number;
   masterEthDailyEstimateWei?: string;
   rewardClaimIntervalMs: number;
@@ -725,6 +733,7 @@ export async function gatherGatheredStatusRaw(
   const baseRaw: GatheredStatusRaw = {
     shutdownState,
     version: buildInfo.implVersion,
+    effectiveMode: status?.effectiveMode,
     latestVersion,
     daemonRuntime: readDaemonRuntime(status?.earningDir),
     daemonStartedAt,
