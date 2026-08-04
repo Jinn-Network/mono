@@ -5,13 +5,17 @@ import {
   eventKindBadgeVariant,
   eventKindMeta,
 } from './event-kinds.js';
-import { LIFECYCLE_KINDS as DAEMON_LIFECYCLE_KINDS } from '../../../../api/contract/lifecycle-kind.js';
+import { ALLOWED_LIFECYCLE_KINDS as DAEMON_LIFECYCLE_KINDS } from '../../../../observability/emit-event.js';
 
 describe('event-kinds', () => {
   it('re-exports the one shared lifecycle-kind vocabulary (§8 artifact 6)', () => {
-    // Both `LIFECYCLE_KINDS` here and `DAEMON_LIFECYCLE_KINDS` are re-exports of the same
-    // array from `client/src/api/contract/lifecycle-kind.ts` — same reference, not just
-    // equal contents, which is what actually rules out a second hand-copy drifting back in.
+    // Compared against `observability/emit-event.ts`'s real daemon-side export — the actual
+    // producer of the vocabulary — not the contract module's own copy of itself. Asserting
+    // against the contract module would pass even if a *third*, re-forked copy of the array
+    // existed somewhere and this file happened to import that one instead; asserting
+    // referential identity against the daemon's own export is what actually catches a
+    // re-forked daemon copy. `toBe` (not `toEqual`) checks the same array reference, not
+    // just equal contents.
     expect(LIFECYCLE_KINDS).toBe(DAEMON_LIFECYCLE_KINDS);
   });
 
