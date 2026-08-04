@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   configurePhaseDTransitionUsage,
   phaseDTransitionUsageDiagnostics,
+  phaseDTransitionUsageDiagnosticsSchema,
   phaseDTransitionUsageSnapshot,
   recordPhaseDTransitionUse,
 } from '../../src/compatibility/phase-d-transition-usage.js';
@@ -82,5 +83,20 @@ describe('Phase D transition usage diagnostics', () => {
       configurePhaseDTransitionUsage(undefined);
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('the diagnostics schema is strict: an unrecognized field is rejected, not silently stripped (N2)', () => {
+    // A plain z.object() would silently drop an unrecognized key at parse time — a future field
+    // added to PhaseDTransitionUsageDiagnostics without updating this schema would then vanish
+    // from the durable file with no error. z.strictObject() makes that drift a loud throw instead.
+    const valid = {
+      schemaVersion: 1,
+      durable: true,
+      observationWindowStartedAt: '2026-08-04T00:00:00.000Z',
+      counters: [],
+    };
+    expect(() => phaseDTransitionUsageDiagnosticsSchema.parse(valid)).not.toThrow();
+    expect(() => phaseDTransitionUsageDiagnosticsSchema.parse({ ...valid, extra: 'unexpected' }))
+      .toThrow();
   });
 });

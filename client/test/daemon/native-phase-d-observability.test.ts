@@ -10,6 +10,7 @@ import {
 import {
   NATIVE_PHASE_D_STATUS_SNAPSHOT_FILENAME,
   NATIVE_PHASE_D_USAGE_FILENAME,
+  nativeStatusSnapshotSchema,
   readNativeStatusSnapshot,
   recordNativeOperatorComposition,
   startNativeStatusSnapshotLoop,
@@ -114,6 +115,26 @@ describe('writeNativeStatusSnapshot / readNativeStatusSnapshot (#2380)', () => {
     });
 
     expect(readNativeStatusSnapshot(path)).toEqual(snapshot);
+  });
+
+  it('the snapshot schema is strict: an unrecognized field is rejected, not silently stripped (N2)', () => {
+    // A plain z.object() would silently drop an unrecognized key at parse time — a future field
+    // added to NativeStatusSnapshot or NativeOperatorHealth without updating this schema would
+    // then vanish from the durable file with no error. z.strictObject() makes that drift a loud
+    // throw instead. Round-trips a real snapshot (not a hand-built fixture) so the valid case
+    // proves the schema still accepts everything writeNativeStatusSnapshot actually produces.
+    const snapshot = writeNativeStatusSnapshot({
+      path,
+      decision,
+      health: health(),
+      now: () => new Date('2026-08-04T01:00:00.000Z'),
+    });
+    expect(() => nativeStatusSnapshotSchema.parse(snapshot)).not.toThrow();
+    expect(() => nativeStatusSnapshotSchema.parse({ ...snapshot, extra: 'unexpected' })).toThrow();
+    expect(() => nativeStatusSnapshotSchema.parse({
+      ...snapshot,
+      health: { ...snapshot.health, extra: 'unexpected' },
+    })).toThrow();
   });
 
   // Review minor: the snapshot carries roleKeyIds (identifiers, e.g. did:key:..., never private

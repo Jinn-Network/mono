@@ -44,15 +44,17 @@ interface PhaseDTransitionUsageState {
 }
 
 // Versioned-Zod-strict container profile (spec §7): the shape a durable state file must satisfy
-// before writeObservation will write it.
-const phaseDTransitionUsageCounterSchema = z.object({
+// before writeObservation will write it. z.strictObject (not z.object, which silently strips
+// unrecognized keys) so a future field added to the TS interface without a matching schema update
+// throws at write time instead of silently vanishing from the durable file (N2).
+const phaseDTransitionUsageCounterSchema = z.strictObject({
   signal: z.enum(PHASE_D_TRANSITION_SIGNALS),
   count: z.number().int().min(1),
   firstObservedAt: z.string().min(1),
   lastObservedAt: z.string().min(1),
 });
 
-const phaseDTransitionUsageStateSchema = z.object({
+const phaseDTransitionUsageStateSchema = z.strictObject({
   schemaVersion: z.literal(1),
   observationWindowStartedAt: z.string().min(1),
   counters: z.array(phaseDTransitionUsageCounterSchema).readonly(),
@@ -67,7 +69,7 @@ export interface PhaseDTransitionUsageDiagnostics {
 
 // Exported so a container embedding these diagnostics as a subtree (e.g. the native status
 // snapshot) can compose it into its own writeObservation schema without duplicating the shape.
-export const phaseDTransitionUsageDiagnosticsSchema = z.object({
+export const phaseDTransitionUsageDiagnosticsSchema = z.strictObject({
   schemaVersion: z.literal(1),
   durable: z.boolean(),
   observationWindowStartedAt: z.string().min(1),

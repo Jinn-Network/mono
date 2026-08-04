@@ -80,15 +80,18 @@ export interface NativeStatusSnapshot {
 // (`native-operator-host.ts`) field-for-field rather than importing it as a schema — that
 // interface is TS-only (no runtime Zod counterpart), and this module's own extractability (issue
 // #2409: no daemon/api/cli imports on the write path beyond what it already needs) argues against
-// growing a new coupling just to share a schema object.
-const nativeOperatorHealthSchema = z.object({
+// growing a new coupling just to share a schema object. z.strictObject (not z.object, which
+// silently strips unrecognized keys) at every level, including the nested `venue` object, so a
+// future field added to either interface without a matching schema update throws at write time
+// instead of silently vanishing from the durable file (N2).
+const nativeOperatorHealthSchema = z.strictObject({
   mode: z.literal('native-v1'),
   role: z.enum(['requester', 'solver', 'evaluator']),
   roleKeyIds: z.record(z.string(), z.string()),
   sourceLag: z.number(),
   sourceLagBySource: z.record(z.string(), z.number()),
   leaseOwned: z.boolean(),
-  venue: z.object({
+  venue: z.strictObject({
     canonicalBlock: z.string(),
     finalizedBlock: z.string(),
     caughtUp: z.boolean(),
@@ -103,7 +106,8 @@ const nativeOperatorHealthSchema = z.object({
   nativeFallbackCount: z.literal(0),
 });
 
-const nativeStatusSnapshotSchema = z.object({
+// Exported directly for unit testing (matching writeNativeStatusSnapshot's own convention below).
+export const nativeStatusSnapshotSchema = z.strictObject({
   schemaVersion: z.literal(1),
   kind: z.literal('jinn.native-operator-status-snapshot'),
   generatedAt: z.string().min(1),

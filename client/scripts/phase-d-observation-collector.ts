@@ -38,7 +38,11 @@ import { writeObservation } from '../src/observability/write-observation.js';
 // already tested, in `src/monitoring/phase-d-observation-window.ts` — the pure library that
 // builds every value passed here. Folding the reader side onto full Zod schemas is out of scope
 // for this change (reader-side hand-rolled validators are explicitly retained).
-const phaseDObservationReceiptWriteSchema = z.object({
+// z.strictObject (not z.object, which silently strips unrecognized keys) at the envelope level so
+// a future field added to PhaseDObservationReceipt without a matching schema update throws at
+// write time instead of silently vanishing from the durable receipt (N2). supportBoundary/
+// instances/verdict stay z.unknown() — deliberately out of scope, per the comment above.
+const phaseDObservationReceiptWriteSchema = z.strictObject({
   schemaVersion: z.literal(1),
   kind: z.literal('jinn.phase-d-observation-window'),
   windowId: z.string().min(1),
