@@ -132,6 +132,15 @@ jinn.network.
   normalize seven — a breaking change under the platform's own identifier law. Which URIs
   must dereference is now a declared `resolvableIdentifiers` register in the catalog,
   enforced at build time.*
+
+  *Amended again 2026-08-04 (DR-2026-08-04): the "breaking change" reasoning above was
+  itself superseded — the immutability law binds *published* identifiers and none had ever
+  been published, so a pre-publication re-seal is lawful. The identifier origin moves to
+  **`spec.jinn.network`** with a full vocabulary re-seal; see the
+  [vocabulary audit](./2026-08-04-protocol-vocabulary-audit.md) and
+  [DR-2026-08-04](../../../log/decisions/2026-08-04-spec-origin-and-vocabulary.md). After
+  the migration the apex serves only the product site; the document root, the manifest, and
+  every protocol URI live on the dedicated origin.*
 - **`/llms.txt`, `/llms-full.txt`** — compiled from the docs tree at build time (§7.1).
 
 The explorer remains a separate application; the site links to it.

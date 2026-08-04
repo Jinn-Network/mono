@@ -1,9 +1,11 @@
 # Protocol Vocabulary Audit — Names Before the Re-Seal
 
-- **Version:** 0.1
+- **Version:** 1.0
 - **Date:** 2026-08-04
-- **Status:** Draft — research complete; per-term dispositions pending operator ruling;
-  feeds the origin/vocabulary DR
+- **Status:** **Ruled** — all dispositions decided by the operator in-session (Ritsu,
+  2026-08-04); recorded in DR-2026-08-04
+  ([`log/decisions/2026-08-04-spec-origin-and-vocabulary.md`](../../../log/decisions/2026-08-04-spec-origin-and-vocabulary.md));
+  rulings inlined below at each question
 - **Shape:** `design`
 - **Scope:** the complete `https://jinn.network/…` identifier vocabulary — every term and
   namespace convention that will be sealed under the new origin — audited against external
@@ -91,42 +93,41 @@ concept under two conventions.
   Guardrail: glossary line "what other systems call a lifecycle event, named from the
   witness's side."
 
-### 4.3 Disambiguate or converge (ruling requested, recommendations marked)
+### 4.3 Disambiguate or converge — RULED (operator, 2026-08-04)
 
-- **Q1 — "attestation" does triple duty** (evidence tier; in-toto DSSE statements; GitHub CI
-  attestations). The two industry senses (in-toto signed-metadata vs RATS/TEE remote
-  attestation) already collide upstream. **Recommend:** keep "attestation" for in-toto
-  statements (normative upstream); rename the *tier* to **`tee-attested`**; glossary entry
-  holding both senses. Alternative: keep the tier name, glossary-only.
-- **Q2 — "trajectory" vs "trace".** The format is literally OTLP spans; the newer Execution
-  Evidence 1.0 profile already says "native trace"; older packages say trajectory (RL
-  register). **Recommend:** converge prose and new surfaces on **trace**; keep pinned
-  `jinn.trajectory.v1` and existing record-kind URIs as sealed history.
-- **Q3 — "envelope" names two structures** (legacy corpus SignedEnvelope; DSSE envelope) plus
-  a third drift (`delivery-envelope`). **Recommend:** reserve "envelope" for DSSE (normative
-  upstream, embedded in our own profile); the legacy SignedEnvelope exits with
-  `packages/core` as already chartered; rename `records/delivery-envelope/1.0` (native
-  publisher) in the migration; update GLOSSARY.md's envelope entry, which currently defines
-  neither code meaning.
-- **Q4 — "claim": operator-claims-a-task vs claim-as-assertion.** Cross-lane conflict: RFC
-  9334 (adopted for "evidence") defines Evidence as a set of *Claims*; VC likewise. Our
-  "claim a task" is lease semantics. `ClaimRegistry.sol` is deployed. **Recommend:** keep
-  "claim" for the deployed task-claiming surface (plain English, PVC-precedented); use
-  "assertion" — never "claim" — in evidence/trust prose; revisit only if a claims-as-
-  assertions record kind ever ships. Alternative: migrate prose toward **lease** (conveys
-  expiry), keeping contract vocabulary as-is.
-- **Q5 — "execution-evidence" vs "execution-provenance".** The one worthwhile rename
-  candidate: SLSA/RO-Crate readers get instant recognition from "provenance," and the
-  record *is* structurally a provenance record. Against: consistency with the RATS-aligned
-  layer name; "provenance" already used *inside* the profile at PROV's narrow scope.
-  **Recommend: keep** execution-evidence; gloss as "a provenance record of one execution."
-- **Q6 — Curator vs requester.** GLOSSARY.md ratifies **Curator** (supersedes
-  Trainer/Launcher) for the demand-side role; the protocol layer says **requester**
-  everywhere (`requesterIri`, native-requester, OLAS-native). Three names for the demand
-  side have now existed (launcher → requester → curator). **Genuinely open — operator
-  call:** either the glossary's Curator is the product-layer name and requester stays the
-  protocol-layer name (two registers, documented), or one wins everywhere. The re-seal is
-  the moment to decide, since `requesterIri` is about to be sealed under the new origin.
+- **Q1 — "attestation" triple duty. RULED: keep the tier name `attested`; glossary
+  disambiguation.** The operator's challenge corrected the draft recommendation
+  (`tee-attested`): verification showed `AttestationSchema` carries a **`profile` field** —
+  the attestation *mechanism* is pluggable by design, TEE quotes being the current profile,
+  not the tier's definition. Renaming the tier would have narrowed a deliberately
+  mechanism-neutral tier to one mechanism. "Attestation" stays for in-toto statements
+  (normative upstream). Noted for the evidence owners, not renamed here: the current schema
+  fields (`quote`, `reportData`, `measurement`) are TEE-quote-shaped — the schema is
+  narrower than the tier's intent.
+- **Q2 — "trajectory" vs "trace". RULED: full convergence.** The re-seal mints
+  `records/trace/v1`, `jinn.trace.v1`, `profiles/trace-vocabulary/v1` for all new records;
+  prose says "trace" everywhere. Pre-migration bytes keep saying `jinn.trajectory.v1`
+  (content-addressed — unchangeable in principle) and readers keep recognizing the old
+  strings as legacy input. Rationale for full rather than prose-only convergence: every
+  identifier is being re-minted by the migration anyway, so keeping the rejected word in the
+  new namespace would pay for a migration and keep the old name.
+- **Q3 — "envelope". RULED: reserve for DSSE.** The legacy corpus SignedEnvelope exits with
+  `packages/core` as already chartered; `records/delivery-envelope/1.0` is renamed in the
+  migration; GLOSSARY.md's envelope entry (which currently matches neither code meaning) is
+  corrected in the glossary pass.
+- **Q4 — "claim". RULED: standing DR-2026-06-14 is the authority — no new decision.**
+  That DR ratified: *claim is the verb (the act of reserving a slot), attempt is the noun
+  (the record the claim creates)* — "the verb and the noun of one event, not two synonyms."
+  The deployed contract already follows the split. The RFC 9334 collision resolves on top:
+  evidence/trust prose says **"assertion," never "claim."**
+- **Q5 — "execution-evidence". RULED: keep**; docs gloss it as "a provenance record of one
+  execution" for SLSA/RO-Crate readers.
+- **Q6 — demand-side role. RULED: requester, everywhere; no product-layer role term.**
+  Verification showed the glossary's Curator entry is anchored to *launching a SolverNet* —
+  a dissolved concept — so it is a stale definition, not a live competing name. The operator:
+  "requester requests from the marketplace — we don't have to overthink it." The Curator
+  role entry (and the "Curator funding" stream name) are corrected in the glossary pass via
+  the canonical-doc process. (stOLAS "curating agent" is OLAS's own term and is untouched.)
 
 ### 4.4 Defects to fix in the migration regardless of naming rulings
 
@@ -182,15 +183,15 @@ concept under two conventions.
 
 ## 6. What happens next
 
-1. Operator rules on §4.2 confirmation, §4.3 Q1–Q6, and §5 (this document updates in place
-   with the rulings).
-2. The DR lands: origin + one-origin scope + vocabulary rulings + namespace convention,
-   amending DR-2026-07-30 §8.4's reserved-URI language.
+1. ~~Operator rules~~ — done 2026-08-04; §4.2 guardrails and the full §5 convention were
+   confirmed as a batch, §4.3 ruled per-question above, `/v1` adopted.
+2. DR-2026-08-04 records: origin + one-origin scope + vocabulary rulings + namespace
+   convention, amending DR-2026-07-30 §8.4's reserved-URI language.
 3. One migration executes everything: re-seal under `spec.jinn.network` with the corrected
    vocabulary and version convention, defect fixes (§4.4), facts-profile regeneration,
    fixture-manifest migration under a DR-sanctioned one-time regeneration, constant updates,
-   guard/origin updates, GLOSSARY.md update. W4/W5 and the signing-key provisioning resume
-   against the new origin.
+   guard/origin updates, GLOSSARY.md update via the canonical-doc process. W4/W5 and the
+   signing-key provisioning resume against the new origin.
 
 ## 7. Provenance
 
