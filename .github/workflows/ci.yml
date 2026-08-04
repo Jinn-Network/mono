@@ -61,6 +61,12 @@ jobs:
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
+      # No-error-leak lint: blocks raw error.message stringification in any
+      # client/src/api/ file that talks to an RPC client. Catches the
+      # credential-leak class where a viem HttpRequestError's message (which
+      # embeds the full request URL) reaches an unauthenticated response
+      # unmasked. See spec §14.2 item 2, issue #2402.
+      - run: yarn lint:no-error-leak
       # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).

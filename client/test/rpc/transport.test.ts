@@ -25,6 +25,7 @@ import {
   MAX_RPC_CHAIN_LENGTH,
   isRpcQuotaError,
   DEFAULT_RPC_COOLDOWN_MS,
+  maskUrlsInMessage,
 } from '../../src/rpc/transport.js';
 
 describe('parseRpcUrls', () => {
@@ -745,6 +746,42 @@ describe('describeFallbackChain', () => {
   it('handles a single-provider chain', () => {
     expect(describeFallbackChain(['https://only.example'])).toBe(
       'fallback chain (1 providers) — primary=only.example',
+    );
+  });
+});
+
+// Regression coverage for spec §14.2 item 2 / issue #2402: `maskRpcHost` was
+// only ever called from the boot/preflight log path — the API-response and
+// SQLite-cache paths stringified caught errors raw, so a viem
+// `HttpRequestError` (which embeds the full request URL, key-in-path and
+// all) could leak an operator's paid-RPC secret through an unauthenticated
+// endpoint. `maskUrlsInMessage` is the companion masking helper that closes
+// that gap.
+describe('maskUrlsInMessage', () => {
+  it('masks a key-bearing URL embedded in a viem HttpRequestError message down to its hostname', () => {
+    const error = new HttpRequestError({
+      url: 'https://base-mainnet.g.alchemy.com/v2/SECRETKEY123',
+      body: { method: 'eth_blockNumber' },
+      details: 'fetch failed',
+    });
+
+    const masked = maskUrlsInMessage(error.message);
+
+    expect(masked).toContain('base-mainnet.g.alchemy.com');
+    expect(masked).not.toContain('SECRETKEY123');
+    expect(masked).not.toContain('https://base-mainnet.g.alchemy.com/v2/SECRETKEY123');
+  });
+
+  it('masks every URL when a message embeds more than one', () => {
+    const masked = maskUrlsInMessage(
+      'primary https://a.example/key/AAA failed, secondary https://b.example/key/BBB also failed',
+    );
+    expect(masked).toBe('primary a.example failed, secondary b.example also failed');
+  });
+
+  it('leaves a message with no URL untouched', () => {
+    expect(maskUrlsInMessage('connect ECONNREFUSED 127.0.0.1:0')).toBe(
+      'connect ECONNREFUSED 127.0.0.1:0',
     );
   });
 });

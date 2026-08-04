@@ -51,11 +51,25 @@ import {
 import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
+import { maskUrlsInMessage } from '../rpc/transport.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
   next: z.string().min(8),
 });
+
+/**
+ * Turn a caught error into a string, masking any embedded RPC URL (spec
+ * §14.2 item 2, issue #2402). Applied uniformly across this file's catch
+ * blocks — most aren't RPC-derived (config read/write, keystore ops, Claude
+ * binary checks), but masking is a safe no-op when there's no URL to find,
+ * and `/v1/setup/drip`'s catch (this file's one genuinely RPC-adjacent site,
+ * downstream of `publicClient.getBalance()`) needs it for real.
+ */
+function errorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error); // lint:no-error-leak-allow — sole raw-message read; masked on the next line
+  return maskUrlsInMessage(raw);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -575,7 +589,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       return c.json(
         {
           ok: false,
-          reason: err instanceof Error ? err.message : String(err),
+          reason: errorMessage(err),
         },
         500,
       );
@@ -797,7 +811,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_unreadable',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
 
@@ -869,7 +883,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
 
@@ -886,7 +900,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       } catch (err) {
         console.error(
           '[join] live apply failed; operator must restart to pick up the join:',
-          err instanceof Error ? err.message : err,
+          errorMessage(err),
         );
       }
     }
@@ -917,7 +931,10 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       markOnboardingComplete: config.markOnboardingComplete,
     });
     if (!result.ok) {
-      return c.json({ error: 'config_write_failed', detail: result.error }, 500);
+      // errorMessage() keeps #2402's masking on this path across the intent
+      // refactor — the intent's error string is produced outside this file's
+      // choke point.
+      return c.json({ error: 'config_write_failed', detail: errorMessage(result.error) }, 500);
     }
     return c.json({ ok: true, onboardingComplete: true });
   });
@@ -942,7 +959,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_unreadable',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
 
@@ -961,7 +978,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
 
@@ -986,7 +1003,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_unreadable',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
     const rawJoined = isRecord(current.joinedSolverNets) ? current.joinedSolverNets : {};
@@ -1050,7 +1067,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
     } catch (err) {
       return c.json({
         error: 'config_write_failed',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: errorMessage(err),
       }, 500);
     }
 
@@ -1119,7 +1136,7 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       return c.json(
         {
           error: 'change_failed',
-          message: err instanceof Error ? err.message : String(err),
+          message: errorMessage(err),
         },
         500,
       );
@@ -1175,7 +1192,7 @@ async function installClaudeCodeForOperator(
       return {
         ok: false,
         status: 'install_failed',
-        detail: `Claude Code is on PATH, but Jinn could not save that setting: ${err instanceof Error ? err.message : String(err)}`,
+        detail: `Claude Code is on PATH, but Jinn could not save that setting: ${errorMessage(err)}`,
         binary: onPath,
       };
     }
@@ -1211,7 +1228,7 @@ async function installClaudeCodeForOperator(
     return {
       ok: false,
       status: 'install_failed',
-      detail: `Claude Code installed, but Jinn could not save that setting: ${err instanceof Error ? err.message : String(err)}`,
+      detail: `Claude Code installed, but Jinn could not save that setting: ${errorMessage(err)}`,
       binary,
     };
   }

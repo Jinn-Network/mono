@@ -287,7 +287,6 @@ export interface StatusV1Response {
   daemon: {
     shutdownState: string | null;
     startedAt: string | null;
-    dbPath: string;
     timestamp: string;
   };
   rpc: GatheredStatusRaw['rpc'];
@@ -646,7 +645,11 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     daemon: {
       shutdownState: raw.shutdownState,
       startedAt: raw.daemonStartedAt ?? null,
-      dbPath: raw.dbPath,
+      // dbPath is deliberately NOT projected here (spec §14.2 item 2, issue
+      // #2402) — it's an absolute filesystem path (home dir, username) and
+      // this is the unauthenticated /v1/status endpoint. `raw.dbPath` itself
+      // stays on GatheredStatusRaw for the `jinn status` CLI roll-up
+      // (status-rollup-build.ts), which is a local, same-machine surface.
       timestamp: new Date().toISOString(),
     },
     rpc: raw.rpc,
