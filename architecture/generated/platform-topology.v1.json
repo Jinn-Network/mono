@@ -1501,13 +1501,13 @@
       "authorityDocuments": 20,
       "boundaryPolicies": 19,
       "catalogManifests": 76,
-      "catalogPublicSurfaces": 1157,
+      "catalogPublicSurfaces": 1168,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2691,
-      "generatedOutputSources": 1213,
+      "discoveredFirstPartySurfaces": 2702,
+      "generatedOutputSources": 1224,
       "generatorSources": 551,
       "marketplaceControl": 2,
       "requiredGates": 18,
@@ -28512,6 +28512,54 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/evidence/trajectory/profiles"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/evidence/trajectory/schemas"
       },
       {
@@ -34382,6 +34430,42 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/task-execution/profiles/profiles/task-profile"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/task-profile/1.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/task-execution/profiles/profiles/task-profiles"
       },
       {
@@ -35285,6 +35369,54 @@
           "@ritsukai"
         ],
         "path": "packages/task-execution/protocol/package.json"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/protocol/profiles"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/protocol/profiles/task-execution"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/protocol/profiles/task-execution/1.0"
+      },
+      {
+        "categories": [
+          "catalogPublicSurfaces",
+          "discoveredFirstPartySurfaces",
+          "generatedOutputSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json"
       },
       {
         "categories": [
@@ -39731,7 +39863,9 @@
         "fixtures": [
           "fixtures"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "schemas": [
           "schemas"
         ]
@@ -40581,7 +40715,9 @@
         "fixtures": [
           "fixtures"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "schemas": [
           "schemas"
         ]
@@ -45669,6 +45805,19 @@
       },
       {
         "claim": {
+          "field": "profile",
+          "identifier": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+          "servedPath": "profiles/trajectory-vocabulary/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/evidence-trajectory",
+        "packedTargets": [],
+        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json",
+        "relativeSource": "profiles/trajectory-vocabulary/1.0/profile.json"
+      },
+      {
+        "claim": {
           "field": "$id",
           "identifier": "https://jinn.network/records/trajectory-derivation-statement/1.0/schema",
           "servedPath": "records/trajectory-derivation-statement/1.0/schema"
@@ -47214,6 +47363,19 @@
       {
         "claim": {
           "field": "profile",
+          "identifier": "https://jinn.network/profiles/task-profile/1.0",
+          "servedPath": "profiles/task-profile/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "packedTargets": [],
+        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json",
+        "relativeSource": "profiles/task-profile/1.0/profile.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
           "identifier": "https://jinn.network/task-profiles/evaluation-task/1.0",
           "servedPath": "task-profiles/evaluation-task/1.0"
         },
@@ -47621,6 +47783,19 @@
         "packedTargets": [],
         "path": "packages/task-execution/protocol/fixtures/manifest.sha256.json",
         "relativeSource": "fixtures/manifest.sha256.json"
+      },
+      {
+        "claim": {
+          "field": "profile",
+          "identifier": "https://jinn.network/profiles/task-execution/1.0",
+          "servedPath": "profiles/task-execution/1.0"
+        },
+        "export": null,
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-protocol",
+        "packedTargets": [],
+        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json",
+        "relativeSource": "profiles/task-execution/1.0/profile.json"
       },
       {
         "claim": null,
@@ -48906,7 +49081,9 @@
         ],
         "name": "@jinn-network/evidence-trajectory",
         "path": "packages/evidence/trajectory",
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "releaseGroup": "platform-v1",
         "schemas": [
           "schemas"
@@ -49109,7 +49286,9 @@
         ],
         "name": "@jinn-network/task-execution-protocol",
         "path": "packages/task-execution/protocol",
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "releaseGroup": "platform-v1",
         "schemas": [
           "schemas"
@@ -49286,6 +49465,27 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://jinn.network/profiles/task-execution/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-protocol",
+        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://jinn.network/profiles/task-profile/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/task-execution-profiles",
+        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+        "kind": "profiles",
+        "package": "@jinn-network/evidence-trajectory",
+        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json"
       },
       {
         "field": "profile",

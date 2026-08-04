@@ -1,0 +1,12 @@
+{
+  "profile": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+  "title": "Trajectory Vocabulary 1.0",
+  "version": "1.0",
+  "owner": "@jinn-network/evidence-trajectory",
+  "description": "The trajectory vocabulary. Trajectory records and derivation statements citing this URI are sealed under the schemas indexed here.",
+  "artifacts": [
+    { "path": "records/trajectory/1.0/schema", "mediaType": "application/schema+json" },
+    { "path": "records/trajectory-derivation-statement/1.0/schema", "mediaType": "application/schema+json" }
+  ],
+  "digestAuthority": "https://jinn.network/manifest.json"
+}
