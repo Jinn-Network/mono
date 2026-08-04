@@ -370,3 +370,35 @@ One epic (`feat`, this program) with children per unit: C1, C2, C3 (`refactor`),
 C6 (`refactor`), C7a–d, C8, C9 (`test`). Issue bodies frame problem + acceptance criteria
 (link the design section); no solutions in bodies. Blocked-on/Effort/Priority set per the
 Project fields; Effort follows §5's table.
+
+## 11. Program closure (2026-08-04) — overall review verdict and open-items ledger
+
+The §13.2 whole-program review ran across the integrated nine merged PRs plus C9:
+**PROGRAM COMPLETE, zero blockers.** All five load-bearing acceptance criteria re-verified
+by execution; all six non-goals held; the F-C9-2 model-spelling seam fix is pinned on both
+sides; the runtime-observation IRI contract and all four F9 conversion points hold.
+
+Fixed in the closure commit itself: the third `learner-public.v1` mirror bound into the
+drift guard (review MAJOR 1); the stale `supports()` docblock; the
+`spec/2026-06-10-learning-approach-solvernet.md` supersession header (MAJOR 8).
+
+**Open items, with owners (nothing evaporates):**
+
+| # | Item | Owner |
+| --- | --- | --- |
+| 1 | Substrate §4.2's "installer already rejects these roots" is aspirational — `jinn checkpoint install` is an unwired v1 stub with no digest/root checks | #2119 (checkpoint train); amend §4.2's parenthetical when picked up |
+| 2 | §6.2 "conflicting redelivery refused" does not hold when the conflict arrives against a *stored* projection (observation absent from the seed) — silent no-op, pinned by test | substrate §6.2 dated amendment + policy-outcomes follow-up, next substrate session |
+| 3 | The §4.3 weakest-axis rule has no consumer: the product's `OutcomesProjectionRow` mirror drops `pinning` | the allocator-hardening follow-up (first unit that consumes fidelity in allocation); undocumented mirror delta to be recorded in wave-types.ts |
+| 4 | §8.2's curation discharge is types-mirrored, not achieved — `task-curation` still has zero code dependents | the live-campaign host unit (see #6), which wires real announcement streams |
+| 5 | `validateCandidateManifest` scope gaps: provenance strictness unenforced; "tuple canonicalization round-trip" not performed | policy-identity follow-up; record as narrowing amendments if accepted |
+| 6 | `optimize campaign run` cannot dispatch (F-C7d-2): no host binds a real `TaskExecutionBackend` to a campaign | **the next implementation unit** — the live-campaign host; feeds touchpoint 3's second act (a campaign over real solves) |
+| 7 | §9's `fork` adoption verb unimplemented | C7d follow-up, with the journey session's UX input |
+| 8 | Ledger hygiene: ~10 unowned findings, 6 cross-ledger status contradictions, 5 review-finding IDs with no ledger entry, C4 README lacks a Findings section | this table is the consolidated ledger of record; per-package READMEs get pointer lines opportunistically |
+| 9 | Learner emits `model: {id}` only — campaigns freezing richer model values refuse every learner candidate | recorded constraint; revisit with the model-axis design when provider pinning matters |
+
+**Operator residuals (top five, one sentence each — printed by the e2e, restated here):**
+`campaign run` cannot dispatch real cells yet; evaluating a candidate executes its payload
+at your privileges (isolation is vacuous — never admit a stranger's hook/tool/harness
+candidate); the digest migration permanently breaks joins to pre-migration on-chain
+codeDigests; v0 promotion discipline protects you from self-deception and proves nothing to
+strangers; every shipped verdict is a fixture verdict — no real solve has been measured yet.
