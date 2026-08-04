@@ -79,12 +79,22 @@ export function createBootstrapRetryCommand(deps: BootstrapRetryDeps = PRODUCTIO
 
     const body = remote.body ?? { ok: false };
     if (!body.ok) {
+      // #2407 L3: a 401 means the ui-token was wrong/missing/rotated — a
+      // distinct, actionable cause from "the daemon isn't currently halted,"
+      // which is what every OTHER non-ok response means (the route itself
+      // never returns ok:false for any other reason — see
+      // api/setup-retry-endpoint.ts).
+      const isUnauthorized = remote.status === 401;
       emitEnvelope(
         {
           code: 'fatal',
-          message: body.error ?? `Daemon returned HTTP ${remote.status ?? 'unknown'} with no error detail.`,
-          hint: 'The daemon may not currently be halted — bootstrap-retry only does something while it is.',
-          details: { cause: body.error },
+          message: isUnauthorized
+            ? 'Daemon returned HTTP 401 Unauthorized.'
+            : body.error ?? `Daemon returned HTTP ${remote.status ?? 'unknown'} with no error detail.`,
+          hint: isUnauthorized
+            ? 'The ui-token (~/.jinn-client/ui-token) did not match what the daemon expects — it may have been rotated. Re-check the token file, or restart the daemon to regenerate it.'
+            : 'The daemon may not currently be halted — bootstrap-retry only does something while it is.',
+          details: { cause: body.error, status: remote.status },
         },
         { writer: ctx.writer, exit: ctx.exit },
       );
