@@ -842,7 +842,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
               ok: false,
               reason: 'hash_mismatch',
               sha256,
-              error: err.message,
+              error: maskUrlsInMessage(err.message),
               sha256Expected: err.sha256Expected,
               sha256Actual: err.sha256Actual,
               source: err.source,
@@ -854,11 +854,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         }
         if (err instanceof AcquireError) {
           return c.json(
-            { ok: false, reason: 'origin_null', sha256, error: err.message, retryable: true },
+            { ok: false, reason: 'origin_null', sha256, error: maskUrlsInMessage(err.message), retryable: true },
             502,
           );
         }
-        const message = err instanceof Error ? err.message : String(err);
+        const message = maskUrlsInMessage(err instanceof Error ? err.message : String(err));
         return c.json(
           { ok: false, reason: 'origin_null', sha256, error: message, retryable: true },
           500,

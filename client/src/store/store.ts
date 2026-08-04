@@ -628,6 +628,21 @@ export class Store {
     this.ensureActivityEventCostColumns();
     this.backfillActivityEvents();
     this.recordLegacyRestorationIntentsIgnored();
+    this.clearLegacyBalanceCacheErrors();
+  }
+
+  /**
+   * One-time migration (issue #2402, spec §14.2 item 2): a `balance_cache`
+   * row written before this fix can carry a raw, key-in-path RPC URL in its
+   * `error` column. `getBalanceCache()` re-masks on every read (see there),
+   * which covers every row a client still fetches — but a service/role that
+   * later drops out of the fleet (re-indexed display slot, removed service)
+   * leaves its row un-read forever, so re-mask-on-read never reaches it.
+   * Clearing the column outright at schema-init closes that orphan-row case;
+   * `error` is re-populated on the role's next fetch/failure regardless.
+   */
+  private clearLegacyBalanceCacheErrors(): void {
+    this.db.exec(`UPDATE balance_cache SET error = NULL WHERE error LIKE '%http%'`);
   }
 
   /**
@@ -2094,12 +2109,15 @@ export class Store {
       bondWei: r.bond_wei,
       assetExtraJson: r.asset_extra_json,
       fetchedAt: r.fetched_at,
-      // One-shot scrub (issue #2402, spec §14.2 item 2): rows written before
-      // gather-status.ts's `errorMessage` choke point started masking RPC
-      // URLs can carry a raw key-in-path error string. Masking again here is
-      // idempotent (already-masked errors have no `http(s)://` substring
-      // left to match) and guarantees a poisoned row stops leaking on its
-      // very next read, without a schema migration.
+      // Re-mask on read (issue #2402, spec §14.2 item 2) — NOT a one-shot
+      // scrub, this runs on every call. A row written before gather-status.ts's
+      // `errorMessage` choke point started masking RPC URLs can carry a raw
+      // key-in-path error string; masking again here is idempotent
+      // (already-masked errors have no `http(s)://` substring left to match)
+      // and guarantees such a row stops leaking on its very next read. The
+      // actual one-shot scrub is `clearLegacyBalanceCacheErrors()` at
+      // schema-init, which also covers rows for a role that's since dropped
+      // out of the fleet and would otherwise never be read again.
       error: r.error === null ? null : maskUrlsInMessage(r.error),
     }));
   }

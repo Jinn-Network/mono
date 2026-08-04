@@ -409,9 +409,10 @@ describe('Store', () => {
   // Regression coverage for spec §14.2 item 2 / issue #2402: a balance-cache
   // row written before gather-status.ts's `errorMessage` choke point started
   // masking RPC URLs can carry a raw key-in-path error string. It is REPLAYED
-  // verbatim on every later /v1/status call unless getBalanceCache() scrubs
-  // it on read.
-  it('scrubs an already-poisoned balance-cache error on read (one-shot scrub)', () => {
+  // verbatim on every later /v1/status call unless getBalanceCache() re-masks
+  // it on read (every call, not a one-shot — see the next describe block for
+  // the actual one-shot migration).
+  it('re-masks an already-poisoned balance-cache error on every read', () => {
     // Simulate a row persisted before the masking fix shipped — write it
     // directly via upsertBalanceCache (which itself does not mask; masking
     // before persistence is gather-status.ts's job) so the row genuinely
@@ -455,4 +456,97 @@ describe('Store', () => {
     expect(byRole.get('service.1.multisig')?.error).toBe('connect ECONNREFUSED 127.0.0.1:0');
   });
 
+});
+
+// Regression coverage for spec §14.2 item 2 / issue #2402's orphan-row case:
+// re-mask-on-read (above) only helps a role a client still fetches. A role
+// that's since dropped out of the fleet (re-indexed display slot, removed
+// service) has a row nothing ever calls getBalanceCache() to re-mask, so it
+// would sit poisoned on disk indefinitely without a genuine one-shot scrub.
+describe('Store balance_cache legacy-error migration (spec §14.2 item 2, issue #2402)', () => {
+  it('clears an already-poisoned error at construction time, including for a role no longer fetched', () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'jinn-balance-cache-migration-')), 'jinn.db');
+
+    // Simulate a pre-fix DB on disk: write directly via better-sqlite3,
+    // bypassing the Store class entirely (as a pre-fix daemon would have
+    // left it), for a role ('service.9.agent') that no longer exists in the
+    // current fleet — i.e. nothing will ever call getBalanceCache() and
+    // re-mask this particular row on read.
+    const raw = new Database(dbPath);
+    raw.exec(
+      `CREATE TABLE balance_cache (
+        role TEXT PRIMARY KEY,
+        address TEXT NOT NULL,
+        native_wei TEXT,
+        bond_wei TEXT,
+        asset_extra_json TEXT,
+        fetched_at TEXT NOT NULL,
+        error TEXT
+      )`,
+    );
+    raw.prepare(
+      `INSERT INTO balance_cache (role, address, native_wei, bond_wei, asset_extra_json, fetched_at, error)
+       VALUES (@role, @address, NULL, NULL, NULL, @fetchedAt, @error)`,
+    ).run({
+      role: 'service.9.agent',
+      address: '0x1111111111111111111111111111111111111111',
+      fetchedAt: new Date(0).toISOString(),
+      error:
+        'HTTP request failed.\n\nURL: https://base-mainnet.g.alchemy.com/v2/SECRETKEY123\nRequest body: {"method":"eth_getBalance"}',
+    });
+    raw.close();
+
+    // Opening a Store against this file runs the schema-init migration.
+    const migratedStore = new Store(dbPath);
+    try {
+      const inspector = new Database(dbPath, { readonly: true });
+      try {
+        const row = inspector
+          .prepare(`SELECT error FROM balance_cache WHERE role = 'service.9.agent'`)
+          .get() as { error: string | null };
+        expect(row.error).toBeNull();
+      } finally {
+        inspector.close();
+      }
+    } finally {
+      migratedStore.close();
+    }
+  });
+
+  it('leaves a balance-cache error with no URL untouched at construction time', () => {
+    const dbPath = join(mkdtempSync(join(tmpdir(), 'jinn-balance-cache-migration-')), 'jinn.db');
+
+    const raw = new Database(dbPath);
+    raw.exec(
+      `CREATE TABLE balance_cache (
+        role TEXT PRIMARY KEY,
+        address TEXT NOT NULL,
+        native_wei TEXT,
+        bond_wei TEXT,
+        asset_extra_json TEXT,
+        fetched_at TEXT NOT NULL,
+        error TEXT
+      )`,
+    );
+    raw.prepare(
+      `INSERT INTO balance_cache (role, address, native_wei, bond_wei, asset_extra_json, fetched_at, error)
+       VALUES ('service.0.agent', '0x1111111111111111111111111111111111111111', NULL, NULL, NULL, ?, 'connect ECONNREFUSED 127.0.0.1:0')`,
+    ).run(new Date(0).toISOString());
+    raw.close();
+
+    const migratedStore = new Store(dbPath);
+    try {
+      const inspector = new Database(dbPath, { readonly: true });
+      try {
+        const row = inspector
+          .prepare(`SELECT error FROM balance_cache WHERE role = 'service.0.agent'`)
+          .get() as { error: string | null };
+        expect(row.error).toBe('connect ECONNREFUSED 127.0.0.1:0');
+      } finally {
+        inspector.close();
+      }
+    } finally {
+      migratedStore.close();
+    }
+  });
 });
