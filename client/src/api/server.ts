@@ -11,9 +11,8 @@
  */
 
 import { Hono } from 'hono';
-import type { Context } from 'hono';
+import type { Context, MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
-import { getCookie } from 'hono/cookie';
 import { serve } from '@hono/node-server';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -38,7 +37,7 @@ import {
   type SolverNetsEndpointsDeps,
 } from './solvernets-endpoints.js';
 import { addAgentBindingRoutes, type AgentBindingRoutesConfig } from './agent-binding-endpoint.js';
-import { addHandshakeRoutes } from './handshake.js';
+import { addHandshakeRoutes, requireUiToken } from './handshake.js';
 import { addAdminRoutes } from './admin-endpoint.js';
 import { addSetupRoutes, type SetupRoutesConfig } from './setup-endpoints.js';
 import { addClaimPolicyRoutes, type ClaimPolicyRoutesConfig } from './claim-policy-endpoints.js';
@@ -122,11 +121,15 @@ export interface ApiServerConfig {
    *  retry the ERC-1271 bind step for unbound services. */
   agentBinding?: AgentBindingRoutesConfig;
   /**
-   * When set, `/auth/handshake` is mounted and the SPA's cookie/header
-   * session token becomes an additional accepted credential on operator-
-   * class routes. The gate itself is unconditional (§14.3) — the SPA-only
-   * route families and `/v1/events` / `/v1/activity-events` are token-gated
-   * even when `ui` is absent, via the bearer `apiToken` fallback.
+   * When set, `/auth/handshake` is mounted and operator-class routes are
+   * gated on the SPA's cookie/header session token EXCLUSIVELY (the bearer
+   * `apiToken` does not admit here — the two credential planes never merge,
+   * see the gate comment in `startApiServer`). When absent, the gate falls
+   * back to the bearer `apiToken` — the only construction paths without
+   * `ui` are `daemon.ts`'s self-start branch and test/embedded callers, on
+   * which the bearer is the sole available credential. The gate itself is
+   * unconditional (§14.3): the SPA-only route families and `/v1/events` /
+   * `/v1/activity-events` are token-gated on every construction path.
    */
   ui?: { token: string; handshakeKey: string };
   /** Admin endpoint for operator MCP write tools. Only mounted when ui is also configured. */
@@ -434,10 +437,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   //
   // Every route on this listener is `operator`-class (token-gated,
   // regardless of bind address) except a fixed allowlist: `/`, `/assets/*`,
-  // `/auth/handshake`, `/artifacts*` (the bearer regime above), and — for
-  // now — `GET /v1/status` (its exemption is removed by a LATER package
-  // per §14.5, once `/health` + `/ready` land as the unauthenticated-safe
-  // liveness surface; do NOT gate it here).
+  // `/auth/handshake`, `/artifacts*` (the bearer regime — scoped by §4.2's
+  // disposition table to artifacts + stop-hook ONLY, never the general
+  // operator-class routes below), and — for now — `GET /v1/status` (its
+  // exemption is removed by a LATER package per §14.5, once `/health` +
+  // `/ready` land as the unauthenticated-safe liveness surface; do NOT gate
+  // it here).
   //
   // This block runs UNCONDITIONALLY — independent of whether `config.ui`
   // was supplied — so a construction path that skips `ui` (`daemon.ts`'s
@@ -445,23 +450,20 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // `startApiServer({ apiToken })` test/embedded call) does not leave the
   // SPA-only route families (nor `/v1/events` / `/v1/activity-events`,
   // which used to be mounted OUTSIDE this block entirely) unauthenticated.
-  // The gate accepts EITHER credential: the bearer `apiToken` (always
-  // present on every construction path), or — when `config.ui` is
-  // configured — the SPA's cookie/`x-jinn-ui-token` header session token.
-  const uiTokenValid = (c: Context): boolean => {
-    if (!config.ui) return false;
-    const cookie = getCookie(c, 'jinn_ui_token');
-    const header = c.req.header('x-jinn-ui-token');
-    const supplied = cookie ?? header;
-    return supplied !== undefined && supplied === config.ui.token;
-  };
-  const requireOperatorToken = async (c: Context, next: () => Promise<void>): Promise<Response | void> => {
-    if (bearerValid(c) || uiTokenValid(c)) {
-      await next();
-      return;
-    }
-    return c.json({ error: 'unauthorized', reason: 'bearer_required' }, 401);
-  };
+  //
+  // The two credential planes do NOT merge: when `config.ui` is configured
+  // (every production boot via main.ts), ONLY the ui-token grants access —
+  // the bearer `apiToken` sits in every spawned solver agent's own process
+  // env (learner adapters' spawnOpts.env, Hermes' bootstrap .env file), so
+  // admitting it here would let any agent reach change-password, admin
+  // restart/stop, claim-policy/wiring writes, captures approve (publishes),
+  // network config, faucet drip (real tx), join/leave, debug-report,
+  // rewards, etc. — routes §4.2's disposition table classes `Control`,
+  // never `bearer`-gated. The bearer only ever buys the no-`ui`
+  // self-start/test path, where it's the sole available credential.
+  const requireOperatorToken: MiddlewareHandler = config.ui
+    ? requireUiToken(config.ui.token)
+    : requireBearer;
 
   // SPA index at /
   app.get('/', (c) => c.html(readSpaIndex()));

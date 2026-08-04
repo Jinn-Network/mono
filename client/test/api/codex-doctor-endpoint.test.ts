@@ -714,10 +714,20 @@ describe('GET /api/codex/doctor — UI token gate (#679)', () => {
   it('rejects an unauthenticated GET with 401 (no cookie, no x-jinn-ui-token header)', async () => {
     const res = await fetch(`http://127.0.0.1:${server.port}/api/codex/doctor`);
     expect(res.status).toBe(401);
-    // §14.3: the gate is now the unconditional `requireOperatorToken` (also
-    // accepts the bearer apiToken, not just the ui-token) — its error body
-    // carries `reason: 'bearer_required'`, matching the rest of the gate.
-    expect(await res.json()).toEqual({ error: 'unauthorized', reason: 'bearer_required' });
+    // §14.3: the gate is now the unconditional `requireOperatorToken`, but
+    // when `config.ui` is configured (as it is here) it delegates to
+    // `requireUiToken` exclusively — the bearer apiToken does NOT admit on
+    // operator-class routes when ui is present (the two credential planes
+    // never merge). Error body is unchanged from pre-gate-unification.
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
+  });
+
+  it('rejects a bearer-only request (no cookie, no x-jinn-ui-token) with 401 — regression for the credential-plane merge finding', async () => {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/codex/doctor`, {
+      headers: { Authorization: 'Bearer api-token' },
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
   });
 
   it('allows a GET carrying a valid x-jinn-ui-token header with 200 and the doctor body', async () => {

@@ -420,10 +420,17 @@ describe('daemon-api-auth (bearer middleware)', () => {
     }
   });
 
-  it('also admits the bearer apiToken on an operator-class route when ui IS configured', async () => {
-    // The gate accepts EITHER credential: the SPA's ui-token cookie/header,
-    // or the bearer apiToken (always present, used by non-browser callers —
-    // e.g. `jinn` CLI verbs, tests, MCP subprocess tooling).
+  it('rejects the bearer apiToken ALONE on an operator-class route when ui IS configured — the two credential planes do not merge', async () => {
+    // §4.2's disposition table scopes the bearer `apiToken` to
+    // `/artifacts` + `/v1/artifacts/acquire` + the stop-hook compat path
+    // ONLY. `apiToken` sits in every spawned solver agent's own process env
+    // (learner adapters' spawnOpts.env, Hermes' bootstrap .env file) — any
+    // agent with a shell can read it. Admitting it on `Control`-class
+    // operator routes (setup, admin, claim-policy, captures, ...) would let
+    // any agent reach change-password, restart/stop, real-money faucet
+    // drip, etc. When `config.ui` is configured (every production boot via
+    // main.ts), ONLY the ui-token grants access here — this is an
+    // empirical regression for that finding, not a design restatement.
     await server.close();
     store.close();
 
@@ -436,9 +443,15 @@ describe('daemon-api-auth (bearer middleware)', () => {
     });
     baseUrl = `http://127.0.0.1:${server.port}`;
 
-    const res = await fetch(`${baseUrl}/v1/events/recent`, {
+    const bearerOnly = await fetch(`${baseUrl}/v1/events/recent`, {
       headers: { Authorization: `Bearer ${TEST_TOKEN}` },
     });
-    expect(res.status).toBe(200);
+    expect(bearerOnly.status).toBe(401);
+
+    // Sanity: the ui-token still admits on the same server/route.
+    const uiTokenAuthed = await fetch(`${baseUrl}/v1/events/recent`, {
+      headers: { 'x-jinn-ui-token': 'ui-token' },
+    });
+    expect(uiTokenAuthed.status).toBe(200);
   });
 });
