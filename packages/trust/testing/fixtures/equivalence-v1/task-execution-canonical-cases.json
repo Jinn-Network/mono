@@ -6,7 +6,7 @@
   {
     "name": "task-shaped",
     "value": {
-      "protocol": "https://jinn.network/profiles/task-execution/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
       "requirements": { "cpu": 2, "memory": 4096 },
       "tags": ["restoration", "evaluation"],
       "unicode": "jinn — 日本語"

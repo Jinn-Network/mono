@@ -13,9 +13,9 @@ const CREATOR = "0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98" as const;
 
 function goldenTask(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
     },
     instructions: "Fix the failing test.",
@@ -25,7 +25,7 @@ function goldenTask(): Uint8Array {
 
 function goldenSubmission(taskBytes: Uint8Array, maxTotal: number | undefined): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:11111111-2222-3333-4444-555555555555",
     task: { digest: { sha256: sha256Hex(taskBytes) } },
     requester: "urn:uuid:66666666-7777-8888-9999-aaaaaaaaaaaa",

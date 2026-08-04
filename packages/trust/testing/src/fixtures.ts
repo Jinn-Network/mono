@@ -83,7 +83,7 @@ export function testDidKey(seed: string): string {
 }
 
 export function testAgentIri(seed: string): string {
-  return `https://jinn.network/agent/fixture-${seed}`;
+  return `https://spec.jinn.network/agents/fixture-${seed}`;
 }
 
 export function testSha256Digest(seed: string): Sha256Digest {

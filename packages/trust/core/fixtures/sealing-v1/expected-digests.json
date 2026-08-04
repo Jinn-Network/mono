@@ -1,10 +1,10 @@
 {
-  "key-binding": "sha256:8e4eb8f45d5b12c7403e6d99728b8484bd89a5e5412256164a02c02d99b8cf3a",
-  "revocation": "sha256:dd6fe2fd23cf831b84d68dc2a0c09bd7cbaa41c7e902ce76238b4d9143fefffd",
-  "policy": "sha256:2627a9fb9406d7e382348cbabe9a41fc8b0e90129c3aed9183bcafdddb575e5f",
-  "authorization": "sha256:734848ceef295922ee837351f8c22806238d04df1f6d7651a4be935995a736e1",
-  "key-binding-golden": "sha256:ee26c1a8c59aed5cad29bf7e5cd455530de90c40a8e5bba8fa71ca9da1e8dba8",
-  "revocation-golden": "sha256:94eb9b97ca81117b3dbda0f56c4ae7526fbda01e02393157b186187d8dd938de",
-  "authorization-golden": "sha256:0cde7effc8de47d44fa0268476c5969a1ffbea1b59b3ad1cfe51f163ed9dbec9",
-  "policy-golden": "sha256:eee6b6109be76c094e069a9ecd5dd462fab292f4a376749c859e7476f8cd2904"
+  "key-binding": "sha256:14796876ad0372f38c7a41a3ba19f451931d7e174b864a04b68cd115e4155f11",
+  "revocation": "sha256:237795a6881604d2f05f9ddcfd1827ccfc5109372f0c44186b90431b39104324",
+  "policy": "sha256:c881c8631a6e1e6f82966e917652561159095e66fa75a9facc67f10b5c452a4d",
+  "authorization": "sha256:8da5c13809c9ec73d0bea8852098d666b9caef55d797ca3f542d1b4350040e4c",
+  "key-binding-golden": "sha256:cd236e2743159dd4ed26b0f9c5fd607078cbb23f603a906229ed9c99a4df96d8",
+  "revocation-golden": "sha256:a2c313b2ffc39855510362bcb85c87ef8850b5c0fc9e0e507a00f03ecaa1717d",
+  "authorization-golden": "sha256:05d6f187d5e9564042a3a003ef66b6e368d4f486f9b80f07880c68c95a13288b",
+  "policy-golden": "sha256:afce14a23e74fe511ea6934a52dd3b8b719462e71fc160a3c12e90f330987301"
 }

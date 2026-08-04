@@ -52,7 +52,11 @@ test('no-record: nothing here seals, hashes, or claims a record kind', () => {
   const banned = [
     /\bseal[A-Z]/, /\bputArtifact\b/, /\bRECORD_KINDS\b/, /@noble\/hashes/,
     /\brecordKind\b/, /\bpayloadType\b/, /\bdssePreAuthEncoding\b/,
-    /https:\/\/jinn\.network\/records\//,
+    // DR-2026-08-04: the re-seal moved every record kind to spec.jinn.network, but a
+    // legacy-origin record kind is still a record kind -- the constraint is about the layer's
+    // behavior (projection, never record), not about which origin spells the URI. Forbid a
+    // record-kind path under either host so this guard still constrains something post-re-seal.
+    /https:\/\/(?:spec\.)?jinn\.network\/records\//,
   ];
   for (const file of productionSources()) {
     const text = readFileSync(file, 'utf8');

@@ -37,7 +37,7 @@ const subjectResults = [
 const evaluationSpecDigest = `sha256:${"5".repeat(64)}` as const;
 
 const subjectSubmission = SubmissionRecordSchema.parse({
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   submission: "urn:uuid:10000000-0000-4000-8000-000000000001",
   task: { name: subjectTask.name, digest: { sha256: subjectTask.digest.slice("sha256:".length) } },
   requester: "urn:uuid:20000000-0000-4000-8000-000000000002",
@@ -137,7 +137,7 @@ describe("deriveAndSealEvaluationSubmission (§6.4, program §7.39–§7.40)", (
     expect(() => deriveAndSealEvaluationSubmission(input({
       submissionFields: {
         ...input().submissionFields,
-        requester: "https://jinn.network/agents/not-the-subject-requester",
+        requester: "https://spec.jinn.network/agents/not-the-subject-requester",
       },
     }))).toThrow(/requester must equal/);
   });

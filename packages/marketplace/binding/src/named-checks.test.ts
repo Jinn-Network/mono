@@ -42,10 +42,10 @@ const VERDICT_KEY = "did:key:z6MkVerdictSigner111111111111111111111111";
 const SETTLEMENT_KEY = "did:key:z6MkSettlementSafe11111111111111111111111";
 const SOLVER_KEY = "did:key:z6MkSolverSafe111111111111111111111111111";
 const REQUESTER_KEY = "did:key:z6MkRequesterSigner1111111111111111111111";
-const ADMISSION_AGENT = "https://jinn.network/agents/admission-fixture";
-const EVALUATOR_AGENT = "https://jinn.network/agents/evaluator-fixture";
-const SOLVER_AGENT = "https://jinn.network/agents/solver-fixture";
-const REQUESTER_AGENT = "https://jinn.network/agents/requester-fixture";
+const ADMISSION_AGENT = "https://spec.jinn.network/agents/admission-fixture";
+const EVALUATOR_AGENT = "https://spec.jinn.network/agents/evaluator-fixture";
+const SOLVER_AGENT = "https://spec.jinn.network/agents/solver-fixture";
+const REQUESTER_AGENT = "https://spec.jinn.network/agents/requester-fixture";
 const SOLVER_ADDRESS = "0x1111111111111111111111111111111111111111";
 const EVALUATOR_ADDRESS = "0x2222222222222222222222222222222222222222";
 const REQUESTER_VOUCHER =
@@ -59,9 +59,9 @@ const spec: EvaluationSpec = {
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: "4",
   family: "deterministic-process",
-  grader: { uri: "https://jinn.network/graders/fixture" },
+  grader: { uri: "https://spec.jinn.network/graders/fixture" },
   familyBlock: {
-    image: { uri: "https://jinn.network/images/fixture" },
+    image: { uri: "https://spec.jinn.network/images/fixture" },
     platform: "linux/amd64",
     workspace: { root: "/workspace" },
     testMaterial: [],
@@ -234,7 +234,7 @@ function makeFixture(): {
   const taskBytes = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "6".repeat(64) },
     },
     instructions: "Solve the fixture.",
@@ -278,7 +278,7 @@ function makeFixture(): {
       { name: task.name, digest: { sha256: task.digest.slice("sha256:".length) } },
       { name: "evaluation-spec.json", digest: { sha256: sealedSpec.digest.slice("sha256:".length) } },
     ],
-    predicateType: "https://jinn.network/attestations/admission-receipt/v1",
+    predicateType: "https://spec.jinn.network/attestations/admission-receipt/v1",
     predicate: { issuer: ADMISSION_AGENT },
   };
   const receiptEnvelopeBytes = signedEnvelope(
@@ -510,7 +510,7 @@ describe("gateVerdictObservation (§6.4, §7.5a/§7.5b)", () => {
         ...fixture.input.verdict,
         solver: {
           ...fixture.input.verdict.solver,
-          claimedAgent: "https://jinn.network/agents/invented-solver",
+          claimedAgent: "https://spec.jinn.network/agents/invented-solver",
         },
       },
     };

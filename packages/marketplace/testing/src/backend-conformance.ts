@@ -145,9 +145,9 @@ export interface MarketplaceProfileTrustFixture {
 /** Builds a self-contained trust fixture: requester key authorized (`scope: authorizations`), executor key controlling (`scope: [family]`). */
 export function buildDefaultTrustFixture(): MarketplaceProfileTrustFixture {
   const requesterKey = "did:key:z6MkRequesterFixtureKey";
-  const requesterAgent = "https://jinn.network/agents/requester-fixture";
+  const requesterAgent = "https://spec.jinn.network/agents/requester-fixture";
   const executorKey = "did:key:z6MkExecutorFixtureKey";
-  const executorAgent = "https://jinn.network/agents/executor-fixture";
+  const executorAgent = "https://spec.jinn.network/agents/executor-fixture";
   const bindingResolver = buildFakeBindingResolver([
     {
       key: requesterKey,
@@ -552,7 +552,7 @@ export async function verifyDeliveryBoundExecutionEvidence(
 }
 
 const GOLDEN_EVALUATION_SPEC: EvaluationSpec = {
-  protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+  protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
   semanticsVersion: "4",
   family: "deterministic-process",
   grader: { uri: "https://example.org/graders/deterministic-process-runner" },
@@ -576,7 +576,7 @@ const GOLDEN_EVALUATION_SPEC: EvaluationSpec = {
 } as unknown as EvaluationSpec;
 
 const PROFILE_DESCRIPTOR = {
-  uri: "https://jinn.network/task-profiles/repository-work/1.0",
+  uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
 };
 
@@ -596,7 +596,7 @@ function buildDeliveryEvidenceVector(
 ): DeliveryEvidenceVector {
   const sealedSpec = sealEvaluationSpec(GOLDEN_EVALUATION_SPEC);
   const taskBytes = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: PROFILE_DESCRIPTOR,
     instructions: "§16.2 exact Delivery-bound evidence fixture.",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -656,7 +656,7 @@ function buildDeliveryEvidenceVector(
     digest: documentDigest(recordBytes),
   };
   const deliveryBytes = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     task: documentDigest(taskBytes),
     outputs: [{
@@ -705,7 +705,7 @@ export function describeMarketplaceBackendConformance(
   describe("native §16.2 marketplace-profile conformance", () => {
     test("signed-Task admission uses the exported boundary for complete canonical success", async () => {
       const task = sealTask({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: PROFILE_DESCRIPTOR,
         instructions: "§16.2 signed-Task exact-payload fixture.",
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -731,7 +731,7 @@ export function describeMarketplaceBackendConformance(
 
     test("signed-Task hostile vectors use the exported boundary and exact typed refusals", async () => {
       const task = sealTask({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: PROFILE_DESCRIPTOR,
         instructions: "§16.2 signed-Task hostile payload fixture.",
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -773,13 +773,13 @@ export function describeMarketplaceBackendConformance(
 
     test("a signed Submission verifies via authenticateRequester (DSSE over exact sealed bytes, §7.5b)", async () => {
       const task = sealTask({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: PROFILE_DESCRIPTOR,
         instructions: "§16.2 signed-Submission fixture.",
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
       });
       const submission = sealSubmission({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         submission: `urn:uuid:${crypto.randomUUID()}`,
         task: { digest: { sha256: sha256Hex(task) } },
         requester: trustFixture.requesterAgent,
@@ -802,13 +802,13 @@ export function describeMarketplaceBackendConformance(
 
     test("a Submission signed by a key with no authorizations scope fails authenticateRequester (fail-closed)", async () => {
       const task = sealTask({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: PROFILE_DESCRIPTOR,
         instructions: "§16.2 unauthorized-signer fixture.",
         outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
       });
       const submission = sealSubmission({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         submission: `urn:uuid:${crypto.randomUUID()}`,
         task: { digest: { sha256: sha256Hex(task) } },
         requester: trustFixture.executorAgent, // the executor key has no `authorizations` scope over its own agent either
@@ -831,7 +831,7 @@ export function describeMarketplaceBackendConformance(
 
     test("an executor-signed Delivery verifies via verifyEnvelopeBinding (§16.2 executor-signed Deliveries)", async () => {
       const delivery = sealDelivery({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         attempt: `urn:uuid:${crypto.randomUUID()}`,
         task: `sha256:${"c".repeat(64)}`,
         outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: "d".repeat(64) } }],
@@ -859,7 +859,7 @@ export function describeMarketplaceBackendConformance(
 
     test("mandatory evidence: a Delivery missing executionIds/evidenceRecords fails the check (§16.2)", () => {
       const withoutEvidence = {
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         attempt: `urn:uuid:${crypto.randomUUID()}`,
         task: `sha256:${"e".repeat(64)}`,
         outputs: [],

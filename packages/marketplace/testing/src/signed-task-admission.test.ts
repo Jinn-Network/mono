@@ -31,9 +31,9 @@ function envelope(
 test("shared signed-Task vectors exercise only the exported admission boundary", async () => {
   const fixture = conformance.buildDefaultTrustFixture();
   const task: TaskSpecification = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "1".repeat(64) },
     },
     instructions: "admission boundary fixture",

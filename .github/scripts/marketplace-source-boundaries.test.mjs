@@ -310,6 +310,29 @@ test('marketplace-pipeline production source stays within its architecture bound
   );
 });
 
+// packages/marketplace/pipeline/src/facts-mapper-kinds.ts duplicates RECORD_KINDS.submission by
+// value on purpose (the pipeline may never import `@jinn-network/record-discovery-protocol`,
+// enforced above by PIPELINE_FORBIDDEN_PACKAGES). Its own comment says "the host asserts that
+// equality in its own test" -- this file is that host: it is the one place that already
+// legitimately reasons about both the pipeline's source tree and record-discovery-protocol's
+// package boundary (see PIPELINE_FORBIDDEN_PACKAGES above), without either package depending on
+// the other at runtime.
+test('drift: pipeline\'s duplicated RECORD_KINDS_SUBMISSION still equals record-discovery-protocol\'s RECORD_KINDS.submission', () => {
+  const pipelineSource = readFileSync(
+    join(packages, 'pipeline', 'src', 'facts-mapper-kinds.ts'), 'utf8');
+  const pipelineMatch = /RECORD_KINDS_SUBMISSION\s*=\s*\n?\s*"([^"]+)"/.exec(pipelineSource);
+  assert.ok(pipelineMatch, 'pipeline no longer declares RECORD_KINDS_SUBMISSION as a string literal');
+
+  const protocolSource = readFileSync(
+    join(root, 'packages', 'discovery', 'protocol', 'src', 'identifiers.ts'), 'utf8');
+  const protocolMatch = /submission:\s*"([^"]+)"/.exec(protocolSource);
+  assert.ok(protocolMatch,
+    'record-discovery-protocol no longer declares RECORD_KINDS.submission as a string literal');
+
+  assert.equal(pipelineMatch[1], protocolMatch[1],
+    "pipeline's duplicated RECORD_KINDS_SUBMISSION drifted from record-discovery-protocol's RECORD_KINDS.submission");
+});
+
 test('marketplace-pipeline has only the frozen legacy client import allowlist', () => {
   assert.deepEqual(
     files(join(root, 'client', 'src'))
