@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -10,6 +10,7 @@ import { emitEnvelope } from '../../errors/envelope.js';
 import {
   resolveCliPassword as defaultResolveCliPassword,
 } from '../password.js';
+import type { JinnConfig } from '../../config.js';
 import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
   loadConfig as defaultLoadConfig,
@@ -23,6 +24,12 @@ import {
   checkApiPortAvailable as defaultCheckApiPortAvailable,
 } from '../../preflight/api-port.js';
 import { resolveConfiguredOperatorVerticalMode } from '../../daemon/native-vertical-config.js';
+import {
+  getNativeConfigPathFromArgs,
+  loadNativeProductConfigFile as defaultLoadNativeConfig,
+  resolveNativeConfigPath,
+} from '../../daemon/native-config-path.js';
+import type { NativeProductConfig } from '../../daemon/native-product-config.js';
 
 function routeConsoleToStderr(): void {
   const writer = (line: string): void => {
@@ -104,6 +111,12 @@ export interface RunDeps extends BaseCommandDeps {
   checkApiPortAvailable: typeof defaultCheckApiPortAvailable;
   apiPortFailureMessage: typeof defaultApiPortFailureMessage;
   resolveCliPassword: typeof defaultResolveCliPassword;
+  /**
+   * Loads + strictly validates the native-v1 structured config file. Kept
+   * separate from `loadConfig` — the legacy loader's shape-v2 migration and
+   * native's strict schema are mutually unsatisfiable on one file (#2378).
+   */
+  loadNativeConfig: typeof defaultLoadNativeConfig;
   /** Wraps the dynamic import('../../main.js') + invocation. Production calls main(); tests inject a no-op. */
   mainFn: () => Promise<unknown>;
   /** Separate entry prevents native startup from loading the legacy daemon graph. */
@@ -118,6 +131,7 @@ const PRODUCTION_DEPS: RunDeps = {
   checkApiPortAvailable: defaultCheckApiPortAvailable,
   apiPortFailureMessage: defaultApiPortFailureMessage,
   resolveCliPassword: defaultResolveCliPassword,
+  loadNativeConfig: defaultLoadNativeConfig,
   // environment plumbing for the spawned daemon — out of DI scope
   mainFn: async () => {
     const m = await import('../../main.js');
@@ -133,8 +147,9 @@ export function createRunCommand(deps: RunDeps = PRODUCTION_DEPS): CommandModule
   return {
     name: 'run',
     summary: 'Start the daemon in the foreground; stops on SIGINT/SIGTERM',
-    helpText: `Usage: jinn run [--human] [--config <path>] [--password-fd <fd>] [--no-ui]
-                [--ui] [--no-daemon] [--funding-timeout <duration>] [--json-progress]
+    helpText: `Usage: jinn run [--human] [--config <path>] [--native-config <path>]
+                [--password-fd <fd>] [--no-ui] [--ui] [--no-daemon]
+                [--funding-timeout <duration>] [--json-progress]
 
 Long-running. Starts the creator, harness, and delivery-watcher
 loops and runs until the process receives SIGINT or SIGTERM. Before
@@ -154,6 +169,11 @@ if both are given.
 
 Flags:
   --human                Print a concise terminal summary instead of JSON.
+  --native-config <path> Boot a native-v1 operator from this structured
+                         config file instead of the legacy config. Mutually
+                         exclusive with --config. Defaults to
+                         ~/.jinn-client/native-config.json when that file
+                         exists and neither flag is passed.
   --no-ui                Suppress automatic browser open. Overrides --ui.
   --ui                   Force the operator panel open even after the first
                          launch (normally auto-open only happens once).
@@ -187,6 +207,7 @@ Failure example (funding gate):
           args: ctx.argv,
           options: {
             ...COMMON_FLAGS,
+            'native-config': { type: 'string' },
             'no-ui': { type: 'boolean', default: false },
             ui: { type: 'boolean', default: false },
             'no-daemon': { type: 'boolean', default: false },
@@ -209,11 +230,61 @@ Failure example (funding gate):
         return;
       }
 
-      const configPath = deps.getConfigPathFromArgs(ctx.argv);
-      const config = deps.loadConfig(configPath);
+      // Native gets its own config file, never the legacy `config.json` — the legacy
+      // loader's shape-v2 migration and native's strict schema are mutually
+      // unsatisfiable on one file (#2378). Both flags explicit is ambiguous; either
+      // flag explicit is decisive and skips the other file entirely, so an operator
+      // who only ever passes --config never has that invocation touched by this
+      // branch, and the legacy config.json is never even opened once native is
+      // selected. With neither flag, the default native-config.json's mere presence
+      // (nobody creates that file by accident) is the deliberate opt-in signal.
+      const legacyConfigFlag = deps.getConfigPathFromArgs(ctx.argv);
+      const nativeConfigFlag = getNativeConfigPathFromArgs(ctx.argv);
+      if (legacyConfigFlag !== undefined && nativeConfigFlag !== undefined) {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: '--config and --native-config are mutually exclusive.',
+            hint: 'A native-v1 operator uses only --native-config (or the default ~/.jinn-client/native-config.json); a legacy operator uses only --config. Drop one of the two flags and re-run.',
+            exampleCli: 'jinn run --native-config ~/.jinn-client/native-config.json',
+            details: { field: 'native-config' },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
+      const nativeConfigPath = nativeConfigFlag ?? resolveNativeConfigPath(ctx.argv, ctx.env);
+      const useNativeConfig = nativeConfigFlag !== undefined
+        || (legacyConfigFlag === undefined && existsSync(nativeConfigPath));
+
+      let config: JinnConfig | undefined;
+      let nativeConfig: NativeProductConfig | undefined;
+      let rpcPreflightConfig: Pick<JinnConfig, 'network' | 'rpcUrl'>;
+
+      if (useNativeConfig) {
+        try {
+          nativeConfig = deps.loadNativeConfig(nativeConfigPath);
+        } catch (err) {
+          emitEnvelope(
+            {
+              code: 'invalid_invocation',
+              message: err instanceof Error ? err.message : String(err),
+              hint: 'native-v1 config is strict — see client/src/daemon/native-product-config.ts for the accepted shape ({ network, rpcUrl, operator } only).',
+              exampleCli: 'jinn run --native-config ~/.jinn-client/native-config.json',
+              details: { field: 'native-config', path: nativeConfigPath },
+            },
+            { writer: ctx.writer, exit: ctx.exit },
+          );
+          return;
+        }
+        rpcPreflightConfig = { network: nativeConfig.network, rpcUrl: nativeConfig.rpcUrl };
+      } else {
+        config = deps.loadConfig(legacyConfigFlag);
+        rpcPreflightConfig = config;
+      }
       // This decision happens before password/key resolution. Native deployment or closure
       // mismatches therefore cannot cause legacy wallet material to be loaded as a fallback.
-      const vertical = resolveConfiguredOperatorVerticalMode(config);
+      const vertical = resolveConfiguredOperatorVerticalMode(nativeConfig ?? config!);
 
       // Resolve password: env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run
@@ -260,7 +331,7 @@ Failure example (funding gate):
       }
       // environment plumbing for the spawned daemon — out of DI scope
       process.env['JINN_PASSWORD'] = resolvedPassword;
-      const rpcPreflight = await deps.checkRpcNetwork(config);
+      const rpcPreflight = await deps.checkRpcNetwork(rpcPreflightConfig);
       if (!rpcPreflight.ok) {
         emitEnvelope(
           {
@@ -281,23 +352,28 @@ Failure example (funding gate):
         );
         return;
       }
-      const portPreflight = await deps.checkApiPortAvailable(config.apiPort);
-      if (!portPreflight.ok) {
-        emitEnvelope(
-          {
-            code: 'invalid_invocation',
-            message: deps.apiPortFailureMessage(portPreflight),
-            hint: `Use --config with apiPort or set JINN_API_PORT to a free port before running jinn run.`,
-            exampleCli: 'JINN_API_PORT=7332 jinn run',
-            details: {
-              field: 'apiPort',
-              port: portPreflight.port,
-              reason: portPreflight.code ?? 'unavailable',
+      // apiPort is a legacy-only concept (native binds `operator.native.publicListen.port`,
+      // a different surface with its own bind-time error path) — this preflight only
+      // applies once `config` is the legacy JinnConfig.
+      if (config !== undefined) {
+        const portPreflight = await deps.checkApiPortAvailable(config.apiPort);
+        if (!portPreflight.ok) {
+          emitEnvelope(
+            {
+              code: 'invalid_invocation',
+              message: deps.apiPortFailureMessage(portPreflight),
+              hint: `Use --config with apiPort or set JINN_API_PORT to a free port before running jinn run.`,
+              exampleCli: 'JINN_API_PORT=7332 jinn run',
+              details: {
+                field: 'apiPort',
+                port: portPreflight.port,
+                reason: portPreflight.code ?? 'unavailable',
+              },
             },
-          },
-          { writer: ctx.writer, exit: ctx.exit },
-        );
-        return;
+            { writer: ctx.writer, exit: ctx.exit },
+          );
+          return;
+        }
       }
       if (!(parsed.values.human as boolean)) {
         routeConsoleToStderr();
