@@ -70,9 +70,28 @@ function loadFleetManifest(path: string): FleetManifest {
   const manifest = readJson<Partial<FleetManifest>>(path, 'fleet manifest');
   if (typeof manifest.windowId !== 'string' || manifest.windowId.length === 0
     || typeof manifest.approvedBy !== 'string' || manifest.approvedBy.length === 0
-    || typeof manifest.startedAt !== 'string'
+    || typeof manifest.startedAt !== 'string' || !Number.isFinite(Date.parse(manifest.startedAt))
+    || (manifest.endedAt !== undefined && manifest.endedAt !== null
+      && (typeof manifest.endedAt !== 'string' || !Number.isFinite(Date.parse(manifest.endedAt))))
     || !Array.isArray(manifest.instances) || manifest.instances.length === 0) {
-    throw new CollectorSetupError(`fleet manifest is missing required fields: ${path}`);
+    // The pure library (hasCoverageGap) already fails closed on a malformed startedAt/endedAt
+    // regardless of caller — this is a setup-time error for a human-authored manifest so a typo
+    // (e.g. a swapped month) surfaces immediately rather than as a silently-incomplete window.
+    throw new CollectorSetupError(`fleet manifest is missing required fields or has an unparseable date: ${path}`);
+  }
+  // Duplicate instanceIds collapse in the pure library (appendDailyObservation merges them
+  // conservatively — see mergeDuplicateFetches), but a copy-pasted manifest entry is a setup
+  // mistake the operator should see immediately, not something silently absorbed every run.
+  const seen = new Set<string>();
+  const duplicated = new Set<string>();
+  for (const instance of manifest.instances) {
+    if (seen.has(instance.instanceId)) duplicated.add(instance.instanceId);
+    seen.add(instance.instanceId);
+  }
+  if (duplicated.size > 0) {
+    throw new CollectorSetupError(
+      `fleet manifest has duplicate instanceId(s): ${[...duplicated].join(', ')} in ${path}`,
+    );
   }
   return manifest as FleetManifest;
 }

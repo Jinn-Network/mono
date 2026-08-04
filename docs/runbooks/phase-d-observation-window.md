@@ -111,6 +111,13 @@ in `src/monitoring/phase-d-observation-window.ts`; ~3x native's 5-minute snapsho
 A `http-status` legacy instance doesn't need this check — a dead process simply refuses the
 connection, which already fails closed.
 
+The freshness check also fails closed on `generatedAt` being **ahead of** the collection time —
+even by a single second — not just stale in the ordinary sense. This is deliberate (a clock
+running ahead is just as untrustworthy as a frozen file) but it has an accepted false-negative
+cost: an instance whose clock genuinely runs fast relative to the collector's cannot go
+`complete`, ever, until the clock is fixed. If a native instance never clears `complete: false`
+despite a healthy, ticking snapshot loop, check its clock before assuming the collector is wrong.
+
 ## Window coverage
 
 `zeroUse` is never `true` while `endedAt` is `null`, and never `true` unless every instance's
@@ -119,6 +126,14 @@ lucky collector run against a freshly-added instance is not evidence for a multi
 receipt has to show the collector actually watched the whole span. Close the window (set `endedAt`
 in the fleet manifest) only once collection has run daily across the whole approved period.
 
+The coverage gate also refuses a degenerate window outright — `startedAt`/`endedAt`/a snapshot's
+collection timestamp that fails to parse, a zero-length window (`startedAt === endedAt`), an
+inverted one (`endedAt` before `startedAt`), or one shorter than one day (the collector's cadence)
+— regardless of how clean the collected snapshots otherwise look. `loadFleetManifest` also
+validates `startedAt`/`endedAt` parse to real dates at load time, so a human typo (a swapped month,
+transposed digits) surfaces as an immediate setup error rather than a receipt that silently never
+covers.
+
 ## Population integrity
 
 An instance that has ever appeared in the receipt's history stays represented in every later run,
@@ -126,6 +141,12 @@ even after it drops out of the fleet manifest (a legacy host decommissioned mid-
 example). It is carried forward as a missing observation, which invalidates its completeness —
 shrinking the fleet never improves the verdict. To genuinely retire an instance's history, start a
 new window (a new `windowId`); do not repoint an old receipt at a shorter instance list.
+
+`loadFleetManifest` also rejects a fleet manifest with a duplicate `instanceId` (a copy-pasted
+entry) as a setup error — fix the manifest rather than relying on it working anyway. The
+underlying merge the library falls back to for a duplicate that does reach it (defense in depth,
+not the primary path) is conservative: it keeps the highest count per signal across the
+duplicates and never trusts a merge whose entries disagree about `observationWindowStartedAt`.
 
 ## Running it
 
