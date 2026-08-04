@@ -94,7 +94,8 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ## Repository Structure
 
 ```
-jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
+                 read-only reference (IMPORTANT: see below)
 
 client/          TypeScript daemon — the main runnable component
   src/
@@ -165,7 +166,7 @@ docs/            Design specs and implementation plans
 
 ## jinn-cli-agents Reference
 
-**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
 
 - `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
 - `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
