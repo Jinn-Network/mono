@@ -170,6 +170,48 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
     }
   });
 
+  // D0a round-2 minor: renewal was silently best-effort -- `renew.run(...)` matching zero rows
+  // (exactly what happens once another process has legitimately stolen the row after this
+  // holder's lease genuinely expired) was indistinguishable from success at the call site, so the
+  // holder kept executing its critical section as if it still had exclusion. This proves the
+  // fencing check: once another holder steals the row, this holder's NEXT renewal tick surfaces
+  // the loss by rejecting its `withSender` call rather than letting it run to a false "success".
+  test("a stolen lease is detected on the next renewal tick and the critical section is signaled to abort", async () => {
+    const otherState = openVenueState(dbPath);
+    try {
+      // A's frozen `now` never advances, so its own lease's expiry is a fixed point in the past
+      // relative to B's frozen `now` -- B's very first acquire attempt steals the row deterministically,
+      // with no dependence on real wall-clock elapsed time.
+      const lockA = createBroadcastLock(state, { holderId: "holder-a", leaseMs: 20, now: () => 0 });
+      const lockB = createBroadcastLock(otherState, {
+        holderId: "holder-b",
+        leaseMs: 20,
+        now: () => 1_000_000,
+      });
+
+      let aBodyEntered = false;
+      const first = lockA.withSender(84532, SENDER, async () => {
+        aBodyEntered = true;
+        // Never resolves on its own -- only the lease-loss signal can end this call.
+        await new Promise(() => {});
+      });
+      // Observed via the assertion below; this just prevents an unhandled-rejection warning if
+      // the interpreter notices the rejection before the `expect(...).rejects` attaches.
+      first.catch(() => undefined);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(aBodyEntered).toBe(true);
+
+      await lockB.withSender(84532, SENDER, async () => {
+        // No-op: entering this body at all proves the steal succeeded.
+      });
+
+      await expect(first).rejects.toThrow(/lease .* was lost to another holder/i);
+    } finally {
+      otherState.close();
+    }
+  });
+
   test("an expired lease is stealable so a crashed holder never wedges the sender", async () => {
     let now = 1_000;
     const lock = createBroadcastLock(state, {

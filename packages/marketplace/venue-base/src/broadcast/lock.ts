@@ -72,15 +72,22 @@ export function createBroadcastLock(
   // `executeSafeTxBatch` retry/backoff can plausibly exceed it). Renew at
   // half the lease window so there is always a full half-lease of slack
   // before the row would actually go stale.
-  function startRenewal(chainId: number, sender: Address): () => void {
+  //
+  // D0a round-2 minor: a renewal that matches ZERO rows means another holder has already
+  // legitimately stolen this lease (this holder's event loop was blocked, or its host was
+  // suspended, past `leaseMs`) -- fencing-token territory. Report it via `onLost` instead of
+  // silently continuing as if exclusion still held; `withSender` races `fn()` against this signal
+  // so the call surfaces a loud failure rather than a false "success" run without exclusion.
+  function startRenewal(chainId: number, sender: Address, onLost: () => void): () => void {
     const renewIntervalMs = Math.max(1, Math.floor(leaseMs / 2));
     const timer = setInterval(() => {
-      renew.run({
+      const result = renew.run({
         chainId,
         sender: sender.toLowerCase(),
         holder: holderId,
         expiresAtMs: now() + leaseMs,
       });
+      if (result.changes === 0) onLost();
     }, renewIntervalMs);
     // Never keep the process alive solely to renew a lease.
     if (typeof timer === "object" && "unref" in timer) timer.unref();
@@ -97,9 +104,25 @@ export function createBroadcastLock(
       await prior.catch(() => undefined);
       try {
         await acquireLease(chainId, sender);
-        const stopRenewal = startRenewal(chainId, sender);
+        let lost = false;
+        let rejectOnLost!: (err: Error) => void;
+        const leaseLost = new Promise<never>((_resolve, reject) => { rejectOnLost = reject; });
+        const stopRenewal = startRenewal(chainId, sender, () => {
+          if (lost) return;
+          lost = true;
+          rejectOnLost(new Error(
+            `BroadcastLock: lease for "${chainId}:${sender.toLowerCase()}" was lost to another `
+            + "holder mid-critical-section (a renewal matched zero rows) -- aborting rather than "
+            + "continuing without exclusion.",
+          ));
+        });
         try {
-          return await fn();
+          const fnResult = fn();
+          // Attaching a handler marks `fnResult` as handled for Node's unhandled-rejection
+          // detection even when `leaseLost` wins the race below and `fnResult` later rejects
+          // unobserved otherwise.
+          fnResult.catch(() => undefined);
+          return await Promise.race([fnResult, leaseLost]);
         } finally {
           stopRenewal();
           release.run(chainId, sender.toLowerCase(), holderId);

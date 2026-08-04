@@ -12,6 +12,14 @@
  * share one simulated on-chain nonce counter, and asserts the fix -- pinning + recording through
  * `withNonceLedger` -- gives them distinct, contiguous nonces with zero "nonce too low"
  * collisions.
+ *
+ * Round-1 minor 7: this file targets `executeSafeTxBatch`'s CURRENT (post-03cc33078) 3-arg
+ * signature -- `({ safe, signerAddress }, transactions, options)` -- so it cannot literally be the
+ * artifact that produced the claimed pre-fix RED run; before 03cc33078 the signature was the
+ * 2-arg `executeSafeTxBatch(safe: SafeInstance, transactions: MetaTransactionData[])` (see
+ * f0a092867), which does not compile against the calls below. The assertions here (contiguous
+ * `[10, 11]`, zero `nonceTooLowCount()`, a real macrotask gap) remain the correct regression
+ * coverage for the fix itself.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { executeSafeTxBatch, type SafeInstance } from '../../src/earning/safe-adapter.js';
