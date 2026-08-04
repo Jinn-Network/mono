@@ -577,6 +577,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // via the `latestVersion` getter threaded into the ApiServer status config.
   const latestVersionHolder: { current: string | null } = { current: null };
 
+  // #2405 (spec §4.1 intent-module law): `POST /api/admin/claim-rewards` is a
+  // thin front-end over `claimRewardsIntent`, built from the daemon's OWN
+  // signer/client objects — never re-derived from the keystore, never routed
+  // through the CLI module. Those objects (`publicClient`, `masterWallet`,
+  // `earningStore`) aren't constructed until after bootstrap completes, well
+  // after `startApiServer` registers the route (same eager-register /
+  // late-populate holder pattern as `joinApplierHolder` above).
+  const claimRewardsRouteHolder: {
+    current: import('./api/admin-endpoint.js').ClaimRewardsRouteContext | undefined;
+  } = { current: undefined };
+
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -623,6 +634,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               await closeCaptureReceiver();
             },
           }),
+        claimRewards: { holder: claimRewardsRouteHolder },
       },
       harnessStatus: {
         getStatus: async () => {
@@ -1325,6 +1337,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
+
+  // #2405: populate the claim-rewards route holder now that the daemon's own
+  // signer/client objects exist — reuses `sharedStore` (already open for the
+  // daemon's lifetime) rather than opening a second handle onto the same
+  // SQLite file the way a fresh CLI process would.
+  claimRewardsRouteHolder.current = {
+    publicClient,
+    masterWallet,
+    fleetStore: earningStore,
+    chain: NETWORK_CHAIN,
+    distributorAddress: CHAIN_CONFIG.distributorAddress,
+    jinnStore: sharedStore,
+  };
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
