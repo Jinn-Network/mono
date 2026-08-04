@@ -1573,9 +1573,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2818,
+      "discoveredFirstPartySurfaces": 2822,
       "generatedOutputSources": 1294,
-      "generatorSources": 569,
+      "generatorSources": 571,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -4104,6 +4104,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/generate-openapi.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/harvest-e2e-live-verify.ts"
       },
       {
@@ -6455,6 +6465,16 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/client-golden-envelope/regen-golden-envelope.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/contract-browser-safety.test.ts"
       },
       {
         "categories": [
@@ -13793,6 +13813,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/release/tier-1/T1.3-contract-conformance.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/release/tier-1/T1.3-contract-conformance.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/release/tier-2"
       },
       {
@@ -14176,6 +14216,17 @@
           "@ritsukai"
         ],
         "path": "client/test/scripts/external-consumer-acceptance.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/scripts/generate-openapi.test.ts"
       },
       {
         "categories": [
