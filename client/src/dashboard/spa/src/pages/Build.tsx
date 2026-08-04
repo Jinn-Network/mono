@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useState, type JSX } from 'react';
 import { api } from '../api/client.js';
-import type { BootstrapState } from '../api/types.js';
+import type { BootstrapState } from '../../../../api/contract/index.js';
 import { Separator } from '../components/ui/separator.js';
 import { IntroCard } from './build/IntroCard.js';
 import { ShapeCatalogue } from './build/ShapeCatalogue.js';

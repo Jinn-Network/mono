@@ -6,7 +6,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { EventDetailPage } from './EventDetail.js';
 import { api } from '../api/client.js';
 import { EVENT_KIND_META, LIFECYCLE_KINDS } from '../lib/event-kinds.js';
-import type { ActivityEventRow } from '../api/types.js';
+import type { ActivityEventRow } from '../../../../api/contract/index.js';
 
 vi.mock('../api/client.js', () => ({
   api: {

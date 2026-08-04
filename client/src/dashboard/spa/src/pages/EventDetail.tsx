@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'wouter';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import { api } from '../api/client.js';
-import type { ActivityEventRow, BootstrapState } from '../api/types.js';
+import type { ActivityEventRow, BootstrapState } from '../../../../api/contract/index.js';
 import { eventKindBadgeVariant, eventKindMeta } from '../lib/event-kinds.js';
 import {
   Card,

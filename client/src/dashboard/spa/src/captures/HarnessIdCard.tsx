@@ -1,4 +1,4 @@
-import type { CaptureSummary } from '../api/types.js';
+import type { CaptureSummary } from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 
