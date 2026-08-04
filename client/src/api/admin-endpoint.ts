@@ -8,8 +8,7 @@
  * and loop pause/resume (stubbed — returns not_implemented).
  */
 import type { Hono } from 'hono';
-import type { CommandContext, CommandModule } from '../cli/command.js';
-import claimRewardsCommand from '../cli/commands/claim-rewards.js';
+import { claimRewardsIntent, type ClaimRewardsIntentInput } from '../intents/claim-rewards.js';
 
 export interface AdminRestartOptions {
   /**
@@ -21,40 +20,32 @@ export interface AdminRestartOptions {
   forceRespawn?: boolean;
 }
 
+/**
+ * Deps the claim-rewards intent module (`intents/claim-rewards.ts`) needs,
+ * minus `strict` (the route always claims strictly, same as the CLI) and
+ * `source` (the route always supplies the literal `'admin-route'`).
+ */
+export type ClaimRewardsRouteContext = Omit<ClaimRewardsIntentInput, 'strict' | 'source'>;
+
 export interface AdminEndpointConfig {
   onRestartRequested: (opts: AdminRestartOptions) => void;
   onStopRequested: () => void;
-}
-
-async function runCommandJson(
-  command: CommandModule,
-  argv: string[],
-  env: NodeJS.ProcessEnv,
-): Promise<{ body: unknown; exitCode: number | null; raw: string }> {
-  const chunks: string[] = [];
-  let exitCode: number | null = null;
-  const writer = {
-    write(s: string): boolean {
-      chunks.push(s);
-      return true;
-    },
-  };
-  const ctx: CommandContext = {
-    argv,
-    stdoutIsTty: false,
-    writer,
-    exit: (code) => { exitCode = code; },
-    env,
-  };
-  await command.run(ctx);
-  const raw = chunks.join('');
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    body = { ok: false, error: 'invalid_command_json', raw };
-  }
-  return { body, exitCode, raw };
+  /**
+   * §4.1 intent-module law: `POST /api/admin/claim-rewards` is a thin
+   * front-end over `claimRewardsIntent` — it builds its signer context from
+   * the daemon's OWN already-constructed wallet/client objects (never from
+   * the keystore, never through the CLI module) and never runs the CLI's
+   * daemon-guard (that guard exists only to stop a standalone CLI process
+   * racing this same daemon; a route running inside the daemon has nothing
+   * to guard against).
+   *
+   * A holder ref because those signer/client objects are built post-bootstrap
+   * in main.ts, after this config is constructed (routes register eagerly at
+   * server start — Hono freezes its matcher, so routes can't be added later;
+   * see the `solverNetsLauncher` / `harnessReadiness` holders for the same
+   * pattern). `current` is `undefined` until bootstrap completes.
+   */
+  claimRewards: { holder: { current: ClaimRewardsRouteContext | undefined } };
 }
 
 export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
@@ -92,17 +83,19 @@ export function addAdminRoutes(app: Hono, cfg: AdminEndpointConfig): void {
   });
 
   app.post('/api/admin/claim-rewards', async (c) => {
-    try {
-      const result = await runCommandJson(claimRewardsCommand, ['--yes', '--json'], process.env);
-      const ok = result.exitCode === null || result.exitCode === 0;
+    const routeCtx = cfg.claimRewards.holder.current;
+    if (!routeCtx) {
       return c.json(
         {
-          ok,
-          result: result.body,
-          exitCode: result.exitCode,
+          ok: false,
+          error: 'Daemon has not finished bootstrap yet; reward-claim signer context is not ready.',
         },
-        ok ? 200 : 500,
+        503,
       );
+    }
+    try {
+      const result = await claimRewardsIntent({ ...routeCtx, strict: true, source: 'admin-route' });
+      return c.json({ ok: true, result }, 200);
     } catch (err) {
       return c.json(
         {

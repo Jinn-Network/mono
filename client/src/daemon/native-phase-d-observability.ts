@@ -19,16 +19,19 @@
  *      surface of that invariant for no durability benefit over a file.
  */
 
-import { join, dirname } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { z } from 'zod';
 
 import { buildInfo } from '../build-info.js';
 import {
   configurePhaseDTransitionUsage,
   phaseDTransitionUsageDiagnostics,
+  phaseDTransitionUsageDiagnosticsSchema,
   recordPhaseDTransitionUse,
   type PhaseDTransitionUsageDiagnostics,
 } from '../compatibility/phase-d-transition-usage.js';
+import { writeObservation } from '../observability/write-observation.js';
 import type { OperatorVerticalDecision } from './native-vertical-mode.js';
 import type { NativeOperatorHealth } from './native-operator-host.js';
 import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
@@ -73,18 +76,58 @@ export interface NativeStatusSnapshot {
   readonly phaseDTransitionUsage: PhaseDTransitionUsageDiagnostics;
 }
 
-function persistDurable(path: string, contents: string): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    // Mode 0600: the snapshot carries roleKeyIds (identifiers, e.g. did:key:..., never private key
-    // material) and an executableDigest, and is meant to be mounted/shipped off-host by the deploy
-    // platform — restrict it like every other durable secret-adjacent file in this repo.
-    writeFileSync(temporaryPath, contents, { flag: 'wx', mode: 0o600 });
-    renameSync(temporaryPath, path);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+// Versioned-Zod-strict container profile (spec §7). Mirrors the `NativeOperatorHealth` interface
+// (`native-operator-host.ts`) field-for-field rather than importing it as a schema — that
+// interface is TS-only (no runtime Zod counterpart), and this module's own extractability (issue
+// #2409: no daemon/api/cli imports on the write path beyond what it already needs) argues against
+// growing a new coupling just to share a schema object. z.strictObject (not z.object, which
+// silently strips unrecognized keys) at every level, including the nested `venue` object, so a
+// future field added to either interface without a matching schema update throws at write time
+// instead of silently vanishing from the durable file (N2).
+const nativeOperatorHealthSchema = z.strictObject({
+  mode: z.literal('native-v1'),
+  role: z.enum(['requester', 'solver', 'evaluator']),
+  roleKeyIds: z.record(z.string(), z.string()),
+  sourceLag: z.number(),
+  sourceLagBySource: z.record(z.string(), z.number()),
+  leaseOwned: z.boolean(),
+  venue: z.strictObject({
+    canonicalBlock: z.string(),
+    finalizedBlock: z.string(),
+    caughtUp: z.boolean(),
+  }),
+  backendReady: z.boolean(),
+  backendRequired: z.boolean(),
+  executableDigest: z.string().optional(),
+  evidenceReady: z.boolean(),
+  evidenceRequired: z.boolean(),
+  publicSourceReady: z.boolean(),
+  uncertainOperations: z.number(),
+  nativeFallbackCount: z.literal(0),
+});
+
+// Exported directly for unit testing (matching writeNativeStatusSnapshot's own convention below).
+export const nativeStatusSnapshotSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  kind: z.literal('jinn.native-operator-status-snapshot'),
+  generatedAt: z.string().min(1),
+  effectiveMode: z.enum(['legacy', 'native-v1']),
+  implVersion: z.string(),
+  reportedSourceSha: z.string(),
+  role: z.enum(['requester', 'solver', 'evaluator']),
+  readiness: z.enum([
+    'explicit-legacy', 'explicit-native-unvalidated', 'live-closure-missing', 'live-closure-validated',
+  ]),
+  health: nativeOperatorHealthSchema,
+  phaseDTransitionUsage: phaseDTransitionUsageDiagnosticsSchema,
+});
+
+function persistDurable(path: string, snapshot: NativeStatusSnapshot): void {
+  // Mode 0600 (writeObservation's default): the snapshot carries roleKeyIds (identifiers, e.g.
+  // did:key:..., never private key material) and an executableDigest, and is meant to be
+  // mounted/shipped off-host by the deploy platform — restrict it like every other durable
+  // secret-adjacent file in this repo.
+  writeObservation(path, nativeStatusSnapshotSchema, snapshot);
 }
 
 function buildSnapshot(input: {
@@ -119,7 +162,7 @@ export function writeNativeStatusSnapshot(input: {
     health: input.health,
     now: input.now ?? (() => new Date()),
   });
-  persistDurable(input.path, `${JSON.stringify(snapshot, null, 2)}\n`);
+  persistDurable(input.path, snapshot);
   return snapshot;
 }
 

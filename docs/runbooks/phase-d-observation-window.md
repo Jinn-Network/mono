@@ -246,3 +246,8 @@ Set the `*_STATUS_TOKEN` environment variables named by the fleet manifest's `to
 service secrets. The receipt file should live somewhere durable across collector runs (a mounted
 volume, not ephemeral container storage) — losing it mid-window discards the snapshot history
 collected so far and restarts completeness from scratch.
+
+The receipt lands mode `0600` (Class O container profile — issue #2409), owner-read/write only.
+A reader running as a different uid than the collector (a separate cron job, a manual `cat` from
+another service account) needs to either run as the same uid or read a copy made by something
+with permission to do so — the collector will not widen the mode to accommodate a second reader.
