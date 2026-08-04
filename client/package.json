@@ -146,6 +146,7 @@
     "attribution:export-facts": "tsx scripts/export-attribution-facts.ts",
     "audit:failures": "tsx scripts/audit-task-run-failures.ts",
     "net-liveness": "tsx scripts/net-liveness-probe.ts",
+    "phase-d-observe": "tsx scripts/phase-d-observation-collector.ts",
     "cleanup:engine-work": "tsx scripts/cleanup-engine-work.ts",
     "e2e": "tsx test/e2e/validate.ts",
     "e2e:task-first-local": "tsx test/e2e/task-first-local.ts",

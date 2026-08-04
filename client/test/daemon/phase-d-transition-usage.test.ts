@@ -25,6 +25,19 @@ describe('Phase D transition usage diagnostics', () => {
     });
   });
 
+  it('records the native-operator-composition signal as positive native-presence evidence (#2380)', () => {
+    const signal = 'native-operator-composition' as const;
+    const before = phaseDTransitionUsageSnapshot().find((row) => row.signal === signal);
+    recordPhaseDTransitionUse(signal, new Date('2026-08-04T00:00:00.000Z'));
+    const row = phaseDTransitionUsageSnapshot().find((value) => value.signal === signal);
+    expect(row).toEqual({
+      signal,
+      count: (before?.count ?? 0) + 1,
+      firstObservedAt: before?.firstObservedAt ?? '2026-08-04T00:00:00.000Z',
+      lastObservedAt: '2026-08-04T00:00:00.000Z',
+    });
+  });
+
   it('persists the observation window and counters across a process-style reload', () => {
     const directory = mkdtempSync(join(tmpdir(), 'jinn-phase-d-usage-'));
     const path = join(directory, 'usage.v1.json');
