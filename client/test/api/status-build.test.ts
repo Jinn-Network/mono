@@ -102,6 +102,25 @@ describe('assembleStatusV1', () => {
     expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual(raw.phaseDTransitionUsage);
   });
 
+  it('carries effectiveMode from the resolver, defaulting to legacy when absent (#2380)', () => {
+    const base: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    expect(assembleStatusV1(base).effectiveMode).toBe('legacy');
+    expect(assembleStatusV1({ ...base, effectiveMode: 'native-v1' }).effectiveMode).toBe('native-v1');
+  });
+
   it('reports zero runway excess when balance is already below minimum', () => {
     const raw: GatheredStatusRaw = {
       shutdownState: 'running',

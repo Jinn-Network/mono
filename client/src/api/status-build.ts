@@ -22,6 +22,7 @@ import {
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
 import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
+import type { OperatorVerticalMode } from '../daemon/native-vertical-mode.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 
@@ -156,6 +157,14 @@ export interface GatheredStatusRaw {
   daemonStartedAt?: string | null;
   /** Durable Phase D compatibility-use counters exposed for an external observation window. */
   phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
+  /**
+   * The daemon's resolved product mode (#2380), threaded from `main.ts`'s call to
+   * `resolveConfiguredOperatorVerticalMode` — never re-derived here. Absent ⇒ `assembleStatusV1`
+   * defaults to `'legacy'`, matching the fact that `GET /v1/status` only exists on the legacy
+   * entry point (native has no API server; see `native-phase-d-observability.ts`'s durable
+   * snapshot for its equivalent).
+   */
+  effectiveMode?: OperatorVerticalMode;
   /**
    * Resolved ISO mtime of the keystore-password file, or `null` when the
    * password is env-sourced or the file is missing/unreadable. Computed at
@@ -394,6 +403,9 @@ export interface StatusV1Response {
   configMigration?: ConfigMigrationStatus;
   /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates. */
   phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
+  /** The daemon's resolved product mode (#2380) — see `GatheredStatusRaw.effectiveMode`. Always
+   *  present; defaults to `'legacy'` when the gatherer didn't thread a value. */
+  effectiveMode: OperatorVerticalMode;
 }
 
 /**
@@ -618,6 +630,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
   return {
     statusMode: mode,
     version: raw.version ?? buildInfo.implVersion,
+    effectiveMode: raw.effectiveMode ?? 'legacy',
     latestVersion: raw.latestVersion ?? null,
     daemon: {
       shutdownState: raw.shutdownState,

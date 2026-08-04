@@ -499,6 +499,32 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('threads effectiveMode from the resolved decision, defaulting to legacy when absent (#2380)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      const withoutMode = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+      });
+      expect(withoutMode.effectiveMode).toBe('legacy');
+
+      const withMode = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-test-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        effectiveMode: 'native-v1',
+      });
+      expect(withMode.effectiveMode).toBe('native-v1');
+    });
+  });
+
   it('threads status.harness from the harnessReadiness getter when supplied', async () => {
     mockStatusRpc();
     const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
