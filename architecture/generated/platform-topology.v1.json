@@ -1506,7 +1506,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2702,
+      "discoveredFirstPartySurfaces": 2704,
       "generatedOutputSources": 1224,
       "generatorSources": 551,
       "marketplaceControl": 2,
@@ -6773,6 +6773,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/evidence.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/fleet-retire.test.ts"
       },
       {
@@ -7034,6 +7044,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/commands/tasks-observe-autopilot.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/commands/tasks-watch.test.ts"
       },
       {
         "categories": [
