@@ -15,13 +15,20 @@ import { dirname } from 'node:path';
  * change a claim decision, or permit deletion. Phase D still requires the manifest's external
  * observation window and exact closure evidence. Production configures a file beside the daemon
  * database, and `/v1/status` exposes the snapshot for collection by the operator control plane.
+ *
+ * `native-operator-composition` (#2380) is the one exception to the "legacy deletion gate"
+ * framing above: it is positive evidence that a native-v1 instance is up, recorded once per boot
+ * at `client/src/daemon/native-phase-d-observability.ts`. Native mode has no `/v1/status`, so its
+ * durable file lives under the operator's `stateDir` instead and is shipped by the periodic
+ * status-snapshot loop (see that module) rather than an HTTP GET.
  */
 export type PhaseDTransitionSignal =
   | 'legacy-operator-composition'
   | 'marketplace-pipeline-invocation'
   | 'legacy-task-submission-synthesis'
   | 'legacy-evaluator-delivery-watcher-loaded'
-  | 'legacy-wiring-config-field';
+  | 'legacy-wiring-config-field'
+  | 'native-operator-composition';
 
 export interface PhaseDTransitionUsageCounter {
   readonly signal: PhaseDTransitionSignal;

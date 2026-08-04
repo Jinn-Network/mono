@@ -492,7 +492,16 @@ Dispatching a cell is an ordinary TEP Submission of the item's Task:
   attributable to no arm.
 - `deadline` from `cellWindow` clipped to `closeAt` (§7.1); `attempts` per
   the binding's supported bounds (local backend v1: `1..1`; marketplace: as
-  bound by the binding).
+  bound by the binding). *(Amended 2026-08-04: a Run's close boundary is
+  evaluated against a **caller-supplied instant only**. `LaunchOptions.clock`
+  is required, and `launchAndWatch` / `resumeRun` no longer fall back to
+  wall-clock when it is absent; the deprecated epoch-ms `now` field is
+  removed. The removed fallback made every call site that omitted a clock a
+  dormant time bomb — it read real time against a fixture's absolute
+  `closeAt`, so a suite that passed for months went red on a date rather than
+  on a change. Requiredness moves that failure from a wall-clock date to
+  compile time. A host that genuinely wants real time passes the exported
+  `systemClock`, which makes the choice visible in the diff.)*
 - Evaluation-requirements per `policy.evaluation`, backend-conditional
   (§7.1).
 - Namespaced extension block (opaque to core, defined by this spec):
