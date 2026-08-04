@@ -130,6 +130,7 @@
     "release:tier-1": "tsx scripts/release/run-tier-1.ts",
     "release:tier-1:T1.1": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts",
     "release:tier-1:T1.2": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.2-harness-readiness-contract.test.ts",
+    "release:tier-1:T1.3": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.3-contract-conformance.test.ts",
     "release:tier-1:T1.4": "playwright test --config=playwright.config.ts test/dashboard/release-prep/spa-route-smoke.e2e.test.ts",
     "release:tier-2": "tsx scripts/release/run-tier-2.ts",
     "release:tier-2:T2.2": "vitest run test/release/tier-2/T2.2-producer-evaluator.test.ts",
