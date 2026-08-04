@@ -40,7 +40,7 @@ import {
   type PublicClient,
 } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
-import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts, AutopilotDeliveryRole, AutopilotDeliveryCandidateLookup } from './types.js';
+import type { DiscoveryAPI, ClaimableTaskCandidate, InstanceClaimCount, TaskStatusSnapshot, VerdictTallyResult, TaskLifecycleEvidence, SolverNetManifestSummary, SolverNetLifecycleStatus, PluginPublication, PluginScoreHistoryRow, PublishedArtifact, CodeDigestRewardRow, TaskPostCounts, AutopilotDeliveryRole, AutopilotDeliveryCandidateLookup } from './types.js';
 import { DiscoveryUnavailableError, TASK_POST_WINDOW_BLOCKS, bucketTaskPostCounts } from './types.js';
 import type { EnvelopeRef, CorpusQuery } from '../corpus/types.js';
 import { runOnchainCorpusQuery, DEFAULT_EXECUTION_DISCOVERY_FROM_BLOCK } from '../corpus/onchain-query.js';
@@ -49,9 +49,16 @@ import { JINN_ROUTER_ADDRESSES, IDENTITY_REGISTRY_ADDRESSES } from '../contracts
 import {
   canClaimTask,
   ROUTER_TASK_ATTEMPT_CREATED_EVENT,
+  ROUTER_TASK_BUDGET_REFUNDED_EVENT,
   ROUTER_TASK_CREATED_EVENT,
+  ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT,
 } from '../adapters/mech/contracts.js';
 import { manifestDigestForCid } from '../adapters/mech/digest.js';
+import {
+  applyTaskLifecycleTerminals,
+  assembleTaskLifecycleEvidence,
+} from './task-lifecycle-evidence.js';
+import type { RawAttemptRow, RawTaskRow, RawVerdictRow } from './task-lifecycle-evidence.js';
 import { resolveMostRecentWins, type SetMetadataEvent, type SetMetadataLifecyclePayload } from '../solvernets/most-recent-wins.js';
 import { isRateLimitedEthReadError, withTransientEthReadRetry } from '../chain-read-errors.js';
 import { PLUGIN_PAYLOAD_TUPLE, REVOCATION_PAYLOAD_TUPLE } from '../erc8004/abis.js';
@@ -1371,6 +1378,305 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     return new Map();
   }
 
+  // ── getTaskLifecycleEvidence (#2044) ───────────────────────────────────────
+  // Reconstruct the authoritative task→attempt→verdict spine from router logs.
+  // Candidates are always empty on the floor (no IPFS enrichment). Scans are
+  // hard-capped at MAX_OPERATOR_COUNT_TASK_PAGES chunks; if the range would
+  // exceed the cap the whole call returns empty (absence > partial lie).
+  async function getTaskLifecycleEvidence(args: {
+    taskIds: string[];
+  }): Promise<Map<string, TaskLifecycleEvidence>> {
+    if (args.taskIds.length === 0) return new Map();
+    if (!routerAddress) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI: no routerAddress configured for chainId=${opts.chainId}`,
+      );
+    }
+
+    const requested = new Set(args.taskIds.filter(Boolean));
+    if (requested.size === 0) return new Map();
+
+    const client = getClient();
+    let currentBlock: bigint;
+    try {
+      currentBlock = await client.getBlockNumber();
+    } catch (err) {
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: failed to get block number`,
+        err,
+      );
+    }
+
+    const fromBlock = resolveScanFromBlock(opts, currentBlock);
+    // Pre-check truncation: if the floor→head range needs more than the hard
+    // chunk cap, omit everything rather than return a partial spine.
+    {
+      const span = chunk + 1n;
+      const range = currentBlock >= fromBlock ? currentBlock - fromBlock + 1n : 0n;
+      const needed = range === 0n ? 0n : (range + span - 1n) / span;
+      if (needed > BigInt(MAX_OPERATOR_COUNT_TASK_PAGES)) {
+        return new Map();
+      }
+    }
+
+    type DecodedTask = RawTaskRow;
+    type DecodedAttempt = RawAttemptRow;
+    type DecodedVerdict = RawVerdictRow;
+
+    let tasks: DecodedTask[];
+    try {
+      const lists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            event: ROUTER_TASK_CREATED_EVENT,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: DecodedTask[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskCreated') continue;
+              const evArgs = event.args as {
+                creator: Address;
+                taskId: bigint;
+                manifestDigest: Hex;
+                taskCidDigest: Hex;
+                maxClaims: number;
+              };
+              const taskId = String(evArgs.taskId);
+              if (!requested.has(taskId)) continue;
+              const createdAtBlock = log.blockNumber != null ? Number(log.blockNumber) : NaN;
+              if (!Number.isFinite(createdAtBlock)) continue;
+              const row: DecodedTask = {
+                taskId,
+                chainId: opts.chainId,
+                manifestDigest: evArgs.manifestDigest.toLowerCase() as `0x${string}`,
+                taskCidDigest: evArgs.taskCidDigest.toLowerCase() as `0x${string}`,
+                creator: evArgs.creator.toLowerCase() as `0x${string}`,
+                maxClaims: Number(evArgs.maxClaims),
+                // Tokenless JinnRouterV3 finalizes on the first delivered
+                // verdict; requiredVerdicts is not present in TaskCreated.
+                requiredVerdicts: 1,
+                createdAtBlock,
+                finalized: false,
+                refunded: false,
+              };
+              if (log.transactionHash) {
+                row.createdAtTx = log.transactionHash.toLowerCase() as `0x${string}`;
+              }
+              decoded.push(row);
+            } catch {
+              // Not a TaskCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+      tasks = lists;
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for TaskCreated failed`,
+        err,
+      );
+    }
+
+    if (tasks.length === 0) return new Map();
+    const knownTaskIds = new Set(tasks.map((t) => t.taskId));
+
+    let attempts: DecodedAttempt[];
+    try {
+      const lists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            event: ROUTER_TASK_ATTEMPT_CREATED_EVENT,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: DecodedAttempt[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskAttemptCreated') continue;
+              const evArgs = event.args as {
+                taskId: bigint;
+                attemptIndex: number;
+                requestId: Hex;
+                operator: Address;
+                priorityMech: Address;
+                deliveryRate: bigint;
+              };
+              const taskId = String(evArgs.taskId);
+              if (!knownTaskIds.has(taskId)) continue;
+              const createdAtBlock = log.blockNumber != null ? Number(log.blockNumber) : NaN;
+              if (!Number.isFinite(createdAtBlock)) continue;
+              decoded.push({
+                taskId,
+                chainId: opts.chainId,
+                attemptIndex: Number(evArgs.attemptIndex),
+                requestId: evArgs.requestId.toLowerCase() as `0x${string}`,
+                operator: evArgs.operator.toLowerCase() as `0x${string}`,
+                priorityMech: evArgs.priorityMech.toLowerCase() as `0x${string}`,
+                deliveryRate: String(evArgs.deliveryRate),
+                createdAtBlock,
+              });
+            } catch {
+              // Not a TaskAttemptCreated event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+      attempts = lists;
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for TaskAttemptCreated failed`,
+        err,
+      );
+    }
+
+    let verdicts: DecodedVerdict[];
+    try {
+      const lists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            event: ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: DecodedVerdict[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'VerdictDeliveryClaimed') continue;
+              const evArgs = event.args as {
+                evaluator: Address;
+                requestId: Hex;
+                taskId: bigint;
+                attemptIndex: number;
+                verdictIndex: number;
+                verdictCode: number;
+              };
+              const taskId = String(evArgs.taskId);
+              if (!knownTaskIds.has(taskId)) continue;
+              const createdAtBlock = log.blockNumber != null ? Number(log.blockNumber) : NaN;
+              if (!Number.isFinite(createdAtBlock)) continue;
+              decoded.push({
+                taskId,
+                chainId: opts.chainId,
+                attemptIndex: Number(evArgs.attemptIndex),
+                verdictIndex: Number(evArgs.verdictIndex),
+                requestId: evArgs.requestId.toLowerCase() as `0x${string}`,
+                evaluator: evArgs.evaluator.toLowerCase() as `0x${string}`,
+                verdictCode: Number(evArgs.verdictCode),
+                createdAtBlock,
+              });
+            } catch {
+              // Not a VerdictDeliveryClaimed event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+      verdicts = lists;
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for VerdictDeliveryClaimed failed`,
+        err,
+      );
+    }
+
+    let refundedTaskIds: Set<string>;
+    try {
+      const lists = await scanLogsInChunks(
+        async (start, end) => {
+          const logs = await (client as PublicClient).getLogs({
+            address: routerAddress,
+            event: ROUTER_TASK_BUDGET_REFUNDED_EVENT,
+            fromBlock: start,
+            toBlock: end,
+          });
+          const decoded: string[] = [];
+          for (const log of logs) {
+            try {
+              const event = decodeEventLog({
+                abi: JINN_ROUTER_ABI,
+                data: log.data,
+                topics: log.topics,
+              });
+              if (event.eventName !== 'TaskBudgetRefunded') continue;
+              const taskId = String((event.args as { taskId: bigint }).taskId);
+              if (knownTaskIds.has(taskId)) decoded.push(taskId);
+            } catch {
+              // Not a TaskBudgetRefunded event — skip.
+            }
+          }
+          return decoded;
+        },
+        fromBlock,
+        currentBlock,
+        chunk,
+        undefined,
+        MAX_OPERATOR_COUNT_TASK_PAGES,
+      );
+      refundedTaskIds = new Set(lists);
+    } catch (err) {
+      if (err instanceof DiscoveryUnavailableError) throw err;
+      throw new DiscoveryUnavailableError(
+        `OnchainDiscoveryAPI.getTaskLifecycleEvidence: getLogs for TaskBudgetRefunded failed`,
+        err,
+      );
+    }
+
+    applyTaskLifecycleTerminals({
+      tasks,
+      attempts,
+      verdicts,
+      refundedTaskIds,
+    });
+
+    return assembleTaskLifecycleEvidence({
+      tasks,
+      attempts,
+      verdicts,
+      attemptCandidates: [],
+      verdictCandidates: [],
+    });
+  }
+
   // ── getTaskPostCounts (#918) ───────────────────────────────────────────────
   // Windowed count of TaskCreated events (last 1h / 6h / 24h) sourced directly
   // from the JinnRouter logs. Block-window approximation; capped at
@@ -1572,5 +1878,6 @@ export function createOnchainDiscoveryAPI(opts: OnchainDiscoveryAPIOptions): Dis
     getMostRecentTaskCidDigest,
     getTaskStatuses,
     getVerdictTallies,
+    getTaskLifecycleEvidence,
   };
 }

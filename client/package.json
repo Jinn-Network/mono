@@ -245,7 +245,7 @@
     "@jinn-network/record-discovery-protocol": "0.1.0",
     "@jinn-network/record-discovery-serve": "0.1.0",
     "@jinn-network/record-discovery-transport-http": "0.1.0",
-    "@jinn-network/sdk": "0.1.1",
+    "@jinn-network/sdk": "0.2.0",
     "@jinn-network/task-admission": "0.1.0",
     "@jinn-network/task-execution-backend": "0.1.0",
     "@jinn-network/task-execution-backend-local": "0.1.0",

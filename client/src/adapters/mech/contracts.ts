@@ -860,6 +860,14 @@ export const ROUTER_EVALUATION_ATTEMPT_CREATED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'EvaluationAttemptCreated',
 });
+export const ROUTER_VERDICT_DELIVERY_CLAIMED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'VerdictDeliveryClaimed',
+});
+export const ROUTER_TASK_BUDGET_REFUNDED_EVENT = getAbiItem({
+  abi: JINN_ROUTER_ABI,
+  name: 'TaskBudgetRefunded',
+});
 export const ROUTER_SOLUTION_DELIVERY_CLAIMED_EVENT = getAbiItem({
   abi: JINN_ROUTER_ABI,
   name: 'SolutionDeliveryClaimed',

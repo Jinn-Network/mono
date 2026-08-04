@@ -10,6 +10,8 @@ import {
   TaskEngine,
   type TaskEngineOptions,
 } from '../../../src/harnesses/engine/engine.js';
+import { HarnessRegistry } from '../../../src/harnesses/engine/registry.js';
+import { SolverNetRegistry, registerJoinedNet } from '../../../src/solver-nets/registry.js';
 import { TaskRunPersistence } from '../../../src/harnesses/engine/persistence.js';
 import { TaskRunState } from '../../../src/harnesses/engine/state.js';
 import type { Harness, HarnessContext, Solution } from '../../../src/harnesses/types.js';
@@ -164,6 +166,74 @@ describe('engine per-kind implStateDir partitioning', () => {
       expect(persisted?.implStateDir?.endsWith('/default')).toBe(true);
       // Must NOT have a trailing kind directory.
       expect(persisted?.implStateDir).not.toMatch(/\/default\/.+$/);
+    });
+  });
+
+  it('two joined SolverNets sharing a solverType get separate implStateDirs, matching the manifest-pinned Harness (issue #2039)', async () => {
+    await withTempStore(async (store) => {
+      const CID_A = 'bafy-impl-state-dir-a';
+      const CID_B = 'bafy-impl-state-dir-b';
+
+      const implRegistry = new HarnessRegistry();
+      implRegistry.register(makeRecordingImpl('harness-a', 'prediction.v1').impl);
+      implRegistry.register(makeRecordingImpl('harness-b', 'prediction.v1').impl);
+
+      const solverNetRegistry = new SolverNetRegistry();
+      // Registered first, so registry-order (solverType-only) dispatch would
+      // pick this one by default — exactly the bug this test guards against.
+      await registerJoinedNet(solverNetRegistry, CID_A, {
+        manifestCid: CID_A,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'harness-a',
+        plugins: [],
+      });
+      await registerJoinedNet(solverNetRegistry, CID_B, {
+        manifestCid: CID_B,
+        contract: { id: 'prediction', version: 'v1' },
+        roles: ['solver'],
+        harness: 'harness-b',
+        plugins: [],
+      });
+
+      const engine = new TaskEngine({
+        store,
+        paths: { workingDirRoot: join(ROOT, 'work'), implStateDirRoot: join(ROOT, 'impl') },
+        implRegistry,
+        solverNetRegistry,
+      });
+      const persistence = new TaskRunPersistence(store.db);
+
+      const now = Date.now();
+      for (const [requestId, cid] of [['pinned-a', CID_A], ['pinned-b', CID_B]] as const) {
+        await engine.observe(makeIntentInput({
+          requestId,
+          solverType: 'prediction.v1',
+          windowStartTs: now - 1000,
+          windowEndTs: now + 86_400_000,
+          task: {
+            id: requestId,
+            description: 'test',
+            solverType: 'prediction.v1',
+            contractId: 'prediction',
+            contractVersion: 'v1',
+            solverNetManifestCid: cid,
+            role: 'restoration',
+          },
+        }));
+        persistence.transition(requestId, TaskRunState.CLAIMED);
+        persistence.transition(requestId, TaskRunState.WAITING);
+        await engine.process(requestId);
+      }
+
+      const dirA = persistence.getByRequestId('pinned-a')?.implStateDir;
+      const dirB = persistence.getByRequestId('pinned-b')?.implStateDir;
+
+      expect(dirA).not.toBeNull();
+      expect(dirB).not.toBeNull();
+      expect(dirA).not.toBe(dirB);
+      expect(dirA).toContain('/harness-a/');
+      expect(dirB).toContain('/harness-b/');
     });
   });
 });

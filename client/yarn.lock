@@ -1083,7 +1083,7 @@ __metadata:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/record-discovery-serve": "npm:0.1.0"
     "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
-    "@jinn-network/sdk": "npm:0.1.1"
+    "@jinn-network/sdk": "npm:0.2.0"
     "@jinn-network/task-admission": "npm:0.1.0"
     "@jinn-network/task-execution-backend": "npm:0.1.0"
     "@jinn-network/task-execution-backend-local": "npm:0.1.0"

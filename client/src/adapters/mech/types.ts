@@ -403,6 +403,16 @@ export const JINN_ROUTER_ABI = [
     ],
   },
   {
+    name: 'TaskBudgetRefunded',
+    type: 'event',
+    inputs: [
+      { name: 'taskId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'solutionAmount', type: 'uint256', indexed: false },
+      { name: 'verdictAmount', type: 'uint256', indexed: false },
+    ],
+  },
+  {
     name: 'claimed',
     type: 'function',
     stateMutability: 'view',
