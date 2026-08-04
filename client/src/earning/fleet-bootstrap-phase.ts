@@ -10,33 +10,20 @@
  * `STEP_INDEX` map and was mis-reported as `currentStep: 'wallet'` (phase 1)
  * instead of its true position (phase 3, "Deploying") — the real sync bug.
  *
- * This module is the single typed source: pre-service phases ∪ every
- * `ServiceStep`, defined once. The endpoint (and anything else that needs
- * the fleet-phase display list) imports this instead of keeping its own copy.
+ * The 15-value list itself now lives in
+ * `client/src/api/contract/fleet-bootstrap-phases.const.ts` (moved there so the operator
+ * dashboard SPA's `BootstrapState` typing can import it without dragging this module's
+ * `zod/v3` dependency into the browser bundle — see that module's docstring). This module
+ * re-exports it for its existing daemon-side importers (`bootstrap-endpoint.ts` and
+ * anything else that needs the fleet-phase display list) and builds the index Map, which
+ * has no SPA consumer and stays here.
  */
-import { ServiceStepSchema } from './types.js';
-
-/** The four phases a fleet passes through before any per-service step exists. */
-export const PRE_SERVICE_BOOTSTRAP_PHASES = [
-  'wallet',
-  'safe_predicted',
-  'awaiting_funding',
-  'safe_deployed',
-] as const;
-
-/**
- * Pre-service phases ∪ ServiceStep, in progression order. 4 + 11 = 15
- * members. `ServiceStepSchema.options` already lists `awaiting_stake` first
- * (bootstrap-run.ts's STANDARD_SERVICE_PROGRESSION / SELF_BOND_SERVICE_PROGRESSION
- * both start there too), so the union naturally places it immediately after
- * `safe_deployed` and before `service_created`.
- */
-export const FLEET_BOOTSTRAP_PHASES = [
-  ...PRE_SERVICE_BOOTSTRAP_PHASES,
-  ...ServiceStepSchema.options,
-] as const;
-
-export type FleetBootstrapPhase = (typeof FLEET_BOOTSTRAP_PHASES)[number];
+export {
+  PRE_SERVICE_BOOTSTRAP_PHASES,
+  FLEET_BOOTSTRAP_PHASES,
+  type FleetBootstrapPhase,
+} from '../api/contract/fleet-bootstrap-phases.const.js';
+import { FLEET_BOOTSTRAP_PHASES, type FleetBootstrapPhase } from '../api/contract/fleet-bootstrap-phases.const.js';
 
 export const FLEET_BOOTSTRAP_PHASE_INDEX = new Map<FleetBootstrapPhase, number>(
   FLEET_BOOTSTRAP_PHASES.map((phase, i) => [phase, i]),

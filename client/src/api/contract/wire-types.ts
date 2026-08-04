@@ -11,7 +11,13 @@
  * Zod here would assert a rigor that doesn't exist yet. Promoting one to a real schema
  * (and generating its OpenAPI entry) is a route-at-a-time follow-up, per §8's "structure
  * so routes are added cheaply."
+ *
+ * `BootstrapState.steps`/`currentStep`/`services[].step` are typed off
+ * `FleetBootstrapPhase` (`fleet-bootstrap-phases.const.ts`, zero-import) rather than plain
+ * `string` — the 15-member unified fleet bootstrap phase list `bootstrap-endpoint.ts`
+ * actually serves (issue #2407), not a re-declared copy.
  */
+import type { FleetBootstrapPhase } from './fleet-bootstrap-phases.const.js';
 
 // ── OLAS reward read state ────────────────────────────────────────────────────
 //
@@ -82,11 +88,11 @@ export interface RpcSlotHealth {
 export interface BootstrapState {
   schemaVersion: 1;
   mode: DaemonMode;
-  steps: string[];
-  currentStep: string;
+  steps: FleetBootstrapPhase[];
+  currentStep: FleetBootstrapPhase;
   services: Array<{
     index: number;
-    step: string;
+    step: FleetBootstrapPhase;
     safe_address?: string;
     service_id?: number;
     /** Raw error string set when a bootstrap step fails non-fatally (e.g. safe_binding_failed). */
