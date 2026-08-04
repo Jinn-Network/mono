@@ -122,3 +122,19 @@ export function daemonGuardEnvelope(
     },
   };
 }
+
+/**
+ * Thrown by callers that build their `EoaBroadcastLock`-signing pipeline outside a
+ * `createCli*Context` (e.g. `cli/commands/solver-plugins.ts`'s lazy write-client closures) and
+ * want the full envelope (pid, pidfile path, opt-out hint) preserved through a generic
+ * `catch (err) { ... }` instead of collapsed to a bare `err.message` string (D0a round-1 review).
+ */
+export class DaemonGuardBlockedError extends Error {
+  readonly envelope: BuildEnvelopeInput;
+
+  constructor(envelope: BuildEnvelopeInput) {
+    super(envelope.message);
+    this.name = 'DaemonGuardBlockedError';
+    this.envelope = envelope;
+  }
+}
