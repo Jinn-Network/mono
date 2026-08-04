@@ -118,6 +118,8 @@
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts",
     "skill:generate": "tsx scripts/skill-generate.ts",
     "skill:check": "tsx scripts/skill-check.ts",
+    "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "generate:openapi:check": "tsx scripts/generate-openapi.ts --check",
     "prepublishOnly": "yarn typecheck",
     "pack:smoke": "node scripts/smoke-test-pack.mjs && yarn consumer:acceptance && yarn pack:smoke:private-runtime",
     "pack:smoke:client-only": "node scripts/smoke-test-pack.mjs --client-only",
