@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -67,7 +67,14 @@ function repoPath(value, label, repoRoot, errors) {
     errors.push(`${label} must be a normalized repository-relative path`);
     return;
   }
-  if (!existsSync(resolve(repoRoot, ...value.split('/')))) errors.push(`${label} does not exist: ${value}`);
+  const resolved = resolve(repoRoot, ...value.split('/'));
+  if (!existsSync(resolved)) {
+    errors.push(`${label} does not exist: ${value}`);
+    return;
+  }
+  // A directory resolves via existsSync too — every current caller (entryPoints, guard/deletion
+  // paths, usageSignal.sourceFile, evidenceCitation) means one specific file, never a directory.
+  if (!statSync(resolved).isFile()) errors.push(`${label} must be a file, not a directory: ${value}`);
 }
 
 function nested(record, fields, label, errors) {

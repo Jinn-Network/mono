@@ -148,6 +148,18 @@ test('evidenceCitation must be Class A (a decision record or spec), not merely a
   assert.ok(arbitrary.some((error) => error.includes('evidenceCitation must live under')));
 });
 
+test('evidenceCitation rejects a bare directory (N1)', () => {
+  // A directory path that lives under an allowed evidence root and resolves via existsSync would
+  // otherwise pass every earlier check while citing nothing in particular — a citation must name
+  // one document, not gesture at a directory of them.
+  const errors = validateTransitionManifest(manifest({ transitions: [transition({
+    status: 'deleted',
+    consumers: [],
+    evidenceCitation: 'log/decisions/',
+  })] }), { repoRoot });
+  assert.ok(errors.some((error) => error.includes('must be a file')));
+});
+
 test('evidenceCitation must not equal a usageSignal.sourceFile declared anywhere in the manifest', () => {
   // A spec document doubling as some transition's usageSignal.sourceFile is exactly the
   // Class-O-cited-as-Class-A failure mode the rule exists to catch, even though the path itself
