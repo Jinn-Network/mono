@@ -1,16 +1,23 @@
 /**
  * Human-readable copy for the persistent lifecycle event stream.
  *
- * `LIFECYCLE_KINDS` is the one exported vocabulary from
- * `client/src/api/contract/lifecycle-kind.ts`
- * (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 6). This file used
- * to hand-copy its own 12-entry list (4 short of the daemon's 16) under a comment claiming
- * `event-kinds.test.ts` kept the two lists aligned; that test in fact compared the local
- * list against its own second hand-copy, never against the daemon's real
- * `ALLOWED_LIFECYCLE_KINDS` in `observability/emit-event.ts`, so the fork was free to drift
- * silently. Importing the shared vocabulary here removes the second copy.
+ * `LIFECYCLE_KINDS` is the one exported vocabulary, sourced from the zod-free
+ * `client/src/api/contract/lifecycle-kinds.const.ts`
+ * (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 6) rather than its
+ * `lifecycle-kind.ts` sibling — value-importing anything from `lifecycle-kind.ts` pulls
+ * zod/v4 into this bundle, since ES module evaluation runs that module's whole top level
+ * (its `z.enum(...)`/`z.looseObject(...)` schema construction) the moment any one export is
+ * used. `EventSeverity` is `import type`-only, which `tsc`/`vite` erase regardless of
+ * source module, so it's fine to still take from `lifecycle-kind.ts`.
+ *
+ * This file used to hand-copy its own 12-entry list (4 short of the daemon's 16) under a
+ * comment claiming `event-kinds.test.ts` kept the two lists aligned; that test in fact
+ * compared the local list against its own second hand-copy, never against the daemon's
+ * real `ALLOWED_LIFECYCLE_KINDS` in `observability/emit-event.ts`, so the fork was free to
+ * drift silently. Importing the shared vocabulary here removes the second copy.
  */
-import { LIFECYCLE_KINDS, type LifecycleKind, type EventSeverity } from '../../../../api/contract/lifecycle-kind.js';
+import { LIFECYCLE_KINDS, type LifecycleKind } from '../../../../api/contract/lifecycle-kinds.const.js';
+import type { EventSeverity } from '../../../../api/contract/lifecycle-kind.js';
 
 export { LIFECYCLE_KINDS };
 export type { LifecycleKind, EventSeverity };
