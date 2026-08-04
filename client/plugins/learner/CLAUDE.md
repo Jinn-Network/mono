@@ -15,8 +15,9 @@ When a session starts, the harness adapter provides the task payload and paths. 
 - `explorer-prompt.md` — info gatherer (used by Orient and Debrief, parallel-dispatched)
 - `strategist-prompt.md`, `planner-prompt.md`, `step-worker-prompt.md`, `analyst-prompt.md`, `promoter-prompt.md`, `consolidator-prompt.md` — one per specialized role
 
-**Hook:**
+**Hooks:**
 - `hooks/session-start` — runs once at session start; ensures `implStateDir` (and, in candidate mode, `$JINN_LEARNER_CANDIDATE_DIR`) is a git repo and sets `claude-code-learner` author identity. Emits a mode-aware steer.
+- `hooks/post-tool-use` — on Bash/Shell PostToolUseFailure (and defensive PostToolUse), appends non-empty failed-test working-tree diffs to `$WORKING_DIR/.execute/intermediate-failure-diffs.json` for harvest (§10 field 4).
 
 ## Modes and the write target
 

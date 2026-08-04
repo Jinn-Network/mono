@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
@@ -35,6 +36,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -65,6 +67,12 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildDaemonStartupInfo,
+  resolveMainEntryEffectiveMode,
+  type DaemonStartupInfo,
+} from './daemon/daemon-startup-info.js';
+import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
@@ -211,6 +219,18 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
+// #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
+// native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
+// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
+// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
+// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
+// runs) with a loud warning on disagreement, rather than trusting the raw decision.
+const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
+const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
+  resolveMainEntryEffectiveMode(verticalDecision);
+if (verticalModeWarning !== undefined) {
+  console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
 // action-authority / plugin-scope shape is still in design. Set
@@ -272,20 +292,7 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
   }
 }
 
-export interface DaemonStartupInfo {
-  schemaVersion: 1;
-  generatedAt: string;
-  kind: 'daemon_started';
-  pid: number;
-  network: 'testnet' | 'mainnet';
-  phase: 'phase-1b' | 'phase-0';
-  apiPort: number;
-  masterAddress: `0x${string}`;
-  safeAddress: `0x${string}`;
-  mechAddress: `0x${string}`;
-  serviceIndex: number;
-  serviceId: number | null;
-}
+export type { DaemonStartupInfo };
 
 export interface SetupHaltedInfo {
   schemaVersion: 1;
@@ -321,21 +328,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // singleton here also runs the startup age-based cleanup of stale rotations.
   getFileLogger();
 
-  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening; §14.2) ────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
-  // require an `Authorization: Bearer <token>` header. Read from env when
-  // operators want a stable token (e.g. multi-process tools); otherwise
-  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
-  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
-  // so `acquire_artifact` and `submit_restoration_result` can authenticate
-  // their calls back to the daemon.
+  // and the `POST /api/stop-hook` compat path require an
+  // `Authorization: Bearer <token>` header. Read from env when operators
+  // want a stable token (e.g. multi-process tools); otherwise resolve the
+  // token persisted at `<earningDir>/daemon-api-token` (mode 0600),
+  // generating it once on first boot. Persistence (not a fresh random value
+  // per boot) is required so an externally-installed stop-hook — the only
+  // production consumer of the bearer on the stop-hook route — has a stable
+  // value it can resolve when `DAEMON_API_TOKEN` isn't already in its own
+  // environment; see `jinn-stop-hook.ts`'s file-fallback. Logged only as an
+  // 8-char prefix. The token is forwarded to the MCP subprocess via
+  // `DAEMON_API_TOKEN` env so `acquire_artifact` and
+  // `submit_restoration_result` can authenticate their calls back to the
+  // daemon.
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
-  const apiToken = envToken && envToken.length > 0
-    ? envToken
-    : cryptoRandomBytes(32).toString('hex');
-  if (!envToken) {
-    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
+  let apiToken: string;
+  if (envToken && envToken.length > 0) {
+    apiToken = envToken;
+  } else {
+    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
+    apiToken = resolved.token;
+    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
+    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
   }
 
   // The keystore-presence probe happens twice: once now (to decide initial
@@ -502,7 +520,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
-  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  // §14.4: env override wins, else the config-file value, else loopback.
+  // Previously this only ever read the env var, so `apiBindHost` written
+  // into the config file was silently dead — the auth gate (§14.3) must be
+  // unconditional BEFORE this activates, since a non-loopback bind now
+  // actually exposes operator-class routes to the network (bearer/token-
+  // gated, but reachable).
+  const apiBindHost = resolveApiBindHost(config.apiBindHost);
+  if (!isLoopbackBindHost(apiBindHost)) {
+    console.warn(
+      `[main] WARNING: apiBindHost is "${apiBindHost}" (non-loopback) — the daemon API ` +
+      'is reachable from other hosts on the network, not just this machine. Operator-class ' +
+      'routes are token-gated, but the bind host is your outer firewall — make sure this is intentional.',
+    );
+  }
   const operatorArtifactsConfig = {
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
@@ -572,6 +603,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // via the `latestVersion` getter threaded into the ApiServer status config.
   const latestVersionHolder: { current: string | null } = { current: null };
 
+  // #2405 (spec §4.1 intent-module law): `POST /api/admin/claim-rewards` is a
+  // thin front-end over `claimRewardsIntent`, built from the daemon's OWN
+  // signer/client objects — never re-derived from the keystore, never routed
+  // through the CLI module. Those objects (`publicClient`, `masterWallet`,
+  // `earningStore`) aren't constructed until after bootstrap completes, well
+  // after `startApiServer` registers the route (same eager-register /
+  // late-populate holder pattern as `joinApplierHolder` above).
+  const claimRewardsRouteHolder: {
+    current: import('./api/admin-endpoint.js').ClaimRewardsRouteContext | undefined;
+  } = { current: undefined };
+
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -618,6 +660,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               await closeCaptureReceiver();
             },
           }),
+        claimRewards: { holder: claimRewardsRouteHolder },
       },
       harnessStatus: {
         getStatus: async () => {
@@ -1320,6 +1363,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
+
+  // #2405: populate the claim-rewards route holder now that the daemon's own
+  // signer/client objects exist — reuses `sharedStore` (already open for the
+  // daemon's lifetime) rather than opening a second handle onto the same
+  // SQLite file the way a fresh CLI process would.
+  claimRewardsRouteHolder.current = {
+    publicClient,
+    masterWallet,
+    fleetStore: earningStore,
+    chain: NETWORK_CHAIN,
+    distributorAddress: CHAIN_CONFIG.distributorAddress,
+    jinnStore: sharedStore,
+  };
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
@@ -2312,6 +2368,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the daemon's `evictionCheck` predicate (~line 2520 below).
       stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
+      // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+      effectiveMode: reportedEffectiveMode,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       rewardClaimIntervalMs: config.rewardClaimIntervalMs,
@@ -2630,20 +2688,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     versionCheckTimer.unref();
   }
 
-  return {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    kind: 'daemon_started',
+  return buildDaemonStartupInfo({
     pid: process.pid,
     network: config.network,
-    phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
     apiPort: config.apiPort,
     masterAddress,
     safeAddress,
     mechAddress,
     serviceIndex,
     serviceId,
-  };
+    // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+    effectiveMode: reportedEffectiveMode,
+    implVersion: buildInfo.implVersion,
+  });
 }
 
 // ── Harness readiness registry factory ───────────────────────────────────────

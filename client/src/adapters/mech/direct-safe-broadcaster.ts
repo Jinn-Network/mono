@@ -7,13 +7,22 @@
  * Signs and submits a Safe `execTransaction` directly against the given `publicClient` /
  * `walletClient`, using the pre-validated (approved-hash) signature encoding — the same encoding
  * `buildSafeSignature` documents and the pre-cutover `executeSafeTransaction` used. Deliberately
- * simpler than venue-base's `createSafeBroadcaster`: a CLI verb submits exactly one Safe
- * transaction per invocation, so it needs neither a persisted nonce ledger nor a cross-process
- * broadcast lock — `withRecoverableRetry` alone absorbs transient RPC faults.
+ * simpler than venue-base's `createSafeBroadcaster`: no persisted nonce ledger, since a fresh
+ * process always starts from the RPC's current on-chain nonce.
+ *
+ * D0a round-1 review: the "one Safe transaction per invocation" premise does not hold for every
+ * caller — `jinn solver-plugins` builds TWO independent instances of this broadcaster for the SAME
+ * agent EOA (`publisherFactory`'s publish/revoke, and the reputation write client), both
+ * reachable from one process. `execute` therefore serializes through `withEoaBroadcastLock`
+ * (per-EOA, in-process by default here — no host installs a shared lock for a one-shot CLI verb)
+ * so two same-EOA broadcasters in one process cannot read the same pending nonce concurrently.
+ * This does not add cross-process protection — that remains `cli/daemon-guard.ts`'s job, and it
+ * is a point-in-time pidfile read at context construction, not a held lease: a daemon that starts
+ * a moment later is unprotected (inherent TOCTOU).
  */
 import type { Address, Hex, PublicClient, WalletClient } from 'viem';
 import { SAFE_ABI } from '../../contracts/abis.js';
-import { flattenErrorMessage, withRecoverableRetry } from '../../tx-retry.js';
+import { flattenErrorMessage, withEoaBroadcastLock, withRecoverableRetry } from '../../tx-retry.js';
 import type { VenueBroadcaster } from './safe.js';
 import {
   decodeSafeInnerRevert,
@@ -42,7 +51,7 @@ export function createDirectSafeBroadcaster(
       if (!account) {
         throw new Error('createDirectSafeBroadcaster: walletClient has no account');
       }
-      return withRecoverableRetry(async () => {
+      return withEoaBroadcastLock(account.address, () => withRecoverableRetry(async () => {
         const nonce = await publicClient.readContract({
           address: safeAddress,
           abi: SAFE_ABI,
@@ -120,7 +129,7 @@ export function createDirectSafeBroadcaster(
         }
         await publicClient.waitForTransactionReceipt({ hash: txHash });
         return { txHash };
-      });
+      }));
     },
   };
 }

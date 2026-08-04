@@ -99,7 +99,53 @@ describe('assembleStatusV1', () => {
         }],
       },
     };
-    expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual(raw.phaseDTransitionUsage);
+    expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual({
+      ...raw.phaseDTransitionUsage,
+      class: 'observation',
+    });
+  });
+
+  it('tags phaseDTransitionUsage class: observation so a consumer cannot silently promote it (#2409, spec §7)', () => {
+    const raw: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+      phaseDTransitionUsage: {
+        schemaVersion: 1,
+        durable: true,
+        observationWindowStartedAt: '2026-08-03T00:00:00.000Z',
+        counters: [],
+      },
+    };
+    expect(assembleStatusV1(raw).phaseDTransitionUsage?.class).toBe('observation');
+  });
+
+  it('carries effectiveMode from the resolver, defaulting to legacy when absent (#2380)', () => {
+    const base: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    expect(assembleStatusV1(base).effectiveMode).toBe('legacy');
+    expect(assembleStatusV1({ ...base, effectiveMode: 'native-v1' }).effectiveMode).toBe('native-v1');
   });
 
   it('reports zero runway excess when balance is already below minimum', () => {

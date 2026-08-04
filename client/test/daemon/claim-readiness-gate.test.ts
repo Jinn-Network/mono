@@ -25,6 +25,8 @@ import { Daemon, type DaemonConfig } from '../../src/daemon/daemon.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { SimpleRunner } from '../../src/runner/simple.js';
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
+import { PREDICTION_V1_SOLVER_NET_CONTRACT } from '../../src/solver-nets/contracts.js';
+import { SolverNetRegistry } from '../../src/solver-nets/registry.js';
 import {
   _resetReadinessGateMemoForTests,
 } from '../../src/daemon/readiness-gate.js';
@@ -33,8 +35,26 @@ import type { HarnessReadinessRegistry } from '../../src/harnesses/readiness-reg
 function minimalEngineConfig(): DaemonConfig['restorationEngine'] {
   const root = mkdtempSync(join(tmpdir(), 'jinn-daemon-readiness-test-'));
   const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
+  const solverNetRegistry = new SolverNetRegistry();
+  for (const manifestCid of ['bafkrei.fake-cid', 'bafkrei.codex-cid']) {
+    solverNetRegistry.register({
+      name: manifestCid,
+      manifestCid,
+      enabled: true,
+      solverType: 'prediction.v1',
+      // Cutover stage 1 (see the file-level comment above): every posted
+      // task now carries role: 'evaluation', so the fixture registers both
+      // operator roles rather than narrowing to 'solving' only.
+      roles: ['solving', 'evaluating'],
+      contract: PREDICTION_V1_SOLVER_NET_CONTRACT,
+      harness: 'legacy-claude',
+      runtimePlugins: [],
+      taskGenerator: { enabled: false },
+    });
+  }
   return {
     implRegistry,
+    solverNetRegistry,
     paths: {
       workingDirRoot: join(root, 'work'),
       implStateDirRoot: join(root, 'impl-state'),
@@ -72,6 +92,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -111,6 +132,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -161,6 +183,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -199,6 +222,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -233,6 +257,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });

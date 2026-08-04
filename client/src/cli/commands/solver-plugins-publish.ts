@@ -33,7 +33,8 @@ import {
 } from '../../plugins/index.js';
 import type { PluginPayload } from '../../erc8004/plugin-registry.js';
 import type { SolverPluginsDeps } from './solver-plugins.js';
-import { writeJson } from './solver-plugins.js';
+import { writeJson, writeDaemonGuardBlocked } from './solver-plugins.js';
+import { DaemonGuardBlockedError } from '../daemon-guard.js';
 
 export interface PublishOptions {
   source: string;
@@ -189,6 +190,10 @@ export async function publishHandler(
       publishedAt: payload.publishedAt,
     });
   } catch (err) {
+    if (err instanceof DaemonGuardBlockedError) {
+      writeDaemonGuardBlocked(ctx, err);
+      return;
+    }
     writeJson(ctx, {
       error: {
         code: 'publish_failed',

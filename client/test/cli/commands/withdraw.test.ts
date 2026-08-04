@@ -53,6 +53,12 @@ const fakeDeps = {
     tryLoadExisting: async () => null,
   }) as any,
   createJinnPublicClient: () => ({}) as any,
+  checkDaemonGuard: () => ({
+    blocked: false as const,
+    pid: null,
+    pidfilePath: '/tmp/e/daemon.pid',
+    reason: 'not-running' as const,
+  }),
 };
 
 describe('withdraw command', () => {
@@ -105,5 +111,71 @@ describe('withdraw command', () => {
     const parsed = envelopes[envelopes.length - 1] as { code: string };
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  // D0a review (round 1), critical finding: `jinn withdraw` sweeps the
+  // master EOA and every agent EOA (`runWithdrawPlan`) with no check for a
+  // concurrently running `jinn run` daemon signing from the same keys.
+  it('refuses to broadcast when a live jinn daemon is detected', async () => {
+    let runWithdrawPlanCalled = false;
+    const deps = {
+      ...fakeDeps,
+      runWithdrawPlan: async () => {
+        runWithdrawPlanCalled = true;
+      },
+      checkDaemonGuard: () => ({
+        blocked: true as const,
+        pid: 987654,
+        pidfilePath: '/tmp/e/daemon.pid',
+        reason: 'alive' as const,
+      }),
+    } as any;
+    const cmd = createWithdrawCommand(deps);
+    const { envelopes, exits } = await runCommand(cmd, {
+      argv: [
+        '--to',
+        '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+        '--eth-amount',
+        '0.01',
+        '--yes',
+      ],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    const parsed = envelopes[envelopes.length - 1] as {
+      code: string;
+      message: string;
+    };
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(parsed.message).toContain('987654');
+    expect(exits).toEqual([11]);
+    expect(runWithdrawPlanCalled).toBe(false);
+  });
+
+  it('does not block withdraw when no daemon is running', async () => {
+    let runWithdrawPlanCalled = false;
+    const deps = {
+      ...fakeDeps,
+      runWithdrawPlan: async () => {
+        runWithdrawPlanCalled = true;
+      },
+      checkDaemonGuard: () => ({
+        blocked: false as const,
+        pid: null,
+        pidfilePath: '/tmp/e/daemon.pid',
+        reason: 'not-running' as const,
+      }),
+    } as any;
+    const cmd = createWithdrawCommand(deps);
+    await runCommand(cmd, {
+      argv: [
+        '--to',
+        '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+        '--eth-amount',
+        '0.01',
+        '--yes',
+      ],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    expect(runWithdrawPlanCalled).toBe(true);
   });
 });

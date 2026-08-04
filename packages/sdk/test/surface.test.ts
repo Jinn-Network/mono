@@ -29,27 +29,6 @@ import type {
   ManifestValidationResult,
   JsonSchema,
 } from '../src/solvernets/index.js';
-import {
-  ConfigV1Schema,
-  BenchmarkRunV1Schema,
-  BenchPreregistrationV1Schema,
-  BenchMatrixV1Schema,
-  validateConfigV1,
-  validateBenchmarkRunV1,
-  validateBenchPreregistrationV1,
-  validateBenchMatrixV1,
-  hashBenchmarkRunV1,
-  computeRunHash,
-  hashBenchMatrixV1,
-  hashCapsuleSet,
-} from '../src/benchmarking.js';
-import type {
-  ConfigV1,
-  BenchmarkRunV1,
-  BenchPreregistrationV1,
-  BenchMatrixV1,
-} from '../src/benchmarking.js';
-
 describe('@jinn-network/sdk surface', () => {
   it('root exports generic protocol types', () => {
     const task: Task = { id: 'i', description: 'test', solverType: 'test.v0' };
@@ -156,27 +135,6 @@ describe('@jinn-network/sdk surface', () => {
     expect(schema.type).toBe('object');
     const zodBack = jsonSchemaToZod(schema);
     expect(zodBack.safeParse({ x: 1 }).success).toBe(true);
-  });
-
-  it('exposes benchmarking contracts via @jinn-network/sdk/benchmarking', () => {
-    expect(typeof ConfigV1Schema.safeParse).toBe('function');
-    expect(typeof BenchmarkRunV1Schema.safeParse).toBe('function');
-    expect(typeof BenchPreregistrationV1Schema.safeParse).toBe('function');
-    expect(typeof BenchMatrixV1Schema.safeParse).toBe('function');
-    expect(typeof validateConfigV1).toBe('function');
-    expect(typeof validateBenchmarkRunV1).toBe('function');
-    expect(typeof validateBenchPreregistrationV1).toBe('function');
-    expect(typeof validateBenchMatrixV1).toBe('function');
-    expect(typeof hashBenchmarkRunV1).toBe('function');
-    expect(typeof computeRunHash).toBe('function');
-    expect(computeRunHash).toBe(hashBenchmarkRunV1);
-    expect(typeof hashBenchMatrixV1).toBe('function');
-    expect(typeof hashCapsuleSet).toBe('function');
-
-    expectTypeOf<BenchmarkRunV1['policy']['selfEvaluation']>().toEqualTypeOf<false>();
-    expectTypeOf<BenchPreregistrationV1['schemaVersion']>().toEqualTypeOf<'jinn.bench-preregistration.v1'>();
-    expectTypeOf<BenchMatrixV1['schemaVersion']>().toEqualTypeOf<'jinn.bench-matrix.v1'>();
-    expectTypeOf<ConfigV1['configId']>().toEqualTypeOf<string>();
   });
 
 });

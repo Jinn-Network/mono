@@ -62,13 +62,20 @@
     "usageSignal": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "source", "zeroDefinition"],
+      "required": ["name", "sourceFile", "sourceDescription", "zeroDefinition"],
       "properties": {
         "name": {
           "type": "string",
           "minLength": 1
         },
-        "source": {
+        "sourceFile": {
+          "description": "Repository-relative path to the file that backs this signal with a durable runtime counter, or null when the signal is a static architecture inventory rather than a runtime counter.",
+          "anyOf": [
+            { "$ref": "#/$defs/repoPath" },
+            { "type": "null" }
+          ]
+        },
+        "sourceDescription": {
           "type": "string",
           "minLength": 1
         },
@@ -187,8 +194,20 @@
         },
         "status": {
           "enum": ["planned", "migrating", "ready-for-deletion", "deleted", "blocked"]
+        },
+        "evidenceCitation": {
+          "description": "Only meaningful when status is 'deleted' (spec §7 human-gate rule): repository-relative path under log/decisions/ or docs/superpowers/specs/ to the Class A evidence (a decision record or design spec) cited as the basis for the deletion flip. Class O counters (a declared usageSignal.sourceFile) may inform the decision but may never be the cited basis — the JS validator (transition-manifest.mjs) additionally rejects a citation equal to any transition's usageSignal.sourceFile.",
+          "type": "string",
+          "pattern": "^(?=log/decisions/|docs/superpowers/specs/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "deleted" } }, "required": ["status"] },
+          "then": { "required": ["evidenceCitation"] },
+          "else": { "not": { "required": ["evidenceCitation"] } }
+        }
+      ]
     }
   }
 }

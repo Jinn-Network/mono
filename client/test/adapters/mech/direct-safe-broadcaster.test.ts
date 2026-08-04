@@ -53,4 +53,57 @@ describe('direct Safe broadcaster', () => {
     });
     expect(publicClient.waitForTransactionReceipt).not.toHaveBeenCalled();
   });
+
+  // D0a round-1 review (minor finding): the docstring's "a CLI verb submits exactly one Safe
+  // transaction per invocation" premise is violated by `jinn solver-plugins`, which builds TWO
+  // independent `createDirectSafeBroadcaster` instances for the SAME agent EOA (publish's
+  // publisherFactory and the reputation write client) that can both be exercised in one process.
+  // With no per-EOA lock, two `execute()` calls from those two instances could race each other's
+  // nonce read. Opting into `withEoaBroadcastLock` (already exported for exactly this) closes it.
+  function makeBroadcaster(
+    label: string,
+    order: string[],
+    opts: { gate?: Promise<void> } = {},
+  ) {
+    const publicClient = {
+      readContract: vi.fn()
+        .mockResolvedValueOnce(0n) // nonce
+        .mockResolvedValueOnce(`0x${'55'.repeat(32)}`), // safeTxHash
+      waitForTransactionReceipt: vi.fn(),
+    };
+    const walletClient = {
+      account: { address: OWNER },
+      chain: { id: 8453 },
+      signMessage: vi.fn(async () => {
+        order.push(`${label}-start`);
+        if (opts.gate) await opts.gate;
+        order.push(`${label}-signed`);
+        return `0x${'66'.repeat(64)}1b`;
+      }),
+      writeContract: vi.fn().mockResolvedValue(`0x${'77'.repeat(32)}`),
+    };
+    return createDirectSafeBroadcaster(publicClient as never, walletClient as never, SAFE);
+  }
+
+  it('serializes concurrent executes for the SAME EOA across two independent broadcaster instances', async () => {
+    const order: string[] = [];
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    const broadcasterA = makeBroadcaster('a', order, { gate: gateA });
+    const broadcasterB = makeBroadcaster('b', order);
+
+    const execA = broadcasterA.execute({ to: ROUTER, value: 0n, data: '0x', logicalTx: 'a' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(order).toEqual(['a-start']);
+
+    const execB = broadcasterB.execute({ to: ROUTER, value: 0n, data: '0x', logicalTx: 'b' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // B must NOT have started yet -- it should be waiting on the shared per-EOA lock, not racing
+    // A's in-flight nonce read.
+    expect(order).toEqual(['a-start']);
+
+    releaseA();
+    await Promise.all([execA, execB]);
+    expect(order).toEqual(['a-start', 'a-signed', 'b-start', 'b-signed']);
+  });
 });

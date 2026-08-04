@@ -13,6 +13,7 @@ const EXPECTED_TRANSITIONS = [
   'direct-public-posttask-composition',
   'legacy-evaluator-delivery-watcher',
   'legacy-operator-composition',
+  'legacy-task-run-store-coupling',
   'legacy-task-submission-synthesis',
   'legacy-taskengine-carve',
   'legacy-wiring-config',
@@ -55,6 +56,23 @@ test('the Phase D manifest is complete, path-valid, and keeps the Phase C defaul
     assert.equal(statSync(resolve(root, transition.noNewUseGuard.path)).isFile(), true);
     assert.equal(statSync(resolve(root, transition.deletionTest.path)).isFile(), true);
     assert.equal(transition.deletionTest.command, 'node --test .github/scripts/phase-d-transition-deletion.test.mjs');
+  }
+});
+
+// Spec §7 human-gate rule: the receipt->deletion link is a human editing this manifest, and the
+// class system must bind that hop or it is cosmetic. `transition-manifest.mjs` already refuses to
+// load a `deleted` row without a resolving `evidenceCitation` (this file would have failed at
+// import above), but this test names the invariant explicitly rather than leaving it implicit in
+// schema validation: a deleted flip must cite Class A evidence, never just the Class O counters
+// that may have informed the decision.
+test('every deleted transition cites Class A evidence, not just Class O counters', () => {
+  const deletedTransitions = manifest.transitions.filter((candidate) => candidate.status === 'deleted');
+  assert.ok(deletedTransitions.length > 0, 'expected at least one deleted transition to exercise this guard');
+  for (const candidate of deletedTransitions) {
+    assert.equal(typeof candidate.evidenceCitation, 'string',
+      `${candidate.id} is deleted without an evidenceCitation`);
+    assert.equal(existsSync(resolve(root, candidate.evidenceCitation)), true,
+      `${candidate.id}.evidenceCitation does not resolve: ${candidate.evidenceCitation}`);
   }
 });
 
@@ -122,6 +140,36 @@ test('TaskEngine carve is present only while its transition remains active', () 
   const references = containing(sourceFiles(pipelineRoot), 'TASK_ENGINE_CARVE');
   if (deleted('legacy-taskengine-carve')) assert.deepEqual(references, []);
   else assert.ok(references.length > 0);
+});
+
+test('legacy task_runs store coupling stays confined to its declared inventory and native production imports the legacy store', () => {
+  const importsTaskRunPersistence = (path) => (
+    /^import\s*\{[^}]*\bTaskRunPersistence\b[^}]*\}\s*from/mu.test(readFileSync(path, 'utf8'))
+  );
+  const importers = sourceFiles(resolve(root, 'client/src'))
+    .filter((path) => !path.endsWith('.test.ts'))
+    .filter(importsTaskRunPersistence)
+    .map((path) => relative(root, path))
+    .sort();
+  assert.deepEqual(importers, [
+    'client/src/adapters/mech/adapter.ts',
+    'client/src/cli/commands/backfill-failed-deliveries.ts',
+    'client/src/daemon/delivery-watcher.ts',
+    'client/src/daemon/work-loop-corpus.ts',
+    'client/src/harnesses/engine/backfill-failed-deliveries.ts',
+    'client/src/harnesses/engine/engine.ts',
+    'client/src/store/store.ts',
+  ], 'a new TaskRunPersistence import means a new consumer of the legacy task_runs store that must be ledgered');
+
+  const nativeEvaluator = readFileSync(resolve(root, 'client/src/daemon/native-evaluator-production.ts'), 'utf8');
+  const nativeSolver = readFileSync(resolve(root, 'client/src/daemon/native-solver-production.ts'), 'utf8');
+  if (deleted('legacy-task-run-store-coupling')) {
+    assert.doesNotMatch(nativeEvaluator, /from '\.\.\/store\/store\.js'/u);
+    assert.doesNotMatch(nativeSolver, /from '\.\.\/store\/store\.js'/u);
+  } else {
+    assert.match(nativeEvaluator, /from '\.\.\/store\/store\.js'/u);
+    assert.match(nativeSolver, /from '\.\.\/store\/store\.js'/u);
+  }
 });
 
 test('marketplace-binding is the only capability package that composes its low-level postTask primitive', () => {

@@ -9,7 +9,7 @@ import type {
 } from "@jinn-network/marketplace-binding";
 import { resolve } from "node:path";
 import type { BaseVenueConfig } from "./config.js";
-import { createBroadcastLock } from "./broadcast/lock.js";
+import { createBroadcastLock, type BroadcastLock } from "./broadcast/lock.js";
 import { createSubmissionLedger } from "./broadcast/ledger.js";
 import { createSafeBroadcaster, type BaseVenueSafeBroadcaster } from "./broadcast/safe-broadcaster.js";
 import { createChainLogSource, type ChainLogSource } from "./log-source/chain-log-source.js";
@@ -43,6 +43,14 @@ export interface BaseVenue {
   readonly safe: BaseVenueSafeBroadcaster;
   readonly logSource: ChainLogSource;
   readonly intents: PostingIntentStore;
+  /**
+   * The durable, SQLite-backed per-`(chainId, sender)` lock `safe` broadcasts through. Exposed so
+   * a host can share it with OTHER broadcast domains against the same agent EOA that do not route
+   * through this venue's Safe broadcaster (finding #525/#562/#897: two independently-locked
+   * broadcasters over one EOA can still collide on a nonce). See
+   * `client/src/tx-retry.ts`'s `setDefaultEoaBroadcastLock`.
+   */
+  readonly broadcastLock: BroadcastLock;
   /** Feature-disabled V3 evaluator primitives; absent for revised V4 venues. */
   readonly verdict?: VerdictPorts;
   close(): void;
@@ -132,6 +140,7 @@ export function createBaseVenue(config: BaseVenueConfig): BaseVenue {
     observe,
     safe,
     logSource,
+    broadcastLock: lock,
     intents: createSqlitePostingIntentStore(state),
     ...(config.chain.generation === "today" ? {
       verdict: createVerdictPorts({

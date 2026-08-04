@@ -22,8 +22,19 @@ import {
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
 import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
+
+/**
+ * `phaseDTransitionUsage` on the wire, tagged Class O — observation
+ * (docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md §7). The tag rides
+ * on the response payload so a consumer cannot silently promote this subtree to a gate input; it
+ * is never present on `GatheredStatusRaw`, only on the assembled response.
+ */
+export interface PhaseDTransitionUsageStatus extends PhaseDTransitionUsageDiagnostics {
+  readonly class: 'observation';
+}
 
 export interface ServiceBalanceErrorEntry {
   agent?: string;
@@ -156,6 +167,14 @@ export interface GatheredStatusRaw {
   daemonStartedAt?: string | null;
   /** Durable Phase D compatibility-use counters exposed for an external observation window. */
   phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
+  /**
+   * The daemon's resolved product mode (#2380), threaded from `main.ts`'s call to
+   * `resolveConfiguredOperatorVerticalMode` — never re-derived here. Absent ⇒ `assembleStatusV1`
+   * defaults to `'legacy'`, matching the fact that `GET /v1/status` only exists on the legacy
+   * entry point (native has no API server; see `native-phase-d-observability.ts`'s durable
+   * snapshot for its equivalent).
+   */
+  effectiveMode?: OperatorVerticalMode;
   /**
    * Resolved ISO mtime of the keystore-password file, or `null` when the
    * password is env-sourced or the file is missing/unreadable. Computed at
@@ -392,8 +411,12 @@ export interface StatusV1Response {
   security: { lastPasswordRotationAt: string | null };
   /** One-time shape-v2 config migration report — see `GatheredStatusRaw.configMigration`. */
   configMigration?: ConfigMigrationStatus;
-  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates. */
-  phaseDTransitionUsage?: PhaseDTransitionUsageDiagnostics;
+  /** Durable compatibility-use diagnostics; collectors use this for Phase D zero-use gates.
+   *  Tagged Class O — observation (§7): never a gate input. */
+  phaseDTransitionUsage?: PhaseDTransitionUsageStatus;
+  /** The daemon's resolved product mode (#2380) — see `GatheredStatusRaw.effectiveMode`. Always
+   *  present; defaults to `'legacy'` when the gatherer didn't thread a value. */
+  effectiveMode: OperatorVerticalMode;
 }
 
 /**
@@ -618,6 +641,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
   return {
     statusMode: mode,
     version: raw.version ?? buildInfo.implVersion,
+    effectiveMode: raw.effectiveMode ?? 'legacy',
     latestVersion: raw.latestVersion ?? null,
     daemon: {
       shutdownState: raw.shutdownState,
@@ -678,7 +702,7 @@ export function assembleStatusV1(raw: GatheredStatusRaw): StatusV1Response {
     ...(raw.taskRuns !== undefined ? { taskRuns: raw.taskRuns } : {}),
     ...(raw.configMigration !== undefined ? { configMigration: raw.configMigration } : {}),
     ...(raw.phaseDTransitionUsage !== undefined
-      ? { phaseDTransitionUsage: raw.phaseDTransitionUsage }
+      ? { phaseDTransitionUsage: { ...raw.phaseDTransitionUsage, class: 'observation' } }
       : {}),
   };
 }

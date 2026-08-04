@@ -19,6 +19,7 @@ import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadc
 import { Store } from '../store/store.js';
 import type { BuildEnvelopeInput } from '../errors/envelope.js';
 import { resolveCliPassword } from './password.js';
+import { checkDaemonGuard, daemonGuardEnvelope } from './daemon-guard.js';
 
 export type NetworkChain = 'base' | 'base-sepolia';
 
@@ -56,6 +57,7 @@ export type CreateCliExecutionContextOptions = {
 async function buildCliSignerContext(
   opts: CreateCliExecutionContextOptions,
   readOnlyFleet = false,
+  willBroadcast = true,
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
   const env = opts.env ?? process.env;
   const pw = resolveCliPassword(opts.argv, env);
@@ -73,6 +75,39 @@ async function buildCliSignerContext(
   }
 
   const config = loadConfig(mergeArgvForConfig(opts.argv));
+
+  // D0a P3 (#525/#562/#897): every context built from this shared function
+  // hands the caller live signer key material (`masterWallet`, and
+  // `mnemonic` for deriving per-agent signers) that downstream code signs
+  // Safe / EOA writes with — with no cross-process lock against a
+  // concurrently running `jinn run` daemon signing from the same keys. Guard
+  // once, here, rather than per verb: `createCliExecutionContext` used to
+  // check this itself (after decrypting the mnemonic and loading fleet
+  // state), which left `createCliSignerContext` callers (`jinn claim-rewards`)
+  // unguarded — see the finding this comment replaces.
+  //
+  // D0a round-2 correction: the guard only makes sense when the caller will actually SIGN with
+  // that key material. `createCliReadOnlySignerContext` (its one production caller is `jinn tasks
+  // submit --dry-run`'s machine-request preflight) never signs or broadcasts — it only reads
+  // fleet state to preview a plan — so guarding it was a pure false positive that fired in the
+  // ordinary case of "operator's daemon is running, operator previews a submission" and had no
+  // real safe escape (`JINN_ALLOW_CLI_BROADCAST_WITH_DAEMON=1`'s "you have verified it is safe to
+  // run concurrently" is meaningless for something that broadcasts nothing). `willBroadcast`
+  // lets a read-only, non-signing caller opt out explicitly instead of inheriting the guard by
+  // accident.
+  if (willBroadcast) {
+    const daemonGuard = checkDaemonGuard({ earningDir: config.earningDir, env });
+    if (daemonGuard.blocked) {
+      return {
+        ok: false,
+        envelope: daemonGuardEnvelope(
+          daemonGuard,
+          'jinn tasks submit --id x --description "…" --solver-net prediction --yes',
+        ),
+      };
+    }
+  }
+
   const networkChain: NetworkChain = config.network === 'testnet' ? 'base-sepolia' : 'base';
   const chainConfig = getChainConfig(networkChain, {
     testnetL2DeploymentPath: config.testnetL2DeploymentPath,
@@ -153,11 +188,15 @@ export async function createCliSignerContext(
   return buildCliSignerContext(opts);
 }
 
-/** Password + signers + existing fleet JSON, with no fleet-file creation or migration. */
+/**
+ * Password + signers + existing fleet JSON, with no fleet-file creation or migration. Read-only —
+ * never signs or broadcasts (`willBroadcast: false`), so it is not subject to the live-daemon
+ * guard; see the D0a round-2 note on `buildCliSignerContext`.
+ */
 export async function createCliReadOnlySignerContext(
   opts: CreateCliExecutionContextOptions = {},
 ): Promise<{ ok: true; ctx: CliSignerContext } | { ok: false; envelope: BuildEnvelopeInput }> {
-  return buildCliSignerContext(opts, true);
+  return buildCliSignerContext(opts, true, false);
 }
 
 export async function createCliExecutionContext(
@@ -182,6 +221,10 @@ export async function createCliExecutionContext(
     };
   }
 
+  // D0a P3 (#525/#562/#897): the daemon guard for this verb's signing runs
+  // in `buildCliSignerContext` (above, via `base`) — it covers the
+  // `createDirectSafeBroadcaster` write below too, since that broadcaster
+  // signs with the same agent EOA derived from `base.ctx.mnemonic`.
   const jinnStore = new Store(config.dbPath);
   const agentEoaPrivateKey = walletPrivateKeyAtIndex(mnemonic, primaryService.index);
   const marketplaceAddress = chainConfig.mechMarketplace as `0x${string}`;
