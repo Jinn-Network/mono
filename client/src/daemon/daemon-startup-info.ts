@@ -6,7 +6,7 @@
  * resolves chain config) that make it impractical to exercise directly in a test file.
  */
 
-import type { OperatorVerticalMode } from './native-vertical-mode.js';
+import type { OperatorVerticalDecision, OperatorVerticalMode } from './native-vertical-mode.js';
 
 export interface DaemonStartupInfo {
   schemaVersion: 1;
@@ -59,5 +59,35 @@ export function buildDaemonStartupInfo(input: {
     serviceId: input.serviceId,
     effectiveMode: input.effectiveMode,
     implVersion: input.implVersion,
+  };
+}
+
+export interface MainEntryEffectiveMode {
+  /** Always 'legacy' — see the function docstring below. */
+  readonly effectiveMode: 'legacy';
+  /** Set when the resolver disagreed; the caller should log this loudly. `undefined` in the
+   *  ordinary case (no disagreement, nothing to say). */
+  readonly warning: string | undefined;
+}
+
+/**
+ * `main.ts` is the legacy-only entry point: its `Daemon` is unconditionally the legacy graph
+ * regardless of what `resolveConfiguredOperatorVerticalMode` decides. Only `jinn run`'s CLI
+ * routing (`cli/commands/run.ts`) actually consults that decision to choose between `main.ts` and
+ * `native-main.ts` — `jinn quickstart` reaches `main.ts` directly, unrouted (confirmed the
+ * complete set of `import('../../main.js')` call sites: review #2380). Reporting a non-legacy
+ * `effectiveMode` from `main.ts` would mislabel a legacy-running instance as native — the one
+ * direction that must never happen for a field a Phase D collector uses to exempt an instance
+ * from scrutiny. This clamps the reported mode to `'legacy'` unconditionally and surfaces a
+ * loud-log warning when the resolver actually disagreed, rather than trusting the raw decision.
+ */
+export function resolveMainEntryEffectiveMode(decision: OperatorVerticalDecision): MainEntryEffectiveMode {
+  if (decision.effectiveMode === 'legacy') return { effectiveMode: 'legacy', warning: undefined };
+  return {
+    effectiveMode: 'legacy',
+    warning: `resolveConfiguredOperatorVerticalMode selected effective mode '${decision.effectiveMode}' `
+      + `(readiness=${decision.readiness}), but main.ts always runs the legacy graph regardless. `
+      + `Reporting effectiveMode as 'legacy'. This means a caller (e.g. 'jinn quickstart') reached `
+      + `main.ts without routing through the resolver first — use 'jinn run' for native-v1 configurations.`,
   };
 }

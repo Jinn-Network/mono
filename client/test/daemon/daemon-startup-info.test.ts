@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildDaemonStartupInfo } from '../../src/daemon/daemon-startup-info.js';
+import { buildDaemonStartupInfo, resolveMainEntryEffectiveMode } from '../../src/daemon/daemon-startup-info.js';
+import type { OperatorVerticalDecision } from '../../src/daemon/native-vertical-mode.js';
 
 function baseInput() {
   return {
@@ -45,5 +46,30 @@ describe('buildDaemonStartupInfo (#2380)', () => {
   it('maps mainnet network to phase-0', () => {
     const info = buildDaemonStartupInfo({ ...baseInput(), network: 'mainnet' });
     expect(info.phase).toBe('phase-0');
+  });
+});
+
+// Review IMPORTANT: "quickstart mislabels." jinn quickstart reaches main.ts directly, unrouted —
+// unlike jinn run, it never consults resolveConfiguredOperatorVerticalMode to choose an entry
+// point. A valid native-v1 config would otherwise make main.ts report effectiveMode: 'native-v1'
+// while it actually runs the legacy graph — mislabeling in the direction that must never happen
+// for a field a Phase D collector uses to exempt an instance from scrutiny.
+describe('resolveMainEntryEffectiveMode (#2380 review IMPORTANT — quickstart mislabeling)', () => {
+  it('reports legacy with no warning when the resolver agrees', () => {
+    const decision: OperatorVerticalDecision = {
+      requestedMode: 'legacy', effectiveMode: 'legacy', readiness: 'explicit-legacy',
+    };
+    expect(resolveMainEntryEffectiveMode(decision)).toEqual({ effectiveMode: 'legacy', warning: undefined });
+  });
+
+  it('clamps to legacy and returns a loud warning when the resolver disagrees (a valid native-v1 config reached main.ts unrouted)', () => {
+    const decision: OperatorVerticalDecision = {
+      requestedMode: 'native-v1', effectiveMode: 'native-v1', readiness: 'explicit-native-unvalidated',
+    };
+    const result = resolveMainEntryEffectiveMode(decision);
+    expect(result.effectiveMode).toBe('legacy');
+    expect(result.warning).toBeDefined();
+    expect(result.warning).toMatch(/native-v1/u);
+    expect(result.warning).toMatch(/quickstart/u);
   });
 });

@@ -65,7 +65,11 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
-import { buildDaemonStartupInfo, type DaemonStartupInfo } from './daemon/daemon-startup-info.js';
+import {
+  buildDaemonStartupInfo,
+  resolveMainEntryEffectiveMode,
+  type DaemonStartupInfo,
+} from './daemon/daemon-startup-info.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
@@ -215,10 +219,16 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
 }
 // #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
 // native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
-// report the real resolved mode rather than assuming 'legacy' — this entry is only ever reached
-// when the resolver already chose legacy, so `verticalDecision.effectiveMode` is 'legacy' in
-// every production invocation, but it stays derived rather than hardcoded.
+// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
+// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
+// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
+// runs) with a loud warning on disagreement, rather than trusting the raw decision.
 const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
+const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
+  resolveMainEntryEffectiveMode(verticalDecision);
+if (verticalModeWarning !== undefined) {
+  console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
 // action-authority / plugin-scope shape is still in design. Set
@@ -2307,8 +2317,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the daemon's `evictionCheck` predicate (~line 2520 below).
       stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
-      // #2380: the real resolver's decision, not a hardcoded 'legacy' literal.
-      effectiveMode: verticalDecision.effectiveMode,
+      // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+      effectiveMode: reportedEffectiveMode,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       rewardClaimIntervalMs: config.rewardClaimIntervalMs,
@@ -2636,8 +2646,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     mechAddress,
     serviceIndex,
     serviceId,
-    // #2380: the real resolver's decision (see verticalDecision above), not a re-derivation.
-    effectiveMode: verticalDecision.effectiveMode,
+    // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+    effectiveMode: reportedEffectiveMode,
     implVersion: buildInfo.implVersion,
   });
 }
