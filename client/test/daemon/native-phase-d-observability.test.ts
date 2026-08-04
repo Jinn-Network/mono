@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,6 +114,27 @@ describe('writeNativeStatusSnapshot / readNativeStatusSnapshot (#2380)', () => {
     });
 
     expect(readNativeStatusSnapshot(path)).toEqual(snapshot);
+  });
+
+  // Review minor: the snapshot carries roleKeyIds (identifiers, e.g. did:key:..., never private
+  // key material) and executableDigest, and is meant to be mounted/shipped off-host — restrict it
+  // to the operator like every other durable secret-adjacent file in this repo.
+  it('writes the snapshot file with mode 0600', () => {
+    writeNativeStatusSnapshot({ path, decision, health: health(), now: () => new Date('2026-08-04T01:00:00.000Z') });
+    const mode = statSync(path).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  // Review minor: a hardcoded 'native-v1' literal here is the same mislabeling class the review
+  // flagged for main.ts/quickstart — echo the resolver's actual decision instead of assuming it.
+  it('echoes decision.effectiveMode rather than hardcoding the native-v1 literal', () => {
+    const legacyDecision: OperatorVerticalDecision = {
+      requestedMode: 'legacy', effectiveMode: 'legacy', readiness: 'explicit-legacy',
+    };
+    const snapshot = writeNativeStatusSnapshot({
+      path, decision: legacyDecision, health: health(), now: () => new Date('2026-08-04T01:00:00.000Z'),
+    });
+    expect(snapshot.effectiveMode).toBe('legacy');
   });
 
   it('returns undefined for a missing snapshot file', () => {

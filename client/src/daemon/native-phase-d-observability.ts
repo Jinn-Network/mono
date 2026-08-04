@@ -31,6 +31,7 @@ import {
 } from '../compatibility/phase-d-transition-usage.js';
 import type { OperatorVerticalDecision } from './native-vertical-mode.js';
 import type { NativeOperatorHealth } from './native-operator-host.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
 export const NATIVE_PHASE_D_USAGE_FILENAME = 'phase-d-transition-usage.v1.json';
 export const NATIVE_PHASE_D_STATUS_SNAPSHOT_FILENAME = 'phase-d-status-snapshot.v1.json';
@@ -56,7 +57,14 @@ export interface NativeStatusSnapshot {
   readonly schemaVersion: 1;
   readonly kind: 'jinn.native-operator-status-snapshot';
   readonly generatedAt: string;
-  readonly effectiveMode: 'native-v1';
+  /**
+   * Echoes `decision.effectiveMode` rather than a hardcoded `'native-v1'` literal — the same
+   * mislabeling class the review flagged for `main.ts`/`jinn quickstart` (a hardcoded value can
+   * silently drift from what the resolver actually decided). In production this module is only
+   * ever invoked once native-main.ts has confirmed `effectiveMode === 'native-v1'`, so the value
+   * is 'native-v1' in practice — but it is derived, not assumed.
+   */
+  readonly effectiveMode: OperatorVerticalMode;
   readonly implVersion: string;
   readonly reportedSourceSha: string;
   readonly role: NativeOperatorHealth['role'];
@@ -69,7 +77,10 @@ function persistDurable(path: string, contents: string): void {
   mkdirSync(dirname(path), { recursive: true });
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
   try {
-    writeFileSync(temporaryPath, contents, { flag: 'wx' });
+    // Mode 0600: the snapshot carries roleKeyIds (identifiers, e.g. did:key:..., never private key
+    // material) and an executableDigest, and is meant to be mounted/shipped off-host by the deploy
+    // platform — restrict it like every other durable secret-adjacent file in this repo.
+    writeFileSync(temporaryPath, contents, { flag: 'wx', mode: 0o600 });
     renameSync(temporaryPath, path);
   } finally {
     rmSync(temporaryPath, { force: true });
@@ -85,7 +96,7 @@ function buildSnapshot(input: {
     schemaVersion: 1,
     kind: 'jinn.native-operator-status-snapshot',
     generatedAt: input.now().toISOString(),
-    effectiveMode: 'native-v1',
+    effectiveMode: input.decision.effectiveMode,
     implVersion: buildInfo.implVersion,
     reportedSourceSha: buildInfo.clientGitSha,
     role: input.health.role,

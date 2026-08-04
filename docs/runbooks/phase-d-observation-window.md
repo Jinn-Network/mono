@@ -20,20 +20,29 @@ proposition; "legacy use was zero for the approved window" is.
 
 ## Continuity, not just presence
 
-A durable counter file that goes missing, becomes corrupt, or is reset (deleted and recreated,
-restarting its `observationWindowStartedAt`) cannot vouch for the days it didn't observe. The
+A durable counter file that goes missing, becomes corrupt, is reset (deleted and recreated,
+restarting its `observationWindowStartedAt`), or regresses (a count that decreased, or a signal
+that disappeared after being present) cannot vouch for the days it didn't genuinely observe. The
 collector enforces this per instance:
 
-- **missing / corrupt** — a fetch failure, non-2xx response, or unparseable body is recorded as a
-  snapshot with `durable: false, observationWindowStartedAt: null`.
+- **missing / corrupt** — a fetch failure, non-2xx response, unparseable body, or a stale native
+  snapshot file (see Freshness below) is recorded as a snapshot with `durable: false,
+  observationWindowStartedAt: null`.
 - **reset** — a `observationWindowStartedAt` that changes between two consecutive snapshots for
   the same instance is counted (`resets`) and invalidates completeness from that point on.
+- **regression** — a signal's count that decreased, or a signal present in an earlier snapshot
+  that is absent from a later one, is counted (`regressions`) and invalidates completeness. The
+  durable counter file is append-only/monotonic by construction
+  (`compatibility/phase-d-transition-usage.ts`); either shape is corrupt or tampered data, never
+  legacy use genuinely dropping back down.
 
-An instance is `complete` only when every one of its collected snapshots is durable and reports
-the same `observationWindowStartedAt`. The overall `verdict.zeroUse` is `true` only when **every**
-instance in the receipt is complete AND every legacy signal observed reads zero — an incomplete
-instance always forces `zeroUse: false`, even if every observed count so far is zero. A coverage
-gap is never evidence of zero use.
+An instance is `complete` only when every one of its collected snapshots is durable, reports the
+same `observationWindowStartedAt`, and shows no per-signal regression. The overall
+`verdict.zeroUse` is `true` only when the window is **closed** (`endedAt !== null`), **every**
+instance in the receipt is complete, every instance's collections continuously **cover** the
+window (see Window coverage below), and every legacy signal observed reads zero. Any failure of
+any of these forces `zeroUse: false` — a coverage gap, an open window, a regressed count, or a
+shrunk fleet (see Population integrity below) is never evidence of zero use.
 
 ## The fleet
 
@@ -83,7 +92,40 @@ Two source kinds:
   `/v1/status`). The path must be reachable from wherever the collector runs (a shared/mounted
   volume, or run the collector on the host itself).
 
+  **Point this at the status snapshot file, not the raw counter file.** Native's `stateDir` also
+  holds `phase-d-transition-usage.v1.json` — the durable counter file itself, with no `generatedAt`
+  and no `phaseDTransitionUsage` wrapper key. A `file-snapshot` entry pointed at that file instead
+  of `phase-d-status-snapshot.v1.json` fails the collector's shape check on every single run and
+  never says why beyond "missing/corrupt" in the receipt — there is no louder signal than that.
+  Double-check the filename in the fleet manifest if an instance never goes `complete`.
+
 `endedAt` stays `null` while the window is open; set it once the window closes.
+
+## Freshness (native only)
+
+A native instance's `file-snapshot` source is a snapshot on disk, not a live request — a process
+that died or a box that quietly flipped back to legacy can leave a frozen file behind that looks
+identical to a live one unless its age is checked. The collector rejects a snapshot whose own
+`generatedAt` is more than ~15 minutes old relative to the collection time (`readFileStatusSnapshot`
+in `src/monitoring/phase-d-observation-window.ts`; ~3x native's 5-minute snapshot-loop interval).
+A `http-status` legacy instance doesn't need this check — a dead process simply refuses the
+connection, which already fails closed.
+
+## Window coverage
+
+`zeroUse` is never `true` while `endedAt` is `null`, and never `true` unless every instance's
+collected snapshots continuously cover `[startedAt, endedAt]` with no gap wider than ~2 days. One
+lucky collector run against a freshly-added instance is not evidence for a multi-week window — the
+receipt has to show the collector actually watched the whole span. Close the window (set `endedAt`
+in the fleet manifest) only once collection has run daily across the whole approved period.
+
+## Population integrity
+
+An instance that has ever appeared in the receipt's history stays represented in every later run,
+even after it drops out of the fleet manifest (a legacy host decommissioned mid-drain, for
+example). It is carried forward as a missing observation, which invalidates its completeness —
+shrinking the fleet never improves the verdict. To genuinely retire an instance's history, start a
+new window (a new `windowId`); do not repoint an old receipt at a shorter instance list.
 
 ## Running it
 
@@ -92,13 +134,16 @@ cd client
 yarn phase-d-observe -- --fleet ./phase-d-fleet.json --receipt ./phase-d-observation-receipt.json
 ```
 
-Each run reads the existing receipt (if present), appends one snapshot per fleet instance dated
-`--now` (defaults to the real current time), recomputes `complete`/`resets`/`verdict`, and writes
-the receipt back atomically (durable temp+rename, same pattern as
+Each run validates the existing receipt (if present — schemaVersion/kind/`windowId`/`approvedBy`/
+`startedAt` must all match what's being requested), appends one snapshot per fleet instance dated
+`--now` (defaults to the real current time), recomputes `complete`/`resets`/`regressions`/`verdict`
+for every instance the receipt has ever seen (not just today's fetch list — see Population
+integrity above), and writes the receipt back atomically (durable temp+rename, same pattern as
 `phase-d-transition-usage.ts`). A single instance's fetch failure never fails the run — it is
 recorded as a missing/corrupt snapshot and invalidates only that instance's completeness. The
-collector exits non-zero only on a setup failure: a missing/invalid fleet manifest, or a corrupt
-existing receipt (which is never silently overwritten — fix or move it before re-running).
+collector exits non-zero only on a setup failure: a missing/invalid fleet manifest, a corrupt
+existing receipt, or an existing receipt with the wrong shape/window/approver (none of which are
+ever silently overwritten — fix or move the file before re-running).
 
 ## Receipt contract
 
@@ -108,8 +153,8 @@ existing receipt (which is never silently overwritten — fix or move it before 
   "kind": "jinn.phase-d-observation-window",
   "windowId": "phase-d-2026-08-04",
   "approvedBy": "ritsuKai2000",
-  "startedAt": "2026-08-04T00:00:00.000Z",
-  "endedAt": null,
+  "startedAt": "2026-07-30T00:00:00.000Z",
+  "endedAt": "2026-08-13T00:00:00.000Z",
   "supportBoundary": {
     "claim": "first-party-operational",
     "disclaims": ["unknown-independent-operators"]
@@ -121,26 +166,50 @@ existing receipt (which is never silently overwritten — fix or move it before 
       "reportedSourceSha": "de8ac3750",
       "snapshots": [
         {
-          "at": "2026-08-04T09:00:00.000Z",
+          "at": "2026-07-30T09:00:00.000Z",
           "observationWindowStartedAt": "2026-07-30T00:00:00.000Z",
           "durable": true,
-          "counters": [{ "signal": "marketplace-pipeline-invocation", "count": 0 }]
+          "counters": []
+        },
+        {
+          "at": "2026-08-13T09:00:00.000Z",
+          "observationWindowStartedAt": "2026-07-30T00:00:00.000Z",
+          "durable": true,
+          "counters": []
         }
       ],
       "complete": true,
-      "resets": 0
+      "resets": 0,
+      "regressions": 0
     }
   ],
-  "verdict": { "zeroUse": true, "signalsCovered": ["marketplace-pipeline-invocation"] }
+  "verdict": {
+    "zeroUse": true,
+    "signalsCovered": [
+      "legacy-evaluator-delivery-watcher-loaded",
+      "legacy-operator-composition",
+      "legacy-task-submission-synthesis",
+      "legacy-wiring-config-field",
+      "marketplace-pipeline-invocation"
+    ]
+  }
 }
 ```
 
-`verdict.signalsCovered` names the legacy signals actually observed (present in at least one
-instance's latest snapshot) — the auditable evidence backing the `zeroUse` claim, distinguishing
-"observed and zero" from "silently absent". `native-operator-composition` is deliberately excluded
-from both `signalsCovered` and the `zeroUse` computation: it is positive native-presence evidence,
-not a legacy-use counter, and a native instance recording activity there must never suppress a
-zero-use verdict.
+(Real receipts collect roughly daily across the window — this example elides the intervening days
+for brevity; `zeroUse: true` requires no gap between them wider than the coverage tolerance below.)
+
+`verdict.signalsCovered` names the legacy signals for which durable, live instrumentation was
+confirmed — at least one instance's latest snapshot reported `durable: true` — regardless of
+whether that signal ever fired. This is deliberate: the durable counter file never persists an
+explicit zero-count row (a signal that never fires simply never appears in its `counters` array —
+see `compatibility/phase-d-transition-usage.ts`), so "present in a snapshot's counters" cannot be
+the coverage signal — it would be empty exactly when `zeroUse` is true, the one case this field
+exists to back up. `durable: true` instead confirms the counter mechanism itself was live and
+would have shown these signals had they fired. `native-operator-composition` is deliberately
+excluded from both `signalsCovered` and the `zeroUse` computation: it is positive native-presence
+evidence, not a legacy-use counter, and a native instance recording activity there must never
+suppress a zero-use verdict.
 
 ## Cron setup
 
