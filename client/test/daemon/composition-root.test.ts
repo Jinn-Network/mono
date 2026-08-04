@@ -10,7 +10,7 @@ import { mkdtempSync } from 'node:fs';
 import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLAIM_NOTHING } from '@jinn-network/marketplace-pipeline';
 import { documentDigest, sealSubmission, sealTask } from '@jinn-network/task-execution-protocol';
 import { buildRepositoryWorkProfile, sealTaskProfile } from '@jinn-network/task-execution-profiles';
@@ -18,6 +18,7 @@ import {
   claudeCodeLauncher,
   predictionV1BaselineLauncher,
 } from '@jinn-network/task-execution-launchers';
+import { resetDefaultEoaBroadcastLockForTesting } from '../../src/tx-retry.js';
 import { Store } from '../../src/store/store.js';
 import { synthesizeLegacyFactsCard } from '../../src/daemon/bridge-legacy-delivery.js';
 import { ProjectorCursorStore } from '../../src/daemon/projector-cursor.js';
@@ -78,6 +79,14 @@ const FACTS = {
 };
 
 const CAPS = { spendCapWei: 10n, aiUnitCap: 10 };
+
+// D0a round-1 review: `buildOperatorComposition` installs a process-global broadcast lock keyed
+// by chainId + venue state path and now REFUSES a second install under a different key (instead
+// of silently clobbering it). This file composes many independent venues (fresh mkdtemp state
+// path per test) in the same worker, so each test must start from a clean slate.
+beforeEach(() => {
+  resetDefaultEoaBroadcastLockForTesting();
+});
 
 describe('claim predicate assembly', () => {
   it('claims nothing when no policy is configured', async () => {

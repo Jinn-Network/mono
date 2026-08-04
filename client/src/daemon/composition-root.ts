@@ -1143,9 +1143,14 @@ export async function buildOperatorComposition(
   // venue-base Safe broadcast and a same-EOA `setMetadata` could still both read the same
   // `pending` nonce and collide. Bound to this composition's one `chainId`; a daemon process
   // only ever composes one chain, so this closure is exact, not an approximation.
-  setDefaultEoaBroadcastLock({
-    withSender: (sender, fn) => venue.broadcastLock.withSender(input.chain.chainId, sender, fn),
-  });
+  //
+  // D0a round-1 review: keyed by chainId + state path so a SECOND composition in the same
+  // process (e2e harness, multi-daemon tests) cannot silently steal this global out from under
+  // this one — `setDefaultEoaBroadcastLock` throws on a conflicting key instead.
+  setDefaultEoaBroadcastLock(
+    { withSender: (sender, fn) => venue.broadcastLock.withSender(input.chain.chainId, sender, fn) },
+    `${input.chain.chainId}:${input.venueStateDbPath}`,
+  );
 
   const discoverySigner: ScopedDiscoverySigner = solverDiscoveryIdentity === undefined
     ? {

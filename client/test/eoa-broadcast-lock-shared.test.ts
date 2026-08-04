@@ -29,6 +29,7 @@ import {
 } from '@jinn-network/marketplace-venue-base';
 import {
   getDefaultEoaBroadcastLock,
+  resetDefaultEoaBroadcastLockForTesting,
   setDefaultEoaBroadcastLock,
   withEoaBroadcastLock,
 } from '../src/tx-retry.js';
@@ -39,26 +40,26 @@ const SENDER = '0x9999999999999999999999999999999999999999' as Address;
 describe('withEoaBroadcastLock -- shared cross-domain lock (issue #525/#562/#897)', () => {
   let root: string;
   let state: VenueStateDatabase;
-  let originalLock: ReturnType<typeof getDefaultEoaBroadcastLock>;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'eoa-shared-lock-'));
     state = openVenueState(join(root, 'venue.sqlite'));
-    originalLock = getDefaultEoaBroadcastLock();
   });
 
   afterEach(() => {
-    // Never leak the test's shared lock into other test files/order.
-    setDefaultEoaBroadcastLock(originalLock);
+    // Never leak the test's shared lock into other test files/order (D0a round 1: the shared
+    // lock now refuses a conflicting install, so a stale key must not survive this test either).
+    resetDefaultEoaBroadcastLockForTesting();
     state.close();
     rmSync(root, { recursive: true, force: true });
   });
 
   it('serializes a venue-base Safe broadcast (domain 1) against an EOA-direct tx-retry send (domain 2)', async () => {
     const venueLock: BroadcastLock = createBroadcastLock(state);
-    setDefaultEoaBroadcastLock({
-      withSender: (sender, fn) => venueLock.withSender(CHAIN_ID, sender, fn),
-    });
+    setDefaultEoaBroadcastLock(
+      { withSender: (sender, fn) => venueLock.withSender(CHAIN_ID, sender, fn) },
+      'test-domain-1',
+    );
 
     const order: string[] = [];
     let releaseDomain1!: () => void;

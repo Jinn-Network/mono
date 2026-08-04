@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createMemoryTxSubmissionLedger,
   flattenErrorMessage,
+  getDefaultEoaBroadcastLock,
   isRecoverableTransactionError,
   isReplacementUnderpricedError,
   recoverStuckNonceIfNeeded,
+  resetDefaultEoaBroadcastLockForTesting,
+  setDefaultEoaBroadcastLock,
   viemSendTransactionWithRetry,
   withEoaBroadcastLock,
   withRecoverableRetry,
@@ -764,6 +767,45 @@ describe('tx-retry', () => {
       await expect(
         withEoaBroadcastLock(key, async () => 'ok'),
       ).resolves.toBe('ok');
+    });
+  });
+
+  // D0a round-1 review (important finding): `setDefaultEoaBroadcastLock` installs a
+  // PROCESS-GLOBAL lock as module state, contradicting the "no process-global broadcaster"
+  // invariant (`adapters/mech/safe.ts`) -- a process that composes two venues had the second
+  // install silently clobber the first with no reset hook. It must now refuse a conflicting
+  // install instead of silently rebinding.
+  describe('setDefaultEoaBroadcastLock (D0a round 1: refuse a conflicting install)', () => {
+    afterEach(() => {
+      resetDefaultEoaBroadcastLockForTesting();
+    });
+
+    it('accepts a second install under the SAME key (idempotent re-install)', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-a.db')).not.toThrow();
+      expect(getDefaultEoaBroadcastLock()).toBe(lockB);
+    });
+
+    it('refuses a second install under a DIFFERENT key instead of silently clobbering it', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-b.db')).toThrow(
+        /venue-a\.db/,
+      );
+      // The original install must still be in effect -- the throw must not have clobbered it.
+      expect(getDefaultEoaBroadcastLock()).toBe(lockA);
+    });
+
+    it('resetDefaultEoaBroadcastLockForTesting clears the installed key, allowing a fresh install', () => {
+      const lockA: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      const lockB: ReturnType<typeof getDefaultEoaBroadcastLock> = { withSender: (_s, fn) => fn() };
+      setDefaultEoaBroadcastLock(lockA, 'chain-84532:/tmp/venue-a.db');
+      resetDefaultEoaBroadcastLockForTesting();
+      expect(() => setDefaultEoaBroadcastLock(lockB, 'chain-84532:/tmp/venue-b.db')).not.toThrow();
+      expect(getDefaultEoaBroadcastLock()).toBe(lockB);
     });
   });
 

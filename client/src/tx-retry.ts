@@ -486,19 +486,49 @@ function createInProcessEoaBroadcastLock(): EoaBroadcastLock {
 }
 
 let defaultEoaBroadcastLock: EoaBroadcastLock = createInProcessEoaBroadcastLock();
+// Identifies WHICH composition's lock is currently installed (D0a round-1 review). This module
+// has no per-chain/per-venue keying of its own -- `withEoaBroadcastLock(from, fn)` takes only the
+// EOA -- so a second `buildOperatorComposition` in the same process (e2e harness, multi-daemon
+// tests, any future two-Safe host) must never silently rebind this single global out from under
+// the first composition's own `venue.safe.execute` calls, which keep using their OWN closure over
+// the first venue and would then be serializing against the SECOND composition's lock/state file.
+let installedLockKey: string | null = null;
 
 /**
  * Install the process-wide default `EoaBroadcastLock` that `withEoaBroadcastLock`
  * (and therefore `withNonceLedger`) delegates to. The composition root calls this
  * once, right after building its venue, with an adapter over that venue's own
  * `BroadcastLock` — see `client/src/daemon/composition-root.ts`.
+ *
+ * `key` identifies the installing composition (composition-root.ts uses
+ * `${chainId}:${venueStateDbPath}`). A second install under a DIFFERENT key throws rather than
+ * silently clobbering the first composition's lock -- this module has NO process-global
+ * broadcaster invariant otherwise (`adapters/mech/safe.ts`); re-installing under the SAME key is
+ * a no-op-shaped success (idempotent re-composition of the same venue). Tests that install a
+ * throwaway lock must call `resetDefaultEoaBroadcastLockForTesting()` when done.
  */
-export function setDefaultEoaBroadcastLock(lock: EoaBroadcastLock): void {
+export function setDefaultEoaBroadcastLock(lock: EoaBroadcastLock, key: string): void {
+  if (installedLockKey !== null && installedLockKey !== key) {
+    throw new Error(
+      `setDefaultEoaBroadcastLock: a broadcast lock is already installed for "${installedLockKey}"; `
+      + `refusing to silently rebind it to "${key}". This module has no process-global broadcaster `
+      + 'invariant (adapters/mech/safe.ts) -- a process composing a second venue must not clobber '
+      + "the first composition's lock out from under it. Call resetDefaultEoaBroadcastLockForTesting() "
+      + 'between compositions if this is a test.',
+    );
+  }
   defaultEoaBroadcastLock = lock;
+  installedLockKey = key;
 }
 
 export function getDefaultEoaBroadcastLock(): EoaBroadcastLock {
   return defaultEoaBroadcastLock;
+}
+
+/** Test-only: clears the installed lock + key so a fresh `setDefaultEoaBroadcastLock` can install. */
+export function resetDefaultEoaBroadcastLockForTesting(): void {
+  defaultEoaBroadcastLock = createInProcessEoaBroadcastLock();
+  installedLockKey = null;
 }
 
 /**
