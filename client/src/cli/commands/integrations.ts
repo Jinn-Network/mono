@@ -9,9 +9,13 @@ import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
 import { DEFAULT_STOP_HOOK_COMMAND, fileContainsHookCommand } from '../hook-installers/common.js';
 import { patchClaudeCodeSettingsJson, removeClaudeCodeHookJson } from '../hook-installers/claude-code.js';
-import { patchCodexConfigJson, removeCodexHookJson } from '../hook-installers/codex.js';
-import { patchCursorHooksJson, removeCursorHookJson } from '../hook-installers/cursor.js';
-import { patchGeminiCliSettingsJson, removeGeminiCliHookJson } from '../hook-installers/gemini-cli.js';
+// codex/cursor/gemini-cli hook wiring is deliberately NOT imported here —
+// their file formats are not independently verified against those tools'
+// real hook schemas (claude-code's WAS wrong before verification caught it;
+// see the follow-up issue). The pure patch/remove functions still exist in
+// `../hook-installers/{codex,cursor,gemini-cli}.js` with test coverage in
+// `test/scripts/install-hooks.test.ts` — only the `jinn integrations
+// install` wiring is scoped down to claude-code.
 
 // ---------------------------------------------------------------------------
 // Skill content resolution
@@ -127,46 +131,25 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
 // `scripts/install-hooks/*` (moved to `src/cli/hook-installers/` in this
 // change so it can be imported here and shipped in `dist/`) had zero
 // production callers — the patcher functions existed but nothing ever wrote
-// a hook config file. This wires them into the real installer surface.
+// a hook config file. This wires the claude-code one into the real
+// installer surface.
 //
-// File-path confidence varies by tool:
-//   - claude-code: `.claude/settings.json` (`hooks.Stop`) — this repo's own
-//     convention (see CLAUDE.md's `.claude/settings.json` references), high
-//     confidence.
-//   - gemini-cli: reuses the same `settings.json` MCP already writes to
-//     (`hooks.SessionEnd` alongside `mcpServers`) — Gemini CLI's real
-//     hooks-in-settings.json surface, high confidence.
-//   - codex / cursor: dedicated `hooks.json` next to each tool's existing
-//     config dir. codex's real MCP config is TOML (`config.toml`), which
-//     can't hold the JSON `hooks.stop` shape the pre-existing patcher
-//     assumed — a separate JSON file sidesteps the format clash. This
-//     assumption is NOT independently verified against either tool's
-//     current hook documentation; treat it as best-effort until an
-//     operator confirms it's picked up.
+// Scope: claude-code ONLY. `.claude/settings.json`'s `hooks.Stop` shape —
+// an array of hook GROUPS, each with a `hooks: [{type,command}]` array —
+// is confirmed against this repo's own documented example
+// (apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md) and the
+// operator's live settings file. codex/cursor/gemini-cli's hook file
+// formats were NOT independently verified (a real wrong-schema bug was
+// caught here in review before this scope-down) — their pure patch/remove
+// functions still exist in `../hook-installers/{codex,cursor,gemini-cli}.js`
+// with coverage in `test/scripts/install-hooks.test.ts`, but are not wired
+// here. See the follow-up issue for verifying + wiring them.
 // ---------------------------------------------------------------------------
 
 export function claudeCodeHookFilePath(scope: 'user' | 'project'): string {
   return scope === 'user'
     ? join(homedir(), '.claude', 'settings.json')
     : join(process.cwd(), '.claude', 'settings.json');
-}
-
-export function geminiCliHookFilePath(scope: 'user' | 'project'): string {
-  return scope === 'user'
-    ? join(homedir(), '.gemini', 'settings.json')
-    : join(process.cwd(), '.gemini', 'settings.json');
-}
-
-export function codexHookFilePath(scope: 'user' | 'project'): string {
-  return scope === 'user'
-    ? join(homedir(), '.codex', 'hooks.json')
-    : join(process.cwd(), '.codex', 'hooks.json');
-}
-
-export function cursorHookFilePath(scope: 'user' | 'project'): string {
-  return scope === 'user'
-    ? join(homedir(), '.cursor', 'hooks.json')
-    : join(process.cwd(), '.cursor', 'hooks.json');
 }
 
 export function isHookFileConfigured(filePath: string, command: string): boolean {
@@ -183,8 +166,17 @@ export function installHookFile(
     return { ok: true, detail: `Already configured in ${filePath}` };
   }
   const raw = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+  let patched: string;
+  try {
+    patched = patchFn(raw);
+  } catch (err) {
+    // A hand-edited settings file with a trailing comma or similar shouldn't
+    // throw a stack trace mid-loop after other targets have already been
+    // written — surface it as an ordinary error result instead.
+    return { ok: false, detail: `Failed to parse ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+  }
   mkdirSync(dirname(filePath), { recursive: true });
-  writeFileSync(filePath, patchFn(raw), 'utf-8');
+  writeFileSync(filePath, patched, 'utf-8');
   return { ok: true, detail: `Wrote stop-hook entry to ${filePath}` };
 }
 
@@ -196,7 +188,13 @@ export function removeHookFile(
   if (!isHookFileConfigured(filePath, command)) {
     return { ok: true, detail: existsSync(filePath) ? 'Not configured' : 'Config file does not exist' };
   }
-  writeFileSync(filePath, removeFn(readFileSync(filePath, 'utf-8')), 'utf-8');
+  let removed: string;
+  try {
+    removed = removeFn(readFileSync(filePath, 'utf-8'));
+  } catch (err) {
+    return { ok: false, detail: `Failed to parse ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  writeFileSync(filePath, removed, 'utf-8');
   return { ok: true, detail: `Removed stop-hook entry from ${filePath}` };
 }
 
@@ -323,7 +321,7 @@ function claudeDesktopConfigDir(): string {
 // Target definitions
 // ---------------------------------------------------------------------------
 
-interface TargetResult {
+export interface TargetResult {
   ok: boolean;
   detail: string;
 }
@@ -331,7 +329,7 @@ interface TargetResult {
 /** A single file change that would be made during install. */
 export interface PlanEntry {
   target: string;
-  kind: 'mcp' | 'skill';
+  kind: 'mcp' | 'skill' | 'hook';
   filePath: string;
   fileExists: boolean;
   /** Exact content that would be appended/written (not the full file). */
@@ -339,7 +337,7 @@ export interface PlanEntry {
   alreadyConfigured: boolean;
 }
 
-interface PluginTarget {
+export interface PluginTarget {
   id: string;
   name: string;
   detect(): boolean;
@@ -354,10 +352,12 @@ interface PluginTarget {
   removeMcp(scope: 'user' | 'project'): Promise<TargetResult>;
   removeSkill(scope: 'user' | 'project'): Promise<TargetResult>;
   /**
-   * §14.1 stop-hook wiring. Optional — only defined for targets with a known
-   * stop/session-end hook surface (claude-code, codex, cursor, gemini-cli).
-   * Absent on claude-desktop / vscode / antigravity.
+   * §14.1 stop-hook wiring. Optional — only defined for targets whose real
+   * hook file format has been independently verified (currently
+   * claude-code only; codex/cursor/gemini-cli are pending a follow-up
+   * issue). `hookFilePath` powers the `--dry-run` plan preview.
    */
+  hookFilePath?(scope: 'user' | 'project'): string | null;
   isHookConfigured?(scope: 'user' | 'project'): boolean;
   installHook?(scope: 'user' | 'project'): Promise<TargetResult>;
   removeHook?(scope: 'user' | 'project'): Promise<TargetResult>;
@@ -417,6 +417,7 @@ const TARGETS: PluginTarget[] = [
     async removeSkill(scope) {
       return removeClaudeSkill(claudeSkillDir(scope));
     },
+    hookFilePath(scope) { return claudeCodeHookFilePath(scope); },
     isHookConfigured(scope) {
       return isHookFileConfigured(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`);
     },
@@ -511,15 +512,8 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), '.cursor', 'rules', 'jinn.md');
       return removeCursorRule(rulePath);
     },
-    isHookConfigured(scope) {
-      return isHookFileConfigured(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`);
-    },
-    async installHook(scope) {
-      return installHookFile(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`, patchCursorHooksJson);
-    },
-    async removeHook(scope) {
-      return removeHookFile(cursorHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`, removeCursorHookJson);
-    },
+    // No stop-hook wiring — cursor's real hook file format is not
+    // independently verified. See the follow-up issue.
   },
 
   // ---- vscode ----
@@ -626,15 +620,8 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), 'GEMINI.md');
       return removeSkillBlock(instrPath);
     },
-    isHookConfigured(scope) {
-      return isHookFileConfigured(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`);
-    },
-    async installHook(scope) {
-      return installHookFile(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`, patchGeminiCliSettingsJson);
-    },
-    async removeHook(scope) {
-      return removeHookFile(geminiCliHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool gemini-cli`, removeGeminiCliHookJson);
-    },
+    // No stop-hook wiring — gemini-cli's real hook file format is not
+    // independently verified. See the follow-up issue.
   },
 
   // ---- antigravity ----
@@ -721,15 +708,10 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), 'AGENTS.md');
       return removeSkillBlock(instrPath);
     },
-    isHookConfigured(scope) {
-      return isHookFileConfigured(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`);
-    },
-    async installHook(scope) {
-      return installHookFile(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`, patchCodexConfigJson);
-    },
-    async removeHook(scope) {
-      return removeHookFile(codexHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool codex`, removeCodexHookJson);
-    },
+    // No stop-hook wiring — codex's real hook file format is not
+    // independently verified (its MCP config is TOML; the pre-existing
+    // patcher assumed JSON, which can't live in `config.toml`). See the
+    // follow-up issue.
   },
 ];
 
@@ -757,7 +739,7 @@ function skillBlockPatch(filePath: string, content: string): string {
   return `${BLOCK_START}\n${content}\n${BLOCK_END}\n`;
 }
 
-function buildPlanEntries(
+export function buildPlanEntries(
   targets: PluginTarget[],
   scope: 'user' | 'project',
   skillContent: string,
@@ -829,6 +811,26 @@ function buildPlanEntries(
           alreadyConfigured: target.isSkillConfigured(scope),
         });
       }
+    }
+
+    // §14.1/F4: the hook write goes into the operator's real
+    // `~/.claude/settings.json` (or the project one) — the dry-run plan is
+    // the consent surface for that, same as MCP/skill. Not gated by
+    // --mcp-only/--skill-only; it's its own axis, matching `runInstall`.
+    const hookFp = target.hookFilePath?.(scope) ?? null;
+    if (hookFp !== null) {
+      const command = `${DEFAULT_STOP_HOOK_COMMAND} --tool ${target.id}`;
+      const alreadyConfigured = target.isHookConfigured?.(scope) ?? false;
+      entries.push({
+        target: target.id,
+        kind: 'hook',
+        filePath: hookFp,
+        fileExists: existsSync(hookFp),
+        patch: alreadyConfigured
+          ? '(already present)'
+          : `would add a Stop hook group running: ${command}`,
+        alreadyConfigured,
+      });
     }
   }
 
