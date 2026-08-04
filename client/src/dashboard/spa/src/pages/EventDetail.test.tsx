@@ -26,6 +26,13 @@ function event(extra: Partial<ActivityEventRow> = {}): ActivityEventRow {
     solverType: 'prediction.v1',
     outcome: 'ok',
     detail: null,
+    credentialId: null,
+    costUsdMicros: null,
+    model: null,
+    aiUnits: null,
+    claimStatus: null,
+    estimatedCostUsdMicros: null,
+    actualCostUsdMicros: null,
     ...extra,
   };
 }
