@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
@@ -35,6 +36,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -326,21 +328,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // singleton here also runs the startup age-based cleanup of stale rotations.
   getFileLogger();
 
-  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening; §14.2) ────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
-  // require an `Authorization: Bearer <token>` header. Read from env when
-  // operators want a stable token (e.g. multi-process tools); otherwise
-  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
-  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
-  // so `acquire_artifact` and `submit_restoration_result` can authenticate
-  // their calls back to the daemon.
+  // and the `POST /api/stop-hook` compat path require an
+  // `Authorization: Bearer <token>` header. Read from env when operators
+  // want a stable token (e.g. multi-process tools); otherwise resolve the
+  // token persisted at `<earningDir>/daemon-api-token` (mode 0600),
+  // generating it once on first boot. Persistence (not a fresh random value
+  // per boot) is required so an externally-installed stop-hook — the only
+  // production consumer of the bearer on the stop-hook route — has a stable
+  // value it can resolve when `DAEMON_API_TOKEN` isn't already in its own
+  // environment; see `jinn-stop-hook.ts`'s file-fallback. Logged only as an
+  // 8-char prefix. The token is forwarded to the MCP subprocess via
+  // `DAEMON_API_TOKEN` env so `acquire_artifact` and
+  // `submit_restoration_result` can authenticate their calls back to the
+  // daemon.
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
-  const apiToken = envToken && envToken.length > 0
-    ? envToken
-    : cryptoRandomBytes(32).toString('hex');
-  if (!envToken) {
-    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
+  let apiToken: string;
+  if (envToken && envToken.length > 0) {
+    apiToken = envToken;
+  } else {
+    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
+    apiToken = resolved.token;
+    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
+    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
   }
 
   // The keystore-presence probe happens twice: once now (to decide initial
@@ -507,7 +520,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
-  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  // §14.4: env override wins, else the config-file value, else loopback.
+  // Previously this only ever read the env var, so `apiBindHost` written
+  // into the config file was silently dead — the auth gate (§14.3) must be
+  // unconditional BEFORE this activates, since a non-loopback bind now
+  // actually exposes operator-class routes to the network (bearer/token-
+  // gated, but reachable).
+  const apiBindHost = resolveApiBindHost(config.apiBindHost);
+  if (!isLoopbackBindHost(apiBindHost)) {
+    console.warn(
+      `[main] WARNING: apiBindHost is "${apiBindHost}" (non-loopback) — the daemon API ` +
+      'is reachable from other hosts on the network, not just this machine. Operator-class ' +
+      'routes are token-gated, but the bind host is your outer firewall — make sure this is intentional.',
+    );
+  }
   const operatorArtifactsConfig = {
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',

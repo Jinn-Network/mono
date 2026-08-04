@@ -1,5 +1,6 @@
 import {
   appendUniqueCommandObject,
+  removeCommandObject,
   DEFAULT_STOP_HOOK_COMMAND,
   parseJsonObject,
   stableJson,
@@ -11,5 +12,14 @@ export function patchCursorHooksJson(
 ): string {
   const obj = parseJsonObject(raw);
   obj['sessionEnd'] = appendUniqueCommandObject(obj['sessionEnd'], command);
+  return stableJson(obj);
+}
+
+export function removeCursorHookJson(
+  raw: string,
+  command = `${DEFAULT_STOP_HOOK_COMMAND} --tool cursor`,
+): string {
+  const obj = parseJsonObject(raw);
+  obj['sessionEnd'] = removeCommandObject(obj['sessionEnd'], command);
   return stableJson(obj);
 }
