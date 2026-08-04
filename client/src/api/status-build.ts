@@ -22,7 +22,7 @@ import {
 import { DEFAULT_MASTER_ETH_DAILY_WEI } from '../earning/master-gas.js';
 import { buildInfo } from '../build-info.js';
 import type { PhaseDTransitionUsageDiagnostics } from '../compatibility/phase-d-transition-usage.js';
-import type { OperatorVerticalMode } from '../daemon/native-vertical-mode.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
 export type StatusHintsScope = 'full' | 'sqlite_only';
 

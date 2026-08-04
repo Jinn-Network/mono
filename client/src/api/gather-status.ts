@@ -38,7 +38,7 @@ import {
   resolveMasterDailyEstimateWei,
 } from './status-build.js';
 import { listStolasClaimTargets } from '../earning/stolas-claim.js';
-import type { OperatorVerticalMode } from '../daemon/native-vertical-mode.js';
+import type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 import {
   gatherPortfolioV0Status,
   DEFAULT_ENGINE_WORKING_DIR_ROOT,

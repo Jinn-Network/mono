@@ -4,7 +4,9 @@ import {
 } from '@jinn-network/marketplace-binding';
 import type { ValidatedPhaseBClosureManifest } from './phase-b-closure-manifest.js';
 
-export type OperatorVerticalMode = 'legacy' | 'native-v1';
+// Re-exported from the neutral types/ home (#2380) so existing daemon-layer imports of
+// `OperatorVerticalMode` from this module keep working unchanged.
+export type { OperatorVerticalMode } from '../types/operator-vertical-mode.js';
 
 export type NativeVerticalReadinessReason =
   | 'live-closure-missing'
