@@ -67,6 +67,25 @@ function nested(record, fields, label, errors) {
   return value;
 }
 
+// usageSignal.sourceFile is a discrete, path-validated field (never embedded in prose) so a
+// stale or renamed file cannot silently pass review the way `usageSignal.source` prose did.
+function usageSignal(record, label, repoRoot, errors) {
+  const fields = ['name', 'sourceFile', 'sourceDescription', 'zeroDefinition'];
+  const value = object(record, label, errors);
+  closed(value, fields, label, errors);
+  if (value === undefined) return;
+  nonEmptyString(value.name, `${label}.name`, errors);
+  if (value.sourceFile === null) {
+    // Static architecture inventory (no durable runtime counter) — nothing to path-check.
+  } else if (typeof value.sourceFile !== 'string') {
+    errors.push(`${label}.sourceFile must be a repository path or null`);
+  } else {
+    repoPath(value.sourceFile, `${label}.sourceFile`, repoRoot, errors);
+  }
+  nonEmptyString(value.sourceDescription, `${label}.sourceDescription`, errors);
+  nonEmptyString(value.zeroDefinition, `${label}.zeroDefinition`, errors);
+}
+
 export function validateTransitionManifest(manifest, { repoRoot = process.cwd() } = {}) {
   const errors = [];
   const root = object(manifest, 'manifest', errors);
@@ -118,7 +137,7 @@ export function validateTransitionManifest(manifest, { repoRoot = process.cwd() 
 
     const guard = nested(transition.noNewUseGuard, ['path', 'assertion'], `${label}.noNewUseGuard`, errors);
     if (guard !== undefined) repoPath(guard.path, `${label}.noNewUseGuard.path`, repoRoot, errors);
-    nested(transition.usageSignal, ['name', 'source', 'zeroDefinition'], `${label}.usageSignal`, errors);
+    usageSignal(transition.usageSignal, `${label}.usageSignal`, repoRoot, errors);
     nested(transition.migration, ['description', 'compatibility'], `${label}.migration`, errors);
     const sunset = object(transition.sunsetCondition, `${label}.sunsetCondition`, errors);
     closed(sunset, ['description', 'evidence'], `${label}.sunsetCondition`, errors);
