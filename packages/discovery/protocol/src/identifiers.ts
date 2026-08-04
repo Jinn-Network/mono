@@ -8,8 +8,15 @@
 export const RECORD_DISCOVERY_FAMILY = "https://jinn.network/record-discovery" as const;
 export const RECORD_DISCOVERY_VERSION = "https://jinn.network/record-discovery/1.0" as const;
 
-// Record-kind URIs (§12). Grammar: `${RECORDS_ROOT}/<segment>/<major>.<minor>`,
-// segment matches SOURCE_NAME_GRAMMAR (below).
+// Record-kind URIs (§12). Grammar: `<records-root>/<segment>/<version>`, segment matches
+// SOURCE_NAME_GRAMMAR (below), version per `./origins.ts`.
+//
+// DR-2026-08-04 moves these strings to `https://spec.jinn.network/records/<segment>/v<major>`.
+// The re-seal migration rewrites the constant values; this component only teaches the
+// *grammar* to recognize both spellings, so the values below are still the legacy ones and
+// the documents that carry them are unchanged. `RECORDS_SEGMENT` is the origin-independent
+// container name the dual-accept roots in `./grammar.ts` are built from.
+export const RECORDS_SEGMENT = "records" as const;
 export const RECORDS_ROOT = "https://jinn.network/records" as const;
 export const RECORD_KINDS = {
   task: "https://jinn.network/records/task/1.0",
