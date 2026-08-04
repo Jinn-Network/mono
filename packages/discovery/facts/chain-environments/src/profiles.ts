@@ -16,10 +16,10 @@ function loadProfile(filename: string): FactsProfileDocument {
 }
 
 export const chainEnvironmentFactsProfile: FactsProfileDocument =
-  loadProfile("chain-environment.1.0.json");
+  loadProfile("chain-environment.v1.json");
 
 export const cryptoEnvironmentFactsProfile: FactsProfileDocument =
-  loadProfile("crypto-environment.1.0.json");
+  loadProfile("crypto-environment.v1.json");
 
 export const informationWorldFactsProfile: FactsProfileDocument =
-  loadProfile("information-world.1.0.json");
+  loadProfile("information-world.v1.json");

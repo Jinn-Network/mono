@@ -12,7 +12,7 @@
       "items": [
         {
           "record": {
-            "kind": "https://jinn.network/records/submission/1.0",
+            "kind": "https://spec.jinn.network/records/submission/v1",
             "digest": "sha256:dc186ba2cd9627a50a896827b5a99a37d28898fae195f717cc4100ccbc80b5ed"
           }
         }

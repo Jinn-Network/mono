@@ -119,7 +119,7 @@ describe("information world recompute", () => {
 
   it("the registry resolves this kind and skips unknown ones", () => {
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(INFORMATION_WORLD_KIND)).toBeDefined();
-    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://jinn.network/records/nope/1.0"))
+    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/nope/v1"))
       .toBeUndefined();
   });
 });
@@ -129,6 +129,6 @@ describe("the registry", () => {
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(CHAIN_ENVIRONMENT_KIND)).toBe(chainEnvironmentRecompute);
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(CRYPTO_ENVIRONMENT_KIND)).toBe(cryptoEnvironmentRecompute);
     expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get(INFORMATION_WORLD_KIND)).toBe(informationWorldRecompute);
-    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://jinn.network/records/environment/1.0")).toBeUndefined();
+    expect(CHAIN_ENVIRONMENTS_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/environment/v1")).toBeUndefined();
   });
 });

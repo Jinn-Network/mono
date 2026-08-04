@@ -51,7 +51,7 @@ describe("classifyCursor (§9.3: the five-case cursor contract)", () => {
 describe("checkLocator (§7/§14: hostile-locator guards)", () => {
   it("rejects a private/link-local address before fetching (SSRF)", async () => {
     const result = await checkLocator(
-      { profile: "https://jinn.network/record-discovery/location/https/1.0", locator: "https://169.254.169.254/latest/meta-data/" },
+      { profile: "https://spec.jinn.network/record-discovery/location/https/v1", locator: "https://169.254.169.254/latest/meta-data/" },
       { transport: makeRoutedTransport(new Map()), maxBytes: 1 << 20 },
     );
     expect(result).toEqual({ rejected: true, reason: "private-address" });
@@ -61,7 +61,7 @@ describe("checkLocator (§7/§14: hostile-locator guards)", () => {
     const locator = "https://example.org/records/huge-blob";
     const routes = new Map<string, TransportResponse>([[locator, { status: 200, contentType: "application/octet-stream", declaredLength: 5_368_709_120, bytes: new Uint8Array(0) }]]);
     const result = await checkLocator(
-      { profile: "https://jinn.network/record-discovery/location/https/1.0", locator },
+      { profile: "https://spec.jinn.network/record-discovery/location/https/v1", locator },
       { transport: makeRoutedTransport(routes), maxBytes: 1 << 20 },
     );
     expect(result).toEqual({ rejected: true, reason: "oversize" });
@@ -71,7 +71,7 @@ describe("checkLocator (§7/§14: hostile-locator guards)", () => {
     const locator = "https://example.org/records/x";
     const routes = new Map<string, TransportResponse>([[locator, { status: 200, contentType: "text/html", bytes: new Uint8Array(10) }]]);
     const result = await checkLocator(
-      { profile: "https://jinn.network/record-discovery/location/https/1.0", locator },
+      { profile: "https://spec.jinn.network/record-discovery/location/https/v1", locator },
       { transport: makeRoutedTransport(routes), maxBytes: 1 << 20 },
     );
     expect(result).toEqual({ rejected: true, reason: "wrong-content-type" });
@@ -81,7 +81,7 @@ describe("checkLocator (§7/§14: hostile-locator guards)", () => {
     const locator = "https://example.org/records/ok";
     const routes = new Map<string, TransportResponse>([[locator, { status: 200, contentType: "application/octet-stream", bytes: new Uint8Array(10) }]]);
     const result = await checkLocator(
-      { profile: "https://jinn.network/record-discovery/location/https/1.0", locator },
+      { profile: "https://spec.jinn.network/record-discovery/location/https/v1", locator },
       { transport: makeRoutedTransport(routes), maxBytes: 1 << 20 },
     );
     expect(result).toEqual({ rejected: false });
@@ -103,14 +103,14 @@ describe("shouldDowngradeRelay (§9.5 obligation 1: head-vs-delivered comparison
 
 describe("spotCheckEntry (§9.5 obligation 2: entry-granular spot-check catches per-item-drop censoring)", () => {
   const fullEntry: AnnouncementEntry = parseAnnouncementEntry({
-    protocol: "https://jinn.network/record-discovery/1.0",
+    protocol: "https://spec.jinn.network/record-discovery/v1",
     source: { agent: "did:key:zAgentSourceOne", name: "feed" },
     sequence: "0000000000000001",
     previous: null,
     timestamp: "2026-07-28T12:00:00.000Z",
     announcements: [
-      { announcementId: "ann-1", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` } },
-      { announcementId: "ann-2", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"b".repeat(64)}` } },
+      { announcementId: "ann-1", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` } },
+      { announcementId: "ann-2", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"b".repeat(64)}` } },
     ],
   });
 
@@ -176,7 +176,7 @@ describe("subscribe (§9.1/§9.4: dispatches announcement vs observation events,
       onObservation: (raw) => observations.push(raw),
     });
 
-    const event = { specversion: "1.0", id: "ann-1", source: "did:key:zAgentSourceOne/feed", type: "network.jinn.record-discovery.announcement", subject: `sha256:${"a".repeat(64)}`, recordkind: "https://jinn.network/records/submission/1.0", sourceagent: "did:key:zAgentSourceOne", sourcename: "feed", entrydigest: `sha256:${"b".repeat(64)}`, announcementid: "ann-1", data: {} };
+    const event = { specversion: "1.0", id: "ann-1", source: "did:key:zAgentSourceOne/feed", type: "network.jinn.record-discovery.announcement", subject: `sha256:${"a".repeat(64)}`, recordkind: "https://spec.jinn.network/records/submission/v1", sourceagent: "did:key:zAgentSourceOne", sourcename: "feed", entrydigest: `sha256:${"b".repeat(64)}`, announcementid: "ann-1", data: {} };
     transport.deliver(JSON.stringify(event));
     transport.deliver(JSON.stringify(event)); // redelivery, same tuple
 
@@ -218,7 +218,7 @@ describe("subscribe (§9.1/§9.4: dispatches announcement vs observation events,
 describe("createAnnouncementDedupe (§9.1: (source identity, entry digest, announcementId))", () => {
   it("collapses a redelivered event with the same dedupe tuple", () => {
     const item: AnnouncedItem = {
-      record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+      record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
       provenance: { source: { agent: "did:key:zAgentSourceOne", name: "feed" }, entry: `sha256:${"b".repeat(64)}`, announcementId: "ann-1" },
     };
     const event = toAnnouncementEvent(item, undefined);

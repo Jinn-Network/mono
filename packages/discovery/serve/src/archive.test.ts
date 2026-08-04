@@ -30,7 +30,7 @@ function readPage(
 
 function makeEntry(sequence: string, previous: `sha256:${string}` | null, padding = ""): AnnouncementEntry {
   return parseAnnouncementEntry({
-    protocol: "https://jinn.network/record-discovery/1.0",
+    protocol: "https://spec.jinn.network/record-discovery/v1",
     source: { agent: "did:key:zAgentSourceOne", name: "feed" },
     sequence,
     previous,
@@ -39,7 +39,7 @@ function makeEntry(sequence: string, previous: `sha256:${string}` | null, paddin
       {
         announcementId: `ann-${sequence}`,
         action: "available",
-        record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
         ...(padding.length > 0 ? { facts: { padding } } : {}),
       },
     ],

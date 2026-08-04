@@ -1,7 +1,7 @@
 {
-  "protocol": "https://jinn.network/record-discovery/1.0",
-  "kind": "https://jinn.network/records/crypto-environment/1.0",
-  "profile": "https://jinn.network/records/crypto-environment/1.0/facts/1.0",
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/crypto-environment/v1",
+  "profile": "https://spec.jinn.network/facts/crypto-environment/v1",
   "fields": [
     { "name": "cryptoEnvironmentRecordDigest", "class": "record" },
     { "name": "chainWorld.digest", "class": "record", "referenceBearing": true, "cloudEvents": { "attribute": "chainworld", "scalar": "string" } },

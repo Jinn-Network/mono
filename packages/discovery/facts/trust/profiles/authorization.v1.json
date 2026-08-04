@@ -1,7 +1,7 @@
 {
-  "protocol": "https://jinn.network/record-discovery/1.0",
-  "kind": "https://jinn.network/records/authorization/1.0",
-  "profile": "https://jinn.network/records/authorization/1.0/facts/1.0",
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/authorization/v1",
+  "profile": "https://spec.jinn.network/facts/authorization/v1",
   "fields": [
     { "name": "issuer", "class": "record", "cloudEvents": { "attribute": "issuer", "scalar": "string" } },
     { "name": "audience", "class": "record" },

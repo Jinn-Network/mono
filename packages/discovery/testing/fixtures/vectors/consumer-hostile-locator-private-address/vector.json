@@ -4,7 +4,7 @@
   "description": "§7 / §14: a locator resolving to a private/link-local address (SSRF) is rejected before fetch.",
   "input": {
     "location": {
-      "profile": "https://jinn.network/record-discovery/location/https/1.0",
+      "profile": "https://spec.jinn.network/record-discovery/location/https/v1",
       "locator": "https://169.254.169.254/latest/meta-data/"
     }
   },

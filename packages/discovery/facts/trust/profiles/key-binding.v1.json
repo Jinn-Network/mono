@@ -1,7 +1,7 @@
 {
-  "protocol": "https://jinn.network/record-discovery/1.0",
-  "kind": "https://jinn.network/records/key-binding/1.0",
-  "profile": "https://jinn.network/records/key-binding/1.0/facts/1.0",
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/key-binding/v1",
+  "profile": "https://spec.jinn.network/facts/key-binding/v1",
   "fields": [
     { "name": "agent", "class": "record", "cloudEvents": { "attribute": "agent", "scalar": "string" } },
     { "name": "keyid", "class": "record" },

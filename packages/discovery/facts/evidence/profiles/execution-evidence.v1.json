@@ -1,7 +1,7 @@
 {
-  "protocol": "https://jinn.network/record-discovery/1.0",
-  "kind": "https://jinn.network/records/execution-evidence/1.0",
-  "profile": "https://jinn.network/records/execution-evidence/1.0/facts/1.0",
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/execution-evidence/v1",
+  "profile": "https://spec.jinn.network/facts/execution-evidence/v1",
   "fields": [
     { "name": "executionId", "class": "record", "cloudEvents": { "attribute": "executionid", "scalar": "string" } },
     { "name": "executorId", "class": "record" },

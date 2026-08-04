@@ -52,7 +52,7 @@ describe("facts/task-execution recompute functions", () => {
     const bytes = await loadGoldenTaskBytes();
     const facts = await taskRecompute(bytes, noReferencedBytes);
     expect(facts).toEqual({
-      profileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+      profileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       profileDigest: "sha256:3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6",
       author: undefined,
       evaluationDigest: undefined,
@@ -71,7 +71,7 @@ describe("facts/task-execution recompute functions", () => {
     const facts = await submissionRecompute(submissionBytes, refs);
     expect(facts).toEqual({
       taskDigest: recordDigest(taskBytes),
-      taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+      taskProfileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       requesterIri: "urn:uuid:cccccccc-cccc-5ccc-8ccc-cccccccccccc",
       deadline: "2026-07-29T00:00:00Z",
       benchrun: undefined,
@@ -91,7 +91,7 @@ describe("facts/task-execution recompute functions", () => {
     const taskBytes = await loadGoldenTaskBytes();
     const taskDigestHex = recordDigest(taskBytes).slice("sha256:".length);
     const bytes = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd",
       task: { digest: { sha256: taskDigestHex } },
       requester: "urn:uuid:eeeeeeee-eeee-5eee-8eee-eeeeeeeeeeee",
@@ -130,7 +130,7 @@ describe("facts/task-execution recompute functions", () => {
 
   it("recomputes the optional benchrun/benchcell/bencharm triple from a Delivery's own namespaced extension fields when present", async () => {
     const bytes = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
       task: "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
       outputs: [],
@@ -150,7 +150,7 @@ describe("facts/task-execution recompute functions", () => {
     const bytes = await loadRepositoryWorkProfileBytes();
     const facts = await profileDocumentRecompute(bytes, noReferencedBytes);
     expect(facts).toEqual({
-      profile: "https://jinn.network/task-profiles/repository-work/1.0",
+      profile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       extendsDigest: undefined,
     });
   });

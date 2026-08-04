@@ -15,6 +15,6 @@ function loadProfile(filename: string): FactsProfileDocument {
   return parseFactsProfile(JSON.parse(readFileSync(path, "utf8")));
 }
 
-export const keyBindingProfile: FactsProfileDocument = loadProfile("key-binding.1.0.json");
-export const authorizationProfile: FactsProfileDocument = loadProfile("authorization.1.0.json");
-export const trustPolicyProfile: FactsProfileDocument = loadProfile("trust-policy.1.0.json");
+export const keyBindingProfile: FactsProfileDocument = loadProfile("key-binding.v1.json");
+export const authorizationProfile: FactsProfileDocument = loadProfile("authorization.v1.json");
+export const trustPolicyProfile: FactsProfileDocument = loadProfile("trust-policy.v1.json");
