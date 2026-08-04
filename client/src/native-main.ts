@@ -17,7 +17,7 @@ export interface NativeDeploymentFactoryInput {
 }
 
 export interface NativeMainDeps {
-  readonly loadConfig: () => NativeProductConfig;
+  readonly loadConfig: () => NativeProductConfig | Promise<NativeProductConfig>;
   readonly buildHost: (input: NativeDeploymentFactoryInput) => Promise<NativeOperatorHost>;
   readonly installSignalHandlers?: boolean;
 }
@@ -28,7 +28,7 @@ export interface NativeMainDeps {
  * (see issue #2378). `jinn run` resolves the identical path before
  * deciding to invoke this entry, so the two can never disagree.
  */
-function loadNativeProductConfig(): NativeProductConfig {
+function loadNativeProductConfig(): Promise<NativeProductConfig> {
   return loadNativeProductConfigFile(resolveNativeConfigPath());
 }
 
@@ -67,7 +67,7 @@ export async function main(deps: NativeMainDeps = PRODUCTION_DEPS): Promise<{
   readonly readiness: OperatorVerticalDecision['readiness'];
   readonly health: NativeOperatorHealth;
 }> {
-  const config = deps.loadConfig();
+  const config = await deps.loadConfig();
   const decision = resolveConfiguredOperatorVerticalMode(config);
   if (decision.effectiveMode !== 'native-v1') {
     throw new Error(`native entry refused effective mode ${decision.effectiveMode} (${decision.readiness})`);

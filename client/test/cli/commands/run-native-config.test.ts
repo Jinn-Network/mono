@@ -60,6 +60,24 @@ function writeNative(path: string, extra: Record<string, unknown> = {}): void {
   writeFileSync(path, `${JSON.stringify(validNativeProductFileContent(extra), null, 2)}\n`, { mode: 0o600 });
 }
 
+/**
+ * `operator.verticalMode` is optional in NativeProductFileSchema — omitted or
+ * `'legacy'` both resolve to `effectiveMode: 'legacy'`
+ * (native-vertical-mode.ts:103-105). A `--native-config` file in either shape
+ * must never silently boot the legacy product against a config the operator
+ * never named as `--config`.
+ */
+function writeNativeFileWithVerticalMode(path: string, verticalMode: 'native-v1' | 'legacy' | 'omitted'): void {
+  const content = validNativeProductFileContent();
+  const operator = content['operator'] as Record<string, unknown>;
+  if (verticalMode === 'omitted') {
+    delete operator['verticalMode'];
+  } else {
+    operator['verticalMode'] = verticalMode;
+  }
+  writeFileSync(path, `${JSON.stringify(content, null, 2)}\n`, { mode: 0o600 });
+}
+
 function writeLegacy(path: string, content: Record<string, unknown> = {}): void {
   writeFileSync(path, `${JSON.stringify(content, null, 2)}\n`, { mode: 0o600 });
 }
@@ -191,5 +209,130 @@ describe('jinn run native/legacy config routing (issue #2378)', () => {
     const parsed = JSON.parse(writes[writes.length - 1]!);
     expect(parsed.code).toBe('invalid_invocation');
     expect(exits).toEqual([11]);
+  });
+
+  // --- Opus review (2026-08-04): naming --native-config must never silently boot the
+  // legacy product. operator.verticalMode is optional in NativeProductFileSchema; an
+  // omitted or explicit 'legacy' value resolves to effectiveMode 'legacy'
+  // (native-vertical-mode.ts:103-105), which — pre-fix — selected deps.mainFn, and in
+  // production that loads AND MIGRATES ~/.jinn-client/config.json, a file the operator
+  // never named. Both shapes must instead hard-fail before any daemon boots.
+
+  it('--native-config with operator.verticalMode omitted refuses to silently boot legacy', async () => {
+    const nativePath = join(jinnDir, 'native-config.json');
+    writeNativeFileWithVerticalMode(nativePath, 'omitted');
+    // A legacy config also exists at the default path — proving it is never touched.
+    writeLegacy(DEFAULT_CONFIG_PATH, { network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
+    const legacyBefore = readFileSync(DEFAULT_CONFIG_PATH, 'utf-8');
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      argv: ['--native-config', nativePath],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(deps.mainFn).not.toHaveBeenCalled();
+    expect(deps.nativeMainFn).not.toHaveBeenCalled();
+    // The legacy config.json was never opened, let alone migrated.
+    expect(readFileSync(DEFAULT_CONFIG_PATH, 'utf-8')).toBe(legacyBefore);
+  });
+
+  it("--native-config with operator.verticalMode: 'legacy' refuses to silently boot legacy", async () => {
+    const nativePath = join(jinnDir, 'native-config.json');
+    writeNativeFileWithVerticalMode(nativePath, 'legacy');
+    writeLegacy(DEFAULT_CONFIG_PATH, { network: 'testnet', rpcUrl: 'https://sepolia.base.org' });
+    const legacyBefore = readFileSync(DEFAULT_CONFIG_PATH, 'utf-8');
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      argv: ['--native-config', nativePath],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(deps.mainFn).not.toHaveBeenCalled();
+    expect(deps.nativeMainFn).not.toHaveBeenCalled();
+    expect(readFileSync(DEFAULT_CONFIG_PATH, 'utf-8')).toBe(legacyBefore);
+  });
+
+  it('the default-path route also refuses a native-config.json whose effective mode is legacy', async () => {
+    // Same hazard via the zero-flag default-path route, not just an explicit --native-config.
+    writeNativeFileWithVerticalMode(defaultNativeConfigPath, 'omitted');
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({ env: { JINN_PASSWORD: 'test' } });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(deps.mainFn).not.toHaveBeenCalled();
+    expect(deps.nativeMainFn).not.toHaveBeenCalled();
+  });
+
+  // --- Opus review: --native-config=<path> (the `=` form, which Node's parseArgs accepts)
+  // was silently ignored by the raw argv scan, falling through to legacy.
+
+  it('accepts the --native-config=<path> equals form', async () => {
+    const nativePath = join(jinnDir, 'native-config.json');
+    writeNative(nativePath);
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx } = makeCommandCtx({
+      argv: [`--native-config=${nativePath}`],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+
+    expect(deps.nativeMainFn).toHaveBeenCalledOnce();
+    expect(deps.mainFn).not.toHaveBeenCalled();
+  });
+
+  it('the --native-config=<path> equals form still errors on a missing file rather than falling to legacy', async () => {
+    const missingPath = join(jinnDir, 'does-not-exist.json');
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      argv: [`--native-config=${missingPath}`],
+      env: { JINN_PASSWORD: 'test' },
+    });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(deps.mainFn).not.toHaveBeenCalled();
+  });
+
+  // --- Opus review minor: the error envelope should name how the path was resolved, so an
+  // operator who set JINN_NATIVE_CONFIG_PATH at their legacy file gets a pointer to the env var.
+
+  it('a bad native config resolved via JINN_NATIVE_CONFIG_PATH names the env var in the error', async () => {
+    const legacyShapedPath = join(jinnDir, 'oops-legacy.json');
+    writeLegacy(legacyShapedPath, { network: 'testnet', rpcUrl: 'https://sepolia.base.org', tasks: [] });
+
+    const deps = realConfigDeps();
+    const run = createRunCommand(deps);
+    const { ctx, writes, exits } = makeCommandCtx({
+      env: { JINN_PASSWORD: 'test', JINN_NATIVE_CONFIG_PATH: legacyShapedPath },
+    });
+    await run.run(ctx);
+
+    const parsed = JSON.parse(writes[writes.length - 1]!);
+    expect(parsed.code).toBe('invalid_invocation');
+    expect(exits).toEqual([11]);
+    expect(JSON.stringify(parsed)).toContain('JINN_NATIVE_CONFIG_PATH');
   });
 });

@@ -253,9 +253,18 @@ Failure example (funding gate):
         );
         return;
       }
+      const nativeConfigEnv = ctx.env['JINN_NATIVE_CONFIG_PATH'];
       const nativeConfigPath = nativeConfigFlag ?? resolveNativeConfigPath(ctx.argv, ctx.env);
       const useNativeConfig = nativeConfigFlag !== undefined
         || (legacyConfigFlag === undefined && existsSync(nativeConfigPath));
+      // Named in error messages below so an operator who set JINN_NATIVE_CONFIG_PATH at their
+      // legacy file (rather than passing --native-config) is told where to look, not just what
+      // failed to parse.
+      const nativeConfigSource = nativeConfigFlag !== undefined
+        ? '--native-config flag'
+        : nativeConfigEnv !== undefined
+          ? 'JINN_NATIVE_CONFIG_PATH env var'
+          : 'default path (~/.jinn-client/native-config.json)';
 
       let config: JinnConfig | undefined;
       let nativeConfig: NativeProductConfig | undefined;
@@ -263,15 +272,17 @@ Failure example (funding gate):
 
       if (useNativeConfig) {
         try {
-          nativeConfig = deps.loadNativeConfig(nativeConfigPath);
+          nativeConfig = await deps.loadNativeConfig(nativeConfigPath);
         } catch (err) {
           emitEnvelope(
             {
               code: 'invalid_invocation',
-              message: err instanceof Error ? err.message : String(err),
-              hint: 'native-v1 config is strict — see client/src/daemon/native-product-config.ts for the accepted shape ({ network, rpcUrl, operator } only).',
+              message: `${err instanceof Error ? err.message : String(err)} (resolved via ${nativeConfigSource})`,
+              hint: nativeConfigSource === 'JINN_NATIVE_CONFIG_PATH env var'
+                ? `JINN_NATIVE_CONFIG_PATH is set to ${nativeConfigPath}, which is not a valid native-v1 config. Either point it at a native-v1 file (network, rpcUrl, operator only) or unset it to boot legacy.`
+                : 'native-v1 config is strict — see client/src/daemon/native-product-config.ts for the accepted shape ({ network, rpcUrl, operator } only).',
               exampleCli: 'jinn run --native-config ~/.jinn-client/native-config.json',
-              details: { field: 'native-config', path: nativeConfigPath },
+              details: { field: 'native-config', path: nativeConfigPath, source: nativeConfigSource },
             },
             { writer: ctx.writer, exit: ctx.exit },
           );
@@ -285,6 +296,31 @@ Failure example (funding gate):
       // This decision happens before password/key resolution. Native deployment or closure
       // mismatches therefore cannot cause legacy wallet material to be loaded as a fallback.
       const vertical = resolveConfiguredOperatorVerticalMode(nativeConfig ?? config!);
+      // A named native config whose effective mode isn't native-v1 (operator.verticalMode
+      // omitted, or explicitly 'legacy' — both valid per NativeProductFileSchema, see
+      // native-vertical-mode.ts:103-105) must never silently fall through to deps.mainFn: in
+      // production that loads AND MIGRATES ~/.jinn-client/config.json, a file the operator
+      // never named. Naming --native-config (or JINN_NATIVE_CONFIG_PATH) and getting the legacy
+      // product booted against a different file entirely is never what an operator meant.
+      if (useNativeConfig && vertical.effectiveMode !== 'native-v1') {
+        emitEnvelope(
+          {
+            code: 'invalid_invocation',
+            message: `${nativeConfigSource} named a native-v1 config, but it resolves to effective mode '${vertical.effectiveMode}' (readiness: ${vertical.readiness}), not native-v1.`,
+            hint: 'Set operator.verticalMode: "native-v1" in that file, or drop --native-config / unset JINN_NATIVE_CONFIG_PATH to boot the legacy daemon from ~/.jinn-client/config.json instead. A native config is never silently booted as the legacy product.',
+            exampleCli: 'jinn run --native-config ~/.jinn-client/native-config.json',
+            details: {
+              field: 'native-config',
+              path: nativeConfigPath,
+              source: nativeConfigSource,
+              effectiveMode: vertical.effectiveMode,
+              readiness: vertical.readiness,
+            },
+          },
+          { writer: ctx.writer, exit: ctx.exit },
+        );
+        return;
+      }
 
       // Resolve password: env > file > auto-generate (matches what
       // `jinn quickstart` used to do). A brand-new operator can run

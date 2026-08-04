@@ -17,16 +17,43 @@
  * Both `jinn run` (`client/src/cli/commands/run.ts`) and the native-only
  * entry (`client/src/native-main.ts`) import this module so the path they
  * resolve — and the loader they call — can never disagree.
+ *
+ * `NativeProductFileSchema` is imported lazily, inside `loadNativeProductConfigFile`,
+ * rather than at module top level. `getNativeConfigPathFromArgs`/`resolveNativeConfigPath`
+ * are cheap and run on every `jinn run` invocation (including plain legacy boots) to decide
+ * which product to load; a top-level import here would otherwise pull
+ * `@jinn-network/trust-core` + `@jinn-network/marketplace-binding` + `zod` into every legacy
+ * run too, which is exactly the static-import discipline `native-vertical-config.ts`
+ * (this module's sibling, consumed the same way) already keeps.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { NativeProductFileSchema, type NativeProductConfig } from './native-product-config.js';
+import type { NativeProductConfig } from './native-product-config.js';
 
-/** Reads `--native-config <path>` out of a raw argv array. Mirrors `config.ts`'s `getConfigPathFromArgs`. */
+const NATIVE_CONFIG_FLAG = '--native-config';
+const NATIVE_CONFIG_FLAG_EQUALS = `${NATIVE_CONFIG_FLAG}=`;
+
+/**
+ * Reads `--native-config <path>` or `--native-config=<path>` out of a raw argv array.
+ * Both forms are accepted because Node's `parseArgs` (used for `--help`/strict-flag
+ * validation elsewhere in `run.ts`) accepts both for a `type: 'string'` option — a
+ * raw scan that only recognised the space-separated form would silently drop
+ * `--native-config=<path>` invocations onto the legacy path instead of erroring.
+ */
 export function getNativeConfigPathFromArgs(argv: string[] = process.argv): string | undefined {
-  const idx = argv.indexOf('--native-config');
-  return idx >= 0 && argv[idx + 1] ? argv[idx + 1] : undefined;
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]!;
+    if (arg === NATIVE_CONFIG_FLAG) {
+      const next = argv[i + 1];
+      return next ? next : undefined;
+    }
+    if (arg.startsWith(NATIVE_CONFIG_FLAG_EQUALS)) {
+      const value = arg.slice(NATIVE_CONFIG_FLAG_EQUALS.length);
+      return value.length > 0 ? value : undefined;
+    }
+  }
+  return undefined;
 }
 
 export interface NativeConfigPathEnv {
@@ -63,8 +90,13 @@ export class NativeConfigLoadError extends Error {}
  * Throws `NativeConfigLoadError` (never returns a partial/legacy-fallback
  * result) on a missing file, invalid JSON, or a schema violation — including
  * a legacy-shaped file pointed at by mistake.
+ *
+ * Async so the schema import above can stay lazy (a dynamic `import()` is
+ * always asynchronous) — this only executes once a caller has already
+ * decided to load a native file, at which point the schema's dependency
+ * weight is expected, not incurred on every legacy run.
  */
-export function loadNativeProductConfigFile(path: string): NativeProductConfig {
+export async function loadNativeProductConfigFile(path: string): Promise<NativeProductConfig> {
   if (!existsSync(path)) {
     throw new NativeConfigLoadError(`native-v1 structured config is missing: ${path}`);
   }
@@ -74,6 +106,7 @@ export function loadNativeProductConfigFile(path: string): NativeProductConfig {
   } catch (cause) {
     throw new NativeConfigLoadError(`native-v1 structured config is not JSON: ${String(cause)}`);
   }
+  const { NativeProductFileSchema } = await import('./native-product-config.js');
   const parsed = NativeProductFileSchema.safeParse(raw);
   if (!parsed.success) {
     throw new NativeConfigLoadError(`native-v1 structured config is invalid: ${parsed.error.message}`);
