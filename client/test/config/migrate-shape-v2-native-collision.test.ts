@@ -10,9 +10,10 @@ import { NativeProductFileSchema } from '../../src/daemon/native-product-config.
  * Standing proof of the collision described in issue #2378: a native-v1
  * config file cannot survive the legacy shape-v2 migration + strict native
  * parse, in either direction. This is NOT a scenario the fix (own config
- * path, see PLAN.md) makes work — the fix is to never route a native file
- * through this migration at all. This file documents *why* that's the only
- * option: both escape routes the issue's author tried are provably closed.
+ * path — see issue #2378 and client/src/daemon/native-config-path.ts) makes
+ * work — the fix is to never route a native file through this migration at
+ * all. This file documents *why* that's the only option: both escape routes
+ * the issue's author tried are provably closed.
  *
  * If this file ever goes green, something now allows a native config to
  * pass through `migrateConfigShapeV2` unscathed — re-read #2378 before
