@@ -183,7 +183,7 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-The OLAS the operator has earned. Rewards build up automatically as the node completes tasks and delivers verdicts, and the daemon collects them for the operator — there is no manual claim step and nothing the operator needs to do here.
+The OLAS the operator has earned. In standard staking mode the daemon's periodic reward-claim loop collects `stOLAS ExternalStakingDistributor.claim` for each staked fleet service automatically (`rewardClaimIntervalMs`, on by default — see amendment banner). A manual claim action also exists (`POST /api/admin/claim-rewards`, `jinn claim-rewards`) for an operator who wants to force a claim between loop ticks, or who has set `JINN_REWARD_CLAIM_INTERVAL_MS=0` to opt out of the automatic loop and claim manually instead.
 
 - **State**
   - lifetime OLAS earned (`claimedStakingRewardsWei`)
@@ -193,7 +193,7 @@ The OLAS the operator has earned. Rewards build up automatically as the node com
 - **Collections**
   - none
 - **Actions**
-  - none (rewards are collected automatically)
+  - claim rewards now — `idle → claiming → claimed` (`failed` terminal alternative); a manual trigger of the same claim logic the automatic loop runs
 
 ### 2.8 Bootstrap
 

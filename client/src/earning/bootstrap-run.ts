@@ -374,3 +374,81 @@ export async function runFleetBootstrap(deps: {
       : null,
   };
 }
+
+// ── Degrade-open retry-loop orchestration (#2407 part 2, spec §5) ──────────
+
+/** Anything that can be stopped — degraded-recovery.ts's DegradedRecoveryHandle satisfies this. */
+export interface StoppableRecovery {
+  stop: () => void | Promise<void>;
+}
+
+export interface RunBootstrapWithDegradeOpenDeps<TResult> {
+  /**
+   * Runs one bootstrap attempt. Resolves with the result on success;
+   * throws `SetupBootstrapHalted` on an expected halt (any other thrown
+   * error propagates out of `runBootstrapWithDegradeOpen` uncaught, exactly
+   * like the inline loop this replaces).
+   */
+  runBootstrap: () => Promise<TResult>;
+  /**
+   * Classifies + starts degraded recovery for a halt's envelope. Returns
+   * `null` when the halt is integrity-class (isEconomicBootstrapHalt says
+   * no degraded loops) or when construction itself failed — either way,
+   * readiness stays at whatever it already was rather than flipping to
+   * `'degraded'` for a recovery surface that isn't actually running.
+   */
+  startDegraded: (envelope: ErrorEnvelope) => StoppableRecovery | null;
+  setReadiness: (readiness: 'bootstrapping' | 'ready' | 'degraded') => void;
+  /**
+   * Waits for the retry signal (SPA click, or the funding auto-resume
+   * poller) to fire for THIS halt. Resolves once the signal fires; the
+   * caller then stops any degraded recovery and loops back to
+   * `runBootstrap()`. Receives the halt's envelope so the caller can decide
+   * whether to run the funding auto-resume poller for it.
+   */
+  awaitRetry: (envelope: ErrorEnvelope) => Promise<void>;
+}
+
+/**
+ * Extracted from main.ts's inline `while (true)` retry loop so the
+ * ORDERING it guarantees is independently testable (main.ts itself is
+ * established in this codebase as impractical to test directly — see
+ * `test/main/rpc-boot-probe-format.test.ts`'s docstring — but this function
+ * has no such dependency): on a `SetupBootstrapHalted`, `startDegraded` runs
+ * BEFORE `setReadiness('degraded')` (so readiness never claims a recovery
+ * surface that failed to start), `setReadiness('degraded')` runs before
+ * `awaitRetry` is awaited, the degraded handle's `stop()` is awaited to
+ * completion BEFORE the loop calls `runBootstrap()` again, and
+ * `setReadiness('ready')` runs only after a successful `runBootstrap()`
+ * resolves — i.e. before the caller goes on to construct the full Daemon.
+ */
+export async function runBootstrapWithDegradeOpen<TResult>(
+  deps: RunBootstrapWithDegradeOpenDeps<TResult>,
+): Promise<TResult> {
+  deps.setReadiness('bootstrapping');
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      const result = await deps.runBootstrap();
+      deps.setReadiness('ready');
+      return result;
+    } catch (err) {
+      if (err instanceof SetupBootstrapHalted) {
+        const degradedRecovery = deps.startDegraded(err.envelope);
+        if (degradedRecovery) {
+          deps.setReadiness('degraded');
+        }
+        try {
+          await deps.awaitRetry(err.envelope);
+        } finally {
+          if (degradedRecovery) {
+            await degradedRecovery.stop();
+          }
+          deps.setReadiness('bootstrapping');
+        }
+        continue;
+      }
+      throw err;
+    }
+  }
+}

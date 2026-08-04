@@ -55,10 +55,9 @@ export interface ClaimRewardsIntentInput {
    */
   jinnStore?: Store;
   /**
-   * Which front-end triggered this claim, recorded on any resulting
-   * activity-feed entries so the feed can distinguish origins. The CLI
-   * passes `'claim-rewards'`, the admin HTTP route passes `'admin-route'`,
-   * the periodic loop passes `'reward-claim'`.
+   * Which front-end triggered this claim — recorded on the emitted log
+   * line. The CLI passes `'claim-rewards'`, the admin HTTP route passes
+   * `'admin-route'`, the periodic loop passes `'reward-claim'`.
    */
   source: string;
 }
