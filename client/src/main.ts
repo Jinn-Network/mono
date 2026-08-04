@@ -56,12 +56,12 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, SetupBootstrapHalted } from './earning/bootstrap-run.js';
-import { isEconomicBootstrapHalt } from './earning/bootstrap-halt-classification.js';
-import { startDegradedRecoveryLoops, type DegradedRecoveryHandle } from './daemon/degraded-recovery.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
+import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import { setDaemonReadiness } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
-import { isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
+import { addressSetFromChainConfig, isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
 import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
@@ -406,7 +406,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   } else {
     const addressSetCheck = verifyBroadcastTargetAddressSet({
       chainId: CHAIN_CONFIG.chainId,
-      set: { stakingProxy: CHAIN_CONFIG.stakingContract, distributor: CHAIN_CONFIG.distributorAddress, marketplace: MARKETPLACE_ADDRESS, router: ROUTER_ADDRESS, olasToken: CHAIN_CONFIG.olasToken },
+      // #2407 L2: goes through the same helper the test suite calls against
+      // getChainConfig(...) directly, rather than reconstructing the set
+      // inline here — one place for the router fallback to live, so the
+      // test suite's coverage is the production set, not a narrower stand-in.
+      set: addressSetFromChainConfig(CHAIN_CONFIG),
     });
     if (!addressSetCheck.ok) {
       emitEnvelope({
@@ -1232,28 +1236,138 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     setupController.refresh({ keystoreExists: true, allComplete: false });
   }
 
-  // hjex.6: halt-and-resume loop for bootstrap retries.
-  // When failBootstrap() throws SetupBootstrapHalted, we wait for the operator
-  // to click Retry in the SPA (which resolves retryBootstrapResolve) rather
-  // than returning and exiting. On each retry, we loop back and call bootstrap()
-  // again. bootstrap() is idempotent — completed steps are no-ops.
+  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
+  // set or a container/compose auth context) this fails loud and exits when a
+  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
+  // Outside a deployment context it only logs advisories — a plain local
+  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
+  // unfit environment refuses before we touch the pidfile.
   //
-  // #2407 / spec §5: readiness starts 'bootstrapping'. On an economic-class
-  // halt, degraded recovery loops start (see below) and readiness flips to
-  // 'degraded'; on a successful bootstrap (first attempt or after retry) it
-  // flips to 'ready' right before the full Daemon (with the claim/work path)
-  // is constructed below. No loops exist yet in the 'bootstrapping' window,
-  // so this is documentation more than active gating, but it keeps the
-  // three-state lifecycle real rather than an unreachable type.
-  setDaemonReadiness('bootstrapping');
-  let bootstrapResult;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  // #2407 B1: this and the pidfile block below used to run much later, right
+  // before Daemon construction — AFTER the entire bootstrap retry loop and
+  // any degrade-open recovery window. That left the whole degraded window
+  // with no `daemon.pid` on disk, so `checkDaemonGuard` (cli/daemon-guard.ts)
+  // reported `not-running` and a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would race the
+  // degraded recovery loops' signer, and a second `jinn run` would start a
+  // second degraded set. Both gates now run here, before the retry loop and
+  // any degraded loops can start.
+  await applyDeploymentReadinessGate(
+    {
+      stateDir: config.stateDir,
+      earningDir: config.earningDir,
+      runtimeMode: config.runtimeMode,
+    },
+    {
+      env: process.env,
+      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
+      detectAuthContext,
+    },
+  );
+
+  const pidPath = join(config.earningDir, 'daemon.pid');
+  applyPidfileLivenessGate(pidPath);
+
+  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
+  const removePidfile = () => {
     try {
-      bootstrapResult = await runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress });
-      break; // success — exit the retry loop
-    } catch (err) {
-      if (err instanceof SetupBootstrapHalted) {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePidfile);
+
+  // hjex.6: halt-and-resume loop for bootstrap retries, extracted into
+  // `runBootstrapWithDegradeOpen` (earning/bootstrap-run.ts, #2407 M3) so its
+  // ORDERING — degraded loops start before readiness flips 'degraded'; on
+  // retry, degraded recovery's `stop()` is awaited to completion BEFORE the
+  // next `runFleetBootstrap()` attempt; 'ready' flips only after a
+  // successful attempt, i.e. before the full Daemon is constructed below —
+  // is independently unit-tested rather than only reachable by spawning the
+  // whole daemon (main.ts itself stays impractical to test directly).
+  //
+  // The master-EOA signer/client used by degraded recovery is derived once
+  // here (cheap, no network calls) rather than per-halt: it's the same
+  // every time, and deriving it eagerly keeps `startDegraded` below
+  // synchronous, matching `runBootstrapWithDegradeOpen`'s sync
+  // `startDegraded` contract without threading async through it.
+  const degradedMnemonic = await decryptMnemonic(
+    await new FleetStateStore(config.earningDir).loadMnemonicKeystore(),
+    PASSWORD,
+  );
+  const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
+  const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
+  const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
+
+  let bootstrapResult;
+  try {
+    bootstrapResult = await runBootstrapWithDegradeOpen({
+      runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
+      setReadiness: setDaemonReadiness,
+      // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
+      // shortfall, incomplete fleet, a recoverable on-chain error) must not
+      // leave the daemon fully dark while the caller awaits the retry signal
+      // — any part of the fleet that's ALREADY operational needs its
+      // eviction/checkpoint/balance-topup/reward-claim loops to keep running
+      // so a self-healing condition doesn't compound (ratifies
+      // earning/bootstrap.ts's #773/#789/#917 decision: eviction recovery
+      // belongs to the running eviction loop, never an inline boot-time
+      // broadcast). Integrity-class halts (bootstrap-halt-classification.ts)
+      // stay fail-closed — no degraded loops. Standalone-recovery-runner
+      // variant, not the full `Daemon` class: `Daemon` needs
+      // mechAddress/safeAddress/composition/adapter resolved from a
+      // COMPLETED bootstrap, none of which exist mid-halt — see
+      // degraded-recovery.ts's docstring.
+      startDegraded: (envelope) => {
+        if (!isEconomicBootstrapHalt(envelope)) {
+          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
+          return null;
+        }
+        try {
+          const handle = startDegradedRecoveryLoops({
+            earningDir: config.earningDir,
+            network: NETWORK_CHAIN,
+            publicClient: degradedPublicClient,
+            masterWallet: degradedMasterWallet,
+            mnemonic: degradedMnemonic,
+            rpcUrl: config.rpcUrl,
+            chainConfig: CHAIN_CONFIG,
+            intervals: {
+              evictionCheckIntervalMs: config.evictionCheckIntervalMs,
+              checkpointIntervalMs: config.checkpointIntervalMs,
+              // #2407 B2: omit balance-topup while a master-EOA
+              // funding_required halt is pending — it drains the exact
+              // balance the funding poller below is waiting to see cross
+              // the threshold (an absorbing state). See
+              // isPendingMasterFundingHalt's docstring.
+              balanceTopupIntervalMs: isPendingMasterFundingHalt(envelope) ? 0 : config.balanceTopupIntervalMs,
+              rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+            },
+            stakingMode: config.stakingMode,
+            jinnStore: sharedStore,
+          });
+          console.log(
+            '[main] Degraded readiness: recovery loops (eviction-check, checkpoint, ' +
+              'balance-topup, reward-claim) running for the already-operational fleet ' +
+              'while this halt is retried; claim/work path stays closed.' +
+              (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
+          );
+          return handle;
+        } catch (degradedErr) {
+          console.error(
+            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
+            degradedErr instanceof Error ? degradedErr.message : degradedErr,
+          );
+          return null;
+        }
+      },
+      // hjex.6: Auto-resume funding poller. When the halt is a funding
+      // shortfall, poll the master EOA balance every
+      // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets
+      // or exceeds the required amount, auto-signal the retry loop. Only
+      // runs while the halt signal is pending; stops on any signal.
+      awaitRetry: async (envelope) => {
         // Install the retry signal so the endpoint can unblock us.
         const retrySignal = new Promise<void>((resolve, reject) => {
           retryBootstrapResolve = resolve;
@@ -1261,69 +1375,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         });
         console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
 
-        // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
-        // shortfall, incomplete fleet, a recoverable on-chain error) must not
-        // leave the daemon fully dark while it waits for the retry signal
-        // below — any part of the fleet that's ALREADY operational needs its
-        // eviction/checkpoint/balance-topup/reward-claim loops to keep
-        // running so a self-healing condition doesn't compound (ratifies
-        // earning/bootstrap.ts's #773/#789/#917 decision: eviction recovery
-        // belongs to the running eviction loop, never an inline boot-time
-        // broadcast). Integrity-class halts (bootstrap-halt-classification.ts)
-        // stay fail-closed — no degraded loops, just the existing blocking
-        // wait below. This is the standalone-recovery-runner variant, not
-        // the full `Daemon` class: `Daemon` needs mechAddress/safeAddress/
-        // composition/adapter resolved from a COMPLETED bootstrap, none of
-        // which exist mid-halt — see degraded-recovery.ts's docstring.
-        let degradedRecovery: DegradedRecoveryHandle | null = null;
-        if (isEconomicBootstrapHalt(err.envelope)) {
-          try {
-            const degradedStore = new FleetStateStore(config.earningDir);
-            const degradedMnemonic = await decryptMnemonic(await degradedStore.loadMnemonicKeystore(), PASSWORD);
-            const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
-            const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
-            const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
-            setDaemonReadiness('degraded');
-            degradedRecovery = startDegradedRecoveryLoops({
-              earningDir: config.earningDir,
-              network: NETWORK_CHAIN,
-              publicClient: degradedPublicClient,
-              masterWallet: degradedMasterWallet,
-              mnemonic: degradedMnemonic,
-              rpcUrl: config.rpcUrl,
-              chainConfig: CHAIN_CONFIG,
-              intervals: {
-                evictionCheckIntervalMs: config.evictionCheckIntervalMs,
-                checkpointIntervalMs: config.checkpointIntervalMs,
-                balanceTopupIntervalMs: config.balanceTopupIntervalMs,
-                rewardClaimIntervalMs: config.rewardClaimIntervalMs,
-              },
-              stakingMode: config.stakingMode,
-              jinnStore: sharedStore,
-            });
-            console.log(
-              '[main] Degraded readiness: recovery loops (eviction-check, checkpoint, ' +
-                'balance-topup, reward-claim) running for the already-operational fleet ' +
-                'while this halt is retried; claim/work path stays closed.',
-            );
-          } catch (degradedErr) {
-            console.error(
-              '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
-              degradedErr instanceof Error ? degradedErr.message : degradedErr,
-            );
-          }
-        } else {
-          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
-        }
-
-        // hjex.6: Auto-resume funding poller.
-        // When the halt is a funding shortfall, poll the master EOA balance
-        // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
-        // meets or exceeds the required amount, auto-signal the retry loop.
-        // Only runs while the halt signal is pending; stops on any signal.
         let fundingPollHandle: ReturnType<typeof setTimeout> | null = null;
-        const isHaltedOnFunding = err.envelope.code === 'funding_required';
-        const haltDetails = err.envelope.details as Record<string, unknown> | undefined;
+        const isHaltedOnFunding = envelope.code === 'funding_required';
+        const haltDetails = envelope.details as Record<string, unknown> | undefined;
         const haltAddress = typeof haltDetails?.['address'] === 'string'
           ? haltDetails['address'] as `0x${string}`
           : null;
@@ -1374,38 +1428,25 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             clearTimeout(fundingPollHandle);
             fundingPollHandle = null;
           }
-          // #2407: stop degraded recovery before re-attempting bootstrap —
-          // see degraded-recovery.ts's DegradedRecoveryHandle.stop() docstring
-          // for why this is fire-and-forget (not awaited) rather than a
-          // blocking join.
-          if (degradedRecovery) {
-            degradedRecovery.stop();
-            degradedRecovery = null;
-          }
-          setDaemonReadiness('bootstrapping');
         }
         console.log('[main] Retry triggered — re-running bootstrap...');
-        continue; // loop back to the bootstrap() call
-      }
-      // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
-      // tear down the API we just started so we don't leave a dangling listener.
-      await setupApiServer.close().catch(() => undefined);
-      await closeCaptureReceiver();
-      sharedStore.close();
-      throw err;
-    }
+      },
+    });
+  } catch (err) {
+    // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
+    // tear down the API we just started so we don't leave a dangling listener.
+    await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
+    sharedStore.close();
+    throw err;
   }
 
   // Bootstrap completed — flip the controller into 'running' so any waiters
-  // (future loops gated on this) unblock.
-  setupController.refresh({ keystoreExists: true, allComplete: true });
-  // #2407 / spec §5: readiness flips 'ready' before the full Daemon (with
-  // its ready-only claim/work path) is constructed below — this is the
+  // (future loops gated on this) unblock. `runBootstrapWithDegradeOpen`
+  // already flipped readiness to 'ready' before returning — this is the
   // no-restart transition: the same process falls straight through to the
-  // existing full-boot code, no restart-daemon.ts invocation needed. Any
-  // degraded recovery loops were already stopped in the retry-signal
-  // `finally` block above before this bootstrap attempt was re-run.
-  setDaemonReadiness('ready');
+  // existing full-boot code below, no restart-daemon.ts invocation needed.
+  setupController.refresh({ keystoreExists: true, allComplete: true });
 
   // ── --no-daemon: exit cleanly after bootstrap completes ──────────────────
   // `jinn run --no-daemon` flips JINN_NO_DAEMON=1 in run.ts. Emit a JSON
@@ -2664,43 +2705,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     console.log('[watchdog] auto-restart ENABLED (stale loop → non-zero exit)');
   }
 
-  // Write pidfile so `jinn stop` can find us. First, refuse the run if another
-  // daemon already owns this earning directory — see issue #649. The gate
-  // handles all three branches (refuse-and-exit, unlink-stale-and-continue,
-  // proceed); the writeFileSync below MUST stay outside the helper so the
-  // "// DO NOT add store mutations above this line — see #649" invariant is
-  // visible right here at the call site.
-  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
-  // set or a container/compose auth context) this fails loud and exits when a
-  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
-  // Outside a deployment context it only logs advisories — a plain local
-  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
-  // unfit environment refuses before we touch the pidfile.
-  await applyDeploymentReadinessGate(
-    {
-      stateDir: config.stateDir,
-      earningDir: config.earningDir,
-      runtimeMode: config.runtimeMode,
-    },
-    {
-      env: process.env,
-      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
-      detectAuthContext,
-    },
-  );
-
-  const pidPath = join(config.earningDir, 'daemon.pid');
-  applyPidfileLivenessGate(pidPath);
-
-  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
-  const removePidfile = () => {
-    try {
-      unlinkSync(pidPath);
-    } catch {
-      /* ignore */
-    }
-  };
-  process.on('exit', removePidfile);
+  // #2407 B1: the deployment-readiness gate + pidfile acquisition used to live
+  // here, AFTER the entire bootstrap retry loop — which left the whole
+  // degrade-open window (part 2) with no pidfile on disk at all. During that
+  // window `checkDaemonGuard` (cli/daemon-guard.ts) reads `daemon.pid` and
+  // reports `not-running`, so a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would proceed against
+  // the same signer as the degraded recovery loops, and a second `jinn run`
+  // would start a second degraded set entirely. Both gates now run near the
+  // top of `main()`, immediately before the bootstrap retry loop (see
+  // `setDaemonReadiness('bootstrapping')` above) — `pidPath` / `removePidfile`
+  // stay in scope for the shutdown handler below unchanged.
 
   // Graceful shutdown — Daemon doesn't own the API server or Store in this
   // flow (they were created in setup-mode before bootstrap), so we close
