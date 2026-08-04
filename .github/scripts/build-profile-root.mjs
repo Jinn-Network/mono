@@ -27,6 +27,7 @@ import { enumeratePublicSurfaceAssets } from './public-surface-assets.mjs';
 
 const MEDIA_TYPES = new Map([
   ['.schema.json', 'application/schema+json'],
+  ['.jsonld', 'application/ld+json'],
   ['.json', 'application/json'],
   ['.md', 'text/markdown'],
   ['.txt', 'text/plain'],
@@ -37,6 +38,23 @@ function mediaTypeFor(path) {
     if (path.endsWith(suffix)) return mediaType;
   }
   return 'application/octet-stream';
+}
+
+// A served path can be a document or a directory prefix, never both: no host can
+// serve bytes at a URL that is also a directory. Without this the build fails later
+// at copyFileSync with an opaque ENOTDIR, and only because the output tree happens to
+// be empty when the collision is reached.
+function assertNoPrefixCollision(documents) {
+  const paths = new Set(documents.map(({ path }) => path));
+  for (const path of paths) {
+    const segments = path.split('/');
+    for (let index = 1; index < segments.length; index += 1) {
+      const ancestor = segments.slice(0, index).join('/');
+      if (paths.has(ancestor)) {
+        throw new Error(`${ancestor} is both a document and a directory prefix of ${path}`);
+      }
+    }
+  }
 }
 
 function isStrictlyInside(child, parent) {
@@ -168,6 +186,7 @@ export function buildProfileRoot({
     }
   }
   documents.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+  assertNoPrefixCollision(documents);
   const manifest = {
     version: 1,
     generatedFrom: { repository: 'Jinn-Network/mono', commit },
