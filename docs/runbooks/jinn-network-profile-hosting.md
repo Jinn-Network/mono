@@ -32,20 +32,29 @@ The same run emits:
 The profile manifest bytes do not depend on whether a signing key exists. Source-tree `.sha256`
 sidecars are not served; `manifest.json` is the digest authority for the hosted copy.
 
-## Hard stable blocker
+## Hard stable hold
 
-Stable package publication remains mechanically disabled until the live host exists and an
-end-to-end verification gate proves that `https://spec.jinn.network/` serves the exact same-run
-manifest and document bytes. Building or attesting an artifact is not proof that the public host
-serves it. Do not remove `stable-hosting-blocker`, enable a stable publisher, or claim external
-conformance before the live-host gate is implemented and passes.
+Stable package publication remains mechanically disabled. Building or attesting an artifact is
+not proof that the public host serves it, and the proof of the second half is
+`stable-live-host-verification`: a fail-closed gate that requires
+`https://spec.jinn.network/` to serve the exact same-run manifest and document bytes. It has no
+"host unreachable, skip" branch. `stable-publish-gate` is the single node any future stable
+publisher depends on; it requires exact success from same-run verification, the live-host gate,
+and the live-host receipt attestation, so a skipped upstream job is a refusal rather than an
+absence.
+
+The gate existing is not the hold lifting. There is still no stable publisher job, the catalog's
+`publishPolicy` is unchanged, and the gate has not yet been observed green against a real host —
+because no host is deployed. Do not enable a stable publisher or claim external conformance
+before this gate has run green against the live domain.
 
 ## Hosting and key-provisioning checklist
 
 An operator with control of `spec.jinn.network` and the organization settings must:
 
-The rows below marked *(gate)* are the ones the fail-closed live-host verification gate will
-discharge automatically once it lands; until then they are performed and recorded by hand.
+The rows below marked *(gate)* are discharged automatically by
+`stable-live-host-verification`; they are not performed by hand. The unmarked rows are the
+operator's own provisioning work, which the gate can only check after it is done.
 
 - [ ] Generate an Ed25519 signing key offline and keep the private key out of this repository.
 - [ ] Add the PKCS#8 PEM private key as `JINN_PROFILE_MANIFEST_SIGNING_KEY`.
@@ -56,12 +65,17 @@ discharge automatically once it lands; until then they are performed and recorde
       apex stays purely the product site and serves no protocol bytes.
 - [ ] Serve each document with the media type declared by `manifest.json`, including extensionless
       task and facts profiles.
-- [ ] Deploy one exact attested profile-root artifact; never rebuild it at the host.
-- [ ] *(gate)* Fetch `manifest.json` from the live domain, verify its attestation/signature, and
-      byte-compare every hosted document and digest with the same-run immutable artifact.
-- [ ] *(gate)* Verify at least one trace schema and one facts/task profile by its self-declared URI.
+- [ ] Deploy one exact attested profile-root artifact; never rebuild it at the host. Turn the
+      attested root into a deploy directory with
+      `node .github/scripts/build-profile-host-bundle.mjs --root <profile-root> --out <deploy-dir>`,
+      which byte-copies the attested bytes and generates the host configuration next to them.
+- [ ] *(gate)* `stable-live-host-verification` fetches `manifest.json` from the live domain,
+      verifies its signature against the digest-pinned published key, and byte-compares every
+      hosted document, media type and digest with the same-run attested artifact.
+- [ ] *(gate)* It re-derives every served document's self-declared URI to the path it is served
+      at, dereferences the registered identifiers, and probes for host fallback behavior.
 - [ ] Record the source SHA, catalog digest, artifact/receipt identities, operator, public-key URL,
       and completion date.
 
-Only after this checklist is represented by a fail-closed automated live-host verification gate
-may the platform stable hold be reconsidered.
+The gate is written and tested; what it has never had is a host to run against. Only after it
+has run green against the live domain may the platform stable hold be reconsidered.

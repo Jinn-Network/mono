@@ -1575,7 +1575,7 @@
       "decisionRecords": 3,
       "discoveredFirstPartySurfaces": 2865,
       "generatedOutputSources": 1305,
-      "generatorSources": 575,
+      "generatorSources": 579,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -1722,6 +1722,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/build-prepublication-bundle.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/build-profile-host-bundle.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/build-profile-host-bundle.test.mjs"
       },
       {
         "categories": [
@@ -2752,6 +2772,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/verify-layer-stable-version.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/verify-live-profile-host.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/verify-live-profile-host.test.mjs"
       },
       {
         "categories": [
@@ -52703,7 +52743,7 @@
           "canary-only"
         ],
         "stable": false,
-        "stableBlocker": "live https://jinn.network profile hosting verification",
+        "stableBlocker": "stable-publish-gate: live https://spec.jinn.network profile host verification of the same run",
         "stackPublished": true
       },
       "trustedPublishers": [

@@ -185,18 +185,128 @@ jobs:
       JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
       JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
 
-  stable-hosting-blocker:
-    name: Stable publication disabled — live profile host verification blocker
-    needs: stable-verification
+  # Building and attesting an artifact is not proof that the public host serves it.
+  # This job proves the second half against the live origin and is the sole reason the
+  # unconditional hosting blocker could be removed. It touches the network, so it holds
+  # nothing but contents: read; attestation is a separate, network-free job.
+  stable-live-host-verification:
+    name: stable-live-host-verification
+    needs:
+      - resolve-stable-source
+      - stable-verification
+    if: >-
+      (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      PROFILE_HOST_ORIGIN: https://spec.jinn.network
+      SOURCE_SHA: ${{ needs.resolve-stable-source.outputs.source_sha }}
+      PUBLIC_KEY_URL: ${{ vars.JINN_PROFILE_MANIFEST_PUBLIC_KEY_URL }}
+      PUBLIC_KEY_SHA256: ${{ vars.JINN_PROFILE_MANIFEST_PUBLIC_KEY_SHA256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve-stable-source.outputs.source_sha }}
+      - name: Verify exact verification checkout
+        run: test "$(git rev-parse HEAD)" = "${SOURCE_SHA}"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Download same-run profile root
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-artifacts
+          path: .platform-verification
+      - name: Download same-run verification receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-verification-receipt
+          path: .platform-verification-receipt
+      - name: Bind the checked-out catalog digest
+        id: catalog
+        run: |
+          set -euo pipefail
+          DIGEST="$(node --input-type=module <<'NODE'
+          import { catalogSha256 } from './.github/scripts/build-prepublication-bundle.mjs';
+          process.stdout.write(catalogSha256(process.cwd()));
+          NODE
+          )"
+          echo "digest=${DIGEST}" >> "${GITHUB_OUTPUT}"
+      - name: Verify the live profile host serves the attested artifact
+        env:
+          CATALOG_DIGEST: ${{ steps.catalog.outputs.digest }}
+        run: |
+          node .github/scripts/verify-live-profile-host.mjs \
+            --root .platform-verification/profile-root \
+            --receipt .platform-verification-receipt/verification-receipt.json \
+            --source-sha "${SOURCE_SHA}" \
+            --catalog-digest "${CATALOG_DIGEST}" \
+            --release-group platform-v1 \
+            --lane stable \
+            --origin "${PROFILE_HOST_ORIGIN}" \
+            --public-key-url "${PUBLIC_KEY_URL}" \
+            --expect-public-key-sha256 "${PUBLIC_KEY_SHA256}" \
+            --out .platform-live-host/live-host-receipt.json
+      - name: Upload live host receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-live-host-receipt
+          path: .platform-live-host/live-host-receipt.json
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
+
+  stable-live-host-attestation:
+    name: stable-live-host-attestation
+    needs: stable-live-host-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Download live host receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-live-host-receipt
+          path: .platform-live-host-receipt
+      - name: Attest live host receipt
+        uses: actions/attest@v4
+        with:
+          subject-path: .platform-live-host-receipt/live-host-receipt.json
+
+  # The single node any future stable publisher depends on. It runs on every stable
+  # event and asserts exact success, so a skipped or failed upstream job is a refusal
+  # rather than an absence.
+  stable-publish-gate:
+    name: stable-publish-gate
+    needs:
+      - stable-verification
+      - stable-live-host-verification
+      - stable-live-host-attestation
     if: >-
       always() &&
       ((github.event_name == 'release' && startsWith(github.event.release.tag_name, 'stack-v')) ||
       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 10
+    permissions: {}
     steps:
-      - name: Keep Phase A stable publication mechanically disabled
+      - name: Require same-run verification and live host proof
+        env:
+          VERIFICATION_RESULT: ${{ needs.stable-verification.result }}
+          LIVE_HOST_RESULT: ${{ needs.stable-live-host-verification.result }}
+          ATTESTATION_RESULT: ${{ needs.stable-live-host-attestation.result }}
         run: |
-          echo "::error::Stable package publication remains disabled in Phase A until live profile host verification is implemented."
-          exit 1
+          if [ "${VERIFICATION_RESULT}" != "success" ] \
+            || [ "${LIVE_HOST_RESULT}" != "success" ] \
+            || [ "${ATTESTATION_RESULT}" != "success" ]; then
+            echo "::error::Stable release is gated: verification=${VERIFICATION_RESULT} live-host=${LIVE_HOST_RESULT} attestation=${ATTESTATION_RESULT}"
+            exit 1
+          fi
+          echo "Stable verification and live profile host proof both succeeded for this run."

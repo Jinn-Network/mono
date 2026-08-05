@@ -107,7 +107,7 @@ test('release, public-surface, ownership, and transition views reuse their canon
     canary: true,
     publishPolicies: ['canary-only'],
     stable: false,
-    stableBlocker: 'live https://jinn.network profile hosting verification',
+    stableBlocker: 'stable-publish-gate: live https://spec.jinn.network profile host verification of the same run',
     stackPublished: true,
   });
   assert.equal(
