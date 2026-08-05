@@ -10,7 +10,7 @@ const profileRoot = join(
   packageRoot,
   "profiles",
   "execution-evidence",
-  "1.0",
+  "v1",
 );
 const schemaRoot = join(profileRoot, "schemas");
 const mode = process.argv[2];

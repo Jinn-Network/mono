@@ -2102,7 +2102,7 @@
       },
       "publicSurface": {
         "schemas": [
-          "profiles/execution-evidence/1.0/schemas"
+          "profiles/execution-evidence/v1/schemas"
         ],
         "profiles": [
           "profiles"
@@ -2288,7 +2288,7 @@
       },
       "publicSurface": {
         "schemas": [
-          "profiles/evidence-repository-oci/1.0/schemas"
+          "profiles/evidence-repository-oci/v1/schemas"
         ],
         "profiles": [
           "profiles"
@@ -3893,13 +3893,13 @@
     {
       "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1",
       "resolution": "prefix",
-      "entryPoint": "profiles/execution-evidence/1.0/ro-crate-metadata.json",
+      "entryPoint": "profiles/execution-evidence/v1/ro-crate-metadata.json",
       "owner": "@jinn-network/evidence-protocol"
     },
     {
       "identifier": "https://spec.jinn.network/profiles/evidence-repository-oci/v1",
       "resolution": "prefix",
-      "entryPoint": "profiles/evidence-repository-oci/1.0/specification.md",
+      "entryPoint": "profiles/evidence-repository-oci/v1/specification.md",
       "owner": "@jinn-network/evidence-repository-oci"
     }
   ]

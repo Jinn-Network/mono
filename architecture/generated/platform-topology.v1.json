@@ -27021,7 +27021,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1"
       },
       {
         "categories": [
@@ -27033,7 +27033,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/ro-crate-metadata.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/ro-crate-metadata.json"
       },
       {
         "categories": [
@@ -27045,7 +27045,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas"
       },
       {
         "categories": [
@@ -27057,7 +27057,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json"
       },
       {
         "categories": [
@@ -27069,7 +27069,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json"
       },
       {
         "categories": [
@@ -27081,7 +27081,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json"
       },
       {
         "categories": [
@@ -27093,7 +27093,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
       },
       {
         "categories": [
@@ -27105,7 +27105,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
       },
       {
         "categories": [
@@ -27117,7 +27117,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/specification.md"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/specification.md"
       },
       {
         "categories": [
@@ -27129,7 +27129,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/vocabulary.jsonld"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/vocabulary.jsonld"
       },
       {
         "categories": [
@@ -27721,7 +27721,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1"
       },
       {
         "categories": [
@@ -27733,7 +27733,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/schemas"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/schemas"
       },
       {
         "categories": [
@@ -27745,7 +27745,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json"
       },
       {
         "categories": [
@@ -27757,7 +27757,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/specification.md"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/specification.md"
       },
       {
         "categories": [
@@ -41300,7 +41300,7 @@
           "profiles"
         ],
         "schemas": [
-          "profiles/execution-evidence/1.0/schemas"
+          "profiles/execution-evidence/v1/schemas"
         ]
       },
       "publishPolicy": "canary-only",
@@ -41464,7 +41464,7 @@
           "profiles"
         ],
         "schemas": [
-          "profiles/evidence-repository-oci/1.0/schemas"
+          "profiles/evidence-repository-oci/v1/schemas"
         ]
       },
       "publishPolicy": "canary-only",
@@ -46956,8 +46956,8 @@
         "kind": "profiles",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/ro-crate-metadata.json",
-        "relativeSource": "profiles/execution-evidence/1.0/ro-crate-metadata.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/ro-crate-metadata.json",
+        "relativeSource": "profiles/execution-evidence/v1/ro-crate-metadata.json"
       },
       {
         "claim": {
@@ -46969,8 +46969,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json",
-        "relativeSource": "profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json",
+        "relativeSource": "profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json"
       },
       {
         "claim": {
@@ -46982,8 +46982,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json",
-        "relativeSource": "profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json",
+        "relativeSource": "profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json"
       },
       {
         "claim": {
@@ -46995,8 +46995,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json",
-        "relativeSource": "profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json",
+        "relativeSource": "profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json"
       },
       {
         "claim": {
@@ -47008,8 +47008,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json",
-        "relativeSource": "profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json",
+        "relativeSource": "profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
       },
       {
         "claim": {
@@ -47021,8 +47021,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json",
-        "relativeSource": "profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json",
+        "relativeSource": "profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
       },
       {
         "claim": null,
@@ -47030,8 +47030,8 @@
         "kind": "profiles",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/specification.md",
-        "relativeSource": "profiles/execution-evidence/1.0/specification.md"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/specification.md",
+        "relativeSource": "profiles/execution-evidence/v1/specification.md"
       },
       {
         "claim": null,
@@ -47039,8 +47039,8 @@
         "kind": "profiles",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/vocabulary.jsonld",
-        "relativeSource": "profiles/execution-evidence/1.0/vocabulary.jsonld"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/vocabulary.jsonld",
+        "relativeSource": "profiles/execution-evidence/v1/vocabulary.jsonld"
       },
       {
         "claim": null,
@@ -47212,8 +47212,8 @@
         "kind": "schemas",
         "package": "@jinn-network/evidence-repository-oci",
         "packedTargets": [],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
-        "relativeSource": "profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
+        "relativeSource": "profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json"
       },
       {
         "claim": null,
@@ -47221,8 +47221,8 @@
         "kind": "profiles",
         "package": "@jinn-network/evidence-repository-oci",
         "packedTargets": [],
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/specification.md",
-        "relativeSource": "profiles/evidence-repository-oci/1.0/specification.md"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/specification.md",
+        "relativeSource": "profiles/evidence-repository-oci/v1/specification.md"
       },
       {
         "claim": null,
@@ -51406,7 +51406,7 @@
         ],
         "releaseGroup": "platform-v1",
         "schemas": [
-          "profiles/execution-evidence/1.0/schemas"
+          "profiles/execution-evidence/v1/schemas"
         ]
       },
       {
@@ -51456,7 +51456,7 @@
         ],
         "releaseGroup": "platform-v1",
         "schemas": [
-          "profiles/evidence-repository-oci/1.0/schemas"
+          "profiles/evidence-repository-oci/v1/schemas"
         ]
       },
       {
@@ -52018,42 +52018,42 @@
         "identifier": "https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-repository-oci",
-        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json"
+        "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json"
       },
       {
         "field": "$id",
         "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json"
       },
       {
         "field": "$id",
         "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json"
       },
       {
         "field": "$id",
         "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json"
       },
       {
         "field": "$id",
         "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
       },
       {
         "field": "$id",
         "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
-        "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+        "path": "packages/evidence/protocol/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
       },
       {
         "field": "profile",
