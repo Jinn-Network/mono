@@ -1150,10 +1150,14 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       expect(result.verdict).toBe("PASS");
       expect(result.cost).toEqual({
         verdict: "lower", pValue: "0.0072", n: 10, excluded: { count: 0, cellKeys: [] },
+        // Replay order is the method's own: ascending synthetic Task digest. Those digests are
+        // sealed here through `sealTask`, so the re-seal's new `TASK_EXECUTION_PROTOCOL_URI`
+        // permutes them. The multiset (eight -0.9, two +0.10), n, p-value and scale are the
+        // assertion; the positions are re-pinned to the post-re-seal ordering.
         replay: { scale: "40", differences: [
-          `-9${"0".repeat(39)}`, `1${"0".repeat(39)}`,
-          `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`,
-          `1${"0".repeat(39)}`, ...Array.from({ length: 4 }, () => `-9${"0".repeat(39)}`),
+          ...Array.from({ length: 4 }, () => `-9${"0".repeat(39)}`), `1${"0".repeat(39)}`,
+          ...Array.from({ length: 3 }, () => `-9${"0".repeat(39)}`), `1${"0".repeat(39)}`,
+          `-9${"0".repeat(39)}`,
         ] },
       });
     });

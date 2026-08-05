@@ -119,7 +119,8 @@ describe("facts/task-execution recompute functions", () => {
     const bytes = await loadGoldenDeliveryBytes();
     const facts = await deliveryRecompute(bytes, noReferencedBytes);
     expect(facts).toEqual({
-      taskDigest: "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+      // The golden Delivery's own `task` field, re-sealed by the migration (DR-2026-08-04).
+      taskDigest: "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
       attemptUri: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
       outcome: "fulfilled",
       benchrun: undefined,
