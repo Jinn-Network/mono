@@ -37,20 +37,20 @@ import { deriveNativeEvaluation } from '../../src/evaluator/native-evaluation-de
 import { publicationKey } from '../../src/daemon/native-operation-identity.js';
 import type { NativePublicationRow, NativeSolutionArtifactRow } from '../../src/daemon/native-operator-state.js';
 import type { NativeEvaluationArtifactRow, NativeEvaluationPublicationRow } from '../../src/daemon/native-evaluator-state.js';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
-import { createProtocolSourceVerifier, syncPublicSource } from '../fixtures/native-vertical-consumer/src/sync.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
+import { createProtocolSourceVerifier, syncPublicSource } from '../../src/native-consumer/sync.js';
 import {
   deriveConsumerEngagementId,
   deriveConsumerEvaluationId,
   discoverNativeGraphRoots,
   retrieveNativePublicGraph,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 import {
   deriveConsumerSolutionSettlementId,
   deriveConsumerVerdictSettlementId,
   verifyNativeVertical,
   writeNativeVerticalVerificationReport,
-} from '../fixtures/native-vertical-consumer/src/verification.js';
+} from '../../src/native-consumer/verification.js';
 import {
   createRealTrustFixture,
   realIdentity,

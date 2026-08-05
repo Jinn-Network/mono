@@ -37,7 +37,7 @@ import {
   type AnnouncementEntry,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import {
   NativeGraphError,
   deriveConsumerEngagementId,
@@ -46,7 +46,7 @@ import {
   retrieveNativePublicGraph,
   verifyExecutionEvidenceJoin,
   type NativeGraphRoots,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 
 const roots: string[] = [];
 const REQUESTER: SourceIdentity = { agent: 'did:web:requester.example', name: 'requester' };

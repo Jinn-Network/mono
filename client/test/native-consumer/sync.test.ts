@@ -19,13 +19,13 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import {
   ConsumerSyncError,
   createProtocolSourceVerifier,
   syncPublicSource,
   type PublicSourceVerifier,
-} from '../fixtures/native-vertical-consumer/src/sync.js';
+} from '../../src/native-consumer/sync.js';
 
 const roots: string[] = [];
 const BASE = 'https://requester.example';

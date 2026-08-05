@@ -336,7 +336,7 @@ export function discoverNativeGraphRoots(input: {
   const sealedAt = stringFact(association.sealedAt, 'sealedAt');
   const authorityTime = record(association.authorityTime);
   const authorityMembers = ['blockHash', 'blockNumber', 'chainId', 'finalized', 'timestamp'];
-  if (authorityTime === null
+  if (authorityTime === undefined
     || Object.keys(authorityTime).sort().join('|') !== authorityMembers.sort().join('|')
     || authorityTime.chainId !== 84532
     || authorityTime.finalized !== true
