@@ -1,0 +1,110 @@
+name: Benchmark Product CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/benchmark-product/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/benchmark-product/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/benchmark-product-package-inventory.test.mjs
+      - name: Verify source boundaries
+        run: node --test .github/scripts/benchmark-product-source-boundaries.test.mjs
+
+  product:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
+      # is what the next one's type resolution reads.
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Verify Benchmark Product core
+        working-directory: packages/benchmark-product/core
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Benchmark Product core distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-product-core-dist
+          path: packages/benchmark-product/core/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: [architecture, product]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Benchmark Product CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          PRODUCT_RESULT: ${{ needs.product.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$PRODUCT_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-core-dist
+          path: packages/benchmark-product/core/dist
+      # The packed consumer installs the whole graph from tarballs, and `npm pack --ignore-scripts`
+      # ships whatever `dist/` is on disk — so every portal dependency needs its build here too,
+      # not only the product's.
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+      - name: Compile the packed public entrypoint consumer
+        run: node .github/scripts/benchmark-product-packed-types.test.mjs

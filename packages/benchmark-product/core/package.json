@@ -1,0 +1,48 @@
+{
+  "name": "@jinn-network/benchmark-product-core",
+  "version": "0.1.0",
+  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product skeleton — branding surface and platform consumption seam.",
+  "private": true,
+  "type": "module",
+  "packageManager": "yarn@4.13.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jinn-Network/mono.git",
+    "directory": "packages/benchmark-product/core"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "prepack": "yarn build"
+  },
+  "dependencies": {
+    "@jinn-network/benchmarking-records": "0.1.0"
+  },
+  "resolutions": {
+    "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.8"
+  }
+}

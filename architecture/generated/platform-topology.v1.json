@@ -2,9 +2,9 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 81,
-    "otherPackagesRootEntries": 17,
-    "packagesRootEntries": 75,
+    "inventory": 82,
+    "otherPackagesRootEntries": 18,
+    "packagesRootEntries": 76,
     "platformV1": 50
   },
   "graph": {
@@ -28,6 +28,11 @@
         "from": "@jinn-network/autopilot",
         "kind": "runtime",
         "to": "@jinn-network/sdk"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-records"
       },
       {
         "from": "@jinn-network/benchmarking-aggregate",
@@ -1118,6 +1123,7 @@
     "nodes": [
       "@jinn-network/attestation-issuer",
       "@jinn-network/autopilot",
+      "@jinn-network/benchmark-product-core",
       "@jinn-network/benchmarking-aggregate",
       "@jinn-network/benchmarking-interop",
       "@jinn-network/benchmarking-local",
@@ -1566,9 +1572,9 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 24,
-      "boundaryPolicies": 22,
-      "catalogManifests": 81,
+      "authorityDocuments": 26,
+      "boundaryPolicies": 23,
+      "catalogManifests": 82,
       "catalogPublicSurfaces": 1249,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
@@ -1576,9 +1582,9 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2868,
       "generatedOutputSources": 1305,
-      "generatorSources": 586,
+      "generatorSources": 593,
       "marketplaceControl": 2,
-      "requiredGates": 21,
+      "requiredGates": 22,
       "staticControl": 6
     },
     "paths": [
@@ -1632,6 +1638,37 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/architecture-control.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/benchmark-product-packed-types.test.mjs"
+      },
+      {
+        "categories": [
+          "boundaryPolicies",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
       },
       {
         "categories": [
@@ -2866,6 +2903,17 @@
           "@ritsukai"
         ],
         "path": ".github/workflows/autopilot-board-painter.yml"
+      },
+      {
+        "categories": [
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/benchmark-product-ci.yml"
       },
       {
         "categories": [
@@ -16841,6 +16889,16 @@
       },
       {
         "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+      },
+      {
+        "categories": [
           "staticControl"
         ],
         "owners": [
@@ -17038,6 +17096,16 @@
           "@ritsukai"
         ],
         "path": "docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
       },
       {
         "categories": [
@@ -18638,6 +18706,46 @@
           "@ritsukai"
         ],
         "path": "packages/autopilot/test/workflow-skills-v2.test.ts"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/pack-smoke.mjs"
       },
       {
         "categories": [
@@ -40555,6 +40663,42 @@
     {
       "boundaryPolicy": {
         "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "@jinn-network/benchmarking-records"
+        ]
+      },
+      "domain": "benchmark-product",
+      "name": "@jinn-network/benchmark-product-core",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmark-product/core",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "never",
+      "releaseGroup": "transitional-or-private",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "role": "benchmark product core",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
         "path": ".github/scripts/benchmarking-source-boundaries.test.mjs"
       },
       "classification": "platform",
@@ -51715,6 +51859,15 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/benchmark-product-core",
+        "path": "packages/benchmark-product/core",
+        "profiles": [],
+        "releaseGroup": "transitional-or-private",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/benchmarking-aggregate",
         "path": "packages/benchmarking/aggregate",
         "profiles": [],
@@ -53700,9 +53853,10 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 10,
+      "expectedPackageCount": 11,
       "packages": [
         "@jinn-network/autopilot",
+        "@jinn-network/benchmark-product-core",
         "@jinn-network/broadcast-bot",
         "@jinn-network/chain-only-gate-harness",
         "@jinn-network/explorer-spa",
@@ -53719,6 +53873,7 @@
       ],
       "requiredGateIds": [
         "autopilot-ci",
+        "benchmark-product-ci",
         "broadcast-bot-ci",
         "client-ci",
         "environments-ci",
