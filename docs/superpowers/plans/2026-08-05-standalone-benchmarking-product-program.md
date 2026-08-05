@@ -144,8 +144,12 @@ Updated at each packet completion and integration wave. Format: packet → state
 
 | Packet | State | Base | Head | Review | Integrated |
 |---|---|---|---|---|---|
-| BP-00 | contracted | — | — | — | — |
-| BP-01 | pending | — | — | — | — |
+| BP-00 | **integrated** | `ad33f1d0d` | `65d8c6acf` (worktree bench-bp00) | PASS (2 rounds, 1 blocking fixed: guard-precedent attribution; sonnet reviewer) | `5bf629930` |
+| BP-01 | dispatched | `5bf629930` | — | — | — |
+
+BP-00 verification: export-verification subagent confirmed every §3 symbol
+exists (3 draft-time corrections); acceptance criteria 13/13 PASS;
+worktree clean; single commit.
 
 **Platform substrate verification (orientation, 2026-08-05):** full portal dep chain (evidence → task-execution → trust → discovery → benchmarking) built green from source in this worktree; `benchmarking-local` typecheck clean, 100/100 tests pass.
 
