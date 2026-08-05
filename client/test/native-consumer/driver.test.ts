@@ -137,7 +137,11 @@ interface Producer {
 }
 
 /** Builds the exact same real requester/solver/evaluator public fixture `public-vertical.test.ts` uses. */
-async function buildPublicVerticalFixture(input: { readonly root: string }): Promise<Producer> {
+async function buildPublicVerticalFixture(input: {
+  readonly root: string;
+  /** M6 regression: declares the solution Delivery's evidenceRecords with a duplicate digest. */
+  readonly duplicateSolutionEvidenceRecord?: boolean;
+}): Promise<Producer> {
   const producerPaths = {
     requester: join(input.root, 'requester-private'),
     solver: join(input.root, 'solver-private'),
@@ -202,7 +206,12 @@ async function buildPublicVerticalFixture(input: { readonly root: string }): Pro
     protocol: task.protocol, attempt, task: documentDigest(taskBytes),
     outputs: [{ name: outputName, mediaType: task.outputs[0]!.mediaType, digest: { sha256: outputDigest.slice(7) } }],
     executionIds: [attempt],
-    evidenceRecords: [{ family: 'execution-evidence', digest: solutionEvidenceDigest }],
+    evidenceRecords: input.duplicateSolutionEvidenceRecord === true
+      ? [
+        { family: 'execution-evidence', digest: solutionEvidenceDigest },
+        { family: 'execution-evidence', digest: solutionEvidenceDigest },
+      ]
+      : [{ family: 'execution-evidence', digest: solutionEvidenceDigest }],
     outcome: 'fulfilled', createdAt: '2026-08-02T12:20:00Z',
   });
   const solutionDeliveryDigest = documentDigest(solutionDeliveryBytes);
@@ -512,6 +521,106 @@ describe('native consumer driver', () => {
         };
         await expect(runNativeConsumer(config(join(root, 'consumer-only'), producer), { ...ports, chain: tamperedChain }))
           .rejects.toThrow(NativeVerificationError);
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('rejects when the solver-delivery binding policy refuses the solver agent (guards the per-role binding check)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-policy-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root });
+      try {
+        const ports = fakePorts(producer);
+        const nonAcceptingExecutorPolicyTrust: NativeConsumerPorts['trust'] = {
+          ...ports.trust,
+          policy(purpose: string) {
+            if (purpose === 'native:solver-delivery') {
+              return { accepted: ['https://agents.example/someone-else'], requiredStrength: 'strong' as const };
+            }
+            return ports.trust.policy(purpose);
+          },
+        };
+
+        const rejection = await runNativeConsumer(
+          config(join(root, 'consumer-only'), producer),
+          { ...ports, trust: nonAcceptingExecutorPolicyTrust },
+        ).catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(NativeVerificationError);
+        expect((rejection as NativeVerificationError).reason).toBe('executor-binding-failed');
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('rejects when the solver and evaluator settle to the same on-chain address (gate self-evaluation prevention)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-selfeval-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root });
+      try {
+        const ports = fakePorts(producer);
+        // Loosen only the evaluator-agent settlement-authority probe so `authority.ts`'s own
+        // independent pre-check does not itself reject before reaching `verifyNativeVertical`'s
+        // gate -- this test isolates the gate's OWN distinctness check (self-evaluation
+        // prevention), not the driver's settlement-authority binding step.
+        const looseEvaluatorAuthorityTrust: NativeConsumerPorts['trust'] = {
+          ...ports.trust,
+          async verifyOnchainAuthority(authorityInput: { agent: string }) {
+            if (authorityInput.agent === EVALUATOR_AGENT) return { bindingDigest: `sha256:${'2'.repeat(64)}` as const };
+            return (ports.trust as unknown as { verifyOnchainAuthority: (i: unknown) => Promise<{ bindingDigest: `sha256:${string}` }> })
+              .verifyOnchainAuthority(authorityInput);
+          },
+        };
+        const sameAddressChain: NativeConsumerChainReader = {
+          ...ports.chain,
+          async observeVerdictSettlement() {
+            return {
+              attemptIndex: 0, evaluator: SOLVER_ADDRESS, verdictCode: producer.verdictCode,
+              evaluationDeliveryDigest: producer.evaluationDeliveryDigest,
+              transaction: { hash: `0x${'c'.repeat(64)}` as const, blockHash: `0x${'c'.repeat(64)}` as const, blockNumber: '140', finalizedBlock: '200', blockTime: '2026-08-02T12:50:00Z' },
+            };
+          },
+        };
+
+        const rejection = await runNativeConsumer(
+          config(join(root, 'consumer-only'), producer),
+          { ...ports, trust: looseEvaluatorAuthorityTrust, chain: sameAddressChain },
+        ).catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(NativeVerificationError);
+        expect((rejection as NativeVerificationError).reason).toBe('named-verdict-gate-failed');
+      } finally {
+        await producer.solutionPublisher.close();
+        await producer.evaluatorPublisher.close();
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it('rejects when the solution Delivery declares a duplicate evidence digest (evidence-graph count mismatch)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'jinn-native-consumer-driver-evidence-'));
+    try {
+      const producer = await buildPublicVerticalFixture({ root, duplicateSolutionEvidenceRecord: true });
+      try {
+        const ports = fakePorts(producer);
+
+        const rejection = await runNativeConsumer(
+          config(join(root, 'consumer-only'), producer),
+          ports,
+        ).catch((error: unknown) => error);
+
+        expect(rejection).toBeInstanceOf(NativeVerificationError);
+        expect((rejection as NativeVerificationError).reason).toBe('delivery-evidence-graph-mismatch');
       } finally {
         await producer.solutionPublisher.close();
         await producer.evaluatorPublisher.close();

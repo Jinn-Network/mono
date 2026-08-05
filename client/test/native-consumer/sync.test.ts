@@ -293,4 +293,29 @@ describe('independent public source sync', () => {
     });
     unknownState.close();
   });
+
+  it('wraps a malformed/tampered head document as a typed ConsumerSyncError, not a raw schema error', async () => {
+    const state = await ConsumerState.open(await stateRoot());
+    const source = publicSource([entry(1, null)], '2026-08-02T12:01:00.000Z');
+    const tamperedTransport: Transport = {
+      async fetch(url) {
+        if (url === `${BASE}${headPath(SOURCE.name)}`) {
+          return { status: 200, bytes: sealJson({ garbage: true }).bytes };
+        }
+        return source.transport.fetch(url);
+      },
+    };
+    const verifier = recordingVerifier([]);
+
+    const rejection = await syncPublicSource({
+      endpoint: source.endpoint, transport: tamperedTransport, state, verifier,
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(ConsumerSyncError);
+    expect((rejection as ConsumerSyncError).reason).toBe('source-head-invalid');
+    // The typed envelope wraps the detail; it must never leak an unwrapped, multi-line schema dump
+    // as the entire error shape (that was the pre-fix behavior a bare ZodError would produce).
+    expect((rejection as ConsumerSyncError).name).toBe('ConsumerSyncError');
+    state.close();
+  });
 });

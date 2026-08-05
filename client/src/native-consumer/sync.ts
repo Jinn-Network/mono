@@ -188,7 +188,12 @@ export async function syncPublicSource(input: {
   readonly verifier: PublicSourceVerifier;
 }): Promise<PublicSourceSyncResult> {
   const source: SourceIdentity = { agent: input.endpoint.agent, name: input.endpoint.name };
-  const fetchedHead = await fetchHead(input.endpoint, input.transport);
+  let fetchedHead: Awaited<ReturnType<typeof fetchHead>>;
+  try {
+    fetchedHead = await fetchHead(input.endpoint, input.transport);
+  } catch (cause) {
+    throw new ConsumerSyncError('source-head-invalid', String(cause));
+  }
   if (fetchedHead.signature === undefined) throw new ConsumerSyncError('unsigned-source-head');
   if (fetchedHead.head.origin !== formatOrigin(source.agent, source.name)) {
     throw new ConsumerSyncError('source-head-origin-mismatch');

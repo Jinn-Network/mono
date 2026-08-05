@@ -6,6 +6,15 @@
  * facts, (4) runs the full decision-grade verification, and (5) writes the canonical report into
  * its own state directory. It never opens, reads, or references a producer's state, identity, or
  * database path -- the only filesystem writes are inside `config.stateDir`.
+ *
+ * Scope limit -- EOA ceremonies only: the production trust catalog (`openNativeTrustCatalog`,
+ * `client/src/daemon/native-trust-catalog.ts`) wires a `CLOSED_WITNESS_VERIFIER` that always
+ * returns `verified: false`. This driver therefore cannot verify a Safe/ERC-1271-witnessed key
+ * binding for any of the four signing roles -- any role bound only via a Safe ceremony is
+ * correctly *rejected*, not silently accepted or skipped. Every role identity in this vertical
+ * must be bound via an offline-verifiable EOA (SIWE-style) ceremony. This is fail-closed and
+ * intentional, not a gap to route around; see `docs/runbooks/phase-b-native-vertical.md` for the
+ * operator-facing statement of this limit.
  */
 import { createTrustAdapter, type SourceEndpoint, type Transport } from '@jinn-network/record-discovery-client';
 import {

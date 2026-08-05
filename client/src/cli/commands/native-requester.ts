@@ -139,14 +139,24 @@ Examples:
             syncModes: result.syncModes,
           })}\n`);
         } catch (cause) {
+          // NativeConsumerConfigError / NativeTrustCatalogError mean the operator's config or
+          // trust-catalog file is wrong -- an invocation problem, not a verification failure.
+          // Checked by name (not `instanceof`) so this CLI file never imports native-consumer
+          // internals directly, matching the deps-injection pattern the rest of this module uses.
+          const name = cause instanceof Error ? cause.name : undefined;
+          const isInvocationError = name === 'NativeConsumerConfigError' || name === 'NativeTrustCatalogError';
           return emitEnvelope({
-            code: 'fatal',
-            message: 'Native consumer verification failed.',
-            hint: 'The independent consumer could not verify the public evidence graph; see the reason for the failing check.',
+            code: isInvocationError ? 'invalid_invocation' : 'fatal',
+            message: isInvocationError
+              ? 'Native consumer config or trust catalog is invalid.'
+              : 'Native consumer verification failed.',
+            hint: isInvocationError
+              ? 'Correct the --consumer-config file or the trust-catalog file it points at, then retry.'
+              : 'The independent consumer could not verify the public evidence graph; see the reason for the failing check.',
             exampleCli: 'jinn native-vertical consume --consumer-config <path>',
             details: {
               feature: 'native-vertical',
-              state: 'verification-failed',
+              state: isInvocationError ? 'config-invalid' : 'verification-failed',
               reason: cause instanceof Error ? cause.message : String(cause),
             },
           }, { writer: ctx.writer, exit: ctx.exit });

@@ -271,6 +271,23 @@ export class ConsumerState {
     } catch (error) {
       await handle?.close().catch(() => undefined);
       await unlink(temporary).catch(() => undefined);
+      // Two records that legitimately share one digest (the same evidence document referenced
+      // twice, for instance) can race two concurrent `putRecord` calls past the `existing` check
+      // above before either has inserted. The loser hits the digest's UNIQUE constraint, not a
+      // real conflict -- reconcile against the winner's bytes exactly like the `existing` branch
+      // instead of surfacing a raw SQLite error for a benign tie.
+      if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+        const winner = this.db.prepare(
+          'SELECT media_type, cache_path FROM consumer_records WHERE digest = ?',
+        ).get(input.digest) as { media_type: string; cache_path: string } | undefined;
+        if (winner !== undefined) {
+          const bytes = new Uint8Array(await readFile(winner.cache_path));
+          if (!equal(bytes, input.bytes) || winner.media_type !== input.mediaType) {
+            throw new ConsumerStateError('record-cache-conflict');
+          }
+          return { stored: false };
+        }
+      }
       throw error;
     }
     return { stored: true };
