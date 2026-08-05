@@ -16,7 +16,7 @@ Workflow: `.github/workflows/stack-npm-publish.yml`. Verified publisher:
   through the stack workflow. Native-role closure is test evidence, not a canary publication promise.
 - Stable publication is mechanically disabled. A stable event may run read-only tag resolution
   and same-run verification, but `stable-hosting-blocker` fails before any publisher job exists.
-  The hold remains until live `jinn.network` profile hosting is implemented and verified.
+  The hold remains until live `spec.jinn.network` profile hosting is implemented and verified.
 - Legacy and product packages remain independent release lines (or private/never-published) under
   their catalog policies and existing workflows. This runbook does not change the layer, SDK,
   client, plugin, or other independent publication paths.
