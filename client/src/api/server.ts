@@ -27,7 +27,8 @@ import {
   verifyRequestWithErc8128,
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
-import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import { enrichStatusV1Tail, type StatusGatherConfig } from './gather-status.js';
+import { getCachedGatheredStatus, invalidateGatheredStatusCache } from './gathered-status-cache.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
@@ -35,6 +36,7 @@ import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
+import { addNotificationsRoutes } from './notifications-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
 import {
   registerSolverNetsEndpoints,
@@ -412,6 +414,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   const { store } = config;
   const app = new Hono();
 
+  // The shared gather/assemble cache (issue #2408 review finding F3) is a process-wide
+  // singleton. A real daemon calls startApiServer exactly once per process, so this is a no-op
+  // there; a test harness that starts several independent servers (different Store/status
+  // fixtures) in the same process must not silently inherit a previous instance's cached read.
+  invalidateGatheredStatusCache();
+
   // The /v1/status handler reads from this holder, not the closure-captured
   // `config.status`, so the daemon can swap the running-mode config in after
   // the server is already up. See `setStatusConfig` on the returned object.
@@ -513,6 +521,52 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
   });
 
+  // Single shared resolver for the enriched `StatusGatherConfig` (issue #2424 review round 2,
+  // findings B1/B2). Before this, `/v1/status`'s handler built its OWN enriched wrapper
+  // (`{ ...liveStatus, discovery, harnessReadiness }`) inline, while `/v1/rewards` and
+  // `/v1/notifications` were wired with the bare `() => liveStatus` — no `discovery`, no
+  // `harnessReadiness`. Once the three shared the gather/assemble cache (F3), that divergence
+  // became load-bearing: whichever caller populated the unkeyed cache slot first decided the
+  // shape for the whole TTL window, so `/v1/status` could transiently serve
+  // `DEFAULT_HARNESS_ROLLUP` + null task outcomes (B1) — and, independent of caching,
+  // `/v1/notifications`'s OWN `harness_not_ready` derivation always read the un-enriched
+  // rollup, making that blocking kind unreachable in production regardless of the cache (B2).
+  // One resolver, called by all three, closes both: the cache slot is now always filled with
+  // the same (enriched) shape, and every consumer of `assembled.harness` sees the real rollup.
+  // `harnessReadiness` / `discovery` still dereference their holders lazily on each call, so
+  // post-bootstrap timing (registry/API constructed after `startApiServer` returns) is
+  // unchanged.
+  const resolveStatusGatherConfig = (): StatusGatherConfig | undefined => {
+    // Thread the live HarnessReadinessRegistry through to gather-status so the response
+    // carries a `harness` rollup. main.ts uses the holder shape (registry is constructed
+    // post-bootstrap); dereferencing once per request keeps server.ts decoupled from that
+    // timing. When the holder is empty (pre-bootstrap) the getter returns null and the
+    // assembler defaults to ready.
+    const reg = config.harnessReadinessRegistry;
+    const getRegistry = (): HarnessReadinessRegistry | null =>
+      reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
+    // Resolve the live DiscoveryAPI (holder pattern, same as the registry above) so status
+    // reads can enrich task-relative outcomes (#502). When the holder is empty
+    // (pre-bootstrap) this is undefined and gather-status leaves outcomes null.
+    const disc = config.discovery;
+    const liveDiscovery: DiscoveryAPI | undefined =
+      disc && 'holder' in disc ? disc.holder.current : disc;
+    return liveStatus
+      ? {
+          ...liveStatus,
+          discovery: liveDiscovery,
+          harnessReadiness: () => {
+            const live = getRegistry();
+            if (!live) return null;
+            return {
+              snapshot: live.getSnapshot(),
+              joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
+            };
+          },
+        }
+      : undefined;
+  };
+
   // GET /health + GET /ready — always ungated (spec §6.1). Mounted here,
   // before the operator-class gate below, alongside `/`/`/assets/*`.
   addHealthRoutes(app, {
@@ -535,37 +589,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
 
   app.get('/v1/status', async (c) => {
     try {
-      // Thread the live HarnessReadinessRegistry through to gather-status so
-      // the response carries a `harness` rollup. main.ts uses the holder shape
-      // (registry is constructed post-bootstrap); dereferencing once per
-      // request keeps server.ts decoupled from that timing. When the holder
-      // is empty (pre-bootstrap) the getter returns null and the assembler
-      // defaults to ready.
-      const reg = config.harnessReadinessRegistry;
-      const getRegistry = (): HarnessReadinessRegistry | null =>
-        reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
-      // Resolve the live DiscoveryAPI (holder pattern, same as the registry
-      // above) so /v1/status can enrich task-relative outcomes (#502). When
-      // the holder is empty (pre-bootstrap) this is undefined and gather-status
-      // leaves outcomes null.
-      const disc = config.discovery;
-      const liveDiscovery: DiscoveryAPI | undefined =
-        disc && 'holder' in disc ? disc.holder.current : disc;
-      const statusConfig: StatusGatherConfig | undefined = liveStatus
-        ? {
-            ...liveStatus,
-            discovery: liveDiscovery,
-            harnessReadiness: () => {
-              const live = getRegistry();
-              if (!live) return null;
-              return {
-                snapshot: live.getSnapshot(),
-                joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
-              };
-            },
-          }
-        : undefined;
-      const body = await gatherStatusForApi(store, statusConfig);
+      const statusConfig = resolveStatusGatherConfig();
+      // Shares the ~3s TTL cache with /v1/rewards and /v1/notifications (issue #2408 review
+      // finding F3) — `enrichStatusV1Tail` is the cheap, no-RPC tail (loop-completion,
+      // evidence-indexing, spend, AI-units) that still runs fresh every request against the
+      // (possibly cached) `{ raw, assembled }` pair.
+      const { raw, assembled } = await getCachedGatheredStatus(store, statusConfig);
+      const body = await enrichStatusV1Tail(store, statusConfig, raw, assembled);
       return c.json(body);
     } catch (err) {
       // Mask any RPC URL embedded in the message and drop the filesystem
@@ -600,6 +630,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.use('/v1/activity-events/*', requireOperatorToken);
   app.use('/v1/bootstrap', requireOperatorToken);
   app.use('/v1/rewards', requireOperatorToken);
+  app.use('/v1/notifications', requireOperatorToken);
   app.use('/v1/solvernets', requireOperatorToken);
   app.use('/v1/solvernets/*', requireOperatorToken);
   app.use('/v1/auth/*', requireOperatorToken);
@@ -644,9 +675,29 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   if (config.ui) {
     addRewardsRoutes(app, {
       store,
-      getStatus: () => liveStatus,
+      // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B1) — the
+      // bare `() => liveStatus` this used to pass shared the gather cache slot with an
+      // unenriched shape, which could transiently starve /v1/status of its harness/discovery
+      // enrichment. Rewards itself gains the enrichment too (harmless: rewards doesn't
+      // currently read `discovery`/`harnessReadiness`, but a future field addition no longer
+      // has to remember to wire it separately).
+      getStatus: resolveStatusGatherConfig,
     });
   }
+
+  // §6.5 / issue #2408 — mounted unconditionally (like `/v1/status`, not gated on
+  // `config.ui`) so the self-start/bearer-only path (tests, embedded callers) still gets
+  // the endpoint. `getBootstrapExtras` reuses `/v1/bootstrap`'s own `configReader` purely
+  // for its already-computed `rpcSlotHealth` + `joinedSolverNets` — never its assembled JSON.
+  addNotificationsRoutes(app, {
+    store,
+    // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B2) — reading
+    // the bare, un-enriched `liveStatus` meant `assembled.harness` was always the
+    // default-ready rollup here, making `harness_not_ready` unreachable in production
+    // regardless of the shared cache. This is the fix.
+    getStatus: resolveStatusGatherConfig,
+    getBootstrapExtras: () => config.bootstrap?.configReader?.(),
+  });
 
   if (config.discovery) {
     const disc = config.discovery;
@@ -1044,6 +1095,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         app,
         setStatusConfig: (status) => {
           liveStatus = status;
+          // Invalidate the shared gather/assemble cache (issue #2408 review finding F3) so the
+          // very next /v1/status (or /v1/rewards, /v1/notifications) read reflects the swapped
+          // config immediately, rather than serving up to the cache's TTL of pre-swap data.
+          invalidateGatheredStatusCache();
         },
       });
     });

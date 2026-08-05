@@ -8,7 +8,7 @@ import { NodeHealthCard, type DaemonStatus, type RpcStatus } from './overview/No
 import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overview/ActivityCard.js';
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
-import { gasSeverity } from '../notifications/derive.js';
+import { gasSeverity } from '../notifications/gas-severity.js';
 import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../../../../api/contract/index.js';
 
 /**
