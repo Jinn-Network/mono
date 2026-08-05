@@ -32,6 +32,10 @@ on:
       - '.github/scripts/verify-layer-stable-version.mjs'
       - 'docs/runbooks/layer-npm-publishing.md'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Layer, Core, Plugin, and client validation is CPU-only. Avoid optional CUDA
 # downloads from both supported onnxruntime-node installer generations.
 env:

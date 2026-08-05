@@ -7,6 +7,19 @@ on:
         required: true
         type: string
   pull_request:
+    paths:
+      - "packages/evidence/**"
+      - ".github/scripts/evidence-*.test.mjs"
+      - ".github/workflows/evidence-ci.yml"
+      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
+      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+      - "docs/superpowers/specs/2026-07-26-evidence-retrieval-design.md"
+      - "docs/superpowers/plans/2026-07-27-evidence-retrieval.md"
+      - "docs/superpowers/specs/2026-07-26-evidence-contribution-design.md"
+      - "docs/superpowers/plans/2026-07-27-evidence-contribution.md"
+      - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c2-trace-decode.md"
   push:
     branches: [next]
     paths:
