@@ -152,7 +152,7 @@ describe("deterministic OCI mapping", () => {
     const schema = JSON.parse(
       await readFile(
         new URL(
-          "../profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
+          "../profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
           import.meta.url,
         ),
         "utf8",

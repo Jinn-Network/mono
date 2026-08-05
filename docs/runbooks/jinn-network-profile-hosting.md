@@ -1,4 +1,4 @@
-# Hosting the jinn.network profile root
+# Hosting the spec.jinn.network profile root
 
 **Scope:** serving the public schemas and profiles declared by the catalog for the exact
 `platform-v1` release set. The current package declarations and self-identifying URI claims are in
@@ -10,9 +10,11 @@ the [generated public-surface view](../../architecture/generated/platform-topolo
 `publicSurface.schemas`, `publicSurface.profiles`, and `publicSurface.fixtures`. The publication
 surface guard first proves that declarations exist and agree with package `files` and `exports`;
 the profile builder then maps a JSON Schema `$id` or facts-profile `profile` claim under
-`https://jinn.network/` to that exact served path and rejects duplicate claims.
+`https://spec.jinn.network/` to that exact served path and rejects duplicate claims. That origin
+is the protocol's own, separate from the product site at the apex, and it is the only one a
+hosted identity may name (DR-2026-08-04). A document still naming the apex is rejected by name.
 
-The core surface includes the cataloged trajectory schemas. It excludes environment records,
+The core surface includes the cataloged trace schemas. It excludes environment records,
 environment-verification assets, and environment facts profiles because those packages belong to
 the disabled experimental release group, not `platform-v1`. Directory location alone can neither
 include nor exclude a document.
@@ -33,27 +35,31 @@ sidecars are not served; `manifest.json` is the digest authority for the hosted 
 ## Hard stable blocker
 
 Stable package publication remains mechanically disabled until the live host exists and an
-end-to-end verification gate proves that `https://jinn.network/` serves the exact same-run
+end-to-end verification gate proves that `https://spec.jinn.network/` serves the exact same-run
 manifest and document bytes. Building or attesting an artifact is not proof that the public host
 serves it. Do not remove `stable-hosting-blocker`, enable a stable publisher, or claim external
 conformance before the live-host gate is implemented and passes.
 
 ## Hosting and key-provisioning checklist
 
-An operator with control of `jinn.network` and the organization settings must:
+An operator with control of `spec.jinn.network` and the organization settings must:
+
+The rows below marked *(gate)* are the ones the fail-closed live-host verification gate will
+discharge automatically once it lands; until then they are performed and recorded by hand.
 
 - [ ] Generate an Ed25519 signing key offline and keep the private key out of this repository.
 - [ ] Add the PKCS#8 PEM private key as `JINN_PROFILE_MANIFEST_SIGNING_KEY`.
 - [ ] Add its identifier as `JINN_PROFILE_MANIFEST_KEY_ID`.
 - [ ] Publish the corresponding public key at a stable URL and record that URL in the deployment
       record.
-- [ ] Configure a static host for `jinn.network` that preserves manifest paths exactly.
+- [ ] Configure a static host for `spec.jinn.network` that preserves manifest paths exactly. The
+      apex stays purely the product site and serves no protocol bytes.
 - [ ] Serve each document with the media type declared by `manifest.json`, including extensionless
       task and facts profiles.
 - [ ] Deploy one exact attested profile-root artifact; never rebuild it at the host.
-- [ ] Fetch `manifest.json` from the live domain, verify its attestation/signature, and byte-compare
-      every hosted document and digest with the same-run immutable artifact.
-- [ ] Verify at least one trajectory schema and one facts/task profile by its self-declared URI.
+- [ ] *(gate)* Fetch `manifest.json` from the live domain, verify its attestation/signature, and
+      byte-compare every hosted document and digest with the same-run immutable artifact.
+- [ ] *(gate)* Verify at least one trace schema and one facts/task profile by its self-declared URI.
 - [ ] Record the source SHA, catalog digest, artifact/receipt identities, operator, public-key URL,
       and completion date.
 

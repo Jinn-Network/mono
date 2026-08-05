@@ -8,12 +8,11 @@ import {
   RUN_RECORD_KIND,
 } from "./identifiers.js";
 
-// DUAL-ACCEPT (DR-2026-08-04 transition window): canonical
-// `https://spec.jinn.network/records/<segment>/v<major>` and the legacy
-// `https://jinn.network/records/<segment>/<major>.<minor>` this constant still
-// spells. Reference implementation: packages/discovery/protocol/src/origins.ts.
-// Component C2 narrows this to the canonical arm once the re-seal has landed.
-const RECORD_KIND_GRAMMAR = /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/(?:v[1-9]\d*|\d+\.\d+)$/;
+// Mirror of discovery's record-kind URI grammar (DR-2026-08-04, transition window closed):
+// one origin, `https://spec.jinn.network`, and one version form, `v<major>`. Mirrored rather
+// than imported because this package declares no Jinn dependency. Reference implementation:
+// packages/discovery/protocol/src/origins.ts.
+const RECORD_KIND_GRAMMAR = /^https:\/\/spec\.jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/v[1-9]\d*$/;
 
 describe("facts/benchmarking identifiers", () => {
   it("exports four grammar-conformant record-kind URIs", () => {
@@ -35,15 +34,15 @@ describe("facts/benchmarking identifiers", () => {
     expect(REPORT_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v1");
   });
 
-  // The mirrored grammar dual-accepts both the canonical re-seal spelling (now what the
-  // constants above are pinned to) and the legacy spelling (still recognized during the
-  // transition window per DR-2026-08-04). Component C2 narrows this to the canonical arm
-  // once the re-seal has landed.
-  it("the mirrored grammar accepts the canonical re-seal spelling", () => {
+  // The regression test for the C2 narrowing. While the mirror dual-accepted, a pre-re-seal
+  // spelling matched as a valid record kind; the two literals at the head of the rejected
+  // list below are exactly the spellings that must no longer match (DR-2026-08-04).
+  it("the mirrored grammar accepts only the canonical spelling", () => {
     expect("https://spec.jinn.network/records/benchmark/v1").toMatch(RECORD_KIND_GRAMMAR);
     expect("https://spec.jinn.network/records/benchmark/v2").toMatch(RECORD_KIND_GRAMMAR);
-    expect("https://jinn.network/records/benchmark/1.0").toMatch(RECORD_KIND_GRAMMAR);
     for (const rejected of [
+      "https://jinn.network/records/benchmark/1.0",
+      "https://spec.jinn.network/records/benchmark/1.0",
       "https://spec.jinn.network/records/benchmark/v0",
       "https://spec.jinn.network/records/benchmark/1",
       "https://spec.jinn.network/records/benchmark/v1/facts/v1",

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 
-import {
-  RESEAL_DR_ID,
-  assertMinorBump,
-  compareFixtureManifests,
-  parseResealAuthorization,
-} from './fixture-immutability.mjs';
+import * as fixtureImmutability from './fixture-immutability.mjs';
+import { assertMinorBump, compareFixtureManifests } from './fixture-immutability.mjs';
+
+const repoRoot = resolve(import.meta.dirname, '../..');
 
 const baseline = {
   version: 1,
@@ -17,8 +17,6 @@ const baseline = {
 test('an unchanged manifest adds nothing', () => {
   assert.deepEqual(compareFixtureManifests(baseline, baseline, { label: 'packages/trust/core' }), {
     added: [],
-    resealed: [],
-    removed: [],
   });
 });
 
@@ -26,8 +24,6 @@ test('an added fixture is allowed and reported', () => {
   const candidate = { ...baseline, entries: [...baseline.entries, { id: 'adversarial/c.json', sha256: 'cc' }] };
   assert.deepEqual(compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core' }), {
     added: ['adversarial/c.json'],
-    resealed: [],
-    removed: [],
   });
 });
 
@@ -55,90 +51,41 @@ test('a correction is accepted as a new fixture plus a dated erratum', () => {
   };
   assert.deepEqual(compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core' }), {
     added: ['golden/a-corrected.json'],
-    resealed: [],
-    removed: [],
   });
 });
 
-// --- DR-2026-08-04 re-seal carve-out (removed with the flag by component C2) ---
+// --- DR-2026-08-04 re-seal carve-out: closed by component C2 ---
 
-test('the re-seal carve-out permits a digest change to an existing fixture id', () => {
-  const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
-  assert.deepEqual(
-    compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    { added: [], resealed: ['golden/a.json'], removed: [] },
+test('the re-seal carve-out is gone from the script and its workflow', () => {
+  assert.equal(fixtureImmutability.RESEAL_DR_ID, undefined);
+  assert.equal(fixtureImmutability.parseResealAuthorization, undefined);
+  assert.doesNotMatch(
+    readFileSync(join(repoRoot, '.github/scripts/fixture-immutability.mjs'), 'utf8'),
+    /allow-reseal/u,
+  );
+  assert.doesNotMatch(
+    readFileSync(join(repoRoot, '.github/workflows/stack-fixture-immutability.yml'), 'utf8'),
+    /allow-reseal|reseal\//u,
   );
 });
 
-test('the re-seal carve-out permits a removed fixture id, and reports it', () => {
-  // DR-2026-08-04 renames the trace vocabulary, and a rename reaches the manifest as a
-  // removal plus an addition. Nothing in this corpus is published, so no vector a third
-  // party pinned can break -- the same premise that makes the digest half lawful.
-  const candidate = {
-    ...baseline,
-    entries: [baseline.entries[0], { id: 'adversarial/b-renamed.json', sha256: 'bb' }],
-  };
-  assert.deepEqual(
-    compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    { added: ['adversarial/b-renamed.json'], resealed: [], removed: ['adversarial/b.json'] },
-  );
-});
-
-test('without the flag a removed fixture id is refused exactly as before', () => {
-  const candidate = { ...baseline, entries: [baseline.entries[0]] };
+test('a stray allowReseal option cannot re-open the gate', () => {
+  // The carve-out was an option on this function. Any caller still passing it -- a stale
+  // branch, a copied invocation -- must get the strict answer, not a silent bypass. Both
+  // halves the carve-out admitted are covered: the re-sealed digest and the renamed id.
+  const edited = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
+  const renamed = { ...baseline, entries: [baseline.entries[0], { id: 'adversarial/b-renamed.json', sha256: 'bb' }] };
   for (const options of [
     { label: 'packages/trust/core' },
-    { label: 'packages/trust/core', allowReseal: false },
+    { label: 'packages/trust/core', allowReseal: true },
   ]) {
     assert.throws(
-      () => compareFixtureManifests(baseline, candidate, options),
-      /packages\/trust\/core: adversarial\/b\.json was removed; fixtures are append-only/,
-      'the carve-out is the only thing that admits a removal',
-    );
-  }
-});
-
-test('the re-seal carve-out reports a removal and a digest change independently', () => {
-  const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }] };
-  assert.deepEqual(
-    compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    { added: [], resealed: ['golden/a.json'], removed: ['adversarial/b.json'] },
-  );
-});
-
-test('the re-seal carve-out does not weaken the erratum rules', () => {
-  const candidate = {
-    ...baseline,
-    errata: [{ id: 'ghost.json', supersededBy: 'adversarial/b.json', date: '2026-07-30', reason: 'x' }],
-  };
-  assert.throws(
-    () => compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    /packages\/trust\/core: erratum names ghost\.json, which is not a fixture in this manifest/,
-  );
-});
-
-test('without the flag a digest change is refused exactly as before', () => {
-  const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
-  for (const options of [
-    { label: 'packages/trust/core' },
-    { label: 'packages/trust/core', allowReseal: false },
-  ]) {
-    assert.throws(
-      () => compareFixtureManifests(baseline, candidate, options),
+      () => compareFixtureManifests(baseline, edited, options),
       /packages\/trust\/core: golden\/a\.json changed from aa to ZZ; a published fixture is never edited, it is superseded by a new fixture plus a dated erratum/,
     );
-  }
-});
-
-test('--allow-reseal authorizes only DR-2026-08-04', () => {
-  assert.equal(RESEAL_DR_ID, 'DR-2026-08-04');
-  assert.equal(parseResealAuthorization(undefined), false, 'an absent flag never authorizes');
-  assert.equal(parseResealAuthorization(RESEAL_DR_ID), true);
-  for (const wrong of ['DR-2026-08-05', 'dr-2026-08-04', 'DR-2026-08-04 ', 'true', '1', '']) {
     assert.throws(
-      () => parseResealAuthorization(wrong),
-      /--allow-reseal only authorizes DR-2026-08-04; got /,
-      JSON.stringify(wrong),
+      () => compareFixtureManifests(baseline, renamed, options),
+      /packages\/trust\/core: adversarial\/b\.json was removed; fixtures are append-only/,
     );
   }
 });

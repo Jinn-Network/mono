@@ -25,8 +25,9 @@ import {
 const repoRoot = resolve(import.meta.dirname, '../..');
 const SHA = 'e'.repeat(40);
 
-function controlledRepo(packages) {
+function controlledRepo(packages, { resolvableIdentifiers } = {}) {
   const catalog = fixtureCatalog();
+  if (resolvableIdentifiers) catalog.resolvableIdentifiers = resolvableIdentifiers;
   const availableCoreIndexes = catalog.packages
     .map((pkg, index) => ({ pkg, index }))
     .filter(({ pkg }) => pkg.name.startsWith('@jinn-network/fixture-core-'))
@@ -52,9 +53,9 @@ function scratchRepo(extraPackages = []) {
     ...extraPackages,
   ]);
   const packageDir = join(root, 'packages/evidence/protocol');
-  mkdirSync(join(packageDir, 'profiles/execution-evidence/1.0/schemas'), { recursive: true });
-  writeFileSync(join(packageDir, 'profiles/execution-evidence/1.0/schemas/a.schema.json'), '{"type":"object"}', 'utf8');
-  writeFileSync(join(packageDir, 'profiles/execution-evidence/1.0/profile.md'), '# profile\n', 'utf8');
+  mkdirSync(join(packageDir, 'profiles/execution-evidence/v1/schemas'), { recursive: true });
+  writeFileSync(join(packageDir, 'profiles/execution-evidence/v1/schemas/a.schema.json'), '{"type":"object"}', 'utf8');
+  writeFileSync(join(packageDir, 'profiles/execution-evidence/v1/profile.md'), '# profile\n', 'utf8');
   return root;
 }
 
@@ -83,12 +84,12 @@ test('documents are served at the paths their profile URIs name', () => {
   try {
     const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
     assert.deepEqual(manifest.documents.map((d) => d.path), [
-      'profiles/execution-evidence/1.0/profile.md',
-      'profiles/execution-evidence/1.0/schemas/a.schema.json',
+      'profiles/execution-evidence/v1/profile.md',
+      'profiles/execution-evidence/v1/schemas/a.schema.json',
     ]);
-    assert.ok(existsSync(join(outDir, 'profiles/execution-evidence/1.0/schemas/a.schema.json')));
+    assert.ok(existsSync(join(outDir, 'profiles/execution-evidence/v1/schemas/a.schema.json')));
     assert.equal(
-      readFileSync(join(outDir, 'profiles/execution-evidence/1.0/schemas/a.schema.json'), 'utf8'),
+      readFileSync(join(outDir, 'profiles/execution-evidence/v1/schemas/a.schema.json'), 'utf8'),
       '{"type":"object"}',
     );
   } finally {
@@ -195,13 +196,13 @@ test('a colliding served path across two packages is refused', () => {
     catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
   }]);
   const second = join(root, 'packages/trust/core');
-  mkdirSync(join(second, 'profiles/execution-evidence/1.0'), { recursive: true });
-  writeFileSync(join(second, 'profiles/execution-evidence/1.0/profile.md'), '# other\n', 'utf8');
+  mkdirSync(join(second, 'profiles/execution-evidence/v1'), { recursive: true });
+  writeFileSync(join(second, 'profiles/execution-evidence/v1/profile.md'), '# other\n', 'utf8');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     assert.throws(
       () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-      /profiles\/execution-evidence\/1\.0\/profile\.md is claimed by both @jinn-network\/evidence-protocol and @jinn-network\/trust-core/,
+      /profiles\/execution-evidence\/v1\/profile\.md is claimed by both @jinn-network\/evidence-protocol and @jinn-network\/trust-core/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -211,8 +212,8 @@ test('a colliding served path across two packages is refused', () => {
 
 // The collision cannot arise from on-disk layout -- no filesystem holds a file and a
 // directory at one path. It arises only when declared $id claims remap documents into
-// the served namespace, which is exactly how profiles/execution-evidence/1.0 became a
-// directory that no document can ever be served at.
+// the served namespace, which is exactly how a profile directory can become a prefix that
+// no document can ever be served at.
 test('a served path that is both a document and a directory prefix is refused', () => {
   for (const [name, claims] of [
     ['document-first', ['profiles/collide/1.0', 'profiles/collide/1.0/schemas/inner.schema.json']],
@@ -284,15 +285,57 @@ test('every registered resolvable identifier resolves in the real platform-v1 tr
     assert.ok(register.length > 0, 'the catalog must declare which identifiers dereference');
     for (const entry of register) {
       assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
+      const servedPath = entry.identifier.replace('https://spec.jinn.network/', '');
       if (entry.resolution === 'prefix') {
         assert.equal(
-          paths.has(entry.identifier.replace('https://spec.jinn.network/', '')),
+          paths.has(servedPath),
           false,
           `${entry.identifier} is a prefix and must not also be a document`,
+        );
+        // One profile, one version segment: a prefix identifier must contain the document it
+        // declares as its entry point.
+        assert.ok(
+          entry.entryPoint.startsWith(`${servedPath}/`),
+          `${entry.identifier} is a prefix whose entry point ${entry.entryPoint} lives outside it`,
         );
       }
     }
   } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a prefix identifier whose entry point lives outside it is refused', () => {
+  // The defect the re-seal's closure surfaced: `profiles/<name>/v1` was registered as a
+  // prefix while its entry point still sat in a leftover `profiles/<name>/1.0/` directory --
+  // the identifier addressed one half of a profile and its declared entry the other. The
+  // builder accepted it because it only checked the entry point existed somewhere.
+  const root = controlledRepo([{
+    directory: 'packages/evidence/protocol',
+    name: '@jinn-network/evidence-protocol',
+    manifest: { files: ['profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
+  }], {
+    resolvableIdentifiers: [{
+      identifier: 'https://spec.jinn.network/profiles/example/v1',
+      resolution: 'prefix',
+      entryPoint: 'profiles/example/1.0/specification.md',
+      owner: '@jinn-network/evidence-protocol',
+    }],
+  });
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-prefix-escape-'));
+  try {
+    const packageDir = join(root, 'packages/evidence/protocol');
+    mkdirSync(join(packageDir, 'profiles/example/1.0'), { recursive: true });
+    mkdirSync(join(packageDir, 'profiles/example/v1'), { recursive: true });
+    writeFileSync(join(packageDir, 'profiles/example/1.0/specification.md'), '# stray\n', 'utf8');
+    writeFileSync(join(packageDir, 'profiles/example/v1/notes.md'), '# inside\n', 'utf8');
+    assert.throws(
+      () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+      /profiles\/example\/v1 is registered as a prefix but its entry point profiles\/example\/1\.0\/specification\.md is not inside profiles\/example\/v1\//u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
   }
 });
@@ -375,7 +418,7 @@ test('direct and encoded traversal identifiers fail before creating a sibling ou
     try {
       assert.throws(
         () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-        /must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
+        /must name a canonical relative spec\.jinn\.network hosted path/u,
       );
       assert.equal(existsSync(escaped), false, 'validation must precede every out-of-root write');
     } finally {
@@ -392,7 +435,7 @@ test('reserved generated metadata paths cannot be claimed by source documents', 
     try {
       assert.throws(
         () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-        /must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
+        /must name a canonical relative spec\.jinn\.network hosted path/u,
       );
       assert.equal(existsSync(join(outDir, filename)), false);
     } finally {

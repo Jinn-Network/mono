@@ -12,6 +12,7 @@ import {
 import { decodeWireEnvelopeForVerification } from '@jinn-network/record-discovery-client';
 import {
   RECORD_DISCOVERY_VERSION,
+  RECORD_KINDS,
   parseAnnouncementEntry,
   sealJson,
 } from '@jinn-network/record-discovery-protocol';
@@ -385,7 +386,7 @@ const discoveryEntry = parseAnnouncementEntry({
   announcements: [{
     announcementId: 'packed-requester-submission',
     action: 'available',
-    record: { kind: 'https://spec.jinn.network/records/submission/1.0', digest: documentDigest(submissionBytes) },
+    record: { kind: RECORD_KINDS.submission, digest: documentDigest(submissionBytes) },
   }],
 });
 const discoveryBytes = sealJson(discoveryEntry).bytes;

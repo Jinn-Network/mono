@@ -43,7 +43,7 @@ export function renderRegistrationMarkdown(registrations) {
     'The npmjs **Environment field MUST equal `npm-publish`** and the **Allowed action MUST be exactly `npm publish`**.',
     'npm permits one trusted publisher configuration per package. Only the final',
     'receipt-gated canary publisher enters that protected',
-    'environment. Stable publication remains disabled pending live `jinn.network`',
+    'environment. Stable publication remains disabled pending live `spec.jinn.network`',
     'hosting verification; the stable blocker never invokes npm.',
     '',
     '| Package | Workflow filename |',

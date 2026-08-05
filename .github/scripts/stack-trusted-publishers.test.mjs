@@ -75,7 +75,7 @@ test('the markdown rendering requires the protected environment and publish-only
   const markdown = renderRegistrationMarkdown(buildRegistrationList(repoRoot));
   assert.match(markdown, /Environment field MUST equal `npm-publish`/);
   assert.match(markdown, /Allowed action MUST be exactly `npm publish`/);
-  assert.match(markdown, /Stable publication remains disabled.*live `jinn\.network`\s+hosting verification/su);
+  assert.match(markdown, /Stable publication remains disabled.*live `spec\.jinn\.network`\s+hosting verification/su);
   assert.doesNotMatch(markdown, /Leave blank|MUST be blank/u);
   assert.doesNotMatch(markdown, /stable from `npm-stable-publish`/u);
   assert.match(markdown, /\| `@jinn-network\/evidence-protocol` \| `stack-npm-publish\.yml` \|/);

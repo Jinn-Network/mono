@@ -19,27 +19,25 @@ import { repositoryCandidateInventory } from './repository-candidates.mjs';
 const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
 
 // DR-2026-08-04 gives the protocol's definition surface its own origin. `spec.jinn.network`
-// is canonical; the apex `jinn.network` is an EXPLICITLY recognized legacy origin for the
-// duration of the re-seal migration, never a silent one.
+// is the only origin a Jinn hosted identity may name. The re-seal migration is complete, so
+// the apex `jinn.network` is retired here -- it is purely the product site.
 //
-// Why recognition must be explicit on both sides: this module decides whether a document
-// *claims* a hosted identity. The failure mode to prevent is fail-open -- an origin the
-// enumerator does not recognize produces no claim at all, so a document would slip through
-// as "declares nothing" instead of failing loudly. That cuts both ways during the window: a
-// migrated document naming spec.jinn.network must not go unclaimed under the old check, and
-// an unmigrated document naming jinn.network must not go unclaimed under the new one. Both
-// are claims; both are validated by the same canonical-path rules.
-//
-// Component C2 drops the legacy entries once every document is migrated.
+// Retired is not the same as unknown, and the difference is the whole design of this module.
+// It decides whether a document *claims* a hosted identity, so the failure mode to prevent
+// is fail-open: an origin the enumerator does not recognize produces no claim at all, and a
+// document naming the retired origin would slip through as "declares nothing" rather than
+// failing loudly. The retired origin therefore stays a *candidate* identity and gets its own
+// named rejection, so a stray unmigrated document is reported as a migration defect instead
+// of being silently ignored. `.github/scripts/origin-tripwire.mjs` is the standing guard;
+// this is the per-document one.
 export const CANONICAL_IDENTIFIER_ORIGIN = 'https://spec.jinn.network/';
-export const LEGACY_IDENTIFIER_ORIGINS = Object.freeze(['https://jinn.network/']);
-const RECOGNIZED_IDENTIFIER_ORIGINS = Object.freeze([
-  CANONICAL_IDENTIFIER_ORIGIN,
-  ...LEGACY_IDENTIFIER_ORIGINS,
+export const RETIRED_IDENTIFIER_ORIGIN = 'https://jinn.network/';
+const CANONICAL_IDENTIFIER_HOST = new URL(CANONICAL_IDENTIFIER_ORIGIN).hostname;
+const RETIRED_IDENTIFIER_HOST = new URL(RETIRED_IDENTIFIER_ORIGIN).hostname;
+const CANDIDATE_IDENTIFIER_HOSTS = new Set([
+  CANONICAL_IDENTIFIER_HOST,
+  RETIRED_IDENTIFIER_HOST,
 ]);
-const RECOGNIZED_IDENTIFIER_HOSTS = new Set(
-  RECOGNIZED_IDENTIFIER_ORIGINS.map((origin) => new URL(origin).hostname),
-);
 const GENERATED_PROFILE_ROOT_PATHS = new Set(['manifest.json', 'manifest.dsse.json']);
 
 function toPosix(value) {
@@ -66,20 +64,28 @@ export function normalizePackageRelativePublicPath(value, label) {
 }
 
 /**
- * The path a recognized identifier is served at, under either the canonical or the legacy
- * origin. The path is origin-relative and identical either way, so both origins' documents
- * are served from one tree for the duration of the migration.
+ * The path a canonical identifier is served at, relative to `spec.jinn.network`.
+ *
+ * An identifier on the retired apex origin is rejected by name rather than by the generic
+ * shape message, so the diagnostic says what actually happened: the namespace moved.
  */
 export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') {
   const invalid = () => {
+    throw new Error(`${label} must name a canonical relative spec.jinn.network hosted path`);
+  };
+  const retired = () => {
     throw new Error(
-      `${label} must name a canonical relative spec.jinn.network or jinn.network hosted path`,
+      `${label} names the retired ${RETIRED_IDENTIFIER_ORIGIN} origin; protocol identifiers `
+      + `moved to ${CANONICAL_IDENTIFIER_ORIGIN} in the DR-2026-08-04 re-seal `
+      + '(log/decisions/2026-08-04-spec-origin-and-vocabulary.md)',
     );
   };
-  // The origins differ at the host, so at most one prefix can ever match; there is no
-  // precedence question here, only recognition.
+  if (typeof identifier === 'string' && identifierHost(identifier) === RETIRED_IDENTIFIER_HOST) {
+    retired();
+  }
   const origin = typeof identifier === 'string'
-    ? RECOGNIZED_IDENTIFIER_ORIGINS.find((candidate) => identifier.startsWith(candidate))
+    && identifier.startsWith(CANONICAL_IDENTIFIER_ORIGIN)
+    ? CANONICAL_IDENTIFIER_ORIGIN
     : undefined;
   if (origin === undefined
     || identifier.includes('?')
@@ -105,23 +111,25 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
   return servedPath;
 }
 
+/** The host `identifier` names, normalized for comparison, or `undefined` if it is not a URL. */
+function identifierHost(identifier) {
+  try {
+    return new URL(identifier).hostname.toLowerCase().replace(/\.$/u, '');
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Whether a field value is *semantically* a Jinn hosted identifier -- including noncanonical
- * spellings (uppercase host, trailing dot, explicit port), which are candidates precisely so
- * that jinnIdentifierServedPath can reject them loudly. A legacy-origin identifier is a
- * candidate for exactly the same reason a canonical one is: an unrecognized origin would
- * make the document silently unclaimed.
+ * spellings (uppercase host, trailing dot, explicit port) and the retired apex origin, which
+ * are candidates precisely so that jinnIdentifierServedPath can reject them loudly rather
+ * than let the document pass as declaring nothing.
  */
 function isJinnIdentifierCandidate(identifier) {
   if (typeof identifier !== 'string') return false;
-  if (RECOGNIZED_IDENTIFIER_ORIGINS.some((origin) => identifier.startsWith(origin))) return true;
-  try {
-    return RECOGNIZED_IDENTIFIER_HOSTS.has(
-      new URL(identifier).hostname.toLowerCase().replace(/\.$/u, ''),
-    );
-  } catch {
-    return false;
-  }
+  if (identifier.startsWith(CANONICAL_IDENTIFIER_ORIGIN)) return true;
+  return CANDIDATE_IDENTIFIER_HOSTS.has(identifierHost(identifier));
 }
 
 function normalizeManifestPath(value, label) {

@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * DISABLED SKELETON — this module ships disabled and is not wired into any CI workflow.
+ * The standing guard on the identifier origin.
  *
- * Authority: DR-2026-08-04 (`log/decisions/2026-08-04-spec-origin-and-vocabulary.md`) moves
+ * Authority: DR-2026-08-04 (`log/decisions/2026-08-04-spec-origin-and-vocabulary.md`) moved
  * the protocol identifier origin from `https://jinn.network/` to `https://spec.jinn.network/`
- * (Decision 1: "Dedicated identifier origin"). Component C1 (the re-seal migration) rewrites
- * the documents to the new origin; this module is the AFTER-migration guard. Component C2
- * wires it into CI once the re-seal lands, and decides then whether a hit fails the build.
+ * (Decision 1: "Dedicated identifier origin"). Component C1 rewrote the documents; component
+ * C2 closed the transition window and wired this module into CI. It is the reason the
+ * narrowing stays narrow: a legacy origin reintroduced into an enforced source scope fails
+ * the build.
  *
- * Pre-migration, scanning the repository with this module reports hundreds of hits — every
- * not-yet-migrated `https://jinn.network/` occurrence. That is expected and is not a defect:
- * nothing in this file fails a build, and nothing under `.github/workflows/` references it.
+ * Run with no arguments it enforces (non-zero exit on any violation in an enforced scope).
+ * Run with `--report` it prints the whole-tree census, exclusions included, and never fails.
  */
 
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
@@ -25,21 +25,68 @@ export const LEGACY_ORIGIN = 'https://jinn.network/';
 export const DEFAULT_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', '.git']);
 
 /**
+ * The scopes the tripwire *enforces*: the source trees a protocol identifier can actually be
+ * minted from. Everything else in the repository is reported by `--report` but never fails a
+ * build -- history, generated output, and the product website all legitimately name the apex.
+ *
+ * `packages/**` is narrowed to the three public-surface directory kinds, since a package's
+ * `fixtures/` holds sealed pre-re-seal bytes that are never retro-edited.
+ */
+export const ENFORCED_SCOPE_PREFIXES = [
+  '.github/scripts/',
+  'client/src/',
+  'plugin/runtime/src/',
+];
+const ENFORCED_PACKAGE_DIRECTORIES = /\/(?:src|schemas|profiles)\//u;
+
+/** True when `relativePath` sits in a scope the tripwire fails the build over. */
+export function isEnforcedPath(relativePath) {
+  if (ENFORCED_SCOPE_PREFIXES.some((prefix) => relativePath.startsWith(prefix))) return true;
+  return relativePath.startsWith('packages/') && ENFORCED_PACKAGE_DIRECTORIES.test(relativePath);
+}
+
+/**
  * Frozen strings that must never be rewritten or flagged, and the dated-record trees that
  * are never retro-edited (DR-2026-08-04 Decision 7 / Consequences: "pre-migration
  * content-addressed bytes are never retro-edited").
+ *
+ * Every entry carries its reason. The list is closed: `origin-tripwire.test.mjs` asserts it
+ * matches exactly, so widening the hole is a reviewed edit rather than a quiet one.
  */
 export const DEFAULT_EXCLUSIONS = {
   // Exact repository-relative paths.
   paths: [
-    // The frozen `bridge/legacy-execution-envelope/1.0` carrier: a namespaced Delivery
-    // extension key (DeliveryRecordSchema `.loose()` extension, TEP §21.3) negotiated with
-    // legacy evaluators as a literal wire-format string. It is not a protocol identifier the
-    // re-seal renames -- see DR-2026-08-04's "envelope" ruling (the *record*
-    // `records/delivery-envelope/1.0` is renamed by the migration; this carrier key is not).
-    // Confirmed by grep: exactly these two files contain the literal string.
+    // -- The frozen wire carrier --
+    // `bridge/legacy-execution-envelope/1.0`: a namespaced Delivery extension key
+    // (DeliveryRecordSchema `.loose()` extension, TEP §21.3) negotiated with legacy
+    // evaluators as a literal wire-format string. It is not a protocol identifier the re-seal
+    // renames -- see DR-2026-08-04's "envelope" ruling (the *record*
+    // `records/delivery-envelope/1.0` was renamed by the migration; this carrier key was not).
     'client/src/daemon/bridge-legacy-delivery.ts',
     'packages/task-execution/backend-local/assembly/src/backend.evidence.test.ts',
+
+    // -- The recognition machinery itself --
+    // This module's own LEGACY_ORIGIN constant and the fixtures that prove it detects.
+    '.github/scripts/origin-tripwire.mjs',
+    '.github/scripts/origin-tripwire.test.mjs',
+    // The per-document guard: it keeps the retired origin as a *candidate* identity so an
+    // unmigrated document is rejected by name instead of passing as "declares nothing".
+    '.github/scripts/public-surface-assets.mjs',
+    '.github/scripts/public-surface-assets.test.mjs',
+
+    // -- Legacy-rejection vectors --
+    // Each of these asserts that a pre-re-seal spelling NO LONGER parses as a record kind.
+    // The literal is the assertion; without it the narrowing has no regression test. The
+    // authoritative grammar plus the six mirrors that copy it (those packages declare no
+    // Jinn dependency and so cannot import `assertRecordKindUri`).
+    'packages/discovery/protocol/src/grammar.test.ts',
+    'packages/benchmarking/records/src/identifiers.test.ts',
+    'packages/discovery/facts/benchmarking/src/identifiers.test.ts',
+    'packages/environments/chain-record/src/identifiers.test.ts',
+    'packages/environments/chain-record/src/primitives.test.ts',
+    'packages/environments/information-world/src/identifiers.test.ts',
+    'packages/environments/record/src/identifiers.test.ts',
+    'packages/evidence/trace/src/vocabulary.test.ts',
   ],
   // Repository-relative directory prefixes (trailing slash), excluded wholesale.
   prefixes: [
@@ -48,6 +95,7 @@ export const DEFAULT_EXCLUSIONS = {
     'docs/press/', // published press releases
     'docs/superpowers/', // dated design specs and implementation plans
     'legacy/', // frozen legacy surface
+    'apps/jinn-agent/', // frozen agent app, out of the re-seal's scope
   ],
 };
 
@@ -139,22 +187,32 @@ export function findLegacyOriginOccurrences({
   return hits.sort((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
 }
 
+/** The subset of {@link findLegacyOriginOccurrences} that fails the build. */
+export function findEnforcedScopeViolations(options) {
+  return findLegacyOriginOccurrences(options).filter(({ path }) => isEnforcedPath(path));
+}
+
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   const args = process.argv.slice(2);
   const root = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();
   const hits = findLegacyOriginOccurrences({ repoRoot: root });
-  if (hits.length === 0) {
-    console.log(`origin-tripwire: no ${LEGACY_ORIGIN} occurrences found outside exclusions`);
+  if (args.includes('--report')) {
+    console.log(`origin-tripwire: ${hits.length} occurrence(s) of ${LEGACY_ORIGIN} outside exclusions (report-only)`);
+    for (const hit of hits) console.log(`  ${hit.path}:${hit.line}: ${hit.text.trim()}`);
   } else {
-    console.log(
-      `origin-tripwire: ${hits.length} occurrence(s) of ${LEGACY_ORIGIN} found (report-only -- `
-      + 'this module ships disabled per DR-2026-08-04; component C2 wires it into CI and sets '
-      + 'pass/fail semantics after the re-seal migration lands)',
-    );
-    for (const hit of hits) {
-      console.log(`  ${hit.path}:${hit.line}: ${hit.text.trim()}`);
+    const violations = hits.filter(({ path }) => isEnforcedPath(path));
+    if (violations.length === 0) {
+      console.log(`origin-tripwire: no ${LEGACY_ORIGIN} occurrences in the enforced source scopes`);
+    } else {
+      console.error(
+        `origin-tripwire: ${violations.length} occurrence(s) of the retired ${LEGACY_ORIGIN} origin `
+        + 'in enforced source scopes. Protocol identifiers moved to https://spec.jinn.network/ in '
+        + 'the DR-2026-08-04 re-seal (log/decisions/2026-08-04-spec-origin-and-vocabulary.md). '
+        + 'If the occurrence is deliberate -- a frozen wire carrier, or a vector proving the '
+        + 'legacy spelling is rejected -- add it to DEFAULT_EXCLUSIONS with its reason.',
+      );
+      for (const hit of violations) console.error(`  ${hit.path}:${hit.line}: ${hit.text.trim()}`);
+      process.exitCode = 1;
     }
   }
-  // Deliberately never sets process.exitCode: see the top-of-file comment. This skeleton
-  // ships disabled and must never fail a build; C2 decides pass/fail wiring later.
 }

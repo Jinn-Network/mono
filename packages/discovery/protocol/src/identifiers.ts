@@ -8,16 +8,11 @@
 export const RECORD_DISCOVERY_FAMILY = "https://spec.jinn.network/record-discovery" as const;
 export const RECORD_DISCOVERY_VERSION = "https://spec.jinn.network/record-discovery/v1" as const;
 
-// Record-kind URIs (§12). Grammar: `<records-root>/<segment>/<version>`, segment matches
-// SOURCE_NAME_GRAMMAR (below), version per `./origins.ts`.
-//
-// DR-2026-08-04 re-seal: the values below are canonical --
-// `https://spec.jinn.network/records/<segment>/v<major>`. The grammar in `./grammar.ts` still
-// recognizes the pre-migration `https://jinn.network/records/<segment>/<major>.<minor>`
-// spelling too, but only to keep parsing documents sealed before the migration during the
-// transition window; component C2 narrows the grammar to the canonical root alone once the
-// re-seal has landed. `RECORDS_SEGMENT` is the origin-independent container name the
-// dual-accept roots in `./grammar.ts` are built from.
+// Record-kind URIs (§12). Grammar: `https://spec.jinn.network/records/<segment>/v<major>`,
+// segment matches SOURCE_NAME_GRAMMAR (below), version per `./origins.ts`. DR-2026-08-04
+// fixed the origin and the major-only version form; the re-seal's transition window is
+// closed and no other spelling is recognized. `RECORDS_SEGMENT` is the container name
+// `./grammar.ts` composes the records root from.
 export const RECORDS_SEGMENT = "records" as const;
 export const RECORDS_ROOT = "https://spec.jinn.network/records" as const;
 export const RECORD_KINDS = {

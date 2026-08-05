@@ -78,8 +78,20 @@ function assertRegisteredIdentifiersResolve(catalog, documents, packageNames) {
     if (!paths.has(entry.entryPoint)) {
       throw new Error(`${entry.identifier} resolves to no served document at ${entry.entryPoint}`);
     }
-    if (entry.resolution === 'prefix' && paths.has(servedPath)) {
-      throw new Error(`${entry.identifier} is registered as a prefix but a document is served at it`);
+    if (entry.resolution === 'prefix') {
+      if (paths.has(servedPath)) {
+        throw new Error(`${entry.identifier} is registered as a prefix but a document is served at it`);
+      }
+      // A prefix must contain its own entry point. Existing somewhere in the tree is not
+      // enough: an entry point outside the prefix means the identifier addresses one part of
+      // the profile while its declared entry lives at another, and every relative reference
+      // inside the crate resolves against the wrong root. This is exactly how the re-seal
+      // left `profiles/execution-evidence/v1` pointing into a leftover `…/1.0/` directory.
+      if (!entry.entryPoint.startsWith(`${servedPath}/`)) {
+        throw new Error(
+          `${entry.identifier} is registered as a prefix but its entry point ${entry.entryPoint} is not inside ${servedPath}/`,
+        );
+      }
     }
   }
 }

@@ -52,7 +52,7 @@ test('writes a canonical public-surface manifest for the exact platform-v1 set',
     assert.equal(new Set(manifest.packages.map(({ name }) => name)).size, expectedNames.length);
     assert.ok(manifest.packages.some(({ name, publicSurface }) => (
       name === '@jinn-network/evidence-protocol'
-        && publicSurface.schemas.includes('profiles/execution-evidence/1.0/schemas')
+        && publicSurface.schemas.includes('profiles/execution-evidence/v1/schemas')
     )));
     assert.equal(readFileSync(outputPath, 'utf8'), canonicalJsonBytes(manifest));
   } finally {

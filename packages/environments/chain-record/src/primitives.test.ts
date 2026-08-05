@@ -94,18 +94,17 @@ describe("ResourceDescriptor", () => {
   });
 });
 
-describe("RecordKindUri (DR-2026-08-04 dual-accept)", () => {
-  // The schema must already accept the spelling the re-seal will mint. C1's wave flips the
-  // record-kind constants; nothing else may have to move with them. Component C2 drops the
-  // legacy arm once every document is migrated.
+describe("RecordKindUri (DR-2026-08-04)", () => {
   test("accepts the canonical spec.jinn.network origin with a major-only version", () => {
     expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/v1")).toBe(true);
     expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/v2")).toBe(true);
   });
 
-  test("still accepts the legacy origin and the legacy major.minor version", () => {
-    expect(ok(RecordKindUri, "https://jinn.network/records/chain-environment/1.0")).toBe(true);
-    expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/1.0")).toBe(true);
+  // The regression test for the C2 narrowing: both spellings below parsed as valid record
+  // kinds while the schema dual-accepted, and must not any more.
+  test("refuses the retired origin and the retired major.minor version", () => {
+    expect(ok(RecordKindUri, "https://jinn.network/records/chain-environment/1.0")).toBe(false);
+    expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/1.0")).toBe(false);
   });
 
   test("refuses a lookalike origin, v0, and a nested version segment", () => {
