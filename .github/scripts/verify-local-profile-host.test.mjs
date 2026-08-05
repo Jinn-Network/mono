@@ -9,24 +9,20 @@
 // runs the gate's own CLI against it as a subprocess, over the real `globalThis.fetch`.
 // There is no injected fetch anywhere in this file, and every case is an exit code.
 //
-// Two accommodations are load-bearing and neither weakens a check. Both are written up in
-// docs/runbooks/jinn-network-profile-hosting.md.
+// One accommodation is load-bearing and it weakens nothing; it is written up in
+// docs/runbooks/jinn-network-profile-hosting.md. `normalizeOrigin` refuses anything that
+// is not `https`, at every lane, and it is right to. So the listener is a real TLS
+// listener with a throwaway self-signed Ed25519 certificate, generated per run, and the
+// gate subprocess is handed exactly that certificate through `NODE_EXTRA_CA_CERTS`.
+// Nothing about the gate is relaxed; the trust anchor is narrowed to one process, one
+// certificate, one run.
 //
-//   1. TLS. `normalizeOrigin` refuses anything that is not `https`, at every lane, and it
-//      is right to. So the listener is a real TLS listener with a throwaway self-signed
-//      Ed25519 certificate, generated per run, and the gate subprocess is handed exactly
-//      that certificate through `NODE_EXTRA_CA_CERTS`. Nothing about the gate is relaxed;
-//      the trust anchor is narrowed to one process and one certificate.
-//
-//   2. The registered-identifier register. Step 7 dereferences the catalog's
-//      `resolvableIdentifiers`, whose identifiers name `https://spec.jinn.network` and are
-//      resolved by the gate *against the verification origin*. Under any other origin the
-//      step fails before it can check anything, so a loopback run cannot exercise it. The
-//      gate reads that register from `--repo-root`, so these runs point `--repo-root` at a
-//      catalog fixture that registers no identifiers -- a legitimate configuration, and the
-//      one the gate's own `resolvableIdentifiers` default already describes. `refuses the
-//      real register under a loopback origin` below pins that behavior rather than hiding
-//      it. Step 7 stays proven only by the fake-host suite and by the first real deploy.
+// These runs use the repository's own catalog and its real registered-identifier
+// register. That is the point of the identity/location split the gate makes: every
+// identifier resolves against `IDENTIFIER_ORIGIN` and the served path it yields is
+// fetched at the loopback origin, so a preview host verifies exactly as the canonical one
+// does. `verifies the real identifier register under a loopback origin` and `identity
+// resolution is bit-identical at the stable origin` below are the two halves of that.
 //
 // Run: `cd .github/scripts && node --test verify-local-profile-host.test.mjs`.
 
@@ -55,8 +51,7 @@ import {
   entityTag,
 } from './build-profile-host-bundle.mjs';
 import { catalogSha256 } from './build-prepublication-bundle.mjs';
-import { PLATFORM_CATALOG_PATH } from './platform-catalog.mjs';
-import { fixtureRepo } from './platform-catalog-test-fixture.mjs';
+import { PLATFORM_CATALOG_PATH, loadPlatformCatalog } from './platform-catalog.mjs';
 import {
   DEFAULT_PUBLIC_KEY_PATH,
   loadBundleRoutes,
@@ -64,12 +59,19 @@ import {
   startProfileHost,
 } from './serve-profile-host.mjs';
 import { SIGNATURE_FILE_NAME, signManifest } from './sign-profile-manifest.mjs';
-import { canonicalPublicKeySha256 } from './verify-live-profile-host.mjs';
+import {
+  IDENTIFIER_ORIGIN,
+  STABLE_ORIGIN,
+  canonicalPublicKeySha256,
+  selfIdentifyingClaim,
+  servedPathForIdentifier,
+} from './verify-live-profile-host.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const gateScript = join(import.meta.dirname, 'verify-live-profile-host.mjs');
 const KEY_ID = 'jinn-local-conformance';
 const sourceSha = execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+const catalogDigest = catalogSha256(repoRoot);
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 const temporaries = [];
@@ -87,8 +89,8 @@ function temporaryDirectory(prefix) {
 
 let tls;
 let caCertPath;
-/** A catalog fixture that registers no resolvable identifiers. See the header, note 2. */
-let register;
+/** The catalog's registered identifiers that the platform-v1 release set owns. */
+let registered;
 let full;
 let subset;
 
@@ -117,7 +119,7 @@ function attestedFixture(root, manifest) {
   const receipt = {
     schemaVersion: 1,
     sourceSha,
-    catalog: { path: PLATFORM_CATALOG_PATH, sha256: register.catalogDigest },
+    catalog: { path: PLATFORM_CATALOG_PATH, sha256: catalogDigest },
     releaseGroup: 'platform-v1',
     lane: 'canary',
     surfaces: {
@@ -175,10 +177,17 @@ function hazardDocuments(manifest) {
   return chosen;
 }
 
-/** A small profile root carved out of the real one, carrying every hazardous path shape. */
+/**
+ * A small profile root carved out of the real one, carrying every hazardous path shape
+ * and every registered identifier's entry point -- so the fault cases below exercise the
+ * same gate steps the full sweep does, only over a dozen documents instead of 541.
+ */
 function subsetRoot(source, manifest) {
-  const documents = [...new Set(hazardDocuments(manifest).values())]
-    .sort((left, right) => (left.path < right.path ? -1 : 1));
+  const entryPoints = new Set(registered.map(({ entryPoint }) => entryPoint));
+  const documents = [...new Set([
+    ...hazardDocuments(manifest).values(),
+    ...manifest.documents.filter(({ path }) => entryPoints.has(path)),
+  ])].sort((left, right) => (left.path < right.path ? -1 : 1));
   const root = temporaryDirectory('jinn-local-host-subset-');
   for (const { path } of documents) {
     const target = join(root, ...path.split('/'));
@@ -195,17 +204,12 @@ before(() => {
   caCertPath = join(temporaryDirectory('jinn-local-host-ca-'), 'loopback-ca.pem');
   writeFileSync(caCertPath, tls.cert, 'utf8');
 
-  const registerRoot = fixtureRepo();
-  temporaries.push(registerRoot);
-  register = { root: registerRoot, catalogDigest: catalogSha256(registerRoot) };
-
   const fullRoot = temporaryDirectory('jinn-local-host-root-');
-  const manifest = buildProfileRoot({
-    repoRoot,
-    outDir: fullRoot,
-    commit: sourceSha,
-    catalogDigest: catalogSha256(repoRoot),
-  });
+  const manifest = buildProfileRoot({ repoRoot, outDir: fullRoot, commit: sourceSha, catalogDigest });
+  const releasePackages = new Set(manifest.packages);
+  registered = (loadPlatformCatalog(repoRoot).resolvableIdentifiers ?? [])
+    .filter(({ owner }) => releasePackages.has(owner));
+  assert.ok(registered.length > 0, 'the platform-v1 release set must own registered identifiers');
   const carved = subsetRoot(fullRoot, manifest);
   full = attestedFixture(fullRoot, manifest);
   subset = attestedFixture(carved.root, carved.manifest);
@@ -238,8 +242,6 @@ function serve(fixture, { fault = null, publicKeyPem, secure = true } = {}) {
  */
 function runGate(fixture, origin, {
   lane = 'canary',
-  repoRootForRegister = register.root,
-  catalogDigest = register.catalogDigest,
   expectPublicKeySha256 = fixture.publicKeySha256,
   publicKeyPath = DEFAULT_PUBLIC_KEY_PATH,
 } = {}) {
@@ -248,7 +250,7 @@ function runGate(fixture, origin, {
     gateScript,
     '--root', fixture.root,
     '--receipt', fixture.receiptPath,
-    '--repo-root', repoRootForRegister,
+    '--repo-root', repoRoot,
     '--source-sha', sourceSha,
     '--catalog-digest', catalogDigest,
     '--release-group', 'platform-v1',
@@ -274,14 +276,6 @@ function runGate(fixture, origin, {
       },
     );
   });
-}
-
-/** The same fixture, pointed at a rewritten verification receipt. */
-function withReceipt(fixture, mutate) {
-  const receipt = mutate(fixture.receipt);
-  const receiptPath = join(temporaryDirectory('jinn-local-host-receipt-'), 'verification-receipt.json');
-  writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
-  return { ...fixture, receipt, receiptPath };
 }
 
 async function gateAgainst(fixture, options = {}, gateOptions = {}) {
@@ -315,10 +309,17 @@ test('the gate passes against a real socket serving the whole real profile root'
   for (const { path } of full.manifest.documents) {
     assert.ok(answered.has(path), `the gate never fetched ${path}`);
   }
-  assert.ok(
-    server.requests.some(({ status }) => status === 404),
-    'the anti-fallback probes must have reached the host and been refused',
-  );
+  // Step 8's anti-fallback probes are the reason none of the above is vacuous, so they
+  // have to be shown reaching the host and being refused -- by their actual shapes, not
+  // by "some 404 happened".
+  const refused = new Set(server.requests.filter(({ status }) => status === 404).map(({ target }) => target));
+  for (const [label, shape] of [
+    ['a random path', /^\/[0-9a-f-]{36}$/u],
+    ['a digest sidecar beside the manifest', /^\/manifest\.json\.sha256$/u],
+    ['an unpublished package manifest', /^\/@jinn-network\/not-a-published-package-[0-9a-f-]{36}\/package\.json$/u],
+  ]) {
+    assert.ok([...refused].some((target) => shape.test(target)), `no anti-fallback probe for ${label} was refused`);
+  }
 
   assert.ok(documentCount > 500, `the real surface should be ~541 documents, saw ${documentCount}`);
   assert.ok(result.receipt, 'a passing run must emit a live-host receipt');
@@ -330,9 +331,10 @@ test('the gate passes against a real socket serving the whole real profile root'
   assert.equal(result.receipt.lane, 'canary');
   assert.match(result.receipt.origin, /^https:\/\/127\.0\.0\.1:\d+$/u);
   assert.match(result.stdout, new RegExp(`${documentCount} documents`, 'u'));
-  // Step 7 is out of reach over a loopback origin; the receipt says so rather than
-  // implying a sweep that did not happen. See the header, note 2.
-  assert.equal(result.receipt.resolvableIdentifiersVerified, 0);
+  // The real register, dereferenced at the loopback origin. Not zero, and not a number
+  // the harness chose: the count the catalog actually declares for this release set.
+  assert.equal(result.receipt.resolvableIdentifiersVerified, registered.length);
+  assert.ok(registered.length > 0);
 });
 
 // --- the hazardous path shapes, byte for byte, over the wire ----------------
@@ -430,7 +432,11 @@ test('the same small bundle passes unfaulted, so every refusal below is the faul
 
 const HOST_FAULTS = [
   ['a trailing-slash redirect', 'redirect-trailing-slash', /returned 308, expected 200/u],
-  ['a single-page-application catch-all', 'spa-catchall', /answers 200; the host has a catch-all/u],
+  // Two independent probes can reach a catch-all: step 7's bare-identifier probe for a
+  // registered prefix, and step 8's anti-fallback probes. The small bundle carries
+  // registered prefixes, so step 7 gets there first. Either way a 200 where the host must
+  // have nothing is fatal, which is the property under test.
+  ['a single-page-application catch-all', 'spa-catchall', /answers 200 at the bare identifier/u],
   ['a mistyped extensionless profile', 'mistype-extensionless', /served content-type application\/octet-stream, expected application\/json/u],
   ['a mistyped .schema.json document', 'mistype-schema', /served content-type application\/json, expected application\/schema\+json/u],
   ['one drifted document', 'drift-one-document', /bytes differ from the attested artifact/u],
@@ -487,20 +493,59 @@ test('the stable lane still refuses a loopback origin', async () => {
   assert.match(result.stdout, /stable lane must verify https:\/\/spec\.jinn\.network/u);
 });
 
-test('the gate refuses the real identifier register under a loopback origin', async () => {
-  // The finding this suite surfaced, pinned as behavior rather than left as a footnote:
-  // `resolvableIdentifiers` name `https://spec.jinn.network` and the gate resolves them
-  // against the verification origin, so step 7 cannot succeed anywhere else. Every other
-  // step is origin-parameterized; this one is not.
-  const realCatalogDigest = catalogSha256(repoRoot);
-  const rebound = withReceipt(full, (receipt) => ({
-    ...receipt,
-    catalog: { ...receipt.catalog, sha256: realCatalogDigest },
-  }));
-  const result = await gateAgainst(rebound, {}, {
-    repoRootForRegister: repoRoot,
-    catalogDigest: realCatalogDigest,
-  });
-  assert.notEqual(result.code, 0);
-  assert.match(result.stdout, /resolvableIdentifiers https:\/\/spec\.jinn\.network\/[^ ]+ is not under https:\/\/127\.0\.0\.1:\d+/u);
+test('the gate verifies the real identifier register under a loopback origin', async () => {
+  // The inverse of what this suite first found. Registered identifiers name
+  // spec.jinn.network and always will -- they are protocol names, not addresses -- so the
+  // gate resolves them canonically and dereferences the resulting served path at the
+  // origin under verification. A preview host is therefore verifiable, which is the whole
+  // reason the canary lane exists.
+  const server = await serve(subset);
+  let result;
+  try {
+    result = await runGate(subset, server.origin);
+  } finally {
+    await server.close();
+  }
+  assert.equal(result.code, 0, `expected exit 0, got ${result.code}: ${result.stdout}${result.stderr}`);
+  assert.equal(result.receipt.resolvableIdentifiersVerified, registered.length);
+
+  // Each registered identifier was actually dereferenced at the loopback origin, and each
+  // prefix registration was probed at its bare identifier and refused there.
+  const fetched = new Set(server.requests.map(({ target }) => target.slice(1)));
+  for (const entry of registered) {
+    const { servedPath } = servedPathForIdentifier(entry.identifier, IDENTIFIER_ORIGIN);
+    assert.ok(fetched.has(entry.entryPoint), `${entry.identifier} entry point was never fetched`);
+    if (entry.resolution === 'prefix') {
+      assert.ok(fetched.has(servedPath), `${entry.identifier} bare prefix was never probed`);
+      assert.ok(
+        server.requests.some(({ target, status }) => target.slice(1) === servedPath && status === 404),
+        `${entry.identifier} bare prefix must be refused, not answered`,
+      );
+    } else {
+      assert.equal(servedPath, entry.entryPoint);
+    }
+  }
+});
+
+test('identity resolution is bit-identical at the stable origin', () => {
+  // The change that made the two tests above possible splits identity from location. At
+  // the stable lane the two coincide, so it must be a no-op there -- proved over the real
+  // surface rather than argued: every registered identifier and every document claim
+  // resolves the same whether asked canonically or against STABLE_ORIGIN.
+  assert.equal(STABLE_ORIGIN, IDENTIFIER_ORIGIN);
+  for (const entry of registered) {
+    assert.deepEqual(
+      servedPathForIdentifier(entry.identifier, IDENTIFIER_ORIGIN),
+      servedPathForIdentifier(entry.identifier, STABLE_ORIGIN),
+    );
+  }
+  let claimed = 0;
+  for (const { path } of full.manifest.documents) {
+    const bytes = readFileSync(join(full.root, ...path.split('/')));
+    const canonical = selfIdentifyingClaim(path, bytes);
+    assert.deepEqual(canonical, selfIdentifyingClaim(path, bytes, STABLE_ORIGIN), path);
+    if (canonical && !canonical.error) claimed += 1;
+  }
+  // And the claims are actually there -- otherwise the sweep above agrees about nothing.
+  assert.ok(claimed > 0, 'the real surface must contain self-identifying documents');
 });

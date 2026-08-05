@@ -89,24 +89,31 @@ credentials, no host CLI.
 
 What that proves: the bundle is servable over real HTTP; the gate passes over a socket against
 the whole real profile root, with the listener's own request log showing every declared document
-fetched and answered; every hazardous served-path shape — extensionless profiles, `@`-prefixed
-fixture directories, dot-version segments, deep fixture paths, and files whose extension a host
-would type differently from the manifest — is served byte-for-byte with its declared media type;
-and each modelled host defect (trailing-slash redirect, single-page-application catch-all,
-mistyped extensionless profile, mistyped `.schema.json`, one drifted document, an unserved or
-unverifiable signature sidecar, a public key whose digest is not the pinned one) is a non-zero
-exit. A host appending `charset=utf-8` still passes, as the gate documents. The server's strict
-404 — no directory index, no trailing-slash redirect, no extension guessing, no case folding, no
-percent-decoding, no path normalization — is the reference behavior a real host must match.
+fetched and answered and every anti-fallback probe refused; every hazardous served-path shape —
+extensionless profiles, `@`-prefixed fixture directories, dot-version segments, deep fixture
+paths, and files whose extension a host would type differently from the manifest — is served
+byte-for-byte with its declared media type; every registered identifier the release set owns
+dereferences, with each prefix registration refused at its bare identifier; and each modelled
+host defect (trailing-slash redirect, single-page-application catch-all, mistyped extensionless
+profile, mistyped `.schema.json`, one drifted document, an unserved or unverifiable signature
+sidecar, a public key whose digest is not the pinned one) is a non-zero exit. A host appending
+`charset=utf-8` still passes, as the gate documents. The server's strict 404 — no directory
+index, no trailing-slash redirect, no extension guessing, no case folding, no percent-decoding,
+no path normalization — is the reference behavior a real host must match.
+
+Identifier resolution is what makes a loopback run meaningful rather than a shell. A document's
+claimed identity is a property of its bytes, not of where those bytes are served: the same
+attested artifact deployed to a preview URL still claims `spec.jinn.network`. So the gate
+resolves every identifier — a document's own `$id` / `profile` and the catalog's registered
+`resolvableIdentifiers` alike — against the canonical origin, then fetches the served path that
+yields at the origin under verification. That split is also what lets the canary lane verify a
+preview deployment before it is promoted. At the stable lane the two origins coincide, so the
+split is a no-op there, and the suite asserts that over the real surface rather than arguing it.
 
 What it does not prove: that Vercel interprets the generated `vercel.json` this way. The
 conformance test reads that configuration against the reference server's behavior, which
 validates this repository's reading of Vercel's documented `headers` / `cleanUrls` /
 `trailingSlash` semantics, not Vercel's implementation of them. Nothing local can close that gap.
-Two gate steps are also out of local reach: registered-identifier dereference and each document's
-self-declared-URI re-derivation both resolve identifiers against the verification origin, and the
-public surface's identifiers name `spec.jinn.network`, so neither step can run under a loopback
-origin. They stay covered by the offline suite's fake host.
 
 The first real deploy is therefore still the remaining verification, and the stable hold is
 unchanged. The gate is what closes it, and it fails closed.
