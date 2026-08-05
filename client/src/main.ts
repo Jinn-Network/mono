@@ -59,7 +59,13 @@ import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } f
 import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
 import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
 import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
-import { setDaemonReadiness } from './daemon/loop-heartbeat.js';
+import {
+  setDaemonReadiness,
+  getDaemonReadiness,
+  getLoopAdmission,
+  getLoopTick,
+  LOOP_REGISTRY,
+} from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
 import { addressSetFromChainConfig, isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
 import { getJinnRouterAddress } from './contracts/addresses.js';
@@ -667,6 +673,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       bindHost: apiBindHost,
       corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
+      // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404). Injected
+      // (rather than server.ts importing daemon/loop-heartbeat.js directly)
+      // per the api→daemon architecture boundary — see the field docstrings
+      // on ApiServerConfig in server.ts.
+      getDaemonReadiness,
+      getLoopSnapshot: () =>
+        LOOP_REGISTRY.map((loop) => {
+          const tickMs = getLoopTick(sharedStore, loop.name);
+          return {
+            name: loop.name,
+            lastTickSeconds: tickMs !== null ? tickMs / 1000 : null,
+            admitted: getLoopAdmission(loop.name) === 'always' || getDaemonReadiness() === 'ready',
+          };
+        }),
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,

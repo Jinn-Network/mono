@@ -7,7 +7,7 @@
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -15,6 +15,7 @@ const PORT = 17335;
 
 let daemon: ChildProcess | null = null;
 let homeDir = '';
+let uiToken = '';
 
 test.beforeAll(async () => {
   homeDir = mkdtempSync(join(tmpdir(), 'jinn-status-shape-e2e-'));
@@ -40,7 +41,14 @@ test.beforeAll(async () => {
       const res = await fetch(`http://127.0.0.1:${PORT}/v1/bootstrap`, {
         headers: { 'x-jinn-ui-token': 'unused' },
       });
-      if (res.status === 200 || res.status === 401) return;
+      if (res.status === 200 || res.status === 401) {
+        // The daemon writes the UI token (`ensureUiToken()`) before the API server
+        // starts listening, so it's on disk by the time the server answers at all.
+        // `/v1/status` is operator-class as of spec §14.5 (issue #2404) — read it
+        // so the fetch below authenticates instead of getting a bare 401.
+        uiToken = readFileSync(join(homeDir, '.jinn-client', 'ui-token'), 'utf-8').trim();
+        return;
+      }
     } catch {
       // not yet
     }
@@ -58,7 +66,9 @@ test.afterAll(async () => {
 });
 
 test('/v1/status carries no OLAS staking fields (#992)', async () => {
-  const res = await fetch(`http://127.0.0.1:${PORT}/v1/status`);
+  const res = await fetch(`http://127.0.0.1:${PORT}/v1/status`, {
+    headers: { 'x-jinn-ui-token': uiToken },
+  });
   expect(res.ok).toBe(true);
   const body = (await res.json()) as {
     rewards: Record<string, unknown>;
