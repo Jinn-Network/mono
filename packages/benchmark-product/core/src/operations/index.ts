@@ -28,4 +28,33 @@ export {
   type UpdateDraftInput,
 } from "./drafts.js";
 
-export { inspectDraft, type ArmInspection, type DraftInspection } from "./inspect.js";
+export {
+  inspectDraft,
+  type ArmInspection,
+  type BenchmarkInspection,
+  type BenchmarkInspectionItem,
+  type DraftInspection,
+} from "./inspect.js";
+
+export { sampleInit, type SampleInitInput, type SampleInitResult, type SampleInitTaskSummary } from "./sample.js";
+
+export { importSweBenchRows, type ImportSweBenchRowsInput, type ImportSweBenchRowsResult } from "./import.js";
+
+export {
+  armAdd,
+  armList,
+  armRemove,
+  armUpdate,
+  type ArmAddInput,
+  type ArmRemoveInput,
+  type ArmUpdateInput,
+  type ArmWarning,
+} from "./arms.js";
+
+export {
+  authorityGrant,
+  authorityRevoke,
+  authorityShow,
+  type AuthorityGrantInput,
+  type AuthorityRevokeInput,
+} from "./authority-ops.js";

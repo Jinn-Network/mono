@@ -50,11 +50,23 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
-      # is what the next one's type resolution reads.
+      # is what the next one's type resolution reads. The full graph (BP-11): the runtime closure
+      # (protocol, trust-core, environment-record, profiles, records, task-admission, interop) plus
+      # the launcher chain (backend, supervisor, workspace, launchers) the test-only
+      # `task-execution-launchers` devDependency needs.
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
       - name: Verify Benchmark Product core
         working-directory: packages/benchmark-product/core
         run: |
@@ -99,12 +111,18 @@ jobs:
         with:
           name: benchmark-product-core-dist
           path: packages/benchmark-product/core/dist
-      # The packed consumer installs the whole graph from tarballs, and `npm pack --ignore-scripts`
-      # ships whatever `dist/` is on disk — so every portal dependency needs its build here too,
-      # not only the product's.
+      # The packed consumer installs the whole RUNTIME graph from tarballs, and `npm pack
+      # --ignore-scripts` ships whatever `dist/` is on disk — so every runtime portal dependency
+      # needs its build here too, not only the product's. The launcher chain is dev-only and a
+      # packed consumer never installs it, so it is deliberately absent here.
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
       - name: Compile the packed public entrypoint consumer
         run: node .github/scripts/benchmark-product-packed-types.test.mjs

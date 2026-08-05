@@ -5,17 +5,25 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-// Cross-tree portal dependencies (§7.8): task-execution-protocol and benchmarking-records
-// resolve through portals at development time; pack them locally too so the consumer graph
-// resolves end-to-end without reaching the npm registry -- benchmarking-records/scripts/pack-smoke.mjs
-// precedent. This package is `"private": true` (never published, per the platform manifest), and
-// Yarn refuses to `yarn pack` a private package, so the product itself is packed with
-// `npm pack --ignore-scripts` after an explicit build instead.
-const taskExecutionProtocolRoot = join(packageRoot, "..", "..", "task-execution", "protocol");
-const benchmarkingRecordsRoot = join(packageRoot, "..", "..", "benchmarking", "records");
+// Cross-tree portal dependencies (§7.8): the product's full RUNTIME @jinn-network closure resolves
+// through portals at development time; pack each one locally too so the consumer graph resolves
+// end-to-end without reaching the npm registry -- benchmarking-records/scripts/pack-smoke.mjs
+// precedent. Listed in dependency order (dependencies before dependents) because `yarn pack`
+// triggers each package's prepack build, whose type resolution reads the ones before it. The
+// `task-execution-launchers` devDependency is deliberately absent: a packed consumer installs
+// runtime dependencies only. This package is `"private": true` (never published, per the platform
+// manifest), and Yarn refuses to `yarn pack` a private package, so the product itself is packed
+// with `npm pack --ignore-scripts` after an explicit build instead.
+const CROSS_TREE_DEPENDENCIES = [
+  ["@jinn-network/task-execution-protocol", ["task-execution", "protocol"]],
+  ["@jinn-network/trust-core", ["trust", "core"]],
+  ["@jinn-network/environment-record", ["environments", "record"]],
+  ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
+  ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
+  ["@jinn-network/task-admission", ["task-supply", "admission"]],
+  ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
+];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-benchmark-product-core-"));
-const taskExecutionProtocolArchive = join(temporaryRoot, "task-execution-protocol.tgz");
-const benchmarkingRecordsArchive = join(temporaryRoot, "benchmarking-records.tgz");
 const consumer = join(temporaryRoot, "consumer");
 
 /** Resolves with the child's stdout when `stdio: "pipe"` is requested, and with `""` otherwise. */
@@ -36,8 +44,12 @@ function run(command, args, options = {}) {
 try {
   // Sequential, not Promise.all: a concurrent `yarn pack` on cross-tree dependencies races their
   // `dist` wipe-and-rebuild prepack steps against each other's type-resolution reads.
-  await run("yarn", ["pack", "--out", taskExecutionProtocolArchive], { cwd: taskExecutionProtocolRoot });
-  await run("yarn", ["pack", "--out", benchmarkingRecordsArchive], { cwd: benchmarkingRecordsRoot });
+  const archives = new Map();
+  for (const [name, segments] of CROSS_TREE_DEPENDENCIES) {
+    const archive = join(temporaryRoot, `${segments.join("-")}.tgz`);
+    await run("yarn", ["pack", "--out", archive], { cwd: join(packageRoot, "..", "..", ...segments) });
+    archives.set(name, archive);
+  }
 
   await run("yarn", ["build"], { cwd: packageRoot });
   const packJson = await run(
@@ -55,8 +67,7 @@ try {
       private: true,
       type: "module",
       dependencies: {
-        "@jinn-network/task-execution-protocol": `file:${taskExecutionProtocolArchive}`,
-        "@jinn-network/benchmarking-records": `file:${benchmarkingRecordsArchive}`,
+        ...Object.fromEntries([...archives].map(([name, archive]) => [name, `file:${archive}`])),
         "@jinn-network/benchmark-product-core": `file:${productArchive}`,
       },
     }),
@@ -69,9 +80,14 @@ try {
     smokeScript,
     `
 import { readFile, readdir } from "node:fs/promises";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark } from "@jinn-network/benchmark-product-core";
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
+// The bundled sample must build from the PACKED graph: this proves the admission package ships
+// its golden fixture in the tarball and the whole intake path works for an external consumer.
+const sample = await buildSampleBenchmark();
+if (sample.tasks.length < 2) throw new Error("sample benchmark must bundle at least two tasks");
+if (!/^[a-f0-9]{64}$/.test(sample.benchmark.sha256)) throw new Error("sample benchmark digest malformed");
 if (BENCHMARKING_PROTOCOL !== "https://spec.jinn.network/protocols/benchmarking/v1") {
   throw new Error("platform seam import failed");
 }
@@ -80,7 +96,12 @@ if (!PRODUCT_BRANDING.attribution.includes("independently verifiable")) {
 }
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
-const expectedJinnDependencies = ["@jinn-network/benchmarking-records"];
+const expectedJinnDependencies = [
+  "@jinn-network/benchmarking-interop",
+  "@jinn-network/benchmarking-records",
+  "@jinn-network/task-admission",
+  "@jinn-network/task-execution-protocol",
+];
 if (jinnDependencies.length !== expectedJinnDependencies.length
     || jinnDependencies.some((name) => !expectedJinnDependencies.includes(name))) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));

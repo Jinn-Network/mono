@@ -6,13 +6,19 @@
 // default. A new Jinn edge fails here until it is added deliberately, in this file and in the
 // package-inventory guard's dependency graph together.
 //
-// **The dependency allow-list.** `@jinn-network/benchmarking-records` only (product design §3, BP-01
-// scope): Benchmark/Run/Matrix/Report sealing and the frozen outcome vocabulary. Everything else the
-// design's §3 table names (`benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`,
-// `benchmarking-interop`, the `task-execution-*` family, `trust-core`, `benchmarking-marketplace`) is
-// scope for later packets (M1+) and stays refused here until a packet adds it. Marketplace, every
-// other product, and the client are denied outright, same as the policy-optimization precedent: v0
-// composes only what BP-01 wires up.
+// **The dependency allow-list.** BP-01 admitted `@jinn-network/benchmarking-records` (Benchmark /
+// Run / Matrix / Report sealing and the frozen outcome vocabulary). BP-11 (task intake) added four
+// edges, each recorded in the design spec's §3 addendum: `benchmarking-interop` (importSweBench /
+// defineBenchmark — the import seam), `task-execution-protocol` (sealTask / documentDigest — the
+// bundled sample re-seals native prediction-forecast Tasks), `task-admission` (the golden
+// prediction-snapshot fixture plus admitPredictionSnapshot / sealPredictionSnapshotAdmissionReceipt —
+// the sample's admission receipts), and `task-execution-launchers` (TEST-ONLY devDependency: the
+// sample's shape-contract test runs the real prediction-v1-baseline launcher subprocess; no non-test
+// source file may import it, enforced below). Everything else the design's §3 table names
+// (`benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`, the rest of the
+// `task-execution-*` family, `trust-core`, `benchmarking-marketplace`) is scope for later packets
+// (M1+) and stays refused here until a packet adds it. Marketplace, every other product, and the
+// client are denied outright, same as the policy-optimization precedent.
 //
 // **No deep imports (product design §3, "no deep imports — public package entries only").** A
 // specifier that reaches past a Jinn package's public root -- `@jinn-network/<name>/src/...` or
@@ -48,7 +54,18 @@ function sourceRoots() {
 }
 
 const ALLOWED_JINN_PACKAGES = [
+  '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-records',
+  '@jinn-network/task-admission',
+  '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-protocol',
+];
+
+// Packages admitted for test files only (devDependencies): a `.test.ts` may import them, non-test
+// source may not. Today: the launcher package, imported solely by the sample intake's
+// shape-contract test, which runs the real launcher subprocess against the bundled sample Tasks.
+const TEST_ONLY_JINN_PACKAGES = [
+  '@jinn-network/task-execution-launchers',
 ];
 
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so a
@@ -68,20 +85,23 @@ const EXPLICITLY_DENIED = [
   '@jinn-network/policy-optimization',
   '@jinn-network/marketplace-*',
   '@jinn-network/evidence-*',
-  '@jinn-network/task-admission',
   '@jinn-network/task-curation',
   '@jinn-network/task-derivation',
   '@jinn-network/task-posting',
   '@jinn-network/task-execution-backend-local',
-  // Denied by name even though it resolves through this tree's portal graph: it is
-  // `benchmarking-records`' own runtime edge, never this product's import.
-  '@jinn-network/task-execution-protocol',
+  // Denied by name even though each resolves through this tree's portal graph: they are the
+  // allow-listed packages' own runtime edges, never this product's imports.
+  '@jinn-network/trust-core',
+  '@jinn-network/environment-record',
+  '@jinn-network/task-execution-profiles',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/task-execution-backend',
   // Not yet admitted: each is scope for a later packet (product design §3), added deliberately when
   // that packet wires it up.
   '@jinn-network/benchmarking-run',
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-local',
-  '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-marketplace',
   // Deep-import exemplars (exact specifiers, not wildcards): refused by the deep-import rule even
   // though `benchmarking-records` is allow-listed and `task-execution-protocol` is a portal
@@ -196,11 +216,26 @@ test('benchmark-product source imports only its approved Jinn dependencies', () 
 
 test('benchmark-product actually imports the dependencies it declares (positive control)', () => {
   // Without this the boundary test above could pass vacuously if an edge were silently dropped -- an
-  // absent edge is not the same claim as an audited one.
+  // absent edge is not the same claim as an audited one. Every allow-listed package must have at
+  // least one live import; a name on the list with zero imports is an unused declaration.
   const roots = sourceRoots();
   if (roots.length === 0) return;
   const imported = new Set(roots.flatMap(files).flatMap((file) => specifiers(readFileSync(file, 'utf8'))));
-  for (const name of ['@jinn-network/benchmarking-records']) {
+  for (const name of ALLOWED_JINN_PACKAGES) {
     assert.ok(imported.has(name), `expected at least one import of ${name}`);
   }
+});
+
+test('test-only packages are imported by test files alone', () => {
+  // The launcher package is a devDependency admitted for the sample intake's shape-contract test.
+  // A non-test source import of it would smuggle a runtime edge in through the test allowance.
+  const roots = sourceRoots();
+  if (roots.length === 0) return;
+  const offenders = roots.flatMap(files)
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file))
+    .flatMap((file) => specifiers(readFileSync(file, 'utf8'))
+      .filter((specifier) => TEST_ONLY_JINN_PACKAGES
+        .some((name) => packageSpecifierMatches(specifier, name)))
+      .map((specifier) => `${relative(root, file)} -> ${specifier}`));
+  assert.deepEqual(offenders, [], 'a test-only package is imported outside test files');
 });

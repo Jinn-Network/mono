@@ -22,6 +22,8 @@ describe("public surface", () => {
       "initWorkspace", "createDraft", "updateDraft", "getDraft", "listDrafts", "inspectDraft",
       "transition", "isDraftMutable", "resolveAssurance", "parseDraftSpec", "draftIdFromName",
       "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
+      "sampleInit", "importSweBenchRows", "armAdd", "armUpdate", "armRemove", "armList",
+      "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }

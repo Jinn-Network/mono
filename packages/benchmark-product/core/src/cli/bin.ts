@@ -10,7 +10,7 @@
 
 import { runCli } from "./main.js";
 
-const result = runCli(process.argv.slice(2), {
+const result = await runCli(process.argv.slice(2), {
   cwd: process.cwd(),
   clock: () => new Date().toISOString(),
 });

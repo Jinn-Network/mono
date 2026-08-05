@@ -1,22 +1,40 @@
 /**
- * The CLI's dispatch table (spec §5.2) — the complete agent surface at M1.
- * Six operational verbs over the operations facade (`init`, `draft create`,
- * `draft update`, `draft show`, `draft list`, `inspect`), plus `help`. Every
- * verb takes `--json` for a machine-readable envelope; every failure is a
- * typed error envelope with a distinct exit code (§4.3). `runCli` never
- * throws and never touches `process` — `bin.ts` is the only file in this
- * package that does.
+ * The CLI's dispatch table (spec §5.2) — the complete agent surface through
+ * BP-11. Fifteen operational verbs over the operations facade (`init`,
+ * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
+ * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
+ * `arm list`, `authority grant`, `authority revoke`, `authority show`), plus
+ * `help`. Every verb takes `--json` for a machine-readable envelope; every
+ * failure is a typed error envelope with a distinct exit code (§4.3).
+ * `runCli` never throws and never touches `process` — `bin.ts` is the only
+ * file in this package that does.
+ *
+ * `runCli` is `async` because `sample.init` (spec: the bundled sample
+ * benchmark) runs through `operateAsync`, not `operate` — building and
+ * sealing the sample is itself async. A verb handler may return a
+ * `CliResult` directly or a `Promise<CliResult>`; the dispatch always
+ * `await`s it, so a synchronous handler pays nothing for the `await`.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
-import { toErrorEnvelope, type ProductErrorCode, type ProductErrorEnvelope } from "../errors.js";
+import { refuse, toErrorEnvelope, type ProductErrorCode, type ProductErrorEnvelope } from "../errors.js";
 import {
+  armAdd,
+  armList,
+  armRemove,
+  armUpdate,
+  authorityGrant,
+  authorityRevoke,
+  authorityShow,
   createDraft,
   getDraft,
+  importSweBenchRows,
   initWorkspace,
   inspectDraft,
   listDrafts,
+  sampleInit,
   updateDraft,
+  type ArmWarning,
   type OperationContext,
   type OperationResult,
 } from "../operations/index.js";
@@ -27,13 +45,27 @@ export const USAGE = `${PRODUCT_BRANDING.displayName} — ${PRODUCT_BRANDING.tag
 
 Verbs (every verb accepts --json for a machine-readable envelope):
 
-  init          --workspace <dir> --principal <id>
-  draft create  --workspace <dir> --principal <id> --name <name>
-                [--description <text>] [--id <draftId>] [--file <spec.json>]
-  draft update  --workspace <dir> --principal <id> --draft <draftId> --file <patch.json>
-  draft show    --workspace <dir> --principal <id> --draft <draftId>
-  draft list    --workspace <dir> --principal <id>
-  inspect       --workspace <dir> --principal <id> --draft <draftId>
+  init             --workspace <dir> --principal <id>
+  draft create     --workspace <dir> --principal <id> --name <name>
+                   [--description <text>] [--id <draftId>] [--file <spec.json>]
+  draft update     --workspace <dir> --principal <id> --draft <draftId> --file <patch.json>
+  draft show       --workspace <dir> --principal <id> --draft <draftId>
+  draft list       --workspace <dir> --principal <id>
+  inspect          --workspace <dir> --principal <id> --draft <draftId>
+  sample init      --workspace <dir> --principal <id> --draft <draftId>
+  import swebench  --workspace <dir> --principal <id> --draft <draftId> --file <rows.json>
+                   [--name <name>] [--description <text>] [--version <ver>]
+                   [--provenance-timestamp <rfc3339>]
+  arm add          --workspace <dir> --principal <id> --draft <draftId>
+                   --arm <armId> --pinning <json> [--notes <text>]
+  arm update       --workspace <dir> --principal <id> --draft <draftId>
+                   --arm <armId> [--pinning <json>] [--notes <text>]
+  arm remove       --workspace <dir> --principal <id> --draft <draftId> --arm <armId>
+  arm list         --workspace <dir> --principal <id> --draft <draftId>
+  authority grant  --workspace <dir> --principal <id> --grantee <id>
+                   [--role sponsor|delegated-agent] [--operations <csv>]
+  authority revoke --workspace <dir> --principal <id> --grantee <id> [--operations <csv>]
+  authority show   --workspace <dir> --principal <id>
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
@@ -45,6 +77,17 @@ const DRAFT_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "file"] a
 const DRAFT_SHOW_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const DRAFT_LIST_FLAGS = ["workspace", "principal", "json"] as const;
 const INSPECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const SAMPLE_INIT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const IMPORT_SWEBENCH_FLAGS = [
+  "workspace", "principal", "json", "draft", "file", "name", "description", "version", "provenance-timestamp",
+] as const;
+const ARM_ADD_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
+const ARM_UPDATE_FLAGS = ["workspace", "principal", "json", "draft", "arm", "pinning", "notes"] as const;
+const ARM_REMOVE_FLAGS = ["workspace", "principal", "json", "draft", "arm"] as const;
+const ARM_LIST_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const AUTHORITY_GRANT_FLAGS = ["workspace", "principal", "json", "grantee", "role", "operations"] as const;
+const AUTHORITY_REVOKE_FLAGS = ["workspace", "principal", "json", "grantee", "operations"] as const;
+const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -77,6 +120,34 @@ function buildOperationContext(args: ParsedArgs, context: CliContext): Operation
   const workspaceDir = pathFrom(context.cwd, required(args, "workspace"));
   const principal = required(args, "principal");
   return { workspaceDir, principal, clock: context.clock };
+}
+
+/** Renders `warnings` (arm mutations, spec: duplicate-pinning is a surface, not a refusal) as human-mode lines. */
+function armWarningLines(warnings: readonly ArmWarning[]): readonly string[] {
+  return warnings.map((warning) => `warning (${warning.code}): ${warning.detail}`);
+}
+
+/** Parses an inline `--pinning` JSON string; refuses `"invalid-invocation"` naming `--pinning` on malformed JSON. */
+function parsePinningFlag(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    refuse("invalid-invocation", "--pinning", "--pinning must be valid JSON");
+  }
+}
+
+/** Refuses `"invalid-invocation"` naming `--role` unless it is one of the two valid role names. */
+function assertRole(value: string): "sponsor" | "delegated-agent" {
+  if (value === "sponsor" || value === "delegated-agent") return value;
+  refuse("invalid-invocation", "--role", `--role must be "sponsor" or "delegated-agent"`);
+}
+
+/** Splits a comma-separated `--operations` value, trimming and dropping empty entries. */
+function parseOperationsList(raw: string): readonly string[] {
+  return raw
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
 }
 
 function handleInit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -139,15 +210,172 @@ function handleInspect(args: ParsedArgs, context: CliContext, jsonMode: boolean)
   return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
 }
 
-type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult;
+async function handleSampleInit(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, SAMPLE_INIT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
 
-const VERBS: ReadonlyMap<string, VerbHandler> = new Map([
+  const result = await sampleInit(opContext, { draftId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) =>
+      `attached sample benchmark ${value.benchmarkSha256} (${value.tasks.length} tasks) to draft ${value.draft.draftId}\n`,
+  );
+}
+
+function handleImportSweBench(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, IMPORT_SWEBENCH_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const filePath = required(args, "file");
+  const rows = readJsonFile(pathFrom(context.cwd, filePath));
+  const name = optional(args, "name");
+  const description = optional(args, "description");
+  const version = optional(args, "version");
+  const provenanceTimestamp = optional(args, "provenance-timestamp");
+
+  const result = importSweBenchRows(opContext, {
+    draftId,
+    rows,
+    ...(name !== undefined ? { name } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(provenanceTimestamp !== undefined ? { provenanceTimestamp } : {}),
+  });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) =>
+      `imported ${value.taskSha256s.length} task(s) as benchmark ${value.benchmarkSha256} into draft ${value.draft.draftId}\n`,
+  );
+}
+
+function handleArmAdd(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ARM_ADD_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+  const pinning = parsePinningFlag(required(args, "pinning"));
+  const notes = optional(args, "notes");
+
+  const result = armAdd(opContext, { draftId, armId, pinning, ...(notes !== undefined ? { notes } : {}) });
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`added arm ${armId} to draft ${draftId}`, ...armWarningLines(value.warnings)];
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+function handleArmUpdate(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ARM_UPDATE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+  const pinningRaw = optional(args, "pinning");
+  const notes = optional(args, "notes");
+  if (pinningRaw === undefined && notes === undefined) {
+    refuse("invalid-invocation", "arm update", "supply --pinning and/or --notes");
+  }
+  const pinning = pinningRaw === undefined ? undefined : parsePinningFlag(pinningRaw);
+
+  const result = armUpdate(opContext, {
+    draftId,
+    armId,
+    ...(pinning !== undefined ? { pinning } : {}),
+    ...(notes !== undefined ? { notes } : {}),
+  });
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`updated arm ${armId} on draft ${draftId}`, ...armWarningLines(value.warnings)];
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+function handleArmRemove(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ARM_REMOVE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const armId = required(args, "arm");
+
+  const result = armRemove(opContext, { draftId, armId });
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`removed arm ${armId} from draft ${draftId}`, ...armWarningLines(value.warnings)];
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+function handleArmList(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, ARM_LIST_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = armList(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => {
+    if (value.arms.length === 0) return "no arms\n";
+    const lines = [
+      ...value.arms.map((arm) => `${arm.armId}\t${JSON.stringify(arm.pinning)}`),
+      ...armWarningLines(value.warnings),
+    ];
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+function handleAuthorityGrant(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AUTHORITY_GRANT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const grantee = required(args, "grantee");
+  const roleRaw = optional(args, "role");
+  const role = roleRaw === undefined ? undefined : assertRole(roleRaw);
+  const operationsRaw = optional(args, "operations");
+  const operations = operationsRaw === undefined ? [] : parseOperationsList(operationsRaw);
+
+  const result = authorityGrant(opContext, {
+    principalId: grantee,
+    ...(role !== undefined ? { role } : {}),
+    operations,
+  });
+  return renderResult(result, jsonMode, () => `granted ${grantee}\n`);
+}
+
+function handleAuthorityRevoke(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AUTHORITY_REVOKE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const grantee = required(args, "grantee");
+  const operationsRaw = optional(args, "operations");
+  const operations = operationsRaw === undefined ? undefined : parseOperationsList(operationsRaw);
+
+  const result = authorityRevoke(opContext, {
+    principalId: grantee,
+    ...(operations !== undefined ? { operations } : {}),
+  });
+  return renderResult(result, jsonMode, () => `revoked ${grantee}\n`);
+}
+
+function handleAuthorityShow(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, AUTHORITY_SHOW_FLAGS);
+  const opContext = buildOperationContext(args, context);
+
+  const result = authorityShow(opContext);
+  return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
+}
+
+type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
+
+const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["init", handleInit],
   ["draft create", handleDraftCreate],
   ["draft update", handleDraftUpdate],
   ["draft show", handleDraftShow],
   ["draft list", handleDraftList],
   ["inspect", handleInspect],
+  ["sample init", handleSampleInit],
+  ["import swebench", handleImportSweBench],
+  ["arm add", handleArmAdd],
+  ["arm update", handleArmUpdate],
+  ["arm remove", handleArmRemove],
+  ["arm list", handleArmList],
+  ["authority grant", handleAuthorityGrant],
+  ["authority revoke", handleAuthorityRevoke],
+  ["authority show", handleAuthorityShow],
 ]);
 
 function usageResult(jsonMode: boolean): CliResult {
@@ -185,12 +413,12 @@ function renderThrown(cause: unknown, jsonMode: boolean): CliResult {
 
 /**
  * Runs one CLI invocation to completion. Never throws — every refusal from
- * argument parsing, flag validation, or the operations facade is caught
- * here and rendered as a typed envelope (or, outside `--json`, a plain-text
- * stderr line) with the matching exit code. Never touches `process`; that
- * is `bin.ts`'s job alone.
+ * argument parsing, flag validation, or the operations facade (including a
+ * rejected async handler, e.g. `sample init`) is caught here and rendered as
+ * a typed envelope (or, outside `--json`, a plain-text stderr line) with the
+ * matching exit code. Never touches `process`; that is `bin.ts`'s job alone.
  */
-export function runCli(argv: readonly string[], context: CliContext): CliResult {
+export async function runCli(argv: readonly string[], context: CliContext): Promise<CliResult> {
   // `--json` is detected from the parsed flags once parsing succeeds; a parse
   // failure itself falls back to a raw argv scan so even a malformed
   // invocation with --json in it renders as an envelope rather than text.
@@ -208,7 +436,7 @@ export function runCli(argv: readonly string[], context: CliContext): CliResult 
     if (handler === undefined) {
       return unknownVerbResult(verbKey, jsonMode);
     }
-    return handler(args, context, jsonMode);
+    return await handler(args, context, jsonMode);
   } catch (cause) {
     return renderThrown(cause, jsonMode);
   }

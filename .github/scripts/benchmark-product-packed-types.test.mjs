@@ -31,14 +31,22 @@ const codeEntrypoints = [
 ];
 
 // Cross-tree Jinn dependencies the product references, packed as `file:` deps so NodeNext resolves
-// them (program plan §4.1; record-discovery-packed-types.test.mjs precedent).
-// `task-execution-protocol` is the transitive `benchmarking-records` depends on, and the only
-// reason it needs packing here at all -- it is not on the registry. Each `npm pack` is independent
-// (the product is packed first, then these), and `--ignore-scripts` ships whatever `dist/` is on
-// disk -- CI builds all three before this script runs.
+// them (program plan §4.1; record-discovery-packed-types.test.mjs precedent). This is the product's
+// full RUNTIME dependency closure -- direct dependencies plus every transitive @jinn-network edge
+// (none is on the registry): protocol + records (BP-01), then per BP-11's intake edges interop
+// (-> records, profiles, protocol), task-admission (-> environment-record, protocol, trust-core),
+// and their transitives. The `task-execution-launchers` devDependency is deliberately absent: a
+// packed consumer installs runtime dependencies only. Each `npm pack` is independent, and
+// `--ignore-scripts` ships whatever `dist/` is on disk -- CI builds every one of these before this
+// script runs.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
+  ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
+  ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
 ];
 
 function run(command, args, options = {}) {

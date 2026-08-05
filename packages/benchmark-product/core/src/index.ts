@@ -70,22 +70,51 @@ export type { AuthorityPolicy, GatedOperation, Principal } from "./authority/pol
 
 // The operations facade (spec §5.1) — the boundary every surface calls.
 export {
+  armAdd,
+  armList,
+  armRemove,
+  armUpdate,
+  authorityGrant,
+  authorityRevoke,
+  authorityShow,
   createDraft,
   getDraft,
+  importSweBenchRows,
   initWorkspace,
   inspectDraft,
   listDrafts,
+  sampleInit,
   updateDraft,
 } from "./operations/index.js";
 export type {
+  ArmAddInput,
   ArmInspection,
+  ArmRemoveInput,
+  ArmUpdateInput,
+  ArmWarning,
+  AuthorityGrantInput,
+  AuthorityRevokeInput,
+  BenchmarkInspection,
+  BenchmarkInspectionItem,
   CreateDraftInput,
   DraftInspection,
   DraftSummary,
+  ImportSweBenchRowsInput,
+  ImportSweBenchRowsResult,
   OperationContext,
   OperationResult,
+  SampleInitInput,
+  SampleInitResult,
+  SampleInitTaskSummary,
   UpdateDraftInput,
 } from "./operations/index.js";
+
+// The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
+// client can call them directly without a source dependency on ./intake/*.
+export { buildSampleBenchmark, SAMPLE_ISSUER } from "./intake/sample.js";
+export type { SampleBenchmark, SampleBenchmarkTask } from "./intake/sample.js";
+export { convertSweBenchRows } from "./intake/swebench.js";
+export type { ConvertSweBenchRowsOptions } from "./intake/swebench.js";
 
 // The CLI as a library (spec §5.2): `runCli` is a pure function of argv and its context;
 // only dist/cli/bin.js touches the process.

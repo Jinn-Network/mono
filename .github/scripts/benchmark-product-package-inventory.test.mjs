@@ -26,27 +26,53 @@ const PRODUCT_PACKAGES = [
   ['core', '@jinn-network/benchmark-product-core'],
 ];
 
-// The approved runtime graph for the M0 skeleton (BP-01). Product design §3 admits a wider REUSE
-// surface eventually; this packet's `core` tree imports exactly one Jinn package
-// (`@jinn-network/benchmarking-records`, from `src/platform.ts`) and nothing else runs yet. New
-// edges are added deliberately, one PR at a time, in this map and in the source-boundary guard's
-// allow-list together.
+// The approved runtime graph. BP-01 wired `benchmarking-records`; BP-11 (task intake) added
+// `benchmarking-interop` (SWE-bench import + defineBenchmark), `task-admission` (golden
+// prediction-snapshot fixture + admission receipts for the bundled sample), and
+// `task-execution-protocol` (sealTask for the sample's re-sealed Tasks), plus the
+// `task-execution-launchers` devDependency (the sample's launcher shape-contract test runs the
+// real prediction-v1-baseline subprocess). New edges are added deliberately, one PR at a time,
+// in this map and in the source-boundary guard's allow-list together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
-    dependencies: ['@jinn-network/benchmarking-records'],
-    devDependencies: [],
+    dependencies: [
+      '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/task-admission',
+      '@jinn-network/task-execution-protocol',
+    ],
+    devDependencies: ['@jinn-network/task-execution-launchers'],
     optionalDependencies: [], peerDependencies: [],
-    // Portals whose own edges must resolve inside this project. `task-execution-protocol` is not
-    // imported here -- the source-boundary guard denies it by name -- but `benchmarking-records`
-    // depends on it, and it is not published to a registry, so its portal resolution has to be
-    // declared here too or `install` sends it to a version that does not exist.
-    portalResolutions: ['@jinn-network/task-execution-protocol'],
+    // Portals whose own edges must resolve inside this project: none of these six is imported here
+    // -- the source-boundary guard denies each by name -- but the declared dependencies above
+    // depend on them, and none is published to a registry, so their portal resolutions have to be
+    // declared too or `install` sends them to versions that do not exist.
+    // trust-core + environment-record: task-admission's edges. task-execution-profiles:
+    // benchmarking-interop's (and the launcher package's) edge. backend + supervisor + workspace:
+    // the launcher package's edges.
+    portalResolutions: [
+      '@jinn-network/environment-record',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-core',
+    ],
   }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
+  ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
 ]);
 
 function readPackage(directory) {

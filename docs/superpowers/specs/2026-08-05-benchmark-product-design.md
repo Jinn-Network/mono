@@ -570,6 +570,44 @@ against this spec's labeled assumptions; no §4/§5/§6 decision reopened):**
   resolved primitive overrides, and disclosed like every other resolved
   primitive.
 
+**Addendum — 2026-08-05, packet BP-11 (§3 consumption-contract additions for
+task intake; no §3 refusal, §4/§5/§6 decision, or record semantics
+reopened):**
+
+- **§3 rows activated.** BP-11 begins importing two packages the §3 table
+  already names, with the exact public exports consumed:
+  `@jinn-network/benchmarking-interop` — `importSweBench`, `defineBenchmark`
+  (plus their public types) for the SWE-bench-shaped import seam and the
+  sample Benchmark's sealing; `@jinn-network/task-execution-protocol` —
+  `sealTask`, `documentDigest` for re-sealing the bundled sample's native
+  prediction-forecast Tasks.
+- **§3 row added: `@jinn-network/task-admission`.** Not in the original §3
+  table. Consumed public exports: `loadPredictionSnapshotFixture`,
+  `verifyPredictionSnapshotFixture`, `admitPredictionSnapshot`,
+  `sealPredictionSnapshotAdmissionReceipt`. Role: the golden
+  prediction-snapshot fixture is the derivation base for the product's
+  bundled REAL sample benchmark (dossier §1, §3 decision 2), and the
+  admission machinery mints the receipts that later let sample cells reach
+  `re-derivable` integrity. The sample's admission receipts are DSSE-sealed
+  with a product-bundled, deliberately non-secret Ed25519 sample key that
+  exists solely so the bundled sample's bytes reproduce byte-for-byte; it
+  attests nothing beyond "the bundled sample admitted its own tasks" and is
+  never used outside the sample.
+- **Test-only dependency: `@jinn-network/task-execution-launchers`.**
+  devDependency, consumed by exactly one test surface: the sample intake's
+  shape-contract test runs the real `prediction-v1-baseline` launcher's
+  `plan()` and spawned argv as a subprocess against the bundled sample Task
+  bytes (dossier §1 sample-task facts). The source-boundary guard enforces
+  that no non-test source file imports it; a packed consumer never installs
+  it.
+- **EvaluationSpec reuse, stated.** The prediction-snapshot admission policy
+  pins the EvaluationSpec content byte-exactly, so every bundled sample Task
+  binds the golden fixture's EvaluationSpec verbatim (same digest); varying
+  it would make admission refuse. "Each Task's bound EvaluationSpec" for the
+  sample therefore means the same sealed spec bytes bound by digest from
+  each Task — recorded here so no later packet mistakes this for an
+  oversight.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

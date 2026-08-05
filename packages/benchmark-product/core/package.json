@@ -34,14 +34,27 @@
     "prepack": "yarn build"
   },
   "dependencies": {
+    "@jinn-network/benchmarking-interop": "0.1.0",
     "@jinn-network/benchmarking-records": "0.1.0",
+    "@jinn-network/task-admission": "0.1.0",
+    "@jinn-network/task-execution-protocol": "0.1.0",
     "zod": "4.4.3"
   },
   "resolutions": {
+    "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
     "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
-    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol"
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/task-admission": "portal:../../task-supply/admission",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-launchers": "portal:../../task-execution/backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
+    "@jinn-network/task-execution-launchers": "0.1.0",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
