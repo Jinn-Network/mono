@@ -119,6 +119,36 @@ export function getLoopTick(store: Store, name: LoopName): number | null {
 }
 
 /**
+ * One `LOOP_REGISTRY` entry's resolved metrics view (spec §5/§6.2, issue #2404).
+ * Structurally mirrors `api/metrics-endpoint.ts`'s `MetricsLoopEntry` — kept in sync by
+ * shape, not by import: `client/src/api/` must never import `client/src/daemon/`
+ * (architecture boundary, #1584 — `test/architecture/api-daemon-boundary.test.ts`).
+ */
+export interface LoopMetricsSnapshotEntry {
+  name: string;
+  lastTickSeconds: number | null;
+  admitted: boolean;
+}
+
+/**
+ * Builds the per-loop snapshot `GET /metrics` needs. Single source of truth for the
+ * admission expression (`getLoopAdmission(name) === 'always' || getDaemonReadiness() ===
+ * 'ready'`) — main.ts, `daemon.ts`'s self-start branch, and the metrics-endpoint test all
+ * call this rather than each restating the expression inline (review finding N5: three
+ * verbatim copies must not drift).
+ */
+export function buildLoopMetricsSnapshot(store: Store): LoopMetricsSnapshotEntry[] {
+  return LOOP_REGISTRY.map((loop) => {
+    const tickMs = getLoopTick(store, loop.name);
+    return {
+      name: loop.name,
+      lastTickSeconds: tickMs !== null ? tickMs / 1000 : null,
+      admitted: getLoopAdmission(loop.name) === 'always' || getDaemonReadiness() === 'ready',
+    };
+  });
+}
+
+/**
  * Shared tick/heartbeat/error/stop skeleton for the supervised while+sleep
  * loops (#1578). Reproduces the per-loop body that each loop previously
  * inlined: run tick, route any throw (custom onError or a default

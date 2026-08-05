@@ -4,7 +4,10 @@
  * Uses Hono for routing.
  *
  * Routes:
- *   GET  /v1/status  (daemon health, fleet hints, RPC — best-effort)
+ *   GET  /health      (always 200, unauthenticated — liveness)
+ *   GET  /ready        (200 ready/degraded, 503 bootstrapping, unauthenticated — readiness)
+ *   GET  /metrics      (Prometheus text exposition, unauthenticated)
+ *   GET  /v1/status    (daemon health, fleet hints, RPC — token-gated, spec §14.5)
  *   GET  /artifacts/search?tags=a,b&outcome=SUCCESS&limit=50
  *   GET  /artifacts/:id/content
  *   POST /artifacts  { id, taskId, requestId, title, content, tags, outcome }
@@ -59,6 +62,8 @@ import { addDiscoveryRoutes } from './discovery-endpoint.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
 import { addDebugReportRoutes, type DebugReportRoutesConfig } from './debug-report-endpoint.js';
 import { addRewardsRoutes } from './rewards-endpoint.js';
+import { addHealthRoutes, type HealthRoutesConfig } from './health-endpoint.js';
+import { addMetricsRoutes, type MetricsRoutesConfig } from './metrics-endpoint.js';
 
 export interface ApiServerConfig {
   port: number;
@@ -74,8 +79,11 @@ export interface ApiServerConfig {
    * Bearer token required on cost-mutating routes (`POST /artifacts`,
    * `POST /v1/artifacts/acquire`). Generated at daemon startup (or read
    * from `DAEMON_API_TOKEN`) and threaded into the MCP subprocess via
-   * the same env var. Read-only routes (`GET /v1/status`, search,
-   * artifact content) stay public.
+   * the same env var. `GET /artifacts/search` and `GET /artifacts/:id/content`
+   * stay public. `GET /v1/status` is operator-class and token-gated as of
+   * spec §14.5 — it no longer falls under this bearer's "read-only stays
+   * public" carve-out (`GET /health` + `GET /ready` + `GET /metrics` are the
+   * unauthenticated-safe liveness/readiness/metrics surface now).
    */
   apiToken: string;
   requireAuth?: boolean;
@@ -194,6 +202,25 @@ export interface ApiServerConfig {
    * download reflects env overrides + defaults, not just the on-disk file.
    */
   debugReport?: DebugReportRoutesConfig;
+  /**
+   * Shared daemon-readiness getter for `GET /ready` and `GET /metrics` (spec §5/§6.1,
+   * issue #2404). Injected as a plain function — `client/src/api/` must never import
+   * `client/src/daemon/` directly (architecture boundary,
+   * `test/architecture/api-daemon-boundary.test.ts`, #1584); main.ts / daemon.ts's
+   * self-start branch pass `getDaemonReadiness` from `daemon/loop-heartbeat.ts`'s shared
+   * holder straight through. Absent (bare/test servers) defaults to always-`ready`,
+   * matching that module's own default for every caller that never touches the holder.
+   */
+  getDaemonReadiness?: HealthRoutesConfig['getDaemonReadiness'];
+  /**
+   * Per-loop heartbeat + admission snapshot for `GET /metrics`'
+   * `jinn_loop_last_tick_seconds` / `jinn_loop_admitted` series (spec §5/§6.2). Precomputed
+   * by the caller (`LOOP_REGISTRY` × `getLoopAdmission` × `getLoopTick`, all owned by
+   * `daemon/loop-heartbeat.ts`) for the same api→daemon boundary reason as
+   * `getDaemonReadiness` above. Absent on bare/test servers — those two metric families
+   * are simply omitted, never fabricated.
+   */
+  getLoopSnapshot?: MetricsRoutesConfig['getLoopSnapshot'];
 }
 
 export interface ApiServer {
@@ -407,10 +434,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // could fabricate `access.endpoint` URLs and drive the daemon's fetcher. The
   // bearer token is generated at daemon startup (or read from
   // `DAEMON_API_TOKEN`) and forwarded to the MCP subprocess via the same env
-  // var. Read-only routes (`GET /v1/status`, `GET /artifacts/search`,
-  // `GET /artifacts/:id/content`) stay public — they are intentionally
-  // network-reachable. The ERC-8128 middleware (gated by `requireAuth=true`,
-  // never set in prod) layers on top of this.
+  // var. `GET /artifacts/search` and `GET /artifacts/:id/content` stay
+  // public — they are intentionally network-reachable. `GET /v1/status` is
+  // NOT in that set as of spec §14.5 (issue #2404) — it is operator-class
+  // and token-gated like every other read route; `GET /health` / `GET /ready`
+  // / `GET /metrics` are the unauthenticated-safe surface now (§6.1–§6.2).
+  // The ERC-8128 middleware (gated by `requireAuth=true`, never set in prod)
+  // layers on top of this.
   const expectedAuth = `Bearer ${config.apiToken}`;
   const expectedBuf = Buffer.from(expectedAuth);
   const bearerValid = (c: Context): boolean => {
@@ -437,10 +467,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // regardless of bind address) except a fixed allowlist: `/`, `/assets/*`,
   // `/auth/handshake`, `/artifacts*` (the bearer regime — scoped by §4.2's
   // disposition table to artifacts + stop-hook ONLY, never the general
-  // operator-class routes below), and — for now — `GET /v1/status` (its
-  // exemption is removed by a LATER package per §14.5, once `/health` +
-  // `/ready` land as the unauthenticated-safe liveness surface; do NOT gate
-  // it here).
+  // operator-class routes below), and `GET /health` / `GET /ready` /
+  // `GET /metrics` — the shallow, unauthenticated-safe liveness/readiness/
+  // metrics surface (spec §6.1–§6.2). `GET /v1/status` LOST its exemption
+  // here (§14.5, issue #2404) now that `/health` + `/ready` exist as the
+  // unauthenticated-safe alternative — it is gated below like every other
+  // operator-class route.
   //
   // This block runs UNCONDITIONALLY — independent of whether `config.ui`
   // was supplied — so a construction path that skips `ui` (`daemon.ts`'s
@@ -480,6 +512,26 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     const mime = ASSET_MIME[extname(filename).toLowerCase()] ?? 'application/octet-stream';
     return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
   });
+
+  // GET /health + GET /ready — always ungated (spec §6.1). Mounted here,
+  // before the operator-class gate below, alongside `/`/`/assets/*`.
+  addHealthRoutes(app, {
+    earningDir: config.bootstrap?.earningDir,
+    getDaemonReadiness: config.getDaemonReadiness,
+  });
+
+  // GET /metrics — always ungated (spec §6.2).
+  addMetricsRoutes(app, store, {
+    getDaemonReadiness: config.getDaemonReadiness,
+    getLoopSnapshot: config.getLoopSnapshot,
+  });
+
+  // `/v1/status` is operator-class as of spec §14.5 (issue #2404) — the
+  // gate must be registered BEFORE the route handler below (Hono composes
+  // middleware + handlers for a matching path in registration order; see
+  // the "Operator-class gate" comment further down, which mounts the
+  // `/v1/events` family the same way, before `addEventsRoutes` runs).
+  app.use('/v1/status', requireOperatorToken);
 
   app.get('/v1/status', async (c) => {
     try {
