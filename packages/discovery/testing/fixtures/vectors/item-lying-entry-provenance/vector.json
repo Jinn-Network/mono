@@ -5,7 +5,7 @@
   "input": {
     "item": {
       "record": {
-        "kind": "https://jinn.network/records/submission/1.0",
+        "kind": "https://spec.jinn.network/records/submission/v1",
         "digest": "sha256:74d324af9ca0760378e5c7f3ffcad156d6460c84721ae8cc5d43dc10fff228e1"
       },
       "provenance": {
@@ -22,7 +22,7 @@
       "kind": "submission"
     },
     "citedEntry": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
       "source": {
         "agent": "did:key:zAgentSourceOne",
         "name": "feed"
@@ -35,7 +35,7 @@
           "announcementId": "ann-unrelated",
           "action": "available",
           "record": {
-            "kind": "https://jinn.network/records/submission/1.0",
+            "kind": "https://spec.jinn.network/records/submission/v1",
             "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
           }
         }

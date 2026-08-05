@@ -108,7 +108,7 @@ let sequence = 0;
 function documents(): { readonly task: Uint8Array; readonly submission: Uint8Array } {
   sequence += 1;
   const task = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: profile.profile,
       digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -119,7 +119,7 @@ function documents(): { readonly task: Uint8Array; readonly submission: Uint8Arr
   return {
     task,
     submission: sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:51000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`,
       task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
       requester: "urn:uuid:52000000-0000-4000-8000-000000000001",

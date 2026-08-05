@@ -1,11 +1,11 @@
 # @jinn-network/evidence-trace-decode
 
 Format-keyed decoders that turn digest-bound native-trace bytes into the spans of a
-Trajectory record.
+Trace record.
 
 Producers bind a native trace and declare the format it is in. This package is the other
 half of that contract: given the bytes and the declared format IRI, it returns the spans,
-a completeness verdict, and a document the Trajectory package can seal.
+a completeness verdict, and a document the Trace package can seal.
 
 Two properties hold for every decoder in this package, and the conformance kit enforces
 both:

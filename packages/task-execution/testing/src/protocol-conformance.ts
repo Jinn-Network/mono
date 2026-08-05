@@ -201,9 +201,9 @@ export function describeProtocolConformance(): void {
 
     test("a namespaced extension field survives seal -> bytes -> decode unchanged (extension preservation, §21.3)", () => {
       const withExtension = {
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: {
-          uri: "https://jinn.network/task-profiles/repository-work/1.0",
+          uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
           digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
         },
         instructions: "Extensions must round-trip through sealed bytes.",
@@ -400,9 +400,9 @@ export function describeProtocolConformance(): void {
       // dispatch-context-grafting and leaked-task-resubmission adversarial fixtures above already
       // document, rather than faking a catch.
       const taskCarryingTheDescriptor = {
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: {
-          uri: "https://jinn.network/task-profiles/repository-work/1.0",
+          uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
           digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
         },
         instructions: "oversized-content boundary fixture.",

@@ -26,7 +26,7 @@ describe("canonical JSON", () => {
 
   test("agrees byte-for-byte with the RFC 8785 reference implementation", () => {
     const value = {
-      kind: "https://jinn.network/records/information-world/1.0",
+      kind: "https://spec.jinn.network/records/information-world/v1",
       corpus: { origins: ["https://api.example.test"], entries: [] },
       requestKeyPolicy: { version: "irk1", headerSubset: ["accept"] },
     };

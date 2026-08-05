@@ -21,6 +21,6 @@
     "evaluationSpecDigest": "sha256:2e47289bc38fc584af29a86da0eaa1795f53a7fe925b4b029a6abde544cf06f5"
   },
   "expect": {
-    "digest": "sha256:94e1c754fdeb895f7842384b59e2b22e2bb5400f68963df6ded98d843aa36ada"
+    "digest": "sha256:cb45c80e1fd4862b8e262500241b7c36720d4bbf9cd4fcce7743ddf4ff5a7b36"
   }
 }

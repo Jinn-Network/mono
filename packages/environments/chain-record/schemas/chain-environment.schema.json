@@ -4,7 +4,7 @@
   "properties": {
     "kind": {
       "type": "string",
-      "const": "https://jinn.network/records/chain-environment/1.0"
+      "const": "https://spec.jinn.network/records/chain-environment/v1"
     },
     "runtime": {
       "type": "object",
@@ -1345,7 +1345,7 @@
     "verificationContract"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/records/chain-environment/1.0/schema",
+  "$id": "https://spec.jinn.network/schemas/chain-environment/v1",
   "title": "Jinn chain environment record",
   "description": "A sealed description of one sandboxed chain world: a pinned simulator runtime, an optional source anchor, a state materialization with its closure and fidelity classes, ordered digest-pinned fixtures, the determinism controls, the agent-facing capability envelope, and the verification contract. The document states what the world is; it makes no claim that the world boots or reproduces, and it does not assert correspondence to a public chain beyond the fidelity class it declares. Those claims live in separately published attestations and are bounded there.",
   "propertyNames": {

@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
   "name": "duplicate-item-benchmark",
   "description": "Schema-valid but fails benchmark-item-distinctness: two items share a Task digest.",
   "version": "1.0.0",

@@ -10,7 +10,7 @@ const evidenceDirectories = [
   'protocol', 'repository', 'repository-oci', 'repository-ipfs', 'discovery',
   'catalog-sqlite', 'execution-recorder', 'attestation-issuer', 'derivation',
   'publication', 'local-runtime', 'execution-recorder-bridge', 'retrieval',
-  'contribution', 'trajectory', 'trace-decode',
+  'contribution', 'trace', 'trace-decode',
 ];
 const APPLICATION_AND_LEGACY_ROOTS = [
   join(root, 'apps'),
@@ -291,24 +291,24 @@ const CONTRIBUTION_FORBIDDEN_PACKAGES = [
   'viem',
 ];
 
-// Trajectory is a tier-2 record kind: schemas, sealing, and derived identity. It composes
+// Trace is a tier-2 record kind: schemas, sealing, and derived identity. It composes
 // Protocol only, never a repository binding, discovery, a runtime, or any product tree,
 // and performs no I/O outside its fixture loaders in the testing region.
-const TRAJECTORY_ALLOWED_DEPENDENCIES = [
+const TRACE_ALLOWED_DEPENDENCIES = [
   '@jinn-network/evidence-protocol',
   '@jinn-network/trust-core',
   '@noble/hashes',
   'ajv',
   'zod',
 ];
-const TRAJECTORY_ALLOWED_DEV_DEPENDENCIES = [
+const TRACE_ALLOWED_DEV_DEPENDENCIES = [
   '@types/node',
   'canonicalize',
   'typescript',
   'vitest',
 ];
-const TRAJECTORY_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
-const TRAJECTORY_FORBIDDEN_PACKAGES = [
+const TRACE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
+const TRACE_FORBIDDEN_PACKAGES = [
   '@jinn-network/attestation-issuer',
   '@jinn-network/autopilot',
   '@jinn-network/client',
@@ -344,10 +344,10 @@ const TRAJECTORY_FORBIDDEN_PACKAGES = [
 ];
 
 // Trace Decode is a tier-3 capability over the tier-2 record: format identity, decoders,
-// and derived-identity assembly. It composes Trajectory ONLY — Protocol is forbidden, so
-// a decoder that needs a protocol type must get it through Trajectory's surface or the
+// and derived-identity assembly. It composes Trace ONLY — Protocol is forbidden, so
+// a decoder that needs a protocol type must get it through Trace's surface or the
 // design is wrong. It performs no I/O outside its fixture loaders in the testing region.
-const TRACE_DECODE_ALLOWED_DEPENDENCIES = ['@jinn-network/evidence-trajectory'];
+const TRACE_DECODE_ALLOWED_DEPENDENCIES = ['@jinn-network/evidence-trace'];
 const TRACE_DECODE_ALLOWED_DEV_DEPENDENCIES = ['@types/node', 'typescript', 'vitest'];
 const TRACE_DECODE_ALLOWED_PEER_DEPENDENCIES = ['vitest'];
 const TRACE_DECODE_FORBIDDEN_PACKAGES = [
@@ -862,8 +862,8 @@ test('Contribution boundary checks catch package, I/O, and ambient-network escap
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
-test('Trajectory boundary checks catch package, I/O, and ambient-network escapes', () => {
-  const fixture = mkdtempSync(join(tmpdir(), 'jinn-trajectory-boundary-'));
+test('Trace boundary checks catch package, I/O, and ambient-network escapes', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'jinn-trace-boundary-'));
   try {
     const source = join(fixture, 'src');
     mkdirSync(source);
@@ -876,7 +876,7 @@ test('Trajectory boundary checks catch package, I/O, and ambient-network escapes
       'fetch;',
     ].join('\n'));
     assert.equal(
-      forbiddenImports(source, TRAJECTORY_FORBIDDEN_PACKAGES).length,
+      forbiddenImports(source, TRACE_FORBIDDEN_PACKAGES).length,
       5,
     );
     assert.equal(ambientNetworkUsesInFiles(files(source)).length, 1);
@@ -1469,113 +1469,113 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     'the Contribution root entrypoint must not export testing.ts or testing-fixtures.ts',
   );
 
-  const trajectory = join(packages, 'trajectory');
-  const trajectorySource = join(trajectory, 'src');
-  const trajectoryTestingEntry = join(trajectorySource, 'testing.ts');
-  const trajectoryFixtureLoaders = join(trajectorySource, 'fixtures.ts');
-  const trajectoryConformance = join(trajectorySource, 'derivation-conformance.ts');
-  const trajectoryThirdReviewProbes = join(trajectorySource, 'third-review-probes.ts');
-  const trajectoryFourthReviewProbes = join(trajectorySource, 'fourth-review-probes.ts');
-  const trajectoryFifthReviewProbes = join(trajectorySource, 'fifth-review-probes.ts');
-  const trajectorySixthReviewProbes = join(trajectorySource, 'sixth-review-probes.ts');
-  const trajectorySeventhReviewProbes = join(trajectorySource, 'seventh-review-probes.ts');
-  const trajectoryConformanceCaseManifest = join(trajectorySource, 'conformance-case-manifest.ts');
-  const trajectoryConformanceCaseRunner = join(trajectorySource, 'conformance-case-runner.ts');
-  const trajectoryExecutionFixtures = join(trajectorySource, 'execution-fixtures.ts');
-  const trajectoryTestRegex = /\.test\.[cm]?[jt]sx?$/u;
-  const trajectorySourceFiles = files(trajectorySource);
-  const trajectoryTestingFiles = trajectorySourceFiles.filter((file) =>
-    file === trajectoryTestingEntry
-      || file === trajectoryFixtureLoaders
-      || file === trajectoryConformance
-      || file === trajectoryThirdReviewProbes
-      || file === trajectoryFourthReviewProbes
-      || file === trajectoryFifthReviewProbes
-      || file === trajectorySixthReviewProbes
-      || file === trajectorySeventhReviewProbes
-      || file === trajectoryConformanceCaseManifest
-      || file === trajectoryConformanceCaseRunner
-      || file === trajectoryExecutionFixtures
-      || trajectoryTestRegex.test(file));
-  const trajectoryProductionFiles = trajectorySourceFiles.filter((file) =>
-    !trajectoryTestingFiles.includes(file));
-  const trajectoryManifest = manifest('trajectory');
-  const trajectoryForeignRoots = evidenceDirectories
-    .filter((directory) => !['trajectory', 'protocol'].includes(directory))
+  const trace = join(packages, 'trace');
+  const traceSource = join(trace, 'src');
+  const traceTestingEntry = join(traceSource, 'testing.ts');
+  const traceFixtureLoaders = join(traceSource, 'fixtures.ts');
+  const traceConformance = join(traceSource, 'derivation-conformance.ts');
+  const traceThirdReviewProbes = join(traceSource, 'third-review-probes.ts');
+  const traceFourthReviewProbes = join(traceSource, 'fourth-review-probes.ts');
+  const traceFifthReviewProbes = join(traceSource, 'fifth-review-probes.ts');
+  const traceSixthReviewProbes = join(traceSource, 'sixth-review-probes.ts');
+  const traceSeventhReviewProbes = join(traceSource, 'seventh-review-probes.ts');
+  const traceConformanceCaseManifest = join(traceSource, 'conformance-case-manifest.ts');
+  const traceConformanceCaseRunner = join(traceSource, 'conformance-case-runner.ts');
+  const traceExecutionFixtures = join(traceSource, 'execution-fixtures.ts');
+  const traceTestRegex = /\.test\.[cm]?[jt]sx?$/u;
+  const traceSourceFiles = files(traceSource);
+  const traceTestingFiles = traceSourceFiles.filter((file) =>
+    file === traceTestingEntry
+      || file === traceFixtureLoaders
+      || file === traceConformance
+      || file === traceThirdReviewProbes
+      || file === traceFourthReviewProbes
+      || file === traceFifthReviewProbes
+      || file === traceSixthReviewProbes
+      || file === traceSeventhReviewProbes
+      || file === traceConformanceCaseManifest
+      || file === traceConformanceCaseRunner
+      || file === traceExecutionFixtures
+      || traceTestRegex.test(file));
+  const traceProductionFiles = traceSourceFiles.filter((file) =>
+    !traceTestingFiles.includes(file));
+  const traceManifest = manifest('trace');
+  const traceForeignRoots = evidenceDirectories
+    .filter((directory) => !['trace', 'protocol'].includes(directory))
     .map((directory) => join(packages, directory));
 
   assert.deepEqual(
     forbiddenImportsInFiles(
-      trajectoryProductionFiles,
-      [...TRAJECTORY_FORBIDDEN_PACKAGES, 'vitest', 'node:fs/promises'],
-      [...trajectoryForeignRoots, ...trajectoryTestingFiles],
+      traceProductionFiles,
+      [...TRACE_FORBIDDEN_PACKAGES, 'vitest', 'node:fs/promises'],
+      [...traceForeignRoots, ...traceTestingFiles],
     ),
     [],
-    'Trajectory production source must not import forbidden packages, vitest, filesystem APIs, or the testing region',
+    'Trace production source must not import forbidden packages, vitest, filesystem APIs, or the testing region',
   );
   assert.deepEqual(
     forbiddenImportsInFiles(
-      trajectoryTestingFiles,
-      TRAJECTORY_FORBIDDEN_PACKAGES.filter((dependency) => dependency !== 'node:fs'),
-      trajectoryForeignRoots,
+      traceTestingFiles,
+      TRACE_FORBIDDEN_PACKAGES.filter((dependency) => dependency !== 'node:fs'),
+      traceForeignRoots,
     ),
     [],
-    'Trajectory testing files must not cross into foreign package roots',
+    'Trace testing files must not cross into foreign package roots',
   );
   assert.deepEqual(
-    trajectoryTestingFiles.flatMap((file) =>
+    traceTestingFiles.flatMap((file) =>
       specifiers(readFileSync(file, 'utf8'))
         .filter((specifier) => specifier === 'node:fs')
         .map((specifier) => `${relative(root, file)} -> ${specifier}`)),
     [],
-    'the Trajectory testing region may only use node:fs/promises, never bare node:fs',
+    'the Trace testing region may only use node:fs/promises, never bare node:fs',
   );
   assert.deepEqual(
-    ambientNetworkUsesInFiles(trajectorySourceFiles),
+    ambientNetworkUsesInFiles(traceSourceFiles),
     [],
-    'Trajectory source must not use ambient network APIs',
+    'Trace source must not use ambient network APIs',
   );
-  assert.deepEqual(Object.keys(trajectoryManifest.exports).sort(), [
-    '.', './fixtures/*', './schemas/*', './testing',
+  assert.deepEqual(Object.keys(traceManifest.exports).sort(), [
+    '.', './fixtures/*', './profiles/*', './schemas/*', './testing',
   ]);
-  assert.deepEqual(trajectoryManifest.exports['.'], {
+  assert.deepEqual(traceManifest.exports['.'], {
     import: './dist/index.js',
     types: './dist/index.d.ts',
   });
-  assert.deepEqual(trajectoryManifest.exports['./testing'], {
+  assert.deepEqual(traceManifest.exports['./testing'], {
     import: './dist/testing.js',
     types: './dist/testing.d.ts',
   });
   assert.deepEqual(
-    Object.keys(trajectoryManifest.dependencies ?? {}).sort(),
-    TRAJECTORY_ALLOWED_DEPENDENCIES,
+    Object.keys(traceManifest.dependencies ?? {}).sort(),
+    TRACE_ALLOWED_DEPENDENCIES,
   );
   assert.deepEqual(
-    Object.keys(trajectoryManifest.devDependencies ?? {}).sort(),
-    TRAJECTORY_ALLOWED_DEV_DEPENDENCIES,
+    Object.keys(traceManifest.devDependencies ?? {}).sort(),
+    TRACE_ALLOWED_DEV_DEPENDENCIES,
   );
   assert.deepEqual(
-    Object.keys(trajectoryManifest.peerDependencies ?? {}).sort(),
-    TRAJECTORY_ALLOWED_PEER_DEPENDENCIES,
+    Object.keys(traceManifest.peerDependencies ?? {}).sort(),
+    TRACE_ALLOWED_PEER_DEPENDENCIES,
   );
-  assert.deepEqual(trajectoryManifest.peerDependenciesMeta, {
+  assert.deepEqual(traceManifest.peerDependenciesMeta, {
     vitest: { optional: true },
   });
-  for (const directory of evidenceDirectories.filter((entry) => entry !== 'trajectory' && entry !== 'trace-decode')) {
+  for (const directory of evidenceDirectories.filter((entry) => entry !== 'trace' && entry !== 'trace-decode')) {
     assertBoundary(
       join(packages, directory, 'src'),
-      ['@jinn-network/evidence-trajectory'],
-      [trajectory],
+      ['@jinn-network/evidence-trace'],
+      [trace],
     );
   }
   assert.deepEqual(
     forbiddenImportsInFiles(
-      [join(trajectorySource, 'index.ts')],
+      [join(traceSource, 'index.ts')],
       [],
-      [trajectoryTestingEntry, trajectoryFixtureLoaders, trajectoryConformance, trajectoryThirdReviewProbes, trajectoryConformanceCaseManifest, trajectoryConformanceCaseRunner],
+      [traceTestingEntry, traceFixtureLoaders, traceConformance, traceThirdReviewProbes, traceConformanceCaseManifest, traceConformanceCaseRunner],
     ),
     [],
-    'the Trajectory root entrypoint must not export testing.ts or fixtures.ts',
+    'the Trace root entrypoint must not export testing.ts or fixtures.ts',
   );
 
   const traceDecode = join(packages, 'trace-decode');
@@ -1592,7 +1592,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     !traceDecodeTestingFiles.includes(file));
   const traceDecodeManifest = manifest('trace-decode');
   const traceDecodeForeignRoots = evidenceDirectories
-    .filter((directory) => !['trace-decode', 'trajectory'].includes(directory))
+    .filter((directory) => !['trace-decode', 'trace'].includes(directory))
     .map((directory) => join(packages, directory));
 
   assert.deepEqual(

@@ -57,7 +57,7 @@ try {
 import { readFile, readdir } from "node:fs/promises";
 import { BENCHMARKING_PROTOCOL, parseBenchmark } from "@jinn-network/benchmarking-records";
 
-if (BENCHMARKING_PROTOCOL !== "https://jinn.network/protocols/benchmarking/1.0") {
+if (BENCHMARKING_PROTOCOL !== "https://spec.jinn.network/protocols/benchmarking/v1") {
   throw new Error("root import failed");
 }
 await readFile(new URL(import.meta.resolve("@jinn-network/benchmarking-records/schemas/benchmark.schema.json")));

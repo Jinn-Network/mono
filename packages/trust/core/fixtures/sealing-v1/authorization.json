@@ -16,5 +16,5 @@
       "name": "input-digest"
     }
   ],
-  "predicateType": "https://jinn.network/trust/authorization/v1"
+  "predicateType": "https://spec.jinn.network/trust/authorization/v1"
 }

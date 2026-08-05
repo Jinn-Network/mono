@@ -2,14 +2,14 @@
 
 import {
   SpanSchema,
-  TRAJECTORY_PROTOCOL,
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_PROTOCOL,
+  TRACE_VOCABULARY_PROFILE,
   compareCodeUnitStrings,
   deriveSpanId,
   deriveTraceId,
   sha256Hex,
-} from "@jinn-network/evidence-trajectory";
-import type { Attribute, Span } from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
+import type { Attribute, Span } from "@jinn-network/evidence-trace";
 
 import {
   ADMITTED_ATTRIBUTE_KEYS,
@@ -34,14 +34,14 @@ export interface DigestBearingDescriptor {
   readonly digest: { readonly sha256: string };
 }
 
-export interface DecodeTrajectoryInput {
+export interface DecodeTraceInput {
   /** The exact native-trace bytes. Digest-checked against `nativeTrace` before decoding. */
   readonly bytes: Uint8Array;
   readonly nativeTrace: DigestBearingDescriptor;
 }
 
-/** The unsealed Trajectory record document; hand it to `sealTrajectory` to get bytes. */
-export interface TrajectoryDocument {
+/** The unsealed Trace record document; hand it to `sealTrace` to get bytes. */
+export interface TraceDocument {
   readonly protocol: string;
   readonly source: {
     readonly nativeTrace: DigestBearingDescriptor;
@@ -59,7 +59,7 @@ export interface TrajectoryDocument {
 }
 
 export type DecodeOutcome =
-  | { readonly ok: true; readonly document: TrajectoryDocument }
+  | { readonly ok: true; readonly document: TraceDocument }
   | {
       readonly ok: false;
       readonly reason: DecodeFailureReason;
@@ -167,18 +167,18 @@ function checkTimebase(timebase: Timebase): void {
 }
 
 /**
- * Decode digest-bound bytes into a Trajectory document.
+ * Decode digest-bound bytes into a Trace document.
  *
  * Fail-closed on identity: bytes whose sha256 disagrees with the declared native-trace
  * digest are refused before any decoder sees them. Fail-closed on the record surface: a
  * decoder that emits spans the record schema would reject fails here, not at seal time,
  * so the violation is attributed to the decoder rather than to the caller.
  */
-export function decodeTrajectory(
+export function decodeTrace(
   registry: DecoderRegistry,
   formatIri: string,
-  input: DecodeTrajectoryInput,
-): TrajectoryDocument {
+  input: DecodeTraceInput,
+): TraceDocument {
   const decoder = registry.require(formatIri);
 
   const actual = sha256Hex(input.bytes);
@@ -196,7 +196,7 @@ export function decodeTrajectory(
     formatIri,
     decoderId: decoder.decoderId,
     decoderVersion: decoder.decoderVersion,
-    vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+    vocabularyProfile: TRACE_VOCABULARY_PROFILE,
   });
 
   const spans = finalizeSpans(traceId, decoded.drafts);
@@ -214,7 +214,7 @@ export function decodeTrajectory(
   if (invalid.length > 0) throw new DecoderContractError(invalid);
 
   return {
-    protocol: TRAJECTORY_PROTOCOL,
+    protocol: TRACE_PROTOCOL,
     source: {
       nativeTrace: input.nativeTrace,
       formatIri,
@@ -222,7 +222,7 @@ export function decodeTrajectory(
     derivation: {
       decoderId: decoder.decoderId,
       decoderVersion: decoder.decoderVersion,
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
     },
     timebase: decoded.timebase,
     traceId,
@@ -236,13 +236,13 @@ export function decodeTrajectory(
  * unreadable trace costs excerpt quality, and must never fail the work the caller was
  * actually doing.
  */
-export function tryDecodeTrajectory(
+export function tryDecodeTrace(
   registry: DecoderRegistry,
   formatIri: string,
-  input: DecodeTrajectoryInput,
+  input: DecodeTraceInput,
 ): DecodeOutcome {
   try {
-    return { ok: true, document: decodeTrajectory(registry, formatIri, input) };
+    return { ok: true, document: decodeTrace(registry, formatIri, input) };
   } catch (error) {
     if (error instanceof UnsupportedFormatError) {
       return { ok: false, reason: "unsupported-format", detail: error.message };

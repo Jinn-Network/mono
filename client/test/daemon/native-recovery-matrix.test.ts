@@ -194,10 +194,10 @@ function queued(): NativeDiscoveryQueuedCard {
     id: 1,
     announcementId: 'announcement-B801',
     card: {
-      record: { kind: 'https://jinn.network/records/task-execution/submission/1.0', digest: SUBMISSION_DIGEST },
+      record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: SUBMISSION_DIGEST },
       facts: {
         taskDigest: TASK_DIGEST,
-        taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+        taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       },
       chain: {
         taskId: 7n,
@@ -229,7 +229,7 @@ function accepted(): NativeClaimDecision {
       taskDigest: TASK_DIGEST,
       submission: 'urn:uuid:11111111-1111-4111-8111-111111111111',
       nonce: 'B801',
-      profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      profileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       requirements: {},
       runnable: true,
       intendedSpendWei: 2n,
@@ -323,10 +323,10 @@ async function claimRun(input: { readonly path: string; readonly recover: boolea
 
 const SOLUTION_OUTPUT_BYTES = new TextEncoder().encode('{"probability":0.62}');
 const SOLUTION_EVIDENCE_BYTES = serializeCanonicalJson({
-  '@context': 'https://jinn.network/evidence/context/1.0',
+  '@context': 'https://spec.jinn.network/evidence/context/v1',
   '@graph': [{
     '@id': 'urn:uuid:55555555-5555-4555-8555-555555555555',
-    '@type': 'https://jinn.network/evidence/Execution',
+    '@type': 'https://spec.jinn.network/evidence/Execution',
   }],
 });
 const SOLUTION_ENVELOPE_BYTES = new TextEncoder().encode(
@@ -337,7 +337,7 @@ function solutionDocuments() {
   const taskBytes = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
     profile: {
-      uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       digest: { sha256: '1'.repeat(64) },
     },
     instructions: 'Return a deterministic prediction.',

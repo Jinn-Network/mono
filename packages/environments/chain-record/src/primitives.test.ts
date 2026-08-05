@@ -10,6 +10,7 @@ import {
   HttpOrigin,
   PrefixedSha256,
   Quantity,
+  RecordKindUri,
   ResourceDescriptorSchema,
 } from "./primitives.js";
 
@@ -90,5 +91,32 @@ describe("ResourceDescriptor", () => {
   test("a digest-pinned reference requires digest.sha256 — a uri alone is a locator", () => {
     expect(ok(DigestPinnedDescriptorSchema, { uri: "https://example.test/state.tar" })).toBe(false);
     expect(ok(DigestPinnedDescriptorSchema, { digest: { sha256: "c".repeat(64) } })).toBe(true);
+  });
+});
+
+describe("RecordKindUri (DR-2026-08-04)", () => {
+  test("accepts the canonical spec.jinn.network origin with a major-only version", () => {
+    expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/v1")).toBe(true);
+    expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/v2")).toBe(true);
+  });
+
+  // The regression test for the C2 narrowing: both spellings below parsed as valid record
+  // kinds while the schema dual-accepted, and must not any more.
+  test("refuses the retired origin and the retired major.minor version", () => {
+    expect(ok(RecordKindUri, "https://jinn.network/records/chain-environment/1.0")).toBe(false);
+    expect(ok(RecordKindUri, "https://spec.jinn.network/records/chain-environment/1.0")).toBe(false);
+  });
+
+  test("refuses a lookalike origin, v0, and a nested version segment", () => {
+    for (const bad of [
+      "https://evil.jinn.network/records/chain-environment/v1",
+      "https://jinn.network.evil.example/records/chain-environment/v1",
+      "https://spec.jinn.network/records/chain-environment/v0",
+      "https://spec.jinn.network/records/chain-environment/1",
+      "https://spec.jinn.network/records/chain-environment/v1/facts/v1",
+      "https://spec.jinn.network/records/Chain-Environment/v1",
+    ]) {
+      expect(ok(RecordKindUri, bad)).toBe(false);
+    }
   });
 });

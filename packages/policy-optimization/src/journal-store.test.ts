@@ -18,7 +18,7 @@ import { campaignWith, digestOf, SEED_TUPLE, SEED_TUPLE_DIGEST } from "./testing
 const seeds: SeedResolution[] = [{ kind: "tuple", digest: SEED_TUPLE_DIGEST, tuple: SEED_TUPLE }];
 
 const promotionBenchmark = sealBenchmark({
-  protocol: "https://jinn.network/protocols/benchmarking/1.0",
+  protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
   name: "promotion",
   description: "held-out promotion gate",
   version: "1.0.0",
@@ -28,7 +28,7 @@ const promotionBenchmark = sealBenchmark({
 
 /** Item-disjoint from the promotion gate's `a`, so the M4 check passes on the honest path. */
 const developmentBenchmark = sealBenchmark({
-  protocol: "https://jinn.network/protocols/benchmarking/1.0",
+  protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
   name: "development",
   description: "the slate dev waves run against",
   version: "1.0.0",

@@ -1,11 +1,11 @@
 [
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444101"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333101",
       "announcementId": "ann-c8-golden-101"
     },
@@ -17,11 +17,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444102"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333102",
       "announcementId": "ann-c8-golden-102"
     },
@@ -36,11 +36,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444103"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333103",
       "announcementId": "ann-c8-golden-103"
     },

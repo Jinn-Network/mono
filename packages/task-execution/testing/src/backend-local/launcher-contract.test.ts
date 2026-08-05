@@ -17,7 +17,7 @@ const fakeLauncher = makeFakeLauncher({
     interruptionBehavior: "repeatable",
   },
   capabilities: {
-    taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0"],
+    taskProfiles: ["https://spec.jinn.network/task-profiles/repository-work/1.0"],
     inputMediaTypes: ["application/json"],
     outputMediaTypes: ["application/json"],
     structuredOutput: false,
@@ -43,7 +43,7 @@ describe("makeFakeLauncher itself", () => {
 
   it("declares static capabilities", () => {
     const capabilities = fakeLauncher.capabilities();
-    expect(capabilities.taskProfiles).toContain("https://jinn.network/task-profiles/repository-work/1.0");
+    expect(capabilities.taskProfiles).toContain("https://spec.jinn.network/task-profiles/repository-work/1.0");
   });
 
   it("plan output actually varies with its inputs (not a trivial constant)", () => {

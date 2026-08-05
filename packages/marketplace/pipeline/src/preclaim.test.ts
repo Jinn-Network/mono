@@ -11,7 +11,7 @@ import {
   verifyPreclaim,
 } from "./preclaim.js";
 
-const PROFILE_URI = "https://jinn.network/task-profiles/repository-work/1.0";
+const PROFILE_URI = "https://spec.jinn.network/task-profiles/repository-work/1.0";
 
 const CAPABILITIES: BackendCapabilities = {
   taskProfiles: [PROFILE_URI],

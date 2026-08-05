@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/trust/policy/v1",
+  "protocol": "https://spec.jinn.network/trust/policy/v1",
   "version": 2,
   "purposes": {
     "verifier-agent": {

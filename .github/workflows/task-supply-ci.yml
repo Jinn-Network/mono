@@ -2,6 +2,13 @@ name: Task Supply CI
 
 on:
   pull_request:
+    paths:
+      - "packages/task-supply/**"
+      - "packages/environments/**"
+      - ".github/scripts/task-supply-*.test.mjs"
+      - ".github/workflows/task-supply-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+      - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
   push:
     branches: [next]
     paths:
@@ -11,6 +18,10 @@ on:
       - ".github/workflows/task-supply-ci.yml"
       - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
       - "docs/superpowers/plans/2026-07-31-chain-environment-program.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

@@ -75,8 +75,8 @@ describe("evidence recorder join (C3)", () => {
 
     const joiner = createEvidenceJoin({
       ports: ports(repository),
-      source: "https://jinn.network/software/backend-local",
-      executor: "https://jinn.network/software/fake-launcher",
+      source: "https://spec.jinn.network/software/backend-local",
+      executor: "https://spec.jinn.network/software/fake-launcher",
       now: () => "2026-07-28T00:00:00.000Z",
     });
     const recording = await joiner.start({
@@ -132,8 +132,8 @@ describe("evidence recorder join (C3)", () => {
     const bytes = new TextEncoder().encode("exact");
     const recording = await createEvidenceJoin({
       ports: ports(repository),
-      source: "https://jinn.network/software/backend-local",
-      executor: "https://jinn.network/software/fake-launcher",
+      source: "https://spec.jinn.network/software/backend-local",
+      executor: "https://spec.jinn.network/software/fake-launcher",
     }).start({
       paths,
       attempt: "urn:uuid:10000000-0000-4000-8000-000000000002",
@@ -161,8 +161,8 @@ describe("evidence recorder join (C3)", () => {
       ports: ports(repository, () => {
         awaitCalls += 1;
       }),
-      source: "https://jinn.network/software/backend-local",
-      executor: "https://jinn.network/software/fake-launcher",
+      source: "https://spec.jinn.network/software/backend-local",
+      executor: "https://spec.jinn.network/software/fake-launcher",
     });
     const bytes = new TextEncoder().encode("exact");
     const recording = await joiner.start({

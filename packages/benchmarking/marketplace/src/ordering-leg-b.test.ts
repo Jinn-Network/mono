@@ -26,7 +26,7 @@ const SUBMISSION_URN = "urn:uuid:11111111-1111-4111-8111-111111111111";
 
 function sealedSubmissionBytes() {
   const doc = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: SUBMISSION_URN,
     task: { digest: { sha256: TASK_DIGEST } },
     requester: "urn:uuid:20000000-0000-5000-8000-000000000002",

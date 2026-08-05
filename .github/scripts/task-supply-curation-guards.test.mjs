@@ -52,7 +52,11 @@ test('no-record: nothing here seals, hashes, or claims a record kind', () => {
   const banned = [
     /\bseal[A-Z]/, /\bputArtifact\b/, /\bRECORD_KINDS\b/, /@noble\/hashes/,
     /\brecordKind\b/, /\bpayloadType\b/, /\bdssePreAuthEncoding\b/,
-    /https:\/\/jinn\.network\/records\//,
+    // DR-2026-08-04: the re-seal moved every record kind to spec.jinn.network, but a
+    // legacy-origin record kind is still a record kind -- the constraint is about the layer's
+    // behavior (projection, never record), not about which origin spells the URI. Forbid a
+    // record-kind path under either host so this guard still constrains something post-re-seal.
+    /https:\/\/(?:spec\.)?jinn\.network\/records\//,
   ];
   for (const file of productionSources()) {
     const text = readFileSync(file, 'utf8');
@@ -86,7 +90,7 @@ test('drift: the mirrored upstream shapes still carry the fields this package as
     assert.ok(item.includes(field), `discovery AnnouncedItem/SourceIdentity lost "${field}"`);
   }
   const profile = JSON.parse(readFileSync(
-    join(root, 'packages/discovery/facts/task-execution/profiles/delivery.1.0.json'), 'utf8'));
+    join(root, 'packages/discovery/facts/task-execution/profiles/delivery.v1.json'), 'utf8'));
   const names = profile.fields.map((f) => f.name);
   for (const field of ['taskDigest', 'attemptUri', 'benchrun']) {
     assert.ok(names.includes(field), `delivery facts profile lost "${field}"`);
@@ -99,7 +103,7 @@ test('serialization: the projection format token is not a record kind', () => {
   assert.match(text, /CURATION_PROJECTION_FORMAT = "network\.jinn\.task-supply\.curation-projection\/1\.0"/);
   const golden = JSON.parse(readFileSync(join(pkg, 'fixtures', 'projection-golden.json'), 'utf8'));
   assert.deepEqual(Object.keys(golden).sort(), ['format', 'rows']);
-  assert.ok(!String(golden.format).startsWith('https://jinn.network/records/'));
+  assert.ok(!/^https:\/\/(spec\.)?jinn\.network\/records\//u.test(String(golden.format)));
 });
 
 // Plan Finding FC6-8: at the C3+C6 merge these assertions fold into

@@ -58,7 +58,7 @@ describe("buildEnvironmentCandidatesFromRows", () => {
 
   it("emits records that round-trip through the record package's own parser", () => {
     const [record] = buildEnvironmentCandidatesFromRows([row()]);
-    expect(record!.kind).toBe("https://jinn.network/records/environment/1.0");
+    expect(record!.kind).toBe("https://spec.jinn.network/records/environment/v1");
     expect(record!.invocations.test).toEqual([{ bin: "pytest", args: ["-q", "tests"] }]);
     expect(record!.workspace).toBe("/testbed");
     expect(record!.build.reproducibilityTier).toBe(0);

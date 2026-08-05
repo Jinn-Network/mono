@@ -173,7 +173,7 @@ export interface InstanceFixture {
  */
 function taskBytes(instanceId: string, repo: string): Uint8Array {
   return serializeCanonicalJson({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: { digest: { sha256: "f".repeat(64) } },
     instructions:
       `Instance ${instanceId} in repository ${repo}. A test in this repository fails. `

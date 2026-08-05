@@ -13,7 +13,7 @@
     "observedAt": "2026-08-01T01:00:00Z",
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333001",
       "announcementId": "ann-policy-001",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444001",
@@ -34,7 +34,7 @@
     "observedAt": "2026-08-01T02:00:00Z",
     "attribution": "urn:jinn:agent:solver-b",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333002",
       "announcementId": "ann-policy-002",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444002",
@@ -55,7 +55,7 @@
     "observedAt": "2026-07-31T19:30:00-07:00",
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333003",
       "announcementId": "ann-policy-003",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444003",
@@ -77,7 +77,7 @@
     "attribution": "urn:jinn:agent:bench-harness",
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333004",
       "announcementId": "ann-policy-004",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444004",
@@ -99,7 +99,7 @@
     "attribution": "urn:jinn:agent:bench-harness",
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333005",
       "announcementId": "ann-policy-005",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444005",
@@ -120,7 +120,7 @@
     "observedAt": "2026-08-03T05:00:00Z",
     "attribution": "urn:jinn:agent:solver-c",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333006",
       "announcementId": "ann-policy-006",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444006",
@@ -141,7 +141,7 @@
     "observedAt": "2026-08-03T06:00:00Z",
     "attribution": "urn:jinn:agent:solver-d",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333007",
       "announcementId": "ann-policy-007",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444007",
@@ -163,7 +163,7 @@
     "attribution": "urn:jinn:agent:bench-harness",
     "benchmarkRun": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333008",
       "announcementId": "ann-policy-008",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444008",
@@ -185,7 +185,7 @@
     "attribution": "urn:jinn:agent:bench-harness",
     "benchmarkRun": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "ref": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333009",
       "announcementId": "ann-policy-009",
       "record": "sha256:4444444444444444444444444444444444444444444444444444444444444009",

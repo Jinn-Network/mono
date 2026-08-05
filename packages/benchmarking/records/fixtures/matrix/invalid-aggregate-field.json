@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
   "run": {
     "digest": {
       "sha256": "4e65d3fbe8ad6535681b021b30785b12b6c0e3f8878859a4148b3f58b8835db0"

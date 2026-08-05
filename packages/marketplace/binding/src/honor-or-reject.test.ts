@@ -23,7 +23,7 @@ const TODAY_MODE_CAPABILITIES: BackendCapabilities = {
 
 function baseSubmission(overrides: Partial<SubmissionRecord> = {}): SubmissionRecord {
   return {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:00000000-0000-5000-8000-000000000000",
     task: { digest: { sha256: "a".repeat(64) } },
     requester: "urn:uuid:00000000-0000-5000-8000-000000000001",

@@ -5,7 +5,7 @@ import { checkRevealConsistency } from "./reveal.js";
 
 function benchmarkOverDigests(digests: string[]) {
   return BenchmarkRecordSchema.parse({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     name: "committed",
     description: "d",
     version: "1.0.0",

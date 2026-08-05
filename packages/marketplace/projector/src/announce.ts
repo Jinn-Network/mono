@@ -585,7 +585,7 @@ export async function projectAnnouncements(
           // The material was anchor-admitted before the verifier ran. Rebuild only the facts
           // card with the verified correspondence; writing/signing remains after this gate.
           projected.push(await availableAnnouncementFromMaterial(event, "evaluation-delivery", material, ports, {
-            "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
+            "https://spec.jinn.network/facts/marketplace-verdict-correspondence/v1": {
               onChainVerdictCode: event.facts.verdictCode,
               statementVerdict: verified.statementVerdict,
             },

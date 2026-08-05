@@ -1,21 +1,21 @@
 {
   "note": "FINDING F5 (see README). Nothing in the profiles design reserves `formatToken`, so a profile author may legally declare it as a requirement key — and §4.1 step 2 then instructs the deriver to copy the effective value over the tuple's own metadata member. The design states no rule. The reference fails closed: a tuple whose `formatToken` is not the format token is not an execution-policy tuple, and silently dropping the requirement instead would violate the closed key rule. Proposed disposition in the README; this fixture pins the behavior either way so the choice is visible rather than accidental.",
   "profile": {
-    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJleGFjdCIsImtleSI6ImZvcm1hdFRva2VuIn1dfQ==",
+    "profile": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3JlcG9zaXRvcnktd29yay8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImV4YWN0Iiwia2V5IjoiZm9ybWF0VG9rZW4ifV19",
     "requirementKeys": [{ "key": "formatToken", "comparisonClass": "exact" }]
   },
   "task": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "profile": {
-      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
-      "digest": { "sha256": "25c87cf136f6fa9fd39f7d84e6891d7358f54f3a99e22036c3b76946d5971b9a" }
+      "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "b34409def3b18277205160b025ada22ec2f4e2660e5d682133479dc5af124e9e" }
     },
     "instructions": "Fix the failing test.",
     "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
   },
   "submission": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c107",
     "task": { "digest": { "sha256": "0000000000000000000000000000000000000000000000000000000000000000" } },
     "requester": "urn:jinn:agent:policy-kit-requester",

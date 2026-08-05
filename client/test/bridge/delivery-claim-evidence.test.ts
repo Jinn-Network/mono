@@ -22,7 +22,7 @@ describe('deliveryClaimEvidenceHash (E46)', () => {
       },
     };
     const sealed = new TextEncoder().encode(JSON.stringify({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       attempt: 'urn:uuid:11111111-1111-4111-8111-111111111111',
       [LEGACY_ENVELOPE_EXTENSION_KEY]: JSON.stringify(nestedEnvelope),
     }));

@@ -17,7 +17,7 @@ const REQUIRED_SETUP_NODE_JOBS = [
   'derivation',
   'execution-recorder-bridge',
   'retrieval',
-  'trajectory',
+  'trace',
   'trace-decode',
   'contribution',
   'catalog-sqlite',
@@ -30,7 +30,7 @@ const PACK_SMOKE_JOB_IDS = [
   'derivation',
   'execution-recorder-bridge',
   'retrieval',
-  'trajectory',
+  'trace',
   'trace-decode',
   'contribution',
   'catalog-sqlite',
@@ -422,10 +422,10 @@ test('mutation: npm step name before pack:smoke but command after fails', () => 
 });
 
 test('mutation: omitted pack-smoke job fails', () => {
-  const mutant = workflow.replace(/\n  trajectory:\n[\s\S]*?(?=\n  contribution:)/, '\n');
+  const mutant = workflow.replace(/\n  trace:\n[\s\S]*?(?=\n  contribution:)/, '\n');
   expectValidationFailure(
     mutant,
-    /missing required pack-smoke job trajectory|missing required setup-node job trajectory/,
+    /missing required pack-smoke job trace|missing required setup-node job trace/,
   );
 });
 
@@ -459,18 +459,18 @@ test('mutation: legacy-peer-deps workaround fails', () => {
 
 test('mutation: anonymous one-line pack:smoke before npm pin fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
+    /(  trace:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
     '$1- run: yarn pack:smoke\n      - name: Install npm 11.19.0 for pack-smoke',
   );
-  expectValidationFailure(mutant, /trajectory npm pin step must precede pack:smoke step/);
+  expectValidationFailure(mutant, /trace npm pin step must precede pack:smoke step/);
 });
 
 test('mutation: anonymous multiline pack:smoke before npm pin fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
+    /(  trace:[\s\S]*?      )- name: Install npm 11\.19\.0 for pack-smoke/,
     '$1- run: |\n          yarn pack:smoke\n      - name: Install npm 11.19.0 for pack-smoke',
   );
-  expectValidationFailure(mutant, /trajectory npm pin step must precede pack:smoke step/);
+  expectValidationFailure(mutant, /trace npm pin step must precede pack:smoke step/);
 });
 
 test('mutation: unnamed npm step before pack:smoke fails', () => {
@@ -481,20 +481,20 @@ test('mutation: unnamed npm step before pack:smoke fails', () => {
   expectValidationFailure(mutant, /must include the named npm install step/);
 });
 
-test('mutation: anonymous pack:smoke inserted before npm pin in trajectory job fails', () => {
+test('mutation: anonymous pack:smoke inserted before npm pin in trace job fails', () => {
   const mutant = workflow.replace(
-    '  trajectory:\n    name: Evidence Trajectory\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4',
-    '  trajectory:\n    name: Evidence Trajectory\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v4',
+    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4',
+    '  trace:\n    name: Evidence Trace\n    needs: [foundation]\n    runs-on: ubuntu-latest\n    steps:\n      - run: yarn pack:smoke\n      - uses: actions/checkout@v4',
   );
   expectValidationFailure(mutant, /npm pin step must precede pack:smoke step at index 0/);
 });
 
-test('mutation: remove setup-node from trajectory job fails', () => {
+test('mutation: remove setup-node from trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1',
   );
-  expectValidationFailure(mutant, /trajectory must have exactly one setup-node step \(found 0\)/);
+  expectValidationFailure(mutant, /trace must have exactly one setup-node step \(found 0\)/);
 });
 
 test('mutation: duplicate setup-node in architecture job fails', () => {
@@ -508,12 +508,12 @@ test('mutation: duplicate setup-node in architecture job fails', () => {
   );
 });
 
-test('mutation: setup-node before checkout in trajectory job fails', () => {
+test('mutation: setup-node before checkout in trace job fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?steps:\n)(      - uses: actions\/checkout@v4\n(?:        with:\n          ref: \$\{\{ inputs\.source_sha \|\| github\.sha \}\}\n)?)(      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1      - uses: actions/setup-node@v4\n        with:\n          node-version: 22.23.1\n$2',
   );
-  expectValidationFailure(mutant, /trajectory checkout must precede setup-node/);
+  expectValidationFailure(mutant, /trace checkout must precede setup-node/);
 });
 
 test('mutation: duplicate checkout in foundation job fails', () => {
@@ -543,30 +543,30 @@ test('mutation: wrong setup-node version in foundation job fails', () => {
 test('mutation: bare setup-node with decoy node-version in later step fails', () => {
   const mutant = workflow
     .replace(
-      /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+      /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
       '$1',
     )
     .replace(
-      /(  trajectory:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
+      /(  trace:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
       '      - run: echo decoy\n        with:\n          node-version: 22.23.1\n$1',
     );
   expectValidationFailure(
     mutant,
-    /trajectory setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
+    /trace setup-node must pin 22\.23\.1 on its own with block \(found undefined\)/,
   );
 });
 
 test('mutation: job-level node-version decoy fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:\n    name: Evidence Trajectory\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
+    /(  trace:\n    name: Evidence Trace\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
     '$1    env:\n      node-version: 22.23.1\n',
   ).replace(
-    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: )22\.23\.1/,
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: )22\.23\.1/,
     '$122.0.0',
   );
   expectValidationFailure(
     mutant,
-    /trajectory setup-node must pin 22\.23\.1 on its own with block/,
+    /trace setup-node must pin 22\.23\.1 on its own with block/,
   );
 });
 
@@ -592,17 +592,17 @@ test('mutation: wrong-indentation node-version outside setup with fails', () => 
   );
 });
 
-test('mutation: duplicate uses in trajectory setup step fails', () => {
+test('mutation: duplicate uses in trace setup step fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n)(        with:\n          node-version: 22\.23\.1\n)/,
     '$1        uses: actions/setup-node@v4\n$2',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
 });
 
-test('mutation: duplicate run in trajectory npm step fails', () => {
+test('mutation: duplicate run in trace npm step fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    /(  trace:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
     '$1\n        run: echo duplicate',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "run"/);
@@ -617,13 +617,13 @@ test('mutation: duplicate node-version in setup with block fails', () => {
 });
 
 test('mutation: duplicate job key fails', () => {
-  const mutant = `${workflow}\n  trajectory:\n    runs-on: ubuntu-latest\n`;
-  expectValidationFailure(mutant, /duplicate YAML mapping key "trajectory"/);
+  const mutant = `${workflow}\n  trace:\n    runs-on: ubuntu-latest\n`;
+  expectValidationFailure(mutant, /duplicate YAML mapping key "trace"/);
 });
 
 test('mutation: duplicate indented step name inside npm step fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    /(  trace:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
     '$1\n        name: duplicate step name',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "name"/);
@@ -631,7 +631,7 @@ test('mutation: duplicate indented step name inside npm step fails', () => {
 
 test('mutation: duplicate indented uses inside setup step fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
+    /(  trace:[\s\S]*?      - uses: actions\/setup-node@v4\n        with:\n          node-version: 22\.23\.1\n)/,
     '$1        uses: actions/setup-node@v4\n',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "uses"/);
@@ -639,15 +639,15 @@ test('mutation: duplicate indented uses inside setup step fails', () => {
 
 test('mutation: duplicate working-directory inside step fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
-    '      - name: Enable Yarn 4.13.0\n        working-directory: packages/evidence/trajectory\n        working-directory: packages/evidence/trajectory\n',
+    /(  trace:[\s\S]*?      - name: Enable Yarn 4\.13\.0\n)/,
+    '      - name: Enable Yarn 4.13.0\n        working-directory: packages/evidence/trace\n        working-directory: packages/evidence/trace\n',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "working-directory"/);
 });
 
 test('mutation: colon-like line inside run block scalar does not false-positive', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|\n)(          npm install -g npm@11\.19\.0\n)/,
+    /(  trace:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|\n)(          npm install -g npm@11\.19\.0\n)/,
     '$1          name: not-a-yaml-key\n$2',
   );
   assert.doesNotThrow(() => validateEvidenceCiWorkflow(mutant));
@@ -655,7 +655,7 @@ test('mutation: colon-like line inside run block scalar does not false-positive'
 
 test('mutation: malformed dedent after block scalar still catches duplicate run', () => {
   const mutant = workflow.replace(
-    /(  trajectory:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
+    /(  trace:[\s\S]*?      - name: Install npm 11\.19\.0 for pack-smoke\n        run: \|)/,
     '$1\n        run: echo duplicate',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "run"/);
@@ -663,7 +663,7 @@ test('mutation: malformed dedent after block scalar still catches duplicate run'
 
 test('mutation: duplicate job-level runs-on fails', () => {
   const mutant = workflow.replace(
-    /(  trajectory:\n    name: Evidence Trajectory\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
+    /(  trace:\n    name: Evidence Trace\n    needs: \[foundation\]\n    runs-on: ubuntu-latest\n)/,
     '$1    runs-on: ubuntu-latest\n',
   );
   expectValidationFailure(mutant, /duplicate YAML mapping key "runs-on"/);

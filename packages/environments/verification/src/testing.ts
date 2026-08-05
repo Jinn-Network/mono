@@ -35,7 +35,7 @@ export const CONFORMANCE_DIVERGENT_OUTCOMES: OutcomeSet = Object.freeze({
 }) as OutcomeSet;
 
 export const CONFORMANCE_VERIFIER_IDENTITY: VerifierIdentity = Object.freeze({
-  id: "https://jinn.network/environment-verification/conformance-verifier",
+  id: "https://spec.jinn.network/environment-verification/conformance-verifier",
   version: "0.1.0",
   digest: `sha256:${"7".repeat(64)}`,
 }) as VerifierIdentity;

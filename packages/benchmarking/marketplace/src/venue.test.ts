@@ -54,12 +54,12 @@ import {
   validateMarketplaceComposition,
 } from "./venue.js";
 
-const TASK_DIGEST = "f2fcac284b66b5ed9d0567dea00ca3a75ac5a9fd570c1909851d1512393ce741";
+const TASK_DIGEST = "8c0771ce49731c14e47d2103710e440abad04d138fc0163be2e9ffa7d9dd838f";
 const RUN_OWNER = "urn:uuid:20000000-0000-5000-8000-000000000002";
 const COORDINATOR = BASE_SEPOLIA_TODAY.taskCoordinator;
 const MECH = BASE_SEPOLIA_TODAY.mechMarketplace;
 const CLOSE_AT = "2099-01-01T00:00:00Z";
-const BENCHMARKING_PROTOCOL = "https://jinn.network/protocols/benchmarking/1.0";
+const BENCHMARKING_PROTOCOL = "https://spec.jinn.network/protocols/benchmarking/v1";
 
 function singleCellBench(): { bench: BenchmarkRecord; benchDigest: `sha256:${string}` } {
   const sealed = sealBenchmark({
@@ -185,7 +185,7 @@ function closePorts() {
 function buildSealedSubmission(runDigest: `sha256:${string}`, dispatch = 1) {
   const key = cellKey(TASK_DIGEST, "armA", 1);
   const doc = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:11111111-1111-4111-8111-111111111111",
     task: { digest: { sha256: TASK_DIGEST } },
     requester: RUN_OWNER,
@@ -327,7 +327,7 @@ describe("runOnMarketplace", () => {
       attemptIndex: 0,
     });
     const deliveryDoc = {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       task: `sha256:${TASK_DIGEST}`,
       attempt,
       outcome: "fulfilled",

@@ -1,0 +1,197 @@
+/* ============================================================
+   JINN WEBSITE — theme.css
+   The one editable stylesheet in this directory.
+
+   `colors_and_type.css` and `foundations.css` beside it are
+   byte-identical copies of docs/design/jinn-design-system/project/
+   and are never edited (guarded by
+   .github/scripts/website-design-tokens.test.mjs). This file is the
+   bridge: it maps those canonical design-system variables onto the
+   two consumers that do not know about them —
+
+     1. Tailwind v4's `@theme` scale (utilities: bg-*, text-*,
+        border-*, rounded-*, font-*), which is also how shadcn/ui
+        components resolve their semantic names (bg-primary,
+        bg-accent, text-muted-foreground, border-border, ring-ring);
+     2. Fumadocs' `--color-fd-*` variables, which every fumadocs-ui
+        layout and MDX component reads.
+
+   Nothing here invents a colour. Every value is `var(--…)` pointing
+   back at the copies. If a value needs to change, it changes in the
+   design system and flows through.
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   1. Fonts — self-hosted via next/font (app/layout.tsx)
+
+   The design-system copy pulls its fonts from a Google Fonts
+   `@import`, which the Tailwind/Lightning bundler hoists away. The
+   families are therefore re-pointed at the next/font variables so the
+   bytes are served from our own origin. Same two faces, same order.
+   ------------------------------------------------------------ */
+:root {
+  --font-display:
+    var(--font-instrument-serif), 'Instrument Serif', 'Times New Roman', serif;
+  --font-mono:
+    var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo,
+    monospace;
+
+  /* Tailwind's own family keys. No sans — the restraint is the brand. */
+  --font-serif: var(--font-display);
+  --font-sans: var(--font-mono);
+
+  /* Tailwind's radius scale, re-pointed at softened-brutalist radii. */
+  --radius-xs: var(--radius-1);
+  --radius-sm: var(--radius-1);
+  --radius-md: var(--radius-2);
+  --radius-lg: var(--radius-3);
+  --radius-xl: var(--radius-3);
+}
+
+/* ------------------------------------------------------------
+   2. Fumadocs — `--color-fd-*`
+
+   Fumadocs ships a neutral greyscale. These re-point every one of its
+   surface variables at the Jinn palette so docs chrome, prose, code
+   blocks, sidebar, and search all read as one system with the landing
+   page. Declared on both `:root` and `.dark` because next-themes puts
+   `.dark` on <html> and the site is dark-only (§ WEBSITE-APP-SPEC.md).
+   ------------------------------------------------------------ */
+:root,
+.dark {
+  --color-fd-background: var(--bg);
+  --color-fd-foreground: var(--fg);
+  --color-fd-muted: var(--bg-elevated);
+  --color-fd-muted-foreground: var(--fg-muted);
+  --color-fd-popover: var(--bg-elevated);
+  --color-fd-popover-foreground: var(--fg);
+  --color-fd-card: var(--bg-elevated);
+  --color-fd-card-foreground: var(--fg);
+  --color-fd-border: var(--border);
+  --color-fd-primary: var(--accent);
+  --color-fd-primary-foreground: var(--accent-fg);
+  --color-fd-secondary: var(--bg-elevated);
+  --color-fd-secondary-foreground: var(--fg);
+  --color-fd-accent: var(--bg-elevated);
+  --color-fd-accent-foreground: var(--fg);
+  --color-fd-ring: var(--accent);
+  --color-fd-overlay: rgba(7, 13, 24, 0.72);
+
+  --color-fd-info: var(--info);
+  --color-fd-warning: var(--warning);
+  --color-fd-error: var(--danger);
+  --color-fd-success: var(--success);
+  --color-fd-idea: var(--gold);
+}
+
+/* The sidebar sits on the sunken surface so the reading column reads
+   as the elevated plane. Fumadocs scopes sidebar tone by id. */
+.dark #nd-sidebar {
+  --color-fd-muted: var(--bg-sunken);
+  --color-fd-secondary: var(--bg-sunken);
+  --color-fd-muted-foreground: var(--fg-muted);
+}
+
+/* ------------------------------------------------------------
+   3. Tailwind v4 `@theme inline`
+
+   `inline` means the generated utility carries `var(--bg)` directly
+   rather than a second indirection, so a utility always resolves to
+   the live design-system value.
+
+   Naming is ported from client/src/dashboard/spa/tailwind.config.ts:
+   shadcn's semantic names (background / foreground / primary /
+   secondary / muted / accent / destructive / border / input / ring /
+   card / popover) plus the brand-only tones that have no shadcn
+   equivalent (sunken, elevated, dim, gold, wane, vow). Source vars
+   use the canonical design-system names, so the SPA's local aliases
+   `--accent-sky` / `--accent-gold` appear here as `--accent` /
+   `--gold`.
+   ------------------------------------------------------------ */
+@theme inline {
+  /* shadcn semantic surface */
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--bg-elevated);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--bg-elevated);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--bg-elevated);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--bg-elevated);
+  --color-muted-foreground: var(--fg-muted);
+  --color-accent: var(--bg-elevated);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger);
+  --color-destructive-foreground: var(--fg);
+  --color-border: var(--border);
+  --color-input: var(--border);
+  --color-ring: var(--accent);
+
+  /* brand-only tones — reach for these instead of raw var() in JSX */
+  --color-sunken: var(--bg-sunken);
+  --color-elevated: var(--bg-elevated);
+  --color-dim: var(--fg-dim);
+  --color-gold: var(--gold);
+  --color-gold-hover: var(--gold-hover);
+  --color-wane: var(--warning);
+  --color-vow: var(--success);
+  --color-seer: var(--info);
+  --color-accent-sky: var(--accent);
+  --color-accent-sky-hover: var(--accent-hover);
+}
+
+/* ------------------------------------------------------------
+   4. Where the layers disagree
+
+   The two copies are imported into Tailwind's `base` layer
+   (app/globals.css), so their element rules are a baseline that
+   utilities and Fumadocs' typography both override. Only two
+   collisions are left, and both are chrome, not content.
+   ------------------------------------------------------------ */
+html {
+  scrollbar-gutter: stable;
+  color-scheme: dark;
+}
+
+html > body[data-scroll-locked] {
+  margin-right: 0 !important;
+  --removed-body-scroll-bar-size: 0 !important;
+}
+
+/* The copied baseline underlines every <a>. That is right in body prose,
+   where it is the link affordance, and noise everywhere else — navigation,
+   sidebar, breadcrumb, table of contents, heading anchors, buttons. Strip
+   it across the docs chrome and the site chrome, then put it back inside
+   the reading column only. */
+#nd-docs-layout a,
+#nd-nav a,
+#nd-subnav a,
+[data-slot='button'],
+:where(h1, h2, h3, h4, h5, h6) a {
+  text-decoration: none;
+}
+
+#nd-docs-layout .prose a:not(:where(.not-prose, .not-prose *, h1 a, h2 a, h3 a, h4 a)) {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+}
+
+/* Display headings keep the serif inside docs prose too; Fumadocs owns
+   their size, the design system owns their voice. */
+#nd-docs-layout h1,
+#nd-docs-layout h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+
+/* Blockquotes carry the dated "not yet written" notices, which are
+   statements this site is making, not quotations. Drop the typographic
+   quote marks Fumadocs' prose adds. */
+#nd-docs-layout blockquote p::before,
+#nd-docs-layout blockquote p::after {
+  content: none;
+}

@@ -164,7 +164,7 @@ export function buildPublicExecutionEvidence(
     "@id": `#derivation-disposition-${index}`,
     "@type": "PropertyValue",
     name: `${count.class}:${count.disposition}`,
-    propertyID: `https://jinn.network/terms/dispositions/${encodeURIComponent(count.class)}/${count.disposition}`,
+    propertyID: `https://spec.jinn.network/terms/dispositions/${encodeURIComponent(count.class)}/${count.disposition}`,
     value: count.count,
     unitCode: "count",
   }));
