@@ -10,3 +10,4 @@ export * from './version.js';
 export * from './lifecycle-kind.js';
 export * from './status.js';
 export * from './wire-types.js';
+export * from './notifications.js';

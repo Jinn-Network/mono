@@ -1,19 +1,28 @@
 /**
- * Regression coverage for issue #1296 — gas runway warnings.
+ * Regression coverage for issue #1296 — gas runway warnings, migrated for issue #2408
+ * (server-side notifications).
  *
- * Exercises the notification deriver (`src/dashboard/spa/src/notifications/derive.ts`)
- * and the WalletCard runway-severity tint (`src/dashboard/spa/src/pages/overview/WalletCard.tsx`)
- * end-to-end through the real SPA against a mocked `/v1/status`.
+ * Two independent concerns share this file:
+ *   1. The `funding_low` / `funding_empty` notification list — derivation moved from the
+ *      SPA's `derive.ts` to the daemon's `GET /v1/notifications` (spec §6.5;
+ *      `buildNotifications` in `client/src/api/notifications-build.ts`, parity-tested in
+ *      `client/test/api/notifications-build.test.ts`). This E2E now mocks that endpoint
+ *      directly with the notice list the server would have produced for each scenario,
+ *      rather than relying on the SPA to derive it from `/v1/status`.
+ *   2. The WalletCard runway-severity tint (`src/dashboard/spa/src/pages/overview/WalletCard.tsx`)
+ *      — untouched by #2408: `Overview.tsx` computes `gasSeverity(status?.masterGas)` directly
+ *      from the live `/v1/status` payload (see `notifications/gas-severity.ts`), independent of
+ *      the notification list. The `/v1/status` mocks below stay in place for this reason.
  *
  * Acceptance criteria under test:
  *   1. A low-but-nonzero L2 (Base Sepolia) runway surfaces a `funding_low` /
  *      `warning` notification naming the wallet address and the chain.
  *   2. A balance below `minEthWei` surfaces the higher-severity `funding_empty`
  *      / `blocking` notification instead, and `funding_low` for that chain is
- *      suppressed (empty supersedes low — see derive.ts `continue`).
+ *      suppressed (empty supersedes low — see notifications-build.ts's `continue`).
  *   3. A low L1 (`l1MasterGas`, Ethereum Sepolia) runway surfaces its own
  *      `funding_low` warning naming "Ethereum Sepolia", independent of L2.
- *   4. Updating `/v1/status` to healthy values clears the warning on the next
+ *   4. Updating `/v1/notifications` to an empty list clears the warning on the next
  *      poll-driven re-render, with no page reload.
  *   5. WalletCard's runway line carries `data-runway-severity="warning"` /
  *      `"blocking"` when the corresponding severity applies (L2 only — see
@@ -121,6 +130,26 @@ const LOW_L1_MASTER_GAS = {
   minEthWei: '500000000000000',
 };
 
+function fundingLowNotice(wallet: string, chain: string) {
+  return {
+    kind: 'funding_low',
+    severity: 'warning',
+    title: 'Gas runway low',
+    message: `Gas runway low — ${wallet} on ${chain} below threshold; top up soon.`,
+    jumpTo: '/overview',
+  };
+}
+
+function fundingEmptyNotice(wallet: string, chain: string) {
+  return {
+    kind: 'funding_empty',
+    severity: 'blocking',
+    title: 'Gas exhausted',
+    message: `Gas exhausted — ${wallet} on ${chain} can't cover the next transaction.`,
+    jumpTo: '/overview',
+  };
+}
+
 /**
  * Registers the `/v1/status` route with a handler that reads the *current*
  * value of `state.status` on every request — lets a single test mutate the
@@ -135,14 +164,35 @@ function mockStatusRoute(page: Page, state: { status: Record<string, unknown> })
   );
 }
 
+/** Same live-mutation pattern as {@link mockStatusRoute}, for `/v1/notifications`. */
+function mockNotificationsRoute(
+  page: Page,
+  state: { notifications: Array<Record<string, unknown>> },
+): Promise<void> {
+  return page.route(
+    (url) => url.pathname === '/v1/notifications',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          notifications: state.notifications,
+        }),
+      }),
+  );
+}
+
 test('low-but-nonzero L2 runway shows funding_low / warning naming the wallet and chain (AC1, AC5)', async ({
   page,
 }) => {
   await mockDaemonApi(page);
   const state = {
     status: { ...DEFAULT_STATUS_PAYLOAD, masterGas: LOW_MASTER_GAS },
+    notifications: [fundingLowNotice(L2_ADDRESS, 'Base Sepolia')],
   };
   await mockStatusRoute(page, state);
+  await mockNotificationsRoute(page, state);
   await page.route(
     (url) => url.pathname === '/v1/bootstrap',
     (route) =>
@@ -179,8 +229,10 @@ test('L2 balance below minEthWei shows funding_empty / blocking and suppresses f
   await mockDaemonApi(page);
   const state = {
     status: { ...DEFAULT_STATUS_PAYLOAD, masterGas: EMPTY_MASTER_GAS },
+    notifications: [fundingEmptyNotice(L2_ADDRESS, 'Base Sepolia')],
   };
   await mockStatusRoute(page, state);
+  await mockNotificationsRoute(page, state);
   await page.route(
     (url) => url.pathname === '/v1/bootstrap',
     (route) =>
@@ -215,8 +267,10 @@ test('low L1 (Ethereum Sepolia) runway shows its own funding_low warning, indepe
       masterGas: HEALTHY_MASTER_GAS,
       l1MasterGas: LOW_L1_MASTER_GAS,
     },
+    notifications: [fundingLowNotice(L1_ADDRESS, 'Ethereum Sepolia')],
   };
   await mockStatusRoute(page, state);
+  await mockNotificationsRoute(page, state);
   await page.route(
     (url) => url.pathname === '/v1/bootstrap',
     (route) =>
@@ -247,8 +301,10 @@ test('warning clears on the next poll-driven re-render once funding recovers, no
   await mockDaemonApi(page);
   const state = {
     status: { ...DEFAULT_STATUS_PAYLOAD, masterGas: LOW_MASTER_GAS },
+    notifications: [fundingLowNotice(L2_ADDRESS, 'Base Sepolia')],
   };
   await mockStatusRoute(page, state);
+  await mockNotificationsRoute(page, state);
   await page.route(
     (url) => url.pathname === '/v1/bootstrap',
     (route) =>
@@ -263,12 +319,14 @@ test('warning clears on the next poll-driven re-render once funding recovers, no
   const runwayLine = page.getByTestId('wallet-runway');
   await expect(runwayLine).toHaveAttribute('data-runway-severity', 'warning');
 
-  // Mutate the mocked payload in place — the route handler reads `state.status`
-  // fresh on every request, so no new `page.route` registration or reload is
-  // needed. Overview's own `['status']` query polls every 5s (see
-  // `pages/Overview.tsx`), which the notifications hook shares the cache key
-  // with — the next scheduled poll picks up the healthy values.
+  // Mutate the mocked payloads in place — both route handlers read `state.status` /
+  // `state.notifications` fresh on every request, so no new `page.route` registration or
+  // reload is needed. Overview's own `['status']` query polls every 5s and
+  // `useNotifications`' `['notifications']` query polls on the same 5s cadence (see
+  // `notifications/useNotifications.ts`) — the next scheduled poll of each picks up the
+  // healthy values.
   state.status = { ...DEFAULT_STATUS_PAYLOAD, masterGas: HEALTHY_MASTER_GAS };
+  state.notifications = [];
 
   await expect(fundingLow).toHaveCount(0, { timeout: 15_000 });
   await expect(runwayLine).toHaveAttribute('data-runway-severity', 'none', { timeout: 15_000 });

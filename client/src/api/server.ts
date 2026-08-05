@@ -32,6 +32,7 @@ import type { ArtifactSource } from '../types/envelope.js';
 import { addEventsRoutes } from './events-endpoint.js';
 import { addActivityEventsRoutes } from './activity-events-endpoint.js';
 import { addBootstrapRoutes, type BootstrapEndpointConfig } from './bootstrap-endpoint.js';
+import { addNotificationsRoutes } from './notifications-endpoint.js';
 import { addSolverNetsRoutes, type SolverNetsRegistry } from './solvernets-endpoint.js';
 import {
   registerSolverNetsEndpoints,
@@ -548,6 +549,7 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   app.use('/v1/activity-events/*', requireOperatorToken);
   app.use('/v1/bootstrap', requireOperatorToken);
   app.use('/v1/rewards', requireOperatorToken);
+  app.use('/v1/notifications', requireOperatorToken);
   app.use('/v1/solvernets', requireOperatorToken);
   app.use('/v1/solvernets/*', requireOperatorToken);
   app.use('/v1/auth/*', requireOperatorToken);
@@ -595,6 +597,16 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
       getStatus: () => liveStatus,
     });
   }
+
+  // §6.5 / issue #2408 — mounted unconditionally (like `/v1/status`, not gated on
+  // `config.ui`) so the self-start/bearer-only path (tests, embedded callers) still gets
+  // the endpoint. `getBootstrapExtras` reuses `/v1/bootstrap`'s own `configReader` purely
+  // for its already-computed `rpcSlotHealth` + `joinedSolverNets` — never its assembled JSON.
+  addNotificationsRoutes(app, {
+    store,
+    getStatus: () => liveStatus,
+    getBootstrapExtras: () => config.bootstrap?.configReader?.(),
+  });
 
   if (config.discovery) {
     const disc = config.discovery;

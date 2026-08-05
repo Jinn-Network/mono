@@ -42,6 +42,7 @@ import type {
   ClaimPolicyConfig,
   ClaimPolicyResponse,
   ExecutionWiringConfigEntry,
+  NotificationsV1Response,
 } from '../../../../api/contract/index.js';
 import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
 
@@ -91,6 +92,7 @@ export const api = {
   getStatus: () => jfetch<StatusV1Response>('/v1/status'),
   getRewards: () => jfetch<RewardsResponse>('/v1/rewards'),
   getBootstrap: () => jfetch<BootstrapState>('/v1/bootstrap'),
+  getNotifications: () => jfetch<NotificationsV1Response>('/v1/notifications'),
   getRecentEvents: (kinds?: string[], limit = 100) => {
     const q = new URLSearchParams();
     if (kinds && kinds.length > 0) q.set('kinds', kinds.join(','));

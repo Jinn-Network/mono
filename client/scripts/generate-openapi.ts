@@ -24,6 +24,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod/v4';
 import { statusV1ResponseSchema } from '../src/api/contract/status.js';
+import { notificationsV1ResponseSchema } from '../src/api/contract/notifications.js';
 import { CURRENT_CONTRACT_VERSION } from '../src/api/contract/version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,12 @@ const ROUTES: RouteSpec[] = [
     method: 'get',
     summary: 'Operator daemon status — fleet, balances, activity, rewards, and per-vertical lifecycle rollups.',
     responseSchema: statusV1ResponseSchema,
+  },
+  {
+    path: '/v1/notifications',
+    method: 'get',
+    summary: 'Server-derived operator notifications — a pure function over receipts + the live-health class (§6.5, issue #2408).',
+    responseSchema: notificationsV1ResponseSchema,
   },
 ];
 
