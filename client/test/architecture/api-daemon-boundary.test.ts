@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
  * Architecture boundary test for #1584.
  *
  * The API layer (`client/src/api/`) must not depend inward on the daemon
- * layer (`client/src/daemon/`) nor on the engine persistence internals
- * (`harnesses/engine/persistence`). The API consumes neutral ports/types
- * (`types/`, `spend/`, `store/`) instead. This test scans the source text
+ * layer (`client/src/daemon/`) nor on the task-run persistence internals
+ * (`store/task-run-persistence`, and its `harnesses/engine/persistence`
+ * re-export shim). The API consumes neutral ports/types (`types/`, `spend/`,
+ * `store/` — the read-model port, not the concrete persistence class; see
+ * `types/task-run-read-model.ts`) instead. This test scans the source text
  * of every module under `src/api/` and fails if any of those forbidden
  * import specifiers are present.
  */
@@ -22,11 +24,15 @@ function apiSourceFiles(): string[] {
 }
 
 // Matches import specifiers that resolve into `client/src/daemon/` — i.e. a
-// `/daemon/` path segment in a relative specifier — or that end in the engine
-// persistence module. The `/daemon/` segment guard deliberately excludes
-// `solvernets/daemon-init` (that lives under `solvernets/`, not `daemon/`).
+// `/daemon/` path segment in a relative specifier — or that end in the
+// task-run persistence module. Both the post-relocation home
+// (`store/task-run-persistence`, one-swap P0-1) and the surviving
+// `harnesses/engine/persistence` shim are named, so the boundary holds
+// whichever path an offending import spells. The `/daemon/` segment guard
+// deliberately excludes `solvernets/daemon-init` (that lives under
+// `solvernets/`, not `daemon/`).
 const FORBIDDEN =
-  /from\s+['"][^'"]*\/daemon\/[^'"]*['"]|from\s+['"][^'"]*harnesses\/engine\/persistence(?:\.js)?['"]/;
+  /from\s+['"][^'"]*\/daemon\/[^'"]*['"]|from\s+['"][^'"]*harnesses\/engine\/persistence(?:\.js)?['"]|from\s+['"][^'"]*task-run-persistence(?:\.js)?['"]/;
 
 describe('api → daemon boundary (#1584)', () => {
   it('no module under src/api/ imports from daemon/ or engine/persistence', () => {

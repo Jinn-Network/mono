@@ -15,7 +15,7 @@ import {
   PROJECTOR_CURSOR_SCHEMA,
   PROJECTOR_OBSERVATIONS_SCHEMA,
 } from '../daemon/projector-cursor.js';
-import { TASK_RUNS_SCHEMA, TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import { TASK_RUNS_SCHEMA, TaskRunPersistence } from './task-run-persistence.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
