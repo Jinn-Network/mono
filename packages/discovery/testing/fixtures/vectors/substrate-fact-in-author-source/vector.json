@@ -5,7 +5,7 @@
   "input": {
     "item": {
       "record": {
-        "kind": "https://jinn.network/records/submission/1.0",
+        "kind": "https://spec.jinn.network/records/submission/v1",
         "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
       },
       "facts": {
@@ -17,15 +17,15 @@
           "agent": "did:key:zAgentSourceOne",
           "name": "feed"
         },
-        "entry": "sha256:02c145e5173dd833235ae5a0b54ce79198da1dca12845c18f651ffa95b41cbd0",
+        "entry": "sha256:985cab56e4e17ec2834ed92b9252831c9432492c66eeafe9af6718feb663f2ae",
         "announcementId": "ann-5"
       }
     },
     "sourceClass": "author",
     "profile": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
-      "kind": "https://jinn.network/records/submission/1.0",
-      "profile": "https://jinn.network/records/submission/facts-profile/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
+      "kind": "https://spec.jinn.network/records/submission/v1",
+      "profile": "https://spec.jinn.network/facts/submission/v1",
       "fields": [
         {
           "name": "taskDigest",
@@ -42,7 +42,7 @@
       "taskDigest": "sha256:b576bb210b2a1313eed1948f4216cb6440c2f5e61cf084da49c5e8ad3bfa437f"
     },
     "citedEntry": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
       "source": {
         "agent": "did:key:zAgentSourceOne",
         "name": "feed"
@@ -55,7 +55,7 @@
           "announcementId": "ann-5",
           "action": "available",
           "record": {
-            "kind": "https://jinn.network/records/submission/1.0",
+            "kind": "https://spec.jinn.network/records/submission/v1",
             "digest": "sha256:fe0328e46eb952f9bed5960f7ef531137d969b51372daab1b10786c04a2a1b22"
           }
         }

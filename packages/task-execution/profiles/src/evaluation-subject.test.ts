@@ -32,9 +32,9 @@ function subjectFixture(options: {
 } = {}) {
   const resultBytes = encoder.encode("diff --git a/a b/a\n");
   const taskBytes = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "1".repeat(64) },
     },
     instructions: "Return the requested patch.",
@@ -45,13 +45,13 @@ function subjectFixture(options: {
     }],
     evaluation: {
       name: "evaluation-spec.json",
-      uri: "https://jinn.network/evaluation-specs/control-v1",
+      uri: "https://spec.jinn.network/evaluation-specs/control-v1",
       mediaType: "application/vnd.jinn.task-execution.evaluation-spec.v1+json",
       digest: { sha256: "2".repeat(64) },
     },
   });
   const deliveryBytes = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
     task: options.deliveryTask ?? documentDigest(taskBytes),
     outputs: options.deliveryOutputs ?? [{
@@ -108,7 +108,7 @@ describe("verifyEvaluationSubject (program §7.56)", () => {
       }],
       evaluationSpecification: {
         name: "evaluation-spec.json",
-        uri: "https://jinn.network/evaluation-specs/control-v1",
+        uri: "https://spec.jinn.network/evaluation-specs/control-v1",
         mediaType:
           "application/vnd.jinn.task-execution.evaluation-spec.v1+json",
         digest: `sha256:${"2".repeat(64)}`,

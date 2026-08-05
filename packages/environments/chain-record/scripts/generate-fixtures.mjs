@@ -24,7 +24,7 @@ const {
   sealCryptoEnvironmentRecord,
 } = await import(join(root, "dist", "index.js"));
 
-const INFORMATION_KIND = "https://jinn.network/records/information-world/1.0";
+const INFORMATION_KIND = "https://spec.jinn.network/records/information-world/v1";
 const prefixed = (hex) => `sha256:${hex.repeat(64)}`;
 const bare = (hex) => hex.repeat(64);
 const word = (hex) => `0x${hex.repeat(64)}`;

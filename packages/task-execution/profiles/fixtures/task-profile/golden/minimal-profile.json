@@ -1,6 +1,6 @@
 {
-  "protocol": "https://jinn.network/profiles/task-profile/1.0",
-  "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+  "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+  "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
   "description": "Minimal example domain for task-profile schema conformance testing.",
   "payloadSchema": {
     "type": "object",

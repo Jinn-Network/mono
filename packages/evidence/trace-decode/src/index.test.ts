@@ -21,8 +21,8 @@ describe("public surface", () => {
       "createDefaultDecoderRegistry",
       "SHIPPED_DECODERS",
       "finalizeSpans",
-      "decodeTrajectory",
-      "tryDecodeTrajectory",
+      "decodeTrace",
+      "tryDecodeTrace",
       "CLAUDE_CODE_STREAM_JSON_FORMAT_IRI",
       "createClaudeCodeStreamJsonDecoder",
     ]) {
@@ -44,7 +44,7 @@ describe("public surface", () => {
 
   test("the default registry decodes exactly the formats this package ships", () => {
     expect(api.createDefaultDecoderRegistry().formats).toEqual([
-      "https://jinn.network/formats/claude-code-stream-json/v1",
+      "https://spec.jinn.network/formats/claude-code-stream-json/v1",
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("public surface", () => {
 
   test("a format the registry knows but no decoder claims resolves to nothing", () => {
     expect(
-      api.createDefaultDecoderRegistry().get("https://jinn.network/formats/hermes-json/v1"),
+      api.createDefaultDecoderRegistry().get("https://spec.jinn.network/formats/hermes-json/v1"),
     ).toBeUndefined();
   });
 });

@@ -21,7 +21,7 @@
       "types": "./dist/index.d.ts"
     },
     "./profiles/*": "./profiles/*",
-    "./schemas/*": "./profiles/evidence-repository-oci/1.0/schemas/*",
+    "./schemas/*": "./profiles/evidence-repository-oci/v1/schemas/*",
     "./fixtures/*": "./fixtures/*"
   },
   "files": [

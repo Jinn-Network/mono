@@ -1,13 +1,13 @@
 {
   "sourceDigest": "sha256:bca6abd06ca17af6e2bcbbbf5223a3a3999e02cd6085e812d8de60889087d6aa",
-  "traceId": "f41cfedf9cc8a5bddf07834226228730",
+  "traceId": "8f62e6eb67c927875883c89cc4354fe1",
   "timebase": "synthetic-ordinal",
   "completeness": {
     "decoded": "full"
   },
   "spans": [
     {
-      "spanId": "bd9479632da1aaae",
+      "spanId": "4a98944b48a60e48",
       "parentSpanId": null,
       "name": "invoke_agent claude-code",
       "kind": 1,
@@ -33,13 +33,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.outcome",
+          "key": "jinn.trace.outcome",
           "value": {
             "stringValue": "success"
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -51,8 +51,8 @@
       }
     },
     {
-      "spanId": "ed52bc645bf16d13",
-      "parentSpanId": "bd9479632da1aaae",
+      "spanId": "08a35544c54835f6",
+      "parentSpanId": "4a98944b48a60e48",
       "name": "chat",
       "kind": 3,
       "startTimeUnixNano": "0",
@@ -71,13 +71,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -89,8 +89,8 @@
       }
     },
     {
-      "spanId": "9841284d1688fa74",
-      "parentSpanId": "ed52bc645bf16d13",
+      "spanId": "53ea1e1026cac5e0",
+      "parentSpanId": "08a35544c54835f6",
       "name": "execute_tool Read",
       "kind": 1,
       "startTimeUnixNano": "0",
@@ -121,7 +121,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -133,8 +133,8 @@
       }
     },
     {
-      "spanId": "1af3e7dfbdd99fe3",
-      "parentSpanId": "ed52bc645bf16d13",
+      "spanId": "13dad70577c9e29a",
+      "parentSpanId": "08a35544c54835f6",
       "name": "execute_tool Grep",
       "kind": 1,
       "startTimeUnixNano": "0",
@@ -165,7 +165,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -177,5 +177,5 @@
       }
     }
   ],
-  "recordDigest": "sha256:a1db3cde61d43243f7cd39104991032124f9bda440bf548b1d74fae3c8efb642"
+  "recordDigest": "sha256:520bb37ada61a4e685a1d279361468056048b81d0228037d179097584857c267"
 }

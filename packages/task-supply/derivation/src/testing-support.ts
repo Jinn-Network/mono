@@ -34,7 +34,7 @@ const PARSER_DIGEST = `sha256:${"2".repeat(64)}`;
  */
 export function buildFixtureEnvironmentRecordBody(): EnvironmentRecord {
   return {
-    kind: "https://jinn.network/records/environment/1.0",
+    kind: "https://spec.jinn.network/records/environment/v1",
     source: {
       repo: "acme/widget",
       repoUrl: "https://github.com/acme/widget",

@@ -197,7 +197,7 @@ test("rejects an unbound private allowlist commitment before detector effects", 
 test("throws STRUCTURED_ARTIFACT_INVALID without output", async () => {
   const input = syntheticDerivationInput();
   const trace = input.sourceArtifacts.find(
-    ({ entityId }) => entityId === "trace/trajectory.jsonl",
+    ({ entityId }) => entityId === "trace/trace.jsonl",
   )!;
   (trace as { bytes: Uint8Array }).bytes =
     new TextEncoder().encode("{invalid\n");

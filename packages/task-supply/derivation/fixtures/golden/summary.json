@@ -1,17 +1,17 @@
 {
   "strategyId": "import.swe-rebench.v1",
-  "environmentRecordDigest": "sha256:132a33ea1aa496974c2aaadbff4c76daf8c957163344b7f64bf96525dd8cae8b",
+  "environmentRecordDigest": "sha256:f9f387b6f0aeeae984e2f4d0c1325c9a278350b3921566c2414bbbb611fae2ca",
   "written": [
     {
       "candidateId": "acme__widget-1234",
-      "taskDigest": "sha256:641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf",
-      "evaluationSpecDigest": "sha256:b1d5082a8bbb228e0b7dfd86006077afbde28e6f23ea3a636423e3d7278c81af",
+      "taskDigest": "sha256:35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49",
+      "evaluationSpecDigest": "sha256:2d5703421176e392e7fd918439dc90f1de427c3dd83c785332afa9bfd90d23c7",
       "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000001"
     },
     {
       "candidateId": "acme__widget-1235",
-      "taskDigest": "sha256:c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057",
-      "evaluationSpecDigest": "sha256:cb2fbc1dc0e6a0d123a6a685c0a6151e4bc129bce421742eaa2325c00b4e714b",
+      "taskDigest": "sha256:2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7",
+      "evaluationSpecDigest": "sha256:751db975920fefb05c6acd68e2ec1574889df55549b7688796c31c1f7245b811",
       "receiptDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000002"
     }
   ],

@@ -12,7 +12,7 @@ import type { LauncherContract } from '@jinn-network/task-execution-launchers';
 export const legacyPredictionV1BaselineLauncher: LauncherContract = {
   id: 'legacy-prediction-v1-baseline',
   capabilities: () => ({
-    taskProfiles: ['https://jinn.network/task-profiles/repository-work/1.0'],
+    taskProfiles: ['https://spec.jinn.network/task-profiles/repository-work/1.0'],
     inputMediaTypes: ['application/json'],
     outputMediaTypes: ['application/json'],
     structuredOutput: true,

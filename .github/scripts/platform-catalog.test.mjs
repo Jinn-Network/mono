@@ -803,7 +803,7 @@ test('the canonical repository catalog validates its topology without a second m
       .every((pkg) => pkg.publishPolicy === 'independent'),
   );
   const schema = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.schema.json'), 'utf8'));
-  assert.equal(schema.$id, 'https://jinn.network/architecture/platform-packages.schema.json');
+  assert.equal(schema.$id, 'https://spec.jinn.network/architecture/platform-packages.schema.json');
   assert.deepEqual(schema.required, [
     'catalogVersion',
     'manifestRoots',

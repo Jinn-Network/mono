@@ -53,7 +53,7 @@ export function createCatalogContractFixtures(): CatalogContractFixtures {
     },
     results: [result],
     nativeTrace: {
-      entityId: "trace/trajectory.jsonl",
+      entityId: "trace/trace.jsonl",
       digest: digest("d"),
       name: "Fixture trace",
       mediaType: "application/x-ndjson",

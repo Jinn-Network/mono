@@ -16,7 +16,7 @@ const fixedSigner: DsseSigner = async () => [
 ];
 
 const VALID_EOA_BINDING = {
-  protocol: "https://jinn.network/trust/key-binding/v1" as const,
+  protocol: "https://spec.jinn.network/trust/key-binding/v1" as const,
   agent: "urn:uuid:11111111-1111-4111-8111-111111111111",
   key: {
     publicKey: "0x04abcdef",

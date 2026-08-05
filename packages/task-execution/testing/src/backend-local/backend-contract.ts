@@ -19,7 +19,7 @@ import type { TestableBackend } from "../fake-backend.js";
 import { describe, expect, test } from "vitest";
 
 const PROFILE = {
-  uri: "https://jinn.network/task-profiles/repository-work/1.0",
+  uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   digest: {
     sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6",
   },
@@ -27,7 +27,7 @@ const PROFILE = {
 
 function taskBytes(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: PROFILE,
     instructions: "Local backend conformance fixture.",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -39,7 +39,7 @@ function submissionBytes(
   overrides: Readonly<Record<string, unknown>> = {},
 ): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${crypto.randomUUID()}`,
     task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
     requester: `urn:uuid:${crypto.randomUUID()}`,
@@ -134,7 +134,7 @@ export function describeLocalBackendContract(
         submissionBytes(task),
       );
       const delivery = sealDelivery({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         attempt,
         task: documentDigest(task),
         outputs: [],

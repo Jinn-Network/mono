@@ -3,14 +3,14 @@ import { describe, expect, test } from "vitest";
 import {
   SPAN_KIND,
   STATUS_CODE,
-  TRAJECTORY_PROTOCOL,
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_PROTOCOL,
+  TRACE_VOCABULARY_PROFILE,
   deriveSpanId,
   deriveTraceId,
-  parseTrajectory,
-  sealTrajectory,
+  parseTrace,
+  sealTrace,
   sha256Hex,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 
 import {
   DecoderContractError,
@@ -18,10 +18,10 @@ import {
   UnsupportedFormatError,
 } from "./contract.js";
 import type { DecodeResult, SpanDraft, TraceDecoder } from "./contract.js";
-import { decodeTrajectory, finalizeSpans, tryDecodeTrajectory } from "./decode.js";
+import { decodeTrace, finalizeSpans, tryDecodeTrace } from "./decode.js";
 import { createDecoderRegistry } from "./registry.js";
 
-const FORMAT = "https://jinn.network/formats/claude-code-stream-json/v1";
+const FORMAT = "https://spec.jinn.network/formats/claude-code-stream-json/v1";
 const BYTES = new TextEncoder().encode("one\ntwo\n");
 const DIGEST = sha256Hex(BYTES);
 
@@ -68,7 +68,7 @@ const traceId = deriveTraceId({
   formatIri: FORMAT,
   decoderId: "claude-code-stream-json",
   decoderVersion: "1.0.0",
-  vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+  vocabularyProfile: TRACE_VOCABULARY_PROFILE,
 });
 
 describe("finalizeSpans", () => {
@@ -133,37 +133,37 @@ describe("finalizeSpans", () => {
   });
 });
 
-describe("decodeTrajectory", () => {
+describe("decodeTrace", () => {
   test("assembles a document that seals and re-parses under the record schema", () => {
-    const document = decodeTrajectory(registryFor(result), FORMAT, input());
-    expect(document.protocol).toBe(TRAJECTORY_PROTOCOL);
+    const document = decodeTrace(registryFor(result), FORMAT, input());
+    expect(document.protocol).toBe(TRACE_PROTOCOL);
     expect(document.traceId).toBe(traceId);
     expect(document.source.formatIri).toBe(FORMAT);
-    expect(document.derivation.vocabularyProfile).toBe(TRAJECTORY_VOCABULARY_PROFILE);
+    expect(document.derivation.vocabularyProfile).toBe(TRACE_VOCABULARY_PROFILE);
     expect(document.timebase).toBe("synthetic-ordinal");
 
-    const sealed = sealTrajectory(document);
-    expect(parseTrajectory(sealed.bytes).traceId).toBe(traceId);
+    const sealed = sealTrace(document);
+    expect(parseTrace(sealed.bytes).traceId).toBe(traceId);
   });
 
   test("is byte-identical across repeated decodes of the same bytes", () => {
     const registry = registryFor(result);
-    expect(sealTrajectory(decodeTrajectory(registry, FORMAT, input())).digest).toBe(
-      sealTrajectory(decodeTrajectory(registry, FORMAT, input())).digest,
+    expect(sealTrace(decodeTrace(registry, FORMAT, input())).digest).toBe(
+      sealTrace(decodeTrace(registry, FORMAT, input())).digest,
     );
   });
 
   test("refuses bytes that do not match the declared native-trace digest", () => {
-    expect(() => decodeTrajectory(registryFor(result), FORMAT, input("b".repeat(64)))).toThrow(
+    expect(() => decodeTrace(registryFor(result), FORMAT, input("b".repeat(64)))).toThrow(
       SourceDigestMismatchError,
     );
   });
 
   test("refuses an unregistered format", () => {
     expect(() =>
-      decodeTrajectory(
+      decodeTrace(
         registryFor(result),
-        "https://jinn.network/formats/hermes-json/v1",
+        "https://spec.jinn.network/formats/hermes-json/v1",
         input(),
       ),
     ).toThrow(UnsupportedFormatError);
@@ -172,28 +172,28 @@ describe("decodeTrajectory", () => {
   test("refuses a decoder whose spans do not validate under the record's span schema", () => {
     const backwards = () =>
       result({ drafts: [draft({ startTimeUnixNano: "9", endTimeUnixNano: "1" })] });
-    expect(() => decodeTrajectory(registryFor(backwards), FORMAT, input())).toThrow(
+    expect(() => decodeTrace(registryFor(backwards), FORMAT, input())).toThrow(
       DecoderContractError,
     );
   });
 
   test("refuses a completeness verdict the record schema would reject", () => {
     const bad = () => result({ completeness: { decoded: "partial" } });
-    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+    expect(() => decodeTrace(registryFor(bad), FORMAT, input())).toThrow(
       DecoderContractError,
     );
   });
 
   test("refuses partial decode with skipped: 0", () => {
     const bad = () => result({ completeness: { decoded: "partial", skipped: 0 } });
-    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+    expect(() => decodeTrace(registryFor(bad), FORMAT, input())).toThrow(
       DecoderContractError,
     );
   });
 
   test("refuses full decode with skipped set", () => {
     const bad = () => result({ completeness: { decoded: "full", skipped: 1 } });
-    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+    expect(() => decodeTrace(registryFor(bad), FORMAT, input())).toThrow(
       DecoderContractError,
     );
   });
@@ -201,31 +201,31 @@ describe("decodeTrajectory", () => {
   test('refuses timebase "source" (invalid; C1 uses source-epoch-ns)', () => {
     const bad = () =>
       result({ timebase: "source" as "synthetic-ordinal" });
-    expect(() => decodeTrajectory(registryFor(bad), FORMAT, input())).toThrow(
+    expect(() => decodeTrace(registryFor(bad), FORMAT, input())).toThrow(
       DecoderContractError,
     );
   });
 });
 
-describe("tryDecodeTrajectory", () => {
+describe("tryDecodeTrace", () => {
   test("returns the document on the success arm", () => {
-    const outcome = tryDecodeTrajectory(registryFor(result), FORMAT, input());
+    const outcome = tryDecodeTrace(registryFor(result), FORMAT, input());
     expect(outcome.ok).toBe(true);
     if (outcome.ok) expect(outcome.document.traceId).toBe(traceId);
   });
 
   test("never throws, and names why it failed", () => {
-    const unsupported = tryDecodeTrajectory(
+    const unsupported = tryDecodeTrace(
       registryFor(result),
-      "https://jinn.network/formats/hermes-json/v1",
+      "https://spec.jinn.network/formats/hermes-json/v1",
       input(),
     );
     expect(unsupported).toMatchObject({ ok: false, reason: "unsupported-format" });
 
-    const mismatch = tryDecodeTrajectory(registryFor(result), FORMAT, input("b".repeat(64)));
+    const mismatch = tryDecodeTrace(registryFor(result), FORMAT, input("b".repeat(64)));
     expect(mismatch).toMatchObject({ ok: false, reason: "source-digest-mismatch" });
 
-    const violating = tryDecodeTrajectory(
+    const violating = tryDecodeTrace(
       registryFor(() => result({ drafts: [draft({ parentOrdinal: 3 })] })),
       FORMAT,
       input(),
@@ -244,7 +244,7 @@ describe("tryDecodeTrajectory", () => {
         },
       },
     ]);
-    const outcome = tryDecodeTrajectory(exploding, FORMAT, input());
+    const outcome = tryDecodeTrace(exploding, FORMAT, input());
     expect(outcome).toMatchObject({ ok: false, reason: "decoder-contract" });
     if (!outcome.ok) expect(outcome.detail).toContain("decoder blew up");
   });

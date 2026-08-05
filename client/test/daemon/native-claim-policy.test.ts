@@ -28,7 +28,7 @@ function documents(
   },
 ) {
   const taskBytes = sealTask({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     profile: { uri: PREDICTION_FORECAST_PROFILE_URI, digest: { sha256: profile.digest.slice(7) } },
     instructions: 'Return the pinned forecast.',
     payload: {
@@ -44,7 +44,7 @@ function documents(
     requirements,
   });
   const submissionBytes = sealSubmission({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: SUBMISSION_URI,
     task: { digest: { sha256: documentDigest(taskBytes).slice(7) } },
     requester: 'urn:jinn:requester:one',

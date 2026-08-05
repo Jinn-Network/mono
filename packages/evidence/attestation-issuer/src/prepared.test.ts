@@ -112,7 +112,10 @@ describe("prepared attestation parsing", () => {
     const prepared = await prepareResultEvaluation({
       task: { name: "task", digest },
       results: [{ name: "result", digest }],
-      evaluator: { id: "https://example.test/evaluator" },
+      // This id's length is chosen so the serialized statement's base64 payload
+      // carries "=" padding (required for malleatePaddingBits below); an
+      // unpadded-length id would leave the payload malleation case untested.
+      evaluator: { id: "https://example.test/evaluator1" },
       evaluatedAt: "2026-07-24T12:00:00Z",
       verdict: "pass",
     }, async () => [{ signature: new Uint8Array([1]) }]);

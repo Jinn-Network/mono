@@ -1,5 +1,5 @@
 {
-  "formatIri": "https://jinn.network/formats/claude-code-stream-json/v1",
+  "formatIri": "https://spec.jinn.network/formats/claude-code-stream-json/v1",
   "decoderId": "claude-code-stream-json",
   "decoderVersion": "1.0.0",
   "fixtures": [

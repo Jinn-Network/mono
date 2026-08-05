@@ -8,7 +8,7 @@ import type { LaunchPlan } from "../src/contract.js";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 
-const view = { task: { instructions: "do the work", outputs: [] }, effectiveRequirements: {}, profile: { profile: "https://jinn.network/task-profiles/repository-work/1.0" } } as unknown as TaskView;
+const view = { task: { instructions: "do the work", outputs: [] }, effectiveRequirements: {}, profile: { profile: "https://spec.jinn.network/task-profiles/repository-work/1.0" } } as unknown as TaskView;
 const paths = { work: "/attempt/work", input: "/attempt/input", harnessState: "/attempt/harness-state", secrets: "/attempt/secrets", out: "/attempt/out", root: "/attempt", logs: "/attempt/logs", tmp: "/attempt/tmp", meta: "/attempt/meta" } as WorkspacePaths;
 const attempt = { attemptUri: "urn:uuid:00000000-0000-0000-0000-000000000001", nonce: "n", attemptNumber: 1 } as AttemptIdentity;
 

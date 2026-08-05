@@ -25,10 +25,10 @@ function queued(id = 1, sequence = '0000000000000001'): NativeDiscoveryQueuedCar
     id,
     announcementId: `announcement-${id}`,
     card: {
-      record: { kind: 'https://jinn.network/records/task-execution/submission/1.0', digest: SUBMISSION_DIGEST },
+      record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: SUBMISSION_DIGEST },
       facts: {
         taskDigest: TASK_DIGEST,
-        taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+        taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       },
       chain: {
         taskId: 7n,
@@ -76,7 +76,7 @@ function accepted(): NativeClaimDecision {
       taskDigest: TASK_DIGEST,
       submission: 'urn:uuid:11111111-1111-4111-8111-111111111111',
       nonce: 'nonce-1',
-      profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      profileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       requirements: {},
       runnable: true,
       intendedSpendWei: 2n,

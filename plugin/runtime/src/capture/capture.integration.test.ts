@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { openLocalEvidenceRuntime } from "@jinn-network/evidence-local-runtime";
 import { validateExecutionEvidence } from "@jinn-network/evidence-protocol";
-import { parseTrajectory } from "@jinn-network/evidence-trajectory";
+import { parseTrace } from "@jinn-network/evidence-trace";
 import type { DsseSigner } from "@jinn-network/trust-core";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -12,14 +12,14 @@ import { resolveRuntimeConfig } from "../config.js";
 import { createCaptureCapability } from "./capability.js";
 import {
   SESSION_FEED_FORMAT_IRI,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
 } from "./identity.js";
 import {
   derivationLinkPath,
-  loadTrajectoryDerivationAttestation,
-  loadTrajectoryRecord,
-  readTrajectoryDerivationAttestationLink,
-  trajectoryReferenceFromRecordBytes,
+  loadTraceDerivationAttestation,
+  loadTraceRecord,
+  readTraceDerivationAttestationLink,
+  traceReferenceFromRecordBytes,
 } from "./link.js";
 import { resolveCapturePaths } from "./paths.js";
 import { SEAL_MARKER_FILENAME, listStrandedSessionIds } from "./retention.js";
@@ -124,7 +124,7 @@ describe("capture end to end", () => {
     expect(result.capture.derivationAttestation.digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
   }, 60_000);
 
-  test("the sealed record binds the feed with its format identity and links the trajectory", async () => {
+  test("the sealed record binds the feed with its format identity and links the trace", async () => {
     const home = await newHome();
     const { capture } = await startCapture(home);
     const { sessionId, feedPath } = await capture.openSession({ sessionId: "s-link" });
@@ -147,8 +147,8 @@ describe("capture end to end", () => {
     const identifiers = Array.isArray(trace?.identifier) ? trace.identifier : [trace?.identifier];
     expect(identifiers).toContainEqual({
       "@type": "PropertyValue",
-      propertyID: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-      value: result.capture.trajectory.digest,
+      propertyID: TRACE_RECORD_IDENTIFIER_PROPERTY,
+      value: result.capture.trace.digest,
     });
   }, 60_000);
 
@@ -168,11 +168,11 @@ describe("capture end to end", () => {
     );
     expect((await stat(linkPath)).isFile()).toBe(true);
 
-    const link = await readTrajectoryDerivationAttestationLink(paths, sealed.record.digest);
+    const link = await readTraceDerivationAttestationLink(paths, sealed.record.digest);
     expect(link).toEqual({
       version: 1,
       executionDigest: sealed.record.digest,
-      trajectoryDigest: sealed.trajectory.digest,
+      traceDigest: sealed.trace.digest,
       attestationDigest: sealed.derivationAttestation.digest,
       nativeTraceDigest: sealed.nativeTrace.reference.digest,
       derivedAt: "2026-07-30T09:00:06Z",
@@ -180,10 +180,10 @@ describe("capture end to end", () => {
 
     const runtime = await openLocalEvidenceRuntime({ rootDir: config.archiveDirectory });
     try {
-      const loaded = await loadTrajectoryDerivationAttestation(runtime.repository, link!);
+      const loaded = await loadTraceDerivationAttestation(runtime.repository, link!);
       expect(loaded.envelopeBytes).toEqual(sealed.derivationAttestation.envelopeBytes);
       expect(`sha256:${loaded.statement.subject[0]!.digest.sha256}`).toBe(
-        sealed.trajectory.digest,
+        sealed.trace.digest,
       );
       expect(`sha256:${loaded.statement.predicate.execution.digest.sha256}`).toBe(
         sealed.record.digest,
@@ -195,7 +195,7 @@ describe("capture end to end", () => {
     }
   }, 60_000);
 
-  test("the trajectory record is retrievable through the link and carries no message content", async () => {
+  test("the trace record is retrievable through the link and carries no message content", async () => {
     const home = await newHome();
     const { capture, config } = await startCapture(home);
     const { sessionId, feedPath } = await capture.openSession({ sessionId: "s-traj" });
@@ -204,13 +204,13 @@ describe("capture end to end", () => {
     expect(result.sealed).toBe(true);
     if (!result.sealed) return;
 
-    const reference = trajectoryReferenceFromRecordBytes(result.capture.recordBytes);
-    expect(reference).toEqual({ digest: result.capture.trajectory.digest });
+    const reference = traceReferenceFromRecordBytes(result.capture.recordBytes);
+    expect(reference).toEqual({ digest: result.capture.trace.digest });
 
     const runtime = await openLocalEvidenceRuntime({ rootDir: config.archiveDirectory });
     try {
-      const record = await loadTrajectoryRecord(runtime.repository, reference!);
-      expect(record.traceId).toBe(result.capture.trajectory.traceId);
+      const record = await loadTraceRecord(runtime.repository, reference!);
+      expect(record.traceId).toBe(result.capture.trace.traceId);
       expect(record.source.formatIri).toBe(SESSION_FEED_FORMAT_IRI);
       expect(record.source).not.toHaveProperty("execution");
       expect(record.spans.map((span) => span.name)).toEqual([
@@ -225,8 +225,8 @@ describe("capture end to end", () => {
       await runtime.close();
     }
     // Sealing bytes and stored bytes are the same bytes.
-    expect(parseTrajectory(result.capture.trajectory.bytes).traceId).toBe(
-      result.capture.trajectory.traceId,
+    expect(parseTrace(result.capture.trace.bytes).traceId).toBe(
+      result.capture.trace.traceId,
     );
   }, 60_000);
 

@@ -32,7 +32,7 @@ const WINDOW = {
 
 function stable(): EnvironmentVerificationPredicate {
   return {
-    protocol: "https://jinn.network/environment-verification/protocol/1.0",
+    protocol: "https://spec.jinn.network/environment-verification/protocol/v1",
     result: "stable",
     window: WINDOW,
     runs: {
@@ -83,7 +83,7 @@ describe("environment verification predicate", () => {
     expect(EnvironmentVerificationPredicateSchema.safeParse(withoutRuns).success).toBe(false);
 
     const errorPredicate = {
-      protocol: "https://jinn.network/environment-verification/protocol/1.0",
+      protocol: "https://spec.jinn.network/environment-verification/protocol/v1",
       result: "error",
       window: WINDOW,
       controls: CONTROLS,

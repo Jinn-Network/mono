@@ -51,7 +51,7 @@ const POPULATION = [PARENT, CANDIDATE, THIRD] as readonly AdmittedCandidate[];
 
 const TASK_A = `sha256:${"a".repeat(64)}`;
 const TASK_B = `sha256:${"b".repeat(64)}`;
-const PROFILE_URI = "https://jinn.network/task-profiles/policy-c7b-seam/1.0";
+const PROFILE_URI = "https://spec.jinn.network/task-profiles/policy-c7b-seam/1.0";
 
 /** The profile the fixture Tasks pin, sealed exactly as the deriver re-hashes it. */
 const PROFILE_BYTES = new TextEncoder().encode(
@@ -84,11 +84,11 @@ function announcement(input: {
   const { formatToken: _formatToken, ...axes } = input.candidate.tuple as Record<string, unknown>;
   return {
     record: {
-      kind: "https://jinn.network/records/delivery/1.0",
+      kind: "https://spec.jinn.network/records/delivery/v1",
       digest: `sha256:${"4".repeat(60)}${suffix}`,
     },
     provenance: {
-      source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+      source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
       entry: `sha256:${"3".repeat(60)}${suffix}`,
       announcementId: `ann-seam-${suffix}`,
     },
@@ -99,13 +99,13 @@ function announcement(input: {
     attributionFromChainEvent: input.evaluator,
     ...(input.benchmarkRun === undefined ? {} : { benchmarkRun: input.benchmarkRun }),
     task: {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: { uri: PROFILE_URI, digest: { sha256: PROFILE_DIGEST } },
       instructions: "Seam fixture task.",
       outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
     },
     submission: {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:0189d1c2-0000-7000-8000-0000000${suffix}1`,
       task: { digest: { sha256: input.taskDigest.slice("sha256:".length) } },
       requester: "urn:jinn:agent:seam-requester",

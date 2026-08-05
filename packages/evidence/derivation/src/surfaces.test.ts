@@ -23,7 +23,7 @@ test("protects structure and emits only policy-admitted metadata literals", () =
   );
   expect(
     extraction.surfaces.some(({ surfaceId }) =>
-      surfaceId.startsWith("artifact:trace/trajectory.jsonl"),
+      surfaceId.startsWith("artifact:trace/trace.jsonl"),
     ),
   ).toBe(true);
 });
@@ -78,14 +78,14 @@ test("admits a protected-looking extension value only through its exact policy s
 test("throws for malformed declared JSONL", () => {
   const input = syntheticDerivationInput();
   const trace = input.sourceArtifacts.find(
-    ({ entityId }) => entityId === "trace/trajectory.jsonl",
+    ({ entityId }) => entityId === "trace/trace.jsonl",
   )!;
   (trace as { bytes: Uint8Array }).bytes =
     new TextEncoder().encode("{broken\n");
   const document = JSON.parse(new TextDecoder().decode(input.sourceRecord.bytes));
   document["@graph"].find(
     (entity: Record<string, unknown>) =>
-      entity["@id"] === "trace/trajectory.jsonl",
+      entity["@id"] === "trace/trace.jsonl",
   ).sha256 = sha256Digest(trace.bytes).slice(7);
   (input.sourceRecord as { bytes: Uint8Array }).bytes = new TextEncoder().encode(
     `${JSON.stringify(document, null, 2)}\n`,

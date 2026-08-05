@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Packs Protocol, Trajectory, and Trace Decode, then proves the tarball is what a real
+// Packs Protocol, Trace, and Trace Decode, then proves the tarball is what a real
 // consumer gets: the kit and fixtures ship, nothing private leaks, a root-only consumer
 // installs without vitest, and the packed /testing entrypoint runs under real vitest.
 
@@ -16,7 +16,7 @@ const trustCoreRoot = join(packagesRoot, "..", "trust", "core");
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-trace-decode-"));
 const protocolArchive = join(temporaryRoot, "evidence-protocol.tgz");
 const trustCoreArchive = join(temporaryRoot, "trust-core.tgz");
-const trajectoryArchive = join(temporaryRoot, "evidence-trajectory.tgz");
+const traceArchive = join(temporaryRoot, "evidence-trace.tgz");
 const traceDecodeArchive = join(temporaryRoot, "evidence-trace-decode.tgz");
 const rootConsumer = join(temporaryRoot, "root-consumer");
 const testingConsumer = join(temporaryRoot, "testing-consumer");
@@ -59,7 +59,7 @@ function output(command, args, options = {}) {
 
 const DEPENDENCIES = {
   "@jinn-network/evidence-protocol": `file:${protocolArchive}`,
-  "@jinn-network/evidence-trajectory": `file:${trajectoryArchive}`,
+  "@jinn-network/evidence-trace": `file:${traceArchive}`,
   "@jinn-network/evidence-trace-decode": `file:${traceDecodeArchive}`,
   "@jinn-network/trust-core": `file:${trustCoreArchive}`,
 };
@@ -84,8 +84,8 @@ try {
   await run("corepack", ["yarn@4.13.0", "pack", "--out", protocolArchive], {
     cwd: join(packagesRoot, "protocol"),
   });
-  await run("corepack", ["yarn@4.13.0", "pack", "--out", trajectoryArchive], {
-    cwd: join(packagesRoot, "trajectory"),
+  await run("corepack", ["yarn@4.13.0", "pack", "--out", traceArchive], {
+    cwd: join(packagesRoot, "trace"),
   });
   await run("corepack", ["yarn@4.13.0", "pack", "--out", traceDecodeArchive], {
     cwd: packageRoot,
@@ -121,11 +121,11 @@ try {
     join(rootConsumer, "smoke.mjs"),
     `
 import assert from "node:assert/strict";
-import { sealTrajectory, sha256Hex } from "@jinn-network/evidence-trajectory";
+import { sealTrace, sha256Hex } from "@jinn-network/evidence-trace";
 import * as root from "@jinn-network/evidence-trace-decode";
 
 assert.equal(typeof root.createDefaultDecoderRegistry, "function");
-assert.equal(typeof root.tryDecodeTrajectory, "function");
+assert.equal(typeof root.tryDecodeTrace, "function");
 assert.equal("describeTraceDecoderContract" in root, false);
 assert.equal("loadClaudeCodeFixtures" in root, false);
 
@@ -133,18 +133,18 @@ const registry = root.createDefaultDecoderRegistry();
 const bytes = new TextEncoder().encode(
   '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}\\n',
 );
-const outcome = root.tryDecodeTrajectory(
+const outcome = root.tryDecodeTrace(
   registry,
   root.CLAUDE_CODE_STREAM_JSON_FORMAT_IRI,
   { bytes, nativeTrace: { digest: { sha256: sha256Hex(bytes) } } },
 );
 assert.equal(outcome.ok, true);
 assert.equal(outcome.document.spans.length, 2);
-assert.equal(typeof sealTrajectory(outcome.document).digest, "string");
+assert.equal(typeof sealTrace(outcome.document).digest, "string");
 
-const unknown = root.tryDecodeTrajectory(
+const unknown = root.tryDecodeTrace(
   registry,
-  "https://jinn.network/formats/hermes-json/v1",
+  "https://spec.jinn.network/formats/hermes-json/v1",
   { bytes, nativeTrace: { digest: { sha256: sha256Hex(bytes) } } },
 );
 assert.equal(unknown.ok, false);
@@ -174,7 +174,7 @@ assert.equal(unknown.reason, "unsupported-format");
     vitest: { optional: true },
   });
   assert.deepEqual(Object.keys(installedManifest.dependencies ?? {}), [
-    "@jinn-network/evidence-trajectory",
+    "@jinn-network/evidence-trace",
   ]);
 
   await mkdir(testingConsumer);

@@ -164,7 +164,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
     const taskBytes = await loadGoldenTaskBytes();
     const taskDigestHex = recordDigest(taskBytes).slice("sha256:".length);
     const submissionBytes = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd",
       task: { digest: { sha256: taskDigestHex } },
       requester: "urn:uuid:eeeeeeee-eeee-5eee-8eee-eeeeeeeeeeee",
@@ -222,7 +222,7 @@ describe("facts/task-execution wired into protocol's verifyItem", () => {
 
   it("mandatory: a Delivery item with NO benchmarking triple announced verifies consistent (absent, opaque to core)", async () => {
     const deliveryBytes = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt: "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
       task: "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
       outputs: [],

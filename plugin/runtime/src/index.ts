@@ -57,20 +57,20 @@ export {
   SESSION_FEED_MEDIA_TYPE,
   SESSION_FEED_VERSION,
   SESSION_ID_PROPERTY,
-  TRAJECTORY_BUILDER_ID,
-  TRAJECTORY_BUILDER_VERSION,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_BUILDER_ID,
+  TRACE_BUILDER_VERSION,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
   executorIri,
 } from "./capture/identity.js";
 export {
   derivationLinkPath,
-  loadTrajectoryDerivationAttestation,
-  loadTrajectoryRecord,
-  readTrajectoryDerivationAttestationLink,
-  trajectoryReferenceFromRecordBytes,
-  writeTrajectoryDerivationAttestationLink,
+  loadTraceDerivationAttestation,
+  loadTraceRecord,
+  readTraceDerivationAttestationLink,
+  traceReferenceFromRecordBytes,
+  writeTraceDerivationAttestationLink,
 } from "./capture/link.js";
-export type { TrajectoryDerivationAttestationLink } from "./capture/link.js";
+export type { TraceDerivationAttestationLink } from "./capture/link.js";
 export {
   assertSafeSessionId,
   ensureOwnerOnlyDirectory,
@@ -93,13 +93,13 @@ export type {
   RetentionWatermark,
   SweepCaptureRetentionInput,
 } from "./capture/retention.js";
-export { buildTrajectorySpans } from "./capture/spans.js";
-export type { BuildTrajectorySpansInput } from "./capture/spans.js";
+export { buildTraceSpans } from "./capture/spans.js";
+export type { BuildTraceSpansInput } from "./capture/spans.js";
 export {
-  TRAJECTORY_ARTIFACT_MEDIA_TYPE,
-  buildTrajectoryRecord,
-} from "./capture/trajectory.js";
-export type { BuiltTrajectory } from "./capture/trajectory.js";
+  TRACE_ARTIFACT_MEDIA_TYPE,
+  buildTraceRecord,
+} from "./capture/trace.js";
+export type { BuiltTrace } from "./capture/trace.js";
 
 // C6 — relevance, sensitivity exclusion, and projection.
 export { PLANES, comparePlanes } from "./relevance/planes.js";

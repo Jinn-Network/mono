@@ -101,7 +101,7 @@ describe("deterministic OCI mapping", () => {
     const canonical = canonicalizeEvidenceOciManifest(manifest);
 
     expect(new TextDecoder().decode(canonical)).toBe(
-      `{"annotations":{"network.jinn.evidence.profile":"https://jinn.network/profiles/evidence-repository-oci/1.0"},"artifactType":"application/vnd.jinn.execution-evidence.v1+json","config":{"digest":"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","mediaType":"application/vnd.oci.empty.v1+json","size":2},"layers":[{"digest":"${reference.digest}","mediaType":"application/vnd.jinn.execution-evidence.v1+json","size":19}],"mediaType":"application/vnd.oci.image.manifest.v1+json","schemaVersion":2}`,
+      `{"annotations":{"network.jinn.evidence.profile":"https://spec.jinn.network/profiles/evidence-repository-oci/v1"},"artifactType":"application/vnd.jinn.execution-evidence.v1+json","config":{"digest":"sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","mediaType":"application/vnd.oci.empty.v1+json","size":2},"layers":[{"digest":"${reference.digest}","mediaType":"application/vnd.jinn.execution-evidence.v1+json","size":19}],"mediaType":"application/vnd.oci.image.manifest.v1+json","schemaVersion":2}`,
     );
     expect(evidenceOciManifestDigest(manifest)).toMatch(
       /^sha256:[0-9a-f]{64}$/u,
@@ -152,7 +152,7 @@ describe("deterministic OCI mapping", () => {
     const schema = JSON.parse(
       await readFile(
         new URL(
-          "../profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
+          "../profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
           import.meta.url,
         ),
         "utf8",

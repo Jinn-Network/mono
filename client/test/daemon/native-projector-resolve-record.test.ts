@@ -4,7 +4,7 @@ import type { ObservationMarketplaceEvent } from '@jinn-network/marketplace-proj
 import { buildNativeResolveRecord } from '../../src/daemon/composition-root.js';
 
 const TASK_DIGEST = `sha256:${'a'.repeat(64)}` as const;
-const SUBMISSION = new TextEncoder().encode('{"protocol":"https://jinn.network/tep/v1"}');
+const SUBMISSION = new TextEncoder().encode('{"protocol":"https://spec.jinn.network/profiles/task-execution/v1"}');
 
 function event(): ObservationMarketplaceEvent {
   return {
@@ -24,7 +24,7 @@ describe('native projector submission resolution', () => {
     const resolveRecord = buildNativeResolveRecord(BASE_SEPOLIA_TODAY, lookup);
 
     await expect(resolveRecord(event(), 'submission')).resolves.toEqual({
-      kind: 'https://jinn.network/records/submission/1.0',
+      kind: 'https://spec.jinn.network/records/submission/v1',
       bytes: SUBMISSION,
     });
     expect(lookup).toHaveBeenCalledExactlyOnceWith({

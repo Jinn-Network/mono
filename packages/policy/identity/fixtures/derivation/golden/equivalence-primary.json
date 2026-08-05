@@ -8,8 +8,8 @@
     "floorTightening": "The Task sets `effort: medium` (a `floor` class key declared by the profile); the Submission tightens to `high`. Same rule: the merge result, `high`, is what enters the tuple."
   },
   "profile": {
-    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9XX0=",
+    "profile": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3JlcG9zaXRvcnktd29yay8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImZsb29yIiwia2V5IjoiZWZmb3J0In0seyJjb21wYXJpc29uQ2xhc3MiOiJjZWlsaW5nIiwia2V5IjoibWF4VG9rZW5zIn0seyJjb21wYXJpc29uQ2xhc3MiOiJleGFjdCIsImtleSI6InJldmlld0RlcHRoIn1dfQ==",
     "requirementKeys": [
       { "key": "effort", "comparisonClass": "floor" },
       { "key": "maxTokens", "comparisonClass": "ceiling" },
@@ -17,10 +17,10 @@
     ]
   },
   "task": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "profile": {
-      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
-      "digest": { "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503" }
+      "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "6876e4c92448b323c749af98cfefd5588a371981598ac21104ef7c70e9cfa5a2" }
     },
     "instructions": "Fix the failing test in the repository and leave the working tree clean.",
     "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }],
@@ -31,10 +31,10 @@
     }
   },
   "submission": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c101",
     "task": {
-      "digest": { "sha256": "d42da8ab68d514689a3aafcab7aedb309afa429dc1cb449dcb12f8b2f0e65dfd" }
+      "digest": { "sha256": "6ec682afe06417a630e6704ab26d51f0ee57a82f654bf78128e8ab180b36ca49" }
     },
     "requester": "urn:jinn:agent:policy-kit-requester",
     "idempotencyKey": "policy-c1-kit-equivalence-1",
@@ -60,8 +60,8 @@
     "observedIsolation": "unrestricted"
   },
   "expect": {
-    "taskDigest": "sha256:d42da8ab68d514689a3aafcab7aedb309afa429dc1cb449dcb12f8b2f0e65dfd",
-    "submissionDigest": "sha256:2e938173d6108125d8fbc8d05bda4ddcea218f4ee8123bb747ccec05dcb251da",
+    "taskDigest": "sha256:6ec682afe06417a630e6704ab26d51f0ee57a82f654bf78128e8ab180b36ca49",
+    "submissionDigest": "sha256:48381e98922a6f4d5465e9fd1fba1a22dd677e2408717471210971f57e44b521",
     "canonicalTuple": "{\"effort\":\"high\",\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":{\"id\":\"claude-code\",\"version\":\"2.1.34\"},\"isolationPolicy\":\"unrestricted\",\"loadout\":{\"digest\":\"sha256:a6098732ccd311fb1f4cf46a2e05389ac24f7207f9be513a0d1d423d8109b2c7\",\"kind\":\"jinn.skill.v1\",\"name\":\"alpha\"},\"maxTokens\":120000,\"model\":{\"id\":\"claude-haiku-4-5\",\"provider\":\"anthropic\"}}",
     "tupleDigest": "sha256:99aad34b38ddf833570e2cba7ee9be94b3e717f6851ffe6efcf77e0ebb5928c3",
     "absentTupleKeys": ["reviewDepth", "maxAttemptDurationMs", "network.example.customKey"],

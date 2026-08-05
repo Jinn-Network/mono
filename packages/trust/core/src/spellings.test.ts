@@ -101,7 +101,7 @@ describe("ScopeSchema", () => {
     expect(ScopeSchema.safeParse("network.jinn.discovery.announcements").success).toBe(true);
     expect(
       ScopeSchema.safeParse(
-        "https://jinn.network/trust-scopes/admission-receipts/1.0",
+        "https://spec.jinn.network/trust-scopes/admission-receipts/v1",
       ).success,
     ).toBe(true);
     expect(ScopeSchema.safeParse("urn:jinn:trust-scope:receipts").success).toBe(true);
@@ -116,8 +116,8 @@ describe("ScopeSchema", () => {
     "relative/scope",
     "https:/missing-authority",
     "https://",
-    "https://jinn.network/has whitespace",
-    "https://jinn.network/control\u0007",
+    "https://spec.jinn.network/has whitespace",
+    "https://spec.jinn.network/control\u0007",
     "network..jinn.scope",
     "-network.jinn.scope",
     "network.-jinn.scope",

@@ -22,16 +22,16 @@ import {
 describe("public contracts", () => {
   it("exports the stable protocol identifiers", () => {
     expect(EXECUTION_EVIDENCE_PROFILE_URI).toBe(
-      "https://jinn.network/profiles/execution-evidence/1.0",
+      "https://spec.jinn.network/profiles/execution-evidence/v1",
     );
     expect(EXECUTION_EVIDENCE_MEDIA_TYPE).toBe(
       "application/vnd.jinn.execution-evidence.v1+json",
     );
     expect(RESULT_EVALUATION_PREDICATE_TYPE).toBe(
-      "https://jinn.network/attestations/result-evaluation/v1",
+      "https://spec.jinn.network/attestations/result-evaluation/v1",
     );
     expect(EXECUTION_VERIFICATION_PREDICATE_TYPE).toBe(
-      "https://jinn.network/attestations/execution-verification/v1",
+      "https://spec.jinn.network/attestations/execution-verification/v1",
     );
     expect(IN_TOTO_STATEMENT_TYPE).toBe("https://in-toto.io/Statement/v1");
     expect(DSSE_PAYLOAD_TYPE).toBe("application/vnd.in-toto+json");
@@ -39,22 +39,22 @@ describe("public contracts", () => {
 
   it("exports stable PropertyValue scheme IRIs", () => {
     expect(DID_PKH_IDENTIFIER_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/did-pkh",
+      "https://spec.jinn.network/schemes/did-pkh",
     );
     expect(DID_KEY_IDENTIFIER_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/did-key",
+      "https://spec.jinn.network/schemes/did-key",
     );
     expect(CAIP19_IDENTIFIER_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/caip-19",
+      "https://spec.jinn.network/schemes/caip-19",
     );
     expect(GITHUB_IDENTIFIER_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/github",
+      "https://spec.jinn.network/schemes/github",
     );
     expect(PROFILE_URI_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/task-profile-uri",
+      "https://spec.jinn.network/schemes/task-profile-uri",
     );
     expect(TASK_DIGEST_SCHEME_IRI).toBe(
-      "https://jinn.network/schemes/task-digest",
+      "https://spec.jinn.network/schemes/task-digest",
     );
   });
 

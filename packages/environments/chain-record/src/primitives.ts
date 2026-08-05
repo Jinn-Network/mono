@@ -71,8 +71,10 @@ export const ExactSemanticVersion = z
 export const RecordKindUri = z
   .string()
   .regex(
-    /^https:\/\/jinn\.network\/records\/[a-z0-9]+(?:-[a-z0-9]+)*\/\d+\.\d+$/,
-    "expected https://jinn.network/records/<segment>/<major>.<minor>",
+    // DR-2026-08-04, transition window closed: one origin, one version form. Reference
+    // implementation: packages/discovery/protocol/src/origins.ts.
+    /^https:\/\/spec\.jinn\.network\/records\/[a-z0-9]+(?:-[a-z0-9]+)*\/v[1-9]\d*$/,
+    "expected https://spec.jinn.network/records/<segment>/v<major>",
   );
 
 /**

@@ -21,7 +21,7 @@ describe("generated profile schemas", () => {
         "https://json-schema.org/draft/2020-12/schema",
       );
       expect(schema.$id).toBe(
-        `https://jinn.network/profiles/execution-evidence/1.0/schemas/${name}`,
+        `https://spec.jinn.network/profiles/execution-evidence/v1/schemas/${name}`,
       );
     }
   });

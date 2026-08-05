@@ -11,7 +11,7 @@ const fixedSigner: DsseSigner = async () => [
 ];
 
 const VALID_REVOCATION = {
-  protocol: "https://jinn.network/trust/revocation/v1" as const,
+  protocol: "https://spec.jinn.network/trust/revocation/v1" as const,
   target: `sha256:${"1".repeat(64)}`,
   revokedBy: "did:pkh:eip155:8453:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
   effectiveFrom: "2026-07-29T00:00:00Z",

@@ -1,10 +1,10 @@
 {
   "input": {
     "op": "resolve",
-    "descriptorUri": "https://jinn.network/task-profiles/example-domain/1.0",
+    "descriptorUri": "https://spec.jinn.network/task-profiles/example-domain/1.0",
     "doc": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
       "description": "Resolution fixture: resolvable document.",
       "payloadSchema": {
         "type": "object",
@@ -18,5 +18,5 @@
       "requirementKeys": []
     }
   },
-  "expect": { "ok": true, "profile": "https://jinn.network/task-profiles/example-domain/1.0" }
+  "expect": { "ok": true, "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0" }
 }

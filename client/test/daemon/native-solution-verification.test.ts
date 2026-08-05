@@ -22,14 +22,14 @@ function fixture(binding = { ok: true as const, bindingDigest: `sha256:${'9'.rep
   const keyId = 'did:key:z6MksolverDelivery';
   const evaluationDigest = documentDigest(EVALUATION_SPEC);
   const taskBytes = sealTask({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
-    profile: { uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
+    profile: { uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
     instructions: 'Predict.',
     outputs: [{ name: 'prediction', mediaType: 'application/json', required: true }],
     evaluation: { name: 'evaluation', digest: { sha256: evaluationDigest.slice(7) } },
   });
   const submissionBytes = sealSubmission({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: SUBMISSION,
     task: { digest: { sha256: documentDigest(taskBytes).slice(7) } },
     requester: 'urn:uuid:33333333-3333-4333-8333-333333333333',
@@ -44,7 +44,7 @@ function fixture(binding = { ok: true as const, bindingDigest: `sha256:${'9'.rep
     attempt: ATTEMPT,
   });
   const deliveryBytes = sealDelivery({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: ATTEMPT,
     task: documentDigest(taskBytes),
     outputs: [{ name: 'prediction', mediaType: 'application/json', digest: { sha256: documentDigest(OUTPUT).slice(7) } }],

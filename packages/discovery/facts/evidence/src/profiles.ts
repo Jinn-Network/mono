@@ -15,6 +15,6 @@ function loadProfile(filename: string): FactsProfileDocument {
   return parseFactsProfile(JSON.parse(readFileSync(path, "utf8")));
 }
 
-export const executionEvidenceProfile: FactsProfileDocument = loadProfile("execution-evidence.1.0.json");
-export const resultEvaluationProfile: FactsProfileDocument = loadProfile("result-evaluation.1.0.json");
-export const executionVerificationProfile: FactsProfileDocument = loadProfile("execution-verification.1.0.json");
+export const executionEvidenceProfile: FactsProfileDocument = loadProfile("execution-evidence.v1.json");
+export const resultEvaluationProfile: FactsProfileDocument = loadProfile("result-evaluation.v1.json");
+export const executionVerificationProfile: FactsProfileDocument = loadProfile("execution-verification.v1.json");

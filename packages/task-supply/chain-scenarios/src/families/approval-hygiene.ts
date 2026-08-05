@@ -179,7 +179,7 @@ function requiredProtocolRoles(params: ApprovalHygieneParams): string[] {
 }
 
 export const approvalHygieneTemplate: ScenarioTemplate<ApprovalHygieneParams> = {
-  id: "https://jinn.network/scenario-templates/approval-hygiene/1",
+  id: "https://spec.jinn.network/scenario-templates/approval-hygiene/v1",
   version: "1",
   compatibility: {
     closureClass: "closed-state",

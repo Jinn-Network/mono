@@ -13,11 +13,11 @@ import type {
   EvidenceRecordReference,
 } from "@jinn-network/evidence-repository";
 import {
-  TRAJECTORY_VOCABULARY_PROFILE,
-  buildTrajectoryDerivationStatement,
+  TRACE_VOCABULARY_PROFILE,
+  buildTraceDerivationStatement,
   documentDigest,
-  sealTrajectoryDerivationAttestation,
-} from "@jinn-network/evidence-trajectory";
+  sealTraceDerivationAttestation,
+} from "@jinn-network/evidence-trace";
 import {
   type CaptureDiagnostic,
   type ExecutionId,
@@ -42,12 +42,12 @@ import {
   PRODUCER_IRI,
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
-  TRAJECTORY_BUILDER_ID,
-  TRAJECTORY_BUILDER_VERSION,
+  TRACE_BUILDER_ID,
+  TRACE_BUILDER_VERSION,
 } from "./identity.js";
 import {
-  type TrajectoryDerivationAttestationLink,
-  writeTrajectoryDerivationAttestationLink,
+  type TraceDerivationAttestationLink,
+  writeTraceDerivationAttestationLink,
 } from "./link.js";
 import {
   type CapturePaths,
@@ -66,7 +66,7 @@ import {
   readRetentionWatermark,
   sweepCaptureRetention,
 } from "./retention.js";
-import { buildTrajectoryRecord } from "./trajectory.js";
+import { buildTraceRecord } from "./trace.js";
 
 /** At most this many stranded feeds are sealed per `openSession`, oldest first. */
 const OPEN_SESSION_RECOVERY_LIMIT = 3;
@@ -116,7 +116,7 @@ export interface SealedCapture {
     readonly formatIri: string;
     readonly mediaType: string;
   };
-  readonly trajectory: {
+  readonly trace: {
     readonly reference: EvidenceArtifactReference;
     readonly bytes: Uint8Array;
     readonly digest: `sha256:${string}`;
@@ -207,7 +207,7 @@ export function createCaptureCapability(
       ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
       ...(input.endedAt === undefined ? {} : { endedAt: input.endedAt }),
     });
-    const trajectory = buildTrajectoryRecord(feed, feedBytes);
+    const trace = buildTraceRecord(feed, feedBytes);
     const nativeTraceDigest = documentDigest(feedBytes);
 
     const assembly: CaptureAssemblyInput = {
@@ -216,13 +216,13 @@ export function createCaptureCapability(
       workspaceDir: workspaceDirectory(state.paths, input.sessionId),
       producerVersion: options.producerVersion,
       outcome,
-      trajectoryDigest: trajectory.digest,
+      traceDigest: trace.digest,
     };
 
     await ensureOwnerOnlyDirectory(assembly.workspaceDir);
 
-    // Trajectory artifact exists before the record that names it, never after.
-    const trajectoryReceipt = await runtime.repository.putArtifact(trajectory.bytes, {
+    // Trace artifact exists before the record that names it, never after.
+    const traceReceipt = await runtime.repository.putArtifact(trace.bytes, {
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
 
@@ -250,20 +250,20 @@ export function createCaptureCapability(
     const executionDigest = finalized.receipt.record.digest;
     const derivedAt = outcome.endedAt;
 
-    const statement = buildTrajectoryDerivationStatement({
+    const statement = buildTraceDerivationStatement({
       producerId: PRODUCER_IRI,
       executionDigest,
-      trajectoryDigest: trajectory.digest,
+      traceDigest: trace.digest,
       nativeTraceDigest,
       formatIri: SESSION_FEED_FORMAT_IRI,
-      decoderId: TRAJECTORY_BUILDER_ID,
-      decoderVersion: TRAJECTORY_BUILDER_VERSION,
-      vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+      decoderId: TRACE_BUILDER_ID,
+      decoderVersion: TRACE_BUILDER_VERSION,
+      vocabularyProfile: TRACE_VOCABULARY_PROFILE,
       timebase: "source-epoch-ns",
       linkageMode: "forward-linked",
       derivedAt,
     });
-    const attestation = await sealTrajectoryDerivationAttestation({
+    const attestation = await sealTraceDerivationAttestation({
       statement,
       signer: options.signer,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
@@ -272,15 +272,15 @@ export function createCaptureCapability(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
 
-    const derivationLink: TrajectoryDerivationAttestationLink = {
+    const derivationLink: TraceDerivationAttestationLink = {
       version: 1,
       executionDigest,
-      trajectoryDigest: trajectory.digest,
+      traceDigest: trace.digest,
       attestationDigest: attestation.digest,
       nativeTraceDigest,
       derivedAt,
     };
-    await writeTrajectoryDerivationAttestationLink(state.paths, derivationLink);
+    await writeTraceDerivationAttestationLink(state.paths, derivationLink);
 
     const recordBytes = await runtime.repository.getRecord(finalized.receipt.record);
     if (recordBytes === null) {
@@ -303,11 +303,11 @@ export function createCaptureCapability(
         formatIri: SESSION_FEED_FORMAT_IRI,
         mediaType: SESSION_FEED_MEDIA_TYPE,
       },
-      trajectory: {
-        reference: trajectoryReceipt.reference,
-        bytes: trajectory.bytes,
-        digest: trajectory.digest,
-        traceId: trajectory.traceId,
+      trace: {
+        reference: traceReceipt.reference,
+        bytes: trace.bytes,
+        digest: trace.digest,
+        traceId: trace.traceId,
       },
       derivationAttestation: {
         reference: attestationReceipt.reference,
@@ -327,7 +327,7 @@ export function createCaptureCapability(
       `${JSON.stringify({
         executionId: capture.executionId,
         record: capture.record,
-        trajectory: capture.trajectory.digest,
+        trace: capture.trace.digest,
         nativeTrace: capture.nativeTrace.reference.digest,
         derivationAttestation: capture.derivationAttestation.digest,
         sealedAt: now().toISOString(),

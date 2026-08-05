@@ -197,7 +197,7 @@ describe("prepareExecutionDisclosure", () => {
     const findings: readonly DerivationFinding[] = [{
       class: "email",
       confidence: "HIGH",
-      surfaceId: "trace/trajectory.jsonl",
+      surfaceId: "trace/trace.jsonl",
       start: 0,
       end: 1,
       evidence: [],

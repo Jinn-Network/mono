@@ -12,6 +12,10 @@ on:
     secrets:
       JINN_MARKETPLACE_FORK_RPC_URL:
         required: false
+      JINN_PROFILE_MANIFEST_SIGNING_KEY:
+        required: false
+      JINN_PROFILE_MANIFEST_KEY_ID:
+        required: false
 
 permissions:
   contents: read
@@ -131,6 +135,13 @@ jobs:
             --release-group platform-v1 \
             --lane "${LANE}" \
             --out .platform-verification/profile-root
+      - name: Sign the profile manifest
+        env:
+          JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
+          JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
+        run: >-
+          node .github/scripts/sign-profile-manifest.mjs
+          --root .platform-verification/profile-root
       - name: Pack exact prepublication bundle
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}

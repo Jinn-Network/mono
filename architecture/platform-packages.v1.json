@@ -13,6 +13,10 @@
       "mode": "package"
     },
     {
+      "path": "apps/website",
+      "mode": "package"
+    },
+    {
       "path": "client",
       "mode": "package"
     },
@@ -116,6 +120,10 @@
     "plugin-tree-ci": {
       "kind": "workflow",
       "path": ".github/workflows/plugin-tree-ci.yml"
+    },
+    "website-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/website-ci.yml"
     }
   },
   "releaseGroups": {
@@ -233,7 +241,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 9,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "private",
         "never"
@@ -247,7 +255,8 @@
         "indexer-enrichment-ci",
         "plugin-tree-ci",
         "policy-optimization-ci",
-        "task-supply-ci"
+        "task-supply-ci",
+        "website-ci"
       ],
       "allowedClassifications": [
         "product",
@@ -2102,7 +2111,7 @@
       },
       "publicSurface": {
         "schemas": [
-          "profiles/execution-evidence/1.0/schemas"
+          "profiles/execution-evidence/v1/schemas"
         ],
         "profiles": [
           "profiles"
@@ -2288,7 +2297,7 @@
       },
       "publicSurface": {
         "schemas": [
-          "profiles/evidence-repository-oci/1.0/schemas"
+          "profiles/evidence-repository-oci/v1/schemas"
         ],
         "profiles": [
           "profiles"
@@ -2394,10 +2403,10 @@
       "replacedBy": []
     },
     {
-      "name": "@jinn-network/evidence-trajectory",
-      "path": "packages/evidence/trajectory",
+      "name": "@jinn-network/evidence-trace",
+      "path": "packages/evidence/trace",
       "domain": "evidence",
-      "role": "trajectory record family",
+      "role": "trace record family",
       "tier": 2,
       "classification": "platform",
       "stability": "candidate",
@@ -2431,7 +2440,9 @@
         "schemas": [
           "schemas"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "fixtures": [
           "fixtures"
         ],
@@ -2577,6 +2588,46 @@
       "boundaryPolicy": {
         "kind": "workflow",
         "path": ".github/workflows/indexer-ci.yml"
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/website",
+      "path": "apps/website",
+      "domain": "devx",
+      "role": "developer-experience website product",
+      "tier": 4,
+      "tierReason": "The apex site is a product surface over the platform, not a protocol layer within it; tier 4 is the product tier.",
+      "classification": "product",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "apps/website/WEBSITE-APP-SPEC.md",
+            "status": "current"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-04-spec-origin-and-vocabulary.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "private",
+      "requiredGateIds": [
+        "website-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/website-ci.yml"
       }
     },
     {
@@ -3348,7 +3399,9 @@
         "schemas": [
           "schemas"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "fixtures": [
           "fixtures"
         ],
@@ -3865,6 +3918,38 @@
         "kind": "source-boundary",
         "path": ".github/scripts/plugin-tree-source-boundaries.test.mjs"
       }
+    }
+  ],
+  "resolvableIdentifiers": [
+    {
+      "identifier": "https://spec.jinn.network/profiles/task-execution/v1",
+      "resolution": "document",
+      "entryPoint": "profiles/task-execution/v1",
+      "owner": "@jinn-network/task-execution-protocol"
+    },
+    {
+      "identifier": "https://spec.jinn.network/profiles/task-profile/v1",
+      "resolution": "document",
+      "entryPoint": "profiles/task-profile/v1",
+      "owner": "@jinn-network/task-execution-profiles"
+    },
+    {
+      "identifier": "https://spec.jinn.network/profiles/trace-vocabulary/v1",
+      "resolution": "document",
+      "entryPoint": "profiles/trace-vocabulary/v1",
+      "owner": "@jinn-network/evidence-trace"
+    },
+    {
+      "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1",
+      "resolution": "prefix",
+      "entryPoint": "profiles/execution-evidence/v1/ro-crate-metadata.json",
+      "owner": "@jinn-network/evidence-protocol"
+    },
+    {
+      "identifier": "https://spec.jinn.network/profiles/evidence-repository-oci/v1",
+      "resolution": "prefix",
+      "entryPoint": "profiles/evidence-repository-oci/v1/specification.md",
+      "owner": "@jinn-network/evidence-repository-oci"
     }
   ]
 }

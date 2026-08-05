@@ -14,7 +14,7 @@ const fixed = { passed: ["keeps", "target"], failed: [], passedMatch: true };
 const receipt = {
   schemaVersion: ADMISSION_RECEIPT_SCHEMA_VERSION,
   admissionPolicyVersion: DIFFERENTIAL_ADMISSION_POLICY_V3.admissionPolicyVersion,
-  issuer: "https://jinn.network/agents/admission-1",
+  issuer: "https://spec.jinn.network/agents/admission-1",
   task: {
     documentDigest: D("1"),
     evaluationSpecDigest: D("2"),

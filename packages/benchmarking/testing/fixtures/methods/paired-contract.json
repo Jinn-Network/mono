@@ -415,7 +415,7 @@
         "reason": "participant-exclusion"
       }
     ],
-    "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+    "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
     "run": {
       "digest": {
         "sha256": "df632b99d25b6ef6f1d16a09a80a4956de2e136387431f190cfaf89fd9834d07"

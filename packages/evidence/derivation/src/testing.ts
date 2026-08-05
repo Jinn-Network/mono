@@ -382,7 +382,7 @@ function sensitiveMetadataInput(
   if (!mixed) {
     replaceSyntheticArtifact(
       input,
-      "trace/trajectory.jsonl",
+      "trace/trace.jsonl",
       new TextEncoder().encode(
         `${JSON.stringify({
           event: "tool",
@@ -747,7 +747,7 @@ export function describeEvidenceDeriverContract(
         "task/task.md",
         "results/result.patch",
         "runtime/runtime-specification.json",
-        "trace/trajectory.jsonl",
+        "trace/trace.jsonl",
         "inputs/base-tree.txt",
       ]) {
         expect(
@@ -757,7 +757,7 @@ export function describeEvidenceDeriverContract(
         );
       }
       const traceMapping = receipt.mappings.find(
-        (mapping) => mapping.sourceEntityId === "trace/trajectory.jsonl",
+        (mapping) => mapping.sourceEntityId === "trace/trace.jsonl",
       );
       expect(traceMapping).toBeDefined();
       const publicTrace = outcome.artifacts.find(
@@ -861,7 +861,7 @@ export function describeEvidenceDeriverContract(
       const input = syntheticDerivationInput();
       replaceSyntheticArtifact(
         input,
-        "trace/trajectory.jsonl",
+        "trace/trace.jsonl",
         new TextEncoder().encode('{"event":"unterminated"\n'),
       );
       await expect((await factory()).derive(input)).rejects.toMatchObject({
@@ -963,7 +963,7 @@ export function describeEvidenceDeriverContract(
             ({ sourceEntityId }) => sourceEntityId,
           ),
         );
-        expect(derivedSourceIds.has("trace/trajectory.jsonl")).toBe(mixed);
+        expect(derivedSourceIds.has("trace/trace.jsonl")).toBe(mixed);
       },
     );
 

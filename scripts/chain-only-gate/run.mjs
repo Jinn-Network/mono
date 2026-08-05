@@ -224,7 +224,7 @@ async function main() {
     signer,
     clock: createFixedClock(),
     verifier: {
-      id: "https://jinn.network/chain-state-extraction/gate",
+      id: "https://spec.jinn.network/chain-state-extraction/gate",
       version: "0.1.0",
       digest: `sha256:${"c".repeat(64)}`,
     },

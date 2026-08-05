@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
   "name": "bad-version-benchmark",
   "description": "Schema-invalid: version is not a SemVer 2.0.0 string.",
   "version": "1",

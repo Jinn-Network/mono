@@ -229,7 +229,7 @@ function validateContext(
     !strings.has("https://w3id.org/ro/crate/1.3/context") ||
     !strings.has("https://w3id.org/ro/terms/workflow-run/context") ||
     mappings.prov !== "http://www.w3.org/ns/prov#" ||
-    mappings.jinn !== "https://jinn.network/terms/"
+    mappings.jinn !== "https://spec.jinn.network/terms/"
   ) {
     diagnostics.push(
       issue(

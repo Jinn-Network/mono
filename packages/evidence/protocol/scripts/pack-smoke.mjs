@@ -69,10 +69,10 @@ import {
   validateResultEvaluation,
 } from "@jinn-network/evidence-protocol";
 
-if (EXECUTION_EVIDENCE_PROFILE_URI !== "https://jinn.network/profiles/execution-evidence/1.0") {
+if (EXECUTION_EVIDENCE_PROFILE_URI !== "https://spec.jinn.network/profiles/execution-evidence/v1") {
   throw new Error("root import failed");
 }
-const profile = await readFile(new URL(import.meta.resolve("@jinn-network/evidence-protocol/profiles/execution-evidence/1.0/specification.md")), "utf8");
+const profile = await readFile(new URL(import.meta.resolve("@jinn-network/evidence-protocol/profiles/execution-evidence/v1/specification.md")), "utf8");
 if (!profile.includes("Jinn Execution Evidence Profile 1.0")) throw new Error("profile missing");
 await readFile(new URL(import.meta.resolve("@jinn-network/evidence-protocol/schemas/execution-evidence-document.schema.json")));
 const execution = await readFile(new URL(import.meta.resolve("@jinn-network/evidence-protocol/fixtures/golden-execution-evidence-v1/execution/ro-crate-metadata.json")));

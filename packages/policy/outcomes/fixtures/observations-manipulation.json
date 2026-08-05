@@ -24,7 +24,7 @@
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0001",
@@ -58,7 +58,7 @@
     "attribution": "urn:jinn:agent:solver-b",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0002",
@@ -92,7 +92,7 @@
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0003",
@@ -126,7 +126,7 @@
     "attribution": "urn:jinn:agent:solver-b",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0004",
@@ -160,7 +160,7 @@
     "attribution": "urn:jinn:agent:sybil-1",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0005",
@@ -194,7 +194,7 @@
     "attribution": "urn:jinn:agent:sybil-2",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0006",
@@ -228,7 +228,7 @@
     "attribution": "urn:jinn:agent:sybil-3",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0007",
@@ -262,7 +262,7 @@
     "attribution": "urn:jinn:agent:sybil-4",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0008",
@@ -296,7 +296,7 @@
     "attribution": "urn:jinn:agent:sybil-5",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0009",
@@ -330,7 +330,7 @@
     "attribution": "urn:jinn:agent:sybil-6",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0010",
@@ -364,7 +364,7 @@
     "attribution": "urn:jinn:agent:sybil-7",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0011",
@@ -398,7 +398,7 @@
     "attribution": "urn:jinn:agent:sybil-8",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0012",

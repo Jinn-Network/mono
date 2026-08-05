@@ -14,11 +14,11 @@ export const IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1" as const
 
 /** Receipt kind — spec §15's `DifferentialAdmissionReceipt/3`, as a URI. */
 export const ADMISSION_RECEIPT_SCHEMA_VERSION =
-  "https://jinn.network/records/differential-admission-receipt/3" as const;
+  "https://spec.jinn.network/records/differential-admission-receipt/v3" as const;
 
 /** in-toto `predicateType` of the Statement whose predicate is the receipt. */
 export const DIFFERENTIAL_ADMISSION_PREDICATE_TYPE =
-  "https://jinn.network/attestations/differential-admission/v3" as const;
+  "https://spec.jinn.network/attestations/differential-admission/v3" as const;
 
 /**
  * The public, versioned evidence policy this package implements (design §7.1). It is a policy
@@ -26,7 +26,7 @@ export const DIFFERENTIAL_ADMISSION_PREDICATE_TYPE =
  * digest it names.
  */
 export const DIFFERENTIAL_ADMISSION_POLICY_V3 = {
-  admissionPolicyVersion: "https://jinn.network/task-admission/policy/3",
+  admissionPolicyVersion: "https://spec.jinn.network/task-admission/policy/v3",
   /** Repeats per side, per path: empty x2 and gold x2. */
   observationsPerSide: 2,
   /** The candidate's declared transitions must be the ones its EvaluationSpec grades against. */
@@ -54,16 +54,16 @@ export const ENVIRONMENT_RECORD_SPEC_KEY = "network.jinn.environment.record" as 
  * import boundary (design §3.3), so the strings are pinned by test, not shared by import.
  */
 export const ADMISSION_RECEIPT_ANNOTATION_URI =
-  "https://jinn.network/annotations/admission-receipt/1.0" as const;
+  "https://spec.jinn.network/annotations/admission-receipt/v1" as const;
 export const ADMISSION_RECEIPT_DESCRIPTOR_NAME = "admission-receipt" as const;
 
 /** Receipt kind for the state-predicate family's admission receipt (chain design §6.3). */
 export const CHAIN_ADMISSION_RECEIPT_SCHEMA_VERSION =
-  "https://jinn.network/records/chain-admission-receipt/1" as const;
+  "https://spec.jinn.network/records/chain-admission-receipt/v1" as const;
 
 /** in-toto `predicateType` of the Statement whose predicate is a chain admission receipt. */
 export const CHAIN_ADMISSION_PREDICATE_TYPE =
-  "https://jinn.network/attestations/chain-admission/v1" as const;
+  "https://spec.jinn.network/attestations/chain-admission/v1" as const;
 
 /**
  * The public, versioned evidence policy the chain entry point implements (chain design
@@ -71,7 +71,7 @@ export const CHAIN_ADMISSION_PREDICATE_TYPE =
  * environment beyond the composite digest it names — the same bound the SWE policy carries.
  */
 export const CHAIN_ADMISSION_POLICY_V1 = {
-  admissionPolicyVersion: "https://jinn.network/task-admission/policy/chain/1",
+  admissionPolicyVersion: "https://spec.jinn.network/task-admission/policy/chain/v1",
   /** Repeats per side: do-nothing x2 and reference x2, each on a fresh instance. */
   observationsPerSide: 2,
   /** The do-nothing check is over the success CONJUNCTION, never over individual predicates. */

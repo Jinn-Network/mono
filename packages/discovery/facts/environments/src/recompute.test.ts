@@ -47,6 +47,6 @@ describe("environment record-fact recompute", () => {
 
   it("registers under the environment record kind and nothing else", () => {
     expect(ENVIRONMENTS_FACTS_RECOMPUTE.get(ENVIRONMENT_RECORD_KIND)).toBe(environmentRecompute);
-    expect(ENVIRONMENTS_FACTS_RECOMPUTE.get("https://jinn.network/records/benchmark/1.0")).toBeUndefined();
+    expect(ENVIRONMENTS_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/benchmark/v1")).toBeUndefined();
   });
 });

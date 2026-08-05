@@ -146,7 +146,7 @@ describe("execution evidence graph", () => {
     expect(entities.map((candidate) => candidate["@id"])).toEqual([
       "ro-crate-metadata.json",
       "./",
-      "https://jinn.network/profiles/execution-evidence/1.0",
+      "https://spec.jinn.network/profiles/execution-evidence/v1",
       "https://example.test/license",
       "task/task.md",
       "inputs/value.txt",
@@ -179,7 +179,7 @@ describe("execution evidence graph", () => {
       datePublished: "2026-07-24T10:00:02Z",
       license: { "@id": "https://example.test/license" },
       conformsTo: {
-        "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
       },
       creator: { "@id": "urn:agent:producer" },
       hasPart: [
@@ -256,7 +256,7 @@ describe("execution evidence graph", () => {
       "@id": "#duration-ms",
       "@type": "PropertyValue",
       name: "durationMs",
-      propertyID: "https://jinn.network/terms/durationMs",
+      propertyID: "https://spec.jinn.network/terms/durationMs",
       value: 1250,
       unitCode: "ms",
     });
@@ -273,7 +273,7 @@ describe("execution evidence graph", () => {
     ["failed", "https://schema.org/FailedActionStatus"],
     [
       "abandoned",
-      "https://jinn.network/terms/AbandonedActionStatus",
+      "https://spec.jinn.network/terms/AbandonedActionStatus",
     ],
   ] as const)("maps a resultless %s terminal state", (outcome, actionStatus) => {
     const bytes = buildExecutionEvidence(minimalInput(outcome));

@@ -4,14 +4,14 @@ import {
   SPAN_KIND,
   STATUS_CODE,
   SpanSchema,
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_VOCABULARY_PROFILE,
   deriveSpanId,
   deriveTraceId,
-  parseTrajectory,
-  sealTrajectory,
+  parseTrace,
+  sealTrace,
   serializeCanonicalJson,
   sha256Hex,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
@@ -25,7 +25,7 @@ import type {
   TraceDecoder,
   TraceDecoderFixture,
 } from "./contract.js";
-import { decodeTrajectory, finalizeSpans, tryDecodeTrajectory } from "./decode.js";
+import { decodeTrace, finalizeSpans, tryDecodeTrace } from "./decode.js";
 import { FORMAT_IRI_PATTERN } from "./formats.js";
 import { createDecoderRegistry } from "./registry.js";
 
@@ -81,7 +81,7 @@ function traceIdFor(decoder: TraceDecoder, bytes: Uint8Array): string {
     formatIri: decoder.formatIri,
     decoderId: decoder.decoderId,
     decoderVersion: decoder.decoderVersion,
-    vocabularyProfile: TRAJECTORY_VOCABULARY_PROFILE,
+    vocabularyProfile: TRACE_VOCABULARY_PROFILE,
   });
 }
 
@@ -216,16 +216,16 @@ export function describeTraceDecoderContract(
       }
     });
 
-    test("seals to a Trajectory record that re-parses, and holds its pinned digest", () => {
+    test("seals to a Trace record that re-parses, and holds its pinned digest", () => {
       const registry = createDecoderRegistry([context.decoder]);
       for (const fixture of context.fixtures) {
-        const document = decodeTrajectory(registry, context.decoder.formatIri, {
+        const document = decodeTrace(registry, context.decoder.formatIri, {
           bytes: fixture.bytes,
           nativeTrace: nativeTraceForSeal(context.decoder, fixture.bytes),
         });
-        const sealed = sealTrajectory(document);
-        expect(parseTrajectory(sealed.bytes).traceId, fixture.id).toBe(document.traceId);
-        expect(sealTrajectory(document).digest, fixture.id).toBe(sealed.digest);
+        const sealed = sealTrace(document);
+        expect(parseTrace(sealed.bytes).traceId, fixture.id).toBe(document.traceId);
+        expect(sealTrace(document).digest, fixture.id).toBe(sealed.digest);
         if (fixture.expected.recordDigest !== undefined) {
           expect(sealed.digest, fixture.id).toBe(fixture.expected.recordDigest);
         }
@@ -235,7 +235,7 @@ export function describeTraceDecoderContract(
     test("refuses bytes that do not match the declared native-trace digest", () => {
       const registry = createDecoderRegistry([context.decoder]);
       for (const fixture of context.fixtures) {
-        const outcome = tryDecodeTrajectory(registry, context.decoder.formatIri, {
+        const outcome = tryDecodeTrace(registry, context.decoder.formatIri, {
           bytes: fixture.bytes,
           nativeTrace: { digest: { sha256: "b".repeat(64) } },
         });
@@ -281,7 +281,7 @@ export function describeTraceDecoderContract(
 }
 
 export const LINE_EVENTS_FORMAT_IRI =
-  "https://jinn.network/formats/fixture-line-events/v1" as const;
+  "https://spec.jinn.network/formats/fixture-line-events/v1" as const;
 
 const LINE_EVENTS_DECODER_ID = "fixture-line-events";
 const LINE_EVENTS_DECODER_VERSION = "1.0.0";
@@ -322,7 +322,7 @@ function lineEventsDrafts(bytes: Uint8Array): DecodeResult {
       endTimeUnixNano: String(index + 1),
       attributes: sortAttributes([
         { key: "gen_ai.operation.name", value: { stringValue: "chat" } },
-        { key: "jinn.trajectory.source.ordinal", value: { intValue: String(index) } },
+        { key: "jinn.trace.source.ordinal", value: { intValue: String(index) } },
       ]),
       events: [],
       status: { code: STATUS_CODE.OK },

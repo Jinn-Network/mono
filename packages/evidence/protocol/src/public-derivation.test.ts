@@ -47,10 +47,10 @@ describe("public Execution Evidence derivation", () => {
     );
 
     expect(report).toMatchObject({ conforms: true, diagnostics: [] });
-    expect(execution.subjectOf).toEqual({ "@id": "trace/trajectory.jsonl" });
-    expect(entity(document, "trace/trajectory.public.jsonl")).toMatchObject({
+    expect(execution.subjectOf).toEqual({ "@id": "trace/trace.jsonl" });
+    expect(entity(document, "trace/trace.public.jsonl")).toMatchObject({
       about: { "@id": execution["@id"] },
-      "prov:wasDerivedFrom": { "@id": "trace/trajectory.jsonl" },
+      "prov:wasDerivedFrom": { "@id": "trace/trace.jsonl" },
       "prov:wasGeneratedBy": { "@id": "#public-scrub" },
     });
   });
@@ -83,8 +83,8 @@ describe("public Execution Evidence derivation", () => {
         await readFile(new URL("results/slug-normalization.patch", publicRoot)),
       ],
       [
-        "trace/trajectory.public.jsonl",
-        await readFile(new URL("trace/trajectory.public.jsonl", publicRoot)),
+        "trace/trace.public.jsonl",
+        await readFile(new URL("trace/trace.public.jsonl", publicRoot)),
       ],
       [
         "scrub/public-execution-policy.json",
@@ -100,7 +100,7 @@ describe("public Execution Evidence derivation", () => {
 
     const integrity = checkArtifactIntegrity(report.value!, available);
     const exactTrace = integrity.artifacts.find(
-      ({ entityId }) => entityId === "trace/trajectory.jsonl",
+      ({ entityId }) => entityId === "trace/trace.jsonl",
     );
 
     expect(exactTrace).toMatchObject({ status: "unavailable" });
@@ -135,7 +135,7 @@ describe("public Execution Evidence derivation", () => {
       document["@graph"].some(
         (candidate) =>
           candidate.predicateType ===
-            "https://jinn.network/attestations/execution-verification/v1" ||
+            "https://spec.jinn.network/attestations/execution-verification/v1" ||
           String(candidate["@id"]).includes("execution-verification"),
       ),
     ).toBe(false);

@@ -85,7 +85,7 @@ const DISPATCH_MEDIA_TYPE =
   "application/vnd.jinn.task-execution.dispatch-context.v1+json";
 const origin = {
   kind: "producer-observed",
-  observer: "https://jinn.network/software/backend-local",
+  observer: "https://spec.jinn.network/software/backend-local",
 } as const;
 
 function inputCapture(
@@ -130,7 +130,7 @@ function results(
       name: artifact.path.split("/").at(-1),
     },
     identifiers: [{
-      propertyId: "https://jinn.network/schemes/sha256",
+      propertyId: "https://spec.jinn.network/schemes/sha256",
       value: String(artifact.sha256),
     }],
     origin,
@@ -177,7 +177,7 @@ class EvidenceCaptureSessionImpl implements EvidenceCaptureSession {
           origin,
         },
         format: {
-          entityId: "https://jinn.network/formats/backend-local-supervisor-facts/v1",
+          entityId: "https://spec.jinn.network/formats/backend-local-supervisor-facts/v1",
           name: "Jinn backend-local supervisor facts",
         },
       },
@@ -210,7 +210,7 @@ export function createEvidenceJoin(options: EvidenceJoinOptions): EvidenceJoin {
           description: "Execution captured by the embedded Jinn local backend.",
           license: "https://spdx.org/licenses/Apache-2.0.html",
           executionIdentifiers: [{
-            propertyId: "https://jinn.network/schemes/task-execution-attempt-uri",
+            propertyId: "https://spec.jinn.network/schemes/task-execution-attempt-uri",
             value: input.attempt,
           }],
         },
@@ -223,7 +223,7 @@ export function createEvidenceJoin(options: EvidenceJoinOptions): EvidenceJoin {
             name: "task.sealed",
           },
           identifiers: [{
-            propertyId: "https://jinn.network/schemes/task-digest",
+            propertyId: "https://spec.jinn.network/schemes/task-digest",
             value: input.taskDigest,
           }],
           origin,

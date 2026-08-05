@@ -53,7 +53,7 @@ export type ReplayServiceFactory = (
 export function describeInformationWorldRecordConformance(): void {
   describe("Information world record conformance", () => {
     test("the pinned identifiers are exactly the design's strings", () => {
-      expect(INFORMATION_WORLD_KIND).toBe("https://jinn.network/records/information-world/1.0");
+      expect(INFORMATION_WORLD_KIND).toBe("https://spec.jinn.network/records/information-world/v1");
       expect(INFORMATION_WORLD_MEDIA_TYPE)
         .toBe("application/vnd.jinn.information-world.v1+json");
     });

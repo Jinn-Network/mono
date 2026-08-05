@@ -80,7 +80,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const hostileWrongKind = await fixtureBytes("run", "minimal");
     const hostileWrongKindDigest = recordDigest(hostileWrongKind);
     const wrongKindRun = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       benchmark: { digest: { sha256: hostileWrongKindDigest.slice("sha256:".length) } },
       closeAt: "2026-08-04T00:00:00Z",
@@ -106,7 +106,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const corrupt = new TextEncoder().encode('{"not":"a-benchmark"}');
     const corruptHex = recordDigest(corrupt);
     const hostileRun = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       benchmark: { digest: { sha256: corruptHex.slice("sha256:".length) } },
       closeAt: "2026-08-04T00:00:00Z",
@@ -130,7 +130,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const realBenchmark = await fixtureBytes("benchmark", "valid");
     const realDigest = recordDigest(realBenchmark);
     const linkedRun = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       benchmark: { digest: { sha256: realDigest.slice("sha256:".length) } },
       closeAt: "2026-08-04T00:00:00Z",
@@ -170,7 +170,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const hostileBenchmark = await fixtureBytes("benchmark", "valid");
     const hostileDigest = recordDigest(hostileBenchmark);
     const wrongKindMatrix = sealMatrix({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: hostileDigest.slice("sha256:".length) } },
       assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
@@ -192,7 +192,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const realRun = await fixtureBytes("run", "minimal");
     const runDigest = recordDigest(realRun);
     const linked = sealMatrix({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: runDigest.slice("sha256:".length) } },
       assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
@@ -231,7 +231,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
       attrition: { asymmetryFlags: [], perArm: {} },
     });
     const report = sealReport({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       subjects: [
         { digest: { sha256: digestA.slice("sha256:".length) } },
         { digest: { sha256: digestB.slice("sha256:".length) } },
@@ -278,7 +278,7 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     const hostileRun = await fixtureBytes("run", "minimal");
     const hostileDigest = recordDigest(hostileRun);
     const wrongKindReport = sealReport({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       subjects: [
         { digest: { sha256: digestA.slice("sha256:".length) } },
         { digest: { sha256: hostileDigest.slice("sha256:".length) } },
@@ -336,6 +336,6 @@ describe("facts/benchmarking recompute (program §7.128–§7.130)", () => {
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(RUN_RECORD_KIND)).toBe(runRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(MATRIX_RECORD_KIND)).toBe(matrixRecompute);
     expect(BENCHMARKING_FACTS_RECOMPUTE.get(REPORT_RECORD_KIND)).toBe(reportRecompute);
-    expect(BENCHMARKING_FACTS_RECOMPUTE.get("https://jinn.network/records/unknown/1.0")).toBeUndefined();
+    expect(BENCHMARKING_FACTS_RECOMPUTE.get("https://spec.jinn.network/records/unknown/v1")).toBeUndefined();
   });
 });
