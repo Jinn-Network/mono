@@ -205,6 +205,21 @@ retrieval, trust, and chain interfaces. It independently verifies exact bytes, s
 effective-time bindings, the record graph, canonical requester posting terms (`maxClaims=1` and
 self-evaluation false), and both settlements.
 
+**The report has no failure representation by design.** Verification is all-or-nothing: the
+consumer either produces a report with `decisionGrade: true`, or it throws and produces no report
+at all. There is no partial report, no `decisionGrade: false` value, and no silent pass on a failing
+check. The failure signal downstream tooling (and this runbook) must key on is therefore the
+**absence** of the report file / a non-zero consumer exit, not a field inside a report -- a report
+that exists is, by construction, a pass.
+
+**Scope limit: EOA ceremonies only.** The consumer's trust catalog rejects any role binding whose
+only ceremony evidence is a Safe/ERC-1271 witness signature (the production trust catalog wires a
+witness verifier that always returns unverified for Safe ceremonies). Every one of the four signing
+roles (requester submission, admission, solver delivery, evaluator verdict) must be bound via an
+offline-verifiable EOA (SIWE-style) ceremony for this vertical's consumer to reach a decision-grade
+report. A role bound only through a Safe ceremony causes the consumer to fail closed, not to skip
+that role's check.
+
 Do not retain passwords, private keys, forwarded signer material, tokens, RPC credentials, full
 confidential inputs, producer state paths, identity-store paths, trust-root paths, or private DB
 contents. The closure manifest is canonical JSON and carries public digests/identities only.

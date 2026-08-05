@@ -51,12 +51,12 @@ import {
   type SealedRevocationRecord,
 } from '@jinn-network/trust-resolve';
 import type { SourceIdentity } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import type {
   ExactPublicArtifact,
   NativePublicGraph,
   NativeGraphRoots,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 import {
   NativeVerificationError,
   deriveConsumerSolutionSettlementId,
@@ -65,7 +65,7 @@ import {
   writeNativeVerticalVerificationReport,
   type ConsumerTrustPorts,
   type NativeRoleAuthority,
-} from '../fixtures/native-vertical-consumer/src/verification.js';
+} from '../../src/native-consumer/verification.js';
 
 const roots: string[] = [];
 const NOW = '2026-08-02T12:00:00Z';

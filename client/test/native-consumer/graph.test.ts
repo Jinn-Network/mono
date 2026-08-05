@@ -37,7 +37,7 @@ import {
   type AnnouncementEntry,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import {
   NativeGraphError,
   deriveConsumerEngagementId,
@@ -46,7 +46,7 @@ import {
   retrieveNativePublicGraph,
   verifyExecutionEvidenceJoin,
   type NativeGraphRoots,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 
 const roots: string[] = [];
 const REQUESTER: SourceIdentity = { agent: 'did:web:requester.example', name: 'requester' };
@@ -308,6 +308,36 @@ describe('native public graph discovery', () => {
       },
       actors: { solverAgent: SOLVER_AGENT, evaluatorAgent: EVALUATOR_AGENT },
     })).toThrow(expect.objectContaining<Partial<NativeGraphError>>({ reason: 'public-record-fact-invalid' }));
+    consumer.close();
+  });
+
+  it('rejects a null authority time with the typed "authority time" error, not a raw TypeError', async () => {
+    // Regression for a graduation-time fix: the guard used to check `authorityTime === null`, but
+    // the object-shape helper it reads from only ever produces `undefined` for a non-object value.
+    // A `null` (or otherwise absent) authorityTime therefore fell through the guard and threw an
+    // uncaught TypeError on the very next property read (`authorityTime.chainId`) rather than this
+    // typed, named `NativeGraphError`. This is strictly a better error shape, not a bypass fix: the
+    // old code never silently accepted a bad authority time, it just crashed with the wrong error.
+    const consumer = await state();
+    seed(consumer, false, { authorityTime: null });
+    let caught: unknown;
+    try {
+      discoverNativeGraphRoots({
+        state: consumer,
+        runId: 'golden-run',
+        sources: {
+          requester: { source: REQUESTER, publicBaseUrl: 'https://requester.example' },
+          solver: { source: SOLVER, publicBaseUrl: 'https://solver.example' },
+          evaluator: { source: EVALUATOR, publicBaseUrl: 'https://evaluator.example' },
+        },
+        actors: { solverAgent: SOLVER_AGENT, evaluatorAgent: EVALUATOR_AGENT },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(NativeGraphError);
+    expect((caught as NativeGraphError).reason).toBe('public-record-fact-invalid');
+    expect((caught as NativeGraphError).message).toBe('public-record-fact-invalid: authority time');
     consumer.close();
   });
 

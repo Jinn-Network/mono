@@ -1574,7 +1574,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2868,
+      "discoveredFirstPartySurfaces": 2864,
       "generatedOutputSources": 1305,
       "generatorSources": 589,
       "marketplaceControl": 2,
@@ -11036,86 +11036,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/fixtures/native-vertical-consumer"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/package.json"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/src"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/src/graph.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/src/state.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/src/sync.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/src/verification.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/test/fixtures/native-vertical-consumer/tsconfig.json"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/fixtures/native-worker-lease-holder.ts"
       },
       {
@@ -13566,6 +13486,36 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/native-consumer/chain-facts.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/config.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/driver.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/native-consumer/graph.test.ts"
       },
       {
@@ -13597,6 +13547,16 @@
           "@ritsukai"
         ],
         "path": "client/test/native-consumer/sync.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-consumer/trust.test.ts"
       },
       {
         "categories": [

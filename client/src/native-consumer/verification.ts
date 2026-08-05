@@ -484,6 +484,7 @@ export async function verifyNativeVertical(input: {
     sealingTime: input.authority.requester.sealingTime,
   }, {
     bindingResolver: input.trust.bindingResolver,
+    witnessVerifier: input.trust.witnessVerifier,
     dsseVerifier: input.trust.dsseVerifier,
     policy: input.trust.policies.requester,
   });
