@@ -121,6 +121,26 @@ describe('GET /v1/bootstrap', () => {
     });
   });
 
+  // Issue #2407: the endpoint's old 14-entry STEPS list dropped `awaiting_stake`,
+  // so a service actually at `awaiting_stake` had no entry in STEP_INDEX and
+  // was mis-reported as `currentStep: 'wallet'` (phase 1) instead of its real
+  // position. The unified 15-entry FLEET_BOOTSTRAP_PHASES list fixes this.
+  it('reports currentStep=awaiting_stake (not wallet) for a service at that step', async () => {
+    const earningDir = makeFixtureEarningDir({
+      master_address: '0xabc',
+      chain: 'base-sepolia',
+      services: [{ index: 1, step: 'awaiting_stake', safe_address: null }],
+    });
+    const app = new Hono();
+    addBootstrapRoutes(app, { earningDir });
+    const res = await app.request('/v1/bootstrap');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { currentStep: string; steps: string[] };
+    expect(body.currentStep).toBe('awaiting_stake');
+    expect(body.steps).toContain('awaiting_stake');
+    expect(body.steps).toHaveLength(15);
+  });
+
   it('reports awaiting_funding when the daemon persists a funding gate during a partial bootstrap', async () => {
     const earningDir = makeFixtureEarningDir({
       master_address: '0xabc',

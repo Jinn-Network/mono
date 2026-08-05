@@ -81,12 +81,30 @@ export function createBroadcastLock(
   function startRenewal(chainId: number, sender: Address, onLost: () => void): () => void {
     const renewIntervalMs = Math.max(1, Math.floor(leaseMs / 2));
     const timer = setInterval(() => {
-      const result = renew.run({
-        chainId,
-        sender: sender.toLowerCase(),
-        holder: holderId,
-        expiresAtMs: now() + leaseMs,
-      });
+      let result;
+      try {
+        result = renew.run({
+          chainId,
+          sender: sender.toLowerCase(),
+          holder: holderId,
+          expiresAtMs: now() + leaseMs,
+        });
+      } catch {
+        // The lease row lives in a database whose lifetime this holder does not own. A renewal
+        // that lands after the connection closes -- teardown, or a host that closed the db under
+        // a still-running critical section -- throws from inside an unref'd timer callback,
+        // where there is no caller to catch it: it surfaces as an unhandled exception and takes
+        // the process (or, under vitest, the whole test file) down.
+        //
+        // Stop renewing rather than reporting `onLost`. A renewal that cannot execute cannot
+        // maintain exclusion either way, but `onLost` rejects the `leaseLost` promise that
+        // `withSender` races against `fn()` -- and once that race has settled the rejection is
+        // itself unhandled, trading one crash for another. The lease lapses on its own after
+        // `leaseMs`, and an operation still holding it surfaces its own failure on its next
+        // database access.
+        clearInterval(timer);
+        return;
+      }
       if (result.changes === 0) onLost();
     }, renewIntervalMs);
     // Never keep the process alive solely to renew a lease.

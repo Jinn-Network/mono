@@ -1,7 +1,7 @@
 import { type JSX } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
-import type { RegistryListResponse, SolverNetManifestSummary } from '../../api/types.js';
+import type { RegistryListResponse, SolverNetManifestSummary } from '../../../../../api/contract/index.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';

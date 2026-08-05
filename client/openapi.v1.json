@@ -1,0 +1,2266 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Jinn operator daemon — read contract",
+    "version": "1.0",
+    "description": "Generated from client/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate. GET /metrics (Prometheus text exposition, spec §6.2) and the SSE lifecycle tail are referenced here as external profiles, not modeled as paths (spec §6 item 6)."
+  },
+  "paths": {
+    "/v1/status": {
+      "get": {
+        "summary": "Operator daemon status — fleet, balances, activity, rewards, and per-vertical lifecycle rollups.",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "contractVersion": {
+                      "type": "object",
+                      "properties": {
+                        "major": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "minor": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "major",
+                        "minor"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "statusMode": {
+                      "type": "string",
+                      "enum": [
+                        "full",
+                        "sqlite_only"
+                      ]
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "latestVersion": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "daemon": {
+                      "type": "object",
+                      "properties": {
+                        "shutdownState": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "startedAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "timestamp": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "shutdownState",
+                        "startedAt",
+                        "timestamp"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "rpc": {
+                      "type": "object",
+                      "properties": {
+                        "ok": {
+                          "type": "boolean"
+                        },
+                        "chainId": {
+                          "type": "number"
+                        },
+                        "blockNumber": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "ok"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "fleet": {
+                      "type": "object",
+                      "properties": {
+                        "loaded": {
+                          "type": "boolean"
+                        },
+                        "chain": {
+                          "type": "string"
+                        },
+                        "stakingMode": {
+                          "type": "string"
+                        },
+                        "masterAddress": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "services": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "index": {
+                                "type": "number"
+                              },
+                              "step": {
+                                "type": "string"
+                              },
+                              "serviceId": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "safeAddress": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "mechAddress": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stakingAddress": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "agentId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "identityRegistryAddress": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "safeBoundToAgent": {
+                                "type": "boolean"
+                              },
+                              "identityBindingStatus": {
+                                "type": "string",
+                                "enum": [
+                                  "bound",
+                                  "pending",
+                                  "not_applicable"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "index",
+                              "step",
+                              "serviceId",
+                              "safeAddress",
+                              "mechAddress",
+                              "stakingAddress",
+                              "agentId",
+                              "identityRegistryAddress",
+                              "safeBoundToAgent",
+                              "identityBindingStatus"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "stakedLikeCount": {
+                          "type": "number"
+                        },
+                        "completeCount": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "loaded",
+                        "services",
+                        "stakedLikeCount",
+                        "completeCount"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "autoRestake": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "checkIntervalMs": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "checkIntervalMs"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "activity": {
+                      "type": "object",
+                      "properties": {
+                        "counts": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        },
+                        "recent": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "number"
+                              },
+                              "ts": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "serviceIndex": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "txHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "solverType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "outcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "ts",
+                              "kind",
+                              "requestId",
+                              "serviceIndex",
+                              "txHash",
+                              "solverType",
+                              "outcome"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "counts",
+                        "recent"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "rewards": {
+                      "type": "object",
+                      "properties": {
+                        "claimLoopIntervalMs": {
+                          "type": "number"
+                        },
+                        "lastClaimTickAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "claimedStakingRewardsWei": {
+                          "type": "string"
+                        },
+                        "claimedStakingRewardsLast24hWei": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "claimLoopIntervalMs",
+                        "lastClaimTickAt",
+                        "claimedStakingRewardsWei",
+                        "claimedStakingRewardsLast24hWei"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "balances": {
+                      "type": "object",
+                      "properties": {
+                        "eth": {
+                          "type": "object",
+                          "properties": {
+                            "master": {
+                              "type": "object",
+                              "properties": {
+                                "address": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "balanceWei": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "error": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "address",
+                                "balanceWei"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            "agent": {
+                              "type": "object",
+                              "properties": {
+                                "address": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "balanceWei": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "error": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "address",
+                                "balanceWei"
+                              ],
+                              "additionalProperties": {}
+                            },
+                            "safe": {
+                              "type": "object",
+                              "properties": {
+                                "address": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "balanceWei": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "error": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "address",
+                                "balanceWei"
+                              ],
+                              "additionalProperties": {}
+                            }
+                          },
+                          "required": [
+                            "master",
+                            "agent",
+                            "safe"
+                          ],
+                          "additionalProperties": {}
+                        }
+                      },
+                      "required": [
+                        "eth"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "masterGas": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "balanceWei": {
+                          "type": "string"
+                        },
+                        "dailyEstimateWei": {
+                          "type": "string"
+                        },
+                        "runwayDaysExcess": {
+                          "type": "string"
+                        },
+                        "minEthWei": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "address",
+                        "dailyEstimateWei"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "l1MasterGas": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "balanceWei": {
+                          "type": "string"
+                        },
+                        "dailyEstimateWei": {
+                          "type": "string"
+                        },
+                        "runwayDaysExcess": {
+                          "type": "string"
+                        },
+                        "minEthWei": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "address",
+                        "dailyEstimateWei"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "earnings": {
+                      "type": "object",
+                      "properties": {
+                        "hint": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "hint"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "nextActions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "portfolioV0": {
+                      "type": "object",
+                      "properties": {
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "delivered": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "settledFailed": {
+                              "type": "number"
+                            },
+                            "localErrors": {
+                              "type": "number"
+                            },
+                            "raceLost": {
+                              "type": "number"
+                            },
+                            "active": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "delivered",
+                            "failed",
+                            "settledFailed",
+                            "localErrors",
+                            "raceLost",
+                            "active"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "inFlight": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "solverType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "lastError": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "state",
+                              "solverType",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "stateUpdatedAt",
+                              "lastError"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentVerdicts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string",
+                                "enum": [
+                                  "COMPLETE",
+                                  "FAILED",
+                                  "RACE_LOST"
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "solverType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "state",
+                              "implName",
+                              "solverType",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "stateUpdatedAt",
+                              "failureReason",
+                              "manifestCid",
+                              "deliveryTxHash"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentSnapshots": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "type": "string"
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "requestId",
+                              "title",
+                              "outcome",
+                              "createdAt"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentClaudeOutcomes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "sessionId": {
+                                "type": "string"
+                              },
+                              "startedAt": {
+                                "type": "number"
+                              },
+                              "endedAt": {
+                                "type": "number"
+                              },
+                              "durationMs": {
+                                "type": "number"
+                              },
+                              "aborted": {
+                                "type": "boolean"
+                              },
+                              "fillsInSessionWindow": {
+                                "type": "number"
+                              },
+                              "coinCounts": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {
+                                  "type": "number"
+                                }
+                              },
+                              "fillsQueryError": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "sessionId",
+                              "startedAt",
+                              "endedAt",
+                              "durationMs",
+                              "aborted",
+                              "fillsInSessionWindow",
+                              "coinCounts"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "totals",
+                        "inFlight",
+                        "recentVerdicts",
+                        "recentSnapshots",
+                        "recentClaudeOutcomes"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "predictionV1": {
+                      "type": "object",
+                      "properties": {
+                        "operator": {
+                          "anyOf": [
+                            {},
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "operatorError": {
+                          "type": "string"
+                        },
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "observedTasks": {
+                              "type": "number"
+                            },
+                            "activeTaskRuns": {
+                              "type": "number"
+                            },
+                            "solutions": {
+                              "type": "number"
+                            },
+                            "verdicts": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "settledFailed": {
+                              "type": "number"
+                            },
+                            "localErrors": {
+                              "type": "number"
+                            },
+                            "raceLost": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "observedTasks",
+                            "activeTaskRuns",
+                            "solutions",
+                            "verdicts",
+                            "failed",
+                            "settledFailed",
+                            "localErrors",
+                            "raceLost"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "latest": {
+                          "type": "object",
+                          "properties": {
+                            "taskAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "solutionAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "verdictAt": {
+                              "anyOf": [
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "taskAt",
+                            "solutionAt",
+                            "verdictAt"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "recentTasks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "taskCid": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "taskRole": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "restoration",
+                                      "evaluation"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "runStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "taskId",
+                              "taskCid",
+                              "state",
+                              "taskRole",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "runStartedAt",
+                              "stateUpdatedAt",
+                              "manifestCid",
+                              "deliveryTxHash",
+                              "failureReason"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentSolutions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "taskCid": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "taskRole": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "restoration",
+                                      "evaluation"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "runStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "taskId",
+                              "taskCid",
+                              "state",
+                              "taskRole",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "runStartedAt",
+                              "stateUpdatedAt",
+                              "manifestCid",
+                              "deliveryTxHash",
+                              "failureReason"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentVerdicts": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "taskCid": {
+                                "type": "string"
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "taskRole": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "restoration",
+                                      "evaluation"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "runStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "taskId",
+                              "taskCid",
+                              "state",
+                              "taskRole",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "runStartedAt",
+                              "stateUpdatedAt",
+                              "manifestCid",
+                              "deliveryTxHash",
+                              "failureReason"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "operator",
+                        "totals",
+                        "latest",
+                        "recentTasks",
+                        "recentSolutions",
+                        "recentVerdicts"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "taskRuns": {
+                      "type": "object",
+                      "properties": {
+                        "totals": {
+                          "type": "object",
+                          "properties": {
+                            "observedTasks": {
+                              "type": "number"
+                            },
+                            "activeTaskRuns": {
+                              "type": "number"
+                            },
+                            "completed": {
+                              "type": "number"
+                            },
+                            "solutions": {
+                              "type": "number"
+                            },
+                            "verdicts": {
+                              "type": "number"
+                            },
+                            "failed": {
+                              "type": "number"
+                            },
+                            "settledFailed": {
+                              "type": "number"
+                            },
+                            "localErrors": {
+                              "type": "number"
+                            },
+                            "raceLost": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "observedTasks",
+                            "activeTaskRuns",
+                            "completed",
+                            "solutions",
+                            "verdicts",
+                            "failed",
+                            "settledFailed",
+                            "localErrors",
+                            "raceLost"
+                          ],
+                          "additionalProperties": {}
+                        },
+                        "inFlight": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "taskCid": {
+                                "type": "string"
+                              },
+                              "solverType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "taskRole": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "restoration",
+                                      "evaluation"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "runStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "outcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "pass",
+                                      "fail",
+                                      "awaiting",
+                                      "accepted",
+                                      "rejected"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "taskId",
+                              "taskCid",
+                              "solverType",
+                              "state",
+                              "taskRole",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "runStartedAt",
+                              "stateUpdatedAt",
+                              "manifestCid",
+                              "deliveryTxHash",
+                              "failureReason",
+                              "outcome"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "recentTasks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "requestId": {
+                                "type": "string"
+                              },
+                              "taskId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "taskCid": {
+                                "type": "string"
+                              },
+                              "solverType": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "state": {
+                                "type": "string"
+                              },
+                              "taskRole": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "restoration",
+                                      "evaluation"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "implName": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "windowStartTs": {
+                                "type": "number"
+                              },
+                              "windowEndTs": {
+                                "type": "number"
+                              },
+                              "runStartedAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "stateUpdatedAt": {
+                                "type": "number"
+                              },
+                              "manifestCid": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "deliveryTxHash": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "failureReason": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "outcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "pass",
+                                      "fail",
+                                      "awaiting",
+                                      "accepted",
+                                      "rejected"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "requestId",
+                              "taskId",
+                              "taskCid",
+                              "solverType",
+                              "state",
+                              "taskRole",
+                              "implName",
+                              "windowStartTs",
+                              "windowEndTs",
+                              "runStartedAt",
+                              "stateUpdatedAt",
+                              "manifestCid",
+                              "deliveryTxHash",
+                              "failureReason",
+                              "outcome"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "totals",
+                        "inFlight",
+                        "recentTasks"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "loopCompletion": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "delivered": {
+                          "type": "number"
+                        },
+                        "withGating": {
+                          "type": "number"
+                        },
+                        "reachedExecute": {
+                          "type": "number"
+                        },
+                        "reachedImprove": {
+                          "type": "number"
+                        },
+                        "reachedMemoryConsolidation": {
+                          "type": "number"
+                        },
+                        "fullLoop": {
+                          "type": "number"
+                        },
+                        "phaseCounts": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "delivered",
+                        "withGating",
+                        "reachedExecute",
+                        "reachedImprove",
+                        "reachedMemoryConsolidation",
+                        "fullLoop",
+                        "phaseCounts"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "implStateCadence": {
+                      "type": "object",
+                      "properties": {
+                        "repos": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "commits": {
+                                "type": "number"
+                              },
+                              "lastCommit": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "shortHash": {
+                                        "type": "string"
+                                      },
+                                      "timestamp": {
+                                        "type": "number"
+                                      },
+                                      "date": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "shortHash",
+                                      "timestamp",
+                                      "date"
+                                    ],
+                                    "additionalProperties": {}
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "commits",
+                              "lastCommit"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "repos"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "evidenceIndexing": {
+                      "type": "object",
+                      "properties": {
+                        "failures": {
+                          "readOnly": true,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "reference": {
+                                "type": "string"
+                              },
+                              "category": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "reference",
+                              "category",
+                              "message"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "pending": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "failures",
+                        "pending"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "spend": {
+                      "type": "object",
+                      "properties": {
+                        "credentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "credentialId": {
+                                "type": "string"
+                              },
+                              "capUsd": {
+                                "type": "number"
+                              },
+                              "spentTodayUsd": {
+                                "type": "number"
+                              },
+                              "paused": {
+                                "type": "boolean"
+                              },
+                              "resetsAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "credentialId",
+                              "capUsd",
+                              "spentTodayUsd",
+                              "paused",
+                              "resetsAt"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "credentials"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "aiUnits": {
+                      "type": "object",
+                      "properties": {
+                        "credentials": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "credentialId": {
+                                "type": "string"
+                              },
+                              "unitsThisBlock": {
+                                "type": "number"
+                              },
+                              "unitsThisWeek": {
+                                "type": "number"
+                              },
+                              "capPerBlock": {
+                                "type": "number"
+                              },
+                              "capPerWeek": {
+                                "type": "number"
+                              },
+                              "usdMicrosThisBlock": {
+                                "type": "number"
+                              },
+                              "usdMicrosThisWeek": {
+                                "type": "number"
+                              },
+                              "capPerBlockUsdMicros": {
+                                "type": "number"
+                              },
+                              "capPerWeekUsdMicros": {
+                                "type": "number"
+                              },
+                              "estimated": {
+                                "type": "boolean"
+                              },
+                              "paused": {
+                                "type": "boolean"
+                              },
+                              "active": {
+                                "type": "boolean"
+                              },
+                              "pausedWindow": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "block",
+                                      "week"
+                                    ]
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "blockResetsAt": {
+                                "type": "string"
+                              },
+                              "weekResetsAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "credentialId",
+                              "unitsThisBlock",
+                              "unitsThisWeek",
+                              "capPerBlock",
+                              "capPerWeek",
+                              "usdMicrosThisBlock",
+                              "usdMicrosThisWeek",
+                              "capPerBlockUsdMicros",
+                              "capPerWeekUsdMicros",
+                              "estimated",
+                              "paused",
+                              "active",
+                              "pausedWindow",
+                              "blockResetsAt",
+                              "weekResetsAt"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "credentials"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "costSurface": {
+                      "type": "object",
+                      "properties": {
+                        "harnesses": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "credentialId": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "usesPaidApiKey": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "credentialId",
+                              "usesPaidApiKey"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        }
+                      },
+                      "required": [
+                        "harnesses"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "harness": {
+                      "type": "object",
+                      "properties": {
+                        "ready": {
+                          "type": "boolean"
+                        },
+                        "name": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "ready",
+                        "name",
+                        "reason"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "security": {
+                      "type": "object",
+                      "properties": {
+                        "lastPasswordRotationAt": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "lastPasswordRotationAt"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "configMigration": {
+                      "type": "object",
+                      "properties": {
+                        "shapeVersion": {
+                          "type": "number",
+                          "const": 2
+                        },
+                        "wiringEntries": {
+                          "type": "number"
+                        },
+                        "postingEntries": {
+                          "type": "number"
+                        },
+                        "backupPath": {
+                          "type": "string"
+                        },
+                        "capsUnset": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "shapeVersion",
+                        "wiringEntries",
+                        "postingEntries",
+                        "capsUnset"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "phaseDTransitionUsage": {
+                      "type": "object",
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "number",
+                          "const": 1
+                        },
+                        "durable": {
+                          "type": "boolean"
+                        },
+                        "observationWindowStartedAt": {
+                          "type": "string"
+                        },
+                        "counters": {
+                          "readOnly": true,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "signal": {
+                                "type": "string",
+                                "enum": [
+                                  "legacy-operator-composition",
+                                  "marketplace-pipeline-invocation",
+                                  "legacy-task-submission-synthesis",
+                                  "legacy-evaluator-delivery-watcher-loaded",
+                                  "legacy-wiring-config-field",
+                                  "native-operator-composition"
+                                ]
+                              },
+                              "count": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                              },
+                              "firstObservedAt": {
+                                "type": "string"
+                              },
+                              "lastObservedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "signal",
+                              "count",
+                              "firstObservedAt",
+                              "lastObservedAt"
+                            ],
+                            "additionalProperties": {}
+                          }
+                        },
+                        "class": {
+                          "type": "string",
+                          "const": "observation"
+                        }
+                      },
+                      "required": [
+                        "schemaVersion",
+                        "durable",
+                        "observationWindowStartedAt",
+                        "counters",
+                        "class"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "effectiveMode": {
+                      "type": "string",
+                      "enum": [
+                        "legacy",
+                        "native-v1"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "contractVersion",
+                    "statusMode",
+                    "version",
+                    "latestVersion",
+                    "daemon",
+                    "rpc",
+                    "fleet",
+                    "autoRestake",
+                    "activity",
+                    "rewards",
+                    "balances",
+                    "masterGas",
+                    "earnings",
+                    "nextActions",
+                    "costSurface",
+                    "harness",
+                    "security",
+                    "effectiveMode"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Liveness probe — always 200, unauthenticated (spec §6.1).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Readiness probe — 200 for reason=ready|degraded, 503 for reason=bootstrapping, unauthenticated (spec §6.1).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "degraded",
+                        "bootstrapping"
+                      ]
+                    },
+                    "cause": {
+                      "type": "string"
+                    },
+                    "accepting_work": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "reason",
+                    "accepting_work"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

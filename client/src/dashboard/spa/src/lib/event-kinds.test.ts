@@ -5,25 +5,18 @@ import {
   eventKindBadgeVariant,
   eventKindMeta,
 } from './event-kinds.js';
-
-const EXPECTED_DAEMON_KINDS = [
-  'task_posted',
-  'intent_registry_failed',
-  'request_claimed',
-  'delivery_submitted',
-  'evaluation_submitted',
-  'reward_claimed',
-  'balance_topup',
-  'engine_transition',
-  'tick_error',
-  'race_lost',
-  'startup',
-  'shutdown',
-];
+import { ALLOWED_LIFECYCLE_KINDS as DAEMON_LIFECYCLE_KINDS } from '../../../../observability/emit-event.js';
 
 describe('event-kinds', () => {
-  it('exposes exactly the daemon lifecycle kinds', () => {
-    expect([...LIFECYCLE_KINDS].sort()).toEqual([...EXPECTED_DAEMON_KINDS].sort());
+  it('re-exports the one shared lifecycle-kind vocabulary (§8 artifact 6)', () => {
+    // Compared against `observability/emit-event.ts`'s real daemon-side export — the actual
+    // producer of the vocabulary — not the contract module's own copy of itself. Asserting
+    // against the contract module would pass even if a *third*, re-forked copy of the array
+    // existed somewhere and this file happened to import that one instead; asserting
+    // referential identity against the daemon's own export is what actually catches a
+    // re-forked daemon copy. `toBe` (not `toEqual`) checks the same array reference, not
+    // just equal contents.
+    expect(LIFECYCLE_KINDS).toBe(DAEMON_LIFECYCLE_KINDS);
   });
 
   it('every lifecycle kind has non-empty human-readable copy', () => {
@@ -36,11 +29,26 @@ describe('event-kinds', () => {
     }
   });
 
-  it('falls back gracefully for unknown future kinds', () => {
+  it('falls back gracefully for unknown future kinds with no wire override', () => {
     const meta = eventKindMeta('some_unknown_future_kind');
     expect(meta.label).toBe('Some unknown future kind');
     expect(meta.label).not.toContain('_');
     expect(meta.description.length).toBeGreaterThan(0);
+  });
+
+  it('unknown-kind rule: renders server-supplied severity+title, never drops the event', () => {
+    const meta = eventKindMeta('a_kind_this_build_has_never_heard_of', {
+      severity: 'warning',
+      title: 'A brand new thing happened',
+    });
+    expect(meta.label).toBe('A brand new thing happened');
+    expect(meta.tone).toBe('warning');
+    expect(
+      eventKindBadgeVariant('a_kind_this_build_has_never_heard_of', undefined, {
+        severity: 'warning',
+        title: 'A brand new thing happened',
+      }),
+    ).toBe('warning');
   });
 
   it('maps explicit failure and warning outcomes to status badges', () => {

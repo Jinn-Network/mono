@@ -2,7 +2,7 @@ import { useState, type FormEvent, type JSX } from 'react';
 import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Button } from '../../components/ui/button.js';
 import { Input } from '../../components/ui/input.js';
 import { cn } from '../../lib/utils.js';

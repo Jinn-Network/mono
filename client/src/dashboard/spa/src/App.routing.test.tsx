@@ -5,7 +5,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App.js';
 import { api } from './api/client.js';
-import type { BootstrapState } from './api/types.js';
+import type { BootstrapState } from './../../../api/contract/index.js';
 import { OverviewPage } from './pages/Overview.js';
 import { EventsPage } from './pages/Events.js';
 import { EventDetailPage } from './pages/EventDetail.js';

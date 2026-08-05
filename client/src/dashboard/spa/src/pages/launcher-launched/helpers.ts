@@ -1,7 +1,7 @@
 import type {
   LaunchedStatus,
   LaunchedSolverNetRecord,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 
 /**
  * Shared helpers for the post-launch dashboard panels (Task 19).

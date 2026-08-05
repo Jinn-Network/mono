@@ -7,7 +7,7 @@ import type {
   LauncherTaskState,
   LauncherTasksResponse,
   TaskOnchainStatus,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Button } from '../../components/ui/button.js';
 import { Card } from '../../components/ui/card.js';
 import {

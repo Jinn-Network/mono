@@ -16,7 +16,13 @@ import { EvictionLoop, type EvictionLoopConfig } from './eviction-loop.js';
 import { HarvestLoop, type HarvestLoopConfig } from './harvest-loop.js';
 import { CheckpointLoop, type CheckpointLoopConfig } from './checkpoint-loop.js';
 import { WatchdogLoop, type WatchdogLoopRegistration } from './watchdog-loop.js';
-import { recordLoopTick, LOOP_REGISTRY, type LoopName } from './loop-heartbeat.js';
+import {
+  recordLoopTick,
+  LOOP_REGISTRY,
+  type LoopName,
+  getDaemonReadiness,
+  buildLoopMetricsSnapshot,
+} from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
 import {
@@ -465,6 +471,12 @@ export class Daemon {
         status: this.config.status,
         bindHost: this.config.apiBindHost,
         corpus,
+        // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404) — same
+        // injection reasoning as main.ts's self-built server (api→daemon
+        // architecture boundary; see the field docstrings on
+        // ApiServerConfig in server.ts).
+        getDaemonReadiness,
+        getLoopSnapshot: () => buildLoopMetricsSnapshot(this.store),
       });
       this.ownsApiServer = true;
     }

@@ -1,7 +1,7 @@
 import { type JSX, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client.js';
-import type { HarnessReadinessEntry } from '../../api/types.js';
+import type { HarnessReadinessEntry } from '../../../../../api/contract/index.js';
 import {
   CLAUDE_CODE_HARNESS,
   CODEX_HARNESS,

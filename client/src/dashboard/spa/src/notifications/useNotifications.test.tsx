@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ConnectionState } from '../api/connection-state.js';
-import type { StructuredEvent } from '../api/types.js';
+import type { StructuredEvent } from '../../../../api/contract/index.js';
 import { useNotifications } from './useNotifications.js';
 
 // Default to connected; individual tests override via the exported setter.
