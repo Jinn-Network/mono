@@ -145,11 +145,34 @@ Updated at each packet completion and integration wave. Format: packet → state
 | Packet | State | Base | Head | Review | Integrated |
 |---|---|---|---|---|---|
 | BP-00 | **integrated** | `ad33f1d0d` | `65d8c6acf` (worktree bench-bp00) | PASS (2 rounds, 1 blocking fixed: guard-precedent attribution; sonnet reviewer) | `5bf629930` |
-| BP-01 | dispatched | `5bf629930` | — | — | — |
+| BP-01 | **integrated** | `8ef3cb19e` | `73bca93e9` (worktree bench-bp01) | PASS (0 blocking, 4 non-blocking dispositioned; sonnet reviewer) | `f1330858e` |
 
 BP-00 verification: export-verification subagent confirmed every §3 symbol
 exists (3 draft-time corrections); acceptance criteria 13/13 PASS;
 worktree clean; single commit.
+
+BP-01 verification (packet + re-run at integration in session worktree):
+`generate-architecture.mjs --check` green; platform-catalog +
+architecture-control 103/103; new family guards 9/9; package battery
+(install --immutable / typecheck / test 6/6 / build / pack:smoke) green;
+guard-red demonstration performed and reverted in-packet.
+
+**M0 COMPLETE** (2026-08-05): program doc, packet DAG, contract decisions,
+product design spec, application skeleton, boundary guards passing on the
+empty product — all verified end-to-end.
+
+**Base drift record (wave boundary after M0):** `origin/integration/evidence-v1`
+advanced 10 commits (`1fb3e78f1` → `0bf0c7862`): CI path-filter/concurrency +
+platform-verification fan-in gating (#2445, #2451), dashboard e2e quarantine
+end (#2400), stage-2 salvage docs (#2453), post-merge architecture regen.
+None touches `packages/benchmark-product`; two touch consumed surfaces
+(`.github` CI gating, `architecture/generated` — mechanical regen conflict
+expected on refresh). **Proposed: refresh base at next human contact;
+awaiting explicit approval. Program continues on `1fb3e78f1` lineage
+meanwhile, per policy.**
+
+**Worktrees pending cleanup** (integrated; removal deferred to avoid the
+sandbox `git worktree remove` gotcha): `bench-bp00`, `bench-bp01`.
 
 **Platform substrate verification (orientation, 2026-08-05):** full portal dep chain (evidence → task-execution → trust → discovery → benchmarking) built green from source in this worktree; `benchmarking-local` typecheck clean, 100/100 tests pass.
 
