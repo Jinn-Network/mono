@@ -1573,9 +1573,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2843,
+      "discoveredFirstPartySurfaces": 2852,
       "generatedOutputSources": 1294,
-      "generatorSources": 572,
+      "generatorSources": 573,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -6094,6 +6094,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/health-ready.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/hermes-doctor-async.test.ts"
       },
       {
@@ -6165,6 +6175,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/loop-completion-build.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/metrics-endpoint.test.ts"
       },
       {
         "categories": [
@@ -7485,6 +7505,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/index.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/introspection-context.test.ts"
       },
       {
         "categories": [
@@ -11904,6 +11934,16 @@
           "@ritsukai"
         ],
         "path": "client/test/harnesses/impls/learner/attribution-plugins.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/harnesses/impls/learner/candidate-admission-seam.test.ts"
       },
       {
         "categories": [
@@ -32024,6 +32064,56 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/candidate-manifest.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/candidate-tree.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/evidence-provenance.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/seed-tree.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -32051,6 +32141,16 @@
           "@ritsukai"
         ],
         "path": "packages/policy-optimization/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/scripts/e2e-campaign.mjs"
       },
       {
         "categories": [

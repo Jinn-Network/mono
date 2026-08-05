@@ -312,9 +312,41 @@ describe('daemon-api-auth (bearer middleware)', () => {
     expect(body.published).toBe(true);
   });
 
-  it('GET /v1/status stays public (no bearer required)', async () => {
+  // §14.5 (issue #2404): `/v1/status` lost its auth exemption once
+  // `/health` + `/ready` landed as the unauthenticated-safe liveness
+  // surface. The `beforeEach` server above has no `ui` configured, so
+  // `requireOperatorToken` falls back to the bearer `apiToken` — same
+  // credential every other gated route on a bare/test server uses.
+  it('rejects GET /v1/status with no Authorization header on a bare (no-ui) server → 401', async () => {
     const res = await fetch(`${baseUrl}/v1/status`);
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error?: string };
+    expect(body.error).toBe('unauthorized');
+  });
+
+  it('admits GET /v1/status with the bearer apiToken on a bare (no-ui) server', async () => {
+    const res = await fetch(`${baseUrl}/v1/status`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
     expect(res.status).toBe(200);
+  });
+
+  it('GET /health stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok?: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it('GET /ready stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/ready`);
+    expect(res.status).toBe(200);
+  });
+
+  it('GET /metrics stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/metrics`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
   });
 
   it('requires the UI token before retrying agent binding', async () => {

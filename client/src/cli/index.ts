@@ -12,6 +12,7 @@ import type { CommandContext, CommandModule } from './command.js';
 import { emitEnvelope } from '../errors/envelope.js';
 import { renderTopLevelHelp, renderCommandHelp } from './help.js';
 import { ConfigLoadError } from '../config.js';
+import { IntrospectionUnauthorizedError } from './introspection-context.js';
 
 import versionCommand from './commands/version.js';
 import doctorCommand from './commands/doctor.js';
@@ -189,6 +190,23 @@ export async function runCli(argv: string[], opts: RunCliOptions = {}): Promise<
           hint: 'Fix the configuration inputs and re-run the command.',
           exampleCli: exampleInvocation,
           details,
+        },
+        { writer, exit },
+      );
+      return;
+    }
+    if (err instanceof IntrospectionUnauthorizedError) {
+      // §14.5 / issue #2404: /v1/status's 401 gets a machine-readable shape
+      // rather than falling into the generic `fatal` bucket below.
+      // `ErrorCode` has no `unauthorized` member — don't mint one; `reason`
+      // in `details` carries the discriminator instead.
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: err.message,
+          hint: 'Restart the daemon (it regenerates the token) or point --config at the right instance.',
+          exampleCli: exampleInvocation,
+          details: { reason: 'unauthorized', verb },
         },
         { writer, exit },
       );

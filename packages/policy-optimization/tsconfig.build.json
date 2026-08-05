@@ -1,4 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts", "src/testing/**/*"]
+  "// src/e2e": "The end-to-end campaign demo. Excluded because it imports the TEP conformance kit, a devDependency: shipping it would put an unresolvable import in the published tree. `tsconfig.e2e.json` builds it for `yarn e2e:campaign`.",
+  "exclude": ["src/**/*.test.ts", "src/testing/**/*", "src/e2e/**/*"]
 }

@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod/v4';
 import { statusV1ResponseSchema } from '../src/api/contract/status.js';
 import { notificationsV1ResponseSchema } from '../src/api/contract/notifications.js';
+import { healthResponseSchema, readyResponseSchema } from '../src/api/contract/health.js';
 import { CURRENT_CONTRACT_VERSION } from '../src/api/contract/version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,11 @@ interface RouteSpec {
 }
 
 // Add the next read route here — one entry, no restructuring (§8 artifact 4).
+//
+// `GET /metrics` (Prometheus text exposition) and the future SSE lifecycle tail are
+// deliberately absent from this table — spec §6 item 6 references them as external
+// profiles rather than modeling them as OpenAPI/JSON-Schema paths (see `info.description`
+// below).
 const ROUTES: RouteSpec[] = [
   {
     path: '/v1/status',
@@ -50,6 +56,18 @@ const ROUTES: RouteSpec[] = [
     method: 'get',
     summary: 'Server-derived operator notifications — a pure function over receipts + the live-health class (§6.5, issue #2408).',
     responseSchema: notificationsV1ResponseSchema,
+  },
+  {
+    path: '/health',
+    method: 'get',
+    summary: 'Liveness probe — always 200, unauthenticated (spec §6.1).',
+    responseSchema: healthResponseSchema,
+  },
+  {
+    path: '/ready',
+    method: 'get',
+    summary: 'Readiness probe — 200 for reason=ready|degraded, 503 for reason=bootstrapping, unauthenticated (spec §6.1).',
+    responseSchema: readyResponseSchema,
   },
 ];
 
@@ -85,7 +103,7 @@ export function buildOpenApiDocument(): Record<string, unknown> {
       title: 'Jinn operator daemon — read contract',
       version: `${CURRENT_CONTRACT_VERSION.major}.${CURRENT_CONTRACT_VERSION.minor}`,
       description:
-        'Generated from client/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate.',
+        'Generated from client/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate. GET /metrics (Prometheus text exposition, spec §6.2) and the SSE lifecycle tail are referenced here as external profiles, not modeled as paths (spec §6 item 6).',
     },
     paths,
   };

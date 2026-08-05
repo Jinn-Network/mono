@@ -1,11 +1,13 @@
 /**
  * GET /v1/status 500-handler masking (spec §14.2 item 2, issue #2402).
  *
- * `/v1/status` is unauthenticated. Before this fix, its catch-all error
- * handler returned `err.message` verbatim (leaking an embedded RPC URL /
- * key-in-path) and `daemon.dbPath` (an absolute filesystem path). This
- * covers the case where an exception escapes gather-status.ts's own
- * internal masking (defense-in-depth for the server boundary itself).
+ * Before the #2402 fix, `/v1/status`'s catch-all error handler returned
+ * `err.message` verbatim (leaking an embedded RPC URL / key-in-path) and
+ * `daemon.dbPath` (an absolute filesystem path). This covers the case where
+ * an exception escapes gather-status.ts's own internal masking
+ * (defense-in-depth for the server boundary itself). `/v1/status` is
+ * operator-class as of spec §14.5 (issue #2404); the fetch below carries
+ * the bearer token this bare (no-`ui`) server accepts.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,7 +43,9 @@ describe('GET /v1/status error-response masking', () => {
     });
 
     server = await startApiServer({ port: 0, store, apiToken: 't' });
-    const res = await fetch(`http://127.0.0.1:${server.port}/v1/status`);
+    const res = await fetch(`http://127.0.0.1:${server.port}/v1/status`, {
+      headers: { Authorization: 'Bearer t' },
+    });
     const body = (await res.json()) as {
       error: string;
       message: string;

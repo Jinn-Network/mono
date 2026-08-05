@@ -62,6 +62,20 @@
  *   is pinned anyway so the tuple describes what actually ran; consumers apply the weakest-axis
  *   rule. No action — recorded so the vacuity is not later mistaken for a verified match.
  *
+ * - **F-C9-2 — the `model` axis was emitted as a bare id string, and had to be an object.**
+ *   Surfaced by the C9 end-to-end campaign, the first consumer to take a manifest this harness
+ *   sealed and put it through admission. Substrate §4.1 spells the axis
+ *   `{"id": "anthropic/claude-haiku-4-5"}`; `modelConstraintAdmits` in
+ *   `task-execution-protocol` reads `.provider`/`.id` off both the constraint and the value, so
+ *   a bare string satisfies no model constraint at all; and the Policy Optimization product's
+ *   `isExactPin` refuses a non-`{id}` model as constraint-shaped. Because every v0 campaign
+ *   freezes the model axis (its mutation surface is exactly `["loadout"]`), the bare spelling
+ *   made **every** candidate this harness could emit unadmittable — a total seam break that no
+ *   unit test on either side could see, because neither side owns both spellings.
+ *   Disposition: fixed here, in `buildPolicyTuple`, because the substrate is the authority and
+ *   this side was the one departing from it. The fix changes the emitted `tupleDigest`; no
+ *   adoption record or published candidate exists yet, so nothing downstream is invalidated.
+ *
  * Authority:
  *   docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md §10
  *   docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md §4.2, §5
@@ -183,7 +197,16 @@ export function buildPolicyTuple(
   return {
     formatToken: EXECUTION_TUPLE_FORMAT_TOKEN,
     harness: axes.harness,
-    model: axes.model,
+    // F-C9-2: the model axis is an OBJECT keyed by `id`, never the bare id string.
+    // Substrate §4.1's tuple is `"model": { "id": "anthropic/claude-haiku-4-5" }`, and
+    // the reason is semantic rather than cosmetic: `modelConstraintAdmits`
+    // (`task-execution-protocol`) reads `.provider` / `.id` off both sides, so a bare
+    // string is admitted by no model constraint at all, and the Policy Optimization
+    // product's `isExactPin` refuses it as constraint-shaped. Emitting the bare id made
+    // every candidate this harness sealed unadmittable into every v0 campaign, since
+    // those freeze the model axis by construction. `null` stays `null` — a run with no
+    // model configured pins nothing, and saying so is honest.
+    model: axes.model === null ? null : { id: axes.model },
     // F9: `learner-public.v1` emits bare hex; a `jinn.harness-state.v1` loadout
     // pin's `digest` carries the `sha256:`-prefixed spelling.
     loadout: {

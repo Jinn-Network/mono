@@ -14,6 +14,16 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { defaultTokenPath } from '../api/ui-token.js';
 
+/**
+ * Resolve the on-disk UI token (`~/.jinn-client/ui-token` by default). Shared by every CLI
+ * front-end that talks to the daemon's operator API — `postToDaemon` below,
+ * `introspection-context.ts`'s `/v1/status` fetch, and `scripts/status.ts` (spec §10.1,
+ * issue #2404) — so there is exactly one token-resolution path, not one per caller.
+ */
+export function resolveUiToken(tokenPath: string = defaultTokenPath()): string | undefined {
+  return existsSync(tokenPath) ? readFileSync(tokenPath, 'utf-8').trim() : undefined;
+}
+
 export interface DaemonPostResult<T> {
   reachable: boolean;
   status?: number;
@@ -28,8 +38,7 @@ export async function postToDaemon<T = unknown>(opts: {
   /** Overridable for tests; defaults to the real `~/.jinn-client/ui-token`. */
   tokenPath?: string;
 }): Promise<DaemonPostResult<T>> {
-  const tokenPath = opts.tokenPath ?? defaultTokenPath();
-  const token = existsSync(tokenPath) ? readFileSync(tokenPath, 'utf-8').trim() : undefined;
+  const token = resolveUiToken(opts.tokenPath);
 
   const ac = new AbortController();
   const timeout = setTimeout(() => ac.abort(), opts.timeoutMs ?? 2000);

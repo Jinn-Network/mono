@@ -123,7 +123,11 @@ describe('shared StatusGatherConfig enrichment across /v1/status, /v1/rewards, /
 
       // /v1/status, reading the SAME cache slot within the TTL, must still see the real
       // (not-ready) harness rollup — not DEFAULT_HARNESS_ROLLUP.
-      const statusRes = await fetch(`${baseUrl}/v1/status`);
+      // `/v1/status` is operator-class as of spec §14.5 (#2404) — this server has no `ui`,
+      // so the exactly-one rule resolves the gate to `requireBearer`. Asserting the status
+      // code first keeps an auth regression from surfacing as a TypeError on a 401 body.
+      const statusRes = await fetch(`${baseUrl}/v1/status`, { headers: { Authorization: 'Bearer t' } });
+      expect(statusRes.status).toBe(200);
       const statusBody = await statusRes.json() as { harness: { ready: boolean; name: string | null } };
       expect(statusBody.harness.ready).toBe(false);
       expect(statusBody.harness.name).toBe('claude-code');

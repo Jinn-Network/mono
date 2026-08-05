@@ -3,7 +3,7 @@
   "info": {
     "title": "Jinn operator daemon — read contract",
     "version": "1.0",
-    "description": "Generated from client/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate."
+    "description": "Generated from client/src/api/contract/ — never handwritten (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 4). Run `tsx scripts/generate-openapi.ts` to regenerate. GET /metrics (Prometheus text exposition, spec §6.2) and the SSE lifecycle tail are referenced here as external profiles, not modeled as paths (spec §6 item 6)."
   },
   "paths": {
     "/v1/status": {
@@ -2261,6 +2261,73 @@
                     "schemaVersion",
                     "generatedAt",
                     "notifications"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Liveness probe — always 200, unauthenticated (spec §6.1).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ],
+                  "additionalProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Readiness probe — 200 for reason=ready|degraded, 503 for reason=bootstrapping, unauthenticated (spec §6.1).",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "object",
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "ready",
+                        "degraded",
+                        "bootstrapping"
+                      ]
+                    },
+                    "cause": {
+                      "type": "string"
+                    },
+                    "accepting_work": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "reason",
+                    "accepting_work"
                   ],
                   "additionalProperties": {}
                 }

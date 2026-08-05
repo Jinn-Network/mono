@@ -38,6 +38,8 @@ growth/.local/
 
 packages/*/node_modules/
 packages/*/dist/
+# `yarn e2e:campaign` scratch build (packages/policy-optimization)
+packages/*/.e2e-build/
 packages/*/.yarn/cache/
 packages/*/.yarn/install-state.gz
 packages/evidence/*/dist/
