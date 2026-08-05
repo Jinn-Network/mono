@@ -16,15 +16,15 @@ import {
   TRACE_BUILDER_ID,
   TRACE_BUILDER_VERSION,
 } from "./identity.js";
-import { buildTrajectoryRecord } from "./trajectory.js";
+import { buildTraceRecord } from "./trace.js";
 
 const goldenBytes = async (): Promise<Uint8Array> =>
   new Uint8Array(await readFile(new URL("../../fixtures/capture/session.ndjson", import.meta.url)));
 
-describe("buildTrajectoryRecord", () => {
+describe("buildTraceRecord", () => {
   test("seals a record that re-parses under C1's schema", async () => {
     const bytes = await goldenBytes();
-    const built = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
+    const built = buildTraceRecord(parseSessionFeed(bytes), bytes);
     const record = parseTrace(built.bytes);
     expect(record.protocol).toBe(TRACE_PROTOCOL);
     expect(record.timebase).toBe("source-epoch-ns");
@@ -34,7 +34,7 @@ describe("buildTrajectoryRecord", () => {
 
   test("declares the feed as its source, by digest and format IRI", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTraceRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.source.formatIri).toBe(SESSION_FEED_FORMAT_IRI);
     expect(record.source.nativeTrace.mediaType).toBe(SESSION_FEED_MEDIA_TYPE);
     expect(record.source.nativeTrace.name).toBe("feed.ndjson");
@@ -43,7 +43,7 @@ describe("buildTrajectoryRecord", () => {
 
   test("declares the builder identity and the vocabulary profile", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTraceRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.derivation).toEqual({
       decoderId: TRACE_BUILDER_ID,
       decoderVersion: TRACE_BUILDER_VERSION,
@@ -53,7 +53,7 @@ describe("buildTrajectoryRecord", () => {
 
   test("the trace id is the value derived from the feed digest and the builder identity", async () => {
     const bytes = await goldenBytes();
-    const built = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
+    const built = buildTraceRecord(parseSessionFeed(bytes), bytes);
     expect(built.traceId).toBe(
       deriveTraceId({
         sourceDigest: documentDigest(bytes),
@@ -67,14 +67,14 @@ describe("buildTrajectoryRecord", () => {
 
   test("omits source.execution, and says so by carrying no execution key", async () => {
     const bytes = await goldenBytes();
-    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), bytes).bytes);
+    const record = parseTrace(buildTraceRecord(parseSessionFeed(bytes), bytes).bytes);
     expect(record.source).not.toHaveProperty("execution");
   });
 
   test("the same feed bytes produce the same record bytes and digest", async () => {
     const bytes = await goldenBytes();
-    const first = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
-    const second = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
+    const first = buildTraceRecord(parseSessionFeed(bytes), bytes);
+    const second = buildTraceRecord(parseSessionFeed(bytes), bytes);
     expect(new TextDecoder().decode(second.bytes)).toBe(new TextDecoder().decode(first.bytes));
     expect(second.digest).toBe(first.digest);
     expect(first.digest).toBe(documentDigest(first.bytes));
@@ -82,12 +82,12 @@ describe("buildTrajectoryRecord", () => {
 
   test("one changed byte in the feed changes the trace id and the record digest", async () => {
     const bytes = await goldenBytes();
-    const original = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
+    const original = buildTraceRecord(parseSessionFeed(bytes), bytes);
     const mutated = new TextDecoder()
       .decode(bytes)
       .replace('"claude-opus-4.6"', '"claude-opus-4.7"');
     const mutatedBytes = new TextEncoder().encode(mutated);
-    const rebuilt = buildTrajectoryRecord(parseSessionFeed(mutatedBytes), mutatedBytes);
+    const rebuilt = buildTraceRecord(parseSessionFeed(mutatedBytes), mutatedBytes);
     expect(rebuilt.traceId).not.toBe(original.traceId);
     expect(rebuilt.digest).not.toBe(original.digest);
   });
@@ -96,8 +96,8 @@ describe("buildTrajectoryRecord", () => {
     const bytes = await goldenBytes();
     const other = new TextEncoder().encode("{}\n");
     // Building against the wrong bytes derives a trace id C1 will not accept for that source.
-    expect(() => buildTrajectoryRecord(parseSessionFeed(bytes), other)).not.toThrow();
-    const record = parseTrace(buildTrajectoryRecord(parseSessionFeed(bytes), other).bytes);
+    expect(() => buildTraceRecord(parseSessionFeed(bytes), other)).not.toThrow();
+    const record = parseTrace(buildTraceRecord(parseSessionFeed(bytes), other).bytes);
     expect(`sha256:${record.source.nativeTrace.digest.sha256}`).toBe(documentDigest(other));
   });
 
@@ -105,7 +105,7 @@ describe("buildTrajectoryRecord", () => {
     const bytes = new Uint8Array(
       await readFile(new URL("../../fixtures/capture/session-minimal.ndjson", import.meta.url)),
     );
-    const built = buildTrajectoryRecord(parseSessionFeed(bytes), bytes);
+    const built = buildTraceRecord(parseSessionFeed(bytes), bytes);
     expect(built.spanCount).toBe(1);
     expect(parseTrace(built.bytes).completeness).toEqual({ decoded: "full" });
   });

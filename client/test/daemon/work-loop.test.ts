@@ -45,7 +45,7 @@ import {
   type AnnouncedSubmissionCard,
 } from '../../src/daemon/native-submission-facts.js';
 
-const PROFILE_URI = 'https://jinn.network/task-profiles/repository-work/1.0';
+const PROFILE_URI = 'https://spec.jinn.network/task-profiles/repository-work/1.0';
 const WORK_KIND = 'repo-fix';
 const TASK_ID = 7n;
 const TASK_DIGEST_HEX = 'a'.repeat(64);
@@ -77,7 +77,7 @@ const WIRING: readonly ExecutionWiringEntry[] = [
 
 function goldenTask(): Uint8Array {
   return sealTask({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     profile: { uri: PROFILE_URI, digest: { sha256: TASK_DIGEST_HEX } },
     instructions: 'Fix the failing test.',
     outputs: [{ name: 'patch', mediaType: 'text/x-diff', required: true }],
@@ -86,7 +86,7 @@ function goldenTask(): Uint8Array {
 
 function goldenSubmission(): Uint8Array {
   return sealSubmission({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: SUBMISSION_URI,
     task: { digest: { sha256: TASK_DIGEST_HEX } },
     requester: 'urn:uuid:33333333-3333-4333-8333-333333333333',
@@ -98,7 +98,7 @@ function goldenSubmission(): Uint8Array {
 
 function goldenDelivery(): Uint8Array {
   return sealDelivery({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: ATTEMPT_URI,
     task: TASK_DIGEST,
     outputs: [],

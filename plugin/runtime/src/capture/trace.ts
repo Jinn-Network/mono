@@ -16,11 +16,11 @@ import {
   TRACE_BUILDER_ID,
   TRACE_BUILDER_VERSION,
 } from "./identity.js";
-import { buildTrajectorySpans } from "./spans.js";
+import { buildTraceSpans } from "./spans.js";
 
 export const TRACE_ARTIFACT_MEDIA_TYPE = TRACE_MEDIA_TYPE;
 
-export interface BuiltTrajectory {
+export interface BuiltTrace {
   readonly bytes: Uint8Array;
   readonly digest: `sha256:${string}`;
   readonly traceId: string;
@@ -28,8 +28,8 @@ export interface BuiltTrajectory {
 }
 
 /**
- * Produces the sealed Trajectory record for one session, directly from the live hook feed
- * (program finding F2 — this product is a trajectory producer and never parses a transcript).
+ * Produces the sealed Trace record for one session, directly from the live hook feed
+ * (program finding F2 — this product is a trace producer and never parses a transcript).
  *
  * `source.execution` is deliberately absent: the execution record's digest does not exist
  * yet at this point in the seal, because the feed must be attached as the native trace before
@@ -37,10 +37,10 @@ export interface BuiltTrajectory {
  * identifier. The join survives anyway — `source.nativeTrace.digest.sha256` is the same
  * digest the sealed execution record carries on its trace entity.
  */
-export function buildTrajectoryRecord(
+export function buildTraceRecord(
   feed: ParsedSessionFeed,
   feedBytes: Uint8Array,
-): BuiltTrajectory {
+): BuiltTrace {
   const sourceDigest = documentDigest(feedBytes);
   const traceId = deriveTraceId({
     sourceDigest,
@@ -49,7 +49,7 @@ export function buildTrajectoryRecord(
     decoderVersion: TRACE_BUILDER_VERSION,
     vocabularyProfile: TRACE_VOCABULARY_PROFILE,
   });
-  const spans = buildTrajectorySpans({ feed, traceId });
+  const spans = buildTraceSpans({ feed, traceId });
 
   const sealed = sealTrace({
     protocol: TRACE_PROTOCOL,

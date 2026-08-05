@@ -14,7 +14,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 import { acquireSubjectMaterial, SubjectMaterialError } from "../../src/evaluator/subject-material.js";
 
-const PROFILE_URI = "https://jinn.network/task-profiles/repository-work/1.0";
+const PROFILE_URI = "https://spec.jinn.network/task-profiles/repository-work/1.0";
 const PROFILE_DIGEST_HEX = "6".repeat(64);
 const sha256 = (bytes: Uint8Array) =>
   `sha256:${createHash("sha256").update(bytes).digest("hex")}` as const;
@@ -23,9 +23,9 @@ const evaluationSpecDocument: EvaluationSpec = {
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: "4",
   family: "deterministic-process",
-  grader: { uri: "https://jinn.network/graders/subject-material-fixture" },
+  grader: { uri: "https://spec.jinn.network/graders/subject-material-fixture" },
   familyBlock: {
-    image: { uri: "https://jinn.network/images/subject-material-fixture" },
+    image: { uri: "https://spec.jinn.network/images/subject-material-fixture" },
     platform: "linux/amd64",
     workspace: { root: "/workspace" },
     testMaterial: [],

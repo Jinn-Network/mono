@@ -14,7 +14,7 @@ import {
 
 import type { FeedLine, ParsedSessionFeed } from "./feed.js";
 
-export interface BuildTrajectorySpansInput {
+export interface BuildTraceSpansInput {
   readonly feed: ParsedSessionFeed;
   readonly traceId: string;
 }
@@ -60,7 +60,7 @@ function sessionStatus(outcome: string | undefined): Span["status"] {
  * comes from the feed, so the same feed bytes always produce the same spans — which is what
  * the record's derived identity asserts and what a consumer can re-check.
  */
-export function buildTrajectorySpans(input: BuildTrajectorySpansInput): readonly Span[] {
+export function buildTraceSpans(input: BuildTraceSpansInput): readonly Span[] {
   const { feed, traceId } = input;
   const outcome = feed.close?.outcome;
   const lastNano =

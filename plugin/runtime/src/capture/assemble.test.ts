@@ -31,7 +31,7 @@ const assembly = async () => {
     workspaceDir: "/home/op/capture/workspaces/s-golden",
     producerVersion: "0.1.0",
     outcome: resolveSessionOutcome(feed),
-    trajectoryDigest: TRACE_DIGEST,
+    traceDigest: TRACE_DIGEST,
   };
 };
 
@@ -146,7 +146,7 @@ describe("buildStartInput", () => {
 
   test("gives the executor an absolute IRI derived from the host", async () => {
     const start = buildStartInput(await assembly());
-    expect(start.executor.entityId).toBe("https://jinn.network/software/agent-host/hermes");
+    expect(start.executor.entityId).toBe("https://spec.jinn.network/software/agent-host/hermes");
     expect(start.executor.kind).toBe("software");
     expect(start.executor.softwareVersion).toBe("0.9.1");
   });
@@ -181,7 +181,7 @@ describe("buildStartInput", () => {
     const start = buildStartInput(await assembly());
     const expected = {
       kind: "executor-reported",
-      reporter: "https://jinn.network/software/agent-host/hermes",
+      reporter: "https://spec.jinn.network/software/agent-host/hermes",
       capturedBy: PRODUCER_IRI,
     };
     expect(start.task.origin).toEqual(expected);
@@ -233,7 +233,7 @@ describe("buildFinalizeInput", () => {
     expect(artifact.kind === "file" && artifact.source.mediaType).toBe(SESSION_FEED_MEDIA_TYPE);
   });
 
-  test("links the trajectory record forward as an identifier on the trace entity", async () => {
+  test("links the trace record forward as an identifier on the trace entity", async () => {
     const finalize = buildFinalizeInput(await assembly());
     expect(finalize.nativeTrace?.artifact.identifiers).toEqual([
       { propertyId: TRACE_RECORD_IDENTIFIER_PROPERTY, value: TRACE_DIGEST },

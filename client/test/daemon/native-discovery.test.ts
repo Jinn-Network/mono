@@ -33,8 +33,8 @@ function entry(sequence: string, previous: `sha256:${string}` | null, digest: `s
     announcements: [{
       announcementId: `announcement-${sequence}`,
       action: 'available',
-      record: { kind: 'https://jinn.network/records/submission/1.0', digest },
-      facts: { taskDigest: digest, taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0' },
+      record: { kind: 'https://spec.jinn.network/records/submission/v1', digest },
+      facts: { taskDigest: digest, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
     }],
   };
 }
@@ -126,8 +126,8 @@ function source(
 
 function cardFor(sequence: string): AnnouncedSubmissionCard {
   return {
-    record: { kind: 'https://jinn.network/records/submission/1.0', digest: DIGEST_A },
-    facts: { taskDigest: DIGEST_A, taskProfileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0' },
+    record: { kind: 'https://spec.jinn.network/records/submission/v1', digest: DIGEST_A },
+    facts: { taskDigest: DIGEST_A, taskProfileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0' },
     chain: {
       taskId: BigInt(sequence),
       submission: 'urn:uuid:11111111-1111-4111-8111-111111111111',

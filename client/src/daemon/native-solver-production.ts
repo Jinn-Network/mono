@@ -552,7 +552,7 @@ export async function buildNativeSolverProductionHost(
       async backend() {
         const capabilities = await solver.backend.capabilities();
         const launcher = await solver.launcher.inspect({
-          profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+          profileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
           requirements: {},
         });
         return capabilities.signedDeliveries && launcher.probe.ready;

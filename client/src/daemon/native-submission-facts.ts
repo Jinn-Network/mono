@@ -1,8 +1,13 @@
 import { RECORD_KINDS } from '@jinn-network/record-discovery-protocol';
 
-/** Frozen bridge-era kind. It intentionally does not become native Record Discovery authority. */
-export const LEGACY_SUBMISSION_RECORD_KIND =
-  'https://jinn.network/records/task-execution/submission/1.0' as const;
+/**
+ * Frozen bridge-era kind. It intentionally does not become native Record Discovery authority.
+ * Byte-identical to `RECORD_KINDS.submission` since the 2026-08 re-seal collapsed the
+ * `records/task-execution/submission/1.0` divergence onto the canonical kind (§4.4 of
+ * docs/superpowers/specs/2026-08-04-protocol-vocabulary-audit.md) — derived from the same
+ * constant rather than duplicating the literal.
+ */
+export const LEGACY_SUBMISSION_RECORD_KIND = RECORD_KINDS.submission;
 
 /** Native discovery provenance retained alongside the product-local facts card. */
 export interface NativeDiscoveryCardProvenance {

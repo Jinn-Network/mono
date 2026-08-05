@@ -63,7 +63,7 @@ See `../../docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.
 
 Capture turns one observed agent session into two sealed products in your local archive: an
 **Execution Evidence record** — the same record family every producer on the platform writes
-— and a **Trajectory record** describing what happened inside it. Nothing leaves the machine;
+— and a **Trace record** describing what happened inside it. Nothing leaves the machine;
 there is no outbound lane in this build.
 
 ### What is written, and where
@@ -72,7 +72,7 @@ there is no outbound lane in this build.
 | --- | --- | --- |
 | `<home>/capture/sessions/<id>/feed.ndjson` | the session feed the host adapter appends to, verbatim | swept once older than the retention window |
 | `<home>/capture/workspaces/<id>/` | the recorder's staging workspace, holding a copy of every captured byte | swept once older than the retention window |
-| `<home>/capture/derivation-links/<digest>.json` | durable execution-to-trajectory attestation link | same lifetime as the local archive; not swept by retention |
+| `<home>/capture/derivation-links/<digest>.json` | durable execution-to-trace attestation link | same lifetime as the local archive; not swept by retention |
 | `<home>/archive/` | the sealed records and their content-addressed artifacts | append-only; see Retention |
 
 Everything above is created **owner-only** — directories `0700`, files `0600` — which is the
@@ -90,8 +90,8 @@ what makes that possible:
 
 1. **The feed is kept verbatim** as a digest-bound artifact. The detector needs the real text
    to find anything.
-2. **Feed lines are never reordered or rewritten**, and every trajectory span carries
-   `jinn.trajectory.source.ordinal` — the 0-based line ordinal. An exclusion decision taken
+2. **Feed lines are never reordered or rewritten**, and every trace span carries
+   `jinn.trace.source.ordinal` — the 0-based line ordinal. An exclusion decision taken
    per feed line therefore has a stable identifier that maps back to spans.
 3. **Message content is confined to the feed** — except for two derived artifacts that quote
    the user, and which the index-time detector must therefore also scan:

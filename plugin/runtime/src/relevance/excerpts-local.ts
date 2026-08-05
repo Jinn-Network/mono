@@ -60,7 +60,7 @@ function hasDiff(line: unknown): boolean {
 }
 
 /**
- * Deterministic excerpt selection over the trajectory's spans, in span order. Selects
+ * Deterministic excerpt selection over the trace's spans, in span order. Selects
  * never paraphrases. Same *function* as the frozen reference's step selection
  * (`packages/plugin/src/schemas/knowledge-packet.ts` — read, never copied), re-derived
  * against stack-native span structure.

@@ -7,7 +7,7 @@ import type {
 } from "@jinn-network/evidence-repository";
 import type { Span } from "@jinn-network/evidence-trace";
 
-import { loadTrajectoryRecord, trajectoryReferenceFromRecordBytes } from "../capture/link.js";
+import { loadTraceRecord, traceReferenceFromRecordBytes } from "../capture/link.js";
 import type { CorpusReader } from "../corpus/read.js";
 import type { CorpusRetrieval } from "../corpus/retrieve.js";
 import { excerptsFromSpans } from "./excerpts-local.js";
@@ -94,13 +94,13 @@ async function indexableFromLocal(
   let excerpts: IndexableRecord["excerpts"] = [];
   if (feedBytes !== null) {
     const recordBytes = await runtime.repository.getRecord(projection.reference);
-    const trajectoryReference =
-      recordBytes === null ? null : trajectoryReferenceFromRecordBytes(recordBytes);
-    let spans: readonly Span[] = trajectoryReference === null
+    const traceReference =
+      recordBytes === null ? null : traceReferenceFromRecordBytes(recordBytes);
+    let spans: readonly Span[] = traceReference === null
       ? []
-      : (await loadTrajectoryRecord(runtime.repository, trajectoryReference)).spans;
+      : (await loadTraceRecord(runtime.repository, traceReference)).spans;
     if (spans.length === 0) {
-      // No producer-side trajectory: fall back to decoding the declared native trace.
+      // No producer-side trace: fall back to decoding the declared native trace.
       spans = spanSource.spansFor({
         bytes: feedBytes,
         nativeTraceDigest: projection.nativeTrace.digest as Sha256Digest,

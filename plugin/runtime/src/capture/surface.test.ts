@@ -9,10 +9,10 @@ describe("public surface", () => {
     for (const name of [
       "createCaptureCapability",
       "parseSessionFeed",
-      "buildTrajectoryRecord",
-      "buildTrajectorySpans",
-      "trajectoryReferenceFromRecordBytes",
-      "loadTrajectoryRecord",
+      "buildTraceRecord",
+      "buildTraceSpans",
+      "traceReferenceFromRecordBytes",
+      "loadTraceRecord",
       "sweepCaptureRetention",
       "readRetentionWatermark",
       "listStrandedSessionIds",
@@ -31,9 +31,9 @@ describe("public surface", () => {
       "SEAL_MARKER_FILENAME",
       "ARCHIVE_BUSY_ERROR_CODE",
       "derivationLinkPath",
-      "writeTrajectoryDerivationAttestationLink",
-      "readTrajectoryDerivationAttestationLink",
-      "loadTrajectoryDerivationAttestation",
+      "writeTraceDerivationAttestationLink",
+      "readTraceDerivationAttestationLink",
+      "loadTraceDerivationAttestation",
     ]) {
       expect(api, `missing export: ${name}`).toHaveProperty(name);
     }
@@ -43,7 +43,7 @@ describe("public surface", () => {
     const readme = await readFile(new URL("../../README.md", import.meta.url), "utf8");
     expect(readme).toContain("owner-only");
     expect(readme).toContain("does not scrub at capture time");
-    expect(readme).toContain("jinn.trajectory.source.ordinal");
+    expect(readme).toContain("jinn.trace.source.ordinal");
     expect(readme).toContain("input/session-task.json");
     expect(readme).toContain("results/session-summary.json");
   });

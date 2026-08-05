@@ -28,10 +28,10 @@ import { ensureOwnerOnlyDirectory, ensureOwnerOnlyFile } from "./paths.js";
 
 const SHA256_REFERENCE = /^sha256:[0-9a-f]{64}$/u;
 
-export interface TrajectoryDerivationAttestationLink {
+export interface TraceDerivationAttestationLink {
   readonly version: 1;
   readonly executionDigest: RepositorySha256Digest;
-  readonly trajectoryDigest: RepositorySha256Digest;
+  readonly traceDigest: RepositorySha256Digest;
   readonly attestationDigest: RepositorySha256Digest;
   readonly nativeTraceDigest: RepositorySha256Digest;
   readonly derivedAt: string;
@@ -44,7 +44,26 @@ export function derivationLinkPath(
   return join(paths.derivationLinksDirectory, `${toBareSha256Hex(executionDigest)}.json`);
 }
 
-function parseLinkBytes(bytes: Uint8Array): TrajectoryDerivationAttestationLink {
+/**
+ * LEGACY, transition window only: the pre-re-seal field spelling for `traceDigest`. A
+ * derivation link file sealed before the trajectory -> trace convergence (re-seal program
+ * wave 7) carries this key instead of the canonical one. Removed by C2.
+ */
+const LEGACY_TRACE_DIGEST_FIELD = "trajectoryDigest";
+
+/**
+ * Dual-accept parse boundary for derivation link files, following the same discipline
+ * `packages/discovery/protocol/src/origins.ts` and `packages/evidence/trace-decode/src/formats.ts`
+ * state: **legacy spellings are inputs to translation, never selection keys.** A link file
+ * written before the trajectory -> trace convergence carries `trajectoryDigest` instead of
+ * `traceDigest`; this function accepts either on read and normalizes to the canonical
+ * `traceDigest` field immediately, here, so nothing downstream of this function ever branches
+ * on which spelling was on disk. `writeTraceDerivationAttestationLink` never emits the legacy
+ * key. TRANSITION WINDOW: this fallback is migration scaffolding, not a permanent dual format;
+ * component C2 owns narrowing it away once every derivation link on disk has been touched by
+ * a canonical write (`derivedAt` bumps under sync, or a plain reseal sweep).
+ */
+function parseLinkBytes(bytes: Uint8Array): TraceDerivationAttestationLink {
   let decoded: unknown;
   try {
     decoded = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -67,13 +86,13 @@ function parseLinkBytes(bytes: Uint8Array): TrajectoryDerivationAttestationLink 
       "A derivation link file must declare version 1.",
     );
   }
-  for (const field of [
-    "executionDigest",
-    "trajectoryDigest",
-    "attestationDigest",
-    "nativeTraceDigest",
+  const traceDigest = candidate.traceDigest ?? candidate[LEGACY_TRACE_DIGEST_FIELD];
+  for (const [field, value] of [
+    ["executionDigest", candidate.executionDigest],
+    ["traceDigest", traceDigest],
+    ["attestationDigest", candidate.attestationDigest],
+    ["nativeTraceDigest", candidate.nativeTraceDigest],
   ] as const) {
-    const value = candidate[field];
     if (typeof value !== "string" || !SHA256_REFERENCE.test(value)) {
       throw new PluginRuntimeError(
         "capture-derivation-link-invalid",
@@ -90,7 +109,7 @@ function parseLinkBytes(bytes: Uint8Array): TrajectoryDerivationAttestationLink 
   return {
     version: 1,
     executionDigest: candidate.executionDigest as RepositorySha256Digest,
-    trajectoryDigest: candidate.trajectoryDigest as RepositorySha256Digest,
+    traceDigest: traceDigest as RepositorySha256Digest,
     attestationDigest: candidate.attestationDigest as RepositorySha256Digest,
     nativeTraceDigest: candidate.nativeTraceDigest as RepositorySha256Digest,
     derivedAt: candidate.derivedAt,
@@ -98,21 +117,21 @@ function parseLinkBytes(bytes: Uint8Array): TrajectoryDerivationAttestationLink 
 }
 
 function linksCoherent(
-  left: TrajectoryDerivationAttestationLink,
-  right: TrajectoryDerivationAttestationLink,
+  left: TraceDerivationAttestationLink,
+  right: TraceDerivationAttestationLink,
 ): boolean {
   return (
     left.executionDigest === right.executionDigest &&
-    left.trajectoryDigest === right.trajectoryDigest &&
+    left.traceDigest === right.traceDigest &&
     left.attestationDigest === right.attestationDigest &&
     left.nativeTraceDigest === right.nativeTraceDigest &&
     left.derivedAt === right.derivedAt
   );
 }
 
-export async function writeTrajectoryDerivationAttestationLink(
+export async function writeTraceDerivationAttestationLink(
   paths: CapturePaths,
-  link: TrajectoryDerivationAttestationLink,
+  link: TraceDerivationAttestationLink,
 ): Promise<void> {
   await ensureOwnerOnlyDirectory(paths.derivationLinksDirectory);
   const target = derivationLinkPath(paths, link.executionDigest);
@@ -138,10 +157,10 @@ export async function writeTrajectoryDerivationAttestationLink(
   await ensureOwnerOnlyFile(target);
 }
 
-export async function readTrajectoryDerivationAttestationLink(
+export async function readTraceDerivationAttestationLink(
   paths: CapturePaths,
   executionDigest: RepositorySha256Digest,
-): Promise<TrajectoryDerivationAttestationLink | null> {
+): Promise<TraceDerivationAttestationLink | null> {
   const target = derivationLinkPath(paths, executionDigest);
   try {
     return parseLinkBytes(await readFile(target));
@@ -154,9 +173,9 @@ export async function readTrajectoryDerivationAttestationLink(
   }
 }
 
-export async function loadTrajectoryDerivationAttestation(
+export async function loadTraceDerivationAttestation(
   repository: EvidenceRepository,
-  link: TrajectoryDerivationAttestationLink,
+  link: TraceDerivationAttestationLink,
 ): Promise<{ envelopeBytes: Uint8Array; statement: TraceDerivationStatement }> {
   const envelopeBytes = await repository.getArtifact(
     { digest: link.attestationDigest },
@@ -182,7 +201,7 @@ export async function loadTrajectoryDerivationAttestation(
   if (!parsed.success) {
     throw new PluginRuntimeError(
       "capture-derivation-attestation-invalid",
-      "The derivation attestation payload is not a valid Trajectory derivation statement.",
+      "The derivation attestation payload is not a valid Trace derivation statement.",
     );
   }
   return { envelopeBytes, statement: parsed.data };
@@ -194,20 +213,20 @@ function asArray(value: unknown): readonly unknown[] {
 }
 
 /**
- * Reads the trajectory record's digest out of a sealed execution record.
+ * Reads the trace record's digest out of a sealed execution record.
  *
  * The link is an `identifier` PropertyValue on the native-trace entity, which the recorder
  * emits from `ArtifactCapture.identifiers`
  * (`packages/evidence/execution-recorder/src/graph.ts:402-404`). It lives there rather than in
  * the catalog because `EVIDENCE_RECORD_FAMILIES` is closed
- * (`packages/evidence/repository/src/types.ts:1-5`) and a trajectory is therefore stored as a
+ * (`packages/evidence/repository/src/types.ts:1-5`) and a trace is therefore stored as a
  * repository artifact, which the catalog does not project.
  *
  * Returns `null` for any record that does not carry the link, including unreadable bytes —
  * a missing link is an ordinary state (every record written by another producer lacks one),
  * not an error.
  */
-export function trajectoryReferenceFromRecordBytes(
+export function traceReferenceFromRecordBytes(
   bytes: Uint8Array,
 ): EvidenceArtifactReference | null {
   let document: unknown;
@@ -234,8 +253,8 @@ export function trajectoryReferenceFromRecordBytes(
   return null;
 }
 
-/** Fetches and parses the sealed trajectory artifact under C1's exact-bytes discipline. */
-export async function loadTrajectoryRecord(
+/** Fetches and parses the sealed trace artifact under C1's exact-bytes discipline. */
+export async function loadTraceRecord(
   repository: EvidenceRepository,
   reference: EvidenceArtifactReference,
   options?: { readonly signal?: AbortSignal },
@@ -243,8 +262,8 @@ export async function loadTrajectoryRecord(
   const bytes = await repository.getArtifact(reference, options);
   if (bytes === null) {
     throw new PluginRuntimeError(
-      "capture-trajectory-missing",
-      `The trajectory record ${reference.digest} is not present in this archive.`,
+      "capture-trace-missing",
+      `The trace record ${reference.digest} is not present in this archive.`,
     );
   }
   return parseTrace(bytes);
