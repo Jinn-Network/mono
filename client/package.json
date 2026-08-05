@@ -27,6 +27,7 @@
   "files": [
     "/dist/",
     "/deployments/",
+    "!/deployments/evaluator/*.local.json",
     "/plugins/",
     "/skills/",
     "/templates/",

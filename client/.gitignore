@@ -27,3 +27,8 @@ e2e-artifacts/
 # Operator-generated jinn-repo pool (built via scripts/build-jinn-repo-pool.ts;
 # regenerable run input at the default loadJinnRepoPool() path, not committed source)
 src/solver-types/jinn-repo-pool.json
+
+# Per-operator sidecar for the native evaluator deployment module (identity + evidence
+# root; see docs/operator/native-evaluator-deployment.md). Deliberately not committed --
+# it is per-deployment, unlike the digest-pinned .mjs module it sits beside.
+deployments/evaluator/*.local.json
