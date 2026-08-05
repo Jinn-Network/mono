@@ -1,14 +1,48 @@
 /**
  * `GET /v1/notifications` (spec/2026-08-04-headless-operator-rederivation-design.md §6.5,
- * issue #2408).
+ * issue #2408; mechanism amended per PR #2424 review).
  *
- * Operator-class, token-gated like its siblings (see `server.ts`'s
- * `requireOperatorToken` gate). Assembles a `NotificationsBuildInput` from the SAME internal
- * sources `/v1/status` uses — `gatherGatheredStatusRaw` + `assembleStatusV1`
- * (`gather-status.ts` / `status-build.ts`), plus the bootstrap fleet-state file, the boot-time
- * RPC slot-health probe, and the daemon's own event ring — and hands it to the pure
- * `buildNotifications` (`notifications-build.ts`). This is an in-process call graph; nothing
- * here round-trips through the serialized `/v1/status` HTTP payload.
+ * Operator-class, token-gated like its siblings (see `server.ts`'s `requireOperatorToken`
+ * gate). Assembles a `NotificationsBuildInput` from the SAME internal sources `/v1/status`
+ * uses — `gatherGatheredStatusRaw` + `assembleStatusV1` (`gather-status.ts` / `status-build.ts`),
+ * shared with `/v1/status` and `/v1/rewards` behind a ~3s TTL cache
+ * (`gathered-status-cache.ts`, review finding F3) — plus the bootstrap fleet-state file, the
+ * boot-time RPC slot-health probe, and the daemon's own event ring. Nothing here round-trips
+ * through the serialized `/v1/status` HTTP payload.
+ *
+ * **`restart_required` mechanism (review finding F1).** NOT config-file-mtime — that fires
+ * permanently for onboarding-complete / pricing writes, which hot-apply while still bumping the
+ * file's mtime. Reads the explicit `isRestartRequired()` flag (`restart-required-state.ts`),
+ * set only by the three write paths the daemon never hot-applies (claim-policy, joinedSolverNets
+ * join-failure-or-absent-applier / leave, rpcUrl).
+ *
+ * **`rpc_all_failed` / `rpc_primary_degraded` (review finding F2).** The boot-time RPC
+ * fallback-chain probe is captured ONCE at startup (`retryCount: 0`) and never re-probed —
+ * CLAUDE.md's RPC fallback-chain docs are explicit that a boot-time 429/5xx on a secondary slot
+ * never gates anything. Treating boot-probe-only evidence as a permanent blocking signal would
+ * be exactly that kind of false gate. So `rpc_all_failed` requires the LIVE read (`raw.rpc.ok`,
+ * the same read `/v1/status.rpc` reports) to ALSO be failing before it fires — boot-probe-only
+ * "every slot failed at boot" with a currently-healthy live read produces no notification.
+ * `rpc_primary_degraded` is unchanged: the spec explicitly blesses the boot probe alone for
+ * that one (a degraded-but-serving fallback is exactly the boot probe's design intent).
+ *
+ * **`rpc_unreachable` is NOT emitted here (review finding F4).** The daemon-offline condition is
+ * a client-local overlay by construction (spec §6 composition item 5) — a server cannot report
+ * its own unreachability. The kind stays in the vocabulary (`OfflineNotice` produces it
+ * client-side); chain-RPC health is covered by the two RPC-health kinds above. `raw.rpc.ok` is
+ * still read here, but only as the F2 live-agreement input, never to emit `rpc_unreachable`
+ * itself.
+ *
+ * **`claim_failed`, two semantic notes (review finding F5):**
+ * 1. *Restart zeroes the window.* The event ring (`../events/emitter.js`) is in-memory; a
+ *    daemon restart clears it, so a failure burst immediately before a restart is invisible to
+ *    this endpoint afterward. Accepted — the pre-#2408 SSE-backfill path had the identical
+ *    property (the ring it read from was the same in-memory buffer).
+ * 2. *Ring-capacity undercount bound.* The ring caps at 1000 events across ALL kinds, not just
+ *    `claim_failed`. If more than 1000 `intent`-kind events land within the 30-minute window,
+ *    older `claim_failed` events can be evicted before this endpoint counts them — an
+ *    undercount, never an overcount. Not fixed here; the bound is named so a future caller
+ *    doesn't assume exactness.
  *
  * **Dead kind, documented (per the issue's per-kind reconciliation requirement):**
  * `unreleased_attempt` is NOT wired — no server-side state tracks "claimed on chain, occupying
@@ -17,17 +51,15 @@
  * for the full 16-kind table.
  */
 import type { Hono } from 'hono';
-import { existsSync, statSync } from 'node:fs';
 import type { Store } from '../store/store.js';
-import {
-  gatherGatheredStatusRaw,
-  type StatusGatherConfig,
-} from './gather-status.js';
-import { assembleStatusV1 } from './status-build.js';
+import { getCachedGatheredStatus } from './gathered-status-cache.js';
+import type { gatherGatheredStatusRaw, StatusGatherConfig } from './gather-status.js';
+import type { assembleStatusV1 } from './status-build.js';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 import { isOperationalServiceStep } from '../earning/types.js';
 import { getEventBuffer } from '../events/emitter.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
+import { isRestartRequired } from './restart-required-state.js';
 import type { NotificationsV1Response, NotificationV1 } from './contract/notifications.js';
 import {
   buildNotifications,
@@ -54,6 +86,7 @@ export interface NotificationsRoutesConfig {
   getBootstrapExtras?: () =>
     | { rpcSlotHealth?: readonly RpcSlotHealthLike[]; joinedSolverNets?: Record<string, unknown> }
     | undefined;
+  /** Overrides for the shared cache's underlying gather/assemble (tests only). */
   gatherRaw?: typeof gatherGatheredStatusRaw;
   assemble?: typeof assembleStatusV1;
   now?: () => number;
@@ -73,33 +106,17 @@ function computeBootstrapMode(
   return allRunning ? 'running' : 'setup';
 }
 
-/**
- * `restart_required`'s new semantic: config-file-newer-than-boot (see
- * `notifications-build.ts`'s docstring for the full rationale/behavior-change note).
- * Best-effort — a missing config file, missing daemon-start timestamp, or a stat failure all
- * degrade to `false` (never blocks the endpoint).
- */
-function computeRestartRequired(configPath: string | undefined, daemonStartedAt: string | null): boolean {
-  if (!configPath || !daemonStartedAt || !existsSync(configPath)) return false;
-  const bootMs = Date.parse(daemonStartedAt);
-  if (Number.isNaN(bootMs)) return false;
-  try {
-    return statSync(configPath).mtimeMs > bootMs;
-  } catch {
-    return false;
-  }
-}
-
 export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfig): void {
-  const gatherRaw = deps.gatherRaw ?? gatherGatheredStatusRaw;
-  const assemble = deps.assemble ?? assembleStatusV1;
   const now = deps.now ?? (() => Date.now());
 
   app.get('/v1/notifications', async (c) => {
     try {
       const status = deps.getStatus();
-      const raw = await gatherRaw(deps.store, status);
-      const assembled = assemble(raw);
+      const { raw, assembled } = await getCachedGatheredStatus(deps.store, status, {
+        gatherRaw: deps.gatherRaw,
+        assemble: deps.assemble,
+        now,
+      });
       const extras = deps.getBootstrapExtras?.();
 
       const nowMs = now();
@@ -132,7 +149,7 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
         harness: assembled.harness,
         rpc: { reachable: assembled.rpc.ok },
         rpcSlotHealth: extras?.rpcSlotHealth,
-        restartRequired: computeRestartRequired(status?.configPath, raw.daemonStartedAt ?? null),
+        restartRequired: isRestartRequired(),
         daemonVersion: assembled.version,
         latestVersion: assembled.latestVersion ?? undefined,
         services: assembled.fleet.services.map((s) => ({ safeBound: s.safeBoundToAgent })),

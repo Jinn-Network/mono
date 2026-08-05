@@ -24,7 +24,8 @@ import {
   verifyRequestWithErc8128,
   InMemoryNonceStore,
 } from '../auth/erc8128.js';
-import { gatherStatusForApi, type StatusGatherConfig } from './gather-status.js';
+import { enrichStatusV1Tail, type StatusGatherConfig } from './gather-status.js';
+import { getCachedGatheredStatus, invalidateGatheredStatusCache } from './gathered-status-cache.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
 import type { Corpus, ArtifactContent } from '../corpus/index.js';
 import { AcquireError, HashMismatchError } from '../corpus/index.js';
@@ -386,6 +387,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   const { store } = config;
   const app = new Hono();
 
+  // The shared gather/assemble cache (issue #2408 review finding F3) is a process-wide
+  // singleton. A real daemon calls startApiServer exactly once per process, so this is a no-op
+  // there; a test harness that starts several independent servers (different Store/status
+  // fixtures) in the same process must not silently inherit a previous instance's cached read.
+  invalidateGatheredStatusCache();
+
   // The /v1/status handler reads from this holder, not the closure-captured
   // `config.status`, so the daemon can swap the running-mode config in after
   // the server is already up. See `setStatusConfig` on the returned object.
@@ -514,7 +521,12 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
             },
           }
         : undefined;
-      const body = await gatherStatusForApi(store, statusConfig);
+      // Shares the ~3s TTL cache with /v1/rewards and /v1/notifications (issue #2408 review
+      // finding F3) — `enrichStatusV1Tail` is the cheap, no-RPC tail (loop-completion,
+      // evidence-indexing, spend, AI-units) that still runs fresh every request against the
+      // (possibly cached) `{ raw, assembled }` pair.
+      const { raw, assembled } = await getCachedGatheredStatus(store, statusConfig);
+      const body = await enrichStatusV1Tail(store, statusConfig, raw, assembled);
       return c.json(body);
     } catch (err) {
       // Mask any RPC URL embedded in the message and drop the filesystem
@@ -1004,6 +1016,10 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
         app,
         setStatusConfig: (status) => {
           liveStatus = status;
+          // Invalidate the shared gather/assemble cache (issue #2408 review finding F3) so the
+          // very next /v1/status (or /v1/rewards, /v1/notifications) read reflects the swapped
+          // config immediately, rather than serving up to the cache's TTL of pre-swap data.
+          invalidateGatheredStatusCache();
         },
       });
     });

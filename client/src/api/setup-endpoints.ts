@@ -52,6 +52,7 @@ import { addSetupRetryEndpoint } from './setup-retry-endpoint.js';
 import { onboardingCompleteIntent } from '../intents/onboarding-complete.js';
 import type { JoinedSolverNetConfig } from '../solver-nets/registry.js';
 import { maskUrlsInMessage } from '../rpc/transport.js';
+import { markRestartRequired } from './restart-required-state.js';
 
 const ChangePasswordSchema = z.object({
   current: z.string().min(1),
@@ -905,6 +906,11 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }
     }
 
+    // Only mark the shared flag when THIS join genuinely needs a restart (hot-apply failed or
+    // the applier wasn't wired yet) — a successful hot-apply must not trip the notification.
+    // See restart-required-state.ts (issue #2408 review F1).
+    if (restartRequired) markRestartRequired();
+
     return c.json({
       ok: true,
       restartRequired,
@@ -982,6 +988,9 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 500);
     }
 
+    // No hot-apply path for leaving a SolverNet — always restart-required. See
+    // restart-required-state.ts (issue #2408 review F1).
+    markRestartRequired();
     return c.json({ ok: true, restartRequired: true, manifestCid: cid });
   });
 
@@ -1071,6 +1080,9 @@ export function addSetupRoutes(app: Hono, config: SetupRoutesConfig = {}): void 
       }, 500);
     }
 
+    // No hot-apply path for the RPC URL — always restart-required. See
+    // restart-required-state.ts (issue #2408 review F1).
+    markRestartRequired();
     return c.json({
       ok: true,
       restartRequired: true,

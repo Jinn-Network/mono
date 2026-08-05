@@ -926,12 +926,23 @@ export async function gatherGatheredStatusRaw(
   return raw;
 }
 
-export async function gatherStatusForApi(
+/**
+ * The cheap, read-only-over-already-gathered-data tail that `gatherStatusForApi` appends onto
+ * `assembleStatusV1`'s output: loop-completion, impl-state cadence, evidence-indexing rollup,
+ * spend, and AI-units. None of this re-reads chain state — it's all derived from `raw`/`store`.
+ * Split out (issue #2408 review finding F3) so `server.ts`'s `/v1/status` handler can run it
+ * against a shared-TTL-cached `{ raw, assembled }` pair (`gathered-status-cache.ts`) without
+ * `gather-status.ts` importing that cache module itself (which would be circular — the cache
+ * module imports FROM here). `gatherStatusForApi` below is unchanged in behavior; it just calls
+ * this helper instead of inlining it, so every existing (uncached) caller keeps its exact prior
+ * fresh-every-call semantics.
+ */
+export async function enrichStatusV1Tail(
   store: Store,
   status: StatusGatherConfig | undefined,
+  raw: GatheredStatusRaw,
+  body: StatusV1Response,
 ): Promise<StatusV1Response> {
-  const raw = await gatherGatheredStatusRaw(store, status);
-  const body = assembleStatusV1(raw);
   // Loop-completion + impl-state commit cadence (#959). Both are read-only and
   // degrade to zeroes / an empty list — they never throw the status endpoint.
   //
@@ -1065,4 +1076,13 @@ export async function gatherStatusForApi(
     };
   }
   return body;
+}
+
+export async function gatherStatusForApi(
+  store: Store,
+  status: StatusGatherConfig | undefined,
+): Promise<StatusV1Response> {
+  const raw = await gatherGatheredStatusRaw(store, status);
+  const body = assembleStatusV1(raw);
+  return enrichStatusV1Tail(store, status, raw, body);
 }

@@ -19,15 +19,19 @@ const SEVERITY_ORDER: Record<OperatorNotification['severity'], number> = {
  * same receipts + live-health class and serves the already-derived, already-sorted list.
  *
  * Shares the react-query cache with no other poller (there wasn't one for this key before
- * either); `refetchInterval` matches the existing `['status']` cadence (5s) so the
- * notification surface stays as fresh as Overview's own status poll.
+ * either). `refetchInterval` is 30s, not the 5s `['status']` cadence (PR #2424 review finding
+ * F3) — notifications are not latency-critical the way the live balance/fleet snapshot is, and
+ * `AppShell` mounts this hook on every page, so a shorter interval multiplies request volume
+ * across the whole app. The server-side gather this endpoint depends on is itself cached
+ * behind a ~3s TTL shared with `/v1/status` and `/v1/rewards`
+ * (`client/src/api/gathered-status-cache.ts`), so Overview's own 5s status poll is unaffected.
  */
 export function useNotifications(): OperatorNotification[] {
   const connection = useConnectionState();
   const query = useQuery({
     queryKey: ['notifications'],
     queryFn: () => api.getNotifications(),
-    refetchInterval: 5000,
+    refetchInterval: 30_000,
   });
 
   // When the SPA can't reach the daemon, surface a blocking notification immediately

@@ -1,20 +1,19 @@
 /**
- * Integration test for `GET /v1/notifications` (issue #2408, spec §6.5). Uses the same
- * dependency-injection pattern as `test/api/rewards-endpoint.test.ts` (`gatherRaw` / `assemble`
- * overrides) so the test controls exactly what `GatheredStatusRaw` / `StatusV1Response` the
- * handler sees, without needing a real RPC client or fleet state on disk.
+ * Integration test for `GET /v1/notifications` (issue #2408, spec §6.5; PR #2424 review
+ * findings F1/F2/F3/F4). Uses the same dependency-injection pattern as
+ * `test/api/rewards-endpoint.test.ts` (`gatherRaw` / `assemble` overrides) so the test controls
+ * exactly what `GatheredStatusRaw` / `StatusV1Response` the handler sees, without needing a
+ * real RPC client or fleet state on disk.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
-import { mkdtempSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { addNotificationsRoutes } from '../../src/api/notifications-endpoint.js';
 import { Store } from '../../src/store/store.js';
 import type { GatheredStatusRaw } from '../../src/api/status-build.js';
 import type { StatusV1Response } from '../../src/api/contract/status.js';
-import { getEventBuffer } from '../../src/events/emitter.js';
-import { emitStructured } from '../../src/events/emitter.js';
+import { getEventBuffer, emitStructured } from '../../src/events/emitter.js';
+import { invalidateGatheredStatusCache } from '../../src/api/gathered-status-cache.js';
+import { markRestartRequired, resetRestartRequiredForTest } from '../../src/api/restart-required-state.js';
 
 function minimalRaw(overrides: Partial<GatheredStatusRaw> = {}): GatheredStatusRaw {
   return {
@@ -63,11 +62,19 @@ describe('GET /v1/notifications', () => {
   beforeEach(() => {
     store = new Store(':memory:');
     getEventBuffer().clear();
+    // The shared gather/assemble cache (gathered-status-cache.ts, review finding F3) is a
+    // process-wide singleton — without clearing it, a later test in this file would silently
+    // reuse an earlier test's cached raw/assembled instead of calling its own injected
+    // gatherRaw/assemble overrides.
+    invalidateGatheredStatusCache();
+    resetRestartRequiredForTest();
   });
 
   afterEach(() => {
     store.close();
     getEventBuffer().clear();
+    invalidateGatheredStatusCache();
+    resetRestartRequiredForTest();
   });
 
   it('returns an empty, healthy payload with the envelope fields', async () => {
@@ -123,13 +130,13 @@ describe('GET /v1/notifications', () => {
     expect(body.notifications.map((n) => n.kind)).not.toContain('no_solvernets_joined');
   });
 
-  it('emits rpc_all_failed from getBootstrapExtras.rpcSlotHealth when every slot failed', async () => {
+  it('emits rpc_all_failed from getBootstrapExtras.rpcSlotHealth when every slot failed AND the live read also fails (review finding F2)', async () => {
     const app = new Hono();
     addNotificationsRoutes(app, {
       store,
       getStatus: () => undefined,
-      gatherRaw: async () => minimalRaw(),
-      assemble: () => minimalAssembled(),
+      gatherRaw: async () => minimalRaw({ rpc: { ok: false } }),
+      assemble: () => minimalAssembled({ rpc: { ok: false } }),
       getBootstrapExtras: () => ({
         rpcSlotHealth: [
           { ok: false, host: 'primary.example' },
@@ -143,6 +150,40 @@ describe('GET /v1/notifications', () => {
     const kinds = body.notifications.map((n) => n.kind);
     expect(kinds).toContain('rpc_all_failed');
     expect(body.notifications.find((n) => n.kind === 'rpc_all_failed')?.severity).toBe('blocking');
+  });
+
+  it('does NOT emit rpc_all_failed on boot-probe-only evidence when the live read is healthy (review finding F2)', async () => {
+    const app = new Hono();
+    addNotificationsRoutes(app, {
+      store,
+      getStatus: () => undefined,
+      gatherRaw: async () => minimalRaw({ rpc: { ok: true } }),
+      assemble: () => minimalAssembled({ rpc: { ok: true } }),
+      getBootstrapExtras: () => ({
+        rpcSlotHealth: [
+          { ok: false, host: 'primary.example' },
+          { ok: false, host: 'secondary.example' },
+        ],
+      }),
+    });
+
+    const res = await app.request('/v1/notifications');
+    const body = await res.json() as { notifications: Array<{ kind: string }> };
+    expect(body.notifications.map((n) => n.kind)).not.toContain('rpc_all_failed');
+  });
+
+  it('does NOT emit rpc_unreachable server-side (review finding F4)', async () => {
+    const app = new Hono();
+    addNotificationsRoutes(app, {
+      store,
+      getStatus: () => undefined,
+      gatherRaw: async () => minimalRaw({ rpc: { ok: false } }),
+      assemble: () => minimalAssembled({ rpc: { ok: false } }),
+    });
+
+    const res = await app.request('/v1/notifications');
+    const body = await res.json() as { notifications: Array<{ kind: string }> };
+    expect(body.notifications.map((n) => n.kind)).not.toContain('rpc_unreachable');
   });
 
   it('sorts blocking-first then warning then info', async () => {
@@ -165,26 +206,16 @@ describe('GET /v1/notifications', () => {
     expect(severities).toEqual([...severities].sort((a, b) => a - b));
   });
 
-  it('restart_required fires when the config file mtime is newer than daemonStartedAt', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-notif-restart-'));
-    const configPath = join(dir, 'config.json');
-    writeFileSync(configPath, '{}');
-    const bootTime = new Date('2026-01-01T00:00:00Z');
-    const editTime = new Date('2026-01-02T00:00:00Z'); // after boot
-    utimesSync(configPath, editTime, editTime);
+  // ── restart_required — explicit flag, not mtime (review finding F1) ───────────────────────
+
+  it('restart_required fires when the shared restart-required flag is set', async () => {
+    markRestartRequired();
 
     const app = new Hono();
     addNotificationsRoutes(app, {
       store,
-      getStatus: () => ({
-        earningDir: dir,
-        rpcUrl: 'http://example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-        configPath,
-      }),
-      gatherRaw: async () => minimalRaw({ daemonStartedAt: bootTime.toISOString() }),
+      getStatus: () => undefined,
+      gatherRaw: async () => minimalRaw(),
       assemble: () => minimalAssembled(),
     });
 
@@ -193,26 +224,12 @@ describe('GET /v1/notifications', () => {
     expect(body.notifications.map((n) => n.kind)).toContain('restart_required');
   });
 
-  it('restart_required stays silent when the config file predates daemonStartedAt', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'jinn-notif-restart-'));
-    const configPath = join(dir, 'config.json');
-    writeFileSync(configPath, '{}');
-    const editTime = new Date('2026-01-01T00:00:00Z');
-    utimesSync(configPath, editTime, editTime);
-    const bootTime = new Date('2026-01-02T00:00:00Z'); // after the edit
-
+  it('restart_required stays silent when the flag was never set', async () => {
     const app = new Hono();
     addNotificationsRoutes(app, {
       store,
-      getStatus: () => ({
-        earningDir: dir,
-        rpcUrl: 'http://example',
-        network: 'testnet',
-        pollIntervalMs: 5000,
-        rewardClaimIntervalMs: 0,
-        configPath,
-      }),
-      gatherRaw: async () => minimalRaw({ daemonStartedAt: bootTime.toISOString() }),
+      getStatus: () => undefined,
+      gatherRaw: async () => minimalRaw(),
       assemble: () => minimalAssembled(),
     });
 

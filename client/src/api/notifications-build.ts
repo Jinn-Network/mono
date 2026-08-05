@@ -1,6 +1,6 @@
 /**
  * Pure server-side notification derivation (spec/2026-08-04-headless-operator-rederivation-design.md
- * §6.5, issue #2408).
+ * §6.5, issue #2408; amended per PR #2424 review findings F1/F2/F4).
  *
  * Ports `client/src/dashboard/spa/src/notifications/derive.ts`'s `deriveNotifications` — a pure
  * function over receipts + the live-health class — to the daemon, plus the two RPC-health kinds
@@ -9,16 +9,27 @@
  *
  * `claim_failed` is event-driven (the SSE ring, not a snapshot) — kept pure here by accepting
  * an already-computed `{ count, sinceMs }` summary; `notifications-endpoint.ts` reads the ring
- * buffer and calls {@link countRecentClaimFailures} to produce it.
+ * buffer and calls {@link countRecentClaimFailures} to produce it. See that endpoint's
+ * docstring for two accepted semantic notes (restart zeroes the window; a ring-capacity
+ * undercount bound).
  *
  * **Per-kind reconciliation (16 canonical kinds, OPERATOR-APP-SPEC §2.10):**
- * - 14 ported unchanged in spirit from the browser deriver: `funding_low`, `funding_empty`,
- *   `password_rotation_due`, `harness_not_ready`, `bootstrap_blocked`, `restart_required`
- *   (semantic CHANGE — see below), `update_available`, `rpc_unreachable`, `no_solvernets_joined`,
+ * - 12 ported unchanged in spirit from the browser deriver: `funding_low`, `funding_empty`,
+ *   `password_rotation_due`, `harness_not_ready`, `update_available`, `no_solvernets_joined`,
  *   `safe_binding_pending`, `claim_failed` (moved from the SSE-ring hook to here),
- *   `config_migrated`, `unreleased_attempt`, `evidence_indexing_failed`.
+ *   `config_migrated`, `unreleased_attempt`.
+ * - `bootstrap_blocked` is ported for its *mode* check, but its message is an IMPROVEMENT, not
+ *   a faithful port: the pre-#2408 browser cast `/v1/bootstrap`'s raw JSON straight to
+ *   `DeriveInput['bootstrap']`, which has a `blockingReason` field the wire response never
+ *   actually carried (verified — no producer ever populated it), so `bootstrap_blocked` always
+ *   fell through to the "Bootstrap incomplete" fallback in production. Server-side wiring
+ *   (`notifications-endpoint.ts` reading `readBootstrapError(...)?.message`) is genuinely new.
+ * - `restart_required` — semantic CHANGE, mechanism amended twice (see below).
+ * - `rpc_unreachable` — **NOT emitted server-side** (review finding F4): stays in the vocabulary
+ *   as a client-produced-only kind (`OfflineNotice`); see that field's note below.
  * - 2 newly implemented here: `rpc_all_failed`, `rpc_primary_degraded` — derivable only from the
- *   live-health class's RPC slot health, which the browser bundle never had.
+ *   live-health class's RPC slot health, which the browser bundle never had. `rpc_all_failed`
+ *   additionally requires live-read agreement (review finding F2, see below).
  * - `unreleased_attempt` stays a **dead kind**: no server-side producer tracks "claimed on chain,
  *   occupying a `maxClaims` slot, not yet reaped" (verified — no such state exists in the store,
  *   claim-policy, or fleet modules). `NotificationsBuildInput` carries no field for it; wiring it
@@ -27,16 +38,26 @@
  *   `EvidenceDriverLoop`'s cached failure list (`StatusGatherConfig.evidenceDriver`, already
  *   threaded for `/v1/status`) is a real server-side producer.
  *
- * **`restart_required` semantic change (flagged per the issue):** the browser derived this from
- * a `restartPending` boolean set by a same-session UI gesture (editing a restart-required config
- * field in the SPA) — session-local, lost on reload. Server-side it is
- * *config-file-newer-than-boot*: the operator's config file's mtime is compared against the
- * daemon's recorded start time (`notifications-endpoint.ts` does the `fs.statSync` + compare;
- * this module just takes the resulting boolean). This is a genuine behavior change: an operator
- * who edits `config.json` directly (not through the SPA) now sees the notice, and a same-session
- * SPA edit that the daemon hot-applies without needing a restart no longer clears the notice
- * until the config file's mtime naturally predates a later boot. All consumers (SPA, any future
- * CLI/console reader of this endpoint) see the same server-computed answer.
+ * **`restart_required` semantic change, mechanism amended (review finding F1).** The browser
+ * derived this from a `restartPending` boolean set by a same-session UI gesture — session-local,
+ * lost on reload. This PR's first pass made it server-side *config-file-newer-than-boot*
+ * (mtime vs. daemon-start-time), following spec §6.5's parenthetical sketch literally — but that
+ * fires PERMANENTLY once an operator completes onboarding or edits pricing, because both of
+ * those writes bump the config file's mtime WHILE ALSO hot-applying in-memory (no restart
+ * needed); mtime can't tell the two cases apart. Ruling: the mechanism changes again, the
+ * semantic stays — an explicit `isRestartRequired()` flag (`restart-required-state.ts`), set
+ * only by the three write paths the daemon never hot-applies (claim-policy, joinedSolverNets,
+ * rpcUrl), cleared at boot. This diverges from spec §6.5's parenthetical; tracked as a
+ * spec-side amendment separately from this PR. An operator hand-editing `config.json` outside
+ * the SPA no longer produces the notification — accepted (the browser-era flag never watched
+ * the filesystem either).
+ *
+ * **`rpc_all_failed` requires live-read agreement (review finding F2).** The boot-time RPC
+ * fallback-chain probe runs once at startup and is never re-probed; treating it alone as a
+ * permanent blocking signal would contradict CLAUDE.md's own rule that boot-time secondary-slot
+ * 429s never gate anything. `rpc_all_failed` therefore fires only when the live gather-status
+ * RPC read (`input.rpc.reachable`) is ALSO currently failing. `rpc_primary_degraded` needs no
+ * such agreement — the spec explicitly blesses the boot probe alone for that informational kind.
  */
 import { NOTIFICATION_KINDS, type NotificationKind, type NotificationV1 } from './contract/notifications.js';
 
@@ -163,7 +184,7 @@ export interface NotificationsBuildInput {
   /** Boot-time RPC fallback-chain probe (main.ts's `lastL2Probe`) — absent ⇒ neither
    *  `rpc_all_failed` nor `rpc_primary_degraded` can fire. */
   rpcSlotHealth?: readonly RpcSlotHealthLike[];
-  /** config-file-mtime-newer-than-daemon-start-time — see module docstring. */
+  /** The explicit `isRestartRequired()` flag (`restart-required-state.ts`) — see module docstring. */
   restartRequired: boolean;
   daemonVersion: string;
   latestVersion?: string;
@@ -231,25 +252,30 @@ export function buildNotifications(input: NotificationsBuildInput): Notification
     );
   }
 
-  if (!input.rpc.reachable) {
-    out.push(notice('rpc_unreachable', 'blocking', 'RPC endpoint is unreachable.', {
-      jumpTo: '/operator/network',
-    }));
-  }
+  // rpc_unreachable is deliberately NOT emitted here (review finding F4) — the daemon-offline
+  // condition is a client-local overlay by construction; see module docstring. `input.rpc` is
+  // still read below, purely as the F2 live-agreement input for `rpc_all_failed`.
 
   if (input.rpcSlotHealth && input.rpcSlotHealth.length > 0) {
-    const allFailed = input.rpcSlotHealth.every((p) => !p.ok);
-    if (allFailed) {
-      const hosts = input.rpcSlotHealth.map((p) => p.host).join(', ');
-      out.push(
-        notice(
-          'rpc_all_failed',
-          'blocking',
-          `Every RPC fallback slot failed: ${hosts}.`,
-          { jumpTo: '/operator/network', details: { hosts: input.rpcSlotHealth.map((p) => p.host) } },
-        ),
-      );
-    } else if (!input.rpcSlotHealth[0]!.ok) {
+    const allSlotsFailed = input.rpcSlotHealth.every((p) => !p.ok);
+    const primaryFailed = !input.rpcSlotHealth[0]!.ok;
+    if (allSlotsFailed) {
+      // Boot-probe-only evidence (every slot failed once, at startup) is not enough on its own
+      // (review finding F2) — only fire when the live read agrees the RPC is CURRENTLY down.
+      if (!input.rpc.reachable) {
+        const hosts = input.rpcSlotHealth.map((p) => p.host).join(', ');
+        out.push(
+          notice(
+            'rpc_all_failed',
+            'blocking',
+            `Every RPC fallback slot failed: ${hosts}.`,
+            { jumpTo: '/operator/network', details: { hosts: input.rpcSlotHealth.map((p) => p.host) } },
+          ),
+        );
+      }
+    } else if (primaryFailed) {
+      // The spec blesses the boot probe alone for this informational kind — no live-agreement
+      // gate needed (review finding F2).
       out.push(
         notice(
           'rpc_primary_degraded',

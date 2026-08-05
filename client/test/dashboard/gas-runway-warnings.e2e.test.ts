@@ -321,14 +321,14 @@ test('warning clears on the next poll-driven re-render once funding recovers, no
 
   // Mutate the mocked payloads in place — both route handlers read `state.status` /
   // `state.notifications` fresh on every request, so no new `page.route` registration or
-  // reload is needed. Overview's own `['status']` query polls every 5s and
-  // `useNotifications`' `['notifications']` query polls on the same 5s cadence (see
-  // `notifications/useNotifications.ts`) — the next scheduled poll of each picks up the
-  // healthy values.
+  // reload is needed. Overview's own `['status']` query polls every 5s; `useNotifications`'
+  // `['notifications']` query polls every 30s (PR #2424 review finding F3 — notifications are
+  // not latency-critical, and AppShell mounts the hook on every page) — the timeout below
+  // covers a full notifications poll cycle plus margin.
   state.status = { ...DEFAULT_STATUS_PAYLOAD, masterGas: HEALTHY_MASTER_GAS };
   state.notifications = [];
 
-  await expect(fundingLow).toHaveCount(0, { timeout: 15_000 });
+  await expect(fundingLow).toHaveCount(0, { timeout: 35_000 });
   await expect(runwayLine).toHaveAttribute('data-runway-severity', 'none', { timeout: 15_000 });
 
   await page.screenshot({ path: 'e2e-artifacts/1296/funding-low-cleared.png', fullPage: true });

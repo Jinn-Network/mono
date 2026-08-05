@@ -108,9 +108,14 @@ describe('buildNotifications', () => {
     );
   });
 
-  it('emits rpc_unreachable when rpc.reachable is false', () => {
+  it('does NOT emit rpc_unreachable server-side, even when rpc.reachable is false (review finding F4)', () => {
+    // The daemon-offline condition is a client-local overlay by construction (spec §6
+    // composition item 5) — a server cannot report its own unreachability. `rpc_unreachable`
+    // stays client-produced only (see OfflineNotice / useNotifications.ts's disconnected
+    // branch); `input.rpc.reachable` is read here purely as the F2 live-agreement input for
+    // `rpc_all_failed`, never to emit this kind.
     const out = buildNotifications({ ...baseInput, rpc: { reachable: false } });
-    expect(out).toContainEqual(expect.objectContaining({ kind: 'rpc_unreachable', severity: 'blocking' }));
+    expect(out.map((n) => n.kind)).not.toContain('rpc_unreachable');
   });
 
   it('emits safe_binding_pending when at least one service has safeBound === false', () => {
@@ -252,10 +257,11 @@ describe('config_migrated (one-time shape-v2 migration, ported)', () => {
 
 // ── RPC-health kinds (spec §6.5 — newly implementable server-side, issue #2408) ────────────
 
-describe('rpc_all_failed / rpc_primary_degraded (new — live-health class carries slot health)', () => {
-  it('emits rpc_all_failed when every configured slot failed', () => {
+describe('rpc_all_failed / rpc_primary_degraded (new — live-health class carries slot health, review finding F2)', () => {
+  it('emits rpc_all_failed only when the LIVE read ALSO agrees (boot-failed + live-failed → blocking)', () => {
     const out = buildNotifications({
       ...baseInput,
+      rpc: { reachable: false },
       rpcSlotHealth: [
         { ok: false, host: 'primary.example' },
         { ok: false, host: 'secondary.example' },
@@ -267,18 +273,41 @@ describe('rpc_all_failed / rpc_primary_degraded (new — live-health class carri
     expect(out.map((n) => n.kind)).not.toContain('rpc_primary_degraded');
   });
 
-  it('emits rpc_primary_degraded when slot 0 failed but a fallback slot served', () => {
+  it('does NOT emit rpc_all_failed on boot-probe-only evidence (boot-failed + live-ok → nothing)', () => {
+    // The boot-time fallback-chain probe runs once at startup and is never re-probed; treating
+    // it alone as a permanent blocking signal would contradict CLAUDE.md's rule that boot-time
+    // secondary-slot failures never gate anything. Live read currently healthy ⇒ no notice at
+    // all (not even rpc_primary_degraded — every slot failed, so there's no "degraded, fallback
+    // serving" story either).
     const out = buildNotifications({
       ...baseInput,
+      rpc: { reachable: true },
       rpcSlotHealth: [
         { ok: false, host: 'primary.example' },
-        { ok: true, host: 'secondary.example' },
+        { ok: false, host: 'secondary.example' },
       ],
     });
-    expect(out).toContainEqual(
-      expect.objectContaining({ kind: 'rpc_primary_degraded', severity: 'info' }),
-    );
     expect(out.map((n) => n.kind)).not.toContain('rpc_all_failed');
+    expect(out.map((n) => n.kind)).not.toContain('rpc_primary_degraded');
+  });
+
+  it('emits rpc_primary_degraded when slot 0 failed but a fallback slot served, regardless of the live read', () => {
+    // The spec explicitly blesses the boot probe alone for this informational kind — no
+    // live-agreement gate, unlike rpc_all_failed.
+    for (const reachable of [true, false]) {
+      const out = buildNotifications({
+        ...baseInput,
+        rpc: { reachable },
+        rpcSlotHealth: [
+          { ok: false, host: 'primary.example' },
+          { ok: true, host: 'secondary.example' },
+        ],
+      });
+      expect(out).toContainEqual(
+        expect.objectContaining({ kind: 'rpc_primary_degraded', severity: 'info' }),
+      );
+      expect(out.map((n) => n.kind)).not.toContain('rpc_all_failed');
+    }
   });
 
   it('emits neither when the primary slot is healthy', () => {
