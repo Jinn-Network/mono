@@ -1,11 +1,14 @@
 # Agent Artifacts as the Replacement for `jinn integrations`
 
-- **Version:** 1.0
-- **Date:** 2026-08-04
+- **Version:** 1.1
+- **Date:** 2026-08-04 (§8 amended 2026-08-05 — see §8.1)
 - **Status:** **Ruled — all dispositions decided by the operator (Ritsu), 2026-08-04**, across
   three rounds recorded in §0. Phase 1 (design) of DevX Re-Seal component C5
   ([#2396](https://github.com/Jinn-Network/mono/issues/2396)). No open questions remain; the
   build phase executes against §8. The document travels with the operator's formal sign-off.
+  **v1.1 amends §8's build order only** — five tasks inserted by the
+  [user-journey design](./2026-08-05-user-journeys-design.md), dated note at §8.1. No ruling in
+  §§1–7 is reopened.
 - **Shape:** `design`
 - **Scope:** the **host skills** as the canonical published onboarding artifact, the **host
   plugin** as their distribution bundle, the requester surface as a **new tier-4 product**, the
@@ -442,10 +445,14 @@ ruling; it belongs to whoever owns the legacy client's sunset.
 
 ## 8. Decision 6 — build-phase breakdown
 
-**Buildable now** (each independently shippable, in order):
+**Buildable now** (each independently shippable, in order). *Amended 2026-08-05 — the three
+`B0*` rows are inserted ahead of B1 by the user-journey design; see §8.1.*
 
 | # | Task | Notes |
 |---|---|---|
+| B0a | Requester-only init over the native path: wallet + keystore, creator Safe, faucet — no service registration, no staking, no mech. Includes lifting the native requester's feature-disable and its single-fixture pin, and correcting the `@jinn-network/client` catalog row that describes the package shipping class 1's blessed surface as operator-domain only | R1 beats 2–4 have no path today; `ensureStage1` is the shape to build on, and nothing creates the free-standing `creatorSafe` the native requester already takes. §2.2's "creation stays the CLI's first-touch job" is **derived** — consumer classes §4.2 row 1 gives class 1 the `jinn` CLI and a machine-local CLI keystore |
+| B0b | The supply-awareness read: live work classes with an operator-activity signal and recent verified deliveries, as a first-class question | R1 beat 1 is the skill's *first* instruction; discovery holds the ingredients, joins none, and two of the three are stubbed empty over HTTP |
+| B0c | Artifact retrieval into the workspace — the deliverable, not its hash | R1 beat 8 and R2 beat 5; `evidence show` returns `{artifactType, sha256}` and writes nothing |
 | B1 | The `skills` kind: optional schema property, precedence entry, `?? []` read; the `@jinn-network/onboarding-skills` package with an empty skills dir, catalog entry, `expectedPackageCount` bump | proves the machinery with zero content |
 | B2 | Builder + operator host skills v1 (documents + records + `resolvableIdentifiers`), the five guardrails, the previous-install cleanup step, guardrail guard, `docs-key-guard` roots | **after C1's origin wave**; builder skill carries the dated interim descriptor note |
 | B3 | Sunset the whole `jinn integrations` surface: delete the command and its seven adapters, remove the one dangling `jinn_update` reference, land the transition manifest + its runnable guard/deletion test + workflow wiring | the replacement path (skills + CLI verbs) exists by B2 |
@@ -458,6 +465,8 @@ by §2.1's amendment note — B6 is schedulable, not blocked):
 | # | Task | Notes |
 |---|---|---|
 | B6 | `@jinn-network/requester-mcp` — the tier-4 product: the 10 tools, signer injection plus the user-designated CLI-keystore source (§2.2), confirm-gated previews, composed on the work client. Mint the host-plugin manifest at `host-plugins/jinn/v1` bundling the skills and the MCP server descriptor; mint skill `v2` carrying the real descriptor in place of the interim note. | Starts **with** the mint, developing against the minting client — the product's enumerated surface is what the client is shaped against. The only ordering constraint is technical: the two spending tools go green when the client's posting path does. Read tools resolve through Record Discovery and can land first. |
+| B0d | Background watch semantics — a delegation that blocks the delegator is a synchronous call with extra steps | *added 2026-08-05, §8.1.* R2 beat 4. Distinct from `requester_task_watch`'s foreground streaming to a terminal state, which stays the right shape for R1 beat 7 — not a flag on it |
+| B0e | The requester ledger and spec library: what was spent, what came back, which specs produced verdicts worth trusting | *added 2026-08-05, §8.1.* R2 beat 7. No tool among the ten covers it; the requester-side mirror of the corpus |
 
 **Last** (needs the live spec host):
 
@@ -465,6 +474,45 @@ by §2.1's amendment note — B6 is schedulable, not blocked):
 |---|---|
 | B7 | T2 agent-tier eval workflow, seeding the agent with the fetched skill; human provisions the credential |
 | B8 | C4 handshake: the website's one-line bootstrap, with a build-time check that the URL it names is a registered `resolvableIdentifiers` entry that resolves |
+
+### 8.1 Dated amendment note — user-journey design (2026-08-05)
+
+> **Amendment note, 2026-08-05.** The [user-journey design](./2026-08-05-user-journeys-design.md)
+> walked the requester path beat by beat for the first time and found that **B1–B5 package a
+> journey whose first, second, and last beats do not exist**. Three items are therefore inserted
+> ahead of B1 — **B0a** requester-only init, **B0b** the supply-awareness read, **B0c** artifact
+> retrieval into the workspace — and two more, **B0d** background watch and **B0e** the requester
+> ledger, are added to the mint-co-developed group.
+>
+> **Why the reorder is lawful rather than a re-litigation.** Nothing in §§1–7 changes: the
+> requester surface is still a new tier-4 product, the skills are still the canonical published
+> artifact, custody is unamended, and `jinn integrations` still sunsets whole. What changes is
+> *sequence*, and it changes on evidence the design phase did not have. The mechanical
+> consequence is decisive: B4's T1 tier executes the published skill's fenced commands
+> **literally** (§6), so a skill written at B2 against a journey with three missing beats is red
+> on arrival. Publishing it first would ship a failing acceptance test as a green artifact.
+>
+> **What the missing beats are, in one line each.** R1's beat 1 — *what is solvable right now* —
+> is the skill's first instruction and no verb answers it. R1's beats 2–4 need a requester-only
+> init that creates a creator Safe without OLAS service registration, staking, or mech
+> deployment; the only reachable posting path today onboards a requester as a supplier. R1's
+> beat 8 needs the deliverable itself, and `evidence show` returns a hash.
+>
+> **§2.2 is confirmed, not amended.** Walking beats 2–4 raised the fair question of whether
+> "keystore creation stays the CLI's first-touch job" leans on a binary that the composition
+> cutover renames `client/` → `operator/`. It does not lean on it: the consumer-class table
+> (marketplace surfaces §4.2, this document's binding dependency) already gives class 1 —
+> *external requester, first-touch* — a blessed surface of "record schemas + `jinn` CLI" with
+> machine-local CLI-keystore custody, and its §8.3 quickstart names that CLI outright. §2.2
+> restates a ratified row. The mismatch the walk did find is narrower and is B0a's: the catalog
+> describes `@jinn-network/client` as `"domain": "operator"`, `"role": "operator daemon and
+> application"` while it ships class 1's surface. Its `transition.sunsetCondition` retires the
+> legacy *release coupling*, not the binary. Where that CLI physically lives after stage 6 is an
+> open question in the journey spec's §10, owned by the composition/headless cutover — no
+> disposition here depends on the answer.
+>
+> **Ratification travels with this document.** #2396 records C5's build as gated on the journey
+> spec plus operator sign-off; the journey spec is that gate, and these rows execute with it.
 
 ---
 
