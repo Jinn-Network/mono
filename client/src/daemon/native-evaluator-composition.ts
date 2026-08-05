@@ -246,7 +246,9 @@ async function requireModuleDigest(path: string, expected: `sha256:${string}`): 
 function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
   const sha256 = registration.evaluationMethod.digest?.sha256;
   if (typeof sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(sha256)) {
-    throw new NativeEvaluatorCompositionError("prediction evaluator method has no canonical sha256 digest");
+    throw new NativeEvaluatorCompositionError(
+      `${registration.registrationId} evaluator method descriptor has no canonical sha256 digest`,
+    );
   }
   return `sha256:${sha256}`;
 }
@@ -292,7 +294,17 @@ function bindGraderReportSource(
 ): EvaluatorRegistration {
   const id = registration.registrationId;
   const uri = registration.evaluationMethod.uri;
-  const binding = sources[id] ?? (typeof uri === "string" ? sources[uri] : undefined);
+  const byId = sources[id];
+  const byUri = typeof uri === "string" ? sources[uri] : undefined;
+  // Both keys addressing the same registration is fine only when they name the same binding.
+  // Silently preferring one would let a deployment run grader execution the operator did not
+  // pick, with the losing key looking configured.
+  if (byId !== undefined && byUri !== undefined && byId !== byUri) {
+    throw new NativeEvaluatorCompositionError(
+      `evaluator registration "${id}" has conflicting grader report sources keyed by "${id}" and "${uri}"`,
+    );
+  }
+  const binding = byId ?? byUri;
   if (graderAdapter === undefined) {
     if (binding !== undefined) {
       throw new NativeEvaluatorCompositionError(

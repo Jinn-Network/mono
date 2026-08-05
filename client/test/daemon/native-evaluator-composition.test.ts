@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +20,8 @@ import {
 } from "@jinn-network/task-execution-evaluator-adapters";
 import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
-import { documentDigest } from "@jinn-network/task-execution-protocol";
+import { documentDigest, sealSubmission } from "@jinn-network/task-execution-protocol";
+import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import type {
   LocalTaskExecutionBackend,
   LocalTaskExecutionBackendConfig,
@@ -408,7 +409,7 @@ describe("native evaluator registration-set selection", () => {
     value.store.close();
   });
 
-  it("accepts a deployment-owned grader source without substituting the module's adapter", async () => {
+  it("composes a container-graded registration bound deployment-owned, keyed by method URI", async () => {
     const value = await fixture({ registrations: [sweRebenchRegistrationSource()] });
     const composition = await buildNativeEvaluatorComposition({
       ...value.config,
@@ -418,8 +419,158 @@ describe("native evaluator registration-set selection", () => {
       },
       graderReportSources: { [SWE_METHOD_URI]: "deployment-owned" },
     });
+    // The container-graded registration reached the launcher's configured set: it plans, and
+    // it plans as itself. (Whether the module's own adapter object survived is not observable
+    // from here -- the launcher exposes no registration handle.)
+    expect(value.backendConfigs).toHaveLength(1);
+    expect(planFor(value.backendConfigs[0]!, `sha256:${"9".repeat(64)}`)).toBe("swe-rebench-v2");
+    await composition.close();
+    value.store.close();
+  });
+
+  it("refuses a registration double-keyed with conflicting grader report sources", async () => {
+    const value = await fixture({ registrations: [sweRebenchRegistrationSource()] });
+    await expect(buildNativeEvaluatorComposition({
+      ...value.config,
+      deployment: {
+        ...value.config.deployment,
+        evaluationMethodDigest: `sha256:${SWE_METHOD_SHA256}`,
+      },
+      graderReportSources: {
+        "swe-rebench-v2": fakeGraderReportSource,
+        [SWE_METHOD_URI]: "deployment-owned",
+      },
+    })).rejects.toThrow(/has conflicting grader report sources keyed by "swe-rebench-v2" and/);
+    expect(value.backendConfigs).toEqual([]);
+    value.store.close();
+  });
+
+  it("accepts the same binding supplied under both the id and the method URI", async () => {
+    const value = await fixture({ registrations: [sweRebenchRegistrationSource()] });
+    const composition = await buildNativeEvaluatorComposition({
+      ...value.config,
+      deployment: {
+        ...value.config.deployment,
+        evaluationMethodDigest: `sha256:${SWE_METHOD_SHA256}`,
+      },
+      graderReportSources: {
+        "swe-rebench-v2": fakeGraderReportSource,
+        [SWE_METHOD_URI]: fakeGraderReportSource,
+      },
+    });
     expect(value.backendConfigs).toHaveLength(1);
     await composition.close();
+    value.store.close();
+  });
+
+  it("refuses an ambiguous, unmatched, or unresolvable registration selection", async () => {
+    const ambiguous = await fixture({
+      registrations: [
+        registrationSource({
+          registrationId: "prediction-market", evaluator: AGENT,
+          methodSha256: "6".repeat(64), methodUri: PREDICTION_METHOD_URI,
+        }),
+        registrationSource({
+          registrationId: "swe-rebench-v2", evaluator: AGENT,
+          methodSha256: SWE_METHOD_SHA256, methodUri: SWE_METHOD_URI,
+        }),
+      ],
+    });
+    const ambiguousComposition = await buildNativeEvaluatorComposition({
+      ...ambiguous.config,
+      deployment: {
+        ...ambiguous.config.deployment,
+        evaluationMethodDigest: {
+          "prediction-market": METHOD_DIGEST,
+          "swe-rebench-v2": `sha256:${SWE_METHOD_SHA256}`,
+        },
+      },
+      graderReportSources: { "swe-rebench-v2": "deployment-owned" },
+    });
+    // Both registrations declare `specificationCompatibility() { return true }`.
+    const bothDigest = publishDurableSpecification(ambiguous.state, specificationFor(PREDICTION_PARSER));
+    expect(() => planFor(ambiguous.backendConfigs[0]!, bothDigest))
+      .toThrow(/more than one configured evaluator registration serves/);
+    await ambiguousComposition.close();
+    ambiguous.store.close();
+
+    const unmatched = await fixture({
+      registrations: [
+        registrationSource({
+          registrationId: "prediction-market", evaluator: AGENT,
+          methodSha256: "6".repeat(64), compatibleWith: "false",
+        }),
+        registrationSource({
+          registrationId: "swe-rebench-v2", evaluator: AGENT,
+          methodSha256: SWE_METHOD_SHA256, compatibleWith: "false",
+        }),
+      ],
+    });
+    const unmatchedComposition = await buildNativeEvaluatorComposition({
+      ...unmatched.config,
+      deployment: {
+        ...unmatched.config.deployment,
+        evaluationMethodDigest: {
+          "prediction-market": METHOD_DIGEST,
+          "swe-rebench-v2": `sha256:${SWE_METHOD_SHA256}`,
+        },
+      },
+      graderReportSources: { "swe-rebench-v2": "deployment-owned" },
+    });
+    const noneDigest = publishDurableSpecification(unmatched.state, specificationFor(PREDICTION_PARSER));
+    expect(() => planFor(unmatched.backendConfigs[0]!, noneDigest))
+      .toThrow(/no configured evaluator registration serves/);
+    await unmatchedComposition.close();
+    unmatched.store.close();
+
+    // Same two-registration deployment, but nothing durable answers the named spec digest.
+    const unresolvable = await fixture({
+      registrations: [predictionRegistrationSource(), sweRebenchRegistrationSource()],
+    });
+    const unresolvableComposition = await buildNativeEvaluatorComposition({
+      ...unresolvable.config,
+      deployment: {
+        ...unresolvable.config.deployment,
+        evaluationMethodDigest: {
+          "prediction-market": METHOD_DIGEST,
+          "swe-rebench-v2": `sha256:${SWE_METHOD_SHA256}`,
+        },
+      },
+      graderReportSources: { "swe-rebench-v2": "deployment-owned" },
+    });
+    expect(() => planFor(unresolvable.backendConfigs[0]!, `sha256:${"9".repeat(64)}`))
+      .toThrow(/EvaluationSpec with no durable evaluator artifact/);
+    expect(() => planFor(unresolvable.backendConfigs[0]!, "not-a-digest" as `sha256:${string}`))
+      .toThrow(/names no canonical EvaluationSpec digest/);
+    await unresolvableComposition.close();
+    unresolvable.store.close();
+  });
+
+  it("refuses a registration set whose members disagree on interruption behavior", async () => {
+    const value = await fixture({
+      registrations: [
+        predictionRegistrationSource(),
+        registrationSource({
+          registrationId: "swe-rebench-v2",
+          evaluator: AGENT,
+          methodSha256: SWE_METHOD_SHA256,
+          methodUri: SWE_METHOD_URI,
+          interruptionBehavior: "recoverable",
+        }),
+      ],
+    });
+    await expect(buildNativeEvaluatorComposition({
+      ...value.config,
+      deployment: {
+        ...value.config.deployment,
+        evaluationMethodDigest: {
+          "prediction-market": METHOD_DIGEST,
+          "swe-rebench-v2": `sha256:${SWE_METHOD_SHA256}`,
+        },
+      },
+      graderReportSources: { "swe-rebench-v2": "deployment-owned" },
+    })).rejects.toThrow(/ambiguous interruption behavior/);
+    expect(value.backendConfigs).toEqual([]);
     value.store.close();
   });
 
@@ -523,6 +674,204 @@ describe("native evaluator registration-set selection", () => {
     expect(listEvaluations).not.toHaveBeenCalled();
     await composition.close();
     value.store.close();
+  });
+});
+
+/**
+ * A fully admitted, claimed evaluation whose durable `evaluation-spec` artifact carries the exact
+ * sealed EvaluationSpec bytes given — the state the harvest guard reads to decide which
+ * registration's evaluation method a verdict is allowed to name.
+ */
+function admittedEvaluation(
+  state: NativeEvaluatorStateRepository,
+  specification: EvaluationSpec,
+) {
+  const artifact = (name: string, value: string) => {
+    const bytes = new TextEncoder().encode(value);
+    return { name, bytes, digest: documentDigest(bytes) };
+  };
+  const sealedSpecification = sealEvaluationSpec(specification);
+  const subject = {
+    task: artifact("task", "method-guard-subject-task"),
+    submission: artifact("submission", "method-guard-subject-submission"),
+    requesterEnvelope: artifact("requester-envelope", "method-guard-requester-envelope"),
+    admissionReceipt: artifact("admission-receipt", "method-guard-admission-receipt"),
+    delivery: artifact("delivery", "method-guard-solution-delivery"),
+    deliveryEnvelope: artifact("delivery-envelope", "method-guard-solution-delivery-envelope"),
+    evidenceRecords: [artifact("solution-evidence", "method-guard-solution-evidence")],
+    results: [artifact("patch", "method-guard-solution-result")],
+    evaluationSpec: {
+      name: "evaluation-spec",
+      bytes: sealedSpecification.bytes,
+      digest: sealedSpecification.digest,
+    },
+  };
+  const admitted = state.admitOpportunity({
+    opportunity: {
+      source: "https://solver.example/method-guard-source",
+      sourceSequence: "0000000000000001",
+      sourceEntryDigest: `sha256:${"a".repeat(64)}`,
+      canonical: true,
+      finality: "finalized",
+      chainId: 84532,
+      taskId: 9n,
+      attemptIndex: 1,
+      solutionRequestId: `0x${"b".repeat(64)}`,
+      operatorAddress: `0x${"1".repeat(40)}`,
+      deliveryCid: "bafymethodguard",
+      advertisedDeliveryDigest: subject.delivery.digest,
+      blockHash: `0x${"c".repeat(64)}`,
+      blockNumber: 200n,
+      transactionHash: `0x${"d".repeat(64)}`,
+      logIndex: 1,
+      canonicalEventIdentity: `84532:0x${"c".repeat(64)}:1`,
+    },
+    evaluatorAgent: AGENT,
+    coordinator: COORDINATOR,
+    material: subject,
+  } as never);
+  state.recordAdmissionVerified(admitted.evaluationId, {
+    requester: { signerKey: "did:key:method-guard-requester", sealingTime: "2026-08-02T10:00:00Z" },
+    admission: { signerKey: "did:key:method-guard-admission", effectiveTime: "2026-08-02T10:00:00Z" },
+    executor: {
+      signerKey: "did:key:method-guard-executor",
+      agent: "https://agents.example/method-guard-solver",
+      declarationKey: "did:key:method-guard-solver-declaration",
+      effectiveTime: "2026-08-02T10:30:00Z",
+      address: `0x${"1".repeat(40)}`,
+    },
+    evaluator: {
+      signerKey: "did:key:method-guard-evaluator",
+      agent: AGENT,
+      declarationKey: "did:key:method-guard-evaluator-declaration",
+      address: EVALUATOR_ADDRESS,
+    },
+    verificationDigest: `sha256:${"e".repeat(64)}`,
+  } as never);
+  const taskBytes = new TextEncoder().encode("method-guard-exact-evaluation-task");
+  const taskDigest = documentDigest(taskBytes);
+  const submissionBytes = sealSubmission({
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+    submission: "urn:uuid:00000000-0000-4000-8000-000000000031",
+    task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
+    requester: AGENT,
+    idempotencyKey: admitted.evaluationId,
+    nonce: admitted.evaluationId,
+    deadline: "2026-08-03T00:00:00.000Z",
+  });
+  state.recordDerivedEvaluation(admitted.evaluationId, {
+    taskBytes,
+    taskDigest,
+    submissionBytes,
+    submissionDigest: documentDigest(submissionBytes),
+    submissionUri: "urn:uuid:00000000-0000-4000-8000-000000000031",
+  });
+  const claim = state.beginEvaluationClaim(admitted.evaluationId, `0x${"f".repeat(64)}`);
+  state.recordEvaluationClaimFinalized(claim.operationId, {
+    txHash: `0x${"1".repeat(64)}`,
+    blockHash: `0x${"2".repeat(64)}`,
+    blockNumber: 201n,
+    requestId: `0x${"9".repeat(64)}`,
+    verdictIndex: 1,
+    evaluatorAddress: EVALUATOR_ADDRESS,
+  });
+  return {
+    attemptUri: state.getEvaluation(admitted.evaluationId)!.evaluationAttemptUri!,
+    taskBytes,
+    task: subject.task,
+    result: subject.results[0]!,
+    evaluationSpec: subject.evaluationSpec,
+  };
+}
+
+async function harvestContractFor(
+  config: LocalTaskExecutionBackendConfig,
+  admitted: { readonly attemptUri: string; readonly taskBytes: Uint8Array },
+) {
+  const selected = config.provisioner({
+    attempt: { attemptUri: admitted.attemptUri, nonce: "method-guard-nonce", attemptNumber: 1 },
+    sealedTaskBytes: admitted.taskBytes,
+    dispatchContextBytes: new TextEncoder().encode("{}"),
+  } as never);
+  const workRoot = await mkdtemp(join(tmpdir(), "jinn-native-evaluator-method-guard-"));
+  roots.push(workRoot);
+  const outDir = join(workRoot, "out");
+  await mkdir(outDir, { recursive: true });
+  return {
+    contract: selected.contract,
+    outDir,
+    paths: {
+      root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
+      harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+    } as unknown as WorkspacePaths,
+  };
+}
+
+describe("native evaluator multi-registration harvest method-digest guard", () => {
+  /**
+   * Two configured methods, one durable swe-rebench EvaluationSpec. A verdict statement is
+   * otherwise genuine and only names the OTHER configured method's digest. Pre-P0-5 the guard
+   * compared against one configured digest for every evaluation, so a second configured method
+   * could launder a verdict under the wrong method identity; it now compares against the digest
+   * of the registration that actually serves this evaluation's spec.
+   */
+  async function twoMethodFixture() {
+    const value = await fixture({
+      registrations: [predictionRegistrationSource(), sweRebenchRegistrationSource()],
+    });
+    const composition = await buildNativeEvaluatorComposition({
+      ...value.config,
+      deployment: {
+        ...value.config.deployment,
+        evaluationMethodDigest: {
+          "prediction-market": METHOD_DIGEST,
+          "swe-rebench-v2": `sha256:${SWE_METHOD_SHA256}`,
+        },
+      },
+      graderReportSources: { "swe-rebench-v2": "deployment-owned" },
+    });
+    const admitted = admittedEvaluation(value.state, specificationFor(SWE_REBENCH_PARSER));
+    const harvestable = await harvestContractFor(value.backendConfigs[0]!, admitted);
+    const verdict = (evaluationMethodDigest: `sha256:${string}`) => buildResultEvaluationPayload({
+      task: { name: admitted.task.name, digest: admitted.task.digest },
+      results: [{ name: admitted.result.name, digest: admitted.result.digest }],
+      evaluator: { id: AGENT },
+      evaluatedAt: "2026-08-02T13:00:00.000Z",
+      verdict: "pass",
+      evaluationSpecification: { name: admitted.evaluationSpec.name, digest: admitted.evaluationSpec.digest },
+      evaluationMethod: { name: "method-guard-evaluator-v1", digest: evaluationMethodDigest },
+    });
+    return { value, composition, harvestable, verdict };
+  }
+
+  it("refuses a swe-rebench evaluation whose verdict names the other configured method's digest", async () => {
+    const { value, composition, harvestable, verdict } = await twoMethodFixture();
+    try {
+      await writeFile(join(harvestable.outDir, "verdict"), verdict(METHOD_DIGEST));
+      await expect(harvestable.contract.harvest(harvestable.paths, []))
+        .rejects.toThrow(/outside its exact Attempt authority/);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("gets past the method-digest guard to a later check when the verdict names the serving method", async () => {
+    const { value, composition, harvestable, verdict } = await twoMethodFixture();
+    try {
+      await writeFile(join(harvestable.outDir, "verdict"), verdict(`sha256:${SWE_METHOD_SHA256}`));
+      // Identical statement, only the method digest changed to the one the durable swe-rebench
+      // spec selects. It still doesn't harvest cleanly (this hand-built statement doesn't
+      // survive `sealSignedRecord`'s canonical re-encoding byte-for-byte -- a fixture-fidelity
+      // limit, not a production path), but it now fails at the *next* check in sequence rather
+      // than the authority guard. Reaching a check that only runs after the authority `if`
+      // completes false is what proves the method-digest term is the one the digest flips.
+      await expect(harvestable.contract.harvest(harvestable.paths, []))
+        .rejects.toThrow(/not canonical exact bytes/);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
   });
 });
 
