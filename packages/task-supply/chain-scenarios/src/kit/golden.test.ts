@@ -77,7 +77,7 @@ async function buildFamilyGoldenArtifacts(
     evaluationSpecBytes: spec.bytes,
     receiptDigest: `sha256:${"7".repeat(64)}` as Sha256Digest,
     environmentRecordDigest: env.recordDigest,
-    strategyId: "https://jinn.network/derivation-strategies/chain-scenarios/1",
+    strategyId: "https://spec.jinn.network/derivation-strategies/chain-scenarios/v1",
     provenance: {
       kind: "synthetic" as const,
       sourceCommitment: scenario.sourceCommitment,

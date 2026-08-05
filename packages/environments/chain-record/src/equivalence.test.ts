@@ -17,7 +17,7 @@ import { sealedRecordDigest } from "./hashing.js";
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 const shared = {
-  kind: "https://jinn.network/records/chain-environment/1.0",
+  kind: "https://spec.jinn.network/records/chain-environment/v1",
   runtime: {
     family: "anvil",
     version: "1.3.7",

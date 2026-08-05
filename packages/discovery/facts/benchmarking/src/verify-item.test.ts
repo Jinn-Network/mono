@@ -109,7 +109,7 @@ describe("facts/benchmarking verifyItem integration", () => {
     const { runProfile } = await import("./profiles.js");
     const { RUN_RECORD_KIND } = await import("./identifiers.js");
     const sealed = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       benchmark: { digest: { sha256: "c".repeat(64) } },
       closeAt: "2026-08-04T00:00:00Z",

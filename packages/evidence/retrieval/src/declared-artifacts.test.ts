@@ -17,7 +17,7 @@ describe("collectDeclaredArtifacts", () => {
     });
     expect(artifacts).toContainEqual(
       expect.objectContaining({
-        entityId: "trace/trajectory.jsonl",
+        entityId: "trace/trace.jsonl",
         roles: expect.arrayContaining(["subjectOf"]),
       }),
     );
@@ -43,11 +43,11 @@ describe("collectDeclaredArtifacts", () => {
   test("merges duplicate entity/digest declarations across multiple checks", async () => {
     const verification = await validatedFixture("execution-verification");
     const artifacts = collectDeclaredArtifacts(verification);
-    const trajectory = artifacts.filter(
-      (artifact) => artifact.entityId === "execution/trace/trajectory.jsonl",
+    const trace = artifacts.filter(
+      (artifact) => artifact.entityId === "execution/trace/trace.jsonl",
     );
-    expect(trajectory).toHaveLength(1);
-    expect(trajectory[0]?.roles).toEqual(["supporting-evidence"]);
+    expect(trace).toHaveLength(1);
+    expect(trace[0]?.roles).toEqual(["supporting-evidence"]);
   });
 
   test("sorts the result deterministically by entity id then digest", async () => {

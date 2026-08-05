@@ -24,7 +24,7 @@ function packageBytes(entries: readonly HarnessStateTreeEntry[]): Uint8Array {
   return Buffer.from(JSON.stringify({ entries }), "utf8");
 }
 
-const view = { task: { inputs: [] }, profile: { profile: "https://jinn.network/task-profiles/repository-work/1.0" } } as unknown as TaskView;
+const view = { task: { inputs: [] }, profile: { profile: "https://spec.jinn.network/task-profiles/repository-work/1.0" } } as unknown as TaskView;
 const runtime = { assertHarnessGroupEmpty: () => undefined, ensureMetaReserve: () => undefined };
 
 async function paths(): Promise<WorkspacePaths> {

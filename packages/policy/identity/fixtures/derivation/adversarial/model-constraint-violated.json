@@ -1,8 +1,8 @@
 {
   "note": "Substrate §4.1 step 1 — the merge decides, and when it refuses there is NO tuple. A deriver that fell back to the Submission's value here would mint an identity for a treatment the Task never admitted, and a campaign comparing arms would be comparing one legal arm against one illegal one. Fail closed; the caller sees `requirement-conflict`, not a tuple.",
   "profile": {
-    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9XX0=",
+    "profile": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3JlcG9zaXRvcnktd29yay8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImZsb29yIiwia2V5IjoiZWZmb3J0In0seyJjb21wYXJpc29uQ2xhc3MiOiJjZWlsaW5nIiwia2V5IjoibWF4VG9rZW5zIn0seyJjb21wYXJpc29uQ2xhc3MiOiJleGFjdCIsImtleSI6InJldmlld0RlcHRoIn1dfQ==",
     "requirementKeys": [
       { "key": "effort", "comparisonClass": "floor" },
       { "key": "maxTokens", "comparisonClass": "ceiling" },
@@ -10,17 +10,17 @@
     ]
   },
   "task": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "profile": {
-      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
-      "digest": { "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503" }
+      "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+      "digest": { "sha256": "6876e4c92448b323c749af98cfefd5588a371981598ac21104ef7c70e9cfa5a2" }
     },
     "instructions": "Fix the failing test.",
     "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }],
     "requirements": { "model": { "provider": "anthropic" } }
   },
   "submission": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c103",
     "task": { "digest": { "sha256": "0000000000000000000000000000000000000000000000000000000000000000" } },
     "requester": "urn:jinn:agent:policy-kit-requester",

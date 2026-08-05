@@ -8,7 +8,7 @@ import {
   sealCryptoEnvironmentRecord,
 } from "./composite.js";
 
-const INFORMATION_KIND = "https://jinn.network/records/information-world/1.0";
+const INFORMATION_KIND = "https://spec.jinn.network/records/information-world/v1";
 
 const chainOnly = () => ({
   kind: CRYPTO_ENVIRONMENT_KIND,

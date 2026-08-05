@@ -27,7 +27,7 @@ function observation(n: number, status: Partial<Record<string, AxisFidelityStatu
     observedAt: `2026-08-01T${String(n).padStart(2, "0")}:00:00Z`,
     attribution: "urn:jinn:agent:solver-a",
     ref: {
-      source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+      source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
       entry: `sha256:${"a".repeat(63)}${n}`,
       announcementId: `ann-axis-${n}`,
       record: `sha256:${"b".repeat(63)}${n}`,

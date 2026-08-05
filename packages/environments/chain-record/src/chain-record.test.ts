@@ -128,7 +128,7 @@ describe("chain environment record", () => {
   });
 
   test("pins the kind: another kind URI is a different record kind, not an extension", () => {
-    expect(parse({ ...record(), kind: "https://jinn.network/records/environment/1.0" }).success).toBe(false);
+    expect(parse({ ...record(), kind: "https://spec.jinn.network/records/environment/v1" }).success).toBe(false);
   });
 
   test("carries no mutable status: staleness is derived from attestation history", () => {

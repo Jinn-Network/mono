@@ -1,8 +1,8 @@
 {
   "note": "Substrate §4.1 step 1, the `model` constraint's provider-inference leg — the one comparison in the whole merge whose outcome is decided by a lookup table rather than by equality. The Task constrains the provider; the Submission pins only a model id, and every shipped venue admits it because protocol's CONSTRAINT_MEMBERSHIP infers `anthropic` from the `claude-` prefix. A deriver missing that leg refuses a Submission the venue accepted, so the two disagree about which Submissions have a tuple at all — and no other fixture in this kit exercises the leg.",
   "profile": {
-    "profile": "https://jinn.network/task-profiles/repository-work/1.0",
-    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9yZXBvc2l0b3J5LXdvcmsvMS4wIiwicmVxdWlyZW1lbnRLZXlzIjpbeyJjb21wYXJpc29uQ2xhc3MiOiJmbG9vciIsImtleSI6ImVmZm9ydCJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiY2VpbGluZyIsImtleSI6Im1heFRva2VucyJ9LHsiY29tcGFyaXNvbkNsYXNzIjoiZXhhY3QiLCJrZXkiOiJyZXZpZXdEZXB0aCJ9XX0=",
+    "profile": "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3JlcG9zaXRvcnktd29yay8xLjAiLCJyZXF1aXJlbWVudEtleXMiOlt7ImNvbXBhcmlzb25DbGFzcyI6ImZsb29yIiwia2V5IjoiZWZmb3J0In0seyJjb21wYXJpc29uQ2xhc3MiOiJjZWlsaW5nIiwia2V5IjoibWF4VG9rZW5zIn0seyJjb21wYXJpc29uQ2xhc3MiOiJleGFjdCIsImtleSI6InJldmlld0RlcHRoIn1dfQ==",
     "requirementKeys": [
       {
         "key": "effort",
@@ -19,11 +19,11 @@
     ]
   },
   "task": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "profile": {
-      "uri": "https://jinn.network/task-profiles/repository-work/1.0",
+      "uri": "https://spec.jinn.network/task-profiles/repository-work/1.0",
       "digest": {
-        "sha256": "797d36cc8a07608d90977fe1ff4723fd4f081a45b28407099742cbc13c625503"
+        "sha256": "6876e4c92448b323c749af98cfefd5588a371981598ac21104ef7c70e9cfa5a2"
       }
     },
     "instructions": "Fix the failing test.",
@@ -41,11 +41,11 @@
     }
   },
   "submission": {
-    "protocol": "https://jinn.network/profiles/task-execution/1.0",
+    "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
     "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c108",
     "task": {
       "digest": {
-        "sha256": "e8463890b463fdee45434f144aa3b54a170508ff8fe365abd7ed45df665a2625"
+        "sha256": "d4159e6dff4a46744e28fc567885fd0721bc43c37b01e10300c1075412617bc9"
       }
     },
     "requester": "urn:jinn:agent:policy-kit-requester",
@@ -60,8 +60,8 @@
     }
   },
   "expect": {
-    "taskDigest": "sha256:e8463890b463fdee45434f144aa3b54a170508ff8fe365abd7ed45df665a2625",
-    "submissionDigest": "sha256:834ad4b1eca2ae58570d658fb858fdb022e7e356b1f7eb641fe6ab0ddb28c3f9",
+    "taskDigest": "sha256:d4159e6dff4a46744e28fc567885fd0721bc43c37b01e10300c1075412617bc9",
+    "submissionDigest": "sha256:e4b3d9644e94a3f96a71384f9a6055257c151b186908bddcb5d58a8f85565dea",
     "canonicalTuple": "{\"formatToken\":\"network.jinn.policy.execution-tuple/1.0\",\"harness\":null,\"isolationPolicy\":\"unrestricted\",\"loadout\":null,\"model\":{\"id\":\"claude-haiku-4-5\"}}",
     "tupleDigest": "sha256:2744c5cd4dd5541cd126bfbb016fe92f22c392d48e2eb2f57f0f0c89b4e17d53",
     "absentTupleKeys": [

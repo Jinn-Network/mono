@@ -45,7 +45,9 @@ export function compareFixtureManifests(baseline, candidate, { label }) {
     }
   }
   const baselineIds = new Set(baseline.entries.map((entry) => entry.id));
-  return { added: candidate.entries.map((entry) => entry.id).filter((id) => !baselineIds.has(id)) };
+  return {
+    added: candidate.entries.map((entry) => entry.id).filter((id) => !baselineIds.has(id)),
+  };
 }
 
 export function readManifestAtRef(ref, packageDirectory, { exec = defaultGit } = {}) {

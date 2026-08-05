@@ -16,7 +16,7 @@ function observation(
     observedAt: `2026-07-31T0${(counter % 9) + 1}:00:00Z`,
     attribution: "urn:jinn:agent:solver-a",
     ref: {
-      source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+      source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
       entry: `sha256:${"a".repeat(60)}${n}`,
       announcementId: `ann-${n}`,
       record: `sha256:${"b".repeat(60)}${n}`,

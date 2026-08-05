@@ -13,8 +13,8 @@ import {
 } from './native-signed-source.js';
 
 const SOLVER_RECORDS_SOURCE_NAME = 'solver-records';
-const SOLVER_RECORDS_OUTPUT_KIND = 'https://jinn.network/records/task-output/1.0';
-const SOLVER_RECORDS_DELIVERY_ENVELOPE_KIND = 'https://jinn.network/records/delivery-envelope/1.0';
+const SOLVER_RECORDS_OUTPUT_KIND = 'https://spec.jinn.network/records/task-output/v1';
+const SOLVER_RECORDS_DELIVERY_SIGNATURE_KIND = 'https://spec.jinn.network/records/delivery-signature/v1';
 
 export class NativeSolutionPublisherOwnershipError extends Error {
   override readonly name = 'NativeSolutionPublisherOwnershipError';
@@ -39,7 +39,7 @@ function recordKind(role: 'output' | 'evidence' | 'delivery' | 'delivery-envelop
     case 'delivery': return RECORD_KINDS.delivery;
     case 'evidence': return RECORD_KINDS.executionEvidence;
     case 'output': return SOLVER_RECORDS_OUTPUT_KIND;
-    case 'delivery-envelope': return SOLVER_RECORDS_DELIVERY_ENVELOPE_KIND;
+    case 'delivery-envelope': return SOLVER_RECORDS_DELIVERY_SIGNATURE_KIND;
   }
 }
 

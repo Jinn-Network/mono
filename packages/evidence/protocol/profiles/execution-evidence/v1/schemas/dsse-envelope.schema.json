@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "payloadType": {
+      "type": "string",
+      "const": "application/vnd.in-toto+json"
+    },
+    "payload": {
+      "type": "string"
+    },
+    "signatures": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "keyid": {
+            "type": "string"
+          },
+          "sig": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sig"
+        ],
+        "additionalProperties": {}
+      }
+    }
+  },
+  "required": [
+    "payloadType",
+    "payload",
+    "signatures"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json"
+}

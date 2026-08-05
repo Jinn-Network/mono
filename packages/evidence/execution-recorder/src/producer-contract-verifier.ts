@@ -123,7 +123,7 @@ function expectedStatus(
     case "failed":
       return "https://schema.org/FailedActionStatus";
     case "abandoned":
-      return "https://jinn.network/terms/AbandonedActionStatus";
+      return "https://spec.jinn.network/terms/AbandonedActionStatus";
   }
 }
 

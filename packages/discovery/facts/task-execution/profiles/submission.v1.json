@@ -1,0 +1,15 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/submission/v1",
+  "profile": "https://spec.jinn.network/facts/submission/v1",
+  "fields": [
+    { "name": "taskDigest", "class": "record", "referenceBearing": true },
+    { "name": "taskProfileUri", "class": "record", "cloudEvents": { "attribute": "profileuri", "scalar": "string" } },
+    { "name": "requesterIri", "class": "record", "cloudEvents": { "attribute": "requester", "scalar": "string" } },
+    { "name": "deadline", "class": "record" },
+    { "name": "terms", "class": "substrate" },
+    { "name": "benchrun", "class": "record", "cloudEvents": { "attribute": "benchrun", "scalar": "string" } },
+    { "name": "benchcell", "class": "record", "cloudEvents": { "attribute": "benchcell", "scalar": "string" } },
+    { "name": "bencharm", "class": "record", "cloudEvents": { "attribute": "bencharm", "scalar": "string" } }
+  ]
+}

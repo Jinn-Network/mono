@@ -14,7 +14,7 @@
       }
     }
   ],
-  "predicateType": "https://jinn.network/attestations/result-evaluation/v1",
+  "predicateType": "https://spec.jinn.network/attestations/result-evaluation/v1",
   "predicate": {
     "evaluatedAt": "2026-07-23T16:00:00Z",
     "evaluator": {

@@ -2,10 +2,10 @@
 import {
   createDefaultDecoderRegistry,
   formatIdentity,
-  tryDecodeTrajectory,
+  tryDecodeTrace,
   type DecoderRegistry,
 } from "@jinn-network/evidence-trace-decode";
-import type { Span } from "@jinn-network/evidence-trajectory";
+import type { Span } from "@jinn-network/evidence-trace";
 import type { Sha256Digest } from "@jinn-network/evidence-repository";
 
 export interface TraceSpanRequest {
@@ -42,7 +42,7 @@ export function createTraceSpanSource(
 
       let outcome;
       try {
-        outcome = tryDecodeTrajectory(registry, formatIri, {
+        outcome = tryDecodeTrace(registry, formatIri, {
           bytes: request.bytes,
           nativeTrace: {
             ...(request.nativeTraceName === undefined ? {} : { name: request.nativeTraceName }),
@@ -50,7 +50,7 @@ export function createTraceSpanSource(
           },
         });
       } catch {
-        // `tryDecodeTrajectory` is documented never to throw; this belt covers a decoder
+        // `tryDecodeTrace` is documented never to throw; this belt covers a decoder
         // that violates that contract without letting it fail an index write.
         return [];
       }

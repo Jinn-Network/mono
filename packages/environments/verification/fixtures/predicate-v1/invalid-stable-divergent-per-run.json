@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/environment-verification/protocol/1.0",
+  "protocol": "https://spec.jinn.network/environment-verification/protocol/v1",
   "result": "stable",
   "window": {
     "startedAt": "2026-07-31T09:00:00.000Z",
@@ -59,7 +59,7 @@
     "timeoutSeconds": 1800
   },
   "verifier": {
-    "id": "https://jinn.network/environment-verification/conformance-verifier",
+    "id": "https://spec.jinn.network/environment-verification/conformance-verifier",
     "version": "0.1.0",
     "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
   }

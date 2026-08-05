@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createBindingResolver } from "./binding-resolver.js";
 import type { BindingStore, SealedKeyBindingRecord } from "./binding-resolver.js";
 
-const AGENT = "https://jinn.network/agent/1";
+const AGENT = "https://spec.jinn.network/agents/1";
 const KEY_A = "did:key:zKeyA";
 const KEY_OWNER = "did:key:zKeyOwner";
 const DIGEST_A = ("sha256:" + "a".repeat(64)) as Sha256Digest;

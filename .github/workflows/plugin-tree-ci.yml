@@ -65,7 +65,7 @@ jobs:
           for pkg in trust/core discovery/protocol discovery/client discovery/serve \
                      evidence/protocol evidence/derivation evidence/repository evidence/discovery \
                      evidence/catalog-sqlite evidence/execution-recorder \
-                     evidence/local-runtime evidence/trajectory evidence/trace-decode evidence/retrieval; do
+                     evidence/local-runtime evidence/trace evidence/trace-decode evidence/retrieval; do
             (cd "packages/$pkg" && yarn install --immutable && yarn build)
           done
       - name: Verify Plugin Runtime
@@ -83,7 +83,7 @@ jobs:
         run: |
           cd packages/evidence/derivation && yarn install --immutable && yarn test && cd -
           cd packages/evidence/trace-decode && yarn install --immutable && yarn test && cd -
-          cd packages/evidence/trajectory && yarn install --immutable && yarn test && cd -
+          cd packages/evidence/trace && yarn install --immutable && yarn test && cd -
       - name: Upload Plugin Runtime distribution
         uses: actions/upload-artifact@v4
         with:

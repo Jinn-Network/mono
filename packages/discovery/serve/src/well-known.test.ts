@@ -18,7 +18,7 @@ function makeInMemoryStore(): BlobStore & { get(path: string): { bytes: Uint8Arr
 }
 
 const VALID_DOCUMENT: WellKnownDocument = {
-  protocol: "https://jinn.network/record-discovery/1.0",
+  protocol: "https://spec.jinn.network/record-discovery/v1",
   sources: [
     {
       agent: "did:key:zAgentSourceOne",
@@ -38,14 +38,14 @@ describe("parseWellKnownDocument (§7 item 3, in-protocol schema)", () => {
 
   it("accepts a source entry with no optional projection metadata", () => {
     const minimal: WellKnownDocument = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       sources: [{ agent: "did:key:zAgentSourceOne", name: "feed", headPath: "/sources/feed/head", archiveRoot: "/sources/feed/entries" }],
     };
     expect(() => parseWellKnownDocument(minimal)).not.toThrow();
   });
 
   it("rejects a document under the wrong protocol version", () => {
-    expect(() => parseWellKnownDocument({ ...VALID_DOCUMENT, protocol: "https://jinn.network/record-discovery/9.9" })).toThrow();
+    expect(() => parseWellKnownDocument({ ...VALID_DOCUMENT, protocol: "https://spec.jinn.network/record-discovery/v9" })).toThrow();
   });
 
   it("rejects a source entry missing a required field", () => {

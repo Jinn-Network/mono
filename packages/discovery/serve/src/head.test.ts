@@ -30,7 +30,7 @@ function makeSigner(keyid: string): DsseSigner {
 }
 
 const BASE_HEAD: SourceHead = {
-  protocol: "https://jinn.network/record-discovery/1.0",
+  protocol: "https://spec.jinn.network/record-discovery/v1",
   origin: "did:key:zAgentSourceOne/feed",
   sequence: "0000000000000001",
   entry: `sha256:${"a".repeat(64)}`,

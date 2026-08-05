@@ -10,7 +10,7 @@
     "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc": "source-conflicted"
   },
   "matrices": [{
-    "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+    "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
     "run": { "digest": { "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" } },
     "closeBoundary": { "at": "2026-08-04T00:00:00Z" },
     "cells": [

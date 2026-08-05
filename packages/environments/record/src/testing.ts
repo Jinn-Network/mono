@@ -39,7 +39,7 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 export function describeEnvironmentRecordConformance(): void {
   describe("Environment record conformance", () => {
     test("the pinned identifiers are exactly the design's strings", () => {
-      expect(ENVIRONMENT_RECORD_KIND).toBe("https://jinn.network/records/environment/1.0");
+      expect(ENVIRONMENT_RECORD_KIND).toBe("https://spec.jinn.network/records/environment/v1");
       expect(ENVIRONMENT_RECORD_MEDIA_TYPE).toBe("application/vnd.jinn.environment.v1+json");
     });
 

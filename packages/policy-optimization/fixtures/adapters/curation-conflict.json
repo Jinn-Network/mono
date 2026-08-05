@@ -1,11 +1,11 @@
 [
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444201"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333201",
       "announcementId": "ann-c8-conflict-201"
     },
@@ -18,11 +18,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444202"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333202",
       "announcementId": "ann-c8-conflict-202"
     },
@@ -32,11 +32,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444203"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333203",
       "announcementId": "ann-c8-conflict-203"
     },
@@ -49,11 +49,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444204"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333204",
       "announcementId": "ann-c8-conflict-204"
     },

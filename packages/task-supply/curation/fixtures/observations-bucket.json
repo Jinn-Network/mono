@@ -6,7 +6,7 @@
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa001",
@@ -22,7 +22,7 @@
     "attribution": "urn:jinn:agent:solver-b",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa002",
@@ -38,7 +38,7 @@
     "attribution": "urn:jinn:agent:solver-a",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa003",
@@ -54,7 +54,7 @@
     "attribution": "urn:jinn:agent:solver-b",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa004",
@@ -71,7 +71,7 @@
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa005",
@@ -88,7 +88,7 @@
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa006",
@@ -105,7 +105,7 @@
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa007",
@@ -122,7 +122,7 @@
     "benchmarkRun": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
     "ref": {
       "source": {
-        "agent": "https://jinn.network/agents/projector",
+        "agent": "https://spec.jinn.network/agents/projector",
         "name": "base-marketplace"
       },
       "entry": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa008",

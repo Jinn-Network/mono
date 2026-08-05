@@ -24,7 +24,7 @@ import type {
 export type { ChainDerivationEnvironment } from "./template.js";
 
 export const CHAIN_SCENARIO_STRATEGY_ID =
-  "https://jinn.network/derivation-strategies/chain-scenarios/1" as const;
+  "https://spec.jinn.network/derivation-strategies/chain-scenarios/v1" as const;
 
 export interface ChainScenarioInputs {
   readonly template: ScenarioTemplate<never>;

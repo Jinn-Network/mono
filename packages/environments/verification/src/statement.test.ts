@@ -22,7 +22,7 @@ const OUTCOMES: OutcomeSet = {
 
 function predicateFor(outcomeSetDigestValue: `sha256:${string}`): EnvironmentVerificationPredicate {
   return {
-    protocol: "https://jinn.network/environment-verification/protocol/1.0",
+    protocol: "https://spec.jinn.network/environment-verification/protocol/v1",
     result: "stable",
     window: { startedAt: "2026-07-31T09:00:00.000Z", endedAt: "2026-07-31T09:25:00.000Z" },
     runs: {
@@ -83,7 +83,7 @@ describe("subjects and statement", () => {
     });
     expect(statement._type).toBe("https://in-toto.io/Statement/v1");
     expect(statement.predicateType)
-      .toBe("https://jinn.network/attestations/environment-verification/v1");
+      .toBe("https://spec.jinn.network/attestations/environment-verification/v1");
     expect(statement.subject).toHaveLength(2);
   });
 

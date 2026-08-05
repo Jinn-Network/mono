@@ -7,7 +7,7 @@ import {
 } from "./observation.js";
 
 const ref = {
-  source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+  source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
   entry: `sha256:${"a".repeat(64)}` as const,
   announcementId: "ann-84532-deadbeef-3-evaluation-delivery-available",
   record: `sha256:${"b".repeat(64)}` as const,
@@ -86,7 +86,7 @@ describe("parseCurationObservation", () => {
 describe("inputRefKey", () => {
   it("is the discovery at-least-once dedupe tuple", () => {
     expect(inputRefKey(ref)).toBe(
-      ["https://jinn.network/agents/projector", "base-marketplace", ref.entry, ref.announcementId]
+      ["https://spec.jinn.network/agents/projector", "base-marketplace", ref.entry, ref.announcementId]
         .join(SEPARATOR),
     );
   });

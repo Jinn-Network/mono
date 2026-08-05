@@ -115,6 +115,20 @@ concept under two conventions.
   `packages/core` as already chartered; `records/delivery-envelope/1.0` is renamed in the
   migration; GLOSSARY.md's envelope entry (which currently matches neither code meaning) is
   corrected in the glossary pass.
+
+  > **Correction, 2026-08-05 (wave 7 verification):** the "envelope is reserved for DSSE"
+  > premise was a misread of the name, not the record's bytes — verification found
+  > `records/delivery-envelope/1.0`'s payload *is* a conformant DSSE envelope
+  > (`native-solution-verification.ts` parses it with `parseDsseEnvelope` and verifies the
+  > solver's signature over the exact Delivery bytes). The rename to
+  > `records/delivery-signature/v1` still stands, but on different ground: the record is the
+  > solver's *assertion about* the Delivery (an envelope wrapping an assertion), not a bare
+  > wrapper competing with DSSE for the word — and the producing seam in
+  > `native-solution-coordinator.ts` was already named `deliverySignature` before this
+  > ruling. `records/delivery-signature/v1` is the resulting name; no further rename is
+  > implied for `deliveryEnvelopeBytes` or the `delivery-envelope` / `evaluation-delivery-envelope`
+  > artifact-role strings, which stay as persisted SQLite column values (a data migration, not
+  > a re-seal).
 - **Q4 — "claim". RULED: standing DR-2026-06-14 is the authority — no new decision.**
   That DR ratified: *claim is the verb (the act of reserving a slot), attempt is the noun
   (the record the claim creates)* — "the verb and the noun of one event, not two synonyms."

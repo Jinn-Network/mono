@@ -7,15 +7,15 @@
     },
     {
       "id": "producer-contract-v1/abandoned.json",
-      "sha256": "a33f7ecf81bdfc490d4cbcfac24539ac03f1d5e9c79d35a7cf16d4f0de599d07"
+      "sha256": "5709555cf9a47916a94f6f78d7c4bf03c85d9277e97e2dfbb395362313b81c88"
     },
     {
       "id": "producer-contract-v1/completed.json",
-      "sha256": "5b5ce1caf5d48686520a0fb9e67ec4832a106f9a0d83906240dda71e8b6831eb"
+      "sha256": "bbf0b97912f962893286f9327bc57777732da4109aefd0fb8b377ff3f657ea01"
     },
     {
       "id": "producer-contract-v1/failed.json",
-      "sha256": "48298d4ca7dee143a2acc455af62058a2b96f7a0d416c4ec1cb7df24ada8397b"
+      "sha256": "24e6bd366deb8615cd2b3573d89f16c520d2ecb30b23d4c2936e503435d9aaf4"
     },
     {
       "id": "producer-contract-v1/result.txt",

@@ -34,7 +34,7 @@ function makeFakeBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
       if (at < from || at >= to) return null;
       return {
         binding: {
-          protocol: "https://jinn.network/trust/key-binding/1.0",
+          protocol: "https://spec.jinn.network/trust/key-binding/v1",
           agent: seed.agent,
           key: { publicKey: `pubkey-${seed.keyid}`, keyid: seed.keyid, algorithm: "ed25519", didKey: seed.keyid },
           voucher: { kind: "account", did: "did:pkh:eip155:1:0x0", contractAccount: false },
@@ -159,7 +159,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
 
   it("verifyForDecision mandates derivation-consistency for a projected item; verifyForFilter skips it (shallow, §13.1)", async () => {
     const entry: AnnouncementEntry = parseAnnouncementEntry({
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: { agent: "did:key:zProjector", name: "marketplace" },
       sequence: "0000000000000001",
       previous: null,
@@ -168,7 +168,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
         {
           announcementId: "ann-1",
           action: "available",
-          record: { kind: "https://jinn.network/records/delivery/1.0", digest: sealJson({ kind: "delivery" }).digest },
+          record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "delivery" }).digest },
         },
       ],
     });
@@ -204,7 +204,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     });
 
     const head: SourceHead = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zProjector/marketplace",
       sequence: "0000000000000001",
       entry: entryDigest,
@@ -229,7 +229,7 @@ describe("createVerifyDriver (§10.1/§10.3/§10.4: wires the trust adapter into
     expect(chainOutcome.status).toBe("ok");
 
     const item: AnnouncedItem = {
-      record: { kind: "https://jinn.network/records/delivery/1.0", digest: sealJson({ kind: "delivery" }).digest },
+      record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: sealJson({ kind: "delivery" }).digest },
       provenance: {
         source: { agent: "did:key:zProjector", name: "marketplace" },
         entry: entryDigest,

@@ -1,0 +1,348 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
+  "title": "Jinn Evidence Repository OCI Manifest",
+  "description": "Canonical OCI Image Manifest serialization for one exact Jinn evidence record or artifact.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "mediaType",
+        "artifactType",
+        "config",
+        "layers",
+        "annotations"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "mediaType": {
+          "const": "application/vnd.oci.image.manifest.v1+json"
+        },
+        "artifactType": {
+          "const": "application/vnd.jinn.execution-evidence.v1+json"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mediaType",
+            "digest",
+            "size"
+          ],
+          "properties": {
+            "mediaType": {
+              "const": "application/vnd.oci.empty.v1+json"
+            },
+            "digest": {
+              "const": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "size": {
+              "const": 2
+            }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mediaType",
+                "digest",
+                "size"
+              ],
+              "properties": {
+                "mediaType": {
+                  "const": "application/vnd.jinn.execution-evidence.v1+json"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "items": false
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "network.jinn.evidence.profile"
+          ],
+          "properties": {
+            "network.jinn.evidence.profile": {
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "mediaType",
+        "artifactType",
+        "config",
+        "layers",
+        "annotations"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "mediaType": {
+          "const": "application/vnd.oci.image.manifest.v1+json"
+        },
+        "artifactType": {
+          "const": "application/vnd.jinn.result-evaluation.v1+json"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mediaType",
+            "digest",
+            "size"
+          ],
+          "properties": {
+            "mediaType": {
+              "const": "application/vnd.oci.empty.v1+json"
+            },
+            "digest": {
+              "const": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "size": {
+              "const": 2
+            }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mediaType",
+                "digest",
+                "size"
+              ],
+              "properties": {
+                "mediaType": {
+                  "const": "application/vnd.jinn.result-evaluation.v1+json"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "items": false
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "network.jinn.evidence.profile"
+          ],
+          "properties": {
+            "network.jinn.evidence.profile": {
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "mediaType",
+        "artifactType",
+        "config",
+        "layers",
+        "annotations"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "mediaType": {
+          "const": "application/vnd.oci.image.manifest.v1+json"
+        },
+        "artifactType": {
+          "const": "application/vnd.jinn.execution-verification.v1+json"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mediaType",
+            "digest",
+            "size"
+          ],
+          "properties": {
+            "mediaType": {
+              "const": "application/vnd.oci.empty.v1+json"
+            },
+            "digest": {
+              "const": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "size": {
+              "const": 2
+            }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mediaType",
+                "digest",
+                "size"
+              ],
+              "properties": {
+                "mediaType": {
+                  "const": "application/vnd.jinn.execution-verification.v1+json"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "items": false
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "network.jinn.evidence.profile"
+          ],
+          "properties": {
+            "network.jinn.evidence.profile": {
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "mediaType",
+        "artifactType",
+        "config",
+        "layers",
+        "annotations"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2
+        },
+        "mediaType": {
+          "const": "application/vnd.oci.image.manifest.v1+json"
+        },
+        "artifactType": {
+          "const": "application/vnd.jinn.evidence-artifact.v1"
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mediaType",
+            "digest",
+            "size"
+          ],
+          "properties": {
+            "mediaType": {
+              "const": "application/vnd.oci.empty.v1+json"
+            },
+            "digest": {
+              "const": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            },
+            "size": {
+              "const": 2
+            }
+          }
+        },
+        "layers": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mediaType",
+                "digest",
+                "size"
+              ],
+              "properties": {
+                "mediaType": {
+                  "const": "application/vnd.jinn.evidence-artifact.v1"
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                },
+                "size": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          ],
+          "items": false
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "network.jinn.evidence.profile"
+          ],
+          "properties": {
+            "network.jinn.evidence.profile": {
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
+            }
+          }
+        }
+      }
+    }
+  ]
+}

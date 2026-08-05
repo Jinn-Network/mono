@@ -96,8 +96,8 @@ import {
   parseCryptoEnvironmentRecord,
 } from "@jinn-network/chain-environment-record";
 
-if (CHAIN_ENVIRONMENT_KIND !== "https://jinn.network/records/chain-environment/1.0"
-    || CRYPTO_ENVIRONMENT_KIND !== "https://jinn.network/records/crypto-environment/1.0") {
+if (CHAIN_ENVIRONMENT_KIND !== "https://spec.jinn.network/records/chain-environment/v1"
+    || CRYPTO_ENVIRONMENT_KIND !== "https://spec.jinn.network/records/crypto-environment/v1") {
   throw new Error("root import failed");
 }
 for (const schema of ["chain-environment", "crypto-environment"]) {

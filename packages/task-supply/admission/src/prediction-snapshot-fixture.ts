@@ -115,7 +115,7 @@ export async function verifyPredictionSnapshotFixture(): Promise<{
   if (receiptStatement._type !== "https://in-toto.io/Statement/v1") {
     throw new Error("fixture admission DSSE payload is not an in-toto Statement/v1");
   }
-  if (receiptStatement.predicateType !== "https://jinn.network/attestations/prediction-snapshot-admission/v1") {
+  if (receiptStatement.predicateType !== "https://spec.jinn.network/attestations/prediction-snapshot-admission/v1") {
     throw new Error("admission receipt predicate type is wrong");
   }
   const receiptPredicate = receiptStatement.predicate;
@@ -143,7 +143,7 @@ export async function verifyPredictionSnapshotFixture(): Promise<{
   if ((submission.task as { digest?: { sha256?: unknown } } | undefined)?.digest?.sha256 !== digestSetValue(taskDigest)) {
     throw new Error("Submission does not bind the exact Task");
   }
-  const admissionAnnotation = (submission.annotations as Record<string, unknown> | undefined)?.["https://jinn.network/annotations/admission-receipt/1.0"] as { name?: unknown; mediaType?: unknown; digest?: { sha256?: unknown } } | undefined;
+  const admissionAnnotation = (submission.annotations as Record<string, unknown> | undefined)?.["https://spec.jinn.network/annotations/admission-receipt/v1"] as { name?: unknown; mediaType?: unknown; digest?: { sha256?: unknown } } | undefined;
   if (admissionAnnotation?.name !== "admission-receipt" || admissionAnnotation.mediaType !== ADMISSION_RECEIPT_MEDIA_TYPE || admissionAnnotation.digest?.sha256 !== digestSetValue(admissionReceiptDigest)) {
     throw new Error("Submission does not bind the exact admission receipt envelope");
   }

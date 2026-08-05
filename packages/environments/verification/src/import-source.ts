@@ -195,7 +195,7 @@ export function buildEnvironmentCandidatesFromRows(
       .sort(compareCodeUnitStrings);
 
     const candidate = {
-      kind: "https://jinn.network/records/environment/1.0",
+      kind: "https://spec.jinn.network/records/environment/v1",
       source: {
         repo: row.repo,
         repoUrl: resolveRepoUrl(row),

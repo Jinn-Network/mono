@@ -6,15 +6,15 @@ import { sealDelivery, sealSubmission, sealTask } from "./sealing.js";
 const validTask = {
   outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
   instructions: "Fix the bug.",
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://jinn.network/task-profiles/repository-work/1.0",
+    uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
     digest: { sha256: "a".repeat(64) },
   },
 };
 
 const validSubmission = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   submission: "urn:uuid:11111111-1111-5111-8111-111111111111",
   task: { digest: { sha256: "a".repeat(64) } },
   requester: "urn:uuid:22222222-2222-5222-8222-222222222222",
@@ -24,7 +24,7 @@ const validSubmission = {
 };
 
 const validDelivery = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   attempt: "urn:uuid:33333333-3333-5333-8333-333333333333",
   task: `sha256:${"a".repeat(64)}`,
   outputs: [{ name: "patch", digest: { sha256: "b".repeat(64) }, mediaType: "text/x-diff" }],

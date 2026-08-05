@@ -230,7 +230,7 @@ function ports(host = createAnnouncementHostState()): AnnouncementProjectionPort
       if (kind === RECORD_KINDS.submission) {
         return async () => ({
           taskDigest: `sha256:${"7".repeat(64)}`,
-          taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+          taskProfileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
           requesterIri: "did:key:zRequesterFixture",
           deadline: "2026-07-30T12:00:00Z",
         });

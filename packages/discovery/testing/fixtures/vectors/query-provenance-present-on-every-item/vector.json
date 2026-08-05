@@ -6,7 +6,7 @@
     "items": [
       {
         "record": {
-          "kind": "https://jinn.network/records/submission/1.0",
+          "kind": "https://spec.jinn.network/records/submission/v1",
           "digest": "sha256:46d4cb843396a04685b4d705d344b74fde18503eadd40ef42dca9e3bb0435eee"
         },
         "provenance": {
@@ -20,7 +20,7 @@
       },
       {
         "record": {
-          "kind": "https://jinn.network/records/submission/1.0",
+          "kind": "https://spec.jinn.network/records/submission/v1",
           "digest": "sha256:c015474e75d9b193e1f0c45fd5a2410a9e1220781859c804e6151d38ad31f37d"
         },
         "provenance": {

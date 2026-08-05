@@ -302,7 +302,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-trace-decode@portal:../../packages/evidence/trace-decode::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
   dependencies:
-    "@jinn-network/evidence-trajectory": "npm:0.1.0"
+    "@jinn-network/evidence-trace": "npm:0.1.0"
   peerDependencies:
     vitest: ^4.1.8
   peerDependenciesMeta:
@@ -311,9 +311,9 @@ __metadata:
   languageName: node
   linkType: soft
 
-"@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
+"@jinn-network/evidence-trace@portal:../../packages/evidence/trace::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-trajectory@portal:../../packages/evidence/trajectory::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
+  resolution: "@jinn-network/evidence-trace@portal:../../packages/evidence/trace::locator=%40jinn-network%2Fplugin-runtime%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"
@@ -353,8 +353,8 @@ __metadata:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/evidence-repository": "npm:0.1.0"
     "@jinn-network/evidence-retrieval": "npm:0.1.0"
+    "@jinn-network/evidence-trace": "npm:0.1.0"
     "@jinn-network/evidence-trace-decode": "npm:0.1.0"
-    "@jinn-network/evidence-trajectory": "npm:0.1.0"
     "@jinn-network/execution-recorder": "npm:0.1.0"
     "@jinn-network/record-discovery-client": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"

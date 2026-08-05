@@ -63,7 +63,7 @@ function verdictBytes(verdict: "pass" | "fail", label: string): Uint8Array {
   const payload = canonicalJsonBytes({
     _type: "https://in-toto.io/Statement/v1",
     subject: [{ name: `fixture/${label}`, digest: { sha256: subjectDigest } }],
-    predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
       evaluatedAt: "2026-07-29T00:00:00Z",
       evaluator: { id: "urn:uuid:77777777-7777-5777-8777-777777777777" },
@@ -104,7 +104,7 @@ function makeFixture(options: { preregistered?: boolean; subjectCount?: number }
           parameters: { verdictRule: "unanimous" },
         }];
     const run = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       benchmark: { digest: { sha256: "b".repeat(64) } },
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       arms: [{ armId: "armA", pinning: {} }],
@@ -125,7 +125,7 @@ function makeFixture(options: { preregistered?: boolean; subjectCount?: number }
     const verdictDigest = index % 2 === 0 ? recordDigest(verdictOne) : recordDigest(verdictTwo);
     const cellKey = `${taskDigest}/armA/1`;
     const matrix = sealMatrix({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: run.digest.slice("sha256:".length) } },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
       cells: [{
@@ -190,7 +190,7 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
 
   for (let index = 0; index < 2; index += 1) {
     const taskBytes = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: { digest: { sha256: "a".repeat(64) } }, instructions: sharedTask ? "shared" : `revision-${index}`,
       outputs: [], evaluation: { digest: { sha256: "d".repeat(64) } },
       payload: { provenance: { source: "fixture/shared-repository", timestamp: "2026-07-29T00:00:00Z" } },
@@ -204,7 +204,7 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
     verdictMap.set(baselineVerdictDigest, baselineVerdict);
     verdictMap.set(candidateVerdictDigest, candidateVerdict);
     const run = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       benchmark: { digest: { sha256: (index === 0 ? "b" : "c").repeat(64) } },
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       arms: [
@@ -230,7 +230,7 @@ function crossVersionPairedFixture(sharedTask: boolean): Fixture {
     runMap.set(run.digest, run.bytes);
     const taskHex = taskDigest.slice("sha256:".length);
     const matrix = sealMatrix({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: run.digest.slice("sha256:".length) } },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
       cells: [
@@ -324,7 +324,7 @@ function resolvedBinding(scope: readonly string[], revoked: boolean): ResolvedBi
   });
   return {
     binding: {
-      protocol: "https://jinn.network/trust/key-binding/v1",
+      protocol: "https://spec.jinn.network/trust/key-binding/v1",
       agent: AUTHOR,
       key: {
         publicKey: "fixture",
@@ -347,7 +347,7 @@ function resolvedBinding(scope: readonly string[], revoked: boolean): ResolvedBi
     revocations: revoked
       ? [{
           revocation: {
-            protocol: "https://jinn.network/trust/revocation/v1",
+            protocol: "https://spec.jinn.network/trust/revocation/v1",
             target: `sha256:${"e".repeat(64)}`,
             revokedBy: REPORT_KEY,
             anchors: [],
@@ -466,7 +466,7 @@ describe("deriveDisclosures", () => {
     const verdictOne = verdictBytes("pass", "independence");
     verdictMap.set(recordDigest(verdictOne), verdictOne);
     const run = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       benchmark: { digest: { sha256: "b".repeat(64) } },
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       arms: [{ armId: "armA", pinning: {} }],
@@ -525,7 +525,7 @@ describe("deriveDisclosures", () => {
     };
     const cell = options.outcome === "judged" ? judgedCell : expiredCell;
     const matrix = sealMatrix({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: run.digest.slice("sha256:".length) } },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
       cells: [cell],

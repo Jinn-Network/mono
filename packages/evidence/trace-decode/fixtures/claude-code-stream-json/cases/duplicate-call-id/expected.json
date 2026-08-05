@@ -1,13 +1,13 @@
 {
   "sourceDigest": "sha256:4a8f6fed4b60d146aa0fc0b3a9bf3aa6142a2895bc7a988ae1ec85f1944e0a02",
-  "traceId": "cf94b002633db2d4bc976b305505f48a",
+  "traceId": "628dd44884a867677259d5bd5f172d0e",
   "timebase": "synthetic-ordinal",
   "completeness": {
     "decoded": "full"
   },
   "spans": [
     {
-      "spanId": "e9fed5827b8d0c30",
+      "spanId": "58e141a1d5815ae0",
       "parentSpanId": null,
       "name": "invoke_agent claude-code",
       "kind": 1,
@@ -33,13 +33,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.outcome",
+          "key": "jinn.trace.outcome",
           "value": {
             "stringValue": "success"
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -51,8 +51,8 @@
       }
     },
     {
-      "spanId": "3d63216692a0d6f1",
-      "parentSpanId": "e9fed5827b8d0c30",
+      "spanId": "49cfbe9a639029cb",
+      "parentSpanId": "58e141a1d5815ae0",
       "name": "chat",
       "kind": 3,
       "startTimeUnixNano": "0",
@@ -71,13 +71,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -89,8 +89,8 @@
       }
     },
     {
-      "spanId": "b44ae0131f78f5fa",
-      "parentSpanId": "3d63216692a0d6f1",
+      "spanId": "2e1df3aa2b89f39d",
+      "parentSpanId": "49cfbe9a639029cb",
       "name": "execute_tool First",
       "kind": 1,
       "startTimeUnixNano": "0",
@@ -121,7 +121,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -133,5 +133,5 @@
       }
     }
   ],
-  "recordDigest": "sha256:a21a4a684f2d75ceff0e471bde5f4e37ca2ab628e48b35924bdb4b965ba9107b"
+  "recordDigest": "sha256:8325a918dceb0e2b45cec80cb439c9f4aa8b252d8b2ce80d8a1c2f0c42057d2d"
 }

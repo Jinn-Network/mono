@@ -88,7 +88,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 
 // Root import: identifiers + the sealing entry point.
-if (TASK_PROFILE_FORMAT_URI !== "https://jinn.network/profiles/task-profile/1.0") {
+if (TASK_PROFILE_FORMAT_URI !== "https://spec.jinn.network/profiles/task-profile/v1") {
   throw new Error("root import failed");
 }
 if (EVAL_SEMANTICS_VERSION !== "4") throw new Error("semanticsVersion seed mismatch");
@@ -97,7 +97,7 @@ const probe = sealDocument({ smoke: "test" });
 if (!probe.digest.startsWith("sha256:")) throw new Error("sealDocument did not return a sha256 digest");
 const resultBytes = new TextEncoder().encode("packed exact Result");
 const taskBytes = sealTask({
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: { digest: { sha256: "1".repeat(64) } },
   instructions: "packed exact-subject smoke",
   outputs: [{ name: "result", mediaType: "text/plain", required: true }],
@@ -107,7 +107,7 @@ const taskBytes = sealTask({
   },
 });
 const deliveryBytes = sealDelivery({
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
   task: documentDigest(taskBytes),
   outputs: [{

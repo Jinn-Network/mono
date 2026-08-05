@@ -4,7 +4,7 @@
   "description": "A withdrawn announcement without a `reason` code fails `parseAnnouncementEntry` before it can even reach source-chain-verification -- primarily covered by M1's entry.test.ts; carried here too for corpus completeness (§18).",
   "input": {
     "rawEntry": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
       "source": {
         "agent": "did:key:zAgentSourceOne",
         "name": "feed"

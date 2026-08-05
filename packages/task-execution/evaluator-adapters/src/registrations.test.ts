@@ -30,7 +30,7 @@ import {
 const method = {
   name: "evaluator-adapters",
   digest: { sha256: "9".repeat(64) },
-  uri: "https://jinn.network/software/evaluator-adapters/v1",
+  uri: "https://spec.jinn.network/software/evaluator-adapters/v1",
 };
 
 function registrations() {

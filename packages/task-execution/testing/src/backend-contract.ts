@@ -11,13 +11,13 @@ function unique(prefix: string): string {
 }
 
 const PROFILE = {
-  uri: "https://jinn.network/task-profiles/repository-work/1.0",
+  uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
 };
 
 function taskBytes(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: PROFILE,
     instructions: "Backend-contract sanity fixture.",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -26,7 +26,7 @@ function taskBytes(): Uint8Array {
 
 function submissionBytes(taskDigest: string, overrides: Record<string, unknown> = {}): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${crypto.randomUUID()}`,
     task: { digest: { sha256: taskDigest.replace(/^sha256:/, "") } },
     requester: `urn:uuid:${crypto.randomUUID()}`,
@@ -39,7 +39,7 @@ function submissionBytes(taskDigest: string, overrides: Record<string, unknown> 
 
 function deliveryBytesFor(taskDigest: string, attempt: string): Uint8Array {
   return sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt,
     task: taskDigest,
     outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: "b".repeat(64) } }],
@@ -236,7 +236,7 @@ export function describeTaskExecutionBackendContract(makeBackend: () => Testable
       // A structurally malformed Task (missing the required outputs[] field, never run through
       // the sealer's own validation) is an operational rejection, not an Attempt outcome.
       const malformedTaskBytes = new TextEncoder().encode(JSON.stringify({
-        protocol: "https://jinn.network/profiles/task-execution/1.0",
+        protocol: "https://spec.jinn.network/profiles/task-execution/v1",
         profile: PROFILE,
         instructions: "missing the required outputs[] field",
       }));

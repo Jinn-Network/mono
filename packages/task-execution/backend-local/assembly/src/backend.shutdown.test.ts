@@ -158,7 +158,7 @@ let sequence = 0;
 function documents(deadline = "2099-01-01T00:00:00Z"): { readonly task: Uint8Array; readonly submission: Uint8Array } {
   sequence += 1;
   const task = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: profile.profile,
       digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -169,7 +169,7 @@ function documents(deadline = "2099-01-01T00:00:00Z"): { readonly task: Uint8Arr
   return {
     task,
     submission: sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:61000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`,
       task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
       requester: "urn:uuid:62000000-0000-4000-8000-000000000001",
@@ -182,7 +182,7 @@ function documents(deadline = "2099-01-01T00:00:00Z"): { readonly task: Uint8Arr
 
 function deliveryBytes(attempt: string, taskDigest: string): Uint8Array {
   return sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt,
     task: taskDigest,
     outputs: [],
@@ -560,7 +560,7 @@ describe("writer-lock-safe shutdown (§7.102)", () => {
 
 function submissionBytes(task: Uint8Array): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:63000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`,
     task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
     requester: "urn:uuid:64000000-0000-4000-8000-000000000001",

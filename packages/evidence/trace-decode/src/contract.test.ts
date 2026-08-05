@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { GEN_AI_ATTRIBUTES, JINN_ATTRIBUTES } from "@jinn-network/evidence-trajectory";
+import { GEN_AI_ATTRIBUTES, JINN_ATTRIBUTES } from "@jinn-network/evidence-trace";
 
 import {
   ADMITTED_ATTRIBUTE_KEYS,

@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ERC1271_MAGIC_VALUE } from "./abis.js";
 import { createWitnessVerifier } from "./witness.js";
 
-const VERIFIER_IRI = "https://jinn.network/agent/verifier-1";
+const VERIFIER_IRI = "https://spec.jinn.network/agents/verifier-1";
 const SAFE = "0x4444444444444444444444444444444444444444";
 const HASH = `0x${"aa".repeat(32)}`;
 const SIGNATURE = `0x${"bb".repeat(65)}`;

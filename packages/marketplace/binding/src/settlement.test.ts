@@ -37,7 +37,7 @@ function makeDelivery(input: {
   }[];
 } = {}): Uint8Array {
   return sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: ATTEMPT_URI,
     task: `sha256:${"1".repeat(64)}`,
     outputs: [],
