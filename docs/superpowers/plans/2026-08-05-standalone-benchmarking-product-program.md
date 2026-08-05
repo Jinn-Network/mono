@@ -146,6 +146,7 @@ Updated at each packet completion and integration wave. Format: packet → state
 |---|---|---|---|---|---|
 | BP-00 | **integrated** | `ad33f1d0d` | `65d8c6acf` (worktree bench-bp00) | PASS (2 rounds, 1 blocking fixed: guard-precedent attribution; sonnet reviewer) | `5bf629930` |
 | BP-01 | **integrated** | `8ef3cb19e` | `73bca93e9` (worktree bench-bp01) | PASS (0 blocking, 4 non-blocking dispositioned; sonnet reviewer) | `f1330858e` |
+| BP-10 | **integrated** | `a30ffb38c` | `65f034796` (worktree bench-bp10) | PASS (0 blocking, 4 non-blocking dispositioned; sonnet reviewer) | `ebd1355d1`+`78737858d` |
 
 BP-00 verification: export-verification subagent confirmed every §3 symbol
 exists (3 draft-time corrections); acceptance criteria 13/13 PASS;
@@ -179,3 +180,15 @@ sandbox `git worktree remove` gotcha): `bench-bp00`, `bench-bp01`.
 ## 9. Merge-readiness caveats (standing)
 
 Owning Issues must be created by an authorized session before any PR; PRs target `next`-lineage per repo policy but this program's base is `integration/evidence-v1` per the human's direction; human CODEOWNERS review required for catalog/guard/CODEOWNERS-covered paths; no live validation, no deployment, no publication performed or claimed. Remote actions performed by this session: none.
+
+BP-10 verification: TDD red/green per unit; battery green (13 files /
+213 tests); guards 10/10; audit law (one attributed entry per operation)
+test-proven; lifecycle/authority typed refusals exhaustively swept;
+re-verified at integration. Carried finding for BP-11: add a
+grant-authority operation (delegated-agent parity demo needs it).
+
+M1 sequencing decision (2026-08-05): BP-11 -> BP-12 -> BP-13 -> BP-14
+SERIALIZED. Rationale: all M1 packets contend on package.json/yarn.lock/
+guard allow-list (single-owner files) and the CLI verb registry; the
+source-boundary positive-control test forbids pre-adding unused deps.
+Correctness over wall-clock, per program parallelization rules.
