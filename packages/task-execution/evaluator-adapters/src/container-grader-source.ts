@@ -45,10 +45,17 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const TASK_SUBJECT_PATH = "task";
 
 /**
- * Every validator below ends with `(?![\s\S])` rather than `$`: JavaScript's `$` also matches
- * immediately before a trailing newline, so `$`-anchored patterns accept `"grader-image\n…"`.
- * A trailing newline is exactly the kind of smuggled-argument suffix these validators exist to
- * refuse, so none of them may end with `$`.
+ * The argument validators below end with `(?![\s\S])` — an end-of-input assertion that reads the
+ * same whatever flags the pattern carries. It is *not* a fix for a `$` defect: JavaScript's `$`,
+ * unlike Perl's and Python's, already asserts end-of-input and does not match before a trailing
+ * newline, so a `$`-anchored twin refuses `"grader-image\n--privileged"` identically. The two are
+ * equivalent here and the lookahead is chosen only for saying so unambiguously.
+ *
+ * The flag hazard these patterns really face is `m`, and it is not confined to the end anchor:
+ * under `m` the leading `^` matches after a newline too, so `^…(?![\s\S])` with `m` accepts
+ * `"grader-image\n--privileged"` by matching the *second* line. Swapping the end anchor buys
+ * nothing against that. **These patterns must never carry the `m` flag** — that, not the choice
+ * of end anchor, is the property the newline test cases pin.
  */
 
 // The docker distribution reference grammar for the repository half of an image reference:
@@ -70,6 +77,9 @@ const IMAGE_REPOSITORY_MAX_LENGTH = 255;
 
 /** `os/arch[/variant]`, the OCI platform shape. Every real value is lowercase alphanumeric. */
 const PLATFORM = /^[a-z0-9]+\/[a-z0-9]+(?:\/[a-z0-9]+)?(?![\s\S])/;
+
+/** Linux `PATH_MAX`, the same role the 255 above plays for the image reference. */
+const CONTAINER_PATH_MAX_LENGTH = 4096;
 
 /** One segment of an absolute container path; `.`/`..` are excluded separately. */
 const CONTAINER_PATH_SEGMENT = /^[A-Za-z0-9._-]+(?![\s\S])/;
@@ -205,7 +215,7 @@ function pinnedPlatform(block: DeterministicProcessBlock): string {
  * resolved, so `..` escapes the intended location), and must carry nothing a shell would read.
  */
 function isContainerPath(value: string): boolean {
-  if (!value.startsWith("/")) return false;
+  if (!value.startsWith("/") || value.length > CONTAINER_PATH_MAX_LENGTH) return false;
   const segments = value.slice(1).split("/");
   return segments.length > 0 && segments.every((segment) =>
     segment !== "." && segment !== ".." && CONTAINER_PATH_SEGMENT.test(segment));

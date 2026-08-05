@@ -391,6 +391,27 @@ describe("containerGraderReportSource", () => {
     expect(runtime.run).not.toHaveBeenCalled();
   });
 
+  test("a workspace root longer than PATH_MAX is refused, at the exact boundary", async () => {
+    const { workspaceRoot } = await workspace();
+    const atLimit = `/${"a".repeat(4095)}`;
+    const overLimit = `/${"a".repeat(4096)}`;
+
+    const accepted = runtimeWriting("{}");
+    await read(containerGraderReportSource({ runtime: accepted, workspaceRoot }), {
+      specification: specification({ workspace: { root: atLimit } }),
+    });
+    expect((accepted.run.mock.calls[0]![0] as ContainerRunRequest).workdir).toBe(atLimit);
+
+    const refused = runtimeWriting("{}");
+    const error = await operationalFrom(
+      read(containerGraderReportSource({ runtime: refused, workspaceRoot }), {
+        specification: specification({ workspace: { root: overLimit } }),
+      }),
+    );
+    expect(error.canonicalCode).toBe("FAILED_PRECONDITION");
+    expect(refused.run).not.toHaveBeenCalled();
+  });
+
   // The docker reference grammar is total, so the validator must refuse nothing legitimate.
   test.each([
     "grader-image",
