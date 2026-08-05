@@ -14,6 +14,13 @@
 //     can never convert a failure into a pass.
 //   * The origin is a parameter. `https://spec.jinn.network` is the default and is
 //     mandatory under `--lane stable` (DR-2026-08-04); nothing else is hardcoded.
+//   * Identity and location are separate. A document's claimed identifier is a property
+//     of its bytes; the verification origin is where those bytes are fetched from. Every
+//     identifier -- a document's own `$id`/`profile` and the catalog's registered
+//     `resolvableIdentifiers` alike -- resolves against `IDENTIFIER_ORIGIN`, and the
+//     resulting served path is then fetched at the origin under verification. That is
+//     what makes verifying a preview deployment possible at all: the same attested
+//     artifact served anywhere still claims spec.jinn.network.
 //   * Anti-fallback probes run last and are load-bearing: a single-page-application
 //     catch-all that answers 200 with the same bytes for every path would otherwise
 //     make every other check pass vacuously.
@@ -34,10 +41,25 @@ import { pathToFileURL } from 'node:url';
 import { assertLiteralRoutePath } from './build-profile-host-bundle.mjs';
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { loadPlatformCatalog } from './platform-catalog.mjs';
-import { CANONICAL_IDENTIFIER_ORIGIN, jinnIdentifierServedPath } from './public-surface-assets.mjs';
+import {
+  CANONICAL_IDENTIFIER_ORIGIN,
+  RETIRED_IDENTIFIER_ORIGIN,
+  jinnIdentifierServedPath,
+} from './public-surface-assets.mjs';
 import { PAYLOAD_TYPE, SIGNATURE_FILE_NAME, verifyEnvelope } from './sign-profile-manifest.mjs';
 
-export const STABLE_ORIGIN = 'https://spec.jinn.network';
+/**
+ * The origin every hosted protocol identifier names, imported rather than restated.
+ *
+ * A document's claimed identity is a property of its bytes, not of where those bytes are
+ * served: the same attested artifact deployed to a preview URL still claims
+ * spec.jinn.network. Identity therefore always resolves against *this* origin, while
+ * fetching happens at whatever origin is under verification.
+ */
+export const IDENTIFIER_ORIGIN = CANONICAL_IDENTIFIER_ORIGIN.replace(/\/+$/u, '');
+// Under the stable lane the verification origin is not an operator choice: it is the
+// canonical origin itself (DR-2026-08-04). One value, not two that must be kept in step.
+export const STABLE_ORIGIN = IDENTIFIER_ORIGIN;
 export const MANIFEST_FILE_NAME = 'manifest.json';
 export const MANIFEST_MEDIA_TYPE = 'application/json';
 
@@ -90,10 +112,26 @@ export function mediaTypeMatches(headerValue, expected) {
   return actual !== null && actual === parseMediaType(expected);
 }
 
-/** @returns {{ servedPath: string } | { error: string }} */
-export function servedPathForIdentifier(identifier, origin, label = 'Jinn identifier') {
-  if (typeof identifier !== 'string' || !identifier.startsWith(`${origin}/`)) {
-    return { error: `${label} is not under ${origin}` };
+/**
+ * Resolve one identifier to the path it must be served at.
+ *
+ * `identifierOrigin` is the origin identifiers are expected to *name*, never the origin
+ * they are fetched from -- the caller composes the served path onto that separately.
+ * @returns {{ servedPath: string } | { error: string }}
+ */
+export function servedPathForIdentifier(identifier, identifierOrigin = IDENTIFIER_ORIGIN, label = 'Jinn identifier') {
+  // The retired apex is handed straight to the path rule, which rejects it by name. Left
+  // to the generic guard below it would read as "not under spec.jinn.network", which is
+  // true but says nothing about why.
+  if (typeof identifier === 'string' && identifier.startsWith(RETIRED_IDENTIFIER_ORIGIN)) {
+    try {
+      return { servedPath: jinnIdentifierServedPath(identifier, label) };
+    } catch (error) {
+      return { error: error?.message ?? String(error) };
+    }
+  }
+  if (typeof identifier !== 'string' || !identifier.startsWith(`${identifierOrigin}/`)) {
+    return { error: `${label} is not under ${identifierOrigin}` };
   }
   let parsed;
   try {
@@ -101,13 +139,13 @@ export function servedPathForIdentifier(identifier, origin, label = 'Jinn identi
   } catch {
     return { error: `${label} is not a URL: ${identifier}` };
   }
-  if (parsed.href !== identifier || parsed.origin !== origin) {
-    return { error: `${label} is not a canonical ${origin} identifier: ${identifier}` };
+  if (parsed.href !== identifier || parsed.origin !== identifierOrigin) {
+    return { error: `${label} is not a canonical ${identifierOrigin} identifier: ${identifier}` };
   }
   try {
     return {
       servedPath: jinnIdentifierServedPath(
-        `${CANONICAL_IDENTIFIER_ORIGIN}${identifier.slice(origin.length + 1)}`,
+        `${CANONICAL_IDENTIFIER_ORIGIN}${identifier.slice(identifierOrigin.length + 1)}`,
         label,
       ),
     };
@@ -120,9 +158,16 @@ export function servedPathForIdentifier(identifier, origin, label = 'Jinn identi
  * A served document's self-identifying claim, under the same rule the profile
  * builder applied: JSON only, fixtures excluded (a fixture's `profile` names the
  * vocabulary a record instance conforms to, not where the fixture is served).
+ *
+ * `identifierOrigin` is the origin a claim must *name* to be a claim about where this
+ * document lives, and it defaults to the canonical one. It is deliberately not the
+ * verification origin: keying on the latter meant that verifying any origin but
+ * spec.jinn.network silently found no claims at all and checked nothing -- a guard that
+ * passes precisely because it is testing nothing. A claim naming the retired apex is
+ * still a claim here, so it surfaces as a named refusal rather than as that same silence.
  * @returns {{ identifier: string, field: string } | { error: string } | null}
  */
-export function selfIdentifyingClaim(servedPath, bytes, origin) {
+export function selfIdentifyingClaim(servedPath, bytes, identifierOrigin = IDENTIFIER_ORIGIN) {
   if (!servedPath.endsWith('.json') || servedPath.split('/').includes('fixtures')) return null;
   let document;
   try {
@@ -134,10 +179,13 @@ export function selfIdentifyingClaim(servedPath, bytes, origin) {
   const claims = [];
   for (const field of ['$id', 'profile']) {
     const identifier = document[field];
-    if (typeof identifier === 'string' && identifier.startsWith(`${origin}/`)) claims.push({ field, identifier });
+    if (typeof identifier !== 'string') continue;
+    if (identifier.startsWith(`${identifierOrigin}/`) || identifier.startsWith(RETIRED_IDENTIFIER_ORIGIN)) {
+      claims.push({ field, identifier });
+    }
   }
   if (claims.length > 1) {
-    return { error: `${servedPath} declares multiple self-identifying claims under ${origin}` };
+    return { error: `${servedPath} declares multiple self-identifying claims under ${identifierOrigin}` };
   }
   return claims[0] ?? null;
 }
@@ -405,10 +453,12 @@ export async function verifyLiveProfileHost({
     const failure = checkServedResponse(response, url, { mediaType, bytes: localBytes });
     if (failure) return failure;
 
-    const claim = selfIdentifyingClaim(path, response.bytes, origin);
+    // Identity resolves canonically; the served path it yields is compared with the path
+    // this document was actually fetched from at the origin under verification.
+    const claim = selfIdentifyingClaim(path, response.bytes);
     if (claim?.error) return claim.error;
     if (claim) {
-      const derived = servedPathForIdentifier(claim.identifier, origin, `${path} ${claim.field}`);
+      const derived = servedPathForIdentifier(claim.identifier, IDENTIFIER_ORIGIN, `${path} ${claim.field}`);
       if (derived.error) return derived.error;
       if (derived.servedPath !== path) {
         return `${url} declares ${claim.field} ${claim.identifier}, which resolves to ${derived.servedPath}, not ${path}`;
@@ -423,7 +473,13 @@ export async function verifyLiveProfileHost({
   const releasePackages = new Set(localManifest.packages ?? []);
   const registered = resolvableIdentifiers.filter((entry) => releasePackages.has(entry?.owner));
   for (const entry of registered) {
-    const derived = servedPathForIdentifier(entry.identifier, origin, `resolvableIdentifiers ${entry.identifier}`);
+    // Registered identifiers are canonical protocol names, so they resolve against the
+    // canonical origin and are then dereferenced at the origin under verification.
+    const derived = servedPathForIdentifier(
+      entry.identifier,
+      IDENTIFIER_ORIGIN,
+      `resolvableIdentifiers ${entry.identifier}`,
+    );
     if (derived.error) return fail(derived.error);
     const identifierUrl = `${origin}/${derived.servedPath}`;
     if (entry.resolution === 'document') {

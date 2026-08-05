@@ -66,6 +66,18 @@ jobs:
             .github/scripts/stack-publication-surface.test.mjs \
             .github/scripts/stack-trusted-publishers.test.mjs \
             .github/scripts/generate-architecture.test.mjs
+      # The publication surface's other half: that the deploy bundle is actually servable,
+      # and that the live-host gate passes over a real socket rather than an injected
+      # fetch. Hermetic by construction -- an ephemeral loopback listener with a throwaway
+      # in-memory certificate. No egress, no credentials, no host CLI. The first two files
+      # are C3's own bundle-generator and gate suites, which shipped unwired.
+      - name: Prove the deploy bundle is servable and the gate passes over a socket
+        run: |
+          node --test \
+            .github/scripts/build-profile-host-bundle.test.mjs \
+            .github/scripts/verify-live-profile-host.test.mjs \
+            .github/scripts/serve-profile-host.test.mjs \
+            .github/scripts/verify-local-profile-host.test.mjs
 
   platform-verification-reusable:
     name: platform-verification-reusable
