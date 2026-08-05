@@ -18,6 +18,15 @@
  * drives the surviving equivalent of the same wiring — an edit on the joined
  * card → POST /v1/operator/join/<cid> → `restartRequired` → notification —
  * because that is what the original was actually guarding.
+ *
+ * MIGRATED for #2408 (server-side notifications). `restart_required` is no
+ * longer derived in the browser: `useNotifications.ts` is a thin fetcher over
+ * `GET /v1/notifications`, and the daemon sets an explicit `isRestartRequired()`
+ * flag on the three write paths it never hot-applies — `joinedSolverNets` among
+ * them — then serves the already-derived notice. So the mock daemon is driven
+ * statefully (empty list until the join POST fires, the notice afterwards) and
+ * the assertion is made after a reload, which is the sharper claim: the pre-#2408
+ * session-local `RestartPendingContext` flag could never have survived one.
  */
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -91,6 +100,13 @@ test.afterAll(async () => {
 test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees the restart notification', async ({ page }) => {
   await mockDaemonApi(page);
 
+  /**
+   * Stands in for the daemon's `isRestartRequired()` flag (`restart-required-state.ts`),
+   * which the `joinedSolverNets` write path sets and `/v1/notifications` reads. Flipped by
+   * the join POST route below, consumed by the notifications route below that.
+   */
+  let restartRequired = false;
+
   // Per-test overrides, registered AFTER mockDaemonApi so they win.
   // 1. one already-joined SolverNet for MembershipsTab to render.
   await page.route(
@@ -123,17 +139,46 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
         body: JSON.stringify(makeRegistryManifestResponse({ manifestCid: JOINED_CID })),
       }),
   );
-  // 3. the save POST reports the config change needs a restart.
+  // 3. the save POST reports the config change needs a restart — and, like the real write
+  //    path, latches the daemon-side flag that `/v1/notifications` derives the notice from.
   await page.route(
     (url) => url.pathname === `/v1/operator/join/${JOINED_CID}`,
-    (route) =>
-      route.fulfill({
+    (route) => {
+      restartRequired = true;
+      return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
           ok: true,
           restartRequired: true,
           manifestCid: JOINED_CID,
           config: { manifestCid: JOINED_CID, name: 'Prediction Markets', roles: ['solver'] },
+        }),
+      });
+    },
+  );
+  // 4. `/v1/notifications` (#2408), served from that flag: empty before the save, carrying the
+  //    notice `notifications-build.ts` emits for `restartRequired` after it. Registered AFTER
+  //    mockDaemonApi so it beats the default empty payload — Playwright checks routes in
+  //    reverse-registration order, the same idiom password-rotation-notification.e2e.test.ts uses.
+  await page.route(
+    (url) => url.pathname === '/v1/notifications',
+    (route) =>
+      route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          notifications: restartRequired
+            ? [
+                {
+                  kind: 'restart_required',
+                  severity: 'warning',
+                  title: 'Restart required',
+                  message: 'A configuration change is pending — restart to apply.',
+                  jumpTo: '/overview',
+                },
+              ]
+            : [],
         }),
       }),
   );
@@ -178,12 +223,28 @@ test('operator opens the Settings tab, edits a joined SolverNet, saves, and sees
 
   await card.getByTestId('joined-net-card-model-select').selectOption('claude-sonnet-4-6');
   await expect(save).toBeEnabled();
-  await save.click();
 
-  // Restart notification appears in the AppShell notification list, on every
-  // route — `deriveNotifications` emits `restart_required` off the
-  // RestartPendingContext flag the save's `restartRequired: true` sets.
+  const savePost = page.waitForResponse(
+    (res) =>
+      new URL(res.url()).pathname === `/v1/operator/join/${JOINED_CID}` &&
+      res.request().method() === 'POST',
+  );
+  await save.click();
+  await savePost;
+
+  // Post-#2408 the notice is server state, not session state: the save latched the daemon's
+  // restart-required flag, so the next `GET /v1/notifications` carries `restart_required`.
+  // Reload rather than waiting out `useNotifications`' 30s `refetchInterval` — it is both
+  // faster and the stronger assertion, since the flag now outlives the browser session that
+  // set it (the removed `RestartPendingContext` boolean was lost on any reload).
+  await page.reload();
+
+  // AppShell mounts `useNotifications` on every route, so the notice renders here on
+  // /operator/memberships. Stable data-kind hook from NotificationItem; copy may evolve.
   const restartNotice = page.locator('[data-kind="restart_required"]');
   await expect(restartNotice).toBeVisible({ timeout: 15_000 });
   await expect(restartNotice).toHaveAttribute('data-severity', 'warning');
+  await expect(restartNotice).toHaveCount(1);
+  // Message text from notifications-build.ts.
+  await expect(restartNotice).toContainText('restart to apply');
 });
