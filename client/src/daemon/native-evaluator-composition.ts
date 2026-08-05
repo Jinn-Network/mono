@@ -12,17 +12,26 @@ import {
   type LocalTaskExecutionBackendConfig,
 } from "@jinn-network/task-execution-backend-local";
 import {
+  defineEvaluatorRegistration,
   makeEvaluationLauncher,
   type EvaluationHarnessDeployment,
+  type EvaluatorAdapter,
   type EvaluatorRegistration,
 } from "@jinn-network/task-execution-evaluation-harness";
-import { PREDICTION_REGISTRATION_ID } from "@jinn-network/task-execution-evaluator-adapters";
+import {
+  PREDICTION_REGISTRATION_ID,
+  SWE_REBENCH_REGISTRATION_ID,
+  createSweRebenchEvaluatorAdapter,
+  type GraderReportSource,
+} from "@jinn-network/task-execution-evaluator-adapters";
 import {
   EVALUATION_SPEC_MEDIA_TYPE,
   EVALUATION_TASK_PROFILE_URI,
   VERDICT_DSSE_PAYLOAD_TYPE,
   buildEvaluationTaskProfile,
+  parseEvaluationSpec,
   sealTaskProfile,
+  type EvaluationSpec,
   type ProfileStore,
 } from "@jinn-network/task-execution-profiles";
 import {
@@ -32,6 +41,7 @@ import {
 import { sealSignedRecord } from "@jinn-network/trust-core";
 import {
   makeDirProvisioner,
+  type TaskView,
   type WorkspaceRuntimePorts,
 } from "@jinn-network/task-execution-workspace";
 import type { VerdictPorts } from "@jinn-network/marketplace-venue-base";
@@ -69,6 +79,49 @@ import {
 import type { RoleIdentitySet } from "./role-identities.js";
 
 type LauncherDeployment = NonNullable<LocalTaskExecutionBackendConfig["launcherDeployments"]>[string];
+
+/**
+ * The evaluation methods this host recognizes. A deployment module may register any non-empty
+ * subset of them; a registrationId outside this table is refused at composition time, before a
+ * backend or a launcher exists.
+ *
+ * A `graderAdapter` marks a container-graded method — one whose adapter cannot produce a grader
+ * report from the harness-supplied evaluation context alone — and is the exact factory the host
+ * rebuilds that registration's adapter with when it owns the grader source. A method with no
+ * `graderAdapter` takes no grader binding at all.
+ */
+const HOST_EVALUATION_METHODS: ReadonlyMap<string, {
+  readonly graderAdapter?: (graderReportSource: GraderReportSource) => EvaluatorAdapter;
+}> = new Map([
+  [PREDICTION_REGISTRATION_ID, {}],
+  [SWE_REBENCH_REGISTRATION_ID, {
+    graderAdapter: (graderReportSource: GraderReportSource) =>
+      createSweRebenchEvaluatorAdapter({ graderReportSource }),
+  }],
+]);
+
+/**
+ * How a container-graded registration's grader execution is owned.
+ *
+ * - a `GraderReportSource` — the host owns it. This is the parent-process registration set the
+ *   launcher plans from, and the in-process evaluation path; tests inject a fake runtime here.
+ * - `"deployment-owned"` — the digest-pinned deployment module constructs its own grader source
+ *   (the production path: the module is imported identically by the daemon and by the spawned
+ *   harness child, so only a module-constructed source reaches the process that actually grades
+ *   — see `docs/operator/native-evaluator-deployment.md`).
+ *
+ * There is no third, implicit state: a container-graded registration with no entry at all is
+ * refused at composition rather than failing on its first evaluation.
+ */
+export type NativeGraderReportBinding = GraderReportSource | "deployment-owned";
+
+/**
+ * One digest every configured registration's evaluation-method descriptor must declare, or an
+ * exact per-`registrationId` map for a deployment that serves more than one method.
+ */
+export type NativeEvaluationMethodDigests =
+  | `sha256:${string}`
+  | Readonly<Record<string, `sha256:${string}`>>;
 
 export type NativeEvaluatorSourceEvent =
   | {
@@ -117,8 +170,16 @@ export interface NativeEvaluatorCompositionInput {
     /** Digest of the exact module bytes; rechecked before every secret release. */
     readonly moduleDigest: `sha256:${string}`;
     readonly signerHandle: string;
-    readonly evaluationMethodDigest: `sha256:${string}`;
+    readonly evaluationMethodDigest: NativeEvaluationMethodDigests;
   };
+  /**
+   * Host-owned grader execution binding for every container-graded registration the deployment
+   * declares, keyed by `registrationId` or by the registration's evaluation-method URI. Omitted
+   * entirely for a deployment with no container-graded registration (today's prediction-only
+   * shape); an entry naming a registration this deployment does not declare is refused, and so
+   * is an entry for a registration that is not container-graded.
+   */
+  readonly graderReportSources?: Readonly<Record<string, NativeGraderReportBinding>>;
   readonly backend: {
     readonly stateRoot: string;
     readonly source: string;
@@ -190,6 +251,20 @@ function methodDigest(registration: EvaluatorRegistration): `sha256:${string}` {
   return `sha256:${sha256}`;
 }
 
+function expectedMethodDigest(
+  configured: NativeEvaluationMethodDigests,
+  registrationId: string,
+): `sha256:${string}` {
+  if (typeof configured === "string") return configured;
+  const digest = configured[registrationId];
+  if (digest === undefined) {
+    throw new NativeEvaluatorCompositionError(
+      `trusted configuration declares no evaluation-method digest for registration "${registrationId}"`,
+    );
+  }
+  return digest;
+}
+
 function requireDeployment(value: unknown): EvaluationHarnessDeployment {
   if (typeof value !== "object" || value === null) {
     throw new NativeEvaluatorCompositionError("evaluator deployment module exports no deployment object");
@@ -205,29 +280,189 @@ function requireDeployment(value: unknown): EvaluationHarnessDeployment {
   return deployment as EvaluationHarnessDeployment;
 }
 
-function predictionRegistration(input: {
+/**
+ * Binds one declared registration's grader execution. A registration the host knows is not
+ * container-graded takes no binding at all — supplying one is a configuration error, not an
+ * ignorable extra, because it would silently do nothing.
+ */
+function bindGraderReportSource(
+  registration: EvaluatorRegistration,
+  graderAdapter: ((graderReportSource: GraderReportSource) => EvaluatorAdapter) | undefined,
+  sources: Readonly<Record<string, NativeGraderReportBinding>>,
+): EvaluatorRegistration {
+  const id = registration.registrationId;
+  const uri = registration.evaluationMethod.uri;
+  const binding = sources[id] ?? (typeof uri === "string" ? sources[uri] : undefined);
+  if (graderAdapter === undefined) {
+    if (binding !== undefined) {
+      throw new NativeEvaluatorCompositionError(
+        `evaluator registration "${id}" is not container-graded and takes no host grader report source`,
+      );
+    }
+    return registration;
+  }
+  if (binding === undefined) {
+    throw new NativeEvaluatorCompositionError(
+      `container-graded evaluator registration "${id}" has no host grader report source: `
+      + `native evaluator composition requires a graderReportSources entry keyed by "${id}"`
+      + `${typeof uri === "string" ? ` or "${uri}"` : ""}`,
+    );
+  }
+  if (binding === "deployment-owned") return registration;
+  return defineEvaluatorRegistration({ ...registration, adapter: graderAdapter(binding) });
+}
+
+/**
+ * The host-recognized registration set this deployment may serve. Every declared registration is
+ * identity-, signer- and method-digest-validated exactly as the single prediction registration
+ * was; the set additionally has to be non-empty, duplicate-free, drawn only from
+ * `HOST_EVALUATION_METHODS`, and unambiguous about interruption behavior. Every failure is
+ * refusal at composition time — the host never boots an evaluator it cannot fully account for.
+ */
+function hostRegistrationSet(input: {
   readonly deployment: EvaluationHarnessDeployment;
   readonly evaluator: string;
   readonly signerHandle: string;
-  readonly evaluationMethodDigest: `sha256:${string}`;
-}): EvaluatorRegistration {
-  const registrations = input.deployment.registrations.filter(
-    ({ registrationId }) => registrationId === PREDICTION_REGISTRATION_ID,
+  readonly evaluationMethodDigest: NativeEvaluationMethodDigests;
+  readonly graderReportSources: Readonly<Record<string, NativeGraderReportBinding>>;
+}): readonly EvaluatorRegistration[] {
+  const declared = input.deployment.registrations;
+  if (declared.length === 0) {
+    throw new NativeEvaluatorCompositionError("evaluator deployment declares no evaluator registration");
+  }
+  const seen = new Set<string>();
+  const keys = new Set<string>();
+  const resolved: EvaluatorRegistration[] = [];
+  for (const registration of declared) {
+    const id = registration.registrationId;
+    if (seen.has(id)) {
+      throw new NativeEvaluatorCompositionError(`evaluator deployment declares registration "${id}" more than once`);
+    }
+    seen.add(id);
+    keys.add(id);
+    if (typeof registration.evaluationMethod.uri === "string") keys.add(registration.evaluationMethod.uri);
+    const method = HOST_EVALUATION_METHODS.get(id);
+    if (method === undefined) {
+      throw new NativeEvaluatorCompositionError(
+        `evaluator deployment registration "${id}" is not a host-recognized evaluation method`,
+      );
+    }
+    if (registration.evaluatorIdentity.id !== input.evaluator) {
+      throw new NativeEvaluatorCompositionError(
+        `${id} evaluator registration names a different persistent agent`,
+      );
+    }
+    if (registration.signer.handle !== input.signerHandle) {
+      throw new NativeEvaluatorCompositionError(
+        `${id} evaluator registration names a different host signer handle`,
+      );
+    }
+    if (methodDigest(registration) !== expectedMethodDigest(input.evaluationMethodDigest, id)) {
+      throw new NativeEvaluatorCompositionError(`${id} evaluator registration method digest changed`);
+    }
+    resolved.push(bindGraderReportSource(registration, method.graderAdapter, input.graderReportSources));
+  }
+  for (const key of Object.keys(input.graderReportSources)) {
+    if (!keys.has(key)) {
+      throw new NativeEvaluatorCompositionError(
+        `grader report source "${key}" names no registration this evaluator deployment declares`,
+      );
+    }
+  }
+  if (typeof input.evaluationMethodDigest !== "string") {
+    for (const key of Object.keys(input.evaluationMethodDigest)) {
+      if (!seen.has(key)) {
+        throw new NativeEvaluatorCompositionError(
+          `trusted configuration declares an evaluation-method digest for unregistered "${key}"`,
+        );
+      }
+    }
+  }
+  if (new Set(resolved.map(({ interruptionBehavior }) => interruptionBehavior)).size > 1) {
+    throw new NativeEvaluatorCompositionError(
+      "evaluator deployment registrations have ambiguous interruption behavior",
+    );
+  }
+  return Object.freeze(resolved);
+}
+
+/** The single configured registration serving this EvaluationSpec — never zero, never two. */
+function compatibleRegistration(
+  registrations: readonly EvaluatorRegistration[],
+  specification: EvaluationSpec,
+): EvaluatorRegistration {
+  const compatible = registrations.filter(
+    (registration) => registration.specificationCompatibility(specification),
   );
-  if (registrations.length !== 1) {
-    throw new NativeEvaluatorCompositionError("deployment must contain exactly one prediction evaluator registration");
+  if (compatible.length !== 1) {
+    throw new NativeEvaluatorCompositionError(
+      compatible.length === 0
+        ? "no configured evaluator registration serves this evaluation's EvaluationSpec"
+        : "more than one configured evaluator registration serves this evaluation's EvaluationSpec",
+    );
   }
-  const registration = registrations[0]!;
-  if (registration.evaluatorIdentity.id !== input.evaluator) {
-    throw new NativeEvaluatorCompositionError("prediction evaluator registration names a different persistent agent");
+  return compatible[0]!;
+}
+
+/**
+ * Resolves the EvaluationSpec the evaluation Task names from the evaluator's own durable
+ * artifacts. The digest comes from the host-derived, host-sealed evaluation Task; the bytes come
+ * from durable state, never from the workspace the attempt can write.
+ */
+function durableEvaluationSpec(
+  state: NativeEvaluatorStateRepository,
+  view: TaskView,
+): EvaluationSpec {
+  const payload = view.task.payload as { readonly evaluationSpec?: unknown } | null | undefined;
+  const digest = payload?.evaluationSpec;
+  if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(digest)) {
+    throw new NativeEvaluatorCompositionError("evaluation Task names no canonical EvaluationSpec digest");
   }
-  if (registration.signer.handle !== input.signerHandle) {
-    throw new NativeEvaluatorCompositionError("prediction evaluator registration names a different host signer handle");
+  for (const evaluation of state.listEvaluations()) {
+    for (const artifact of state.listSubjectArtifacts(evaluation.evaluationId)) {
+      if (artifact.role === "evaluation-spec" && artifact.digest === digest) {
+        return parseEvaluationSpec(artifact.bytes);
+      }
+    }
   }
-  if (methodDigest(registration) !== input.evaluationMethodDigest) {
-    throw new NativeEvaluatorCompositionError("prediction evaluator registration method digest changed");
+  throw new NativeEvaluatorCompositionError(
+    "evaluation Task names an EvaluationSpec with no durable evaluator artifact",
+  );
+}
+
+/**
+ * The launcher's `selectRegistration` seam. A one-registration deployment resolves to that exact
+ * registration without reading anything — byte-for-byte the pre-registration-set behavior. A
+ * larger set selects per evaluation method, by matching each registration's own specification
+ * compatibility (exact parser identity for the shipped adapters) against the durable
+ * EvaluationSpec.
+ */
+function registrationSelector(input: {
+  readonly registrations: readonly EvaluatorRegistration[];
+  readonly state: NativeEvaluatorStateRepository;
+}): (view: TaskView) => EvaluatorRegistration {
+  if (input.registrations.length === 1) {
+    const only = input.registrations[0]!;
+    return () => only;
   }
-  return registration;
+  return (view) => compatibleRegistration(input.registrations, durableEvaluationSpec(input.state, view));
+}
+
+/**
+ * The evaluation-method digest a harvested verdict statement must declare. One registration
+ * pins its own digest unconditionally; a larger set pins the digest of the registration that
+ * serves the evaluation's own EvaluationSpec, so a second configured method can never launder a
+ * verdict under the wrong method identity.
+ */
+function methodDigestResolver(
+  registrations: readonly EvaluatorRegistration[],
+): (specificationBytes: Uint8Array) => `sha256:${string}` {
+  if (registrations.length === 1) {
+    const digest = methodDigest(registrations[0]!);
+    return () => digest;
+  }
+  return (specificationBytes) =>
+    methodDigest(compatibleRegistration(registrations, parseEvaluationSpec(specificationBytes)));
 }
 
 function digestFromDescriptor(descriptor: { readonly digest?: Readonly<Record<string, string>> }): `sha256:${string}` {
@@ -242,7 +477,7 @@ function stateBackedProvisioner(input: {
   readonly state: NativeEvaluatorStateRepository;
   readonly runtime: WorkspaceRuntimePorts;
   readonly roles: RoleIdentitySet;
-  readonly evaluationMethodDigest: `sha256:${string}`;
+  readonly expectedMethodDigest: (specificationBytes: Uint8Array) => `sha256:${string}`;
   readonly quotaBytes?: number;
   readonly workTtlMs?: number;
   readonly diskFloorBytes?: number;
@@ -330,7 +565,8 @@ function stateBackedProvisioner(input: {
             || predicate.taskSubject !== task.name
             || JSON.stringify(predicate.resultSubjects) !== JSON.stringify(results.map(({ name }) => name))
             || predicate.evaluationSpecification?.digest.sha256 !== specification.digest.slice("sha256:".length)
-            || predicate.evaluationMethod?.digest.sha256 !== input.evaluationMethodDigest.slice("sha256:".length)
+            || predicate.evaluationMethod?.digest.sha256
+              !== input.expectedMethodDigest(specification.bytes).slice("sha256:".length)
             || Date.parse(predicate.evaluatedAt) > Date.parse(effectiveDeadline(input.state, local.attempt.attemptUri) ?? "")) {
             throw new NativeEvaluatorCompositionError("unsigned evaluator statement is outside its exact Attempt authority");
           }
@@ -393,16 +629,17 @@ export async function buildNativeEvaluatorComposition(
   await requireModuleDigest(location.path, input.deployment.moduleDigest);
   const loaded = await import(location.specifier) as { readonly evaluationHarnessDeployment?: unknown };
   const deployment = requireDeployment(loaded.evaluationHarnessDeployment);
-  const registration = predictionRegistration({
+  const registrations = hostRegistrationSet({
     deployment,
     evaluator: input.roles.agent,
     signerHandle: input.deployment.signerHandle,
     evaluationMethodDigest: input.deployment.evaluationMethodDigest,
+    graderReportSources: input.graderReportSources ?? {},
   });
   const launcher = makeEvaluationLauncher({
     deploymentModule: location.specifier,
-    registrations: [registration],
-    selectRegistration: () => registration,
+    registrations,
+    selectRegistration: registrationSelector({ registrations, state: input.state }),
   });
 
   const backendConfig: LocalTaskExecutionBackendConfig = {
@@ -416,7 +653,7 @@ export async function buildNativeEvaluatorComposition(
       state: input.state,
       runtime: input.backend.workspaceRuntime,
       roles: input.roles,
-      evaluationMethodDigest: input.deployment.evaluationMethodDigest,
+      expectedMethodDigest: methodDigestResolver(registrations),
       ...(input.backend.quotaBytes === undefined ? {} : { quotaBytes: input.backend.quotaBytes }),
       ...(input.backend.workTtlMs === undefined ? {} : { workTtlMs: input.backend.workTtlMs }),
       ...(input.backend.diskFloorBytes === undefined ? {} : { diskFloorBytes: input.backend.diskFloorBytes }),
