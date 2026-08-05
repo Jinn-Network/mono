@@ -1575,7 +1575,7 @@
       "decisionRecords": 3,
       "discoveredFirstPartySurfaces": 2865,
       "generatedOutputSources": 1305,
-      "generatorSources": 573,
+      "generatorSources": 575,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -2045,6 +2045,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/observation-reader-gate-boundary.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/origin-tripwire.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/origin-tripwire.test.mjs"
       },
       {
         "categories": [

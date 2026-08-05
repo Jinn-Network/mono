@@ -10,18 +10,74 @@ import { FIXTURE_MANIFEST_NAME, readFixtureManifest } from './fixture-manifest.m
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 
-export function compareFixtureManifests(baseline, candidate, { label }) {
+// TEMPORARY -- REMOVED BY COMPONENT C2 OF THE DevX RE-SEAL PROGRAM (#2396).
+//
+// DR-2026-08-04 (log/decisions/2026-08-04-spec-origin-and-vocabulary.md, §Consequences)
+// authorizes exactly one pre-publication fixture-manifest regeneration: the re-seal moves
+// the protocol identifier origin to spec.jinn.network and the version convention to
+// major-only /v1, which changes the bytes of already-sealed fixtures. The immutability law
+// binds *published* identifiers, and none of these has ever been published -- that is the
+// whole ground on which the DR permits this, and it is why the carve-out is single-use.
+//
+// The carve-out covers id REMOVAL as well as digest change. It was first written to cover
+// only the latter, and that under-covered the DR it was written for: the same DR renames
+// the trace vocabulary, and a rename reaches the manifest as a removed id plus an added
+// one. The append-only law protects published conformance vectors a third party may have
+// pinned; nothing in this corpus has ever been published, which is the identical premise
+// that makes the digest half lawful. Scoping the exception to the authorized migration is
+// the narrow move -- keeping a fixture named for the retired vocabulary would publish that
+// vocabulary permanently into the served corpus, and waiving the gate would delete the
+// check instead of bounding it.
+//
+// What it does NOT relax: the erratum rules, and the gate itself off the carve-out. Without
+// the flag a removal and a digest change both throw exactly as before, and a wrong, empty,
+// or invented DR id is an error rather than a bypass. Removals under the flag are reported,
+// never silent.
+//
+// The flag is not a default anywhere. It is applied only on `reseal/*` branches, by an
+// explicit condition in .github/workflows/stack-fixture-immutability.yml, and C2 deletes
+// the flag, this constant, and that condition once the re-seal waves have landed.
+export const RESEAL_DR_ID = 'DR-2026-08-04';
+
+/**
+ * Parses the `--allow-reseal <dr-id>` argument. Absent -> false (today's behavior).
+ * Present with exactly the authorizing DR id -> true. Anything else is an error: a
+ * misspelled or invented authorization must fail loudly, never fall through to a bypass.
+ */
+export function parseResealAuthorization(value) {
+  if (value === undefined) return false;
+  if (value !== RESEAL_DR_ID) {
+    throw new Error(
+      `--allow-reseal only authorizes ${RESEAL_DR_ID}; got ${value === '' ? '(empty)' : value}`,
+    );
+  }
+  return true;
+}
+
+export function compareFixtureManifests(baseline, candidate, { label, allowReseal = false }) {
   const candidateById = new Map(candidate.entries.map((entry) => [entry.id, entry.sha256]));
+  const resealed = [];
+  const removed = [];
   for (const entry of baseline.entries) {
     if (!candidateById.has(entry.id)) {
-      throw new Error(`${label}: ${entry.id} was removed; fixtures are append-only`);
+      if (!allowReseal) {
+        throw new Error(`${label}: ${entry.id} was removed; fixtures are append-only`);
+      }
+      // Same treatment as a re-sealed digest: surfaced in the run output, never swallowed.
+      removed.push(entry.id);
+      continue;
     }
     const actual = candidateById.get(entry.id);
     if (actual !== entry.sha256) {
-      throw new Error(
-        `${label}: ${entry.id} changed from ${entry.sha256} to ${actual}; a published fixture is never edited, `
-        + 'it is superseded by a new fixture plus a dated erratum',
-      );
+      if (!allowReseal) {
+        throw new Error(
+          `${label}: ${entry.id} changed from ${entry.sha256} to ${actual}; a published fixture is never edited, `
+          + 'it is superseded by a new fixture plus a dated erratum',
+        );
+      }
+      // Reported, never silent: a re-sealed digest is the one thing this gate exists to
+      // notice, so the carve-out surfaces it in the run output rather than swallowing it.
+      resealed.push(entry.id);
     }
   }
   const candidateErrata = new Map(candidate.errata.map((erratum) => [erratum.id, erratum]));
@@ -45,7 +101,11 @@ export function compareFixtureManifests(baseline, candidate, { label }) {
     }
   }
   const baselineIds = new Set(baseline.entries.map((entry) => entry.id));
-  return { added: candidate.entries.map((entry) => entry.id).filter((id) => !baselineIds.has(id)) };
+  return {
+    added: candidate.entries.map((entry) => entry.id).filter((id) => !baselineIds.has(id)),
+    resealed,
+    removed,
+  };
 }
 
 export function readManifestAtRef(ref, packageDirectory, { exec = defaultGit } = {}) {
@@ -145,6 +205,16 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   try {
     const args = process.argv.slice(2);
     const root = args.includes('--root') ? args[args.indexOf('--root') + 1] : process.cwd();
+    // See RESEAL_DR_ID above -- single-use, branch-gated in CI, deleted by C2. A bare
+    // `--allow-reseal` with no value reaches parseResealAuthorization as '' and is refused;
+    // the flag never authorizes anything by its mere presence.
+    const resealIndex = args.indexOf('--allow-reseal');
+    const allowReseal = parseResealAuthorization(
+      resealIndex === -1 ? undefined : (args[resealIndex + 1] ?? ''),
+    );
+    if (allowReseal && args.includes('--registry-baseline')) {
+      throw new Error(`--allow-reseal is a pre-publication carve-out (${RESEAL_DR_ID}); it does not apply to the registry baseline`);
+    }
     if (args.includes('--registry-baseline')) {
       const version = args[args.indexOf('--version') + 1];
       if (!args.includes('--version') || !version) throw new Error('--version <candidate-version> is required');
@@ -154,18 +224,31 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       if (!args.includes('--base') || !base) throw new Error('--base <git-ref> is required');
       let checked = 0;
       const additions = [];
+      const reseals = [];
+      const removals = [];
       for (const pkg of discoverStackPackages(root)) {
         const candidate = readFixtureManifest(join(root, pkg.directory));
         if (candidate === null) continue;
         const baseline = readManifestAtRef(base, pkg.directory);
         if (baseline === null) continue;
-        const { added } = compareFixtureManifests(baseline, candidate, { label: pkg.directory });
+        const { added, resealed, removed } = compareFixtureManifests(baseline, candidate, {
+          label: pkg.directory,
+          allowReseal,
+        });
         checked += 1;
         if (added.length > 0) additions.push(`${pkg.directory}: +${added.join(', +')}`);
+        if (resealed.length > 0) reseals.push(`${pkg.directory}: ${resealed.join(', ')}`);
+        if (removed.length > 0) removals.push(`${pkg.directory}: ${removed.join(', ')}`);
       }
       console.log(`fixture immutability holds across ${checked} packages against ${base}`);
       if (additions.length > 0) {
         console.log(`fixture additions in this change (each needs a minor bump and a changelog note):\n  ${additions.join('\n  ')}`);
+      }
+      if (reseals.length > 0) {
+        console.log(`${RESEAL_DR_ID} re-sealed fixture digests (carve-out active):\n  ${reseals.join('\n  ')}`);
+      }
+      if (removals.length > 0) {
+        console.log(`${RESEAL_DR_ID} removed fixture ids (carve-out active; each must reappear under its re-sealed name):\n  ${removals.join('\n  ')}`);
       }
     }
   } catch (error) {

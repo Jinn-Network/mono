@@ -193,9 +193,128 @@ test('Jinn identifiers map only to canonical relative hosted paths', async () =>
   ]) {
     assert.throws(
       () => jinnIdentifierServedPath(identifier, 'fixture identity'),
-      /fixture identity must name a canonical relative jinn\.network hosted path/u,
+      /fixture identity must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
       identifier,
     );
+  }
+});
+
+// --- DR-2026-08-04: spec.jinn.network canonical, jinn.network explicitly legacy ---
+
+test('the canonical spec.jinn.network origin serves the same relative path as the legacy one', async () => {
+  const { jinnIdentifierServedPath } = await implementation;
+  assert.equal(
+    jinnIdentifierServedPath('https://spec.jinn.network/records/trace/v1/schema'),
+    'records/trace/v1/schema',
+  );
+  // Identical path under either origin: one served tree covers the whole migration window.
+  assert.equal(
+    jinnIdentifierServedPath('https://spec.jinn.network/records/trajectory/1.0/schema'),
+    jinnIdentifierServedPath('https://jinn.network/records/trajectory/1.0/schema'),
+  );
+});
+
+test('the canonical origin gets every rule the legacy origin gets', async () => {
+  const { jinnIdentifierServedPath } = await implementation;
+  for (const identifier of [
+    'https://spec.jinn.network/',
+    'https://spec.jinn.network/.',
+    'https://spec.jinn.network/../escaped.json',
+    'https://spec.jinn.network/a//b',
+    'https://spec.jinn.network/a/./b',
+    'https://spec.jinn.network/%2e%2e/escaped.json',
+    'https://spec.jinn.network/a%2fb',
+    'https://spec.jinn.network/a\\b',
+    'https://SPEC.jinn.network/schema',
+    'https://spec.jinn.network:443/schema',
+    'https://user@spec.jinn.network/schema',
+    'https://spec.jinn.network/schema?draft=1',
+    'https://spec.jinn.network/schema#fragment',
+    'https://spec.jinn.network/manifest.json',
+    'https://spec.jinn.network/manifest.dsse.json',
+  ]) {
+    assert.throws(
+      () => jinnIdentifierServedPath(identifier, 'fixture identity'),
+      /fixture identity must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
+      identifier,
+    );
+  }
+});
+
+test('a neighbouring host that merely contains a recognized one is not an identifier', async () => {
+  const { jinnIdentifierServedPath } = await implementation;
+  for (const identifier of [
+    'https://notjinn.network/schema',
+    'https://jinn.network.evil.example/schema',
+    'https://spec.jinn.network.evil.example/schema',
+    'https://evil.example/https://jinn.network/schema',
+  ]) {
+    assert.throws(
+      () => jinnIdentifierServedPath(identifier, 'fixture identity'),
+      /fixture identity must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
+      identifier,
+    );
+  }
+});
+
+test('a canonical-origin claim is detected as a claim, not silently unclaimed', async () => {
+  // The fail-open this guards: an origin the enumerator does not recognize yields no claim,
+  // so a migrated document would pass as "declares nothing" instead of being validated.
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/migrated.schema.json'),
+      JSON.stringify({ $id: 'https://spec.jinn.network/records/trace/v1/schema' }),
+    );
+    const [asset] = enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] });
+    assert.deepEqual(asset.claim, {
+      field: '$id',
+      identifier: 'https://spec.jinn.network/records/trace/v1/schema',
+      servedPath: 'records/trace/v1/schema',
+    });
+
+    // ... and a malformed one under the canonical origin still fails loudly rather than
+    // dropping out of the claim set.
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/escape.schema.json'),
+      JSON.stringify({ $id: 'https://spec.jinn.network/%2e%2e/escaped.json' }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /escape\.schema\.json \$id must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a document mixing the two origins is an ambiguous claim, not a silent pick', async () => {
+  const { enumeratePublicSurfaceAssets } = await implementation;
+  const root = mkdtempSync(join(tmpdir(), 'jinn-public-assets-'));
+  try {
+    const pkg = fixturePackage(root, {
+      schemas: ['schemas'], profiles: [], fixtures: [], conformance: [],
+    });
+    mkdirSync(join(root, PACKAGE_PATH, 'schemas'), { recursive: true });
+    writeFileSync(
+      join(root, PACKAGE_PATH, 'schemas/half-migrated.schema.json'),
+      JSON.stringify({
+        $id: 'https://spec.jinn.network/schemas/alpha',
+        profile: 'https://jinn.network/profiles/beta',
+      }),
+    );
+    assert.throws(
+      () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
+      /half-migrated\.schema\.json declares multiple public self-identifying claims/u,
+      'a half-migrated document must not have one of its two identities quietly ignored',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -213,7 +332,7 @@ test('enumeration rejects a semantically Jinn identifier with noncanonical URL s
     );
     assert.throws(
       () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
-      /noncanonical\.schema\.json \$id must name a canonical relative jinn\.network hosted path/u,
+      /noncanonical\.schema\.json \$id must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -234,7 +353,7 @@ test('enumeration rejects an encoded traversal identity before exposing a served
     );
     assert.throws(
       () => enumeratePublicSurfaceAssets({ repoRoot: root, packages: [pkg] }),
-      /escape\.schema\.json \$id must name a canonical relative jinn\.network hosted path/u,
+      /escape\.schema\.json \$id must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

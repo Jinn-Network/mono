@@ -375,7 +375,7 @@ test('direct and encoded traversal identifiers fail before creating a sibling ou
     try {
       assert.throws(
         () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-        /must name a canonical relative jinn\.network hosted path/u,
+        /must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
       );
       assert.equal(existsSync(escaped), false, 'validation must precede every out-of-root write');
     } finally {
@@ -392,7 +392,7 @@ test('reserved generated metadata paths cannot be claimed by source documents', 
     try {
       assert.throws(
         () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-        /must name a canonical relative jinn\.network hosted path/u,
+        /must name a canonical relative spec\.jinn\.network or jinn\.network hosted path/u,
       );
       assert.equal(existsSync(join(outDir, filename)), false);
     } finally {

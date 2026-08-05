@@ -17,7 +17,29 @@ import {
 import { repositoryCandidateInventory } from './repository-candidates.mjs';
 
 const PUBLIC_DOCUMENT_KIND_PRECEDENCE = ['fixtures', 'schemas', 'profiles'];
-const JINN_NETWORK_ORIGIN = 'https://jinn.network/';
+
+// DR-2026-08-04 gives the protocol's definition surface its own origin. `spec.jinn.network`
+// is canonical; the apex `jinn.network` is an EXPLICITLY recognized legacy origin for the
+// duration of the re-seal migration, never a silent one.
+//
+// Why recognition must be explicit on both sides: this module decides whether a document
+// *claims* a hosted identity. The failure mode to prevent is fail-open -- an origin the
+// enumerator does not recognize produces no claim at all, so a document would slip through
+// as "declares nothing" instead of failing loudly. That cuts both ways during the window: a
+// migrated document naming spec.jinn.network must not go unclaimed under the old check, and
+// an unmigrated document naming jinn.network must not go unclaimed under the new one. Both
+// are claims; both are validated by the same canonical-path rules.
+//
+// Component C2 drops the legacy entries once every document is migrated.
+export const CANONICAL_IDENTIFIER_ORIGIN = 'https://spec.jinn.network/';
+export const LEGACY_IDENTIFIER_ORIGINS = Object.freeze(['https://jinn.network/']);
+const RECOGNIZED_IDENTIFIER_ORIGINS = Object.freeze([
+  CANONICAL_IDENTIFIER_ORIGIN,
+  ...LEGACY_IDENTIFIER_ORIGINS,
+]);
+const RECOGNIZED_IDENTIFIER_HOSTS = new Set(
+  RECOGNIZED_IDENTIFIER_ORIGINS.map((origin) => new URL(origin).hostname),
+);
 const GENERATED_PROFILE_ROOT_PATHS = new Set(['manifest.json', 'manifest.dsse.json']);
 
 function toPosix(value) {
@@ -43,12 +65,23 @@ export function normalizePackageRelativePublicPath(value, label) {
   return value;
 }
 
+/**
+ * The path a recognized identifier is served at, under either the canonical or the legacy
+ * origin. The path is origin-relative and identical either way, so both origins' documents
+ * are served from one tree for the duration of the migration.
+ */
 export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') {
   const invalid = () => {
-    throw new Error(`${label} must name a canonical relative jinn.network hosted path`);
+    throw new Error(
+      `${label} must name a canonical relative spec.jinn.network or jinn.network hosted path`,
+    );
   };
-  if (typeof identifier !== 'string'
-    || !identifier.startsWith(JINN_NETWORK_ORIGIN)
+  // The origins differ at the host, so at most one prefix can ever match; there is no
+  // precedence question here, only recognition.
+  const origin = typeof identifier === 'string'
+    ? RECOGNIZED_IDENTIFIER_ORIGINS.find((candidate) => identifier.startsWith(candidate))
+    : undefined;
+  if (origin === undefined
     || identifier.includes('?')
     || identifier.includes('#')
     || identifier.includes('%')
@@ -60,9 +93,9 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
   } catch {
     invalid();
   }
-  if (parsed.href !== identifier || parsed.origin !== 'https://jinn.network') invalid();
+  if (parsed.href !== identifier || `${parsed.origin}/` !== origin) invalid();
 
-  const servedPath = identifier.slice(JINN_NETWORK_ORIGIN.length);
+  const servedPath = identifier.slice(origin.length);
   const segments = servedPath.split('/');
   if (servedPath === ''
     || isAbsolute(servedPath)
@@ -72,11 +105,20 @@ export function jinnIdentifierServedPath(identifier, label = 'Jinn identifier') 
   return servedPath;
 }
 
+/**
+ * Whether a field value is *semantically* a Jinn hosted identifier -- including noncanonical
+ * spellings (uppercase host, trailing dot, explicit port), which are candidates precisely so
+ * that jinnIdentifierServedPath can reject them loudly. A legacy-origin identifier is a
+ * candidate for exactly the same reason a canonical one is: an unrecognized origin would
+ * make the document silently unclaimed.
+ */
 function isJinnIdentifierCandidate(identifier) {
   if (typeof identifier !== 'string') return false;
-  if (identifier.startsWith(JINN_NETWORK_ORIGIN)) return true;
+  if (RECOGNIZED_IDENTIFIER_ORIGINS.some((origin) => identifier.startsWith(origin))) return true;
   try {
-    return new URL(identifier).hostname.toLowerCase().replace(/\.$/u, '') === 'jinn.network';
+    return RECOGNIZED_IDENTIFIER_HOSTS.has(
+      new URL(identifier).hostname.toLowerCase().replace(/\.$/u, ''),
+    );
   } catch {
     return false;
   }
