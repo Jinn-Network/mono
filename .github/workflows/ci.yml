@@ -81,6 +81,19 @@ jobs:
       - run: env -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_API_KEY yarn test
         env:
           SKIP_HL_TESTS: '1'
+      # The three in-process `test/e2e/*.test.ts` composition tests. They are
+      # named *.test.ts but are tsx scripts, not vitest files, so
+      # vitest.config.ts's `test/e2e/**` exclude hides them from `yarn test`
+      # and nothing else ran them — they sat unexecuted behind a `yarn e2e:*`
+      # script no workflow invoked. All three are "Option B lightweight
+      # integration": mocked IPFS / HF fetcher / eval-runner, no Anvil, no
+      # Docker, no network, ~50ms each. They belong in the same job as the
+      # unit suite, right after it, on the workspace builds `yarn test`
+      # already produced. `summarize()` throws on any failed phase, so a
+      # regression exits non-zero and reddens the job.
+      - run: yarn e2e:checkpoint-flow
+      - run: yarn e2e:freeze-mode
+      - run: yarn e2e:swe-rebench-v2
       - run: yarn build
 
   pack-smoke:
@@ -127,22 +140,30 @@ jobs:
           fi
           echo "✓ Tarball contents verified"
 
-  funding-sequence-e2e:
-    # Playwright E2E for the AwaitingFundingCard auto-continue sequence
-    # (jinn-mono-u34i). Catches wiring/UX regressions that unit tests can't
-    # see — specifically the Stage 1 → Stage 2 gate transition where the
-    # funding card's local dripStatus.targetReached must reset when the
-    # daemon's gate advances. Sequential /v1/bootstrap mocks reproduce the
-    # exact scenario that broke the 2026-05-18 canary.
+  dashboard-e2e:
+    # Playwright E2E for the operator dashboard SPA — every top-level
+    # test/dashboard/*.e2e.test.ts, driven against a real daemon serving the
+    # built bundle with the daemon API mocked at the page.route() boundary.
     #
-    # Scoped to just the funding-sequence test for now — the other dashboard
-    # E2Es (spa.e2e.test.ts, spa-config.e2e.test.ts, solvernet-flow.e2e.test.ts,
-    # HarnessSection.e2e.test.ts) have stale failures unrelated to u34i; fixing
-    # those is filed as a follow-up. When they're green, swap this run to
-    # `yarn e2e:dashboard` to gate all of them.
-    name: Funding Sequence E2E (Playwright)
+    # This job used to run ONLY funding-sequence, because the rest of the
+    # dashboard E2Es had stale failures and were quarantined behind a
+    # "fixing those is filed as a follow-up" comment with no owner and no
+    # expiry. Sitting outside CI for months is what let them rot in the first
+    # place. They are fixed and green now, so the whole surface is gated here.
+    #
+    # `e2e:dashboard-app` filters to top-level files by regex rather than
+    # naming them, so a NEW dashboard E2E is gated the moment it lands — an
+    # allowlist would re-create the quarantine one file at a time. The regex
+    # deliberately excludes test/dashboard/release-prep/, which is release-tier
+    # T1.4 and runs from `yarn release:tier-1:T1.4`, not from PR CI.
+    #
+    # solvernet-flow + join also run in hermetic-gate, where they serve a
+    # different purpose (the determinism verdict). The few seconds of overlap
+    # buy a dashboard job whose scope needs no maintenance.
+    name: Dashboard E2E (Playwright)
     needs: check
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -153,7 +174,7 @@ jobs:
       # Install only chromium — the playwright.config.ts targets chromium
       # exclusively, so this is the minimal browser surface.
       - run: npx playwright install --with-deps chromium
-      - run: yarn e2e:funding-sequence
+      - run: yarn e2e:dashboard-app
       # Upload traces on failure so a reviewer can step through the timeline.
       - if: failure()
         uses: actions/upload-artifact@v7
