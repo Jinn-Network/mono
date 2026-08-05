@@ -79,3 +79,34 @@ operator's own provisioning work, which the gate can only check after it is done
 
 The gate is written and tested; what it has never had is a host to run against. Only after it
 has run green against the live domain may the platform stable hold be reconsidered.
+
+## Local host conformance
+
+`.github/scripts/serve-profile-host.mjs` serves a deploy bundle over real HTTP, and
+`.github/scripts/verify-local-profile-host.test.mjs` runs the gate's own CLI against it on an
+ephemeral loopback port. Both run in CI on every pull request, hermetically: no egress, no
+credentials, no host CLI.
+
+What that proves: the bundle is servable over real HTTP; the gate passes over a socket against
+the whole real profile root, with the listener's own request log showing every declared document
+fetched and answered; every hazardous served-path shape — extensionless profiles, `@`-prefixed
+fixture directories, dot-version segments, deep fixture paths, and files whose extension a host
+would type differently from the manifest — is served byte-for-byte with its declared media type;
+and each modelled host defect (trailing-slash redirect, single-page-application catch-all,
+mistyped extensionless profile, mistyped `.schema.json`, one drifted document, an unserved or
+unverifiable signature sidecar, a public key whose digest is not the pinned one) is a non-zero
+exit. A host appending `charset=utf-8` still passes, as the gate documents. The server's strict
+404 — no directory index, no trailing-slash redirect, no extension guessing, no case folding, no
+percent-decoding, no path normalization — is the reference behavior a real host must match.
+
+What it does not prove: that Vercel interprets the generated `vercel.json` this way. The
+conformance test reads that configuration against the reference server's behavior, which
+validates this repository's reading of Vercel's documented `headers` / `cleanUrls` /
+`trailingSlash` semantics, not Vercel's implementation of them. Nothing local can close that gap.
+Two gate steps are also out of local reach: registered-identifier dereference and each document's
+self-declared-URI re-derivation both resolve identifiers against the verification origin, and the
+public surface's identifiers name `spec.jinn.network`, so neither step can run under a loopback
+origin. They stay covered by the offline suite's fake host.
+
+The first real deploy is therefore still the remaining verification, and the stable hold is
+unchanged. The gate is what closes it, and it fails closed.
