@@ -498,7 +498,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/evidence-repository-oci | platform-v1 | profiles/evidence-repository-oci/1.0/schemas | profiles | fixtures | — |
 | @jinn-network/evidence-retrieval | platform-v1 | — | — | — | ./testing |
 | @jinn-network/evidence-trace-decode | platform-v1 | — | — | fixtures | ./testing |
-| @jinn-network/evidence-trajectory | platform-v1 | schemas | — | fixtures | ./testing |
+| @jinn-network/evidence-trajectory | platform-v1 | schemas | profiles | fixtures | ./testing |
 | @jinn-network/indexer | transitional-or-private | — | — | — | — |
 | @jinn-network/indexer-enrichment | transitional-or-private | — | — | — | — |
 | @jinn-network/explorer-spa | transitional-or-private | — | — | — | — |
@@ -521,7 +521,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | @jinn-network/task-execution-evaluation-harness | platform-v1 | — | — | — | — |
 | @jinn-network/task-execution-evaluator-adapters | platform-v1 | — | — | fixtures | — |
 | @jinn-network/task-execution-profiles | platform-v1 | — | profiles | fixtures | ./testing |
-| @jinn-network/task-execution-protocol | platform-v1 | schemas | — | fixtures | — |
+| @jinn-network/task-execution-protocol | platform-v1 | schemas | profiles | fixtures | — |
 | @jinn-network/task-execution-testing | platform-v1 | — | — | fixtures | . |
 | @jinn-network/task-admission | experimental-task-supply | — | — | — | ./testing |
 | @jinn-network/chain-scenarios | experimental-task-supply | — | — | fixtures | ./testing |
@@ -1029,6 +1029,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/evidence-trajectory | packages/evidence/trajectory/fixtures/trajectory/minimal.sha256 | — | — | — |
 | fixtures | @jinn-network/evidence-trajectory | packages/evidence/trajectory/fixtures/trajectory/valid.json | — | — | — |
 | fixtures | @jinn-network/evidence-trajectory | packages/evidence/trajectory/fixtures/trajectory/valid.sha256 | — | — | — |
+| profiles | @jinn-network/evidence-trajectory | packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json | — | — | https://jinn.network/profiles/trajectory-vocabulary/1.0 |
 | schemas | @jinn-network/evidence-trajectory | packages/evidence/trajectory/schemas/trajectory-derivation-statement.schema.json | — | — | https://jinn.network/records/trajectory-derivation-statement/1.0/schema |
 | schemas | @jinn-network/evidence-trajectory | packages/evidence/trajectory/schemas/trajectory.schema.json | — | — | https://jinn.network/records/trajectory/1.0/schema |
 | conformance | @jinn-network/evidence-trajectory | packages/evidence/trajectory/src/testing.ts | ./testing | ./dist/testing.d.ts<br>./dist/testing.js | — |
@@ -1259,6 +1260,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/fractional-decimal-string-threshold.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/inconclusive-predicate.json | — | — | — |
 | fixtures | @jinn-network/task-execution-profiles | packages/task-execution/profiles/fixtures/verdict-rule/golden/threshold-pass.json | — | — | — |
+| profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/1.0/profile.json | — | — | https://jinn.network/profiles/task-profile/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json | — | — | https://jinn.network/task-profiles/evaluation-task/1.0 |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.sha256 | — | — | — |
 | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json | — | — | https://jinn.network/task-profiles/prediction-forecast/1.0 |
@@ -1303,6 +1305,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | fixtures | @jinn-network/task-execution-protocol | packages/task-execution/protocol/fixtures/golden-task-execution-v1/marketplace/submission.json | — | — | — |
 | fixtures | @jinn-network/task-execution-protocol | packages/task-execution/protocol/fixtures/golden-task-execution-v1/task.json | — | — | — |
 | fixtures | @jinn-network/task-execution-protocol | packages/task-execution/protocol/fixtures/manifest.sha256.json | — | — | — |
+| profiles | @jinn-network/task-execution-protocol | packages/task-execution/protocol/profiles/task-execution/1.0/profile.json | — | — | https://jinn.network/profiles/task-execution/1.0 |
 | schemas | @jinn-network/task-execution-protocol | packages/task-execution/protocol/schemas/delivery.schema.json | — | — | — |
 | schemas | @jinn-network/task-execution-protocol | packages/task-execution/protocol/schemas/dispatch-context.schema.json | — | — | — |
 | schemas | @jinn-network/task-execution-protocol | packages/task-execution/protocol/schemas/observation.schema.json | — | — | — |
@@ -1399,6 +1402,9 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json | `$id` | schemas | @jinn-network/evidence-protocol | packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json |
 | https://jinn.network/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json | `$id` | schemas | @jinn-network/evidence-protocol | packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json |
 | https://jinn.network/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json | `$id` | schemas | @jinn-network/evidence-protocol | packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json |
+| https://jinn.network/profiles/task-execution/1.0 | `profile` | profiles | @jinn-network/task-execution-protocol | packages/task-execution/protocol/profiles/task-execution/1.0/profile.json |
+| https://jinn.network/profiles/task-profile/1.0 | `profile` | profiles | @jinn-network/task-execution-profiles | packages/task-execution/profiles/profiles/task-profile/1.0/profile.json |
+| https://jinn.network/profiles/trajectory-vocabulary/1.0 | `profile` | profiles | @jinn-network/evidence-trajectory | packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json |
 | https://jinn.network/records/authorization/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-trust | packages/discovery/facts/trust/profiles/authorization.1.0.json |
 | https://jinn.network/records/benchmark-matrix/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/matrix.1.0.json |
 | https://jinn.network/records/benchmark-report/1.0/facts/1.0 | `profile` | profiles | @jinn-network/record-discovery-facts-benchmarking | packages/discovery/facts/benchmarking/profiles/report.1.0.json |
@@ -1432,7 +1438,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3567 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3580 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1440,13 +1446,13 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | authorityDocuments | 23 |
 | boundaryPolicies | 21 |
 | catalogManifests | 80 |
-| catalogPublicSurfaces | 1238 |
+| catalogPublicSurfaces | 1249 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2852 |
-| generatedOutputSources | 1294 |
+| discoveredFirstPartySurfaces | 2865 |
+| generatedOutputSources | 1305 |
 | generatorSources | 573 |
 | marketplaceControl | 2 |
 | requiredGates | 20 |

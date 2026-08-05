@@ -53,8 +53,8 @@ test('the reusable interface grants OIDC only to artifact-only attestation jobs'
   }
   assert.match(
     header,
-    /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false/u,
-    'the reusable interface must name its only optional domain secret',
+    /secrets:\n\s+JINN_MARKETPLACE_FORK_RPC_URL:\n\s+required: false\n\s+JINN_PROFILE_MANIFEST_SIGNING_KEY:\n\s+required: false\n\s+JINN_PROFILE_MANIFEST_KEY_ID:\n\s+required: false\n/u,
+    'the reusable interface must name exactly its optional domain and profile-signing secrets',
   );
   assert.match(header, /contents: read/u);
   for (const job of ['artifacts', 'verification_receipt']) {
@@ -178,6 +178,11 @@ test('artifacts build and upload public/profile/pack outputs without OIDC', () =
   const artifacts = jobBlock(platform, 'artifacts');
   assert.match(artifacts, /build-platform-public-surface\.mjs/u);
   assert.match(artifacts, /build-profile-root\.mjs/u);
+  assert.match(artifacts, /sign-profile-manifest\.mjs\n\s+--root \.platform-verification\/profile-root/u);
+  assert.ok(
+    artifacts.indexOf('build-profile-root.mjs') < artifacts.indexOf('sign-profile-manifest.mjs'),
+    'the manifest must be built before it is signed',
+  );
   assert.match(artifacts, /build-prepublication-bundle\.mjs/u);
   assert.match(artifacts, /--native-vertical-roles/u);
   assert.match(artifacts, /--out \.platform-verification\/native-role-pack/u);
@@ -274,11 +279,7 @@ test('receipt attestation downloads only the completed receipt and executes no r
 
 test('the experimental environment-supply group remains continuously represented and disabled', () => {
   const group = catalog.releaseGroups['experimental-environment-supply'];
-  assert.deepEqual(group.requiredGateIds, [
-    'environments-ci',
-    'record-discovery-ci',
-    'task-supply-ci',
-  ]);
+  assert.deepEqual(group.requiredGateIds, ['environments-ci', 'record-discovery-ci']);
   assert.deepEqual(group.publishPolicies, ['disabled']);
   assert.equal(group.stackPublished, false);
   assert.equal(group.canary, false);

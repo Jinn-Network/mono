@@ -1536,7 +1536,7 @@ test('evidence source boundaries remain one-way across the approved graph', () =
     'Trajectory source must not use ambient network APIs',
   );
   assert.deepEqual(Object.keys(trajectoryManifest.exports).sort(), [
-    '.', './fixtures/*', './schemas/*', './testing',
+    '.', './fixtures/*', './profiles/*', './schemas/*', './testing',
   ]);
   assert.deepEqual(trajectoryManifest.exports['.'], {
     import: './dist/index.js',

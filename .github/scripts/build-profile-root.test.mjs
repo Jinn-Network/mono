@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
 
 import { buildProfileRoot, manifestBytes } from './build-profile-root.mjs';
@@ -205,6 +205,132 @@ test('a colliding served path across two packages is refused', () => {
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+// The collision cannot arise from on-disk layout -- no filesystem holds a file and a
+// directory at one path. It arises only when declared $id claims remap documents into
+// the served namespace, which is exactly how profiles/execution-evidence/1.0 became a
+// directory that no document can ever be served at.
+test('a served path that is both a document and a directory prefix is refused', () => {
+  for (const [name, claims] of [
+    ['document-first', ['profiles/collide/1.0', 'profiles/collide/1.0/schemas/inner.schema.json']],
+    ['prefix-first', ['profiles/collide/1.0/schemas/inner.schema.json', 'profiles/collide/1.0']],
+  ]) {
+    const root = scratchRepo([{
+      directory: 'packages/trust/core',
+      name: '@jinn-network/trust-core',
+      manifest: { files: ['profiles/'] },
+      catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
+    }]);
+    const packageDir = join(root, 'packages/trust/core');
+    const outDir = mkdtempSync(join(tmpdir(), `jinn-profile-out-${name}-`));
+    try {
+      mkdirSync(join(packageDir, 'profiles'), { recursive: true });
+      claims.forEach((claim, index) => {
+        writeFileSync(
+          join(packageDir, `profiles/claim-${index}.schema.json`),
+          `${JSON.stringify({ $id: `https://jinn.network/${claim}` })}\n`,
+          'utf8',
+        );
+      });
+      assert.throws(
+        () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
+        /profiles\/collide\/1\.0 is both a document and a directory prefix of profiles\/collide\/1\.0\/schemas\/inner\.schema\.json/u,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('a .jsonld document is served as application/ld+json', () => {
+  const root = scratchRepo([{
+    directory: 'packages/trust/core',
+    name: '@jinn-network/trust-core',
+    manifest: { files: ['profiles/'] },
+    catalog: { publicSurface: { schemas: [], profiles: ['profiles'], fixtures: [], conformance: [] } },
+  }]);
+  const packageDir = join(root, 'packages/trust/core');
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-jsonld-'));
+  try {
+    mkdirSync(join(packageDir, 'profiles/vocab'), { recursive: true });
+    writeFileSync(join(packageDir, 'profiles/vocab/vocabulary.jsonld'), '{"@context":{}}\n', 'utf8');
+    const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
+    const document = manifest.documents.find(({ path }) => path.endsWith('vocabulary.jsonld'));
+    assert.equal(document.mediaType, 'application/ld+json');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('every registered resolvable identifier resolves in the real platform-v1 tree', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-register-'));
+  try {
+    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
+    const manifest = buildProfileRoot({
+      repoRoot,
+      outDir,
+      commit: SHA,
+      releaseGroup: 'platform-v1',
+      packages,
+    });
+    const paths = new Set(manifest.documents.map(({ path }) => path));
+    const catalog = JSON.parse(readFileSync(join(repoRoot, 'architecture/platform-packages.v1.json'), 'utf8'));
+    const register = catalog.resolvableIdentifiers ?? [];
+    assert.ok(register.length > 0, 'the catalog must declare which identifiers dereference');
+    for (const entry of register) {
+      assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
+      if (entry.resolution === 'prefix') {
+        assert.equal(
+          paths.has(entry.identifier.replace('https://jinn.network/', '')),
+          false,
+          `${entry.identifier} is a prefix and must not also be a document`,
+        );
+      }
+    }
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+// Scoped to profile crates. A fixture crate describes a captured evidence bundle, so its
+// encodingFormat names the original source file's type, not how the served fixture copy
+// is typed -- fixture bytes are served opaquely on purpose.
+test('every profile RO-Crate encodingFormat agrees with the manifest media type it is served under', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-crate-'));
+  try {
+    const packages = loadCatalogPackages(repoRoot, { releaseGroup: 'platform-v1' });
+    const manifest = buildProfileRoot({
+      repoRoot,
+      outDir,
+      commit: SHA,
+      releaseGroup: 'platform-v1',
+      packages,
+    });
+    const mediaTypes = new Map(manifest.documents.map(({ path, mediaType }) => [path, mediaType]));
+    const crates = manifest.documents.filter(({ path }) => (
+      path.endsWith('/ro-crate-metadata.json') && !path.startsWith('@')
+    ));
+    assert.ok(crates.length > 0, 'the served tree must contain at least one profile RO-Crate');
+    for (const crate of crates) {
+      const crateRoot = crate.path.slice(0, crate.path.lastIndexOf('/'));
+      const graph = JSON.parse(readFileSync(join(outDir, crate.path), 'utf8'))['@graph'] ?? [];
+      for (const node of graph) {
+        if (typeof node.encodingFormat !== 'string') continue;
+        const served = `${crateRoot}/${node['@id']}`;
+        if (!mediaTypes.has(served)) continue;
+        assert.equal(
+          mediaTypes.get(served),
+          node.encodingFormat,
+          `${served} is served as ${mediaTypes.get(served)} but its RO-Crate declares ${node.encodingFormat}`,
+        );
+      }
+    }
+  } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
 });

@@ -2431,7 +2431,9 @@
         "schemas": [
           "schemas"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "fixtures": [
           "fixtures"
         ],
@@ -3348,7 +3350,9 @@
         "schemas": [
           "schemas"
         ],
-        "profiles": [],
+        "profiles": [
+          "profiles"
+        ],
         "fixtures": [
           "fixtures"
         ],
@@ -3865,6 +3869,38 @@
         "kind": "source-boundary",
         "path": ".github/scripts/plugin-tree-source-boundaries.test.mjs"
       }
+    }
+  ],
+  "resolvableIdentifiers": [
+    {
+      "identifier": "https://jinn.network/profiles/task-execution/1.0",
+      "resolution": "document",
+      "entryPoint": "profiles/task-execution/1.0",
+      "owner": "@jinn-network/task-execution-protocol"
+    },
+    {
+      "identifier": "https://jinn.network/profiles/task-profile/1.0",
+      "resolution": "document",
+      "entryPoint": "profiles/task-profile/1.0",
+      "owner": "@jinn-network/task-execution-profiles"
+    },
+    {
+      "identifier": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+      "resolution": "document",
+      "entryPoint": "profiles/trajectory-vocabulary/1.0",
+      "owner": "@jinn-network/evidence-trajectory"
+    },
+    {
+      "identifier": "https://jinn.network/profiles/execution-evidence/1.0",
+      "resolution": "prefix",
+      "entryPoint": "profiles/execution-evidence/1.0/ro-crate-metadata.json",
+      "owner": "@jinn-network/evidence-protocol"
+    },
+    {
+      "identifier": "https://jinn.network/profiles/evidence-repository-oci/1.0",
+      "resolution": "prefix",
+      "entryPoint": "profiles/evidence-repository-oci/1.0/specification.md",
+      "owner": "@jinn-network/evidence-repository-oci"
     }
   ]
 }

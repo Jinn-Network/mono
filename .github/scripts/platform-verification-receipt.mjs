@@ -23,6 +23,7 @@ import {
   loadCatalogPackages,
   loadPlatformCatalog,
 } from './platform-catalog.mjs';
+import { PAYLOAD_TYPE, SIGNATURE_FILE_NAME } from './sign-profile-manifest.mjs';
 import { buildDependencyGraph, topologicalWaves } from './stack-package-graph.mjs';
 import { resolvePublishVersion } from './stack-publish-manifest.mjs';
 
@@ -206,6 +207,34 @@ function expectedProfileManifest(context) {
   }
 }
 
+function validateProfileSignature(profileManifestPath) {
+  const signaturePath = join(dirname(profileManifestPath), SIGNATURE_FILE_NAME);
+  if (!existsSync(signaturePath)) return null;
+  let envelope;
+  try {
+    envelope = JSON.parse(readFileSync(signaturePath, 'utf8'));
+  } catch {
+    throw new Error('profile manifest signature is not valid JSON');
+  }
+  if (envelope?.payloadType !== PAYLOAD_TYPE) {
+    throw new Error(`profile manifest signature payload type must be ${PAYLOAD_TYPE}`);
+  }
+  if (typeof envelope.payload !== 'string') {
+    throw new Error('profile manifest signature payload must be a base64 string');
+  }
+  if (Buffer.compare(Buffer.from(envelope.payload, 'base64'), readFileSync(profileManifestPath)) !== 0) {
+    throw new Error('profile manifest signature does not envelope the exact manifest bytes');
+  }
+  if (!Array.isArray(envelope.signatures) || envelope.signatures.length === 0) {
+    throw new Error('profile manifest signature must carry at least one signature');
+  }
+  const keyids = envelope.signatures.map(({ keyid }) => keyid);
+  if (keyids.some((keyid) => typeof keyid !== 'string' || keyid.length === 0)) {
+    throw new Error('profile manifest signature must name its key id');
+  }
+  return { keyids, sha256: fileSha256(signaturePath) };
+}
+
 function validateProfileManifest(profileManifest, profileManifestPath, context) {
   if (profileManifest.generatedFrom?.commit !== context.sourceSha) {
     throw new Error('profile manifest source SHA does not match the receipt input');
@@ -239,7 +268,11 @@ function validateProfileManifest(profileManifest, profileManifestPath, context) 
     throw new Error('profile manifest document inventory does not match the checked-out source');
   }
 
-  const expectedFiles = new Set(['manifest.json', ...expected.documents.map(({ path }) => path)]);
+  const expectedFiles = new Set([
+    'manifest.json',
+    SIGNATURE_FILE_NAME,
+    ...expected.documents.map(({ path }) => path),
+  ]);
   for (const path of walkProfileRoot(profileRoot)) {
     if (!expectedFiles.has(path)) throw new Error(`profile root contains unexpected file ${path}`);
   }
@@ -304,6 +337,7 @@ export function createVerificationReceipt({
   const { expectedWaves, expectedOrder, version } = validatePackManifest(pack, packPath, context);
   validatePublicManifest(publicManifest, context);
   validateProfileManifest(profileManifest, profilePath, context);
+  const profileSignature = validateProfileSignature(profilePath);
 
   const receipt = {
     schemaVersion: 1,
@@ -327,6 +361,7 @@ export function createVerificationReceipt({
         manifestSha256: fileSha256(profilePath),
         documentCount: profileManifest.documents.length,
         documents: profileManifest.documents,
+        signature: profileSignature,
       },
     },
     conclusions,

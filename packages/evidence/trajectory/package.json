@@ -24,11 +24,13 @@
       "import": "./dist/testing.js",
       "types": "./dist/testing.d.ts"
     },
+    "./profiles/*": "./profiles/*",
     "./schemas/*": "./schemas/*",
     "./fixtures/*": "./fixtures/*"
   },
   "files": [
     "dist/",
+    "profiles/",
     "schemas/",
     "fixtures/",
     "README.md"
