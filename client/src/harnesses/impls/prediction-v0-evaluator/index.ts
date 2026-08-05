@@ -42,7 +42,7 @@ import {
   recomputeTopLevelSignatureHash,
 } from './checks/integrity.js';
 import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
-import { canonicalJson } from '../../engine/canonical-json.js';
+import { canonicalJson } from '../../../util/canonical-json.js';
 import { checkQuestionKindSupported } from './checks/spec.js';
 
 function nowNanos(): string {

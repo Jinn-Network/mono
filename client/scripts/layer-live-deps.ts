@@ -15,7 +15,7 @@ import {
   fetchRawBytesFromIpfs,
   uploadToIpfs,
 } from '../src/adapters/mech/ipfs.js';
-import { canonicalJson } from '../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../src/util/canonical-json.js';
 import {
   codeDigestSha256ToBytes32,
   contentKindForAnchor,

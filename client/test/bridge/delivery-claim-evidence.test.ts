@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { keccak256 } from 'viem';
 import { keccakEvidenceHash } from '@jinn-network/marketplace-binding';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   LEGACY_ENVELOPE_EXTENSION_KEY,
   deliveryClaimEvidenceHash,

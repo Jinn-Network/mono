@@ -7,7 +7,7 @@ import {
   sha256Hex,
   type CapturePublishDeps,
 } from '../../src/captures/publish.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { EMPTY_BUNDLE_SHA256 } from '../../src/trajectory/schema.js';
 
 const SAFE = `0x${'1'.repeat(40)}` as const;

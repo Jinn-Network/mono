@@ -14,7 +14,7 @@ import {
   PredictionV1RestorationPayloadSchema,
   type PredictionV1RestorationPayload,
 } from '../../../types/payloads/prediction-v1.js';
-import { canonicalJson } from '../../engine/canonical-json.js';
+import { canonicalJson } from '../../../util/canonical-json.js';
 import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
 import {
   checkManifestSignature,

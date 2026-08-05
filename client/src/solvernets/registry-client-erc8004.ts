@@ -19,7 +19,7 @@
  * hash verification and `getLifecycleStatus`.
  */
 
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   canonicalManifestJson,
   manifestHash,

@@ -35,7 +35,7 @@ import { JINN_ROUTER_ABI, MECH_ABI } from '../../src/adapters/mech/types.js';
 import { FleetBootstrapper } from '../../src/earning/bootstrap.js';
 import { FleetStateStore } from '../../src/earning/store.js';
 import { decryptMnemonic, walletPrivateKeyAtIndex } from '../../src/earning/wallet.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { LocalAdapter } from '../../src/adapters/local/adapter.js';
 import { TaskEngine, joinedSolverNetsViewFromConfig } from '../../src/harnesses/engine/engine.js';
 import { signCanonical } from '../../src/harnesses/engine/signing.js';

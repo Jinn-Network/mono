@@ -34,7 +34,7 @@ import { baseSepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 import { IDENTITY_REGISTRY_SET_METADATA_ABI } from '../../src/erc8004/abis.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   signManifest,
   type UnsignedSolverNetManifestV1,

@@ -32,7 +32,7 @@ import type { Task } from '../../../types/task.js';
 import type { HlFill, HlGridPoint } from '../../../venues/hyperliquid/types.js';
 import { HyperliquidClient, HL_MAINNET_BASE_URL, HL_TESTNET_BASE_URL } from '../../../venues/hyperliquid/client.js';
 import { bracketGridPoints } from '../../../venues/hyperliquid/grid.js';
-import { canonicalJson } from '../../engine/canonical-json.js';
+import { canonicalJson } from '../../../util/canonical-json.js';
 import { signCanonical } from '../../engine/signing.js';
 import { buildVerificationStub } from '../../engine/verification-stub.js';
 import { resolveSolutionEnvelopeCid } from '../evaluation-context.js';

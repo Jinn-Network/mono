@@ -12,7 +12,7 @@ import {
   type AttributionFacts,
   type AttributionPreregistration,
 } from '../../src/eval/attribution-instrument.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { createAttributionVerdictProof } from './attribution-verdict-fixture.js';
 
 const digest = (value: string | Uint8Array): string =>

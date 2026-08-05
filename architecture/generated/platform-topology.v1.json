@@ -1574,7 +1574,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2866,
+      "discoveredFirstPartySurfaces": 2867,
       "generatedOutputSources": 1305,
       "generatorSources": 589,
       "marketplaceControl": 2,
@@ -11186,16 +11186,6 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "client/test/harnesses/engine/canonical-json.test.ts"
-      },
-      {
-        "categories": [
-          "discoveredFirstPartySurfaces"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
         "path": "client/test/harnesses/engine/claim-gate.test.ts"
       },
       {
@@ -16688,6 +16678,26 @@
           "@ritsukai"
         ],
         "path": "client/test/types/task.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/util"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/util/canonical-json.test.ts"
       },
       {
         "categories": [

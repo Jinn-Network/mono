@@ -18,7 +18,7 @@ import {
   recomputeTopLevelSignatureHash,
 } from '../prediction-v0-evaluator/checks/integrity.js';
 import { resolveExpectedSolutionTaskCid, resolveSolutionEnvelopeCid } from '../evaluation-context.js';
-import { canonicalJson } from '../../engine/canonical-json.js';
+import { canonicalJson } from '../../../util/canonical-json.js';
 import { deriveGroundTruthBps } from './canonical-metrics.js';
 import { parsePredictionApySubmissionEnvelope } from './parse-submission.js';
 import { computeScore } from './score.js';

@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath, join } from 'node:path';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 
 export const HELD_OUT_SLATE_SCHEMA_VERSION = 'held-out-slate.v1' as const;

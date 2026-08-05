@@ -2,7 +2,7 @@ import type { Hex } from 'viem';
 import type { Task, TaskResult } from '../../types/index.js';
 import { parseSignedTaskV1, type SignedTaskV1 } from '../../types/task-document.js';
 import { IPFS_GATEWAY_PREFIX } from './types.js';
-import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 import {
   buildIpfsFetchCidPathCandidates,
   buildIpfsHexCidCandidatesFromPartialHex,
