@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jinn.network/architecture/platform-packages.schema.json",
+  "$id": "https://spec.jinn.network/architecture/platform-packages.schema.json",
   "title": "Jinn platform package catalog",
   "type": "object",
   "additionalProperties": false,
@@ -238,7 +238,7 @@
         "properties": {
           "identifier": {
             "type": "string",
-            "pattern": "^https://jinn\\.network/"
+            "pattern": "^https://spec\\.jinn\\.network/"
           },
           "resolution": {
             "enum": [

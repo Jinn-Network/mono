@@ -231,7 +231,7 @@ test('a served path that is both a document and a directory prefix is refused', 
       claims.forEach((claim, index) => {
         writeFileSync(
           join(packageDir, `profiles/claim-${index}.schema.json`),
-          `${JSON.stringify({ $id: `https://jinn.network/${claim}` })}\n`,
+          `${JSON.stringify({ $id: `https://spec.jinn.network/${claim}` })}\n`,
           'utf8',
         );
       });
@@ -286,7 +286,7 @@ test('every registered resolvable identifier resolves in the real platform-v1 tr
       assert.ok(paths.has(entry.entryPoint), `${entry.identifier} has no served entry point`);
       if (entry.resolution === 'prefix') {
         assert.equal(
-          paths.has(entry.identifier.replace('https://jinn.network/', '')),
+          paths.has(entry.identifier.replace('https://spec.jinn.network/', '')),
           false,
           `${entry.identifier} is a prefix and must not also be a document`,
         );
@@ -346,16 +346,16 @@ test('a document is served at its declared $id, not its directory location', () 
   mkdirSync(join(packageDir, 'profile/v1'), { recursive: true });
   writeFileSync(
     join(packageDir, 'profile/v1/registration.schema.json'),
-    JSON.stringify({ $id: 'https://jinn.network/profiles/evidence-repository-ipfs-registration/1/registration.schema.json' }),
+    JSON.stringify({ $id: 'https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json' }),
     'utf8',
   );
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
     assert.deepEqual(manifest.documents.map((d) => d.path), [
-      'profiles/evidence-repository-ipfs-registration/1/registration.schema.json',
+      'profiles/evidence-repository-ipfs-registration/v1/registration.schema.json',
     ]);
-    assert.ok(existsSync(join(outDir, 'profiles/evidence-repository-ipfs-registration/1/registration.schema.json')));
+    assert.ok(existsSync(join(outDir, 'profiles/evidence-repository-ipfs-registration/v1/registration.schema.json')));
     assert.ok(!existsSync(join(outDir, 'profile/v1/registration.schema.json')));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -365,8 +365,8 @@ test('a document is served at its declared $id, not its directory location', () 
 
 test('direct and encoded traversal identifiers fail before creating a sibling output file', () => {
   for (const [name, identifier] of [
-    ['direct', 'https://jinn.network/../escaped.json'],
-    ['encoded', 'https://jinn.network/%2e%2e/escaped.json'],
+    ['direct', 'https://spec.jinn.network/../escaped.json'],
+    ['encoded', 'https://spec.jinn.network/%2e%2e/escaped.json'],
   ]) {
     const root = identityRepo(identifier);
     const outputParent = mkdtempSync(join(tmpdir(), `jinn-profile-${name}-escape-`));
@@ -387,7 +387,7 @@ test('direct and encoded traversal identifiers fail before creating a sibling ou
 
 test('reserved generated metadata paths cannot be claimed by source documents', () => {
   for (const filename of ['manifest.json', 'manifest.dsse.json']) {
-    const root = identityRepo(`https://jinn.network/${filename}`);
+    const root = identityRepo(`https://spec.jinn.network/${filename}`);
     const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-reserved-'));
     try {
       assert.throws(
@@ -403,7 +403,7 @@ test('reserved generated metadata paths cannot be claimed by source documents', 
 });
 
 test('the output root must be a real canonical directory, never a symlink', () => {
-  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const root = identityRepo('https://spec.jinn.network/records/valid/schema');
   const outputParent = mkdtempSync(join(tmpdir(), 'jinn-profile-output-link-'));
   const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-output-outside-'));
   const outDir = join(outputParent, 'profile-root');
@@ -422,7 +422,7 @@ test('the output root must be a real canonical directory, never a symlink', () =
 });
 
 test('a nested output parent symlink fails before any outside document is created', () => {
-  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const root = identityRepo('https://spec.jinn.network/records/valid/schema');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-parent-link-'));
   const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-parent-outside-'));
   symlinkSync(outside, join(outDir, 'records'));
@@ -440,7 +440,7 @@ test('a nested output parent symlink fails before any outside document is create
 });
 
 test('a dangling output target symlink fails before its outside target is created', () => {
-  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const root = identityRepo('https://spec.jinn.network/records/valid/schema');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-target-link-'));
   const outside = mkdtempSync(join(tmpdir(), 'jinn-profile-target-outside-'));
   mkdirSync(join(outDir, 'records/valid'), { recursive: true });
@@ -460,7 +460,7 @@ test('a dangling output target symlink fails before its outside target is create
 });
 
 test('an existing special output target fails before any document copy', () => {
-  const root = identityRepo('https://jinn.network/records/valid/schema');
+  const root = identityRepo('https://spec.jinn.network/records/valid/schema');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-special-target-'));
   const target = join(outDir, 'records/valid/schema');
   mkdirSync(join(outDir, 'records/valid'), { recursive: true });
@@ -477,12 +477,12 @@ test('an existing special output target fails before any document copy', () => {
 });
 
 test('a valid nested identifier remains safely hosted below the output root', () => {
-  const root = identityRepo('https://jinn.network/records/valid/1.0/schema');
+  const root = identityRepo('https://spec.jinn.network/records/valid/v1/schema');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-valid-nested-'));
   try {
     const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
-    assert.deepEqual(manifest.documents.map(({ path }) => path), ['records/valid/1.0/schema']);
-    assert.ok(existsSync(join(outDir, 'records/valid/1.0/schema')));
+    assert.deepEqual(manifest.documents.map(({ path }) => path), ['records/valid/v1/schema']);
+    assert.ok(existsSync(join(outDir, 'records/valid/v1/schema')));
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(outDir, { recursive: true, force: true });
@@ -500,13 +500,13 @@ test('a record-discovery facts profile document is served at its declared "profi
   mkdirSync(join(packageDir, 'profiles'), { recursive: true });
   writeFileSync(
     join(packageDir, 'profiles/execution-evidence.1.0.json'),
-    JSON.stringify({ profile: 'https://jinn.network/records/execution-evidence/1.0/facts/1.0' }),
+    JSON.stringify({ profile: 'https://spec.jinn.network/facts/execution-evidence/v1' }),
     'utf8',
   );
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
-    assert.deepEqual(manifest.documents.map((d) => d.path), ['records/execution-evidence/1.0/facts/1.0']);
+    assert.deepEqual(manifest.documents.map((d) => d.path), ['facts/execution-evidence/v1']);
     assert.equal(manifest.documents[0].mediaType, 'application/json');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -532,7 +532,7 @@ test('a .sha256 sidecar next to a remapped document is dropped from the profile 
   mkdirSync(join(packageDir, 'profiles/task-profiles/repository-work/1.0'), { recursive: true });
   writeFileSync(
     join(packageDir, 'profiles/task-profiles/repository-work/1.0/profile.json'),
-    JSON.stringify({ profile: 'https://jinn.network/task-profiles/repository-work/1.0' }),
+    JSON.stringify({ profile: 'https://spec.jinn.network/task-profiles/repository-work/1.0' }),
     'utf8',
   );
   writeFileSync(
@@ -564,8 +564,8 @@ test('a fixture that reuses a "profile" value as test data is never treated as s
   writeFileSync(
     join(packageDir, 'profiles/fixtures/task-profile/golden/minimal-profile.json'),
     JSON.stringify({
-      $id: 'https://jinn.network/fixtures/example-domain/schema',
-      profile: 'https://jinn.network/task-profiles/example-domain/1.0',
+      $id: 'https://spec.jinn.network/fixtures/example-domain/schema',
+      profile: 'https://spec.jinn.network/task-profiles/example-domain/1.0',
     }),
     'utf8',
   );
@@ -620,12 +620,12 @@ test('only catalog-declared schema, profile, and fixture paths are walked', () =
   mkdirSync(join(packageDir, 'profiles'), { recursive: true });
   writeFileSync(
     join(packageDir, 'api/schema-documents/declared.schema.json'),
-    JSON.stringify({ $id: 'https://jinn.network/schemas/declared' }),
+    JSON.stringify({ $id: 'https://spec.jinn.network/schemas/declared' }),
     'utf8',
   );
   writeFileSync(
     join(packageDir, 'api/examples/profile-shaped.json'),
-    JSON.stringify({ profile: 'https://jinn.network/fixtures/not-an-identity' }),
+    JSON.stringify({ profile: 'https://spec.jinn.network/fixtures/not-an-identity' }),
     'utf8',
   );
   writeFileSync(join(packageDir, 'profiles/undeclared.json'), '{}', 'utf8');
@@ -711,7 +711,7 @@ test('nested fixture declarations override broader profile classification before
     writeFileSync(
       join(fixtures, 'registration.json'),
       JSON.stringify({
-        profile: 'https://jinn.network/fixtures/not-a-document-identity',
+        profile: 'https://spec.jinn.network/fixtures/not-a-document-identity',
         package: pkg.name,
       }),
       'utf8',
@@ -746,12 +746,12 @@ test('nested catalog declarations copy each source file once', () => {
   }]);
   const packageDir = join(root, 'packages/evidence/trace');
   mkdirSync(join(packageDir, 'schemas/v1'), { recursive: true });
-  writeFileSync(join(packageDir, 'schemas/v1/trajectory.schema.json'), '{}', 'utf8');
+  writeFileSync(join(packageDir, 'schemas/v1/trace.schema.json'), '{}', 'utf8');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     const manifest = buildProfileRoot({ repoRoot: root, outDir, commit: SHA });
     assert.deepEqual(manifest.documents.map((document) => document.path), [
-      'schemas/v1/trajectory.schema.json',
+      'schemas/v1/trace.schema.json',
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -770,14 +770,14 @@ test('duplicate self-identifier claims fail even within one package', () => {
   }]);
   const packageDir = join(root, 'packages/evidence/trace/schemas');
   mkdirSync(packageDir, { recursive: true });
-  const duplicate = JSON.stringify({ $id: 'https://jinn.network/records/trajectory/1.0/schema' });
+  const duplicate = JSON.stringify({ $id: 'https://spec.jinn.network/schemas/trace/v1' });
   writeFileSync(join(packageDir, 'one.schema.json'), duplicate, 'utf8');
   writeFileSync(join(packageDir, 'two.schema.json'), duplicate, 'utf8');
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     assert.throws(
       () => buildProfileRoot({ repoRoot: root, outDir, commit: SHA }),
-      /records\/trajectory\/1\.0\/schema is claimed more than once/,
+      /schemas\/trace\/v1 is claimed more than once/,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -785,7 +785,7 @@ test('duplicate self-identifier claims fail even within one package', () => {
   }
 });
 
-test('release-group selection includes core trajectory schemas and isolates experimental environment schemas', () => {
+test('release-group selection includes core trace schemas and isolates experimental environment schemas', () => {
   const root = controlledRepo([{
     directory: 'packages/evidence/trace',
     name: '@jinn-network/evidence-trace',
@@ -807,13 +807,13 @@ test('release-group selection includes core trajectory schemas and isolates expe
   mkdirSync(join(root, 'packages/evidence/trace/schemas'), { recursive: true });
   mkdirSync(join(root, 'packages/environments/record/schemas'), { recursive: true });
   writeFileSync(
-    join(root, 'packages/evidence/trace/schemas/trajectory.schema.json'),
-    JSON.stringify({ $id: 'https://jinn.network/records/trajectory/1.0/schema' }),
+    join(root, 'packages/evidence/trace/schemas/trace.schema.json'),
+    JSON.stringify({ $id: 'https://spec.jinn.network/schemas/trace/v1' }),
     'utf8',
   );
   writeFileSync(
     join(root, 'packages/environments/record/schemas/environment.schema.json'),
-    JSON.stringify({ $id: 'https://jinn.network/records/environment/1.0/schema' }),
+    JSON.stringify({ $id: 'https://spec.jinn.network/schemas/environment/v1' }),
     'utf8',
   );
   const coreOut = mkdtempSync(join(tmpdir(), 'jinn-profile-core-out-'));
@@ -821,7 +821,7 @@ test('release-group selection includes core trajectory schemas and isolates expe
   try {
     const core = buildProfileRoot({ repoRoot: root, outDir: coreOut, commit: SHA });
     assert.deepEqual(core.documents.map((document) => document.path), [
-      'records/trajectory/1.0/schema',
+      'schemas/trace/v1',
     ]);
     const experimental = buildProfileRoot({
       repoRoot: root,
@@ -830,7 +830,7 @@ test('release-group selection includes core trajectory schemas and isolates expe
       releaseGroup: 'experimental-environment-supply',
     });
     assert.deepEqual(experimental.documents.map((document) => document.path), [
-      'records/environment/1.0/schema',
+      'schemas/environment/v1',
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -870,7 +870,7 @@ test('the real core root serves trace identities and excludes the experimental e
     const corePaths = new Set(core.documents.map((document) => document.path));
     assert.ok(corePaths.has('schemas/trace/v1'));
     assert.ok(corePaths.has('schemas/trace-derivation-statement/v1'));
-    assert.equal(corePaths.has('records/environment/1.0/schema'), false);
+    assert.equal(corePaths.has('schemas/environment/v1'), false);
     assert.deepEqual(
       core.documents.filter((document) => experimentalPackages.has(document.sourcePackage)),
       [],
@@ -883,7 +883,7 @@ test('the real core root serves trace identities and excludes the experimental e
       releaseGroup: 'experimental-environment-supply',
     });
     assert.ok(experimental.documents.some(
-      (document) => document.path === 'records/environment/1.0/schema'
+      (document) => document.path === 'schemas/environment/v1'
         && document.sourcePackage === '@jinn-network/environment-record',
     ));
   } finally {
@@ -892,7 +892,7 @@ test('the real core root serves trace identities and excludes the experimental e
   }
 });
 
-test('URI resolution gate: every real document declaring a jinn.network identifier is served at exactly that path', () => {
+test('URI resolution gate: every real document declaring a spec.jinn.network identifier is served at exactly that path', () => {
   const outDir = mkdtempSync(join(tmpdir(), 'jinn-profile-out-'));
   try {
     const manifest = buildProfileRoot({ repoRoot, outDir, commit: SHA });
@@ -907,10 +907,10 @@ test('URI resolution gate: every real document declaring a jinn.network identifi
       }
       for (const field of ['$id', 'profile']) {
         const value = parsed?.[field];
-        if (typeof value !== 'string' || !value.startsWith('https://jinn.network/')) continue;
+        if (typeof value !== 'string' || !value.startsWith('https://spec.jinn.network/')) continue;
         checked += 1;
         assert.equal(
-          `https://jinn.network/${document.path}`,
+          `https://spec.jinn.network/${document.path}`,
           value,
           `${document.path} declares ${field} ${value} but is served elsewhere`,
         );

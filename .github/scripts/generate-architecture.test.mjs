@@ -121,7 +121,7 @@ test('release, public-surface, ownership, and transition views reuse their canon
   assert.equal(new Set(report.publicSurfaces.selfIdentifyingClaims.map(({ identifier }) => identifier)).size,
     report.publicSurfaces.selfIdentifyingClaims.length);
   assert.ok(report.publicSurfaces.selfIdentifyingClaims.every(({ identifier }) => (
-    identifier.startsWith('https://jinn.network/')
+    identifier.startsWith('https://spec.jinn.network/')
   )));
   assert.deepEqual(
     report.publicSurfaces.assets.find(({ path }) => (
@@ -199,13 +199,13 @@ test('catalog-declared public identity extraction fails closed on malformed and 
         mkdirSync(join(root, pkg.path, 'profiles'), { recursive: true });
         writeFileSync(
           join(root, pkg.path, 'profiles/profile.json'),
-          '{"profile":"https://jinn.network/records/example/facts/v1"}\n',
+          '{"profile":"https://spec.jinn.network/facts/example/v1"}\n',
           'utf8',
         );
       }
       assert.throws(
         () => buildArchitectureReport(root),
-        /duplicate public self-identifying claim https:\/\/jinn\.network\/records\/example\/facts\/v1/u,
+        /duplicate public self-identifying claim https:\/\/spec\.jinn\.network\/facts\/example\/v1/u,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -103,7 +103,7 @@ test('serialization: the projection format token is not a record kind', () => {
   assert.match(text, /CURATION_PROJECTION_FORMAT = "network\.jinn\.task-supply\.curation-projection\/1\.0"/);
   const golden = JSON.parse(readFileSync(join(pkg, 'fixtures', 'projection-golden.json'), 'utf8'));
   assert.deepEqual(Object.keys(golden).sort(), ['format', 'rows']);
-  assert.ok(!String(golden.format).startsWith('https://jinn.network/records/'));
+  assert.ok(!/^https:\/\/(spec\.)?jinn\.network\/records\//u.test(String(golden.format)));
 });
 
 // Plan Finding FC6-8: at the C3+C6 merge these assertions fold into

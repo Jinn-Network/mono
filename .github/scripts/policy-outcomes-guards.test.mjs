@@ -99,7 +99,7 @@ test('serialization: the projection format token is not a record kind', () => {
   assert.match(text, /POLICY_OUTCOMES_PROJECTION_FORMAT = "network\.jinn\.policy\.outcomes-projection\/1\.0"/);
   const golden = JSON.parse(readFileSync(join(pkg, 'fixtures', 'projection-golden.json'), 'utf8'));
   assert.deepEqual(Object.keys(golden).sort(), ['format', 'rows']);
-  assert.ok(!String(golden.format).startsWith('https://jinn.network/records/'));
+  assert.ok(!/^https:\/\/(spec\.)?jinn\.network\/records\//u.test(String(golden.format)));
 });
 
 // Substrate §7: each axis's pinning counters sum to the row's verdicts -- checked at the fixture

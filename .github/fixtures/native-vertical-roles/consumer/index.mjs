@@ -160,9 +160,9 @@ const evaluationSpec = sealEvaluationSpec({
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: '4',
   family: 'deterministic-process',
-  grader: { uri: 'https://jinn.network/graders/prediction-packed' },
+  grader: { uri: 'https://spec.jinn.network/graders/prediction-packed' },
   familyBlock: {
-    image: { uri: 'https://jinn.network/images/prediction-packed' },
+    image: { uri: 'https://spec.jinn.network/images/prediction-packed' },
     platform: 'linux/amd64',
     workspace: { root: '/workspace' },
     testMaterial: [],
@@ -178,7 +178,7 @@ const evaluationSpec = sealEvaluationSpec({
 const taskBytes = sealTask({
   protocol: TASK_EXECUTION_PROTOCOL_URI,
   profile: {
-    uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+    uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
     digest: { sha256: '1'.repeat(64) },
   },
   instructions: 'Return the pinned forecast.',
@@ -192,7 +192,7 @@ const admissionStatement = {
     { name: 'task.json', digest: { sha256: taskDigest.slice(7) } },
     { name: 'evaluation-spec.json', digest: { sha256: evaluationSpec.digest.slice(7) } },
   ],
-  predicateType: 'https://jinn.network/attestations/admission-receipt/v1',
+  predicateType: 'https://spec.jinn.network/attestations/admission-receipt/v1',
   predicate: { issuer: ADMISSION_AGENT },
 };
 const admissionReceiptBytes = signedEnvelope(
@@ -385,7 +385,7 @@ const discoveryEntry = parseAnnouncementEntry({
   announcements: [{
     announcementId: 'packed-requester-submission',
     action: 'available',
-    record: { kind: 'https://jinn.network/records/submission/1.0', digest: documentDigest(submissionBytes) },
+    record: { kind: 'https://spec.jinn.network/records/submission/1.0', digest: documentDigest(submissionBytes) },
   }],
 });
 const discoveryBytes = sealJson(discoveryEntry).bytes;
