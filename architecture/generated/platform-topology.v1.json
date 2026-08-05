@@ -1573,7 +1573,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2852,
+      "discoveredFirstPartySurfaces": 2853,
       "generatedOutputSources": 1294,
       "generatorSources": 573,
       "marketplaceControl": 2,
@@ -7515,6 +7515,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/introspection-context.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/native-identity.test.ts"
       },
       {
         "categories": [
