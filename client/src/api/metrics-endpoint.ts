@@ -77,11 +77,13 @@ export function renderMetrics(store: Store, config: MetricsRoutesConfig = {}): s
       lines,
       'jinn_loop_last_tick_seconds',
       'gauge',
-      'Unix time (seconds) of each daemon loop\'s last heartbeat tick.',
+      'Unix time (seconds) of each daemon loop\'s last heartbeat tick. A loop that has never ' +
+        'ticked has no sample here — alert on jinn_loop_admitted==1 unless ' +
+        'jinn_loop_last_tick_seconds exists for that loop, not on staleness alone.',
     );
     for (const loop of loops) {
       if (loop.lastTickSeconds !== null) {
-        lines.push(`jinn_loop_last_tick_seconds{loop="${loop.name}"} ${loop.lastTickSeconds}`);
+        lines.push(`jinn_loop_last_tick_seconds{loop="${escapeLabelValue(loop.name)}"} ${loop.lastTickSeconds}`);
       }
     }
 
@@ -92,21 +94,32 @@ export function renderMetrics(store: Store, config: MetricsRoutesConfig = {}): s
       'Whether the loop is currently admitted to tick under the §5 per-loop admission rule (1), or sitting out a degraded window (0).',
     );
     for (const loop of loops) {
-      lines.push(`jinn_loop_admitted{loop="${loop.name}"} ${loop.admitted ? 1 : 0}`);
+      lines.push(`jinn_loop_admitted{loop="${escapeLabelValue(loop.name)}"} ${loop.admitted ? 1 : 0}`);
     }
   }
 
-  metricHeader(lines, 'jinn_activity_counter', 'counter', 'Lifetime count of recorded activity events by kind.');
+  metricHeader(lines, 'jinn_activity_events_total', 'counter', 'Lifetime count of recorded activity events by kind.');
   for (const [kind, count] of Object.entries(store.getActivityCountsByKind())) {
-    lines.push(`jinn_activity_counter{kind="${escapeLabelValue(kind)}"} ${count}`);
+    lines.push(`jinn_activity_events_total{kind="${escapeLabelValue(kind)}"} ${count}`);
   }
 
+  // Two passes, not one interleaved loop: OpenMetrics requires every sample for a metric
+  // family to be contiguous under its own HELP/TYPE header (promtool flags interleaving as
+  // invalid) — a single pass emitting a native line then a bond line per cache row would
+  // interleave the two families.
   metricHeader(
     lines,
     'jinn_balance_native_tokens',
     'gauge',
     'Cached native-token balance (whole tokens) by role. Exact wei strings stay on /v1/status.',
   );
+  for (const entry of store.getBalanceCache()) {
+    const native = weiToTokenFloat(entry.nativeWei);
+    if (native !== null) {
+      lines.push(`jinn_balance_native_tokens{role="${escapeLabelValue(entry.role)}"} ${native}`);
+    }
+  }
+
   metricHeader(
     lines,
     'jinn_balance_bond_tokens',
@@ -114,11 +127,10 @@ export function renderMetrics(store: Store, config: MetricsRoutesConfig = {}): s
     'Cached bond-asset (OLAS) balance (whole tokens) by role. Exact wei strings stay on /v1/status.',
   );
   for (const entry of store.getBalanceCache()) {
-    const role = escapeLabelValue(entry.role);
-    const native = weiToTokenFloat(entry.nativeWei);
-    if (native !== null) lines.push(`jinn_balance_native_tokens{role="${role}"} ${native}`);
     const bond = weiToTokenFloat(entry.bondWei);
-    if (bond !== null) lines.push(`jinn_balance_bond_tokens{role="${role}"} ${bond}`);
+    if (bond !== null) {
+      lines.push(`jinn_balance_bond_tokens{role="${escapeLabelValue(entry.role)}"} ${bond}`);
+    }
   }
 
   return `${lines.join('\n')}\n`;

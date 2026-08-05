@@ -5,34 +5,27 @@
  *
  * `getDaemonReadiness` / `getLoopSnapshot` are injected (api→daemon architecture boundary,
  * #1584 — `client/src/api/` must never import `client/src/daemon/`; this test file is NOT
- * under `src/api/`, so it can build the snapshot from the real `LOOP_REGISTRY` +
- * `getLoopAdmission` + `getLoopTick` and wire it straight through, exactly like the
- * production caller in main.ts / daemon.ts).
+ * under `src/api/`, so it can import `buildLoopMetricsSnapshot` from the real
+ * `daemon/loop-heartbeat.js` and wire it straight through, exactly like the production
+ * caller in main.ts / daemon.ts's self-start branch — one shared implementation, not a
+ * third verbatim copy of the admission expression (review finding N5).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startApiServer, type ApiServer } from '../../src/api/server.js';
 import { Store } from '../../src/store/store.js';
-import { renderMetrics, type MetricsLoopEntry } from '../../src/api/metrics-endpoint.js';
+import { renderMetrics } from '../../src/api/metrics-endpoint.js';
 import {
   LOOP_REGISTRY,
+  buildLoopMetricsSnapshot,
   getDaemonReadiness,
-  getLoopAdmission,
-  getLoopTick,
   recordLoopTick,
   setDaemonReadiness,
 } from '../../src/daemon/loop-heartbeat.js';
 
 let store: Store;
 
-function loopSnapshot(): MetricsLoopEntry[] {
-  return LOOP_REGISTRY.map((loop) => {
-    const tickMs = getLoopTick(store, loop.name);
-    return {
-      name: loop.name,
-      lastTickSeconds: tickMs !== null ? tickMs / 1000 : null,
-      admitted: getLoopAdmission(loop.name) === 'always' || getDaemonReadiness() === 'ready',
-    };
-  });
+function loopSnapshot() {
+  return buildLoopMetricsSnapshot(store);
 }
 
 beforeEach(() => {
@@ -55,7 +48,7 @@ describe('renderMetrics — exposition format', () => {
 
   it('emits HELP + TYPE lines for every metric family it writes samples for', () => {
     const text = renderMetrics(store, { getDaemonReadiness, getLoopSnapshot: loopSnapshot });
-    const names = ['jinn_daemon_ready', 'jinn_daemon_degraded', 'jinn_loop_last_tick_seconds', 'jinn_loop_admitted', 'jinn_activity_counter', 'jinn_balance_native_tokens', 'jinn_balance_bond_tokens'];
+    const names = ['jinn_daemon_ready', 'jinn_daemon_degraded', 'jinn_loop_last_tick_seconds', 'jinn_loop_admitted', 'jinn_activity_events_total', 'jinn_balance_native_tokens', 'jinn_balance_bond_tokens'];
     for (const name of names) {
       expect(text).toContain(`# HELP ${name} `);
       expect(text).toMatch(new RegExp(`# TYPE ${name} (gauge|counter)`));
@@ -68,7 +61,7 @@ describe('renderMetrics — exposition format', () => {
     expect(text).not.toContain('jinn_loop_admitted');
     // Readiness still defaults to ready and the other families still render.
     expect(text).toContain('jinn_daemon_ready 1');
-    expect(text).toContain('jinn_activity_counter');
+    expect(text).toContain('jinn_activity_events_total');
   });
 
   it('reports jinn_daemon_ready=1 / jinn_daemon_degraded=0 when readiness is ready', () => {
@@ -111,14 +104,14 @@ describe('renderMetrics — exposition format', () => {
     expect(after).toMatch(/jinn_loop_last_tick_seconds\{loop="creator"\} \d+(\.\d+)?/);
   });
 
-  it('derives jinn_activity_counter from store.getActivityCountsByKind, one line per kind', () => {
+  it('derives jinn_activity_events_total from store.getActivityCountsByKind, one line per kind', () => {
     store.recordActivityEvent({ ts: new Date().toISOString(), kind: 'restoration_delivered' });
     store.recordActivityEvent({ ts: new Date().toISOString(), kind: 'restoration_delivered' });
     store.recordActivityEvent({ ts: new Date().toISOString(), kind: 'evaluation_delivered' });
 
     const text = renderMetrics(store);
-    expect(text).toContain('jinn_activity_counter{kind="restoration_delivered"} 2');
-    expect(text).toContain('jinn_activity_counter{kind="evaluation_delivered"} 1');
+    expect(text).toContain('jinn_activity_events_total{kind="restoration_delivered"} 2');
+    expect(text).toContain('jinn_activity_events_total{kind="evaluation_delivered"} 1');
   });
 
   it('derives balance gauges from the cache as whole-token floats, no raw wei/address', () => {
@@ -142,6 +135,35 @@ describe('renderMetrics — exposition format', () => {
     expect(text).toContain('jinn_balance_bond_tokens{role="service.0.multisig"} 3');
     expect(text).not.toContain('0xAgentAddressShouldNeverAppearInMetrics');
     expect(text).not.toContain('0xSafeAddressShouldNeverAppearInMetrics');
+  });
+
+  it('does not interleave the native and bond balance families (OpenMetrics contiguity)', () => {
+    store.upsertBalanceCache({
+      role: 'service.0.agent',
+      address: '0xAgent',
+      nativeWei: '1000000000000000000',
+      fetchedAt: new Date().toISOString(),
+    });
+    store.upsertBalanceCache({
+      role: 'service.0.multisig',
+      address: '0xSafe',
+      nativeWei: '2000000000000000000',
+      bondWei: '3000000000000000000',
+      fetchedAt: new Date().toISOString(),
+    });
+
+    const lines = renderMetrics(store).split('\n').filter(Boolean);
+    const nativeIdx = lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.startsWith('jinn_balance_native_tokens{') || l === '# TYPE jinn_balance_native_tokens gauge')
+      .map(({ i }) => i);
+    const bondIdx = lines
+      .map((l, i) => ({ l, i }))
+      .filter(({ l }) => l.startsWith('jinn_balance_bond_tokens{') || l === '# TYPE jinn_balance_bond_tokens gauge')
+      .map(({ i }) => i);
+    // Every native-family line index must come before every bond-family line index —
+    // i.e. the two families occupy disjoint contiguous blocks, never interleaved.
+    expect(Math.max(...nativeIdx)).toBeLessThan(Math.min(...bondIdx));
   });
 
   it('ends with a trailing newline (exposition-format requirement)', () => {

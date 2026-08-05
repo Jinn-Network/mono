@@ -34,10 +34,15 @@ async function tryMergeStatusFromHttp(
   local: GatheredStatusRaw,
 ): Promise<GatheredStatusRaw> {
   const url = `http://127.0.0.1:${config.apiPort}/v1/status`;
-  const token = resolveUiToken();
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 500);
   try {
+    // resolveUiToken() reads the on-disk token file — deliberately INSIDE the
+    // try: an unreadable file (e.g. the daemon runs as another user on the
+    // same host, a realistic case) throws EACCES, which must fall through to
+    // the same connection-error handling below rather than escape as an
+    // unhandled rejection carrying a raw fs error (absolute path included).
+    const token = resolveUiToken();
     const res = await fetch(url, {
       signal: ac.signal,
       headers: token ? { 'x-jinn-ui-token': token } : {},

@@ -62,9 +62,7 @@ import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
 import {
   setDaemonReadiness,
   getDaemonReadiness,
-  getLoopAdmission,
-  getLoopTick,
-  LOOP_REGISTRY,
+  buildLoopMetricsSnapshot,
 } from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
 import { addressSetFromChainConfig, isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
@@ -678,15 +676,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // per the api→daemon architecture boundary — see the field docstrings
       // on ApiServerConfig in server.ts.
       getDaemonReadiness,
-      getLoopSnapshot: () =>
-        LOOP_REGISTRY.map((loop) => {
-          const tickMs = getLoopTick(sharedStore, loop.name);
-          return {
-            name: loop.name,
-            lastTickSeconds: tickMs !== null ? tickMs / 1000 : null,
-            admitted: getLoopAdmission(loop.name) === 'always' || getDaemonReadiness() === 'ready',
-          };
-        }),
+      getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,

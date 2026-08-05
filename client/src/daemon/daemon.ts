@@ -21,8 +21,7 @@ import {
   LOOP_REGISTRY,
   type LoopName,
   getDaemonReadiness,
-  getLoopAdmission,
-  getLoopTick,
+  buildLoopMetricsSnapshot,
 } from './loop-heartbeat.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { emitStructured } from '../events/emitter.js';
@@ -477,15 +476,7 @@ export class Daemon {
         // architecture boundary; see the field docstrings on
         // ApiServerConfig in server.ts).
         getDaemonReadiness,
-        getLoopSnapshot: () =>
-          LOOP_REGISTRY.map((loop) => {
-            const tickMs = getLoopTick(this.store, loop.name);
-            return {
-              name: loop.name,
-              lastTickSeconds: tickMs !== null ? tickMs / 1000 : null,
-              admitted: getLoopAdmission(loop.name) === 'always' || getDaemonReadiness() === 'ready',
-            };
-          }),
+        getLoopSnapshot: () => buildLoopMetricsSnapshot(this.store),
       });
       this.ownsApiServer = true;
     }

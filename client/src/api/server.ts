@@ -434,10 +434,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // could fabricate `access.endpoint` URLs and drive the daemon's fetcher. The
   // bearer token is generated at daemon startup (or read from
   // `DAEMON_API_TOKEN`) and forwarded to the MCP subprocess via the same env
-  // var. Read-only routes (`GET /v1/status`, `GET /artifacts/search`,
-  // `GET /artifacts/:id/content`) stay public — they are intentionally
-  // network-reachable. The ERC-8128 middleware (gated by `requireAuth=true`,
-  // never set in prod) layers on top of this.
+  // var. `GET /artifacts/search` and `GET /artifacts/:id/content` stay
+  // public — they are intentionally network-reachable. `GET /v1/status` is
+  // NOT in that set as of spec §14.5 (issue #2404) — it is operator-class
+  // and token-gated like every other read route; `GET /health` / `GET /ready`
+  // / `GET /metrics` are the unauthenticated-safe surface now (§6.1–§6.2).
+  // The ERC-8128 middleware (gated by `requireAuth=true`, never set in prod)
+  // layers on top of this.
   const expectedAuth = `Bearer ${config.apiToken}`;
   const expectedBuf = Buffer.from(expectedAuth);
   const bearerValid = (c: Context): boolean => {
