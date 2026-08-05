@@ -192,3 +192,15 @@ SERIALIZED. Rationale: all M1 packets contend on package.json/yarn.lock/
 guard allow-list (single-owner files) and the CLI verb registry; the
 source-boundary positive-control test forbids pre-adding unused deps.
 Correctness over wall-clock, per program parallelization rules.
+
+| BP-11 | integrated | `efa49533e` | `fa6ddac63` (worktree bench-bp11) | PASS + CONFIRMED-PASS (1 should-fix fixed, 2 nits; sonnet reviewer) | see git log |
+
+BP-11 verification: 260/260 tests; real-subprocess launcher-contract test
+for sample tasks; determinism test (byte-identical digests across builds);
+pack:smoke runs buildSampleBenchmark() from packed tarballs; guards green.
+Facts: admission pins ONE EvaluationSpec byte-exactly across sample tasks;
+package name is @jinn-network/task-admission. Carried to BP-12: end-to-end
+gated-operation test for lock/launch; consume attachBenchmarkToDraft
+conflict rule + stored admission receipts. Session-worktree build order
+note for BP-12 CI: attestation-issuer -> evaluation-harness ->
+evaluator-adapters -> backend-local/assembly.
