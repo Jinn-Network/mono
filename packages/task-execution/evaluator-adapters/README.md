@@ -21,11 +21,15 @@ grammar, which the harness runtime turns into the signed Result Evaluation.
 
 ## Injected provider ports
 
-- `GraderReportSource` — resolves an already-produced swe-rebench grader report from
-  the harness-supplied evaluation context. The in-package implementation,
-  `contextGraderReportSource`, reads the report from the runner design's §8.3
-  "supporting context" (`runtime.ts`'s `optionalContext`). A container-executing
-  `GraderReportSource` is out of scope for this package (see Finding A).
+- `GraderReportSource` — resolves a swe-rebench grader report. Two implementations
+  ship here. `contextGraderReportSource` reads an already-produced report from the
+  runner design's §8.3 "supporting context" (`runtime.ts`'s `optionalContext`) and
+  executes nothing. `containerGraderReportSource` *runs* the grader: it provisions an
+  isolated 0700 workspace under a host-supplied root, atomically writes the subject
+  material and an `evaluation-context.json` index, runs the specification's
+  digest-pinned image through an injected `ContainerRuntime`, and reads back
+  `grader-output.json`. It still shells out to nothing — the concrete Docker (or
+  other) driver behind `ContainerRuntime` is host work (see Finding A).
 - `ResolutionSnapshotSource` — resolves a prediction market's resolution snapshot.
   The in-package implementation, `contextResolutionSnapshotSource`, reads the
   snapshot from the same supporting-context channel. A live venue-reading
@@ -33,11 +37,16 @@ grammar, which the harness runtime turns into the signed Result Evaluation.
 
 ## Findings carried from the design (see the plan for full detail)
 
-- **Finding A** — nothing in the merged stack executes a `deterministic-process`
-  grader (no container driver exists anywhere in the current stack). This package
-  defines the `GraderReportSource` port and ships only the hermetic
-  `contextGraderReportSource`; a container-executing implementation is stage-2 host
-  work or a separately chartered tree.
+- **Finding A** — nothing in the merged stack executed a `deterministic-process`
+  grader (no container driver existed anywhere in the stack). This package defined the
+  `GraderReportSource` port and originally shipped only the hermetic
+  `contextGraderReportSource`. **Partially closed** by the one-swap cutover
+  (DR-2026-08-05 decision 3a): `containerGraderReportSource` now performs the
+  workspace, execution, and report-reading half in-package, against an injected
+  `ContainerRuntime` port. The remaining half — the concrete container driver that
+  actually spawns `docker run`, and the deployment module that injects it — is still
+  host work, deliberately: a package that shells out is a package that cannot be
+  tested hermetically.
 - **Finding B** — the prediction evaluator's ground truth is a live venue read, and
   none of the four frozen `EvaluationSpec` grader families natively describes
   "deterministic scorer over an external observation". This package models
@@ -59,8 +68,11 @@ grammar, which the harness runtime turns into the signed Result Evaluation.
   to whichever `GraderReportSource` actually runs the grader. The hermetic
   context-backed source in this package runs nothing, so it has no honest elapsed
   time to report. Emitting a fabricated or zero cost would be worse than omitting it.
-  A container-executing `GraderReportSource` (stage 2, per Finding A) is the right
-  place to reintroduce it.
+  A container-executing `GraderReportSource` (per Finding A) is the right place to
+  reintroduce it — `containerGraderReportSource` now has the honest elapsed time, but
+  it still has no channel to carry it: `RawGraderReport` is `{ report, log }`, and
+  widening that shared shape is a separate change, not a side effect of adding a
+  source. `evaluator_cost_usd` therefore still rides nowhere.
 
 Per the coordinator amendments (2026-07-30), all four findings are ratified as
 proposed and are not patched in this package or the harness runtime.
@@ -69,7 +81,9 @@ proposed and are not patched in this package or the harness runtime.
 
 - **No container or Docker driver, and no live venue client.** Both are execution
   providers under the runner design's §5.4 ownership line. This package defines the
-  two injected ports and ships only hermetic, in-package implementations.
+  injected ports — including `ContainerRuntime` — and every implementation it ships is
+  hermetic: `containerGraderReportSource` composes a run request and reads a file, and
+  never spawns a process.
 - **No evaluator loop.** Observing deliveries, deriving the evaluation Submission,
   claiming the verdict attempt, and dispatching the Attempt are stage-2 work. This
   package is *called by* that loop's deployment module; it never runs one.
