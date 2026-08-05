@@ -16,7 +16,7 @@ import {
   verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
-import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:fs/promises';
+import { chmod, mkdir, open as openFile, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
 import bs58 from 'bs58';
 import type { BindingResolver } from '@jinn-network/trust-core';
@@ -521,4 +521,48 @@ export class RoleIdentitySet {
 
 export function openRoleIdentitySet(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
   return RoleIdentitySet.open(input);
+}
+
+/** Public role material only — never a private key, never enough to sign. */
+export interface RoleIdentitySummary {
+  readonly role: NativeRoleIdentityRole;
+  readonly keyId: string;
+}
+
+/**
+ * Opens the identity store at `storePath` for `ownedRoles` (minting it first when `create` is
+ * true and no store exists yet) and returns only public role -> keyId material for trust-catalog
+ * authoring. Reuses `IdentityStore` directly rather than `RoleIdentitySet.open`: keygen/listing
+ * has no agent or binding resolver to check against, and the return shape structurally excludes
+ * the private key bytes `IdentityStore.loadOrCreate` also holds.
+ */
+export async function listRoleIdentityKeyIds(input: {
+  readonly storePath: string;
+  readonly password: string;
+  readonly ownedRoles: readonly NativeRoleIdentityRole[];
+  readonly create: boolean;
+  readonly now?: () => Date;
+}): Promise<{ readonly created: boolean; readonly identities: readonly RoleIdentitySummary[] }> {
+  if (!isAbsolute(input.storePath)) throw new IdentityStoreError('identity store path must be absolute');
+  let existedBefore = true;
+  try {
+    await stat(input.storePath);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new IdentityStoreError(`identity store cannot be accessed: ${String(cause)}`);
+    }
+    existedBefore = false;
+  }
+  if (!existedBefore && !input.create) {
+    throw new IdentityStoreError(
+      `identity store does not exist at ${input.storePath}; pass create: true to mint its role identities`,
+    );
+  }
+  const store = await IdentityStore.open({ path: input.storePath, password: input.password });
+  const now = input.now?.() ?? new Date();
+  const roles = await store.loadOrCreate(now, input.ownedRoles);
+  return {
+    created: !existedBefore,
+    identities: roles.map((role) => ({ role: role.role, keyId: role.keyId })),
+  };
 }

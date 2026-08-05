@@ -2,11 +2,22 @@
  * `jinn native-vertical request` is the production boundary for the Phase B requester.
  * Readiness is side-effect free. Execution remains protected by an explicit flag, an
  * environment interlock, and password-gated role custody.
+ *
+ * `jinn native-vertical identity` is the sibling keygen/listing tool: it mints (or opens) an
+ * encrypted role identity store for a named role set and prints role -> did:key keyIds only,
+ * so trust-catalog authoring (#2431/#2432) has something to bind without ever seeing key bytes.
  */
 import { parseArgs } from 'node:util';
 import type { CommandContext, CommandModule } from '../command.js';
 import { COMMON_FLAGS } from '../command.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { emitResult } from '../output.js';
+import {
+  IdentityStoreError,
+  listRoleIdentityKeyIds,
+  NATIVE_ROLE_IDENTITY_ROLES,
+  type NativeRoleIdentityRole,
+} from '../../daemon/role-identities.js';
 
 const OPTIONS = {
   ...COMMON_FLAGS,
@@ -14,7 +25,35 @@ const OPTIONS = {
   fixture: { type: 'string' as const },
   'run-id': { type: 'string' as const },
   execute: { type: 'boolean' as const, default: false },
+  store: { type: 'string' as const },
+  roles: { type: 'string' as const },
+  create: { type: 'boolean' as const, default: false },
 };
+
+/**
+ * The four role sets a native process actually opens at boot (mirrors
+ * `buildRequesterHost`/`buildSolverHost`/`buildEvaluatorHost` in
+ * `daemon/native-production-deployment.ts`). Free-form role lists are deliberately not
+ * accepted here: a store owning any other combination is one boot refuses to open.
+ */
+const ROLE_SETS = {
+  requester: new Set<NativeRoleIdentityRole>(['requester-submission', 'requester-discovery']),
+  admission: new Set<NativeRoleIdentityRole>(['admission']),
+  solver: new Set<NativeRoleIdentityRole>(['solver-delivery', 'solver-settlement', 'solver-discovery']),
+  evaluator: new Set<NativeRoleIdentityRole>(['evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery']),
+} as const;
+
+type RoleSetName = keyof typeof ROLE_SETS;
+
+function isRoleSetName(value: unknown): value is RoleSetName {
+  return typeof value === 'string' && Object.hasOwn(ROLE_SETS, value);
+}
+
+/** Same canonical-order derivation `RoleIdentitySet.open` uses, so stores stay byte-compatible. */
+function orderedRolesForSet(name: RoleSetName): readonly NativeRoleIdentityRole[] {
+  const members = ROLE_SETS[name];
+  return NATIVE_ROLE_IDENTITY_ROLES.filter((role) => members.has(role));
+}
 
 type Parsed = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true }>>;
 
@@ -58,25 +97,98 @@ function invalid(ctx: CommandContext, message: string): never {
   }, { writer: ctx.writer, exit: ctx.exit });
 }
 
+const IDENTITY_EXAMPLE_CLI = 'jinn native-vertical identity --store <absolute path> --roles requester|admission|solver|evaluator [--create]';
+
+function invalidIdentity(ctx: CommandContext, message: string): never {
+  return emitEnvelope({
+    code: 'invalid_invocation',
+    message,
+    exampleCli: IDENTITY_EXAMPLE_CLI,
+  }, { writer: ctx.writer, exit: ctx.exit });
+}
+
+async function runIdentity(ctx: CommandContext, parsed: Parsed): Promise<void> {
+  if (parsed.positionals.length !== 1) {
+    return invalidIdentity(ctx, 'native-vertical identity takes no positional arguments beyond `identity`');
+  }
+  const store = parsed.values.store;
+  if (typeof store !== 'string' || store.length === 0) {
+    return invalidIdentity(ctx, 'native-vertical identity requires --store <absolute path>');
+  }
+  const roleSet = parsed.values.roles;
+  if (!isRoleSetName(roleSet)) {
+    return invalidIdentity(ctx, 'native-vertical identity requires --roles requester|admission|solver|evaluator');
+  }
+  const password = ctx.env.JINN_PASSWORD;
+  if (typeof password !== 'string' || password.length === 0) {
+    return invalidIdentity(ctx, 'native-vertical identity requires JINN_PASSWORD (no --password-fd or keystore-file fallback)');
+  }
+  const create = parsed.values.create === true;
+
+  let result: Awaited<ReturnType<typeof listRoleIdentityKeyIds>>;
+  try {
+    result = await listRoleIdentityKeyIds({
+      storePath: store,
+      password,
+      ownedRoles: orderedRolesForSet(roleSet),
+      create,
+    });
+  } catch (cause) {
+    return invalidIdentity(ctx, cause instanceof IdentityStoreError ? cause.message : (cause instanceof Error ? cause.message : String(cause)));
+  }
+
+  emitResult(
+    {
+      schemaVersion: 1,
+      kind: 'native_role_identity_listing',
+      store,
+      roleSet,
+      created: result.created,
+      identities: result.identities,
+    },
+    (value) => {
+      const listing = value as { readonly identities: readonly { readonly role: string; readonly keyId: string }[] };
+      return listing.identities.map((identity) => `${identity.role}\t${identity.keyId}`).join('\n');
+    },
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env.NO_COLOR),
+    },
+  );
+}
+
 export function createNativeRequesterCommand(deps?: NativeRequesterCommandDeps): CommandModule {
   return {
     name: 'native-vertical',
-    summary: 'Native requester vertical for Base Sepolia',
+    summary: 'Native requester vertical and role-identity keygen for Base Sepolia',
     helpText: `Usage:
   jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id <run-id>
+  jinn native-vertical identity --store <absolute path> --roles requester|admission|solver|evaluator [--create]
 
 Status:
-  The default invocation performs read-only target, contract, funding, and cap checks.
+  The default \`request\` invocation performs read-only target, contract, funding, and cap checks.
   Live execution requires all explicit authorization controls described below.
+  \`identity\` opens (or, with --create, mints) an encrypted role identity store and prints its
+  role -> did:key keyIds. It never prints or exports private key material.
 
-Options:
+Options (request):
   --network <name>    Must be base-sepolia
   --fixture <name>    Must be prediction-forecast-golden.json
   --run-id <id>       Durable native requester run identifier
   --execute           Permit the already-preflighted requester operation; also requires JINN_NATIVE_VERTICAL_EXECUTE=1
 
+Options (identity):
+  --store <path>      Absolute path to the encrypted identity store
+  --roles <set>       requester | admission | solver | evaluator (the exact role-set groupings a native boot opens)
+  --create            Mint the store's role identities if the store does not already exist
+  JINN_PASSWORD        Required; identity refuses to run without it (no --password-fd or keystore-file fallback)
+
 Examples:
   jinn native-vertical request --network base-sepolia --fixture prediction-forecast-golden.json --run-id operator-run-20260802
+  JINN_PASSWORD=... jinn native-vertical identity --store /abs/path/roles.enc.json --roles requester --create
 `,
     async run(ctx: CommandContext): Promise<void> {
       let parsed: Parsed;
@@ -85,8 +197,11 @@ Examples:
       } catch (error) {
         invalid(ctx, error instanceof Error ? error.message : String(error));
       }
+      if (parsed.positionals[0] === 'identity') {
+        return runIdentity(ctx, parsed);
+      }
       if (parsed.positionals.length !== 1 || parsed.positionals[0] !== 'request') {
-        invalid(ctx, 'native-vertical requires the `request` subcommand');
+        invalid(ctx, 'native-vertical requires the `request` or `identity` subcommand');
       }
       if (parsed.values.network !== 'base-sepolia') {
         invalid(ctx, 'native-vertical requires --network base-sepolia');
