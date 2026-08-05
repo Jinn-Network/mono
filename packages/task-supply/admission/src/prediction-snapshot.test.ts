@@ -7,9 +7,9 @@ import {
 
 const seal = (value: unknown) => canonicalJsonBytes(value);
 const taskDocument = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://jinn.network/task-profiles/prediction-forecast/1.0",
+    uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
     digest: { sha256: "e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937" },
   },
   instructions: "Forecast the named market.",
@@ -30,7 +30,7 @@ const taskDocument = {
 };
 
 const evaluationSpec = seal({
-  protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+  protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
   semanticsVersion: "4",
   family: "deterministic-process",
   grader: { name: "public-grader", digest: { sha256: "b".repeat(64) }, accessClass: "public" },
@@ -100,7 +100,7 @@ describe("prediction-snapshot-admission/1", () => {
     const original = JSON.parse(new TextDecoder().decode(task));
     const legacyTask = seal({
       ...original,
-      profile: { ...original.profile, uri: "https://jinn.network/task-profiles/repository-work/1.0" },
+      profile: { ...original.profile, uri: "https://spec.jinn.network/task-profiles/repository-work/1.0" },
     });
     expect(() => admitPredictionSnapshot({ taskBytes: legacyTask, evaluationSpecBytes: evaluationSpec, issuer: "did:jinn:admitter" }))
       .toThrow("prediction-forecast/1.0");

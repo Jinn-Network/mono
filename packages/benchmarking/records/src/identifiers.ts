@@ -6,7 +6,7 @@
 // four benchmarking record kinds is the https URL form, consistent with the TEP / profiles /
 // discovery convention. The design's literal bare token `jinn.benchmarking/1.0` is superseded
 // on this point.
-export const BENCHMARKING_PROTOCOL = "https://jinn.network/protocols/benchmarking/1.0";
+export const BENCHMARKING_PROTOCOL = "https://spec.jinn.network/protocols/benchmarking/v1";
 
 export const BENCHMARK_MEDIA_TYPE = "application/vnd.jinn.benchmarking.benchmark.v1+json";
 export const RUN_MEDIA_TYPE = "application/vnd.jinn.benchmarking.run.v1+json";
@@ -15,17 +15,17 @@ export const REPORT_MEDIA_TYPE = "application/vnd.jinn.benchmarking.report.v1+js
 
 // Record-kind URIs (plan §Pinned-identifiers, Finding F1 sub-flag): pre-aligned at fix time to
 // the record-discovery record-kind grammar `${RECORDS_ROOT}/<segment>/<major>.<minor>`
-// (`RECORDS_ROOT = "https://jinn.network/records"`), verified against
+// (`RECORDS_ROOT = "https://spec.jinn.network/records"`), verified against
 // `2026-07-28-record-discovery.md` §Pinned-identifiers (its `RECORD_KINDS` map +
 // `SOURCE_NAME_GRAMMAR` + `assertRecordKindUri`). `records` cannot import discovery's own
 // `assertRecordKindUri` (discovery is absent on this branch and `records` is protocol-only,
 // Finding F3) — `identifiers.test.ts` asserts a local mirror-regex instead; the authoritative
 // check against the built discovery grammar is re-applied in the facts leaf (M6) at the Phase 3
 // merge.
-export const BENCHMARK_RECORD_KIND = "https://jinn.network/records/benchmark/1.0";
-export const RUN_RECORD_KIND = "https://jinn.network/records/benchmark-run/1.0";
-export const MATRIX_RECORD_KIND = "https://jinn.network/records/benchmark-matrix/1.0";
-export const REPORT_RECORD_KIND = "https://jinn.network/records/benchmark-report/1.0";
+export const BENCHMARK_RECORD_KIND = "https://spec.jinn.network/records/benchmark/v1";
+export const RUN_RECORD_KIND = "https://spec.jinn.network/records/benchmark-run/v1";
+export const MATRIX_RECORD_KIND = "https://spec.jinn.network/records/benchmark-matrix/v1";
+export const REPORT_RECORD_KIND = "https://spec.jinn.network/records/benchmark-report/v1";
 
 export const ASSEMBLY_PROCEDURE = "jinn.benchmarking.assembly";
 export const ASSEMBLY_PROCEDURE_VERSION = "1.0";

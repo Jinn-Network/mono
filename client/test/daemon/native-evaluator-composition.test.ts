@@ -156,7 +156,7 @@ describe("native evaluator production composition", () => {
     const config = value.backendConfigs[0]!;
     expect(config.launchers).toHaveLength(1);
     expect(config.launchers[0]!.capabilities().taskProfiles).toEqual([
-      "https://jinn.network/task-profiles/evaluation-task/1.0",
+      "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
     ]);
     expect(config.launchers[0]!.capabilities().hostSecretForwards).toEqual([]);
     expect(config.trustKeys?.deliverySigningKey?.keyId)

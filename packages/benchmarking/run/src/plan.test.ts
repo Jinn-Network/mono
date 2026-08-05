@@ -70,7 +70,7 @@ describe("planRun (§10.1 op 2)", () => {
 
 function capabilitiesStub(overrides: Partial<BackendCapabilities> = {}): BackendCapabilities {
   return {
-    taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0"],
+    taskProfiles: ["https://spec.jinn.network/task-profiles/repository-work/1.0"],
     inputMediaTypes: ["text/plain"],
     outputMediaTypes: ["text/plain"],
     cancel: true,

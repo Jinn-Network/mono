@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
   "name": "URI-only item",
   "description": "Invalid because the Task identity is not content-addressed.",
   "version": "1.0.0",

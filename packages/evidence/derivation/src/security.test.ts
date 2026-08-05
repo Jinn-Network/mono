@@ -153,7 +153,7 @@ test("strict JSON boundaries reject duplicate and prototype-pollution keys", asy
     Uint8Array.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d]),
   ]) {
     const input = syntheticDerivationInput();
-    replaceArtifact(input, "trace/trajectory.jsonl", bytes);
+    replaceArtifact(input, "trace/trace.jsonl", bytes);
     await expect(deriver().derive(input)).rejects.toMatchObject({
       code: "STRUCTURED_ARTIFACT_INVALID",
     });

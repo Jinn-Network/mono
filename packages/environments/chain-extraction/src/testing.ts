@@ -612,7 +612,7 @@ const HIDDEN_READ_GROUPS = [
 ] as const;
 
 const CONFORMANCE_VERIFIER: VerifierIdentity = Object.freeze({
-  id: "https://jinn.network/chain-state-extraction/conformance",
+  id: "https://spec.jinn.network/chain-state-extraction/conformance",
   version: "0.1.0",
   digest: `sha256:${"c".repeat(64)}`,
 }) as VerifierIdentity;

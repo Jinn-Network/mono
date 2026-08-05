@@ -168,9 +168,9 @@ const CONSENT_KEY = "did:key:z6MkfCONSENT11111111111111111111111111111";
 describe("verifyEnvelopeBinding", () => {
   test("a real sealed KeyBinding can carry and verify the admission-receipt scope (§7.42/§7.45)", async () => {
     const admissionScope =
-      "https://jinn.network/trust-scopes/admission-receipts/1.0";
+      "https://spec.jinn.network/trust-scopes/admission-receipts/v1";
     const key = "did:key:z6MkAdmissionScopeFixture1111111111111111111";
-    const agent = "https://jinn.network/agents/admission-scope-fixture";
+    const agent = "https://spec.jinn.network/agents/admission-scope-fixture";
     const binding = keyBinding({
       agent,
       key: {

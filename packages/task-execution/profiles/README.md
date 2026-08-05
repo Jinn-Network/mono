@@ -22,8 +22,8 @@ trust, no marketplace.
 
 | Profile | Reserved instance URI | Sealed asset |
 | --- | --- | --- |
-| `repository-work/1.0` (design §8) — real-repository code-change work, delivered as a patch | `https://jinn.network/task-profiles/repository-work/1.0` | `profiles/task-profiles/repository-work/1.0/profile.json` + `profile.sha256` |
-| `evaluation-task/1.0` (design §9) — the generic thin profile for evaluation-as-work; its `verdict` output *is* the DSSE-signed Result Evaluation Statement | `https://jinn.network/task-profiles/evaluation-task/1.0` | `profiles/task-profiles/evaluation-task/1.0/profile.json` + `profile.sha256` |
+| `repository-work/1.0` (design §8) — real-repository code-change work, delivered as a patch | `https://spec.jinn.network/task-profiles/repository-work/1.0` | `profiles/task-profiles/repository-work/1.0/profile.json` + `profile.sha256` |
+| `evaluation-task/1.0` (design §9) — the generic thin profile for evaluation-as-work; its `verdict` output *is* the DSSE-signed Result Evaluation Statement | `https://spec.jinn.network/task-profiles/evaluation-task/1.0` | `profiles/task-profiles/evaluation-task/1.0/profile.json` + `profile.sha256` |
 
 Each `profile.json` is the exact raw RFC 8785 JCS bytes (no indentation, no trailing newline,
 program §7.1) produced by this package's own builder + sealer — `sha256(profile.json) ==

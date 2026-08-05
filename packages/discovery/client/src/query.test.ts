@@ -21,13 +21,13 @@ function jsonResponse(value: unknown): TransportResponse {
 }
 
 const PROVENANCED_ITEM: AnnouncedItem = {
-  record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+  record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
   provenance: { source: { agent: "did:key:zAgentSourceOne", name: "feed" }, entry: `sha256:${"b".repeat(64)}`, announcementId: "ann-1" },
 };
 
 describe("DiscoveryQueryClient (§8: implements DiscoveryQueryService as a thin remote client)", () => {
   it("capabilities() fetches and parses the remote service's capabilities", async () => {
-    const capabilities: QueryCapabilities = { kinds: ["https://jinn.network/records/submission/1.0"], sources: [], freshness: [] };
+    const capabilities: QueryCapabilities = { kinds: ["https://spec.jinn.network/records/submission/v1"], sources: [], freshness: [] };
     const routes = new Map([["https://query.example.org/capabilities", jsonResponse(capabilities)]]);
     const client = new DiscoveryQueryClient({ transport: makeRoutedTransport(routes), baseUrl: "https://query.example.org" });
 
@@ -62,11 +62,11 @@ describe("DiscoveryQueryClient (§8: implements DiscoveryQueryService as a thin 
   it("search() surfaces complete vs truncated honestly, without re-ranking (§8 rules 2, 3)", async () => {
     const truncated: Page<AnnouncedItem> = { items: [PROVENANCED_ITEM], nextCursor: "cursor-1", complete: false, freshness: [] };
     const routes = new Map([
-      ["https://query.example.org/search?kind=https%3A%2F%2Fjinn.network%2Frecords%2Fsubmission%2F1.0", jsonResponse(truncated)],
+      ["https://query.example.org/search?kind=https%3A%2F%2Fspec.jinn.network%2Frecords%2Fsubmission%2Fv1", jsonResponse(truncated)],
     ]);
     const client = new DiscoveryQueryClient({ transport: makeRoutedTransport(routes), baseUrl: "https://query.example.org" });
 
-    const result = await client.search("https://jinn.network/records/submission/1.0", {});
+    const result = await client.search("https://spec.jinn.network/records/submission/v1", {});
 
     expect(result.complete).toBe(false);
     expect(result.nextCursor).toBe("cursor-1");

@@ -115,7 +115,7 @@ describe("BenchmarkRecordSchema / parseBenchmark / sealBenchmark", () => {
     "a".repeat(63),
   ])("rejects a non-canonical Benchmark item sha256 digest: %s", (sha256) => {
     const value = {
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       name: "bad-digest",
       description: "d",
       version: "1.0.0",

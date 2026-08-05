@@ -1,11 +1,11 @@
 import type { LauncherContract } from "./contract.js";
 
 export const REPOSITORY_WORK_PROFILE =
-  "https://jinn.network/task-profiles/repository-work/1.0";
+  "https://spec.jinn.network/task-profiles/repository-work/1.0";
 export const PREDICTION_FORECAST_PROFILE =
-  "https://jinn.network/task-profiles/prediction-forecast/1.0";
+  "https://spec.jinn.network/task-profiles/prediction-forecast/1.0";
 export const EVALUATION_TASK_PROFILE =
-  "https://jinn.network/task-profiles/evaluation-task/1.0";
+  "https://spec.jinn.network/task-profiles/evaluation-task/1.0";
 export const EVALUATION_LAUNCHER_ID = "evaluation-harness";
 
 function supports(launcher: LauncherContract, profile: string): boolean {

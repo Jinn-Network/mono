@@ -323,10 +323,10 @@ test("transforms an exact UTF-16 JSONL span on only its intended line", () => {
     '{"line":"stay 🧪"}',
     "",
   ].join("\n");
-  replaceArtifact(input, "trace/trajectory.jsonl", source);
+  replaceArtifact(input, "trace/trace.jsonl", source);
   const result = transformedArtifactText(
     input,
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     "😀 ada@example.invalid tail",
     3,
     22,
@@ -340,7 +340,7 @@ test("transforms an exact UTF-16 JSONL span on only its intended line", () => {
   expect(result.text).toBe(expected);
   expect(
     input.sourceArtifacts.find(
-      ({ entityId }) => entityId === "trace/trajectory.jsonl",
+      ({ entityId }) => entityId === "trace/trace.jsonl",
     )!.bytes,
   ).toEqual(result.sourceBytes);
 });

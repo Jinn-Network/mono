@@ -483,7 +483,7 @@ describe('first-party Base Sepolia finalized trust anchors', () => {
     const result = await createBaseSepoliaFinalizedAnchorClient(anchorReads()).lookupFinalizedAnchor({
       digest,
       locator: {
-        profile: 'https://jinn.network/trust/anchor-locators/base-sepolia-calldata-v1',
+        profile: 'https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1',
         chainId: 84532,
         transactionHash,
         contractAddress,
@@ -524,7 +524,7 @@ describe('first-party Base Sepolia finalized trust anchors', () => {
     )).lookupFinalizedAnchor({
       digest,
       locator: {
-        profile: 'https://jinn.network/trust/anchor-locators/base-sepolia-calldata-v1',
+        profile: 'https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1',
         chainId: 84532,
         transactionHash,
         contractAddress,

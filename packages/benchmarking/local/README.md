@@ -67,16 +67,16 @@ turn that knowledge into a contradiction of a pin that carried only `{id, versio
 ## Runtime Observations
 
 `axisObservationsFromRuntimeObservations` projects `resource`-kind captures under
-`https://jinn.network/properties/run-pinning/<requirements-key>` onto axis observations. The
+`https://spec.jinn.network/properties/run-pinning/<requirements-key>` onto axis observations. The
 IRI segment is the **requirements-vocabulary** key, so the isolation axis is published as
 `.../run-pinning/isolationPolicy`; producers speak the requirements vocabulary and the Matrix
 name is a rendering concern on the far side of this package. The four IRIs are:
 
 ```
-https://jinn.network/properties/run-pinning/harness
-https://jinn.network/properties/run-pinning/model
-https://jinn.network/properties/run-pinning/loadout
-https://jinn.network/properties/run-pinning/isolationPolicy
+https://spec.jinn.network/properties/run-pinning/harness
+https://spec.jinn.network/properties/run-pinning/model
+https://spec.jinn.network/properties/run-pinning/loadout
+https://spec.jinn.network/properties/run-pinning/isolationPolicy
 ```
 
 Object-shaped axis values travel as JSON text, because a resource capture's value admits only

@@ -53,7 +53,7 @@ function entry(sequence: number, previous: `sha256:${string}` | null, label = St
       announcementId: `announcement-${label}`,
       action: 'available',
       record: {
-        kind: 'https://jinn.network/records/submission/1.0',
+        kind: 'https://spec.jinn.network/records/submission/v1',
         digest: `sha256:${label.padEnd(64, label[0] ?? '0').slice(0, 64)}`,
       },
     }],

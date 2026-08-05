@@ -61,7 +61,7 @@ async function stateRoot(): Promise<string> {
 
 function documents(): { task: Uint8Array; submission: Uint8Array } {
   const task = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: profile.profile,
       digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -72,7 +72,7 @@ function documents(): { task: Uint8Array; submission: Uint8Array } {
   return {
     task,
     submission: sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:${crypto.randomUUID()}`,
       task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
       requester: "urn:uuid:20000000-0000-4000-8000-000000000001",
@@ -128,7 +128,7 @@ function backend(
   const instance = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:evidence-test",
-    executor: "https://jinn.network/software/fake-launcher",
+    executor: "https://spec.jinn.network/software/fake-launcher",
     profileStore,
     launchers: [launcher],
     provisioner: () => ({ id: "fixture", contract: provisioner }),
@@ -280,7 +280,7 @@ describe("backend evidence capture posture (C3)", () => {
   test("threads a host-noted workKind and requestId through to deliveryExtensions at delivery time", async () => {
     const repository = new InMemoryEvidenceRepository();
     const task = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: {
         uri: profile.profile,
         digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -292,7 +292,7 @@ describe("backend evidence capture posture (C3)", () => {
     const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
     const nonce = crypto.randomUUID();
     const submission = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: submissionUri,
       task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
       requester: "urn:uuid:20000000-0000-4000-8000-000000000002",
@@ -415,7 +415,7 @@ function signingBackend(
   const instance = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:signing-test",
-    executor: "https://jinn.network/software/fake-launcher",
+    executor: "https://spec.jinn.network/software/fake-launcher",
     profileStore,
     launchers: [launcher],
     provisioner: () => ({ id: "fixture", contract: provisioner }),
@@ -446,7 +446,7 @@ describe("executor delivery signing (finding E31)", () => {
       },
     };
     const task = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: { uri: profile.profile, digest: { sha256: sealedProfile.digest.slice("sha256:".length) } },
       instructions: "Capture this execution.",
       outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -455,7 +455,7 @@ describe("executor delivery signing (finding E31)", () => {
     const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
     const nonce = crypto.randomUUID();
     const submission = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: submissionUri,
       task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
       requester: "urn:uuid:20000000-0000-4000-8000-000000000003",

@@ -40,8 +40,8 @@ import {
 import { deriveEvaluationTask } from '@jinn-network/task-execution-profiles';
 import { ConsumerState } from './state.js';
 
-const REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
-const DELIVERY_ENVELOPE_KIND = 'https://jinn.network/records/delivery-envelope/1.0';
+const REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
+const DELIVERY_ENVELOPE_KIND = 'https://spec.jinn.network/records/delivery-signature/v1';
 const VERDICT_MEDIA_TYPE = 'application/vnd.in-toto+json';
 const UINT256_MAX = (1n << 256n) - 1n;
 
@@ -481,7 +481,7 @@ function descriptorDigest(value: { readonly digest?: { readonly sha256?: string 
 }
 
 function annotationDigest(submission: ReturnType<typeof SubmissionRecordSchema.parse>): `sha256:${string}` | undefined {
-  const value = submission.annotations?.['https://jinn.network/annotations/admission-receipt/1.0'] as
+  const value = submission.annotations?.['https://spec.jinn.network/annotations/admission-receipt/v1'] as
     | { readonly digest?: { readonly sha256?: string } }
     | undefined;
   const hex = value?.digest?.sha256;
@@ -489,7 +489,7 @@ function annotationDigest(submission: ReturnType<typeof SubmissionRecordSchema.p
 }
 
 function annotationDescriptor(submission: ReturnType<typeof SubmissionRecordSchema.parse>): Record<string, unknown> | undefined {
-  return record(submission.annotations?.['https://jinn.network/annotations/admission-receipt/1.0']);
+  return record(submission.annotations?.['https://spec.jinn.network/annotations/admission-receipt/v1']);
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {

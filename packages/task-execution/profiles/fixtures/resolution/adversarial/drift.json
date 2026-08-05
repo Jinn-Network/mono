@@ -2,8 +2,8 @@
   "input": {
     "op": "drift",
     "doc": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
       "description": "Drift fixture: the pinned document.",
       "payloadSchema": {
         "type": "object",
@@ -17,8 +17,8 @@
       "requirementKeys": []
     },
     "differentDoc": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
       "description": "Drift fixture: a differently-digested cached document for the same URI (a newer patch).",
       "payloadSchema": {
         "type": "object",

@@ -5,8 +5,8 @@ import { ADMISSION_RECEIPT_MEDIA_TYPE, IN_TOTO_STATEMENT_TYPE } from "./identifi
 import { refuse } from "./refusals.js";
 
 export const PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1 = {
-  admissionPolicyVersion: "https://jinn.network/task-admission/policy/prediction-snapshot/1",
-  predicateType: "https://jinn.network/attestations/prediction-snapshot-admission/v1",
+  admissionPolicyVersion: "https://spec.jinn.network/task-admission/policy/prediction-snapshot/v1",
+  predicateType: "https://spec.jinn.network/attestations/prediction-snapshot-admission/v1",
 } as const;
 
 const PREDICTION_PROFILE_DIGEST = "sha256:e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937";
@@ -45,7 +45,7 @@ function isExactlyCanonical(actual: unknown, expected: unknown): boolean {
 }
 
 export interface PredictionSnapshotAdmissionReceiptV1 {
-  readonly schemaVersion: "https://jinn.network/records/prediction-snapshot-admission-receipt/1";
+  readonly schemaVersion: "https://spec.jinn.network/records/prediction-snapshot-admission-receipt/v1";
   readonly admissionPolicyVersion: typeof PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1.admissionPolicyVersion;
   readonly issuer: string;
   readonly task: {
@@ -90,7 +90,7 @@ function parseExactDocument(bytes: Uint8Array, label: string): Record<string, un
 function exactEvaluationSpec(bytes: Uint8Array): { digest: `sha256:${string}` } {
   const specification = parseExactDocument(bytes, "prediction EvaluationSpec");
   if (
-    specification.protocol !== "https://jinn.network/profiles/evaluation-spec/1.0"
+    specification.protocol !== "https://spec.jinn.network/profiles/evaluation-spec/v1"
     || specification.semanticsVersion !== "4"
     || specification.family !== "deterministic-process"
     || Object.keys(specification).sort().join(",") !== "evidenceConventions,family,familyBlock,grader,measurements,protocol,semanticsVersion,unscorable,verdictRule"
@@ -116,7 +116,7 @@ function exactEvaluationSpec(bytes: Uint8Array): { digest: `sha256:${string}` } 
 
 function forecastFromTask(task: Record<string, unknown>, evaluationSpecDigest: string): PredictionSnapshotAdmissionReceiptV1["forecast"] {
   if (
-    task.protocol !== "https://jinn.network/profiles/task-execution/1.0"
+    task.protocol !== "https://spec.jinn.network/profiles/task-execution/v1"
     || typeof task.instructions !== "string" || task.instructions.length === 0
     || Object.keys(task).sort().join(",") !== "evaluation,instructions,outputs,payload,profile,protocol"
   ) {
@@ -124,7 +124,7 @@ function forecastFromTask(task: Record<string, unknown>, evaluationSpecDigest: s
   }
   const profile = task.profile as { uri?: unknown; digest?: { sha256?: unknown } } | undefined;
   if (
-    profile?.uri !== "https://jinn.network/task-profiles/prediction-forecast/1.0"
+    profile?.uri !== "https://spec.jinn.network/task-profiles/prediction-forecast/1.0"
     || profile.digest?.sha256 !== PREDICTION_PROFILE_DIGEST.slice("sha256:".length)
   ) {
     return refuse("invalid-candidate", "prediction Task does not name the sealed prediction-forecast/1.0 profile");
@@ -187,7 +187,7 @@ export function admitPredictionSnapshot(input: PredictionSnapshotAdmissionInput)
   const task = parseExactDocument(input.taskBytes, "prediction Task");
   const specification = exactEvaluationSpec(input.evaluationSpecBytes);
   return {
-    schemaVersion: "https://jinn.network/records/prediction-snapshot-admission-receipt/1",
+    schemaVersion: "https://spec.jinn.network/records/prediction-snapshot-admission-receipt/v1",
     admissionPolicyVersion: PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1.admissionPolicyVersion,
     issuer: input.issuer,
     task: {

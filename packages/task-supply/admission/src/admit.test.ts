@@ -9,7 +9,7 @@ const GOLD = "sha256:55555555555555555555555555555555555555555555555555555555555
 const D = (seed: string) => `sha256:${seed.repeat(64).slice(0, 64)}`;
 
 const recordBytes = sealEnvironmentRecord({
-  kind: "https://jinn.network/records/environment/1.0",
+  kind: "https://spec.jinn.network/records/environment/v1",
   source: { repo: "owner/name", repoUrl: "https://github.com/owner/name", commit: "a".repeat(40) },
   image: { manifestDigest: MANIFEST, platform: "linux/amd64", reference: `ghcr.io/example/env@${MANIFEST}` },
   workspace: "/testbed",
@@ -64,7 +64,7 @@ function runner(overrides: Partial<Record<"gold" | "none", unknown>> = {}) {
 describe("admitCandidate", () => {
   it("admits a discriminating candidate and returns a policy-valid receipt", async () => {
     const { port, requests } = runner();
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("receipt" in result).toBe(true);
     if (!("receipt" in result)) return;
     expect(requests).toHaveLength(4);
@@ -79,7 +79,7 @@ describe("admitCandidate", () => {
 
   it("passes the gold patch to the runner as a selector, never as bytes", async () => {
     const { port, requests } = runner();
-    await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     for (const request of requests) {
       expect(JSON.stringify(request)).not.toContain("diff --git");
       expect(Object.keys(request.patch).sort()).toStrictEqual(
@@ -90,7 +90,7 @@ describe("admitCandidate", () => {
 
   it("binds the environment record by digest and targets the record's test command", async () => {
     const { port, requests } = runner();
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     if (!("receipt" in result)) throw new Error("expected a receipt");
     expect(requests[0]?.environmentRecordDigest).toBe(result.receipt.environment.recordDigest);
     expect(requests[0]?.command.args).toStrictEqual(["-m", "pytest", "-rA", "tests/unit/test_thing.py"]);
@@ -104,7 +104,7 @@ describe("admitCandidate", () => {
         new TextDecoder().decode(evaluationSpecBytes).replaceAll("1111", "2222"),
       ),
     };
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, mismatched, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, mismatched, recordBytes);
     expect(result).toStrictEqual({
       refusal: { code: "env-record-mismatch", detail: expect.stringContaining("inline image manifest digest") },
     });
@@ -113,7 +113,7 @@ describe("admitCandidate", () => {
   it("refuses invalid-environment-record on unparseable record bytes", async () => {
     const { port } = runner();
     const result = await admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never,
       candidate,
       new TextEncoder().encode("{not json"),
     );
@@ -130,7 +130,7 @@ describe("admitCandidate", () => {
       passedMatch: false,
       appliedPatchDigest: request.patch.kind === "gold" ? GOLD : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("unstable-observations");
   });
 
@@ -139,7 +139,7 @@ describe("admitCandidate", () => {
     const port = async (request: EnvironmentRunRequest) => ({
       ...inert, appliedPatchDigest: request.patch.kind === "gold" ? GOLD : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("no-discrimination");
   });
 
@@ -148,13 +148,13 @@ describe("admitCandidate", () => {
       passed: [], failed: ["target"], passedMatch: false,
       appliedPatchDigest: request.patch.kind === "gold" ? D("9") : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("execution-failed");
   });
 
   it("refuses execution-failed when the runner throws", async () => {
     const port = async () => { throw new Error("container runtime unavailable"); };
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("execution-failed");
     expect("refusal" in result && result.refusal.detail).toContain("container runtime unavailable");
   });
@@ -169,7 +169,7 @@ describe("admitCandidate", () => {
       passedMatch: false,
       appliedPatchDigest: request.patch.kind === "gold" ? GOLD : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("transitions-mismatch");
     expect("refusal" in result && result.refusal.detail).toContain("target");
   });
@@ -181,7 +181,7 @@ describe("admitCandidate", () => {
       passedMatch: false,
       appliedPatchDigest: request.patch.kind === "gold" ? GOLD : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("transitions-mismatch");
     expect("refusal" in result && result.refusal.detail).toContain("keeps");
   });
@@ -195,14 +195,14 @@ describe("admitCandidate", () => {
       passedMatch: request.patch.kind === "gold",
       appliedPatchDigest: request.patch.kind === "gold" ? GOLD : null,
     });
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     expect("refusal" in result && result.refusal.code).toBe("no-discrimination");
   });
 
   it("refuses transitions-mismatch when the spec grades a different set than the candidate declares", async () => {
     const { port, requests } = runner();
     const result = await admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never,
       { ...candidate, evaluationSpecBytes: canonicalJsonBytes(specValue({
         transitions: { failToPass: ["something_else"], passToPass: ["keeps"] },
       })) },
@@ -215,7 +215,7 @@ describe("admitCandidate", () => {
   it("refuses invalid-candidate when the spec grades material the candidate does not declare", async () => {
     const { port, requests } = runner();
     const result = await admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never,
       { ...candidate, evaluationSpecBytes: canonicalJsonBytes(specValue({
         testMaterial: [{ name: "test-patch", digest: { sha256: D("9").slice(7) }, accessClass: "public" }],
       })) },
@@ -229,7 +229,7 @@ describe("admitCandidate", () => {
   it("refuses non-canonical EvaluationSpec bytes before spending a single container run", async () => {
     const { port, requests } = runner();
     const result = await admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never,
       { ...candidate, evaluationSpecBytes: new TextEncoder().encode(JSON.stringify(specValue(), null, 2)) },
       recordBytes,
     );
@@ -241,7 +241,7 @@ describe("admitCandidate", () => {
   it("refuses a candidate with no test material before spending a single container run", async () => {
     const { port, requests } = runner();
     const result = await admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never,
       { ...candidate, testMaterialDigests: [] },
       recordBytes,
     );
@@ -254,7 +254,7 @@ describe("admitCandidate", () => {
     const { port, requests } = runner();
     controller.abort();
     await expect(admitCandidate(
-      { runInEnvironment: port, issuer: "https://jinn.network/agents/a", signal: controller.signal } as never,
+      { runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a", signal: controller.signal } as never,
       candidate,
       recordBytes,
     )).rejects.toThrow();
@@ -263,7 +263,7 @@ describe("admitCandidate", () => {
 
   it("records one entry per run on each side", async () => {
     const { port } = runner();
-    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://jinn.network/agents/a" } as never, candidate, recordBytes);
+    const result = await admitCandidate({ runInEnvironment: port, issuer: "https://spec.jinn.network/agents/a" } as never, candidate, recordBytes);
     if (!("receipt" in result)) throw new Error("expected a receipt");
     const path = result.receipt.testPaths[0];
     expect(path?.broken).toStrictEqual([

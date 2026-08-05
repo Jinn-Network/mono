@@ -16,7 +16,7 @@ function genesisEntry(overrides: Record<string, unknown> = {}) {
       {
         announcementId: "a1",
         action: "available",
-        record: { kind: "https://jinn.network/records/task/1.0", digest: DIGEST_A },
+        record: { kind: "https://spec.jinn.network/records/task/v1", digest: DIGEST_A },
       },
     ],
     ...overrides,
@@ -46,12 +46,12 @@ describe("parseAnnouncementEntry", () => {
             {
               announcementId: "a1",
               action: "available",
-              record: { kind: "https://jinn.network/records/task/1.0", digest: DIGEST_A },
+              record: { kind: "https://spec.jinn.network/records/task/v1", digest: DIGEST_A },
             },
             {
               announcementId: "a1",
               action: "available",
-              record: { kind: "https://jinn.network/records/task/1.0", digest: DIGEST_B },
+              record: { kind: "https://spec.jinn.network/records/task/v1", digest: DIGEST_B },
             },
           ],
         }),

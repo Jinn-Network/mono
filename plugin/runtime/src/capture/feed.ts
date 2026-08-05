@@ -115,7 +115,7 @@ function invalid(message: string, cause?: unknown): never {
 /**
  * Parses the append-only NDJSON session feed. Strict by construction: an unreadable feed is
  * a refused capture, never a silently truncated one. The 0-based line ordinal is preserved
- * because it is the stable back-reference from a trajectory span into the source line
+ * because it is the stable back-reference from a trace span into the source line
  * (program finding F5 — the record carries no message content).
  */
 export function parseSessionFeed(bytes: Uint8Array): ParsedSessionFeed {

@@ -67,9 +67,9 @@ const evaluationSpec: EvaluationSpec = {
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: "4",
   family: "deterministic-process",
-  grader: { uri: "https://jinn.network/graders/marketplace-conformance" },
+  grader: { uri: "https://spec.jinn.network/graders/marketplace-conformance" },
   familyBlock: {
-    image: { uri: "https://jinn.network/images/marketplace-conformance" },
+    image: { uri: "https://spec.jinn.network/images/marketplace-conformance" },
     platform: "linux/amd64",
     workspace: { root: "/workspace" },
     testMaterial: [],
@@ -183,7 +183,7 @@ export async function buildNamedCheckFixture(
   const taskBytes = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "6".repeat(64) },
     },
     instructions: "Solve the marketplace conformance fixture.",
@@ -237,7 +237,7 @@ export async function buildNamedCheckFixture(
         digest: { sha256: sealedSpec.digest.slice("sha256:".length) },
       },
     ],
-    predicateType: "https://jinn.network/attestations/admission-receipt/v1",
+    predicateType: "https://spec.jinn.network/attestations/admission-receipt/v1",
     predicate: { issuer: ADMISSION_AGENT },
   };
   const receiptEnvelopeBytes = signedEnvelope(

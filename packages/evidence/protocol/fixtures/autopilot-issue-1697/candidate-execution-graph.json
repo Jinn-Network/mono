@@ -4,7 +4,7 @@
     "https://w3id.org/ro/terms/workflow-run/context",
     {
       "prov": "http://www.w3.org/ns/prov#",
-      "jinn": "https://jinn.network/terms/"
+      "jinn": "https://spec.jinn.network/terms/"
     }
   ],
   "@graph": [
@@ -215,7 +215,7 @@
       "@id": "#duration-ms",
       "@type": "PropertyValue",
       "name": "durationMs",
-      "propertyID": "https://jinn.network/terms/durationMs",
+      "propertyID": "https://spec.jinn.network/terms/durationMs",
       "value": 604534,
       "unitCode": "ms"
     }

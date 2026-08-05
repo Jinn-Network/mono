@@ -1,0 +1,397 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "_type": {
+      "type": "string",
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": {}
+          },
+          "uri": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "downloadLocation": {
+            "type": "string"
+          },
+          "annotations": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "name",
+          "digest"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "predicateType": {
+      "type": "string",
+      "const": "https://spec.jinn.network/attestations/execution-verification/v1"
+    },
+    "predicate": {
+      "type": "object",
+      "properties": {
+        "verifiedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+        },
+        "verifier": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": {}
+        },
+        "verificationMethod": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            },
+            "uri": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": {}
+        },
+        "verificationPolicy": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            },
+            "uri": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": {}
+        },
+        "executionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "rejected",
+            "inconclusive"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown"
+                ]
+              },
+              "explanation": {
+                "type": "string"
+              },
+              "evidence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "digest": {
+                      "type": "object",
+                      "properties": {
+                        "sha256": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        }
+                      },
+                      "required": [
+                        "sha256"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "uri": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "mediaType": {
+                      "type": "string"
+                    },
+                    "downloadLocation": {
+                      "type": "string"
+                    },
+                    "annotations": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "digest"
+                  ],
+                  "additionalProperties": {}
+                }
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "status"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              },
+              "uri": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "disputes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              },
+              "uri": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "verifiedAt",
+        "verifier",
+        "executionId",
+        "verdict"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json"
+}

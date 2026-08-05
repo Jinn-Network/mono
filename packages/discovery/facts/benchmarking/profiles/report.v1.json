@@ -1,0 +1,12 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/benchmark-report/v1",
+  "profile": "https://spec.jinn.network/facts/benchmark-report/v1",
+  "fields": [
+    { "name": "matrixDigests", "class": "record", "referenceBearing": true },
+    { "name": "methodId", "class": "record", "cloudEvents": { "attribute": "methodid", "scalar": "string" } },
+    { "name": "methodVersion", "class": "record" },
+    { "name": "author", "class": "record", "cloudEvents": { "attribute": "author", "scalar": "string" } },
+    { "name": "preregistered", "class": "record" }
+  ]
+}

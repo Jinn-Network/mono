@@ -6,7 +6,7 @@ import type { MethodComputeInput } from "./method.js";
 
 function baseInput(overrides: Partial<MethodComputeInput> = {}): MethodComputeInput {
   const sealed = sealMatrix({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: { digest: { sha256: "a".repeat(64) } },
     closeBoundary: { at: "2026-08-04T00:00:00Z" },
     cells: [],
@@ -33,7 +33,7 @@ function hostileArmSubject(): MethodComputeInput["subjects"][number] {
   const taskDigest = "b".repeat(64);
   const armIds = ["__proto__", "constructor", "prototype"];
   const sealed = sealMatrix({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: { digest: { sha256: "a".repeat(64) } },
     closeBoundary: { at: "2026-08-04T00:00:00Z" },
     cells: armIds.map((armId) => ({

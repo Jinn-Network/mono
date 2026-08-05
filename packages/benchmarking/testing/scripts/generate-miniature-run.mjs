@@ -82,7 +82,7 @@ const evaluationDigest = sealedEvaluationSpec.digest.slice("sha256:".length);
 const profileDigest = "f".repeat(64);
 const tasks = ["alpha", "beta", "gamma"].map((name) => {
   const bytes = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: { digest: { sha256: profileDigest } },
     instructions: `Solve miniature task ${name}.`,
     outputs: [{ name: "answer", mediaType: "text/plain", required: true }],
@@ -150,7 +150,7 @@ const cells = coordinates.map((coordinate, index) => {
   let latestSubmissionDigest;
   for (let dispatch = 1; dispatch <= dispatches; dispatch += 1) {
     const submission = {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:${String(index + 1).padStart(8, "0")}-0000-5000-8000-${String(dispatch).padStart(12, "0")}`,
       task: { digest: { sha256: coordinate.task.digest } },
       requester: "urn:uuid:20000000-0000-5000-8000-000000000002",
@@ -179,7 +179,7 @@ const cells = coordinates.map((coordinate, index) => {
   let deliveryDigest;
   if (hasDelivery) {
     const delivery = {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       task: `sha256:${coordinate.task.digest}`,
       attempt: `urn:uuid:${String(index + 101).padStart(8, "0")}-0000-5000-8000-000000000000`,
       outcome: "fulfilled",

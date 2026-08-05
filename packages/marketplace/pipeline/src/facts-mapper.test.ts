@@ -10,10 +10,10 @@ const CHAIN = {
 };
 
 const CHAIN_CARD: AnnouncedSubmissionCard = {
-  record: { kind: "https://jinn.network/records/task-execution/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+  record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
   facts: {
     taskDigest: `sha256:${"b".repeat(64)}`,
-    taskProfileUri: "https://jinn.network/profiles/task-execution/repository-work/1.0",
+    taskProfileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
     workKind: "repository-work",
     runPinning: { harness: "claude-code", model: "claude-haiku-4-5-20251001" },
     requirements: { isolation: "process" },
@@ -34,7 +34,7 @@ describe("facts → SubmissionFacts mapper", () => {
         taskDigest: `sha256:${"b".repeat(64)}`,
         submission: CHAIN.submission,
         nonce: "0x01",
-        profileUri: "https://jinn.network/profiles/task-execution/repository-work/1.0",
+        profileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
         requirements: { isolation: "process" },
         runnable: true,
         intendedSpendWei: 1_000_000_000_000n,
@@ -74,7 +74,7 @@ describe("facts → SubmissionFacts mapper", () => {
   it("refuses a delivery record announced as a submission", () => {
     expect(
       mapAnnouncedSubmissionToFacts(
-        { ...CHAIN_CARD, record: { ...CHAIN_CARD.record, kind: "https://jinn.network/records/task-execution/delivery/1.0" } },
+        { ...CHAIN_CARD, record: { ...CHAIN_CARD.record, kind: "https://spec.jinn.network/records/delivery/v1" } },
         options,
       ),
     ).toEqual({ ok: false, reason: "wrong-record-kind" });

@@ -43,7 +43,7 @@ import { ADMISSION_RECEIPT_ANNOTATION_URI } from "./evaluation-derive.js";
 import { VerdictCode, type VerdictCode as VerdictCodeValue } from "./venue/verdict-code.js";
 
 export const ADMISSION_RECEIPT_TRUST_SCOPE =
-  "https://jinn.network/trust-scopes/admission-receipts/1.0" as const;
+  "https://spec.jinn.network/trust-scopes/admission-receipts/v1" as const;
 const SUBMISSION_DSSE_PAYLOAD_TYPE =
   "application/vnd.jinn.task-execution.submission.v1+json";
 

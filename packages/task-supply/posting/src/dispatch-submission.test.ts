@@ -151,7 +151,7 @@ describe("assertSealedMaxClaimsAgreement", () => {
     return new TextEncoder().encode(JSON.stringify(document));
   }
   const BASE = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:11111111-2222-3333-4444-555555555555",
     task: { digest: { sha256: sha256Hex(TASK_BYTES) } },
     requester: "urn:uuid:66666666-7777-8888-9999-aaaaaaaaaaaa",

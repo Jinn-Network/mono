@@ -3,11 +3,11 @@
   "entries": [
     {
       "id": "vectors/broken-linkage-previous-mismatch/vector.json",
-      "sha256": "a6a20828c0adcc97e73fde201367b832b6c408cc710461a68478fbe69a037994"
+      "sha256": "82f97be2c4d5877a5aede6b20986eab291fc0d6baa7d19944111b42ed451e38c"
     },
     {
       "id": "vectors/competing-head-rotated-out-key/vector.json",
-      "sha256": "6215aaf985433e2ba824205a49e8bdd4dbfbd1ec9506725476944dd2ead46d79"
+      "sha256": "3d7f3989d888229d49c326c094f8874faa5847bbaa90abf000513bd0ff43e22d"
     },
     {
       "id": "vectors/consumer-cold-start-mirror-disagreement/vector.json",
@@ -19,15 +19,15 @@
     },
     {
       "id": "vectors/consumer-hostile-locator-oversize/vector.json",
-      "sha256": "b0956f3740d87771ad69b21f6479aa94a64dc774e603414c289d031678a9b88d"
+      "sha256": "07c1b28465f0fa810d09ca76acebb923252227a27e51f49b709ded78ff04ecef"
     },
     {
       "id": "vectors/consumer-hostile-locator-private-address/vector.json",
-      "sha256": "8fecd56b5991e24dfb59b4e816804bc6203959c59f26362241490e80ce123206"
+      "sha256": "e5fb7d21f8995c8dfacd9444fab71289618782432d90857920cb9b83d9349f45"
     },
     {
       "id": "vectors/consumer-hostile-locator-wrong-content-type/vector.json",
-      "sha256": "f6de54e8ca7cd322c64906e4173d7bc9d6d8be5b47f764632fb7208d046d5946"
+      "sha256": "bcfae9f5758d5078a308e5c055d1e8450faa0016f2667e9cf96ff29feca5b378"
     },
     {
       "id": "vectors/consumer-ping-flood-debounce/vector.json",
@@ -35,83 +35,83 @@
     },
     {
       "id": "vectors/consumer-reorged-withdrawal-recompute/vector.json",
-      "sha256": "00b168d701df2b449e4b4a667ffab1cc64d9d558728916408c79eb2a6e153d81"
+      "sha256": "f748c2870b65883fc3f493b5aacfa4f4add92f3235829078a3c44f116ab9b9b2"
     },
     {
       "id": "vectors/consumer-withdrawal-retrospective-no-prune/vector.json",
-      "sha256": "bdf7c1bf508fa5c32b6698671b7c5b32797dca83e381fff6f2c67fbd56935d3f"
+      "sha256": "7d0b76f90faaaaa8f96bea82c6b5e3a1eaddb92e8c491ef66a44732a7ab9fd21"
     },
     {
       "id": "vectors/derivation-consistency-fabricated/vector.json",
-      "sha256": "89b769c2fa9b13bbff0c7365dee26813002717bff0aa6b9c6ce46fc5f761ab82"
+      "sha256": "804fb5a973e7dca1872c7ab75faf4eeff095288c34b63f867cbdc05fae0edf0c"
     },
     {
       "id": "vectors/derivation-consistency-present/vector.json",
-      "sha256": "c3f0d2f9505cdabcd6c52f02d52a2913aa1f879013ef32b82e33cafeca604fde"
+      "sha256": "3867e4a5e9feef6a844e7c225d3ecf95fd3c93c4fec48a575e3f0b0ae4d1ae13"
     },
     {
       "id": "vectors/derivation-consistency-reorged-away/vector.json",
-      "sha256": "9abd72d6f829fe9217535dd63f0282ef36e0b66366f231d8d573256f556b7ebd"
+      "sha256": "fce3ccfb12fe11fe1d09661a6f7883d7affaf8abeb2afa96e7c6ba0768ffd42a"
     },
     {
       "id": "vectors/duplicate-announcement-id-across-entries/vector.json",
-      "sha256": "37aa0a86510c01a03bffb7cd4786361a7392aa04349097806e474ecba7212e47"
+      "sha256": "66064ac30d34eef4e75a3b4b52cc54fc7350beac3a006f4a4486b37b20cb890f"
     },
     {
       "id": "vectors/duplicate-genesis-entries/vector.json",
-      "sha256": "b6f02c35b1fd18acc16430b7aac94676211b54b6364909a6b28e609bf7fa3b4a"
+      "sha256": "c84e29e473f65192ebe26d3454e5af02745b10241e9232d8e90936f6e4d8b88c"
     },
     {
       "id": "vectors/facts-consistency-consistent/vector.json",
-      "sha256": "b32727d4757ccb448894532e3472a7ecbe7f3d5126569719eb176df84de3f6d1"
+      "sha256": "103d679ced2c527e029f140f9838bcb8b5dca7878f4a3e85ed596ffd2e415ed4"
     },
     {
       "id": "vectors/facts-consistency-inconsistent/vector.json",
-      "sha256": "819a89bb846fc273371d7ab09cca0512a4d106befc559c60bf202edb2f13430a"
+      "sha256": "3ac545b9fcb5947ae9699ee85de98d79bcd66e991e87fc94ebb79ee0db7c1c26"
     },
     {
       "id": "vectors/facts-consistency-indeterminate-unavailable-referenced-bytes/vector.json",
-      "sha256": "76b3a11b436e254e78726aee023c5d584f83715ecff42e3bcf237ea8513c11b7"
+      "sha256": "fb278816229a4154e5278fce61fd7c68a0855eb05093481a7f8172bc644a7da4"
     },
     {
       "id": "vectors/forked-chain-second-signed-child/vector.json",
-      "sha256": "53ba2aeae3d3d5e7e08cc8c918810efc21c830172a343f7a0fcad9fc56b7c7ff"
+      "sha256": "e13a2536ccb4a21f3aa9e881061e17043a695df9cdc7b922ef5085cc89e0ccf3"
     },
     {
       "id": "vectors/forked-chain-shared-previous/vector.json",
-      "sha256": "e86a256e74f9b7418c36824d2d25b392bfaabc9971823e3eeeb434f3e4750583"
+      "sha256": "dcb1e24ceb509e4bdf0917dafbeb86533a7f9fb9dbf4aa4d15ec0bb6ceae6cc6"
     },
     {
       "id": "vectors/genesis-pinned-sequence/vector.json",
-      "sha256": "12af5bcf4950352eb5ba3bf8f2e369c87033227866a89c670dbd19248be145bc"
+      "sha256": "5dc156f400efb40c596d37dfacdb1d903083210ce2d8a8dce6da9e8be5b8ad5f"
     },
     {
       "id": "vectors/issued-at-regression/vector.json",
-      "sha256": "52c29be48ea3450402809245ff06cd01aedc44bb528a469c8df066f1827a24f2"
+      "sha256": "6f722d6964558a5595fbae2dcfa0cc941e50c8acf4b45340190325ea7c8796f6"
     },
     {
       "id": "vectors/item-content-corruption/vector.json",
-      "sha256": "f343de09fe1d7ecc8db2e5db1cae3a8f5dc2402399cfff4c83738554db1f4ddc"
+      "sha256": "3a95c8f67120390e5ae8a23ed7d11dd4f70e1e80d1c4242cc01d5624f93a917f"
     },
     {
       "id": "vectors/item-lying-entry-provenance/vector.json",
-      "sha256": "93fe43e6d98b1a5da9bb374d12cb702d1382edc4afc8234db6f54c2225280f03"
+      "sha256": "d503db820342c2dd1a07f32a942967de269b0b10d5594493c8adf5788d5bb5f9"
     },
     {
       "id": "vectors/item-unauthorized-provenance/vector.json",
-      "sha256": "9f127ab4fae79b08c5fdb671072f23c432e67f577bf11c1e5155a0c30b54d86c"
+      "sha256": "91db25222ea2b96048a74374ded767debdab0c90b93333cb0f1e95c73254aff8"
     },
     {
       "id": "vectors/item-verified-consistent/vector.json",
-      "sha256": "2c2e11d1f97bd154ab345c9d279c7fa75e8bf0ba3d29eddb64bde8701591ea73"
+      "sha256": "281a444fa6738287501b3744b00e5e6a68d4242cfbe70da3d3f731eaf799131c"
     },
     {
       "id": "vectors/missing-withdrawal-reason/vector.json",
-      "sha256": "8949559e9dc854f754d54861abbca9acc8c0e78722f6dc0c7e534430a0af94f2"
+      "sha256": "89811d2a985bd3c61b349d24071cd1e267042035abdfb4d3e6bd6c460181b671"
     },
     {
       "id": "vectors/non-genesis-previous-null/vector.json",
-      "sha256": "d9529310f6966a7d532afe7c13671095c8a8c93787e220eedbf955149d64c1b9"
+      "sha256": "3ab618a59580af65a9bc4d28634d8134e779d24ad67ba85b10eb86fbab1781fb"
     },
     {
       "id": "vectors/oversized-archive-page/vector.json",
@@ -119,67 +119,67 @@
     },
     {
       "id": "vectors/oversized-entry/vector.json",
-      "sha256": "9f4da6a843d442b29b9e609bac04cd047a8e0ec9e7761c4b3e4617b5ce2b8d9a"
+      "sha256": "2aac92c6d5c852104591cb1e5f4cac10ab631a8a64f65fa37b4d281c966347cc"
     },
     {
       "id": "vectors/query-complete-honesty/vector.json",
-      "sha256": "b94775e57a5da7f39e89db4202de1684c285705b38ff576fd2ea7ff7cccd8117"
+      "sha256": "e40dfa44b72519c446c97113ec151176cba0ef49e47eadff1eed89d659421d87"
     },
     {
       "id": "vectors/query-cursor-determinism-digest-tiebreak/vector.json",
-      "sha256": "3968bafb1014933b6904608a18df59da377ac965cdc60037e2b829b65ab744be"
+      "sha256": "d101cab7cc059ec3791cd4e6d2484549cc8fd7df316ebc7a77d9c32f4823ad53"
     },
     {
       "id": "vectors/query-fabricated-provenance/vector.json",
-      "sha256": "cc5dfdb5eb9c2f7ebcb241a3c8437eda60af5f7380737a351af5cd597dd019d4"
+      "sha256": "33a25df00ba4a4b1270c24671d1d59e82053e9bdbe4412b4e523e77b5ae6ac27"
     },
     {
       "id": "vectors/query-provenance-present-on-every-item/vector.json",
-      "sha256": "395a09a771b3748ebf75cbc85134a7dd594f637dcfb7128e226e48cd2f3f90be"
+      "sha256": "61c1c41e46cb3da29b31e7028e28c413d45257e8da43ac59f90c974b300c86c5"
     },
     {
       "id": "vectors/query-service-originates-rejected/vector.json",
-      "sha256": "7fcaaedffd18c50de67340367a35e3fce8754c2a4d14fa19f0f1fe03304027e3"
+      "sha256": "121763c7c8bbc3303e8d09b781e4b98cd298ea409ae63812ccf0c9e3389960c1"
     },
     {
       "id": "vectors/re-announce-after-withdrawal/vector.json",
-      "sha256": "80d3c8d440085eba7c037e52a642d39ec6c3e7fff251ab941f722f215752da63"
+      "sha256": "3bb795d4dd4301e876a9ff268902f9a9f8602a701485371671dd5db465151b45"
     },
     {
       "id": "vectors/rolled-back-head/vector.json",
-      "sha256": "c7fc01fab4d546a335a987e78eabb5ee4c11bfbe3417e52f7b535671d7dd139d"
+      "sha256": "11753d3eaceb25bd0ce2613b4db7f5abb60191a67cc9093f0fb787578d522c18"
     },
     {
       "id": "vectors/sequence-duplicate/vector.json",
-      "sha256": "737305d4c393c4c9fb2fd922f18c2a73d7fbbe974b01bc84b34291cb02310722"
+      "sha256": "bec0e94a06fcf57c4a953edb9260b9e1f89731263f596b91bba32fa2e05bb620"
     },
     {
       "id": "vectors/sequence-gap/vector.json",
-      "sha256": "5ff2a1f4d897755494f7b4b4b26785e18a11aa7d241c6f128e295b2cf1d2fdb7"
+      "sha256": "8804f254c872f93a85a54172c30d433d1768860b4ea308c3e974b2ce5bc23ede"
     },
     {
       "id": "vectors/source-conformance-correction-by-append-reorged/vector.json",
-      "sha256": "c6b064ae3366657f650dea68453ec4042cad95b17b04be50f189ae9f82153fbc"
+      "sha256": "7fa6c74921eaf6836537799cc223f0e9b5b8cc008be81d7b2d7b22d38237cccb"
     },
     {
       "id": "vectors/source-conformance-freshness-maintenance/vector.json",
-      "sha256": "18c78e46ac7db9d48bc7a6c73bdcd814fa75fa5c81edd3ecc6d8f10f6ee5b95a"
+      "sha256": "18203b0bfe9d1dcc4816446a2e8a7faf542507270ac199a252f10635497d8c38"
     },
     {
       "id": "vectors/source-conformance-published-profile/vector.json",
-      "sha256": "1fa6224f167276f1542321102ad83dff32b498a1672ad8834083b3f05940ab4d"
+      "sha256": "44e3548ebce4c43a24ffc14f2f2f373a5185b1f58ee55cb0dd35b0a2f10894fa"
     },
     {
       "id": "vectors/source-conformance-refreshby-bound/vector.json",
-      "sha256": "577d730e74fc3063a4d56235730debfa5abec54664d777fe7ec26d05d55162fc"
+      "sha256": "0982ff0242147a38338d1748034930e492d696ff5c4e8688243bd3794b86a6cb"
     },
     {
       "id": "vectors/source-conformance-unpublished-profile/vector.json",
-      "sha256": "ad378b1035178cf5ee73dbde3f7a7e15115f2774bd5f409c71c7af3b9f9528ab"
+      "sha256": "4140fa77b2fdc9f68dc3db9da98038908070b054e16efb24416b78d99ece582b"
     },
     {
       "id": "vectors/stale-head/vector.json",
-      "sha256": "199e53a8dc1ee3d338f92b364183c92735f6d09a8de8e33c34f508b9157cf700"
+      "sha256": "0e8d56e26cd8ef0a11be14b6bed5c1c8abcfd2ee06a4175075ee2fe74aa63d8a"
     },
     {
       "id": "vectors/subscribe-announcement-dedupe-key/vector.json",
@@ -215,7 +215,7 @@
     },
     {
       "id": "vectors/subscribe-per-item-drop-censoring-relay/vector.json",
-      "sha256": "6a62141966bc8f454245ec0075b1d8bbe1c622daa8ff7b325d75b8ea35e7c6d3"
+      "sha256": "9f3ed4f39a7607e132e440337457d67e0b2c4dcb8d215466bf8d6d3fce5899bc"
     },
     {
       "id": "vectors/subscribe-relay-local-cursor-declaration/vector.json",
@@ -223,31 +223,31 @@
     },
     {
       "id": "vectors/substrate-fact-in-author-source/vector.json",
-      "sha256": "f39a726003acbffa6e33caba0144623a908225497a6706b4ff8ea1b1435d27a3"
+      "sha256": "9a557f154bfd273194ccdcaf5cbd90f7808a5b2b073f712c0d85c6a18b32078f"
     },
     {
       "id": "vectors/unknown-facts-field-skip/vector.json",
-      "sha256": "6fa458ea5b4d3feda34acd5a300e32eafac1cbb4d9251ae3c60a2b596ae82a91"
+      "sha256": "d605a88be297e89db1a46cb38c95d0d6212c0c0eafed6e974ede92e27329e4a9"
     },
     {
       "id": "vectors/unknown-record-kind-skip/vector.json",
-      "sha256": "b296e81fa8d6e65d1178e6fa5241f670d69e5d96633d1583509a70b261efedf9"
+      "sha256": "1c842a8204da35305ce03ed1d72dbb75bd21385e7b3bf4d3b60afbdf14004df8"
     },
     {
       "id": "vectors/valid-chain/vector.json",
-      "sha256": "c0246e71deb69bc7cba35d1318fb14a41f33223589645ca244d49f8c2cf77fc3"
+      "sha256": "5bec2c2544a379d8b0d4688425e532f2f9b268620e30572e9fb665c4ac2ee756"
     },
     {
       "id": "vectors/withdrawal-of-foreign-announcement/vector.json",
-      "sha256": "f55da544fdca3357d0b68368b47e29146347ceb0996e61843a9cb817873be139"
+      "sha256": "a08bae9992b801e7283b491c4e19f8fcd7014085b8e68990141d1c42136ad0d6"
     },
     {
       "id": "vectors/withdrawal-of-withdrawal/vector.json",
-      "sha256": "3758f60e48eb2c28fc530190f65f0022a07e86ba3031fdfb043bf7dc1477923e"
+      "sha256": "c9e9a8edca78da87671aceecdcc7b07da8c6e6ae98f4cbf94a8028e3fd9e59e2"
     },
     {
       "id": "vectors/wrong-signing-scope/vector.json",
-      "sha256": "abf09fda1ce8dce2dc701154e68a9082b8ae4097123eee10321929ee455a838f"
+      "sha256": "3d13ea117928b7132dcbf1db34263780d3580449eaec8c0b1a1ff4971e7a330c"
     }
   ],
   "errata": []

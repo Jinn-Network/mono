@@ -78,7 +78,7 @@ export const CHAIN_CONFORMANCE_SCENARIOS = [
 export type ScriptedChainScenario = (typeof CHAIN_CONFORMANCE_SCENARIOS)[number];
 
 export const CONFORMANCE_VERIFIER_IDENTITY: VerifierIdentity = Object.freeze({
-  id: "https://jinn.network/chain-environment-verification/conformance-verifier",
+  id: "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
   version: "0.1.0",
   digest: `sha256:${"7".repeat(64)}`,
 }) as VerifierIdentity;
@@ -450,7 +450,7 @@ function informationWorldComponent(id: string, name: string) {
   return {
     world: {
       id,
-      kind: "https://jinn.network/records/information-world/1.0",
+      kind: "https://spec.jinn.network/records/information-world/v1",
       record: {
         name,
         digest: { sha256: artifact.digest.slice("sha256:".length) },

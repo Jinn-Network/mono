@@ -1,13 +1,13 @@
 {
   "sourceDigest": "sha256:88286d246aa8e2befb7f9f606421853b6c3103aa9484267e4304f824db445fc6",
-  "traceId": "0e3165a6acd9613d51d8420d0c95f8d0",
+  "traceId": "f1a1b5366da5b42d2cc029bd7a7aef9a",
   "timebase": "synthetic-ordinal",
   "completeness": {
     "decoded": "full"
   },
   "spans": [
     {
-      "spanId": "63add7b6d3792bdb",
+      "spanId": "465be51e9bdae23b",
       "parentSpanId": null,
       "name": "invoke_agent claude-code",
       "kind": 1,
@@ -57,13 +57,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.outcome",
+          "key": "jinn.trace.outcome",
           "value": {
             "stringValue": "success"
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -75,8 +75,8 @@
       }
     },
     {
-      "spanId": "5e3c26b28f71fd28",
-      "parentSpanId": "63add7b6d3792bdb",
+      "spanId": "9b19bbd9b0902234",
+      "parentSpanId": "465be51e9bdae23b",
       "name": "chat synthetic-model-a",
       "kind": 3,
       "startTimeUnixNano": "2",
@@ -101,13 +101,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "2"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -119,8 +119,8 @@
       }
     },
     {
-      "spanId": "780aee96dc444a22",
-      "parentSpanId": "5e3c26b28f71fd28",
+      "spanId": "a274cbc36e695ff1",
+      "parentSpanId": "9b19bbd9b0902234",
       "name": "execute_tool Read",
       "kind": 1,
       "startTimeUnixNano": "2",
@@ -151,7 +151,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "2"
           }
@@ -163,8 +163,8 @@
       }
     },
     {
-      "spanId": "a2c94091bebf672d",
-      "parentSpanId": "63add7b6d3792bdb",
+      "spanId": "7298038e90cdb20c",
+      "parentSpanId": "465be51e9bdae23b",
       "name": "chat",
       "kind": 3,
       "startTimeUnixNano": "4",
@@ -183,13 +183,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "4"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -201,5 +201,5 @@
       }
     }
   ],
-  "recordDigest": "sha256:d03dd80aa79166189f610ec51640750d582db6532ebbcd462e9d82d9a187e1be"
+  "recordDigest": "sha256:dc414f7965a82e276369acc03a192194429c8f3718178f2917d1b350673a7e8b"
 }

@@ -158,7 +158,7 @@ function verdictEnvelopeBytes(labelDigest: string, outcome: VerdictOutcome): Uin
   const statement: ResultEvaluationStatement = {
     _type: "https://in-toto.io/Statement/v1",
     subject: [{ name: `fixture/${labelDigest}`, digest: { sha256: labelDigest.slice("sha256:".length) } }],
-    predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
       evaluatedAt: "2026-07-29T00:00:00Z",
       evaluator: { id: "urn:uuid:77777777-7777-5777-8777-777777777777" },
@@ -372,7 +372,7 @@ function clusterBcaMethodFixture(
     parameters: fixture.parameters,
     verdictRule: fixture.verdictRule,
     matrices: [{
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       run: { digest: { sha256: "0".repeat(64) } },
       closeBoundary: { at: "2026-08-04T00:00:00Z" },
       cells,
@@ -474,7 +474,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
     const benchmarkDigest = `sha256:${String(matrixIndex + 1).padStart(64, "b")}`;
     const methodParameters = { ...fixture.parameters, verdictRule: fixture.verdictRule };
     const sealedRun = sealRun({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       benchmark: { digest: { sha256: benchmarkDigest.slice("sha256:".length) } },
       owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
       arms: armIds.map((armId) => ({ armId, pinning: { "fixture/arm": armId } })),
@@ -499,7 +499,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
     matrix.run.digest.sha256 = sealedRun.digest.slice("sha256:".length);
 
     const entryBytes = canonicalJsonBytes({
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: { agent: "urn:uuid:88888888-8888-5888-8888-888888888888", name: "fixture" },
       sequence: "0000000000000001",
       previous: null,
@@ -508,7 +508,7 @@ function prepareFixture(fixture: MethodFixture): PreparedMethodFixture {
         announcementId: `benchmark-${matrixIndex}`,
         action: "available",
         record: {
-          kind: "https://jinn.network/records/benchmark/1.0",
+          kind: "https://spec.jinn.network/records/benchmark/v1",
           digest: benchmarkDigest,
         },
       }],
@@ -1150,10 +1150,14 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
       expect(result.verdict).toBe("PASS");
       expect(result.cost).toEqual({
         verdict: "lower", pValue: "0.0072", n: 10, excluded: { count: 0, cellKeys: [] },
+        // Replay order is the method's own: ascending synthetic Task digest. Those digests are
+        // sealed here through `sealTask`, so the re-seal's new `TASK_EXECUTION_PROTOCOL_URI`
+        // permutes them. The multiset (eight -0.9, two +0.10), n, p-value and scale are the
+        // assertion; the positions are re-pinned to the post-re-seal ordering.
         replay: { scale: "40", differences: [
-          `-9${"0".repeat(39)}`, `1${"0".repeat(39)}`,
-          `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`, `-9${"0".repeat(39)}`,
-          `1${"0".repeat(39)}`, ...Array.from({ length: 4 }, () => `-9${"0".repeat(39)}`),
+          ...Array.from({ length: 4 }, () => `-9${"0".repeat(39)}`), `1${"0".repeat(39)}`,
+          ...Array.from({ length: 3 }, () => `-9${"0".repeat(39)}`), `1${"0".repeat(39)}`,
+          `-9${"0".repeat(39)}`,
         ] },
       });
     });

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jinn.network/architecture/platform-packages.schema.json",
+  "$id": "https://spec.jinn.network/architecture/platform-packages.schema.json",
   "title": "Jinn platform package catalog",
   "type": "object",
   "additionalProperties": false,
@@ -24,13 +24,19 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "mode"],
+        "required": [
+          "path",
+          "mode"
+        ],
         "properties": {
           "path": {
             "$ref": "#/$defs/repositoryPath"
           },
           "mode": {
-            "enum": ["recursive", "package"]
+            "enum": [
+              "recursive",
+              "package"
+            ]
           },
           "excludedDirectories": {
             "type": "array",
@@ -69,7 +75,12 @@
             "minLength": 1
           },
           "classification": {
-            "enum": ["vendored", "fixture", "external", "transitional"]
+            "enum": [
+              "vendored",
+              "fixture",
+              "external",
+              "transitional"
+            ]
           },
           "reviewCondition": {
             "type": "string",
@@ -97,10 +108,16 @@
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "path"],
+        "required": [
+          "kind",
+          "path"
+        ],
         "properties": {
           "kind": {
-            "enum": ["workflow", "source-boundary"]
+            "enum": [
+              "workflow",
+              "source-boundary"
+            ]
           },
           "path": {
             "$ref": "#/$defs/repositoryPath"
@@ -166,12 +183,20 @@
     "tierRules": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allowedDependencies"],
+      "required": [
+        "allowedDependencies"
+      ],
       "properties": {
         "allowedDependencies": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["1", "2", "3", "4", "null"],
+          "required": [
+            "1",
+            "2",
+            "3",
+            "4",
+            "null"
+          ],
           "properties": {
             "1": {
               "$ref": "#/$defs/tierList"
@@ -197,6 +222,40 @@
       "items": {
         "$ref": "#/$defs/package"
       }
+    },
+    "resolvableIdentifiers": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identifier",
+          "resolution",
+          "entryPoint",
+          "owner"
+        ],
+        "properties": {
+          "identifier": {
+            "type": "string",
+            "pattern": "^https://spec\\.jinn\\.network/"
+          },
+          "resolution": {
+            "enum": [
+              "document",
+              "prefix"
+            ]
+          },
+          "entryPoint": {
+            "type": "string",
+            "minLength": 1
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -206,7 +265,13 @@
       "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
     },
     "tier": {
-      "enum": [1, 2, 3, 4, null]
+      "enum": [
+        1,
+        2,
+        3,
+        4,
+        null
+      ]
     },
     "tierList": {
       "type": "array",
@@ -256,13 +321,23 @@
     "authoritySource": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path", "status"],
+      "required": [
+        "path",
+        "status"
+      ],
       "properties": {
         "path": {
           "$ref": "#/$defs/repositoryPath"
         },
         "status": {
-          "enum": ["ratified", "approved", "proposed", "draft", "current", "superseded"]
+          "enum": [
+            "ratified",
+            "approved",
+            "proposed",
+            "draft",
+            "current",
+            "superseded"
+          ]
         }
       }
     },
@@ -325,7 +400,10 @@
         "authority": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["documents", "decisionRecord"],
+          "required": [
+            "documents",
+            "decisionRecord"
+          ],
           "properties": {
             "documents": {
               "type": "array",
@@ -370,10 +448,16 @@
         "boundaryPolicy": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "path"],
+          "required": [
+            "kind",
+            "path"
+          ],
           "properties": {
             "kind": {
-              "enum": ["workflow", "source-boundary"]
+              "enum": [
+                "workflow",
+                "source-boundary"
+              ]
             },
             "path": {
               "$ref": "#/$defs/repositoryPath"
@@ -383,7 +467,12 @@
         "publicSurface": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["schemas", "profiles", "fixtures", "conformance"],
+          "required": [
+            "schemas",
+            "profiles",
+            "fixtures",
+            "conformance"
+          ],
           "properties": {
             "schemas": {
               "$ref": "#/$defs/stringList"
@@ -408,7 +497,11 @@
         "transition": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["reason", "status", "sunsetCondition"],
+          "required": [
+            "reason",
+            "status",
+            "sunsetCondition"
+          ],
           "properties": {
             "reason": {
               "type": "string",
@@ -433,23 +526,34 @@
                 "type": "null"
               }
             },
-            "required": ["tier"]
+            "required": [
+              "tier"
+            ]
           },
           "then": {
-            "required": ["tierReason"]
+            "required": [
+              "tierReason"
+            ]
           }
         },
         {
           "if": {
             "properties": {
               "stability": {
-                "enum": ["deprecated", "transitional"]
+                "enum": [
+                  "deprecated",
+                  "transitional"
+                ]
               }
             },
-            "required": ["stability"]
+            "required": [
+              "stability"
+            ]
           },
           "then": {
-            "required": ["transition"]
+            "required": [
+              "transition"
+            ]
           }
         }
       ]

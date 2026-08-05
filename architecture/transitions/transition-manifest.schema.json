@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jinn.network/architecture/transition-manifest.schema.json",
+  "$id": "https://spec.jinn.network/architecture/transition-manifest.schema.json",
   "title": "Jinn Phase D transition manifest",
   "type": "object",
   "additionalProperties": false,

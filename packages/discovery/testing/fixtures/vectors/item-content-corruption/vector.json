@@ -5,7 +5,7 @@
   "input": {
     "item": {
       "record": {
-        "kind": "https://jinn.network/records/submission/1.0",
+        "kind": "https://spec.jinn.network/records/submission/v1",
         "digest": "sha256:584b846c6865b94fab600274f930bb58ff08f69fbaea6a9aa0c6f8e1590c28ee"
       },
       "provenance": {

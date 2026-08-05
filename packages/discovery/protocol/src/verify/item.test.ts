@@ -19,7 +19,7 @@ import type { EntryFetcher, FactsRecompute, KeyResolver, RecordFetcher, Signatur
 
 const AGENT = "did:key:zAgentSourceOne";
 const SOURCE_NAME = "feed";
-const RECORD_KIND = "https://jinn.network/records/submission/1.0";
+const RECORD_KIND = "https://spec.jinn.network/records/submission/v1";
 
 const recordBytes = new TextEncoder().encode(JSON.stringify({ hello: "world" }));
 const recordDigestValue = recordDigest(recordBytes);

@@ -83,8 +83,8 @@ test('the final deterministic publication receipt is attested and uploaded', () 
 test('stable resolves an exact tag SHA and shares verification without any publication path', () => {
   const resolverAt = workflow.indexOf('resolve-stable-source:');
   const stableVerificationAt = workflow.indexOf('stable-verification:');
-  const blockerAt = workflow.indexOf('stable-hosting-blocker:');
-  assert.ok(resolverAt > -1 && stableVerificationAt > resolverAt && blockerAt > stableVerificationAt);
+  const liveHostAt = workflow.indexOf('stable-live-host-verification:');
+  assert.ok(resolverAt > -1 && stableVerificationAt > resolverAt && liveHostAt > stableVerificationAt);
   const resolver = workflow.slice(resolverAt, stableVerificationAt);
   assert.match(resolver, /\^stack-v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/u);
   assert.match(resolver, /git ls-remote origin "refs\/tags\/\$\{RELEASE_TAG\}"/u);
@@ -96,18 +96,74 @@ test('stable resolves an exact tag SHA and shares verification without any publi
   assert.match(resolver, /TAG_VERSION/u);
   assert.match(resolver, /fixture-immutability\.mjs\s+--registry-baseline\s+--version "\$\{TAG_VERSION\}"/u);
   assert.match(resolver, /source_sha=/u);
-  const verification = workflow.slice(stableVerificationAt, blockerAt);
+  const verification = workflow.slice(stableVerificationAt, liveHostAt);
   assert.match(verification, /uses: \.\/\.github\/workflows\/platform-verification\.yml/u);
   assert.match(verification, /source_sha: \$\{\{ needs\.resolve-stable-source\.outputs\.source_sha \}\}/u);
   assert.match(verification, /lane: stable/u);
-  const blocker = workflow.slice(blockerAt);
-  assert.match(blocker, /live profile host verification/u);
-  assert.match(blocker, /::error::/u);
-  assert.match(blocker, /exit 1/u);
 
   const stableSurface = workflow.slice(resolverAt);
   assert.doesNotMatch(stableSurface, /npm\s+publish|publish-verified-platform|publish-stack\.mjs/u);
   assert.doesNotMatch(stableSurface, /environment: npm-stable-publish/u);
+});
+
+test('the unconditional hosting blocker is gone, replaced by a real live-host gate', () => {
+  assert.doesNotMatch(workflow, /stable-hosting-blocker/u);
+  assert.doesNotMatch(workflow, /Keep Phase A stable publication mechanically disabled/u);
+  assert.match(workflow, /^\s{2}stable-live-host-verification:/mu);
+  assert.match(workflow, /node \.github\/scripts\/verify-live-profile-host\.mjs/u);
+});
+
+test('live-host verification needs the resolved source and the same-run verification', () => {
+  const liveHostAt = workflow.indexOf('stable-live-host-verification:');
+  const attestationAt = workflow.indexOf('stable-live-host-attestation:');
+  const gateAt = workflow.indexOf('stable-publish-gate:');
+  assert.ok(liveHostAt > -1 && attestationAt > liveHostAt && gateAt > attestationAt);
+  const block = workflow.slice(liveHostAt, attestationAt);
+
+  assert.match(block, /needs:\s*\n\s+- resolve-stable-source\s*\n\s+- stable-verification/u);
+  assert.match(block, /github\.event_name == 'release' && startsWith\(github\.event\.release\.tag_name, 'stack-v'\)/u);
+  assert.match(block, /github\.event_name == 'workflow_dispatch'/u);
+  assert.match(block, /timeout-minutes: 20/u);
+  // The job talks to the public network: contents: read and nothing else.
+  assert.match(block, /permissions:\s*\n\s+contents: read\s*\n/u);
+  assert.doesNotMatch(block, /id-token: write|attestations: write/u);
+
+  assert.match(block, /--lane stable/u);
+  assert.match(block, /--release-group platform-v1/u);
+  assert.match(block, /--origin "\$\{PROFILE_HOST_ORIGIN\}"/u);
+  assert.match(block, /PROFILE_HOST_ORIGIN: https:\/\/spec\.jinn\.network/u);
+  assert.match(block, /--public-key-url "\$\{PUBLIC_KEY_URL\}"/u);
+  assert.match(block, /--expect-public-key-sha256 "\$\{PUBLIC_KEY_SHA256\}"/u);
+  assert.match(block, /--root \.platform-verification\/profile-root/u);
+  assert.match(block, /--receipt \.platform-verification-receipt\/verification-receipt\.json/u);
+  assert.equal((block.match(/uses: actions\/download-artifact@v4/gu) ?? []).length, 2);
+  assert.match(block, /name: platform-live-host-receipt/u);
+  assert.match(block, /if-no-files-found: error/u);
+
+  const attestation = workflow.slice(attestationAt, gateAt);
+  assert.match(attestation, /uses: actions\/attest@v4/u);
+  assert.match(attestation, /subject-path: \.platform-live-host-receipt\/live-host-receipt\.json/u);
+  for (const permission of ['id-token: write', 'attestations: write', 'artifact-metadata: write']) {
+    assert.ok(attestation.includes(permission), `missing attestation permission ${permission}`);
+  }
+});
+
+test('the publish gate always runs, needs exact success from every proof job, and holds no permissions', () => {
+  const gateAt = workflow.indexOf('stable-publish-gate:');
+  const gate = workflow.slice(gateAt);
+  assert.match(gate, /needs:\s*\n\s+- stable-verification\s*\n\s+- stable-live-host-verification\s*\n\s+- stable-live-host-attestation/u);
+  assert.match(gate, /always\(\)/u);
+  assert.match(gate, /permissions: \{\}/u);
+  assert.match(gate, /needs\.stable-verification\.result/u);
+  assert.match(gate, /needs\.stable-live-host-verification\.result/u);
+  assert.match(gate, /needs\.stable-live-host-attestation\.result/u);
+  assert.match(gate, /!= "success"/u);
+  assert.match(gate, /::error::/u);
+  assert.match(gate, /exit 1/u);
+});
+
+test('no job in the workflow may soften a failure with continue-on-error', () => {
+  assert.doesNotMatch(workflow, /continue-on-error/u);
 });
 
 test('the Phase A boolean hold and old polling or parallel best-effort jobs are gone', () => {

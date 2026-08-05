@@ -21,7 +21,7 @@
       "types": "./dist/index.d.ts"
     },
     "./profiles/*": "./profiles/*",
-    "./schemas/*": "./profiles/execution-evidence/1.0/schemas/*",
+    "./schemas/*": "./profiles/execution-evidence/v1/schemas/*",
     "./fixtures/*": "./fixtures/*"
   },
   "files": [

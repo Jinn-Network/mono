@@ -7,7 +7,7 @@
     },
     {
       "id": "golden-oci-mapping/artifact.manifest.json",
-      "sha256": "5645701029406e778e00b3f3e91c44b4171ec60a1e9547816165c315cc1f6284"
+      "sha256": "f8fecf26aa9f2dad518f1341a54c5c47905c64d05cc3dc51c041c535d2529e5d"
     },
     {
       "id": "golden-oci-mapping/execution-evidence.content",
@@ -15,7 +15,7 @@
     },
     {
       "id": "golden-oci-mapping/execution-evidence.manifest.json",
-      "sha256": "bbb57908370a7df3c6cbc91f4b4c386cc8946272e097a7654da860dfaec9c253"
+      "sha256": "25ac78b817d4a1013a8caf0a5fed889cd56af41265fc8aad3bdaa508600137a5"
     },
     {
       "id": "golden-oci-mapping/execution-verification.content",
@@ -23,11 +23,11 @@
     },
     {
       "id": "golden-oci-mapping/execution-verification.manifest.json",
-      "sha256": "b2d488ad93e79547703869d665f6f4c0f45ef7e46aedd16d8e942232b5cacfb0"
+      "sha256": "8ae57fd9ca520b8078721496b5b480aff638821d9bee2ed072cf9383bf5a0f62"
     },
     {
       "id": "golden-oci-mapping/expected-digests.json",
-      "sha256": "b08b75efb334a07053a80c3d92ed5e4bba6d7955c3c113b1d4980df23c230a77"
+      "sha256": "77bf6468b6a89d6685ae45c40188e4cea9451a4ed3603643e2f0baba6957ad58"
     },
     {
       "id": "golden-oci-mapping/result-evaluation.content",
@@ -35,7 +35,7 @@
     },
     {
       "id": "golden-oci-mapping/result-evaluation.manifest.json",
-      "sha256": "14038e8a508bb9310ba68bb44b25e59ff6a7ae3119d14c7dc8ba4afd5c8a7f71"
+      "sha256": "81195f10541d5379e9dd6652dd3f9ad6358e571b42147179393cf3b3634ee87c"
     }
   ],
   "errata": []
