@@ -1,0 +1,12 @@
+{
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
+  "kind": "https://spec.jinn.network/records/information-world/v1",
+  "profile": "https://spec.jinn.network/facts/information-world/v1",
+  "fields": [
+    { "name": "informationWorldRecordDigest", "class": "record" },
+    { "name": "capture.fidelity", "class": "record", "cloudEvents": { "attribute": "fidelity", "scalar": "string" } },
+    { "name": "requestKeyPolicy.version", "class": "record", "cloudEvents": { "attribute": "keypolicy", "scalar": "string" } },
+    { "name": "corpus.entryCount", "class": "record", "cloudEvents": { "attribute": "entries", "scalar": "number" } },
+    { "name": "corpus.originCount", "class": "record", "cloudEvents": { "attribute": "origins", "scalar": "number" } }
+  ]
+}

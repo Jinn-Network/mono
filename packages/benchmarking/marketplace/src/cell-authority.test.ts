@@ -52,7 +52,7 @@ const FIXTURES_ROOT = fileURLToPath(new URL("../fixtures/projector/", import.met
 function buildSealedSubmission(dispatch = 1) {
   const extension = submissionExtensionBlock(RUN_DIGEST, CELL_KEY, "armA");
   const doc = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: SUBMISSION_URN,
     task: { digest: { sha256: TASK_DIGEST } },
     requester: "urn:uuid:3333333333333333333333333333333333333333",
@@ -415,7 +415,7 @@ describe("authorizeCellFromProjection attempt selection", () => {
       attemptIndex: 1,
     });
     const deliveryBytes = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt: attempt1,
       task: `sha256:${TASK_DIGEST}`,
       outputs: [],

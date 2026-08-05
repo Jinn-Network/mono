@@ -10,7 +10,7 @@ import {
 } from "./chain-verification.js";
 
 const head = {
-  protocol: "https://jinn.network/record-discovery/1.0",
+  protocol: "https://spec.jinn.network/record-discovery/v1",
   origin: "https://agents.test/alice/attempts",
   sequence: "0000000000000003",
   entry: `sha256:${"a".repeat(64)}` as const,

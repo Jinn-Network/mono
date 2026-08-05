@@ -73,7 +73,11 @@ test('formats, never record kinds: the two tokens claim no tier-2 status', () =>
   assert.match(tokens, /CANDIDATE_MANIFEST_FORMAT_TOKEN = "network\.jinn\.policy\.candidate\/1\.0"/);
   for (const file of productionSources()) {
     const text = readFileSync(file, 'utf8');
-    assert.doesNotMatch(text, /https:\/\/jinn\.network\/records\//,
+    // DR-2026-08-04: the re-seal moved every record kind to spec.jinn.network, but a
+    // legacy-origin record kind is still a record kind -- the constraint is about the layer's
+    // behavior (format, never record), not about which origin spells the URI. Forbid a
+    // record-kind path under either host so this guard still constrains something post-re-seal.
+    assert.doesNotMatch(text, /https:\/\/(?:spec\.)?jinn\.network\/records\//,
       `${relative(root, file)} claims a record kind; substrate §2 says nothing here is one`);
   }
 });

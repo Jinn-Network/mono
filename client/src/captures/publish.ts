@@ -18,7 +18,7 @@ import { scrubCaptureSpans } from '../trajectory/scrub/emit-scrub.js';
 const ZERO_MEASUREMENT = `0x${'0'.repeat(64)}` as const;
 const DEFAULT_PRICE_USDC = '0';
 const DONATION_ARTIFACT_ENCODING = 'jinn.artifact.donation.v1' as const;
-const CAPTURE_TRAJECTORY_ARTIFACT_TYPE = 'jinn.capture-trajectory.v1' as const;
+const CAPTURE_TRACE_ARTIFACT_TYPE = 'jinn.capture-trajectory.v1' as const;
 
 export interface CapturePublishedBlob {
   cid: string;
@@ -125,7 +125,7 @@ export async function publishCaptureEnvelope(
   const trajectoryPayload = await buildCaptureTrajectoryPayload(capture, spans, now, scrubPipeline);
   const trajectoryBlob = await deps.publishArtifact({
     sessionId,
-    artifactType: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
+    artifactType: CAPTURE_TRACE_ARTIFACT_TYPE,
     payload: trajectoryPayload,
     metadata: { description: 'Redacted local-session capture trajectory' },
   });
@@ -289,7 +289,7 @@ async function buildCaptureTrajectoryPayload(
   const perClassCounts: Record<string, number> = {};
   const scrubbed = await scrubCaptureSpans(spans, scrubPipeline, { perClassCounts });
   const unsigned = {
-    schemaVersion: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
+    schemaVersion: CAPTURE_TRACE_ARTIFACT_TYPE,
     sessionId: capture.sessionId,
     capturedAt: capture.capturedAt,
     exportedAt: now.toISOString(),
@@ -346,7 +346,7 @@ function blobToAccess(blob: CapturePublishedBlob, deps: Pick<
 
 function trajectoryToArtifact(trajectory: ReturnType<typeof blobToAccess>): Artifact {
   return {
-    artifactType: CAPTURE_TRAJECTORY_ARTIFACT_TYPE,
+    artifactType: CAPTURE_TRACE_ARTIFACT_TYPE,
     sha256: trajectory.sha256,
     metadata: { description: 'Redacted local-session capture trajectory' },
     access: { endpoint: trajectory.endpoint, priceUsdc: trajectory.priceUsdc },

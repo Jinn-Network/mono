@@ -153,7 +153,7 @@ function matrix(cells, opts = {}) {
     perArm[c.armId][c.outcome] += 1;
   }
   return {
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: opts.run ?? RUN_DESCRIPTOR,
     closeBoundary: CLOSE_BOUNDARY,
     cells,

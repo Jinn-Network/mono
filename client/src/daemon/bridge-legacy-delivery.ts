@@ -132,7 +132,7 @@ export function synthesizeLegacyTaskProjection(input: {
   };
 }
 
-const TEP_PROTOCOL_URI = 'https://jinn.network/profiles/task-execution/1.0' as const;
+const TEP_PROTOCOL_URI = 'https://spec.jinn.network/profiles/task-execution/v1' as const;
 const LEGACY_SIGNED_TASK_INPUT_NAME = 'legacy-signed-task-v1.json' as const;
 
 /**

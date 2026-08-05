@@ -21,9 +21,9 @@ async function write(path, bytes) {
 // --- one Task, sealed once (§24: "a complete local-and-marketplace scenario pair over one Task
 // digest") ---
 const taskDocument = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://jinn.network/task-profiles/repository-work/1.0",
+    uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
     digest: {
       sha256: sha256Hex(
         Buffer.from("golden fixture placeholder repository-work profile v1"),
@@ -130,7 +130,7 @@ const report = { taskDigest, scenarios: {} };
   const submissionUri = "urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb";
   const source = "urn:jinn:backend:local";
   const submissionDocument = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
     requester: "urn:uuid:cccccccc-cccc-5ccc-8ccc-cccccccccccc",
@@ -142,7 +142,7 @@ const report = { taskDigest, scenarios: {} };
   await write(join(fixtureRoot, "local", "submission.json"), submissionBytes);
 
   const deliveryDocument = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt,
     task: taskDigest,
     outputs: [
@@ -183,7 +183,7 @@ const report = { taskDigest, scenarios: {} };
   const submissionUri = "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd";
   const source = "urn:jinn:backend:marketplace";
   const submissionDocument = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
     requester: "urn:uuid:eeeeeeee-eeee-5eee-8eee-eeeeeeeeeeee",
@@ -200,7 +200,7 @@ const report = { taskDigest, scenarios: {} };
   await write(join(fixtureRoot, "marketplace", "submission.json"), submissionBytes);
 
   const deliveryDocument = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt,
     task: taskDigest,
     outputs: [

@@ -1,6 +1,6 @@
 {
   "fixtureVersion": 1,
-  "protocol": "https://jinn.network/profiles/execution-evidence/1.0",
+  "protocol": "https://spec.jinn.network/profiles/execution-evidence/v1",
   "sourceExecutionId": "urn:uuid:1b110a92-0095-4cd5-b230-847c7f0d6ba2",
   "overall": "nonconforming-source-backed-candidate",
   "profiles": {

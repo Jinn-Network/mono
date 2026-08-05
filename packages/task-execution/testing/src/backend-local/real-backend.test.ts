@@ -105,7 +105,7 @@ function baseConfig(stateRoot: string): LocalTaskExecutionBackendConfig {
   return {
     stateRoot,
     source: `urn:jinn:backend-local:conformance:${stateRoot.split("/").at(-1)}`,
-    executor: "https://jinn.network/software/fake-launcher",
+    executor: "https://spec.jinn.network/software/fake-launcher",
     profileStore: emptyProfileStore,
     // The unchanged core kit carries a historical placeholder digest for which no sealed
     // profile document exists. The downstream host injects the intended immutable profile

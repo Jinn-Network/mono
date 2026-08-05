@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "_type": {
+      "type": "string",
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "digest": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": {}
+          },
+          "uri": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "downloadLocation": {
+            "type": "string"
+          },
+          "annotations": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "name",
+          "digest"
+        ],
+        "additionalProperties": {}
+      }
+    },
+    "predicateType": {
+      "type": "string",
+      "const": "https://spec.jinn.network/attestations/result-evaluation/v1"
+    },
+    "predicate": {
+      "type": "object",
+      "properties": {
+        "evaluatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+        },
+        "evaluator": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": {}
+        },
+        "evaluationMethod": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            },
+            "uri": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": {}
+        },
+        "evaluationSpecification": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": {}
+            },
+            "uri": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "downloadLocation": {
+              "type": "string"
+            },
+            "annotations": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": {}
+        },
+        "taskSubject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resultSubjects": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail",
+            "inconclusive"
+          ]
+        },
+        "measurements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "unit": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "value"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              },
+              "uri": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              },
+              "uri": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        },
+        "disputes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "type": "object",
+                "properties": {
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "additionalProperties": {}
+              },
+              "uri": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              },
+              "downloadLocation": {
+                "type": "string"
+              },
+              "annotations": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "name",
+              "digest"
+            ],
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "evaluatedAt",
+        "evaluator",
+        "taskSubject",
+        "resultSubjects",
+        "verdict"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
+}

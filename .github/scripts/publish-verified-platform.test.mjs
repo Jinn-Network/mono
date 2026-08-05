@@ -77,7 +77,7 @@ function publicationFixture({
   const sourceProfileRoot = join(repoRoot, profilePackage.path, 'schemas');
   mkdirSync(sourceProfileRoot, { recursive: true });
   writeFileSync(join(sourceProfileRoot, 'profile.schema.json'), `${JSON.stringify({
-    $id: 'https://jinn.network/fixture/profile.schema.json',
+    $id: 'https://spec.jinn.network/fixture/profile.schema.json',
     type: 'object',
   }, null, 2)}\n`, 'utf8');
 

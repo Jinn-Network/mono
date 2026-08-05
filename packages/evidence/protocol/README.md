@@ -9,9 +9,9 @@ identity, signature trust, quality, retention, marketplace eligibility, or acces
 
 ## Package contents
 
-- `profiles/execution-evidence/1.0/specification.md` — normative human specification.
-- `profiles/execution-evidence/1.0/ro-crate-metadata.json` — Profile Crate.
-- `profiles/execution-evidence/1.0/schemas/` — checked-in JSON Schema Draft 2020-12.
+- `profiles/execution-evidence/v1/specification.md` — normative human specification.
+- `profiles/execution-evidence/v1/ro-crate-metadata.json` — Profile Crate.
+- `profiles/execution-evidence/v1/schemas/` — checked-in JSON Schema Draft 2020-12.
 - `fixtures/golden-execution-evidence-v1/` — conforming private and public examples.
 - `fixtures/autopilot-issue-1697/` — intentionally nonconforming source-backed candidate.
 - `dist/` — reference schemas, validators, integrity checks, and DSSE utilities.
@@ -49,4 +49,4 @@ yarn pack:smoke
 ```
 
 The profile URI is reserved but is not hosted by this package:
-`https://jinn.network/profiles/execution-evidence/1.0`.
+`https://spec.jinn.network/profiles/execution-evidence/v1`.

@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/evidence-trace-decode",
   "version": "0.1.0",
-  "description": "Format-keyed decoders from digest-bound native-trace bytes to Trajectory record spans.",
+  "description": "Format-keyed decoders from digest-bound native-trace bytes to Trace record spans.",
   "type": "module",
   "packageManager": "yarn@4.13.0",
   "engines": {
@@ -45,7 +45,7 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/evidence-trajectory": "0.1.0"
+    "@jinn-network/evidence-trace": "0.1.0"
   },
   "peerDependencies": {
     "vitest": "^4.1.8"
@@ -61,7 +61,7 @@
     "vitest": "^4.1.8"
   },
   "resolutions": {
-    "@jinn-network/evidence-trajectory": "portal:../trajectory",
+    "@jinn-network/evidence-trace": "portal:../trace",
     "@jinn-network/evidence-protocol": "portal:../protocol",
     "@jinn-network/trust-core": "portal:../../trust/core",
     "vite": "6.4.3"

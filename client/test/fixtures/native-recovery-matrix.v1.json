@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/tests/native-recovery-matrix/1.0",
+  "protocol": "https://spec.jinn.network/tests/native-recovery-matrix/v1",
   "seeds": [
     {
       "seed": "B800", "boundary": "posting-wallet-return-uncertain", "rail": "requester",

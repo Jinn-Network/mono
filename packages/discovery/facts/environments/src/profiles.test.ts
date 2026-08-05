@@ -8,7 +8,7 @@ describe("environment facts profile (design §4.4)", () => {
   it("binds the record kind discovery's own grammar accepts", () => {
     expect(() => assertRecordKindUri(ENVIRONMENT_RECORD_KIND)).not.toThrow();
     expect(environmentFactsProfile.kind).toBe(ENVIRONMENT_RECORD_KIND);
-    expect(environmentFactsProfile.profile).toBe(`${ENVIRONMENT_RECORD_KIND}/facts/1.0`);
+    expect(environmentFactsProfile.profile).toBe("https://spec.jinn.network/facts/environment/v1");
   });
 
   it("names exactly the fields the design requires", () => {

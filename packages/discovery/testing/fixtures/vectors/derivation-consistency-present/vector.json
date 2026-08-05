@@ -5,7 +5,7 @@
   "input": {
     "item": {
       "record": {
-        "kind": "https://jinn.network/records/delivery/1.0",
+        "kind": "https://spec.jinn.network/records/delivery/v1",
         "digest": "sha256:f226ccc53fea7efca138e37a55ef7efc31d91516a242f407e16000f5613bbde7"
       },
       "facts": {},
@@ -15,7 +15,7 @@
           "agent": "did:key:zProjector",
           "name": "marketplace"
         },
-        "entry": "sha256:8a135d771e0746aec4cebc8d23a2958a5c89cb11d2c8871beef44bdfa3e59f8c",
+        "entry": "sha256:9157dcfc8b96b6d0435e87f37cab5547a1b7fd830dec6c6c6f7a9072facf5a48",
         "announcementId": "ann-derivation-consistency-present",
         "derivation": {
           "substrateRef": "sha256:dccf178446e74c8f94818405d5a015e7a83c39ae52b82bb9225440aca967dcd7"
@@ -27,7 +27,7 @@
       "kind": "delivery"
     },
     "citedEntry": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
       "source": {
         "agent": "did:key:zProjector",
         "name": "marketplace"
@@ -40,7 +40,7 @@
           "announcementId": "ann-derivation-consistency-present",
           "action": "available",
           "record": {
-            "kind": "https://jinn.network/records/delivery/1.0",
+            "kind": "https://spec.jinn.network/records/delivery/v1",
             "digest": "sha256:f226ccc53fea7efca138e37a55ef7efc31d91516a242f407e16000f5613bbde7"
           }
         }

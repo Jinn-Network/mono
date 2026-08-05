@@ -1,2 +1,15 @@
 .vercel
 .env*
+
+# deps
+/node_modules
+/.yarn
+
+# fumadocs-mdx generated content
+/.source
+
+# build
+/.next/
+/out/
+*.tsbuildinfo
+next-env.d.ts

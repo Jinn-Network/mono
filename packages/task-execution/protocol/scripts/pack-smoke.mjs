@@ -70,7 +70,7 @@ import {
   mergeRequirements,
 } from "@jinn-network/task-execution-protocol";
 
-if (TASK_EXECUTION_PROTOCOL_URI !== "https://jinn.network/profiles/task-execution/1.0") {
+if (TASK_EXECUTION_PROTOCOL_URI !== "https://spec.jinn.network/profiles/task-execution/v1") {
   throw new Error("root import failed");
 }
 await readFile(new URL(import.meta.resolve("@jinn-network/task-execution-protocol/schemas/task.schema.json")));

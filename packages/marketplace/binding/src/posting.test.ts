@@ -13,9 +13,9 @@ function hash(char: string): `0x${string}` {
 
 function goldenTask(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
     },
     instructions: "Fix the failing test.",
@@ -25,7 +25,7 @@ function goldenTask(): Uint8Array {
 
 function goldenSubmission(taskBytes: Uint8Array, overrides: Record<string, unknown> = {}): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${crypto.randomUUID()}`,
     task: { digest: { sha256: sha256Hex(taskBytes) } },
     requester: `urn:uuid:${crypto.randomUUID()}`,
@@ -93,9 +93,9 @@ describe("postTask", () => {
   test("enforces the digest-join before broadcast: a mismatched task digest rejects invalid-reference, never reaching the safe port", async () => {
     const task = goldenTask();
     const otherTask = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: {
-        uri: "https://jinn.network/task-profiles/repository-work/1.0",
+        uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
         digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
       },
       instructions: "A DIFFERENT task.",
@@ -114,7 +114,7 @@ describe("postTask", () => {
   test("rejects the mismatched pair as a TaskExecutionError instance", async () => {
     const task = goldenTask();
     const wrongDigestSubmission = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: `urn:uuid:${crypto.randomUUID()}`,
       task: { digest: { sha256: "0".repeat(64) } },
       requester: `urn:uuid:${crypto.randomUUID()}`,

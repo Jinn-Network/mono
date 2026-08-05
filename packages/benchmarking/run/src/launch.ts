@@ -260,7 +260,7 @@ async function sealNewSubmission(input: {
     run.closeAt,
   );
   const submissionDocument = {
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: submissionUri,
     task: { digest: { sha256: coord.taskDigest } },
     requester: run.owner,

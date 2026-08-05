@@ -1,0 +1,38 @@
+{
+  "name": "@jinn-network/website",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@4.13.0",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "npx --yes serve@14 out",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "check:links": "node scripts/check-links.mjs"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fumadocs-core": "16.14.0",
+    "fumadocs-mdx": "^15.2.2",
+    "fumadocs-ui": "16.14.0",
+    "lucide-react": "^1.27.0",
+    "next": "16.3.0",
+    "radix-ui": "^1.6.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.3.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.24",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3"
+  }
+}

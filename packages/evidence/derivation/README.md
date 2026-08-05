@@ -95,7 +95,7 @@ This package does not ship ML inference, a review queue, repository access,
 publication, announcements, application wiring, or legacy cutover behavior.
 
 See the packaged Evidence Profile
-[§3.6, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/packages/evidence/protocol/profiles/execution-evidence/1.0/specification.md#36-capture-and-derivation-provenance),
+[§3.6, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/packages/evidence/protocol/profiles/execution-evidence/v1/specification.md#36-capture-and-derivation-provenance),
 the Evidence Protocol rationale for
 [§6.8, Capture and derivation provenance](https://github.com/Jinn-Network/mono/blob/main/docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md#68-capture-and-derivation-provenance)
 and

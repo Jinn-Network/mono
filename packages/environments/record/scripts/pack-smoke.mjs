@@ -91,7 +91,7 @@ import {
   parseEnvironmentRecord,
 } from "@jinn-network/environment-record";
 
-if (ENVIRONMENT_RECORD_KIND !== "https://jinn.network/records/environment/1.0") {
+if (ENVIRONMENT_RECORD_KIND !== "https://spec.jinn.network/records/environment/v1") {
   throw new Error("root import failed");
 }
 await readFile(new URL(import.meta.resolve("@jinn-network/environment-record/schemas/environment.schema.json")));

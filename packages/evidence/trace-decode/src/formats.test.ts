@@ -26,28 +26,28 @@ describe("format identity registry", () => {
 
   test("maps every envelope format the local backend's launchers declare", () => {
     expect(formatIriForEnvelopeFormat("claude-code-stream-json")).toBe(
-      "https://jinn.network/formats/claude-code-stream-json/v1",
+      "https://spec.jinn.network/formats/claude-code-stream-json/v1",
     );
     expect(formatIriForEnvelopeFormat("hermes-json")).toBe(
-      "https://jinn.network/formats/hermes-json/v1",
+      "https://spec.jinn.network/formats/hermes-json/v1",
     );
     expect(formatIriForEnvelopeFormat("codex-exec-json")).toBe(
-      "https://jinn.network/formats/codex-exec-json/v1",
+      "https://spec.jinn.network/formats/codex-exec-json/v1",
     );
     expect(formatIriForEnvelopeFormat("cursor-agent-json")).toBe(
-      "https://jinn.network/formats/cursor-agent-json/v1",
+      "https://spec.jinn.network/formats/cursor-agent-json/v1",
     );
   });
 
   test("reconciles the frozen parsers' divergent source-format names", () => {
     expect(formatIriForLegacySourceFormat("hermes-session-json")).toBe(
-      "https://jinn.network/formats/hermes-json/v1",
+      "https://spec.jinn.network/formats/hermes-json/v1",
     );
     expect(formatIriForLegacySourceFormat("claude-code-stream-json")).toBe(
-      "https://jinn.network/formats/claude-code-stream-json/v1",
+      "https://spec.jinn.network/formats/claude-code-stream-json/v1",
     );
     expect(formatIriForLegacySourceFormat("codex-exec-json")).toBe(
-      "https://jinn.network/formats/codex-exec-json/v1",
+      "https://spec.jinn.network/formats/codex-exec-json/v1",
     );
   });
 
@@ -58,7 +58,7 @@ describe("format identity registry", () => {
 
   test("classifies the supervisor-facts format as not a harness trace", () => {
     const supervisorFacts = formatIdentity(
-      "https://jinn.network/formats/backend-local-supervisor-facts/v1",
+      "https://spec.jinn.network/formats/backend-local-supervisor-facts/v1",
     );
     expect(supervisorFacts?.harnessTrace).toBe(false);
     expect(

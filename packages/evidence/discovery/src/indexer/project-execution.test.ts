@@ -25,14 +25,14 @@ const fixtureRoot = new URL(
 );
 
 const PRIVATE_DIGEST =
-  "sha256:dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf";
+  "sha256:7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf";
 const PUBLIC_DIGEST =
-  "sha256:95fbf3c50d8a90f9437801e6559237f3bdf5eed2f613870462abfae1447c79a3";
+  "sha256:d31b6017ef4e4a23d61d510a51a13c6fff39ca344e87436cdc4c3360b69de8ed";
 const EXECUTION_ID = "urn:uuid:22222222-2222-4222-8222-222222222222";
 
 const expectedPrivateRelationships = [
   ["#capture", "agent", "urn:uuid:44444444-4444-4444-8444-444444444444"],
-  ["./", "conformsTo", "https://jinn.network/profiles/execution-evidence/1.0"],
+  ["./", "conformsTo", "https://spec.jinn.network/profiles/execution-evidence/v1"],
   ["./", "creator", "urn:uuid:44444444-4444-4444-8444-444444444444"],
   ["./", "hasPart", "evidence/in-run-tests.json"],
   ["./", "hasPart", "external/marketplace-reference.json"],
@@ -49,7 +49,7 @@ const expectedPrivateRelationships = [
   ["./", "hasPart", "runtime/tool-policy.json"],
   ["./", "hasPart", "runtime/workflow.json"],
   ["./", "hasPart", "task/task.md"],
-  ["./", "hasPart", "trace/trajectory.jsonl"],
+  ["./", "hasPart", "trace/trace.jsonl"],
   ["./", "license", "https://creativecommons.org/publicdomain/zero/1.0/"],
   ["./", "mentions", EXECUTION_ID],
   ["./", "prov:wasGeneratedBy", "#capture"],
@@ -124,11 +124,11 @@ const expectedPrivateRelationships = [
     "softwareRequirements",
     "urn:uuid:77777777-7777-4777-8777-777777777777",
   ],
-  ["trace/trajectory.jsonl", "about", EXECUTION_ID],
+  ["trace/trace.jsonl", "about", EXECUTION_ID],
   [
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     "conformsTo",
-    "https://jinn.network/formats/fixture-trajectory/1.0",
+    "https://spec.jinn.network/formats/fixture-trace/v1",
   ],
   [
     EXECUTION_ID,
@@ -144,7 +144,7 @@ const expectedPrivateRelationships = [
   [EXECUTION_ID, "resourceUsage", "#input-tokens"],
   [EXECUTION_ID, "resourceUsage", "#output-tokens"],
   [EXECUTION_ID, "result", "results/slug-normalization.patch"],
-  [EXECUTION_ID, "subjectOf", "trace/trajectory.jsonl"],
+  [EXECUTION_ID, "subjectOf", "trace/trace.jsonl"],
 ] as const;
 
 const expectedPrivateEntities = [
@@ -185,12 +185,12 @@ const expectedPrivateEntities = [
     name: "CC0 1.0 Universal",
   },
   {
-    entityId: "https://jinn.network/formats/fixture-trajectory/1.0",
+    entityId: "https://spec.jinn.network/formats/fixture-trace/v1",
     types: ["CreativeWork", "Profile"],
-    name: "Synthetic fixture trajectory format 1.0",
+    name: "Synthetic fixture trace format 1.0",
   },
   {
-    entityId: "https://jinn.network/profiles/execution-evidence/1.0",
+    entityId: "https://spec.jinn.network/profiles/execution-evidence/v1",
     types: ["CreativeWork", "Profile"],
     name: "Jinn Execution Evidence Profile 1.0",
   },
@@ -261,7 +261,7 @@ const expectedPrivateEntities = [
     name: "Implement deterministic slug normalization",
   },
   {
-    entityId: "trace/trajectory.jsonl",
+    entityId: "trace/trace.jsonl",
     types: ["File"],
     name: "Native synthetic execution trace",
   },
@@ -295,7 +295,7 @@ const publicOnlyEntityIds = [
   "private/ro-crate-metadata.json",
   "scrub/public-execution-policy.json",
   "scrub/scrub-receipt.json",
-  "trace/trajectory.public.jsonl",
+  "trace/trace.public.jsonl",
   "urn:uuid:88888888-8888-4888-8888-888888888888",
 ] as const;
 
@@ -329,23 +329,23 @@ const publicOnlyRelationships = [
   ["./", "hasPart", "private/ro-crate-metadata.json"],
   ["./", "hasPart", "scrub/public-execution-policy.json"],
   ["./", "hasPart", "scrub/scrub-receipt.json"],
-  ["./", "hasPart", "trace/trajectory.public.jsonl"],
+  ["./", "hasPart", "trace/trace.public.jsonl"],
   ["./", "prov:wasDerivedFrom", "private/ro-crate-metadata.json"],
   ["./", "prov:wasGeneratedBy", "#public-scrub"],
   ["scrub/scrub-receipt.json", "prov:wasGeneratedBy", "#public-scrub"],
-  ["trace/trajectory.public.jsonl", "about", EXECUTION_ID],
+  ["trace/trace.public.jsonl", "about", EXECUTION_ID],
   [
-    "trace/trajectory.public.jsonl",
+    "trace/trace.public.jsonl",
     "conformsTo",
-    "https://jinn.network/formats/fixture-trajectory/1.0",
+    "https://spec.jinn.network/formats/fixture-trace/v1",
   ],
   [
-    "trace/trajectory.public.jsonl",
+    "trace/trace.public.jsonl",
     "prov:wasDerivedFrom",
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
   ],
   [
-    "trace/trajectory.public.jsonl",
+    "trace/trace.public.jsonl",
     "prov:wasGeneratedBy",
     "#public-scrub",
   ],
@@ -419,7 +419,7 @@ describe("projectExecutionEvidence", () => {
 
     expect(projection).toMatchObject({
       reference: reference(PRIVATE_DIGEST),
-      byteSize: 12226,
+      byteSize: 12232,
       family: "execution-evidence",
       executionId: EXECUTION_ID,
       task: {
@@ -447,9 +447,9 @@ describe("projectExecutionEvidence", () => {
         },
       ],
       nativeTrace: {
-        entityId: "trace/trajectory.jsonl",
+        entityId: "trace/trace.jsonl",
         digest:
-          "sha256:c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483",
+          "sha256:49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a",
         name: "Native synthetic execution trace",
         mediaType: "application/x-ndjson",
       },
@@ -593,7 +593,7 @@ describe("projectExecutionEvidence", () => {
 
     expect(publicProjection).toMatchObject({
       reference: reference(PUBLIC_DIGEST),
-      byteSize: 15772,
+      byteSize: 15777,
       family: "execution-evidence",
       executionId: EXECUTION_ID,
       task: {
@@ -621,9 +621,9 @@ describe("projectExecutionEvidence", () => {
         },
       ],
       nativeTrace: {
-        entityId: "trace/trajectory.jsonl",
+        entityId: "trace/trace.jsonl",
         digest:
-          "sha256:c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483",
+          "sha256:49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a",
         name: "Native synthetic execution trace",
         mediaType: "application/x-ndjson",
       },
@@ -701,7 +701,7 @@ describe("projectExecutionEvidence", () => {
         name: "Public derivation scrub receipt",
       },
       {
-        entityId: "trace/trajectory.public.jsonl",
+        entityId: "trace/trace.public.jsonl",
         types: ["File"],
         name: "Structure-aware scrubbed trace projection",
       },

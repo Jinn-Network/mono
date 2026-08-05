@@ -27,7 +27,7 @@ import { takeEveryRunnable } from "./claim-predicate.js";
 import { runPipeline, type PipelinePorts } from "./pipeline.js";
 import type { SubmissionFacts } from "./types.js";
 
-const PROFILE_URI = "https://jinn.network/task-profiles/repository-work/1.0";
+const PROFILE_URI = "https://spec.jinn.network/task-profiles/repository-work/1.0";
 const ATTEMPT_URI = "urn:uuid:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const REQUEST_ID = `0x${"b".repeat(64)}` as const;
 const CLAIM_TX = `0x${"c".repeat(64)}` as const;
@@ -39,7 +39,7 @@ const DEFAULT_RUN_PINNING: RunPinningKeySupport[] = [
 
 function goldenTask(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: PROFILE_URI,
       digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
@@ -51,7 +51,7 @@ function goldenTask(): Uint8Array {
 
 function goldenSubmission(taskBytes: Uint8Array): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:22222222-2222-4222-8222-222222222222",
     task: { digest: { sha256: sha256Hex(taskBytes) } },
     requester: "urn:uuid:33333333-3333-4333-8333-333333333333",
@@ -63,7 +63,7 @@ function goldenSubmission(taskBytes: Uint8Array): Uint8Array {
 
 function goldenDelivery(attemptUri: string): Uint8Array {
   return sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: attemptUri,
     task: `sha256:${"1".repeat(64)}`,
     outputs: [],

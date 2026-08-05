@@ -50,7 +50,7 @@ function material() {
   const taskBytes = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
     profile: {
-      uri: "https://jinn.network/task-profiles/prediction-forecast/1.0",
+      uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
       digest: { sha256: "2".repeat(64) },
     },
     instructions: "forecast",

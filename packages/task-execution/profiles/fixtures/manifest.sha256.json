@@ -7,19 +7,19 @@
     },
     {
       "id": "admission-receipt/adversarial/reused.json",
-      "sha256": "3ced17dd2616b2d5f98668978c7e088d73ca711c7470a2fc4c0d4af2c2ddfcd9"
+      "sha256": "63814a142480814a8f98fddcf0a03b0a3765d92c0f3864c51e224accb8d2a2ab"
     },
     {
       "id": "admission-receipt/adversarial/unsigned.json",
-      "sha256": "3d3aada43380c0cf072e7ff4931e37fa7ceb22735a38ffe9afc0e2e5d6eb3f48"
+      "sha256": "e9962568c652b131cd3ed352b7f15ccc907762421eac2bb68c56efaf683c875c"
     },
     {
       "id": "admission-receipt/adversarial/wrong-subject.json",
-      "sha256": "8b3e4f350e1005a7cdf73edd3652afb8ce5146e126ce66f8b83c9fbbc1d5680c"
+      "sha256": "fd636df60980c85a2851ea96934dc43f22d4a9637c3f074ad7b86cf337df109e"
     },
     {
       "id": "admission-receipt/golden/valid-signed.json",
-      "sha256": "a1eb4dc24172c28aae974745c8499e181a993563d8e8a317e36912a0f2f2c1a5"
+      "sha256": "f850ac8d075510f8a5003dab352795fa9fcaa4c9b8d286eae9eaa3a8f00b8a9d"
     },
     {
       "id": "composite/adversarial/composite-depth-3.json",
@@ -43,31 +43,31 @@
     },
     {
       "id": "evaluation-spec/adversarial/wrong-protocol.json",
-      "sha256": "f4a5f4b4729fb86676ce66096ec460de631538dcbf1c7f3b7e4895046bcc0fd9"
+      "sha256": "6ba590c267c7189eb2938b4b583ae6eed5b2efb3ca8a34bddebc782566817b1b"
     },
     {
       "id": "evaluation-spec/golden/deterministic-minimal.json",
-      "sha256": "d8339f32e9882b3b69f0900524943df7afe4aba1629dcbb174d04a3c07c02682"
+      "sha256": "198ebb9a677b36259a5e499d83cfef1cc4b55acab64a15af5551747373c85a39"
     },
     {
       "id": "evaluation-spec/golden/deterministic-minimal.sha256",
-      "sha256": "569613faea0d2dd2e51c69dbebc74c218a9d571f328c7241681b52cc422607fb"
+      "sha256": "33385a415392756bcf4388fe0e7f289dfb241ea98a79c6ebc2f4e975b0f0d28b"
     },
     {
       "id": "evaluation-spec/golden/fractional-threshold.json",
-      "sha256": "11ac581b3f8024392dd454c0fbfb13f10f844434e3ab1bc34a25fd4138f52e10"
+      "sha256": "21590a5615ce1cd33d878059f075f2ecd28edb1b2079a592278364970dcd5157"
     },
     {
       "id": "evaluation-spec/golden/fractional-threshold.sha256",
-      "sha256": "03718fc46ed6eb289b9f30ea3c67d316f0c3f522251e36fee3ee3b499dc5fdf8"
+      "sha256": "289c73c12a1577bb056898eeca3a861b588aa0a5d89a66ec7e637927d347467f"
     },
     {
       "id": "evaluation-spec/golden/state-predicate-minimal.json",
-      "sha256": "ffff9b238955ca5e2c07b3821f5449089fc3606efea6705f9365a9fe6c8b3d93"
+      "sha256": "88c1d5c4e7f81cbc26d91364e6abfd0ec0de8120d3ce47cc09c5395d786c8b37"
     },
     {
       "id": "evaluation-spec/golden/state-predicate-minimal.sha256",
-      "sha256": "d5d9d8eafdbca3c6f022584ec618ed21407a927d686ce8f248c972f88167b057"
+      "sha256": "49f621f1265d9b69fd6c678c6ddff2a4f0aadb925a1b027bf1e5a85f461eb298"
     },
     {
       "id": "evaluation-task-derivation/adversarial/competitor-delivery.json",
@@ -87,7 +87,7 @@
     },
     {
       "id": "evaluation-task-derivation/golden/derive-TD.json",
-      "sha256": "81448f4490b5ab528dbb9eed1470f880a38faeb1e0dc74f53cbb79554b7942bb"
+      "sha256": "11a8352e4ba4b93b67fe89e55925172431dddbbc2e66b036e0db3aedbb1df0e9"
     },
     {
       "id": "family-blocks/adversarial/composite-bare-extra-key.json",
@@ -215,15 +215,15 @@
     },
     {
       "id": "resolution/adversarial/drift.json",
-      "sha256": "a801b4ed80755f0523e42cfeddf54d004797e7e20e02eb405aa3a564ea9d3874"
+      "sha256": "f1a8ae200a6151cc9c9edaa4d78a7fd32662bfd114b4d961e1c837ba550f16c8"
     },
     {
       "id": "resolution/adversarial/unknown-digest.json",
-      "sha256": "7371180f240410fd05a6cf4429c799a7e9f6f15d4b1e5bba6292176a86f1b3f9"
+      "sha256": "4ef2a5ded0ec4685cf1ed7fd133e67dea36c5364a5e0e474c158d18bcfbe4440"
     },
     {
       "id": "resolution/golden/resolves.json",
-      "sha256": "42c1af202a48287b4967d22f62235aec36aaf1ca2cb0e45d7ba5ac53a36509b2"
+      "sha256": "d3c5087ff325541ba4b257aad6243de1784288cc52f74aacc8e56ea66f8835e9"
     },
     {
       "id": "result-evaluation/golden/evidence-statement.PROVENANCE.md",
@@ -231,7 +231,7 @@
     },
     {
       "id": "result-evaluation/golden/evidence-statement.json",
-      "sha256": "8bc65dacb69dc8b37196663a4746f1faf552784025c03398a178014aee6e370f"
+      "sha256": "7e41ef580944ec4b35f1fe20411d3f5416b334a064340b4856ba0af3c61c1fe8"
     },
     {
       "id": "schema-hardening/adversarial/depth-bomb.json",
@@ -363,31 +363,31 @@
     },
     {
       "id": "sub-profile/adversarial/chain-depth-9.json",
-      "sha256": "579fce3a44146767566c406c964da4890413433f12e5dbde07fbf1d816744107"
+      "sha256": "2e15c5d8e88b2704e6df5abce92a384a4168887a3821686af1592b1f233b3b5a"
     },
     {
       "id": "sub-profile/adversarial/closed-parent.json",
-      "sha256": "f7a0477f732ed2a53a25705b26f0f4859d3ae27631ecf775620d5e47eb391589"
+      "sha256": "78af5e0d64c27a18793ab3d7473579b273346775fe14013a60fd77c4bb722cc7"
     },
     {
       "id": "sub-profile/adversarial/widening-subprofile.json",
-      "sha256": "afb6f353c7f7bd07b88d88788f8328a5f0326374c1c87221aa7ace3cb92a6abd"
+      "sha256": "239e052884e17f17e99cc599e61677bffdbdf4cad02cec8a8742debed32ae8b6"
     },
     {
       "id": "sub-profile/golden/family-chain.json",
-      "sha256": "94b387346823889827ccb36d7cd7794d084c434a1676af3c51a5bc12afd7ae4f"
+      "sha256": "892db1e1c8f7a79896ae897ffa8b92075a515805ec38e25198459c2141c550a6"
     },
     {
       "id": "sub-profile/golden/valid-subprofile.json",
-      "sha256": "c3c03ec3a61257fd8c051804ffcf93867e910bf34daacdef45e033ed6d26150d"
+      "sha256": "1d21e7001ab0b4f4edaf38fbfe501f886c5bdc1120814422a48c6bf109d58918"
     },
     {
       "id": "swe-rebench-golden/golden/evaluation-spec.sealed.json",
-      "sha256": "9cf546c8a2adfefd1076337b373934b76ed231d90028dd13b6084cecfd8a0df6"
+      "sha256": "5ccd5617bed73b69ccce34317356f18604039c2e2393b5b11509e52bf620d416"
     },
     {
       "id": "swe-rebench-golden/golden/expected.json",
-      "sha256": "f8a5e2b5bbb260e667a32370c06d21b94fef00f16c37121373df5b380c2ee73d"
+      "sha256": "77c840fc627aa3ada8ff290fe3e329e5d8c8ab0ab32ea08dfb9aba9bcc95d1f9"
     },
     {
       "id": "swe-rebench-golden/golden/row.json",
@@ -395,23 +395,23 @@
     },
     {
       "id": "swe-rebench-golden/golden/task.sealed.json",
-      "sha256": "0faa4332b9186c54b83d6da1d6cfeb6725ce0a40c628b8d0cfe0cb4a3584d6a3"
+      "sha256": "3aa2d8778a8b173003f4f403b02c4293e71b3b317fd692fb19fd96b54b9aac82"
     },
     {
       "id": "task-profile/adversarial/requirement-key-no-class.json",
-      "sha256": "e968d80379bec92e07de5faddf41ed33890b937eb4abab2223b3e1401c457aa4"
+      "sha256": "7e45e1a3c2dd8c8b50b943017ae9d243a93d884be1c3c67603d7166b7816617d"
     },
     {
       "id": "task-profile/adversarial/wrong-format-uri.json",
-      "sha256": "1d935d5e7396b40aa7a1ea001b1a07597e23d30affb95a27a366c30069df0492"
+      "sha256": "2e6e1b3bee9a428d017c105fb31c5718b1dd8c75bdc1dccf432eef5e605a1faa"
     },
     {
       "id": "task-profile/golden/minimal-profile.json",
-      "sha256": "e06edc5de0746851eca4abf62fad9f4fb6962efd4757674ed5c44cf1edf482aa"
+      "sha256": "0f947b172f43e248b1b3eb2b4ca4cf117d047f9443b083d963c4e2d6750707e2"
     },
     {
       "id": "task-profile/golden/minimal-profile.sha256",
-      "sha256": "0ee4a86f4a574a133d08d5fdb7aa1ee664439f4cf8e3ebfba5fc6806c42cd230"
+      "sha256": "42a08f8fe0d0b01c9bced139eda5a9cf537222b7f85730c04782e2ed94d42017"
     },
     {
       "id": "unscorable/adversarial/unknown-disposition.json",

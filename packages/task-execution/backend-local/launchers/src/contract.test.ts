@@ -11,8 +11,8 @@ import type { LaunchPlan, LauncherContract } from "./contract.js";
 // pins the "launcher is a pure function, never a state machine" invariant (design §8.4).
 
 const task: TaskSpecification = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
-  profile: { uri: "https://jinn.network/task-profiles/repository-work/1.0", digest: { sha256: "0".repeat(64) } },
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+  profile: { uri: "https://spec.jinn.network/task-profiles/repository-work/1.0", digest: { sha256: "0".repeat(64) } },
   instructions: "stub instructions",
   outputs: [],
 };
@@ -21,7 +21,7 @@ const effectiveRequirements: EffectiveRequirements = {};
 
 const profile: TaskProfileDocument = {
   protocol: TASK_PROFILE_FORMAT_URI,
-  profile: "https://jinn.network/task-profiles/repository-work/1.0",
+  profile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   description: "stub profile",
   payloadSchema: {},
   inputConventions: { slots: [] },
@@ -67,7 +67,7 @@ const FIXED_PLAN: LaunchPlan = {
 const stubLauncher: LauncherContract = {
   id: "stub",
   capabilities: () => ({
-    taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0"],
+    taskProfiles: ["https://spec.jinn.network/task-profiles/repository-work/1.0"],
     inputMediaTypes: ["application/json"],
     outputMediaTypes: ["application/json"],
     structuredOutput: false,
@@ -103,7 +103,7 @@ describe("LauncherContract (A2 conformance shape)", () => {
 
   it("declares static capabilities without spawning or holding state", () => {
     const capabilities = stubLauncher.capabilities();
-    expect(capabilities.taskProfiles).toContain("https://jinn.network/task-profiles/repository-work/1.0");
+    expect(capabilities.taskProfiles).toContain("https://spec.jinn.network/task-profiles/repository-work/1.0");
     expect(typeof stubLauncher.plan).toBe("function");
     expect(stubLauncher.probe).toBeUndefined();
   });

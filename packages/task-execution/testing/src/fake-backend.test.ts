@@ -3,13 +3,13 @@ import { describe, expect, test } from "vitest";
 import { createInMemoryBackend } from "./fake-backend.js";
 
 const PROFILE = {
-  uri: "https://jinn.network/task-profiles/repository-work/1.0",
+  uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
 };
 
 function taskBytes(overrides: Record<string, unknown> = {}): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: PROFILE,
     instructions: "Normalize the slug helper.",
     outputs: [{ name: "patch", mediaType: "text/x-diff", required: true }],
@@ -19,7 +19,7 @@ function taskBytes(overrides: Record<string, unknown> = {}): Uint8Array {
 
 function submissionBytes(taskDigest: string, overrides: Record<string, unknown> = {}): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:11111111-1111-5111-8111-111111111111",
     task: { digest: { sha256: taskDigest.replace(/^sha256:/, "") } },
     requester: "urn:uuid:22222222-2222-5222-8222-222222222222",
@@ -32,7 +32,7 @@ function submissionBytes(taskDigest: string, overrides: Record<string, unknown> 
 
 function deliveryBytesFor(taskDigest: string, attempt: string): Uint8Array {
   return sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt,
     task: taskDigest,
     outputs: [{ name: "patch", mediaType: "text/x-diff", digest: { sha256: "a".repeat(64) } }],

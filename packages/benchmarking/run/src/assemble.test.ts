@@ -17,7 +17,7 @@ const EVAL_SPEC = `sha256:${"e".repeat(64)}` as const;
 const VERDICT_DIGEST = `sha256:${"a".repeat(64)}` as const;
 
 const MINIMAL_SPEC = {
-  protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+  protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
   family: "deterministic-process",
   semanticsVersion: "4",
   measurements: [{ name: "passed", type: "boolean", required: true }],

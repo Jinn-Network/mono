@@ -1,6 +1,6 @@
 {
   "sourceDigest": "sha256:3f20016e14d77229722d5877b1c0a90515ce20718272bf1a6e43b5a30bc34181",
-  "traceId": "31a1fb7bc89e2c68fd6a88ad5c4bbc82",
+  "traceId": "2ccfe5a719c121c33e85161c253d18a3",
   "timebase": "synthetic-ordinal",
   "completeness": {
     "decoded": "partial",
@@ -9,7 +9,7 @@
   },
   "spans": [
     {
-      "spanId": "ae306f207e80c2b3",
+      "spanId": "53315f4dbb39e57e",
       "parentSpanId": null,
       "name": "invoke_agent claude-code",
       "kind": 1,
@@ -35,13 +35,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.outcome",
+          "key": "jinn.trace.outcome",
           "value": {
             "stringValue": "success"
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -53,8 +53,8 @@
       }
     },
     {
-      "spanId": "5eb9d871b6d5acf7",
-      "parentSpanId": "ae306f207e80c2b3",
+      "spanId": "adc8d704bb26a78b",
+      "parentSpanId": "53315f4dbb39e57e",
       "name": "chat",
       "kind": 3,
       "startTimeUnixNano": "0",
@@ -73,13 +73,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -91,5 +91,5 @@
       }
     }
   ],
-  "recordDigest": "sha256:ed72023d6c9eb1aba14a407428c3c389db78c699ed5c9603e660367a290f6fe6"
+  "recordDigest": "sha256:5b5a1d8f268a35d89a8c27e2219a687b0f0ebf6f755dc69a97d9c34e1c8d4d87"
 }

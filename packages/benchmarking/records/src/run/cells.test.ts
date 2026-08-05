@@ -98,7 +98,7 @@ describe("expectedCellSet / expectedCellCount", () => {
 
   test("a 3-item x 2-arm x 2-replicate pair yields 12 lexicographically-ordered coordinates", () => {
     const threeItemBench = BenchmarkRecordSchema.parse({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       name: "three",
       description: "d",
       version: "1.0.0",
@@ -126,7 +126,7 @@ describe("expectedCellSet / expectedCellCount", () => {
 
   test("rejects an unsafe exact Cartesian cardinality before converting or enumerating", () => {
     const threeItemBench = BenchmarkRecordSchema.parse({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       name: "three-position-overflow",
       description: "d",
       version: "1.0.0",
@@ -153,7 +153,7 @@ describe("expectedCellSet / expectedCellCount", () => {
 
   test("reports a safe million-plus count but refuses materialization before iteration", () => {
     const oneItemBench = BenchmarkRecordSchema.parse({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       name: "materialization-bound",
       description: "d",
       version: "1.0.0",

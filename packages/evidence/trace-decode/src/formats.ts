@@ -18,9 +18,9 @@
  * bare strings are inputs to translation, never selection keys.
  */
 
-/** `https://jinn.network/formats/<slug>/v<major>` — the grammar already in the tree. */
+/** `https://spec.jinn.network/formats/<slug>/v<major>` — the grammar already in the tree. */
 export const FORMAT_IRI_PATTERN =
-  /^https:\/\/jinn\.network\/formats\/[a-z][a-z0-9-]*\/v[1-9]\d*$/;
+  /^https:\/\/spec\.jinn\.network\/formats\/[a-z][a-z0-9-]*\/v[1-9]\d*$/;
 
 export interface FormatIdentity {
   /** The canonical, versioned identity every decoder keys on. */
@@ -40,7 +40,7 @@ export interface FormatIdentity {
 
 const IDENTITIES: readonly FormatIdentity[] = Object.freeze([
   Object.freeze({
-    formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+    formatIri: "https://spec.jinn.network/formats/claude-code-stream-json/v1",
     envelopeFormat: "claude-code-stream-json",
     legacySourceFormats: Object.freeze(["claude-code-stream-json"]),
     mediaType: "application/x-ndjson",
@@ -49,7 +49,7 @@ const IDENTITIES: readonly FormatIdentity[] = Object.freeze([
       "Newline-delimited JSON stream events emitted by the Claude Code CLI under --output-format stream-json.",
   }),
   Object.freeze({
-    formatIri: "https://jinn.network/formats/hermes-json/v1",
+    formatIri: "https://spec.jinn.network/formats/hermes-json/v1",
     envelopeFormat: "hermes-json",
     legacySourceFormats: Object.freeze(["hermes-session-json"]),
     mediaType: "application/json",
@@ -58,7 +58,7 @@ const IDENTITIES: readonly FormatIdentity[] = Object.freeze([
       "The Hermes agent's JSON session snapshot. Off by default host-side and carrying neither per-message timestamps nor token counts; no decoder ships for it here.",
   }),
   Object.freeze({
-    formatIri: "https://jinn.network/formats/codex-exec-json/v1",
+    formatIri: "https://spec.jinn.network/formats/codex-exec-json/v1",
     envelopeFormat: "codex-exec-json",
     legacySourceFormats: Object.freeze(["codex-exec-json"]),
     mediaType: "application/x-ndjson",
@@ -66,7 +66,7 @@ const IDENTITIES: readonly FormatIdentity[] = Object.freeze([
     description: "Newline-delimited JSON events emitted by codex exec --json.",
   }),
   Object.freeze({
-    formatIri: "https://jinn.network/formats/cursor-agent-json/v1",
+    formatIri: "https://spec.jinn.network/formats/cursor-agent-json/v1",
     envelopeFormat: "cursor-agent-json",
     legacySourceFormats: Object.freeze([]),
     mediaType: "application/json",
@@ -75,13 +75,13 @@ const IDENTITIES: readonly FormatIdentity[] = Object.freeze([
       "The cursor-agent JSON envelope. No parser exists in the tree, frozen or otherwise.",
   }),
   Object.freeze({
-    formatIri: "https://jinn.network/formats/backend-local-supervisor-facts/v1",
+    formatIri: "https://spec.jinn.network/formats/backend-local-supervisor-facts/v1",
     envelopeFormat: "backend-local-supervisor-facts",
     legacySourceFormats: Object.freeze([]),
     mediaType: "application/json",
     harnessTrace: false,
     description:
-      "The local backend supervisor's own outcome-and-outputs blob. Present in the native-trace slot today for every harness; it describes the supervisor, not the agent, and is never decodable to trajectory spans.",
+      "The local backend supervisor's own outcome-and-outputs blob. Present in the native-trace slot today for every harness; it describes the supervisor, not the agent, and is never decodable to trace spans.",
   }),
 ]);
 

@@ -38,7 +38,7 @@ test("builds a conforming derivative without substituting historical roles", () 
   for (const surface of extraction.surfaces) {
     const shouldRedact =
       surface.text === "Synthetic private execution" ||
-      surface.sourceEntityId === "trace/trajectory.jsonl";
+      surface.sourceEntityId === "trace/trace.jsonl";
     dispositions.set(surface.surfaceId, {
       status: shouldRedact ? "redacted" : "retained",
       text: shouldRedact ? "[REDACTED]" : surface.text,
@@ -118,7 +118,7 @@ test("builds a conforming derivative without substituting historical roles", () 
     `${JSON.stringify(recursivelySorted(document), null, 2)}\n`,
   );
   const expectedDigest =
-    "sha256:8544520d7b740f2bbc044cb1e29db20d99ab78b014f28497fd9cba3c096bf818";
+    "sha256:855f5d78b3ee94a685adf3262abe62c76c1240bbb733821ac10f899f6e064dc6";
   expect(sha256Digest(expectedBytes)).toBe(expectedDigest);
   expect(derivative.record.bytes).toEqual(expectedBytes);
   expect(derivative.record.reference.digest).toBe(expectedDigest);

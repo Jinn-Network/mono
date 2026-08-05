@@ -4,6 +4,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Pull requests from forks receive a restricted token. The reusable verifier's
 # artifact attestations need id-token/attestations write, so fork runs can stop
 # at that permission boundary and must be rerun by a maintainer in the trusted
@@ -44,6 +48,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  platform-release-surface:
+    name: platform-release-surface
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Validate the profile root, publish path, and their workflow shapes
+        run: |
+          node --test \
+            .github/scripts/build-profile-root.test.mjs \
+            .github/scripts/sign-profile-manifest.test.mjs \
+            .github/scripts/public-surface-assets.test.mjs \
+            .github/scripts/platform-verification-receipt.test.mjs \
+            .github/scripts/platform-verification-workflow.test.mjs \
+            .github/scripts/stack-publish-workflow.test.mjs \
+            .github/scripts/stack-publication-surface.test.mjs \
+            .github/scripts/stack-trusted-publishers.test.mjs \
+            .github/scripts/generate-architecture.test.mjs
+      # The publication surface's other half: that the deploy bundle is actually servable,
+      # and that the live-host gate passes over a real socket rather than an injected
+      # fetch. Hermetic by construction -- an ephemeral loopback listener with a throwaway
+      # in-memory certificate. No egress, no credentials, no host CLI. The first two files
+      # are C3's own bundle-generator and gate suites, which shipped unwired.
+      - name: Prove the deploy bundle is servable and the gate passes over a socket
+        run: |
+          node --test \
+            .github/scripts/build-profile-host-bundle.test.mjs \
+            .github/scripts/verify-live-profile-host.test.mjs \
+            .github/scripts/serve-profile-host.test.mjs \
+            .github/scripts/verify-local-profile-host.test.mjs
+
   platform-verification-reusable:
     name: platform-verification-reusable
     permissions:
@@ -57,6 +96,8 @@ jobs:
       lane: canary
     secrets:
       JINN_MARKETPLACE_FORK_RPC_URL: ${{ secrets.JINN_MARKETPLACE_FORK_RPC_URL }}
+      JINN_PROFILE_MANIFEST_SIGNING_KEY: ${{ secrets.JINN_PROFILE_MANIFEST_SIGNING_KEY }}
+      JINN_PROFILE_MANIFEST_KEY_ID: ${{ secrets.JINN_PROFILE_MANIFEST_KEY_ID }}
 
   platform-verification:
     name: platform-verification

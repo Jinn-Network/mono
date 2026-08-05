@@ -18,10 +18,10 @@ function loadProfile(filename: string): FactsProfileDocument {
   return parseFactsProfile(JSON.parse(readFileSync(path, "utf8")));
 }
 
-export const taskProfile: FactsProfileDocument = loadProfile("task.1.0.json");
-export const submissionProfile: FactsProfileDocument = loadProfile("submission.1.0.json");
-export const deliveryProfile: FactsProfileDocument = loadProfile("delivery.1.0.json");
-export const profileDocumentProfile: FactsProfileDocument = loadProfile("profile-document.1.0.json");
-export const evaluationSpecProfile: FactsProfileDocument = loadProfile("evaluation-spec.1.0.json");
-export const pluginProfile: FactsProfileDocument = loadProfile("plugin.1.0.json");
-export const checkpointProfile: FactsProfileDocument = loadProfile("checkpoint.1.0.json");
+export const taskProfile: FactsProfileDocument = loadProfile("task.v1.json");
+export const submissionProfile: FactsProfileDocument = loadProfile("submission.v1.json");
+export const deliveryProfile: FactsProfileDocument = loadProfile("delivery.v1.json");
+export const profileDocumentProfile: FactsProfileDocument = loadProfile("profile-document.v1.json");
+export const evaluationSpecProfile: FactsProfileDocument = loadProfile("evaluation-spec.v1.json");
+export const pluginProfile: FactsProfileDocument = loadProfile("plugin.v1.json");
+export const checkpointProfile: FactsProfileDocument = loadProfile("checkpoint.v1.json");

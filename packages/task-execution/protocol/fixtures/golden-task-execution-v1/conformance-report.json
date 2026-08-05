@@ -1,17 +1,17 @@
 {
-  "taskDigest": "sha256:2b929dcdfe77f88e8bbb97f04381798e84db81925f2dda884bedc2ac587b27a0",
+  "taskDigest": "sha256:fc1a04cdbafaa835006e85d81ba952e6d4fcb02bc9166f7848f0e4def21bd607",
   "scenarios": {
     "local": {
       "submission": "urn:uuid:bbbbbbbb-bbbb-5bbb-8bbb-bbbbbbbbbbbb",
-      "submissionDigest": "sha256:9c5c466d60c4486428e3606860f2f0c3d1050b28f8e937573e6025b2f93dbd25",
+      "submissionDigest": "sha256:7b78f52210fc430449e0bfb2ccc65fb72e4f92aa6290d817dba4c71b2b4fc1b1",
       "attempt": "urn:uuid:aaaaaaaa-aaaa-5aaa-8aaa-aaaaaaaaaaaa",
-      "deliveryDigest": "sha256:7c75a5b04dca693d29c56bcf7213cea45338f32f8e0f2c2745775cb7e3c7cfdc"
+      "deliveryDigest": "sha256:84a7367623136bbabda781b570080c704c129657bc250aedd7865dbc0c1180b5"
     },
     "marketplace": {
       "submission": "urn:uuid:dddddddd-dddd-5ddd-8ddd-dddddddddddd",
-      "submissionDigest": "sha256:3d802052a7c655f660280b7b391034a932b3ac546c28ffd3ccb293736d552430",
+      "submissionDigest": "sha256:ecfd0277d9c614abaa934d6a60f14c1046876fc0333275951ee90c2397cb1b9d",
       "attempt": "urn:uuid:39d04895-f99d-57b8-bba6-e266626f6fae",
-      "deliveryDigest": "sha256:d533fb15574e5e9d44a3cf267e42e49d6ccc18ad245ff68d77e2cc4ed4f8b4c2",
+      "deliveryDigest": "sha256:5cc823fdd9b7c727b79427221bb609c5eec6370c82257a95bf2d12cf5bab268e",
       "correlationTuple": {
         "chainId": 8453,
         "coordinatorAddress": "0xfFa7118A3D820cd4E820010837D65FAfF463181B",

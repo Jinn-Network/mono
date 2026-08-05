@@ -7,6 +7,19 @@ on:
         required: true
         type: string
   pull_request:
+    paths:
+      - "packages/evidence/**"
+      - ".github/scripts/evidence-*.test.mjs"
+      - ".github/workflows/evidence-ci.yml"
+      - "docs/superpowers/specs/2026-07-23-jinn-execution-evidence-protocol-design.md"
+      - "docs/superpowers/specs/2026-07-24-jinn-attestation-issuer-design.md"
+      - "docs/superpowers/specs/2026-07-26-evidence-retrieval-design.md"
+      - "docs/superpowers/plans/2026-07-27-evidence-retrieval.md"
+      - "docs/superpowers/specs/2026-07-26-evidence-contribution-design.md"
+      - "docs/superpowers/plans/2026-07-27-evidence-contribution.md"
+      - "docs/superpowers/specs/2026-07-30-plugin-stack-reconciliation-design.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c1-trajectory-record.md"
+      - "docs/superpowers/plans/2026-07-30-plugin-c2-trace-decode.md"
   push:
     branches: [next]
     paths:
@@ -379,8 +392,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  trajectory:
-    name: Evidence Trajectory
+  trace:
+    name: Evidence Trace
     needs: [foundation]
     runs-on: ubuntu-latest
     steps:
@@ -414,8 +427,8 @@ jobs:
           yarn build
       - name: Install packed-smoke dependency toolchains
         run: (cd packages/evidence/protocol && yarn install --immutable)
-      - name: Verify Evidence Trajectory
-        working-directory: packages/evidence/trajectory
+      - name: Verify Evidence Trace
+        working-directory: packages/evidence/trace
         run: |
           yarn install --immutable
           yarn typecheck
@@ -424,17 +437,17 @@ jobs:
           yarn check:fixtures
           yarn check:schemas
           yarn pack:smoke
-      - name: Upload Evidence Trajectory distribution
+      - name: Upload Evidence Trace distribution
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-trajectory-dist
-          path: packages/evidence/trajectory/dist
+          name: evidence-trace-dist
+          path: packages/evidence/trace/dist
           if-no-files-found: error
           retention-days: 1
 
   trace-decode:
     name: Evidence Trace Decode
-    needs: [foundation, trajectory]
+    needs: [foundation, trace]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -460,11 +473,11 @@ jobs:
         with:
           name: evidence-protocol-dist
           path: packages/evidence/protocol/dist
-      - name: Restore Evidence Trajectory distribution
+      - name: Restore Evidence Trace distribution
         uses: actions/download-artifact@v4
         with:
-          name: evidence-trajectory-dist
-          path: packages/evidence/trajectory/dist
+          name: evidence-trace-dist
+          path: packages/evidence/trace/dist
       - name: Build Trust Core distribution
         working-directory: packages/trust/core
         run: |
@@ -473,7 +486,7 @@ jobs:
       - name: Install packed-smoke dependency toolchains
         run: |
           (cd packages/evidence/protocol && yarn install --immutable)
-          (cd packages/evidence/trajectory && yarn install --immutable)
+          (cd packages/evidence/trace && yarn install --immutable)
       - name: Verify Evidence Trace Decode
         working-directory: packages/evidence/trace-decode
         run: |
@@ -691,7 +704,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trajectory, trace-decode]
+    needs: [architecture, foundation, components, derivation, execution-recorder-bridge, retrieval, contribution, catalog-sqlite, local-runtime, trace, trace-decode]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -706,7 +719,7 @@ jobs:
           CONTRIBUTION_RESULT: ${{ needs.contribution.result }}
           CATALOG_SQLITE_RESULT: ${{ needs['catalog-sqlite'].result }}
           LOCAL_RUNTIME_RESULT: ${{ needs['local-runtime'].result }}
-          TRAJECTORY_RESULT: ${{ needs.trajectory.result }}
+          TRACE_RESULT: ${{ needs.trace.result }}
           TRACE_DECODE_RESULT: ${{ needs['trace-decode'].result }}
         run: |
           for result in \
@@ -719,7 +732,7 @@ jobs:
             "$CONTRIBUTION_RESULT" \
             "$CATALOG_SQLITE_RESULT" \
             "$LOCAL_RUNTIME_RESULT" \
-            "$TRAJECTORY_RESULT" \
+            "$TRACE_RESULT" \
             "$TRACE_DECODE_RESULT"; do
             test "$result" = "success"
           done
@@ -740,7 +753,7 @@ jobs:
           path: .evidence-dist
       - name: Place package distributions
         run: |
-          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trajectory trace-decode; do
+          for package in protocol repository repository-oci repository-ipfs discovery catalog-sqlite execution-recorder attestation-issuer derivation publication local-runtime execution-recorder-bridge retrieval contribution trace trace-decode; do
             mkdir -p "packages/evidence/${package}/dist"
             cp -R ".evidence-dist/evidence-${package}-dist/." "packages/evidence/${package}/dist/"
           done

@@ -5,19 +5,19 @@ import {
   JINN_ATTRIBUTES,
   TIMEBASES,
   compareCodeUnitStrings,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 import type {
   Attribute,
   Span,
   SpanEvent,
   SpanStatus,
   Timebase,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 
 export { TIMEBASES };
 export type { Timebase };
 
-/** Structurally the Trajectory record's `completeness` block. */
+/** Structurally the Trace record's `completeness` block. */
 export interface Completeness {
   readonly decoded: "full" | "partial" | "empty";
   readonly skipped?: number;

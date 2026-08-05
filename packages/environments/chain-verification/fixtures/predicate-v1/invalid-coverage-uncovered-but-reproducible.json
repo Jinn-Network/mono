@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
+  "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
   "scope": "component",
   "outcome": "closed-reproducible",
   "window": {
@@ -7,7 +7,7 @@
     "endedAt": "2026-07-31T09:04:00.000Z"
   },
   "verifier": {
-    "id": "https://jinn.network/chain-environment-verification/conformance-verifier",
+    "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
     "version": "0.1.0",
     "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
   },

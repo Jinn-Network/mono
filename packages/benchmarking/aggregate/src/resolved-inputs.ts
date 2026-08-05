@@ -52,11 +52,11 @@ export class MethodInputError extends Error {
 
 const IN_TOTO_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
 const RESULT_EVALUATION_PREDICATE_TYPE =
-  "https://jinn.network/attestations/result-evaluation/v1";
+  "https://spec.jinn.network/attestations/result-evaluation/v1";
 const VERDICT_PAYLOAD_TYPE = "application/vnd.in-toto+json";
 const DISCOVERY_ENTRY_PAYLOAD_TYPE = "application/vnd.jinn.discovery.entry.v1+json";
-const DISCOVERY_PROTOCOL = "https://jinn.network/record-discovery/1.0";
-const BENCHMARK_RECORD_KIND = "https://jinn.network/records/benchmark/1.0";
+const DISCOVERY_PROTOCOL = "https://spec.jinn.network/record-discovery/v1";
+const BENCHMARK_RECORD_KIND = "https://spec.jinn.network/records/benchmark/v1";
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);

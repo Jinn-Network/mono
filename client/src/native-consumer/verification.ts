@@ -119,7 +119,7 @@ export interface PackageProvenance {
 }
 
 export interface NativeVerticalVerificationReport {
-  readonly protocol: 'https://jinn.network/reports/native-vertical-verification/1.0';
+  readonly protocol: 'https://spec.jinn.network/reports/native-vertical-verification/v1';
   readonly runId: string;
   readonly decisionGrade: true;
   readonly sources: readonly {
@@ -369,7 +369,7 @@ export async function verifyNativeVertical(input: {
   );
   const receiptAnchor = authorityTimeAnchor(receiptStatement.predicate?.authorityTime, 'admission receipt');
   const submissionAnchor = authorityTimeAnchor(
-    submission.annotations?.['https://jinn.network/annotations/authority-time/1.0'],
+    submission.annotations?.['https://spec.jinn.network/annotations/authority-time/v1'],
     'Submission',
   );
   const sourceAnchor = input.graph.roots.requester.chain.authorityTime;
@@ -611,7 +611,7 @@ export async function verifyNativeVertical(input: {
   }).sort((left, right) => `${left.agent}\0${left.name}`.localeCompare(`${right.agent}\0${right.name}`));
 
   return {
-    protocol: 'https://jinn.network/reports/native-vertical-verification/1.0',
+    protocol: 'https://spec.jinn.network/reports/native-vertical-verification/v1',
     runId: input.graph.roots.runId,
     decisionGrade: true,
     sources,

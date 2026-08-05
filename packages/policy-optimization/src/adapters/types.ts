@@ -14,7 +14,7 @@
  *      (`packages/task-execution/profiles/src/result-evaluation.ts`) — TWO independent sources.
  *   2. statementVerdict      — the verdict-correspondence facts card
  *      (`packages/marketplace/projector/src/announce.ts`,
- *      `"https://jinn.network/facts/marketplace-verdict-correspondence/1.0"`).
+ *      `"https://spec.jinn.network/facts/marketplace-verdict-correspondence/v1"`).
  *   3. observedAt            — `AnnouncementEntry.timestamp`
  *      (`packages/discovery/protocol/src/entry.ts`), block time, never adapter wall-clock.
  *   4. attribution           — on-chain `VerdictDeliveryClaimed.evaluator`

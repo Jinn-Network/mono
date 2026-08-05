@@ -24,7 +24,7 @@ const EVIDENCE_PACKAGES = [
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
-  ['trajectory', '@jinn-network/evidence-trajectory'],
+  ['trace', '@jinn-network/evidence-trace'],
   ['trace-decode', '@jinn-network/evidence-trace-decode'],
 ];
 
@@ -78,14 +78,14 @@ const JINN_DEPENDENCY_GRAPH = new Map([
     optionalDependencies: [],
     peerDependencies: [],
   }],
-  ['trajectory', {
+  ['trace', {
     dependencies: ['@jinn-network/evidence-protocol', '@jinn-network/trust-core'],
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
   }],
   ['trace-decode', {
-    dependencies: ['@jinn-network/evidence-trajectory'],
+    dependencies: ['@jinn-network/evidence-trace'],
     // Yarn 4 does not inherit portal resolutions from a portaled dependency (C2-F1).
     // These entries are install-graph only: they MUST appear in package.json resolutions
     // and MUST NOT appear in any dependency section. Task 10 still forbids importing them.
@@ -192,7 +192,7 @@ test('evidence package Jinn dependencies and portal resolutions match the approv
 });
 
 test('testing entrypoints declare Vitest as an exact optional peer', () => {
-  for (const directory of ['derivation', 'retrieval', 'trajectory', 'trace-decode']) {
+  for (const directory of ['derivation', 'retrieval', 'trace', 'trace-decode']) {
     const manifest = readPackage(directory);
     assert.deepEqual(manifest.peerDependencies, { vitest: '^4.1.8' });
     assert.deepEqual(manifest.peerDependenciesMeta, {

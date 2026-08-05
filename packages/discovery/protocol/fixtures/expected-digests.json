@@ -1,6 +1,6 @@
 {
-  "genesis": "sha256:400d928d6a95190c986a0116d9ae76adecfd26cb843a45dda0b766e30b331095",
-  "genesis-shuffled-keys": "sha256:400d928d6a95190c986a0116d9ae76adecfd26cb843a45dda0b766e30b331095",
-  "available-withdrawn": "sha256:d01443d9e54dfdfec5bea50182a0026edcc5d6d288bf41546055de36a28abc0a",
-  "head": "sha256:344d67f1444d66c08009a49437c824ad3dfd47d614ad97e34caadfd95df722f0"
+  "genesis": "sha256:f62faa566dda0363b0d5524e75f90010de427fc3f15d47a2f49a0bf45c3441ab",
+  "genesis-shuffled-keys": "sha256:f62faa566dda0363b0d5524e75f90010de427fc3f15d47a2f49a0bf45c3441ab",
+  "available-withdrawn": "sha256:906362803e38cdee7ae652ed98255c5e5a58cf24cafa060ced73390bdf55c0f2",
+  "head": "sha256:fb754d9199868c74c907516210c665b5ce122adbea190c3f4933fdde2e3b18cf"
 }

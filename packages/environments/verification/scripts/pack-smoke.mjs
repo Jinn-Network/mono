@@ -97,7 +97,7 @@ import { test } from "vitest";
 test("packed environment-verification exposes its distribution contract", () => {
   assert.equal(
     ENVIRONMENT_VERIFICATION_PREDICATE_TYPE,
-    "https://jinn.network/attestations/environment-verification/v1",
+    "https://spec.jinn.network/attestations/environment-verification/v1",
   );
   assert.equal(typeof verifyEnvironment, "function");
   assert.equal(typeof buildEnvironmentCandidatesFromRows, "function");

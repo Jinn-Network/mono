@@ -15,7 +15,7 @@ import {
   SESSION_FEED_FORMAT_IRI,
   SESSION_FEED_MEDIA_TYPE,
   SESSION_ID_PROPERTY,
-  TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
+  TRACE_RECORD_IDENTIFIER_PROPERTY,
   executorIri,
 } from "./identity.js";
 
@@ -33,7 +33,7 @@ export interface CaptureAssemblyInput {
   readonly workspaceDir: string;
   readonly producerVersion: string;
   readonly outcome: SessionOutcome;
-  readonly trajectoryDigest: `sha256:${string}`;
+  readonly traceDigest: `sha256:${string}`;
 }
 
 const encoder = new TextEncoder();
@@ -224,11 +224,11 @@ export function buildFinalizeInput(input: CaptureAssemblyInput): FinalizeExecuti
           mediaType: SESSION_FEED_MEDIA_TYPE,
           name: "feed.ndjson",
         },
-        // The forward link to the trajectory record, sealed inside the execution record.
+        // The forward link to the trace record, sealed inside the execution record.
         identifiers: [
           {
-            propertyId: TRAJECTORY_RECORD_IDENTIFIER_PROPERTY,
-            value: input.trajectoryDigest,
+            propertyId: TRACE_RECORD_IDENTIFIER_PROPERTY,
+            value: input.traceDigest,
           },
         ],
         origin: captureOrigin,

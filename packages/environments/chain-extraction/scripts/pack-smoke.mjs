@@ -115,7 +115,7 @@ test("packed chain-state-extraction exposes its distribution contract", () => {
   assert.equal(MAX_WIDENINGS_CEILING, 8);
   assert.equal(
     CHAIN_EXTRACTION_PROTOCOL_URI,
-    "https://jinn.network/protocols/chain-state-extraction/v1",
+    "https://spec.jinn.network/protocols/chain-state-extraction/v1",
   );
 });
 `);

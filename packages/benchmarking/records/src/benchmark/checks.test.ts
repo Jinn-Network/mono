@@ -24,7 +24,7 @@ const DIGEST_C = "1724980aa084bbaa16a8a69b664b783799bc75f8abe13ffc65b76843564fbb
 
 function benchmarkWith(items: readonly string[], overrides: Record<string, unknown> = {}) {
   return BenchmarkRecordSchema.parse({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     name: "n",
     description: "d",
     version: "1.0.0",
@@ -75,9 +75,9 @@ describe("checkJudgeability", () => {
     timestamp = "2026-07-29T00:00:00Z",
   ): Uint8Array {
     return sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: {
-        uri: "https://jinn.network/task-profiles/repository-work/1.0",
+        uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
         digest: { sha256: "829c28d91e324098739bcd6dfd3e32f7c6902efd737333c8f5659dc354a0475a" },
       },
       instructions,
@@ -124,7 +124,7 @@ describe("checkJudgeability", () => {
 
   test("rejects a valid sealed Task whose evaluation descriptor has no canonical sha256 digest", () => {
     const taskBytes = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       profile: { digest: { sha256: DIGEST_B } },
       instructions: "do it",
       outputs: [],
@@ -153,7 +153,7 @@ describe("checkJudgeability", () => {
 
   test("requires timestamp and exactly one plaintext source or lowercase sha256 source commitment", () => {
     const missingTimestamp = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0", profile: { digest: { sha256: DIGEST_B } },
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1", profile: { digest: { sha256: DIGEST_B } },
       instructions: "do it", outputs: [], evaluation: { digest: { sha256: DIGEST_C } },
       payload: { provenance: { source: "fixture" } },
     });
@@ -165,7 +165,7 @@ describe("checkJudgeability", () => {
 
   test("refuses a valid source accompanied by a malformed present sourceCommitment", () => {
     const bytes = sealTask({
-      protocol: "https://jinn.network/profiles/task-execution/1.0", profile: { digest: { sha256: DIGEST_B } },
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1", profile: { digest: { sha256: DIGEST_B } },
       instructions: "do it", outputs: [], evaluation: { digest: { sha256: DIGEST_C } },
       payload: { provenance: { source: "fixture", sourceCommitment: "not-a-digest", timestamp: "2026-07-29T00:00:00Z" } },
     });

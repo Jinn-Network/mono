@@ -15,7 +15,7 @@ describeTraceDecoderContract("line-events fake", () => ({
 describe("the in-tree fake", () => {
   test("claims a canonical but non-production format identity", () => {
     expect(LINE_EVENTS_FORMAT_IRI).toBe(
-      "https://jinn.network/formats/fixture-line-events/v1",
+      "https://spec.jinn.network/formats/fixture-line-events/v1",
     );
   });
 
