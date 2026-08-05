@@ -124,8 +124,27 @@ both processes: the spawned child imports the *exact same absolute path* as the 
 Create it with `writePredictionEvaluatorSidecar` (`client/src/native-evaluator/deployment-paths.ts`)
 or by hand at
 `client/deployments/evaluator/prediction-market-deployment.local.json` (published-package
-path: alongside the resolved `deploymentModule` path above). It is **not committed** —
-see `client/.gitignore`.
+path: alongside the resolved `deploymentModule` path above).
+
+**It is never git-committed, and never published.** These are two separate mechanisms,
+not one:
+
+- `client/.gitignore` excludes it from git commits. This governs `git status`/`git add`
+  only — it says nothing about what `npm pack`/`npm publish` ship.
+- `client/package.json`'s `files` array includes `/deployments/` unconditionally (needed
+  for the two committed artifacts above), and this package **also ships a
+  `client/.npmignore`** — whose mere presence makes npm ignore `.gitignore` entirely for
+  packing decisions. Excluding the sidecar from the tarball therefore needs its own,
+  separate mechanism: a negated pattern in that same `files` array,
+  `"!/deployments/evaluator/*.local.json"`. This is the only thing that actually keeps a
+  sidecar written at this path out of a published tarball (verified with
+  `npm pack --dry-run`, and pinned by
+  `client/test/native-evaluator/prediction-deployment.test.ts`'s "npm packaging" describe
+  block — write a real sidecar, pack, assert it's absent from the file list). Without
+  that negation, a contributor's own `agent` IRI (and, depending on how the sidecar path
+  resolves, a local filesystem path) would ship to every downstream installer, and every
+  installer would inherit a foreign sidecar that makes their own evaluator refuse to
+  boot with a misleading error.
 
 Two independent guards mean a wrong or tampered sidecar cannot produce a trusted
 verdict, even though it isn't digest-pinned:
@@ -150,9 +169,48 @@ changed, from (wrong) process env to a sidecar file both processes read identica
 already-running daemon process, nor for an evaluation attempt already spawned; both
 pick up an edit only on their own next process start / next spawn.
 
-## Alternatives considered
+## The sidecar does not survive an upgrade
 
-Two other mechanisms would also satisfy "one committed file, per-operator identity":
+`npm install -g @jinn-network/client@latest` **replaces the installed package's whole
+directory tree**, including `deployments/evaluator/` — deleting the co-located sidecar
+along with it. After every version bump, the evaluator role host fails to boot
+(`prediction-market-deployment.mjs requires a per-operator sidecar file at ...`) until
+you re-run the create-sidecar step:
+
+```bash
+node --input-type=module -e "
+import { writePredictionEvaluatorSidecar } from '@jinn-network/client/dist/native-evaluator/deployment-paths.js';
+await writePredictionEvaluatorSidecar({ agent: '<your operator.native.agent value>' });
+"
+```
+
+(or hand-author the JSON file again at the resolved `deploymentModule` path's directory
+— see [Config wiring](#config-wiring) above). Recovering is quick and the failure is
+loud (the daemon refuses to boot the evaluator role, not a silent per-attempt failure),
+but there is currently no automation that does this for you across an upgrade — treat it
+as a required step of your upgrade runbook.
+
+## Why not an out-of-tree, upgrade-safe location instead
+
+The obvious fix for the upgrade problem is a second lookup location outside the
+installed package tree (e.g. `~/.jinn-client/native-evaluator/...`), which an
+`npm install -g` reinstall would never touch. This was prototyped and reverted: it
+introduces exactly the class of bug this whole sidecar design exists to avoid.
+
+`os.homedir()` reads `$HOME`. The daemon (parent) and the spawned evaluation-harness
+child do not necessarily agree on it — the child's environment is reconstructed from the
+launcher's small fixed allowlist (see above), which never forwards `HOME`. If the daemon
+process ever runs with an overridden `HOME` — a containerized deployment, a systemd unit
+with `Environment=HOME=...`, or (concretely, reproduced while building this) **this
+repo's own test suite**, which isolates `HOME` per test file
+(`client/test/_support/isolate-home.ts`) — the child's `os.homedir()` falls back to the
+OS user database and silently resolves to somewhere else. Parent and child would then be
+reading the identity from two *different* files, with no error at all if both happen to
+exist. Only a location derived from this module's own `import.meta.url` is structurally
+guaranteed identical for both processes, which is why the sidecar has exactly one
+location, not two.
+
+## Other alternatives considered
 
 - **A committed generator emits a personalized module per operator**, each operator
   computing and pinning their own, distinct `moduleDigest`. Rejected: every operator

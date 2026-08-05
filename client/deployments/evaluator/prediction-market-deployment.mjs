@@ -18,11 +18,25 @@
 // forwards a fixed, small env allowlist -- see
 // `packages/task-execution/backend-local/workspace/src/dir-provisioner.ts`'s
 // `executionEnv()` -- that allowlist has no slot for an arbitrary operator env var, so
-// nothing named here would ever reach the child). A file living next to this module on
-// disk, by contrast, is visible to both processes identically: the child imports this
-// exact same absolute path (see `deploymentFromEnvironment()` in
+// nothing named here would ever reach the child). A file next to this module on disk,
+// by contrast, is visible to both processes identically: the child imports this exact
+// same absolute module path (see `deploymentFromEnvironment()` in
 // `packages/task-execution/evaluation-harness/src/runtime.ts`), and dynamic `import()`
 // is not sandboxed to the spawned attempt's workspace directory.
+//
+// Why NOT also (or instead) an `os.homedir()`-based location outside the package tree
+// (which would survive an `npm install -g` upgrade replacing this directory -- see
+// docs/operator/native-evaluator-deployment.md's upgrade callout for how that's handled
+// instead): `os.homedir()` reads `$HOME`, and the daemon (parent) and the spawned child
+// do NOT necessarily agree on it. The child's env is reconstructed from the launcher's
+// small fixed allowlist above, which never forwards `HOME` -- so if the daemon process
+// ever runs with an overridden `HOME` (a containerized deployment, a systemd unit with
+// `Environment=HOME=...`, this repo's own test suite, which isolates `HOME` per test
+// file -- see `client/test/_support/isolate-home.ts`), the child's `os.homedir()` falls
+// back to the OS user database and silently resolves somewhere ELSE. That reintroduces
+// exactly the class of bug this whole design avoids: a value visible to the parent that
+// isn't identically visible to the child. Only a location derived from this file's own
+// `import.meta.url` is structurally guaranteed identical for both processes.
 //
 // Identity is still enforced where it must be. The parent composition
 // (`native-evaluator-composition.ts`) cross-checks this module's declared
@@ -37,12 +51,19 @@
 //
 // Once read (at import), this value is not re-read for the lifetime of the process --
 // editing the sidecar file requires restarting the daemon (and any in-flight spawned
-// attempts pick up the edit on their own next process, since they import fresh).
+// attempts pick up the edit on their own next process, since they import fresh). It is
+// also NOT upgrade-safe on its own: `npm install -g @jinn-network/client@latest`
+// replaces this whole directory, deleting the sidecar with it. See
+// docs/operator/native-evaluator-deployment.md's upgrade callout -- re-run the
+// create-sidecar step after every version bump.
 //
 // The sidecar is deliberately NOT part of `moduleDigest`: `moduleDigest` pins this
 // file's logic, which is identical for every operator; the sidecar carries only the
 // per-operator parameters (identity, evidence root), the same relationship
-// `native-config.json` itself already has to the rest of the trusted deployment.
+// `native-config.json` itself already has to the rest of the trusted deployment. It is
+// NEVER git-committed (this repo's `.gitignore`) or published in the npm tarball
+// (`client/package.json`'s negated `files` entry -- a `.gitignore` rule alone does not
+// exclude a files-array-included path from `npm pack`/`npm publish`).
 
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -98,6 +119,9 @@ function readSidecar() {
   if (agent.length === 0) {
     throw new Error(`${SIDECAR_PATH} must declare a non-empty "agent" (the evaluator's persistent Agent IRI)`);
   }
+  if (parsed.claimEvidenceDir !== undefined && typeof parsed.claimEvidenceDir !== 'string') {
+    throw new Error(`${SIDECAR_PATH}'s "claimEvidenceDir", if present, must be a string`);
+  }
   const claimEvidenceDir = trimmedString(parsed.claimEvidenceDir);
   return { agent, claimEvidenceDir: claimEvidenceDir.length === 0 ? undefined : claimEvidenceDir };
 }
@@ -112,6 +136,12 @@ function evaluationMethodDescriptorDigestHex() {
 
 const sidecar = readSidecar();
 const evaluatorId = sidecar.agent;
+// Same `os.homedir()` divergence risk as the identity lookup above applies to this
+// DEFAULT, unless the sidecar sets `claimEvidenceDir` explicitly (recommended -- see
+// docs/operator/native-evaluator-deployment.md). Harmless today (the prediction
+// adapter's `evaluate()` currently returns no `claimEvidence` entries, so this
+// directory is created but never written to), but set `claimEvidenceDir` explicitly
+// before a future adapter revision starts using it for real.
 const claimEvidenceRoot = sidecar.claimEvidenceDir
   ?? join(homedir(), '.jinn-client', 'native-evaluator', 'claim-evidence');
 

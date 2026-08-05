@@ -1,10 +1,13 @@
 import { randomUUID, createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { BindingResolver, ResolvedBinding } from "@jinn-network/trust-core";
 import { ResultEvaluationStatementSchema } from "@jinn-network/evidence-protocol";
+import { buildResultEvaluationPayload } from "@jinn-network/attestation-issuer";
 import { InMemoryEvidenceRepository } from "@jinn-network/evidence-repository/testing";
 import { InMemoryEvidenceCatalog } from "@jinn-network/evidence-discovery";
 import {
@@ -30,6 +33,7 @@ import {
 } from "@jinn-network/task-execution-workspace";
 import {
   makeLocalTaskExecutionBackend,
+  type LocalProvisionerInput,
   type LocalTaskExecutionBackend,
   type LocalTaskExecutionBackendConfig,
 } from "@jinn-network/task-execution-backend-local";
@@ -66,6 +70,8 @@ const EVALUATOR_ADDRESS = `0x${"2".repeat(40)}` as const;
 const COORDINATOR = `0x${"3".repeat(40)}` as const;
 const SIGNER_HANDLE = "prediction-market-evaluator-verdict";
 const MODULE_HREF = pathToFileURL(PREDICTION_EVALUATOR_DEPLOYMENT_MODULE_PATH).href;
+const CLIENT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
+const execFileAsync = promisify(execFile);
 const roots: string[] = [];
 let claimEvidenceRoot: string;
 
@@ -568,4 +574,298 @@ describe("production prediction-market deployment module — spawned evaluation-
     },
     60_000,
   );
+});
+
+// --- packaging: the sidecar must never reach a downstream installer ------------------
+//
+// `client/.gitignore` only governs what git commits; it says nothing about what `npm
+// pack`/`npm publish` ships. `deployments/` is included unconditionally in
+// `package.json`'s `files` array, and files-array entries cannot be excluded by an
+// ignore file (and this package also has a `client/.npmignore`, which -- when present --
+// makes npm ignore `.gitignore` entirely). The only mechanism that actually excludes a
+// files-array-included path is a negated pattern in that same array
+// (`"!/deployments/evaluator/*.local.json"`). This test proves that pattern still works,
+// with a real sidecar on disk, so a future edit to `files` can't silently regress it.
+describe("production prediction-market deployment module — npm packaging", () => {
+  it("excludes the sidecar from the published tarball while still shipping the committed artifacts", async () => {
+    // The sidecar written in this file's top-level beforeAll (at the same co-located
+    // path the deployment module reads) is on disk for this entire suite -- exactly
+    // the "real sidecar present" precondition this check must hold under, not an
+    // absence trivially passing.
+    const { stdout } = await execFileAsync("npm", ["pack", "--dry-run", "--json"], {
+      cwd: CLIENT_ROOT,
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    const [entry] = JSON.parse(stdout) as readonly {
+      readonly files: readonly { readonly path: string }[];
+    }[];
+    const paths = entry!.files.map((file) => file.path);
+    expect(paths).toContain("deployments/evaluator/prediction-market-deployment.mjs");
+    expect(paths).toContain("deployments/evaluator/prediction-market-evaluation-method.v1.json");
+    expect(paths).not.toContain("deployments/evaluator/prediction-market-deployment.local.json");
+  }, 30_000);
+});
+
+// --- the harvest-time identity guard is now load-bearing -----------------------------
+//
+// The sidecar is not part of `moduleDigest` (see docs/operator/native-evaluator-deployment.md)
+// specifically because two OTHER guards make identity correctness not depend on hashing
+// it. One is the boot-time cross-check already covered above ("refuses an operator agent
+// that does not equal..."). The other -- `native-evaluator-composition.ts`'s
+// `stateBackedProvisioner` harvest contract requiring
+// `predicate.evaluator.id === roles.agent` before it will seal anything -- had zero
+// coverage before this test. It is the sole barrier against a verdict whose *declared*
+// evaluator identity (inside the unsigned statement a spawned child produced) doesn't
+// match this daemon's own trusted role authority, e.g. because a sidecar was swapped for
+// only the spawned child and not the parent.
+describe("production prediction-market deployment module — harvest-time identity guard", () => {
+  async function admittedEvaluationFixture(state: NativeEvaluatorStateRepository) {
+    const artifact = (name: string, value: string) => {
+      const bytes = new TextEncoder().encode(value);
+      return { name, bytes, digest: documentDigest(bytes) };
+    };
+    const subject = {
+      task: artifact("task", "harvest-guard-subject-task"),
+      submission: artifact("submission", "harvest-guard-subject-submission"),
+      requesterEnvelope: artifact("requester-envelope", "harvest-guard-requester-envelope"),
+      admissionReceipt: artifact("admission-receipt", "harvest-guard-admission-receipt"),
+      delivery: artifact("delivery", "harvest-guard-solution-delivery"),
+      deliveryEnvelope: artifact("delivery-envelope", "harvest-guard-solution-delivery-envelope"),
+      evidenceRecords: [artifact("solution-evidence", "harvest-guard-solution-evidence")],
+      results: [artifact("prediction", "harvest-guard-prediction-result")],
+      evaluationSpec: artifact("evaluation-spec", "harvest-guard-evaluation-spec"),
+    };
+    const admitted = state.admitOpportunity({
+      opportunity: {
+        source: "https://solver.example/harvest-guard-source",
+        sourceSequence: "0000000000000001",
+        sourceEntryDigest: `sha256:${"a".repeat(64)}`,
+        canonical: true,
+        finality: "finalized",
+        chainId: 84532,
+        taskId: 9n,
+        attemptIndex: 1,
+        solutionRequestId: `0x${"b".repeat(64)}`,
+        operatorAddress: `0x${"1".repeat(40)}`,
+        deliveryCid: "bafyharvestguard",
+        advertisedDeliveryDigest: subject.delivery.digest,
+        blockHash: `0x${"c".repeat(64)}`,
+        blockNumber: 200n,
+        transactionHash: `0x${"d".repeat(64)}`,
+        logIndex: 1,
+        canonicalEventIdentity: `84532:0x${"c".repeat(64)}:1`,
+      },
+      evaluatorAgent: AGENT,
+      coordinator: COORDINATOR,
+      material: subject,
+    });
+    state.recordAdmissionVerified(admitted.evaluationId, {
+      requester: { signerKey: "did:key:harvest-guard-requester", sealingTime: "2026-08-02T10:00:00Z" },
+      admission: { signerKey: "did:key:harvest-guard-admission", effectiveTime: "2026-08-02T10:00:00Z" },
+      executor: {
+        signerKey: "did:key:harvest-guard-executor",
+        agent: "https://agents.example/harvest-guard-solver",
+        declarationKey: "did:key:harvest-guard-solver-declaration",
+        effectiveTime: "2026-08-02T10:30:00Z",
+        address: `0x${"1".repeat(40)}`,
+      },
+      evaluator: {
+        signerKey: "did:key:harvest-guard-evaluator",
+        agent: AGENT,
+        declarationKey: "did:key:harvest-guard-evaluator-declaration",
+        address: EVALUATOR_ADDRESS,
+      },
+      verificationDigest: `sha256:${"e".repeat(64)}`,
+    });
+    const taskBytes = new TextEncoder().encode("harvest-guard-exact-evaluation-task");
+    const taskDigest = documentDigest(taskBytes);
+    const deadline = "2026-08-03T00:00:00.000Z";
+    const submissionBytes = sealSubmission({
+      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      submission: "urn:uuid:00000000-0000-4000-8000-000000000030",
+      task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
+      requester: AGENT,
+      idempotencyKey: admitted.evaluationId,
+      nonce: admitted.evaluationId,
+      deadline,
+    });
+    state.recordDerivedEvaluation(admitted.evaluationId, {
+      taskBytes,
+      taskDigest,
+      submissionBytes,
+      submissionDigest: documentDigest(submissionBytes),
+      submissionUri: "urn:uuid:00000000-0000-4000-8000-000000000030",
+    });
+    const claim = state.beginEvaluationClaim(admitted.evaluationId, `0x${"f".repeat(64)}`);
+    state.recordEvaluationClaimFinalized(claim.operationId, {
+      txHash: `0x${"1".repeat(64)}`,
+      blockHash: `0x${"2".repeat(64)}`,
+      blockNumber: 201n,
+      requestId: `0x${"9".repeat(64)}`,
+      verdictIndex: 1,
+      evaluatorAddress: EVALUATOR_ADDRESS,
+    });
+    const evaluationRow = state.getEvaluation(admitted.evaluationId)!;
+    const attemptUri = evaluationRow.evaluationAttemptUri!;
+    expect(attemptUri).toBeTruthy();
+    const [task, evaluationSpec, result] = [
+      subject.task,
+      subject.evaluationSpec,
+      subject.results[0]!,
+    ] as const;
+    return { evaluationId: admitted.evaluationId, attemptUri, taskBytes, deadline, task, evaluationSpec, result };
+  }
+
+  async function harvestContractFor(
+    config: NativeEvaluatorCompositionInput,
+    backendConfigs: LocalTaskExecutionBackendConfig[],
+    input: { readonly attemptUri: string; readonly taskBytes: Uint8Array },
+  ): Promise<{ readonly contract: ProvisionerContract; readonly outDir: string }> {
+    const backendConfig = backendConfigs[0]!;
+    const provisionerInput = {
+      attempt: { attemptUri: input.attemptUri, nonce: "harvest-guard-nonce", attemptNumber: 1 },
+      sealedTaskBytes: input.taskBytes,
+      dispatchContextBytes: new TextEncoder().encode("{}"),
+    } as unknown as LocalProvisionerInput;
+    const selected = backendConfig.provisioner(provisionerInput);
+    const workRoot = await mkdtemp(join(tmpdir(), "jinn-harvest-guard-"));
+    roots.push(workRoot);
+    const outDir = join(workRoot, "out");
+    await mkdir(outDir, { recursive: true });
+    return { contract: selected.contract, outDir };
+  }
+
+  it("throws 'outside its exact Attempt authority' for an unsigned verdict whose evaluator.id does not equal roles.agent", async () => {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    try {
+      const fixtureState = await admittedEvaluationFixture(value.config.state);
+      const { contract, outDir } = await harvestContractFor(value.config, value.backendConfigs, fixtureState);
+      const evaluationMethodDigest = await predictionEvaluatorMethodDigest();
+
+      const impostorPayload = buildResultEvaluationPayload({
+        task: { name: fixtureState.task.name, digest: fixtureState.task.digest },
+        results: [{ name: fixtureState.result.name, digest: fixtureState.result.digest }],
+        evaluator: { id: OTHER_AGENT },
+        evaluatedAt: "2026-08-02T13:00:00.000Z",
+        verdict: "pass",
+        evaluationSpecification: { name: fixtureState.evaluationSpec.name, digest: fixtureState.evaluationSpec.digest },
+        evaluationMethod: { name: "prediction-market-evaluator-v1", digest: evaluationMethodDigest },
+      });
+      await writeFile(join(outDir, "verdict"), impostorPayload);
+
+      await expect(contract.harvest({
+        root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
+        harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+      } as unknown as WorkspacePaths, [])).rejects.toThrow(/outside its exact Attempt authority/);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+
+  it("gets past the identity-authority guard to a later, different check when evaluator.id equals roles.agent", async () => {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    try {
+      const fixtureState = await admittedEvaluationFixture(value.config.state);
+      const { contract, outDir } = await harvestContractFor(value.config, value.backendConfigs, fixtureState);
+      const evaluationMethodDigest = await predictionEvaluatorMethodDigest();
+
+      const genuinePayload = buildResultEvaluationPayload({
+        task: { name: fixtureState.task.name, digest: fixtureState.task.digest },
+        results: [{ name: fixtureState.result.name, digest: fixtureState.result.digest }],
+        evaluator: { id: AGENT },
+        evaluatedAt: "2026-08-02T13:00:00.000Z",
+        verdict: "pass",
+        evaluationSpecification: { name: fixtureState.evaluationSpec.name, digest: fixtureState.evaluationSpec.digest },
+        evaluationMethod: { name: "prediction-market-evaluator-v1", digest: evaluationMethodDigest },
+      });
+      await writeFile(join(outDir, "verdict"), genuinePayload);
+
+      const paths = {
+        root: outDir, input: outDir, work: outDir, out: outDir, logs: outDir,
+        harnessState: outDir, secrets: outDir, tmp: outDir, meta: outDir,
+      } as unknown as WorkspacePaths;
+      // Identical statement construction to the previous test, with only `evaluator.id`
+      // changed to match `roles.agent`. It still doesn't harvest cleanly (this hand-built
+      // statement doesn't survive `sealSignedRecord`'s canonical re-encoding byte-for-byte
+      // -- a fixture-fidelity limit, not a real production path), but it now fails at the
+      // *next* check in sequence ("not canonical exact bytes", composition.ts:344) rather
+      // than the identity-authority guard (composition.ts:335). Reaching a check that only
+      // runs after the identity `if` block completes false is proof the identity guard
+      // specifically is what `evaluator.id` flips -- not a false positive tripped by some
+      // unrelated field this fixture also carries.
+      await expect(contract.harvest(paths, [])).rejects.toThrow(/not canonical exact bytes/);
+    } finally {
+      await composition.close();
+      value.store.close();
+    }
+  });
+});
+
+// --- sidecar shape validation ---------------------------------------------------------
+//
+// The module's top-level sidecar read executes once per resolved specifier (Node's ESM
+// import cache), so re-testing a REJECTED shape needs a fresh module instance. Appending
+// a distinguishing query string to the same file: URL gives each case its own cache
+// entry while still resolving to the identical on-disk file -- a standard technique for
+// exercising an ESM module's side-effecting top-level code more than once in one process.
+describe("production prediction-market deployment module — sidecar shape validation", () => {
+  async function restoreValidSidecar(): Promise<void> {
+    await writePredictionEvaluatorSidecar({ agent: `  ${AGENT}  `, claimEvidenceDir: claimEvidenceRoot });
+  }
+
+  it("rejects a present, non-string claimEvidenceDir instead of silently falling back to the default directory", async () => {
+    await writeFile(
+      PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH,
+      `${JSON.stringify({ agent: AGENT, claimEvidenceDir: 42 })}\n`,
+    );
+    try {
+      await expect(import(`${MODULE_HREF}?shape-case=non-string-claim-evidence-dir`))
+        .rejects.toThrow(/claimEvidenceDir.*must be a string/);
+    } finally {
+      await restoreValidSidecar();
+    }
+  });
+
+  it("rejects a missing agent field", async () => {
+    await writeFile(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, `${JSON.stringify({})}\n`);
+    try {
+      await expect(import(`${MODULE_HREF}?shape-case=missing-agent`))
+        .rejects.toThrow(/non-empty "agent"/);
+    } finally {
+      await restoreValidSidecar();
+    }
+  });
+
+  it("rejects an agent field that is whitespace only", async () => {
+    await writeFile(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, `${JSON.stringify({ agent: "   " })}\n`);
+    try {
+      await expect(import(`${MODULE_HREF}?shape-case=whitespace-agent`))
+        .rejects.toThrow(/non-empty "agent"/);
+    } finally {
+      await restoreValidSidecar();
+    }
+  });
+
+  it("rejects a sidecar that is not a JSON object", async () => {
+    await writeFile(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, `${JSON.stringify(["not", "an", "object"])}\n`);
+    try {
+      await expect(import(`${MODULE_HREF}?shape-case=not-an-object`))
+        .rejects.toThrow(/must contain a JSON object/);
+    } finally {
+      await restoreValidSidecar();
+    }
+  });
+
+  it("rejects a sidecar that is not valid JSON", async () => {
+    await writeFile(PREDICTION_EVALUATOR_DEPLOYMENT_SIDECAR_PATH, "not json at all");
+    try {
+      await expect(import(`${MODULE_HREF}?shape-case=not-json`))
+        .rejects.toThrow(/is not valid UTF-8 JSON/);
+    } finally {
+      await restoreValidSidecar();
+    }
+  });
 });
