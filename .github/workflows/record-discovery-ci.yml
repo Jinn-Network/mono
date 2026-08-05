@@ -7,6 +7,13 @@ on:
         required: true
         type: string
   pull_request:
+    paths:
+      - "packages/discovery/**"
+      - ".github/scripts/record-discovery-*.test.mjs"
+      - ".github/workflows/record-discovery-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-record-discovery-protocol-design.md"
+      - 'docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md'
+      - 'docs/superpowers/plans/2026-07-31-supply-c1-environment-record.md'
   push:
     branches: [next]
     paths:

@@ -3,6 +3,10 @@ on:
   pull_request:
     branches: [main]
     types: [opened, edited, synchronize, reopened, ready_for_review]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   guard:
     # The check-run name reported by GitHub is the job's display `name:` below
