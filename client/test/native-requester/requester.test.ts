@@ -247,10 +247,10 @@ describe('native requester', () => {
     expect(admissionPayload.predicate?.issuer).toBe('urn:jinn:admission:test');
     expect(admissionPayload.predicate?.issuer).not.toContain('run-one');
     expect(recordDigest(postInput.taskBytes)).toBe(
-      'sha256:40ae3efd61b75951ad68a868fdd020de931e3d27eb1b448f341997bf4917a598',
+      'sha256:5f021ff3ba8f132c19d43e0ec4bb927ac53da9f659827e2490c6e181d687fe69',
     );
     expect(recordDigest(postInput.evaluationSpecBytes)).toBe(
-      'sha256:4e9b938d24e7752630f0fb27c2295781a7b5ecfcb130daa28d320bbedd96e962',
+      'sha256:a6821a066168cb199adf550ec515ad14dc7f9a27587963cbb5cc549732a31e0c',
     );
     expect(result.association.taskId).toBe(17n);
     expect(result.association.postingTerms).toEqual({

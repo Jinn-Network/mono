@@ -12,9 +12,9 @@ import {
 // profile is a sealed, digest-pinned document. Update these only when a
 // field or key ordering changes deliberately.
 const EXPECTED_DIGESTS: Record<string, string> = {
-  "execution-evidence": "sha256:10c40753258724d9b4d44dfc97fbe535843cc20a04e92c9dbffb7e422fd120b6",
-  "result-evaluation": "sha256:f0b00ade31921bba9b080341d935650fc3af4257d2c1525df1240bffb9f3820e",
-  "execution-verification": "sha256:7af5a91697b0c959043aa4ffb286014d0f9d2d6401281e95ff490cfdc3fd8293",
+  "execution-evidence": "sha256:c36fb2a8e4fa3dc6216c81bcefd48d1216dce66ec2bd095014d138c30079d86f",
+  "result-evaluation": "sha256:d29d2912be95a56c4029b817413a09fe150e146f4520da5ed109f1c3513d9e65",
+  "execution-verification": "sha256:1cc7b58b201d4ae8463ab03f8feb17ba4046509cb9a0b42eaf8d6df1c5ed94e1",
 };
 
 function expectPinnedDigest(name: string, digest: string) {

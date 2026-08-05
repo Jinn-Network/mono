@@ -96,7 +96,7 @@ import {
 // the accepted requester command contract.
 const FIXTURE = 'prediction-forecast-golden.json' as const;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://jinn.network/facts/native-requester-association/1.0';
+export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
 const UINT256_MAX = (1n << 256n) - 1n;
 
 type Digest = `sha256:${string}`;
@@ -553,7 +553,7 @@ export async function decodeNativeRequesterAnnouncement(input: {
       failAssociation('runId is not canonical');
     }
     const annotations = objectFact(submission.annotations ?? {}, 'Submission annotations');
-    if (!sameJson(annotations['https://jinn.network/annotations/authority-time/1.0'], authorityTime)) {
+    if (!sameJson(annotations['https://spec.jinn.network/annotations/authority-time/v1'], authorityTime)) {
       failAssociation('signed Submission authority time does not equal signed source facts');
     }
 
@@ -1008,13 +1008,13 @@ async function sealRunBundle(input: {
   const seed = runSeed(input.runId, taskDigest, sealedReceipt.receiptDigest);
   const annotations = {
     ...(templateSubmission.annotations as Record<string, unknown> ?? {}),
-    'https://jinn.network/annotations/admission-receipt/1.0': {
+    'https://spec.jinn.network/annotations/admission-receipt/v1': {
       name: 'admission-receipt',
       mediaType: ADMISSION_RECEIPT_MEDIA_TYPE,
       digest: { sha256: sealedReceipt.receiptDigest.slice('sha256:'.length) },
     },
-    'https://jinn.network/annotations/native-requester-run/1.0': { runId: input.runId },
-    'https://jinn.network/annotations/authority-time/1.0': input.authorityTime,
+    'https://spec.jinn.network/annotations/native-requester-run/v1': { runId: input.runId },
+    'https://spec.jinn.network/annotations/authority-time/v1': input.authorityTime,
   };
   const submissionBytes = sealSubmission({
     ...templateSubmission,

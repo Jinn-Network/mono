@@ -1,16 +1,16 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  TRAJECTORY_VOCABULARY_PROFILE,
+  TRACE_VOCABULARY_PROFILE,
   deriveSpanId,
   deriveTraceId,
-  parseTrajectory,
-  sealTrajectory,
+  parseTrace,
+  sealTrace,
   sha256Hex,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 
 import { createClaudeCodeStreamJsonDecoder } from "./claude-code-stream-json.js";
-import { decodeTrajectory } from "./decode.js";
+import { decodeTrace } from "./decode.js";
 import { loadClaudeCodeFixtures, loadDecoderFixtureManifest } from "./fixtures.js";
 import { createDecoderRegistry } from "./registry.js";
 import { describeTraceDecoderContract } from "./testing.js";
@@ -69,7 +69,7 @@ describe("end-to-end: bytes to a sealed record", () => {
     const fixture = fixtures.find((candidate) => candidate.id === "tool-loop");
     expect(fixture).toBeDefined();
 
-    const document = decodeTrajectory(registry, decoder.formatIri, {
+    const document = decodeTrace(registry, decoder.formatIri, {
       bytes: fixture!.bytes,
       nativeTrace: {
         name: "stdout.jsonl",
@@ -78,10 +78,10 @@ describe("end-to-end: bytes to a sealed record", () => {
       },
     });
 
-    const sealed = sealTrajectory(document);
+    const sealed = sealTrace(document);
     expect(sealed.digest).toBe(fixture!.expected.recordDigest);
 
-    const record = parseTrajectory(sealed.bytes);
+    const record = parseTrace(sealed.bytes);
     expect(record.traceId).toBe(
       deriveTraceId({
         sourceDigest: `sha256:${record.source.nativeTrace.digest.sha256}`,
@@ -91,7 +91,7 @@ describe("end-to-end: bytes to a sealed record", () => {
         vocabularyProfile: record.derivation.vocabularyProfile,
       }),
     );
-    expect(record.derivation.vocabularyProfile).toBe(TRAJECTORY_VOCABULARY_PROFILE);
+    expect(record.derivation.vocabularyProfile).toBe(TRACE_VOCABULARY_PROFILE);
     expect(record.timebase).toBe("synthetic-ordinal");
     record.spans.forEach((span, ordinal) => {
       expect(span.spanId).toBe(deriveSpanId(record.traceId, ordinal));

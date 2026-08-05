@@ -26,7 +26,7 @@ export interface LocalRuntimeObservationCapture {
  * simply sees no observations, which keeps enforced axes on the admission-gate leg and
  * leaves attested axes `unverifiable`.
  */
-export const RUN_PINNING_PROPERTY_PREFIX = "https://jinn.network/properties/run-pinning/";
+export const RUN_PINNING_PROPERTY_PREFIX = "https://spec.jinn.network/properties/run-pinning/";
 
 /**
  * The IRI segment is the **requirements-vocabulary** key, not the Matrix axis name — so the

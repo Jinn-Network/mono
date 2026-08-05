@@ -21,7 +21,7 @@ describe("typed Statement builders", () => {
     });
     expect(statement).toMatchObject({
       _type: "https://in-toto.io/Statement/v1",
-      predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+      predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
       subject: [
         { name: "task.md", digest: { sha256: "a".repeat(64) } },
         { name: "result.patch", digest: { sha256: "a".repeat(64) } },
@@ -46,7 +46,7 @@ describe("typed Statement builders", () => {
       verdict: "verified",
     });
     expect(statement).toMatchObject({
-      predicateType: "https://jinn.network/attestations/execution-verification/v1",
+      predicateType: "https://spec.jinn.network/attestations/execution-verification/v1",
       subject: [{ name: "ro-crate-metadata.json", digest: { sha256: "a".repeat(64) } }],
       predicate: {
         executionId: "urn:uuid:11111111-1111-4111-8111-111111111111",

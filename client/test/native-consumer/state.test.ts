@@ -6,7 +6,7 @@ import { documentDigest } from '@jinn-network/task-execution-protocol';
 import {
   ConsumerState,
   ConsumerStateError,
-} from '../fixtures/native-vertical-consumer/src/state.js';
+} from '../../src/native-consumer/state.js';
 
 const roots: string[] = [];
 const SOURCE = { agent: 'did:web:requester.example', name: 'requester' } as const;

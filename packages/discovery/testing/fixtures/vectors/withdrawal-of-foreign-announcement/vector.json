@@ -18,27 +18,27 @@
     },
     "firstAdoption": true,
     "head": {
-      "protocol": "https://jinn.network/record-discovery/1.0",
+      "protocol": "https://spec.jinn.network/record-discovery/v1",
       "origin": "did:key:zAgentSourceOne/feed",
       "sequence": "0000000000000002",
-      "entry": "sha256:55e83ff4987b229eb65dcb2f5f71159d96c1d6b965ac5e72eda1fb0c1b48f04b",
+      "entry": "sha256:8e7a7a67ff5c6232823946bc35aee01f22fc1317e1dd51b5d5a42ecc3a48353e",
       "issuedAt": "2026-07-28T12:00:00.000Z",
       "refreshBy": "2026-07-29T12:00:00.000Z"
     },
     "headSignature": {
       "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
-      "payload": "{\"entry\":\"sha256:55e83ff4987b229eb65dcb2f5f71159d96c1d6b965ac5e72eda1fb0c1b48f04b\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000002\"}",
+      "payload": "{\"entry\":\"sha256:8e7a7a67ff5c6232823946bc35aee01f22fc1317e1dd51b5d5a42ecc3a48353e\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000002\"}",
       "signatures": [
         {
           "keyid": "key-1",
-          "sig": "d1af1ed0d624cc6c0d10825fafa4b45f4b8561040598a993754db29c6f677d65:key-1"
+          "sig": "7b96a6ff8177678b79695749b074d7ee59cacb7f2a13e94fccc636571545aff2:key-1"
         }
       ]
     },
     "entries": [
       {
         "entry": {
-          "protocol": "https://jinn.network/record-discovery/1.0",
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
           "source": {
             "agent": "did:key:zAgentSourceOne",
             "name": "feed"
@@ -51,7 +51,7 @@
               "announcementId": "ann-1",
               "action": "available",
               "record": {
-                "kind": "https://jinn.network/records/submission/1.0",
+                "kind": "https://spec.jinn.network/records/submission/v1",
                 "digest": "sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773"
               }
             }
@@ -59,24 +59,24 @@
         },
         "signature": {
           "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
-          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://jinn.network/records/submission/1.0\"}}],\"previous\":null,\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "payload": "{\"announcements\":[{\"action\":\"available\",\"announcementId\":\"ann-1\",\"record\":{\"digest\":\"sha256:59908df50572502ceeabbcc669a28bcc5343d7564a581b9c9648479580f5b773\",\"kind\":\"https://spec.jinn.network/records/submission/v1\"}}],\"previous\":null,\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000001\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
           "signatures": [
             {
               "keyid": "key-1",
-              "sig": "37a78af256d37608aa967f3406dc634da978f083fde5b733a1eefe63b15c0950:key-1"
+              "sig": "735ac73988105324115302b7f2810a9aa61bbe76616f623cfe37fffb529f3102:key-1"
             }
           ]
         }
       },
       {
         "entry": {
-          "protocol": "https://jinn.network/record-discovery/1.0",
+          "protocol": "https://spec.jinn.network/record-discovery/v1",
           "source": {
             "agent": "did:key:zAgentSourceOne",
             "name": "feed"
           },
           "sequence": "0000000000000002",
-          "previous": "sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642",
+          "previous": "sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c",
           "timestamp": "2026-07-28T12:00:00.000Z",
           "announcements": [
             {
@@ -89,11 +89,11 @@
         },
         "signature": {
           "payloadType": "application/vnd.jinn.record-discovery.entry.v1+json",
-          "payload": "{\"announcements\":[{\"action\":\"withdrawn\",\"announcementId\":\"ann-2\",\"reason\":\"delisted\",\"retracts\":\"ann-never-announced\"}],\"previous\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"sequence\":\"0000000000000002\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
+          "payload": "{\"announcements\":[{\"action\":\"withdrawn\",\"announcementId\":\"ann-2\",\"reason\":\"delisted\",\"retracts\":\"ann-never-announced\"}],\"previous\":\"sha256:cabc9380a6f78d7b00c35cca00f9efb4721106faf86a8a94ec27420eece1db0c\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"sequence\":\"0000000000000002\",\"source\":{\"agent\":\"did:key:zAgentSourceOne\",\"name\":\"feed\"},\"timestamp\":\"2026-07-28T12:00:00.000Z\"}",
           "signatures": [
             {
               "keyid": "key-1",
-              "sig": "6d575383e2f1c8db7b89b66db984bf16bc92ff17b4a7ef35f89f4a9eeb188a81:key-1"
+              "sig": "38b6194e197dbb24222ff4082d9095eb0f46857f3a2cc705e6223d7999b7427d:key-1"
             }
           ]
         }

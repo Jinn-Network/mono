@@ -1,11 +1,11 @@
 [
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444301"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333301",
       "announcementId": "ann-c8-outcomes-301"
     },
@@ -15,16 +15,16 @@
     "subjectTaskDigestFromEvaluationTask": "sha256:1111111111111111111111111111111111111111111111111111111111111301",
     "attributionFromChainEvent": "urn:jinn:agent:evaluator-a",
     "task": {
-      "protocol": "https://jinn.network/profiles/task-execution/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
       "profile": {
-        "uri": "https://jinn.network/task-profiles/policy-c8-fixture/1.0",
-        "digest": { "sha256": "3f1cf61249a00934e512d3ecbb20c2fd6d0fffa815005500e497153a8a4de038" }
+        "uri": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+        "digest": { "sha256": "5fcb4f033d87b1ef1468334f795ebf5477aab90312f07a4b5d047c9e5cb6f3b9" }
       },
       "instructions": "Fixture task for the C8 policy-outcomes adapter kit (arm A).",
       "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
     },
     "submission": {
-      "protocol": "https://jinn.network/profiles/task-execution/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
       "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c801",
       "task": { "digest": { "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
       "requester": "urn:jinn:agent:policy-c8-requester",
@@ -43,8 +43,8 @@
       }
     },
     "profile": {
-      "profile": "https://jinn.network/task-profiles/policy-c8-fixture/1.0",
-      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9wb2xpY3ktYzgtZml4dHVyZS8xLjAiLCJyZXF1aXJlbWVudEtleXMiOltdfQ==",
+      "profile": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3BvbGljeS1jOC1maXh0dXJlLzEuMCIsInJlcXVpcmVtZW50S2V5cyI6W119",
       "requirementKeys": []
     },
     "fidelityEvidence": {
@@ -56,11 +56,11 @@
   },
   {
     "record": {
-      "kind": "https://jinn.network/records/delivery/1.0",
+      "kind": "https://spec.jinn.network/records/delivery/v1",
       "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444302"
     },
     "provenance": {
-      "source": { "agent": "https://jinn.network/agents/projector", "name": "base-marketplace" },
+      "source": { "agent": "https://spec.jinn.network/agents/projector", "name": "base-marketplace" },
       "entry": "sha256:3333333333333333333333333333333333333333333333333333333333333302",
       "announcementId": "ann-c8-outcomes-302"
     },
@@ -71,16 +71,16 @@
     "attributionFromChainEvent": "urn:jinn:agent:bench-harness",
     "benchmarkRun": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
     "task": {
-      "protocol": "https://jinn.network/profiles/task-execution/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
       "profile": {
-        "uri": "https://jinn.network/task-profiles/policy-c8-fixture/1.0",
-        "digest": { "sha256": "3f1cf61249a00934e512d3ecbb20c2fd6d0fffa815005500e497153a8a4de038" }
+        "uri": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+        "digest": { "sha256": "5fcb4f033d87b1ef1468334f795ebf5477aab90312f07a4b5d047c9e5cb6f3b9" }
       },
       "instructions": "Fixture task for the C8 policy-outcomes adapter kit (arm B).",
       "outputs": [{ "name": "patch", "mediaType": "text/x-diff", "required": true }]
     },
     "submission": {
-      "protocol": "https://jinn.network/profiles/task-execution/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-execution/v1",
       "submission": "urn:uuid:0189d1c2-0000-7000-8000-00000000c802",
       "task": { "digest": { "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" } },
       "requester": "urn:jinn:agent:policy-c8-requester",
@@ -99,8 +99,8 @@
       }
     },
     "profile": {
-      "profile": "https://jinn.network/task-profiles/policy-c8-fixture/1.0",
-      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9qaW5uLm5ldHdvcmsvdGFzay1wcm9maWxlcy9wb2xpY3ktYzgtZml4dHVyZS8xLjAiLCJyZXF1aXJlbWVudEtleXMiOltdfQ==",
+      "profile": "https://spec.jinn.network/task-profiles/policy-c8-fixture/1.0",
+      "sealedBytes": "eyJwcm9maWxlIjoiaHR0cHM6Ly9zcGVjLmppbm4ubmV0d29yay90YXNrLXByb2ZpbGVzL3BvbGljeS1jOC1maXh0dXJlLzEuMCIsInJlcXVpcmVtZW50S2V5cyI6W119",
       "requirementKeys": []
     },
     "fidelityEvidence": {

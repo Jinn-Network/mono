@@ -11,7 +11,7 @@ function specBytes(document: unknown): Uint8Array {
 }
 
 const PUBLIC_SPEC = specBytes({
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   familyBlock: {
     testMaterial: [
       { name: "test-patch", mediaType: "text/x-diff", content: "ZGlmZg==", accessClass: "public" },

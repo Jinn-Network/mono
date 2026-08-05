@@ -101,7 +101,7 @@ async function produceBridgedDelivery(): Promise<Uint8Array> {
   roots.push(stateRoot);
 
   const task = sealTask({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     profile: { uri: profile.profile, digest: { sha256: sealedProfile.digest.slice('sha256:'.length) } },
     instructions: 'Predict the outcome.',
     outputs: [{ name: 'prediction.json', mediaType: 'application/json', required: true }],
@@ -110,7 +110,7 @@ async function produceBridgedDelivery(): Promise<Uint8Array> {
   const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
   const nonce = crypto.randomUUID();
   const submission = sealSubmission({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: submissionUri,
     task: { digest: { sha256: taskDigest.slice('sha256:'.length) } },
     requester: 'urn:uuid:30000000-0000-4000-8000-000000000001',
@@ -256,7 +256,7 @@ describe('converged Delivery is parseable by the legacy evaluator path', () => {
 
   it('returns undefined for a Delivery carrying no bridge annotation', () => {
     const bare = sealDelivery({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       attempt: 'urn:uuid:11111111-2222-3333-4444-555555555555',
       task: `sha256:${'b'.repeat(64)}`,
       outputs: [],

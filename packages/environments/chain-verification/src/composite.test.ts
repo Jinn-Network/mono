@@ -316,7 +316,7 @@ function informationWorldComponent(id: string, name: string) {
   return {
     world: {
       id,
-      kind: "https://jinn.network/records/information-world/1.0",
+      kind: "https://spec.jinn.network/records/information-world/v1",
       record: {
         name,
         digest: { sha256: artifact.digest.slice("sha256:".length) },

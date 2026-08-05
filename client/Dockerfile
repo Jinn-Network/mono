@@ -191,6 +191,7 @@ COPY packages/task-execution/evaluator-adapters/README.md ./packages/task-execut
 COPY packages/task-execution/profiles/profiles/ ./packages/task-execution/profiles/profiles/
 COPY packages/task-execution/profiles/fixtures/ ./packages/task-execution/profiles/fixtures/
 COPY packages/task-execution/profiles/README.md ./packages/task-execution/profiles/README.md
+COPY packages/task-execution/protocol/profiles/ ./packages/task-execution/protocol/profiles/
 COPY packages/task-execution/protocol/schemas/ ./packages/task-execution/protocol/schemas/
 COPY packages/task-execution/protocol/fixtures/ ./packages/task-execution/protocol/fixtures/
 COPY packages/task-execution/protocol/README.md ./packages/task-execution/protocol/README.md

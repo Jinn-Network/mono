@@ -82,7 +82,7 @@ export const CANDIDATE = candidateFor("candidate", "repo-work-candidate", "2");
 /** A minimal, valid sealed Task document. `evaluation` is required for benchmark judgeability. */
 export function taskBytes(instructions: string): Uint8Array {
   return serializeCanonicalJson({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: { digest: { sha256: "f".repeat(64) } },
     instructions,
     outputs: [{ name: "answer", mediaType: "text/plain", required: true }],

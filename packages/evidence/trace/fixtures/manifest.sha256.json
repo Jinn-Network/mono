@@ -1,0 +1,90 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "adversarial-v1/empty-with-spans/document.json",
+      "sha256": "7b409a1f1c1293218e8c92183bb596ef0b68b5c9f4ab19d21f6d8a5827411dde"
+    },
+    {
+      "id": "adversarial-v1/full-with-skipped/document.json",
+      "sha256": "665e5e6818c4f1fa722dd13796de05ddbc74805de846c883249a91281247e45c"
+    },
+    {
+      "id": "adversarial-v1/grafted-parent/document.json",
+      "sha256": "ac6c6a375841f81445b2168bf351f4ba8436fb0781f4875fe22a8b017ecf5d53"
+    },
+    {
+      "id": "adversarial-v1/manifest.json",
+      "sha256": "1c1c18ebb25c25876a5bed885e1bc28b50d42bd74a78f2ba18e3afb5fb1f3543"
+    },
+    {
+      "id": "adversarial-v1/message-content-attribute/document.json",
+      "sha256": "0f5007de40866fa8b388e0a548b62e8779b69453b8d33131f4e3148297255fdd"
+    },
+    {
+      "id": "adversarial-v1/namespaced-extension-preserved/document.json",
+      "sha256": "5f61b55304339c691617c0128a8ed324adf382e0dd9a5d67749faa6e7b9bfef0"
+    },
+    {
+      "id": "adversarial-v1/nested-native-trace-key/document.json",
+      "sha256": "5f32b1f114bba1a7db95efa900cfaebbee69a64b3e670bc5800830f00e52e8c7"
+    },
+    {
+      "id": "adversarial-v1/partial-without-skipped/document.json",
+      "sha256": "d935bf0c0735e607a6d3c3502009021fd5ea04b4a26783b7227d7f01d268e35d"
+    },
+    {
+      "id": "adversarial-v1/substituted-source-digest/document.json",
+      "sha256": "078748c0661c3c86ad1e5126cc61580760da5552681a7d3f0363c18a4a9b7dc9"
+    },
+    {
+      "id": "derivation/execution-golden-base.json",
+      "sha256": "80f71b7bc400a1452dc5dbc30e2ce642f1a28691cc91c35eaf74d694883475b2"
+    },
+    {
+      "id": "equivalence/expected-digest.json",
+      "sha256": "7bd06294bb0b0dc2a352129d650681e792d5b74dfa3e3edb2027a337b04be88f"
+    },
+    {
+      "id": "equivalence/input-a.json",
+      "sha256": "1a3f6a3c0959282f5276a8a898b3264079a8810f833354622aac0a9c3c963ead"
+    },
+    {
+      "id": "equivalence/input-b.json",
+      "sha256": "684b3cb79d63196e6d8caf9a36afa9529f606f9ad2a6e8d87a35d939de036e65"
+    },
+    {
+      "id": "trace/invalid-forged-span-id.json",
+      "sha256": "3b1767e2329dbcd84b3926ff188f1d4f6bdd86625b5d777afb62683b04ba0458"
+    },
+    {
+      "id": "trace/invalid-forged-trace-id.json",
+      "sha256": "c16e3fda970a4fa930b47078f0a5a9adc06bd86e6100ad09a976e058d2813ad2"
+    },
+    {
+      "id": "trace/invalid-unknown-extension-key.json",
+      "sha256": "641d49e4b5f1e9bb236507a4cecb09e8bd6d7a07113ba8ddeb5c9ee3c30b76db"
+    },
+    {
+      "id": "trace/invalid-unsorted-attributes.json",
+      "sha256": "42c448fd800cef7f0249f3dfcd79fc9f965318bdd0ea129fd62be6d20fbda1f4"
+    },
+    {
+      "id": "trace/minimal.json",
+      "sha256": "f03f4cac8274ad31de957dddd1a5c6eeddae7c4a410b8debf4f455e10b7050dd"
+    },
+    {
+      "id": "trace/minimal.sha256",
+      "sha256": "4e1c46deba0efbf807eb20e5b431068126520a51aa796d0a765d83b82c2738c8"
+    },
+    {
+      "id": "trace/valid.json",
+      "sha256": "85c75d3c2b4f86fc0c86e9765f709e8f0c0eaf963b19da6fd8ecbf134c8e002f"
+    },
+    {
+      "id": "trace/valid.sha256",
+      "sha256": "67393b8abbe656ccf8e6e4097346b6081fff1fe28d7be13b5d0eff7bc1d16d85"
+    }
+  ],
+  "errata": []
+}

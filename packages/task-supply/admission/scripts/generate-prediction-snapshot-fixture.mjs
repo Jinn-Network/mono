@@ -35,7 +35,7 @@ const bytes = (value) => canonicalJsonBytes(value);
 const write = async (name, value) => writeFile(new URL(name, root), value);
 
 const evaluationSpec = {
-  protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+  protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
   semanticsVersion: "4",
   family: "deterministic-process",
   grader: { name: "public-grader", digest: { sha256: "b".repeat(64) }, accessClass: "public" },
@@ -65,9 +65,9 @@ const evaluationSpec = {
 };
 const evaluationSpecBytes = bytes(evaluationSpec);
 const task = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   profile: {
-    uri: "https://jinn.network/task-profiles/prediction-forecast/1.0",
+    uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
     digest: { sha256: "e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937" },
   },
   instructions: "Forecast the named market.",
@@ -93,14 +93,14 @@ const taskBytes = bytes(task);
 const receipt = admitPredictionSnapshot({ taskBytes, evaluationSpecBytes, issuer: "did:jinn:admitter" });
 const sealedReceipt = await sealPredictionSnapshotAdmissionReceipt(receipt, signer);
 const submission = {
-  protocol: "https://jinn.network/profiles/task-execution/1.0",
+  protocol: "https://spec.jinn.network/profiles/task-execution/v1",
   submission: "urn:uuid:0f9a8b7c-1234-5abc-8def-123456789abc",
   requester: "did:jinn:requester-golden",
   task: { digest: { sha256: recordDigest(taskBytes).slice(7) } },
   deadline: "2026-08-02T12:00:00Z",
   idempotencyKey: "native-prediction-forecast-will-jinn-ship-2026-08-02",
   nonce: "native-prediction-forecast-nonce-1",
-  annotations: { "https://jinn.network/annotations/admission-receipt/1.0": {
+  annotations: { "https://spec.jinn.network/annotations/admission-receipt/v1": {
     name: "admission-receipt", mediaType: payloadType, digest: { sha256: sealedReceipt.receiptDigest.slice(7) },
   } },
 };

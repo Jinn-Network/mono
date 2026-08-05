@@ -50,7 +50,7 @@ describe("curateAnnouncements: the seven joins, golden path", () => {
   it("assembles ref from provenance + record digest + attemptUri", () => {
     const ref = observations[0]!.ref;
     expect(ref).toEqual({
-      source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+      source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
       entry: "sha256:3333333333333333333333333333333333333333333333333333333333333101",
       announcementId: "ann-c8-golden-101",
       record: "sha256:4444444444444444444444444444444444444444444444444444444444444101",

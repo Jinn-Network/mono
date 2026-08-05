@@ -36,7 +36,7 @@ function entry(overrides: Partial<AnnouncementEntry> & { sequence: string; previ
       {
         announcementId: `ann-${overrides.sequence}`,
         action: "available",
-        record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
       },
     ],
     ...overrides,
@@ -57,7 +57,7 @@ describe("checkGlobalChainRules", () => {
       sequence: GENESIS_SEQUENCE,
       previous: null,
       announcements: [
-        { announcementId: "ann-genesis-b", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"b".repeat(64)}` } },
+        { announcementId: "ann-genesis-b", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"b".repeat(64)}` } },
       ],
     });
     expect(checkGlobalChainRules(digestEntries([genesisA, genesisB]))).toEqual({ kind: "duplicate-genesis" });
@@ -69,21 +69,21 @@ describe("checkGlobalChainRules", () => {
     const childA = entry({
       sequence: "0000000000000002",
       previous: genesisDigested!.digest,
-      announcements: [{ announcementId: "ann-2a", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` } }],
+      announcements: [{ announcementId: "ann-2a", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` } }],
     });
     const childB = entry({
       sequence: "0000000000000002",
       previous: genesisDigested!.digest,
-      announcements: [{ announcementId: "ann-2b", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"b".repeat(64)}` } }],
+      announcements: [{ announcementId: "ann-2b", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"b".repeat(64)}` } }],
     });
     const failure = checkGlobalChainRules(digestEntries([genesis, childA, childB]));
     expect(failure?.kind).toBe("forked");
   });
 
   it("rejects a source-wide duplicate announcementId across entries", () => {
-    const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null, announcements: [{ announcementId: "ann-shared", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` } }] });
+    const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null, announcements: [{ announcementId: "ann-shared", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` } }] });
     const [genesisDigested] = digestEntries([genesis]);
-    const child = entry({ sequence: "0000000000000002", previous: genesisDigested!.digest, announcements: [{ announcementId: "ann-shared", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"b".repeat(64)}` } }] });
+    const child = entry({ sequence: "0000000000000002", previous: genesisDigested!.digest, announcements: [{ announcementId: "ann-shared", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"b".repeat(64)}` } }] });
     expect(checkGlobalChainRules(digestEntries([genesis, child]))).toEqual({ kind: "duplicate-announcement-id", announcementId: "ann-shared" });
   });
 
@@ -102,7 +102,7 @@ describe("checkGlobalChainRules", () => {
   });
 
   it("rejects a withdrawal-of-a-withdrawal", () => {
-    const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null, announcements: [{ announcementId: "ann-1", action: "available", record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` } }] });
+    const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null, announcements: [{ announcementId: "ann-1", action: "available", record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` } }] });
     const [genesisDigested] = digestEntries([genesis]);
     const first = entry({ sequence: "0000000000000002", previous: genesisDigested!.digest, announcements: [{ announcementId: "ann-2", action: "withdrawn", retracts: "ann-1", reason: "delisted" }] });
     const [, firstDigested] = digestEntries([genesis, first]);
@@ -171,7 +171,7 @@ describe("walkLinkage", () => {
         {
           announcementId: "ann-oversized-facts",
           action: "available",
-          record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+          record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
           facts: { blob: "x".repeat(4200) }, // seals to > 4 KiB
         },
       ],
@@ -190,7 +190,7 @@ describe("walkLinkage", () => {
         {
           announcementId: "ann-small-facts",
           action: "available",
-          record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+          record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
           facts: { blob: "x".repeat(10) },
         },
       ],

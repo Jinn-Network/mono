@@ -13,7 +13,7 @@ import { recordDigest } from "./hashing.js";
 // independent of any one family's eventual Zod schema.
 const FIXTURES = {
   "key-binding": {
-    protocol: "https://jinn.network/trust/key-binding/v1",
+    protocol: "https://spec.jinn.network/trust/key-binding/v1",
     agent: "urn:uuid:11111111-1111-4111-8111-111111111111",
     key: {
       algorithm: "secp256k1",
@@ -30,14 +30,14 @@ const FIXTURES = {
     anchors: [],
   },
   revocation: {
-    protocol: "https://jinn.network/trust/revocation/v1",
+    protocol: "https://spec.jinn.network/trust/revocation/v1",
     target: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     revokedBy: "did:pkh:eip155:8453:0xAbCdEf0123456789aBcDef0123456789ABcDeF0",
     effectiveFrom: "2026-07-29T00:00:00Z",
     anchors: [],
   },
   policy: {
-    protocol: "https://jinn.network/trust/policy/v1",
+    protocol: "https://spec.jinn.network/trust/policy/v1",
     version: 1,
     purposes: {
       "verifier-agent": {
@@ -56,7 +56,7 @@ const FIXTURES = {
       issuer: "urn:uuid:11111111-1111-4111-8111-111111111111",
       nonce: "n-1",
     },
-    predicateType: "https://jinn.network/trust/authorization/v1",
+    predicateType: "https://spec.jinn.network/trust/authorization/v1",
     subject: [{ digest: { sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }, name: "input-digest" }],
   },
 } as const;

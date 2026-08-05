@@ -18,10 +18,10 @@ import {
 // sealed, digest-pinned document. Update these only when a field or key
 // ordering changes deliberately.
 const EXPECTED_DIGESTS: Record<string, string> = {
-  benchmark: "sha256:0e53619e482fe5e1722f8eb630afafbb4428aba4fa62f256d77ebd7537538d05",
-  run: "sha256:d3ef84d6941b81b98470c3b1b57c30b20a2140152dc4e2ccd4d354e1625a5d46",
-  matrix: "sha256:a9b39bea6fa015466e85334075d9dc3409be7214c4c3576513ba226f3fbbbf9f",
-  report: "sha256:b75d0e9a2e7d9100d34774878e394b02267903c2e9424b4ce866afcb4eb75e58",
+  benchmark: "sha256:46e35e23cf24bc3b3eff79d6e25e9bc9f595f1cb53f05caabd6ce57e08e32fdd",
+  run: "sha256:c7cd601d477aa308994c6f135f6026967d51a6f8700c735b58c885ae33ba9732",
+  matrix: "sha256:80458de1c987bb7a68a73b3a0e0673cbbeb4106abe610ef916e4d09e99bdb76a",
+  report: "sha256:85c7392b237da814e4dbdfdee1b4c7d9eb71663237d585e41320c3fb547f0b35",
 };
 
 function expectPinnedDigest(name: string, digest: string) {

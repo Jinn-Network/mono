@@ -54,7 +54,11 @@ test('no-record: nothing here seals, hashes an on-chain identity, or claims a re
   const banned = [
     /\bsealCandidateManifest\b/, /\bputArtifact\b/, /\bRECORD_KINDS\b/,
     /\brecordKind\b/, /\bpayloadType\b/, /\bdssePreAuthEncoding\b/,
-    /https:\/\/jinn\.network\/records\//,
+    // DR-2026-08-04: the re-seal moved every record kind to spec.jinn.network, but a
+    // legacy-origin record kind is still a record kind -- the constraint is about the layer's
+    // behavior (projection, never record), not about which origin spells the URI. Forbid a
+    // record-kind path under either host so this guard still constrains something post-re-seal.
+    /https:\/\/(?:spec\.)?jinn\.network\/records\//,
   ];
   for (const file of productionSources()) {
     const text = readFileSync(file, 'utf8');
@@ -95,7 +99,7 @@ test('serialization: the projection format token is not a record kind', () => {
   assert.match(text, /POLICY_OUTCOMES_PROJECTION_FORMAT = "network\.jinn\.policy\.outcomes-projection\/1\.0"/);
   const golden = JSON.parse(readFileSync(join(pkg, 'fixtures', 'projection-golden.json'), 'utf8'));
   assert.deepEqual(Object.keys(golden).sort(), ['format', 'rows']);
-  assert.ok(!String(golden.format).startsWith('https://jinn.network/records/'));
+  assert.ok(!/^https:\/\/(spec\.)?jinn\.network\/records\//u.test(String(golden.format)));
 });
 
 // Substrate §7: each axis's pinning counters sum to the row's verdicts -- checked at the fixture

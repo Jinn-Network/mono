@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/profiles/evaluation-spec/1.0",
+  "protocol": "https://spec.jinn.network/profiles/evaluation-spec/v1",
   "semanticsVersion": "4",
   "family": "deterministic-process",
   "grader": { "uri": "https://example.org/graders/deterministic-process-runner" },

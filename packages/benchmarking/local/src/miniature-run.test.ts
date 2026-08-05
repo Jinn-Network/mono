@@ -46,7 +46,7 @@ const LOADOUT_B = {
 };
 
 const EVAL_SPEC = {
-  protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+  protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
   family: "deterministic-process",
   semanticsVersion: "4",
   measurements: [{ name: "passed", type: "boolean", required: true }],

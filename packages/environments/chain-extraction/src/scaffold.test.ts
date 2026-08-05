@@ -15,7 +15,7 @@ describe("chain-state-extraction scaffold", () => {
     expect(DEFAULT_MAX_WIDENINGS).toBe(3);
     expect(MAX_WIDENINGS_CEILING).toBe(8);
     expect(CHAIN_EXTRACTION_PROTOCOL_URI).toBe(
-      "https://jinn.network/protocols/chain-state-extraction/v1",
+      "https://spec.jinn.network/protocols/chain-state-extraction/v1",
     );
   });
 });

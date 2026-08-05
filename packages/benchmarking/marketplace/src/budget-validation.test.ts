@@ -15,7 +15,7 @@ import {
 } from "./budget-validation.js";
 import { validateMarketplaceComposition } from "./venue.js";
 
-const TASK_DIGEST = "f2fcac284b66b5ed9d0567dea00ca3a75ac5a9fd570c1909851d1512393ce741";
+const TASK_DIGEST = "8c0771ce49731c14e47d2103710e440abad04d138fc0163be2e9ffa7d9dd838f";
 
 function bench(items = 1): { bench: BenchmarkRecord; benchDigest: string } {
   const itemsList = Array.from({ length: items }, () => ({

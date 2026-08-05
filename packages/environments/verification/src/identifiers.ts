@@ -2,11 +2,11 @@
 
 /** in-toto `predicateType` for this attestation (design §5.1). */
 export const ENVIRONMENT_VERIFICATION_PREDICATE_TYPE =
-  "https://jinn.network/attestations/environment-verification/v1" as const;
+  "https://spec.jinn.network/attestations/environment-verification/v1" as const;
 
 /** The protocol the predicate's `protocol` field names (design §5.2, §5.3). */
 export const ENVIRONMENT_VERIFICATION_PROTOCOL_URI =
-  "https://jinn.network/environment-verification/protocol/1.0" as const;
+  "https://spec.jinn.network/environment-verification/protocol/v1" as const;
 
 /**
  * K for the v1 profile. Rerun studies put flaky-test detection on an

@@ -48,7 +48,7 @@ const KNOWN_FIELDS = new Set<string>([...REQUIRED_FIELDS, "compatibility"]);
 const PARENT_KINDS = new Set(["candidate", "tuple"]);
 
 // TEP §21.3's two extension-key spellings, mirrored from the stack's existing rule
-// (`packages/evidence/trajectory/src/extensions.ts`): reverse-DNS, or an absolute URI.
+// (`packages/evidence/trace/src/extensions.ts`): reverse-DNS, or an absolute URI.
 const REVERSE_DNS_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9-]*(\.[A-Za-z][A-Za-z0-9-]*)+$/;
 const ABSOLUTE_URI_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:[^\s]+$/;
 

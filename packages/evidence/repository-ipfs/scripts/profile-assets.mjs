@@ -11,7 +11,7 @@ const encoder = new TextEncoder();
 const schema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   $id:
-    "https://jinn.network/profiles/evidence-repository-ipfs-registration/1/registration.schema.json",
+    "https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json",
   title: "Jinn Evidence Repository IPFS Registration v1",
   oneOf: [
     {

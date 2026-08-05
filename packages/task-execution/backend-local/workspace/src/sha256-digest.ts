@@ -12,7 +12,7 @@
  * these two functions rather than concatenating or slicing `"sha256:"` inline.
  *
  * Mirrors the established `toBareSha256Hex`/`toRepositorySha256Digest` pair in
- * `packages/evidence/trajectory/src/digests.ts` (not imported — evidence/trajectory is a
+ * `packages/evidence/trace/src/digests.ts` (not imported — evidence/trace is a
  * different tree and not an approved task-execution dependency).
  */
 

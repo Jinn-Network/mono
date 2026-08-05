@@ -51,12 +51,12 @@ import {
   type SealedRevocationRecord,
 } from '@jinn-network/trust-resolve';
 import type { SourceIdentity } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import type {
   ExactPublicArtifact,
   NativePublicGraph,
   NativeGraphRoots,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 import {
   NativeVerificationError,
   deriveConsumerSolutionSettlementId,
@@ -65,7 +65,7 @@ import {
   writeNativeVerticalVerificationReport,
   type ConsumerTrustPorts,
   type NativeRoleAuthority,
-} from '../fixtures/native-vertical-consumer/src/verification.js';
+} from '../../src/native-consumer/verification.js';
 
 const roots: string[] = [];
 const NOW = '2026-08-02T12:00:00Z';
@@ -118,9 +118,9 @@ const SPEC: EvaluationSpec = {
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: '4',
   family: 'deterministic-process',
-  grader: { uri: 'https://jinn.network/graders/prediction-golden' },
+  grader: { uri: 'https://spec.jinn.network/graders/prediction-golden' },
   familyBlock: {
-    image: { uri: 'https://jinn.network/images/prediction-golden' },
+    image: { uri: 'https://spec.jinn.network/images/prediction-golden' },
     platform: 'linux/amd64', workspace: { root: '/workspace' }, testMaterial: [],
     parser: { id: 'jinn.parser.prediction', version: '1.0.0', digest: `sha256:${'9'.repeat(64)}` },
     transitions: { failToPass: [], passToPass: [] }, timeout: 60,
@@ -139,7 +139,7 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
   const evaluationSpec = artifact('evaluation-spec', sealedSpec.bytes, 'application/vnd.jinn.evaluation-spec.v1+json');
   const task = artifact('task', sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
-    profile: { uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
+    profile: { uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
     instructions: 'Return the pinned prediction.',
     outputs: [{ name: 'result.txt', mediaType: 'text/plain', required: true }],
     evaluation: descriptor(evaluationSpec, 'evaluation-spec.json'),
@@ -147,7 +147,7 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
   const admissionStatement = {
     _type: 'https://in-toto.io/Statement/v1',
     subject: [descriptor(task, 'task'), descriptor(evaluationSpec, 'evaluation-spec.json')],
-    predicateType: 'https://jinn.network/attestations/admission-receipt/v1',
+    predicateType: 'https://spec.jinn.network/attestations/admission-receipt/v1',
     predicate: { issuer: ADMISSION_AGENT, authorityTime: AUTHORITY_TIME },
   };
   const admissionReceipt = artifact('admission-receipt', envelope(
@@ -159,8 +159,8 @@ function makeGraph(keys: Record<'requester' | 'admission' | 'executor' | 'evalua
     task: descriptor(task, 'task'), requester: REQUESTER_AGENT,
     idempotencyKey: 'golden-run', nonce: 'golden-run', deadline: '2026-08-03T00:00:00Z',
     annotations: {
-      'https://jinn.network/annotations/admission-receipt/1.0': descriptor(admissionReceipt, 'admission-receipt'),
-      'https://jinn.network/annotations/authority-time/1.0': AUTHORITY_TIME,
+      'https://spec.jinn.network/annotations/admission-receipt/v1': descriptor(admissionReceipt, 'admission-receipt'),
+      'https://spec.jinn.network/annotations/authority-time/v1': AUTHORITY_TIME,
     },
   }), SUBMISSION_MEDIA_TYPE);
   const requesterEnvelope = artifact(

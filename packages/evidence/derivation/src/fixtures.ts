@@ -177,7 +177,7 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
     "+export const slug = value => value.toLowerCase();\n",
   );
   const trace = artifact(
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     "application/x-ndjson",
     [
       JSON.stringify({
@@ -215,7 +215,7 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
       datePublished: "2026-07-26T00:00:00Z",
       license: { "@id": "https://creativecommons.org/publicdomain/zero/1.0/" },
       conformsTo: {
-        "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
       },
       creator: {
         "@id": "urn:uuid:44444444-4444-4444-8444-444444444444",
@@ -227,7 +227,7 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
       "prov:wasGeneratedBy": { "@id": "#capture" },
     },
     {
-      "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+      "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
       "@type": ["CreativeWork", "Profile"],
       name: "Jinn Execution Evidence Profile 1.0",
     },
@@ -304,22 +304,22 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
       encodingFormat: trace.mediaType,
       sha256: trace.digest,
       conformsTo: {
-        "@id": "https://jinn.network/formats/fixture-trajectory/1.0",
+        "@id": "https://spec.jinn.network/formats/fixture-trace/v1",
       },
       about: {
         "@id": "urn:uuid:22222222-2222-4222-8222-222222222222",
       },
     },
     {
-      "@id": "https://jinn.network/formats/fixture-trajectory/1.0",
+      "@id": "https://spec.jinn.network/formats/fixture-trace/v1",
       "@type": ["CreativeWork", "Profile"],
-      name: "Synthetic fixture trajectory 1.0",
+      name: "Synthetic fixture trace 1.0",
     },
     {
       "@id": "#duration-ms",
       "@type": "PropertyValue",
       name: "durationMs",
-      propertyID: "https://jinn.network/terms/durationMs",
+      propertyID: "https://spec.jinn.network/terms/durationMs",
       value: 1000,
       unitCode: "ms",
     },
@@ -345,7 +345,7 @@ export function syntheticDerivationInput(): DeriveExecutionEvidenceInput {
       "https://w3id.org/ro/terms/workflow-run/context",
       {
         prov: "http://www.w3.org/ns/prov#",
-        jinn: "https://jinn.network/terms/",
+        jinn: "https://spec.jinn.network/terms/",
       },
     ],
     "@graph": graph,

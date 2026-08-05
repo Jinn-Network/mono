@@ -32,7 +32,7 @@ const SPKI = Buffer.from('302a300506032b6570032100', 'hex');
 const NOW = '2026-08-02T12:00:00.000Z';
 const VALID_FROM = '2026-08-01T00:00:00.000Z';
 const ANCHOR_TIME = '2026-08-01T00:01:00.000Z';
-const AGENT = 'https://jinn.network/agents/native-solver';
+const AGENT = 'https://spec.jinn.network/agents/native-solver';
 const ROLE_PURPOSE = 'native:solver-delivery';
 const FAMILY = 'deliveries';
 const ACCOUNT = privateKeyToAccount(`0x${'11'.repeat(32)}`);
@@ -70,7 +70,7 @@ Promise<EoaCeremonyEvidence> {
     resources: [agent, didKey],
   };
   const signedMessage = mode === 'bad-content'
-    ? { ...message, resources: ['https://jinn.network/agents/attacker', didKey] }
+    ? { ...message, resources: ['https://spec.jinn.network/agents/attacker', didKey] }
     : message;
   const messageBytes = serializeCeremonyMessage('eoa', signedMessage);
   const signature = mode === 'bad-signature'
@@ -83,7 +83,7 @@ type AnchorObservation = Awaited<ReturnType<NativeFinalizedAnchorReadClient['loo
 
 function anchorLocator(_digest: string, index: number) {
   return {
-    profile: 'https://jinn.network/trust/anchor-locators/base-sepolia-calldata-v1' as const,
+    profile: 'https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1' as const,
     chainId: 84532 as const,
     transactionHash: `0x${(index + 1).toString(16).padStart(64, '0')}` as const,
     contractAddress: `0x${'ab'.repeat(20)}` as const,
@@ -135,7 +135,7 @@ async function buildCatalog(options: {
       ? options.ceremonyMode
       : 'valid');
   const binding: KeyBinding = {
-    protocol: 'https://jinn.network/trust/key-binding/v1',
+    protocol: 'https://spec.jinn.network/trust/key-binding/v1',
     agent: AGENT,
     key: { publicKey: working.id, keyid: working.id, algorithm: 'Ed25519', didKey: working.id },
     voucher: { kind: 'account', did: didPkh(84532, ACCOUNT.address), contractAccount: false },
@@ -161,7 +161,7 @@ async function buildCatalog(options: {
   }
 
   const policy: TrustPolicy = {
-    protocol: 'https://jinn.network/trust/policy/v1',
+    protocol: 'https://spec.jinn.network/trust/policy/v1',
     version: 1,
     purposes: options.purpose === 'missing' ? {} : {
       [ROLE_PURPOSE]: { accepted: [AGENT], requiredStrength: 'strong' },
@@ -201,7 +201,7 @@ async function buildCatalog(options: {
   if (options.revoked === true) {
     const revocationAnchor = recordDigest(new TextEncoder().encode('revocation-anchor'));
     const revocation = await sealRevocation({
-      protocol: 'https://jinn.network/trust/revocation/v1',
+      protocol: 'https://spec.jinn.network/trust/revocation/v1',
       target: recordDigest(bindingEnvelope),
       revokedBy: working.id,
       anchors: [{ digest: revocationAnchor }],

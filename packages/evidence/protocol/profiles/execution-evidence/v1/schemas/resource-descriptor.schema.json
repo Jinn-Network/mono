@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "object",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "sha256"
+      ],
+      "additionalProperties": {}
+    },
+    "uri": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "mediaType": {
+      "type": "string"
+    },
+    "downloadLocation": {
+      "type": "string"
+    },
+    "annotations": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    }
+  },
+  "required": [
+    "name",
+    "digest"
+  ],
+  "additionalProperties": {},
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
+}

@@ -15,4 +15,4 @@ function loadProfile(filename: string): FactsProfileDocument {
   );
 }
 
-export const environmentFactsProfile: FactsProfileDocument = loadProfile("environment.1.0.json");
+export const environmentFactsProfile: FactsProfileDocument = loadProfile("environment.v1.json");

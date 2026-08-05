@@ -8,7 +8,7 @@ const ANCHORED_TASK = {
   manifestDigest: 'QmSolver',
   taskCidDigest: `0x${'a'.repeat(64)}` as const,
   taskBytes: new TextEncoder().encode(
-    JSON.stringify({ protocol: 'https://jinn.network/profiles/task-execution/1.0' }),
+    JSON.stringify({ protocol: 'https://spec.jinn.network/profiles/task-execution/v1' }),
   ),
   solutionBudgetWei: 1_000_000_000_000n,
 };
@@ -19,7 +19,7 @@ describe('bridge-era legacy facts card', () => {
     expect(card.derivationKind).toBe('legacy');
     expect(card.legacyManifestDigest).toBe('QmSolver');
     expect(card.record.kind).toBe(
-      'https://jinn.network/records/task-execution/submission/1.0',
+      'https://spec.jinn.network/records/submission/v1',
     );
   });
 
@@ -58,7 +58,7 @@ describe('signedEnvelopeJsonFromDeliveryOrRaw (E43)', () => {
   it('unwraps the nested bridge envelope from a sealed Delivery-shaped document', () => {
     const nested = { schemaVersion: 'jinn.execution.v1', solverType: 'prediction.v1', role: 'solution' };
     const delivery = {
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       [LEGACY_ENVELOPE_EXTENSION_KEY]: JSON.stringify(nested),
     };
     expect(signedEnvelopeJsonFromDeliveryOrRaw(delivery)).toEqual(nested);

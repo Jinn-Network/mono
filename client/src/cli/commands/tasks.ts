@@ -46,6 +46,7 @@ import {
   writeMarketplaceTaskSelection,
 } from '../../tasks/submit-selection.js';
 import { createHttpDiscoveryAPI } from '../../discovery/http.js';
+import type { DiscoveryAPI } from '../../discovery/types.js';
 import { fetchFromIpfs } from '../../adapters/mech/ipfs.js';
 import { getJinnRouterAddress } from '../../contracts/addresses.js';
 import {
@@ -937,6 +938,271 @@ async function runSubmit(ctx: CommandContext): Promise<void> {
   }
 }
 
+// ── tasks watch ───────────────────────────────────────────────────────────────
+
+/**
+ * NDJSON progress envelope emitted while `jinn tasks watch` waits. Mirrors the
+ * stable shape `jinn quickstart` emits (`QuickstartProgressEnvelope` in
+ * quickstart.ts) so an agent parses waiting the same way everywhere — the only
+ * difference is the phase, which is always `watch` here.
+ */
+export interface TasksWatchProgressEnvelope {
+  type: 'progress';
+  phase: 'watch';
+  step: string;
+  attempt?: number;
+  estimatedWaitMs?: number;
+}
+
+export interface TasksWatchDeps {
+  createDiscovery: (url: string) => Pick<DiscoveryAPI, 'getAutopilotDeliveryCandidates'>;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+}
+
+const DEFAULT_WATCH_DEPS: TasksWatchDeps = {
+  createDiscovery: (url: string) => createHttpDiscoveryAPI({ url }),
+  sleep: (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+  now: () => Date.now(),
+};
+
+const DEFAULT_WATCH_TIMEOUT_SECONDS = 900;
+const WATCH_EXAMPLE = 'jinn tasks watch 42 --timeout 600';
+
+/**
+ * Poll discovery until the task's solution delivery is indexed.
+ *
+ * Terminal states: `delivered` (carries the envelope CID) and `timeout`. Both
+ * exit 0 — the `status` field carries the outcome. An indexer contradiction
+ * stops the poll and emits a transient_error envelope: re-polling cannot
+ * resolve inconsistent rows.
+ *
+ * Read-only: config-only, no keystore, no signer, no daemon.
+ */
+export async function runTasksWatch(
+  ctx: CommandContext,
+  deps: TasksWatchDeps = DEFAULT_WATCH_DEPS,
+): Promise<void> {
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: ctx.argv,
+      options: {
+        ...COMMON_FLAGS,
+        timeout: { type: 'string' as const },
+      },
+      allowPositionals: true,
+    });
+  } catch (err) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: err instanceof Error ? err.message : String(err),
+        exampleCli: WATCH_EXAMPLE,
+        details: { field: 'flags' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const taskId = parsed.positionals[0];
+  if (!taskId) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message: 'A task id is required',
+        exampleCli: WATCH_EXAMPLE,
+        details: { field: '<id>', expected: 'on-chain task id (decimal string)' },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const rawTimeout = parsed.values.timeout as string | undefined;
+  let timeoutSeconds = DEFAULT_WATCH_TIMEOUT_SECONDS;
+  if (rawTimeout !== undefined) {
+    const n = Number(rawTimeout);
+    if (!Number.isFinite(n) || n <= 0) {
+      emitEnvelope(
+        {
+          code: 'invalid_invocation',
+          message: `--timeout must be a positive number of seconds, got '${rawTimeout}'`,
+          exampleCli: WATCH_EXAMPLE,
+          details: { field: '--timeout', expected: 'positive number (seconds)' },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+    timeoutSeconds = n;
+  }
+
+  const config = loadConfig(getConfigPathFromArgs(ctx.argv));
+  if (config.discovery?.mode !== 'http' || !config.discovery.url) {
+    emitEnvelope(
+      {
+        code: 'invalid_invocation',
+        message:
+          'An HTTP discovery indexer is required to watch a task, but '
+          + `discovery.mode is '${config.discovery?.mode ?? 'unset'}'`
+          + (config.discovery?.mode === 'http' ? ' with no discovery.url' : '')
+          + '.',
+        hint:
+          'Set `discovery.mode: "http"` and `discovery.url: "<indexer url>"` in '
+          + '~/.jinn-client/config.json (or export JINN_DISCOVERY_MODE=http and '
+          + 'JINN_DISCOVERY_URL=<indexer url>). The on-chain floor cannot resolve '
+          + 'a task id to a delivery, so this verb does not fall back to it.',
+        exampleCli: WATCH_EXAMPLE,
+        details: {
+          field: 'discovery.mode',
+          expected: 'http',
+          actual: config.discovery?.mode ?? null,
+          configKeys: ['discovery.mode', 'discovery.url'],
+          envVars: ['JINN_DISCOVERY_MODE', 'JINN_DISCOVERY_URL'],
+        },
+      },
+      { writer: ctx.writer, exit: ctx.exit },
+    );
+    return;
+  }
+
+  const human = Boolean(parsed.values.human);
+  const emitProgress = (envelope: TasksWatchProgressEnvelope): void => {
+    ctx.writer.write(
+      human
+        ? `[watch] ${envelope.step}${envelope.attempt ? ` (attempt ${envelope.attempt})` : ''}\n`
+        : JSON.stringify(envelope) + '\n',
+    );
+  };
+
+  const chainId = config.network === 'testnet' ? 84532 : 8453;
+  const pollIntervalMs = Math.max(250, config.pollIntervalMs);
+  const discovery = deps.createDiscovery(config.discovery.url);
+  const startedAt = deps.now();
+  const deadline = startedAt + timeoutSeconds * 1000;
+
+  let attempt = 0;
+  let lastReason: string | undefined;
+  for (;;) {
+    attempt += 1;
+    emitProgress({
+      type: 'progress',
+      phase: 'watch',
+      step: 'polling_discovery',
+      attempt,
+      estimatedWaitMs: Math.max(0, deadline - deps.now()),
+    });
+
+    let lookup;
+    try {
+      lookup = await discovery.getAutopilotDeliveryCandidates({
+        chainId,
+        taskId,
+        role: 'solution',
+      });
+    } catch (err) {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: `Discovery lookup failed for task ${taskId}: ${errorMessage(err)}`,
+          hint: 'Retry when the discovery indexer is reachable.',
+          exampleCli: WATCH_EXAMPLE,
+          details: { taskId, chainId, attempt },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    if (lookup.status === 'ready') {
+      emitResult(
+        {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          verb: 'tasks watch',
+          taskId,
+          role: 'solution',
+          status: 'delivered',
+          envelopeCid: lookup.envelope.manifestCid,
+          publisherAgentId: lookup.envelope.publisherAgentId,
+          requestId: lookup.attempt.requestId,
+          operator: lookup.attempt.operator,
+          attempts: attempt,
+          waitedMs: deps.now() - startedAt,
+        },
+        (v) => {
+          const value = v as { taskId: string; envelopeCid: string };
+          return `Task ${value.taskId} delivered.\nEnvelope: ${value.envelopeCid}`;
+        },
+        {
+          json: Boolean(parsed.values.json),
+          human,
+          writer: ctx.writer,
+          stdoutIsTty: ctx.stdoutIsTty,
+          noColor: Boolean(ctx.env['NO_COLOR']),
+        },
+      );
+      return;
+    }
+
+    if (lookup.status === 'contradiction') {
+      emitEnvelope(
+        {
+          code: 'transient_error',
+          message: `The indexer holds inconsistent rows for task ${taskId}: ${lookup.reason}`,
+          hint: 'Re-polling cannot resolve a contradiction; inspect the indexer rows for this task.',
+          exampleCli: WATCH_EXAMPLE,
+          details: { taskId, reason: lookup.reason, attempt },
+        },
+        { writer: ctx.writer, exit: ctx.exit },
+      );
+      return;
+    }
+
+    lastReason = lookup.reason;
+    const remainingMs = deadline - deps.now();
+    if (remainingMs <= 0) {
+      emitResult(
+        {
+          schemaVersion: 1,
+          generatedAt: new Date().toISOString(),
+          verb: 'tasks watch',
+          taskId,
+          role: 'solution',
+          status: 'timeout',
+          attempts: attempt,
+          waitedMs: deps.now() - startedAt,
+          lastReason,
+        },
+        (v) => {
+          const value = v as { taskId: string; lastReason?: string };
+          return `Task ${value.taskId} not delivered before the timeout (last state: ${value.lastReason}).`;
+        },
+        {
+          json: Boolean(parsed.values.json),
+          human,
+          writer: ctx.writer,
+          stdoutIsTty: ctx.stdoutIsTty,
+          noColor: Boolean(ctx.env['NO_COLOR']),
+        },
+      );
+      return;
+    }
+
+    const waitMs = Math.min(pollIntervalMs, remainingMs);
+    emitProgress({
+      type: 'progress',
+      phase: 'watch',
+      step: `awaiting_delivery:${lastReason}`,
+      attempt,
+      estimatedWaitMs: waitMs,
+    });
+    await deps.sleep(waitMs);
+  }
+}
+
 async function run(ctx: CommandContext): Promise<void> {
   const [subverb, ...rest] = ctx.argv;
   if (!subverb || subverb === '--help' || subverb === '-h') {
@@ -948,6 +1214,9 @@ async function run(ctx: CommandContext): Promise<void> {
   }
   if (subverb === 'observe-autopilot-delivery') {
     return runObserveAutopilotDelivery({ ...ctx, argv: rest });
+  }
+  if (subverb === 'watch') {
+    return runTasksWatch({ ...ctx, argv: rest });
   }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
@@ -1001,7 +1270,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|observe-autopilot-delivery|list|show',
+        expected: 'submit|watch|observe-autopilot-delivery|list|show',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1014,15 +1283,29 @@ const command: CommandModule = {
   helpText: `Usage:
   jinn tasks submit --id <id> --description <text> (--solver-net <name> | --solver-type <type>) [--spec-file <path>] [--dry-run] [--yes] [--human]
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
+  jinn tasks watch <id> [--timeout <seconds>] [--json|--human]
   jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks list
   jinn tasks show <id>
+
+\`watch\` polls the discovery indexer until the task's solution delivery is
+indexed, emitting NDJSON progress envelopes (type/phase/step/attempt/
+estimatedWaitMs) so waiting is legible rather than silent. Terminal states are
+\`delivered\` (carrying envelopeCid) and \`timeout\`; both exit 0 and carry the
+outcome in \`status\`. Feed the envelopeCid to \`jinn evidence show\`.
+
+\`watch\` is read-only (config-only; no keystore, signer, or daemon) and needs
+\`discovery.mode: "http"\` with a \`discovery.url\` — env: JINN_DISCOVERY_MODE=http,
+JINN_DISCOVERY_URL=<indexer url>. It never falls back to the on-chain floor.
 
 Idempotent: re-posting the same (--id) from the same creator Safe returns the
 existing request id from the shared task-posting store without sending a new
 transaction.
 
 Options:
+  --timeout <seconds> (watch) How long to poll before returning status
+                      'timeout'. Default 900. Poll interval follows
+                      pollIntervalMs from config.
   --max-claims <n>    Number of on-chain attempt slots for the task (default 1).
                       The default single-slot policy is brittle on a shared
                       network: one non-delivering claimer permanently locks the
@@ -1050,6 +1333,7 @@ Options:
 Examples:
   jinn tasks submit --id eth-up --description "ETH direction" --solver-net prediction --spec-file fixtures/prediction-v1-task.example.json --yes
   jinn tasks submit --id usdc-apy --description "Aave APY" --solver-type prediction.apy.v0 --spec-file fixtures/prediction-apy-v0-intent.example.json --yes
+  jinn tasks watch 42 --timeout 600 --json
 `,
   run,
 };

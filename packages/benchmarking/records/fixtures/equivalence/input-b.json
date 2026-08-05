@@ -21,5 +21,5 @@
   "version": "1.0.0",
   "description": "Key-order equivalence fixture.",
   "name": "equivalence-fixture",
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0"
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1"
 }

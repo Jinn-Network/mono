@@ -1,13 +1,13 @@
 {
   "sourceDigest": "sha256:da814028feb1f3c6e90adc43d2d62e156ae50bd72b7c08d848a58379738f6981",
-  "traceId": "cfed32aad463e99096cf4472ba5b597f",
+  "traceId": "b39e627bf00bfeb3f9b2a94a43b6df3c",
   "timebase": "synthetic-ordinal",
   "completeness": {
     "decoded": "full"
   },
   "spans": [
     {
-      "spanId": "31f6e2a6cd58f919",
+      "spanId": "702e74892f2ecb01",
       "parentSpanId": null,
       "name": "invoke_agent claude-code",
       "kind": 1,
@@ -33,7 +33,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -45,8 +45,8 @@
       }
     },
     {
-      "spanId": "46003364d5c04fa5",
-      "parentSpanId": "31f6e2a6cd58f919",
+      "spanId": "1da046b757b01f28",
+      "parentSpanId": "702e74892f2ecb01",
       "name": "chat",
       "kind": 3,
       "startTimeUnixNano": "0",
@@ -65,13 +65,13 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
         },
         {
-          "key": "jinn.trajectory.turn.role",
+          "key": "jinn.trace.turn.role",
           "value": {
             "stringValue": "assistant"
           }
@@ -83,8 +83,8 @@
       }
     },
     {
-      "spanId": "398a97f92662b5c0",
-      "parentSpanId": "46003364d5c04fa5",
+      "spanId": "457fd0b41f82fa48",
+      "parentSpanId": "1da046b757b01f28",
       "name": "execute_tool Bash",
       "kind": 1,
       "startTimeUnixNano": "0",
@@ -115,7 +115,7 @@
           }
         },
         {
-          "key": "jinn.trajectory.source.ordinal",
+          "key": "jinn.trace.source.ordinal",
           "value": {
             "intValue": "0"
           }
@@ -127,5 +127,5 @@
       }
     }
   ],
-  "recordDigest": "sha256:deef5185b3a8ab8467ff3267281a510020d47ba2f1997777d4009c1c3146cfd6"
+  "recordDigest": "sha256:64d98c008b281cc9eb178d111d0ad1d7aab8dc0ea0bbcadb9e1769cf01f08537"
 }

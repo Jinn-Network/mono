@@ -22,7 +22,7 @@ const MECH = "0x3333333333333333333333333333333333333333" as Address;
 const REQUEST = `0x${"d".repeat(64)}` as Hex;
 const OTHER_REQUEST = `0x${"f".repeat(64)}` as Hex;
 const TX_HASH = `0x${"e".repeat(64)}` as Hex;
-const BYTES = new TextEncoder().encode('{"protocol":"https://jinn.network/profiles/task-execution/1.0"}');
+const BYTES = new TextEncoder().encode('{"protocol":"https://spec.jinn.network/profiles/task-execution/v1"}');
 
 function successReceipt(logs: readonly Log[]): SafeBroadcastReceipt {
   return { txHash: TX_HASH, blockNumber: 1n, blockHash: `0x${"c".repeat(64)}` as Hex, logs, alreadySettled: false };

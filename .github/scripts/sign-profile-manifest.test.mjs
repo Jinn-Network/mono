@@ -71,6 +71,14 @@ test('the CLI writes a sidecar when a key is present and leaves manifest.json by
   }
 });
 
+test('signing identical payload bytes with one key is byte-reproducible across runs', () => {
+  const { privateKeyPem } = keyPair();
+  const payload = Buffer.from('{\n  "version": 1\n}\n', 'utf8');
+  const first = signManifest(payload, privateKeyPem, 'k1');
+  const second = signManifest(Buffer.from(payload), privateKeyPem, 'k1');
+  assert.deepEqual(second, first);
+});
+
 test('the CLI exits 0 and writes no sidecar when no key is provisioned', () => {
   const root = mkdtempSync(join(tmpdir(), 'jinn-sign-'));
   try {

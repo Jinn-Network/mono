@@ -77,6 +77,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
 | `jinn backfill-failed-deliveries` | Reclassify FAILED runs as COMPLETE when their delivery tx actually succeeded (#506) |
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
+| `jinn evidence` | Read delivered evidence — resolve a task id to an envelope, and an envelope to its result |
 | `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |
 | `jinn ui` | Open the operator panel in your browser (assumes daemon is running) |
 | `jinn tasks` | Submit and inspect Tasks |

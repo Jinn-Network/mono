@@ -24,7 +24,7 @@ function makeFakeBindingResolver(seeds: FakeBindingSeed[]): BindingResolver {
       if (at < from || at >= to) return null;
       return {
         binding: {
-          protocol: "https://jinn.network/trust/key-binding/1.0",
+          protocol: "https://spec.jinn.network/trust/key-binding/v1",
           agent: seed.agent,
           key: { publicKey: `pubkey-${seed.keyid}`, keyid: seed.keyid, algorithm: "ed25519", didKey: seed.keyid },
           voucher: { kind: "account", did: "did:pkh:eip155:1:0x0", contractAccount: false },

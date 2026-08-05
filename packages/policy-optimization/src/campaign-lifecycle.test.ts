@@ -101,7 +101,7 @@ const EVAL_SPEC_DIGEST = `sha256:${"2".repeat(64)}`;
 /** The EvaluationSpec the verdicts are consistent against; contextually typed by the evidence. */
 function evaluationSpec(): NonNullable<WaveCellEvidence["evaluationSpec"]> {
   return {
-    protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+    protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
     family: "deterministic-process",
     semanticsVersion: "4",
     measurements: [{ name: "passed", type: "boolean", required: true }],
@@ -134,7 +134,7 @@ function verdictEnvelope(verdict: "pass" | "fail", cellKey: string): Uint8Array 
       name: `cell/${cellKey}`,
       digest: { sha256: documentDigest(new TextEncoder().encode(cellKey)).slice("sha256:".length) },
     }],
-    predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
       evaluatedAt: "2026-08-04T09:30:00Z",
       evaluator: { id: EVALUATOR },

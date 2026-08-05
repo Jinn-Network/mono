@@ -1,33 +1,49 @@
-import { RECORDS_ROOT, SEQUENCE_WIDTH, SOURCE_NAME_GRAMMAR } from "./identifiers.js";
+import { RECORDS_SEGMENT, SEQUENCE_WIDTH, SOURCE_NAME_GRAMMAR } from "./identifiers.js";
+import { CANONICAL_ORIGIN, CANONICAL_VERSION_GRAMMAR } from "./origins.js";
 
 /** Source names match SOURCE_NAME_GRAMMAR (§5.1): lowercase alphanumeric plus interior hyphens, ≤64 chars. */
 export function isSourceName(name: string): boolean {
   return SOURCE_NAME_GRAMMAR.test(name);
 }
 
-const RECORD_KIND_VERSION_GRAMMAR = /^\d+\.\d+$/;
+/** The one records root: `https://spec.jinn.network/records` (DR-2026-08-04). */
+export const RECORDS_KIND_ROOT = `${CANONICAL_ORIGIN}/${RECORDS_SEGMENT}`;
 
 /**
- * Record-kind URI grammar (§12): `${RECORDS_ROOT}/<segment>/<major>.<minor>`,
+ * Splits a record-kind URI into its parts, or returns `undefined` when the input does not
+ * conform. One origin, one version form -- see `./origins.ts`.
+ */
+export function parseRecordKindUri(
+  uri: string,
+): { root: string; segment: string; version: string } | undefined {
+  if (typeof uri !== "string" || !uri.startsWith(`${RECORDS_KIND_ROOT}/`)) return undefined;
+  const parts = uri.slice(RECORDS_KIND_ROOT.length + 1).split("/");
+  if (parts.length !== 2) return undefined;
+  const [segment, version] = parts as [string, string];
+  if (!isSourceName(segment) || !CANONICAL_VERSION_GRAMMAR.test(version)) return undefined;
+  return { root: RECORDS_KIND_ROOT, segment, version };
+}
+
+/**
+ * Record-kind URI grammar (§12): `https://spec.jinn.network/records/<segment>/v<major>`,
  * segment matching SOURCE_NAME_GRAMMAR. Throws on any non-conforming input.
  */
 export function assertRecordKindUri(uri: string): void {
-  const prefix = `${RECORDS_ROOT}/`;
-  if (!uri.startsWith(prefix)) {
-    throw new Error(`Record-kind URI must start with "${prefix}": ${uri}`);
+  if (typeof uri !== "string" || !uri.startsWith(`${RECORDS_KIND_ROOT}/`)) {
+    throw new Error(`Record-kind URI must start with "${RECORDS_KIND_ROOT}/": ${uri}`);
   }
-  const parts = uri.slice(prefix.length).split("/");
+  const parts = uri.slice(RECORDS_KIND_ROOT.length + 1).split("/");
   if (parts.length !== 2) {
     throw new Error(
-      `Record-kind URI must have the shape ${RECORDS_ROOT}/<segment>/<major>.<minor>: ${uri}`,
+      `Record-kind URI must have the shape ${RECORDS_KIND_ROOT}/<segment>/<version>: ${uri}`,
     );
   }
   const [segment, version] = parts as [string, string];
   if (!isSourceName(segment)) {
     throw new Error(`Record-kind URI segment is not a valid source-name-shaped segment: ${segment}`);
   }
-  if (!RECORD_KIND_VERSION_GRAMMAR.test(version)) {
-    throw new Error(`Record-kind URI version must be <major>.<minor>: ${version}`);
+  if (!CANONICAL_VERSION_GRAMMAR.test(version)) {
+    throw new Error(`Record-kind URI version must be v<major>: ${version}`);
   }
 }
 

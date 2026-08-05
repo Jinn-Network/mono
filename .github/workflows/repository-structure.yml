@@ -5,6 +5,10 @@ on:
   push:
     branches: [main, next]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -22,6 +26,22 @@ jobs:
       - run: node --test .github/scripts/repository-gitlinks.test.mjs
       - name: Docs key guard
         run: node --test .github/scripts/docs-key-guard.test.mjs
+  identifier-origin:
+    name: Identifier origin tripwire
+    runs-on: ubuntu-latest
+    # DR-2026-08-04 moved the protocol identifier origin to spec.jinn.network. The re-seal
+    # was lawful only because nothing had ever been published; once a document is served the
+    # apex spelling can never come back. This gate is what keeps it from creeping back in.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node --test .github/scripts/origin-tripwire.test.mjs
+      - name: No retired identifier origin in enforced source scopes
+        run: node .github/scripts/origin-tripwire.mjs
   evidence-architecture:
     name: Evidence package architecture
     runs-on: ubuntu-latest

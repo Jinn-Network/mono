@@ -7,6 +7,11 @@ on:
         required: true
         type: string
   pull_request:
+    paths:
+      - "packages/benchmarking/**"
+      - ".github/scripts/benchmarking-*.test.mjs"
+      - ".github/workflows/benchmarking-ci.yml"
+      - "docs/superpowers/specs/2026-07-28-benchmarking-application-design.md"
   push:
     branches: [next]
     paths:

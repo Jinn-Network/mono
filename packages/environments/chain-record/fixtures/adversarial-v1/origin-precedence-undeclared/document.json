@@ -1,7 +1,7 @@
 {
-  "kind": "https://jinn.network/records/crypto-environment/1.0",
+  "kind": "https://spec.jinn.network/records/crypto-environment/v1",
   "chainWorld": {
-    "kind": "https://jinn.network/records/chain-environment/1.0",
+    "kind": "https://spec.jinn.network/records/chain-environment/v1",
     "record": {
       "name": "chain",
       "digest": {
@@ -12,7 +12,7 @@
   "informationWorlds": [
     {
       "id": "yields",
-      "kind": "https://jinn.network/records/information-world/1.0",
+      "kind": "https://spec.jinn.network/records/information-world/v1",
       "record": {
         "name": "yields",
         "digest": {
@@ -22,7 +22,7 @@
     },
     {
       "id": "docs",
-      "kind": "https://jinn.network/records/information-world/1.0",
+      "kind": "https://spec.jinn.network/records/information-world/v1",
       "record": {
         "name": "docs",
         "digest": {

@@ -37,7 +37,7 @@ import {
   type AnnouncementEntry,
   type SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { ConsumerState } from '../fixtures/native-vertical-consumer/src/state.js';
+import { ConsumerState } from '../../src/native-consumer/state.js';
 import {
   NativeGraphError,
   deriveConsumerEngagementId,
@@ -46,7 +46,7 @@ import {
   retrieveNativePublicGraph,
   verifyExecutionEvidenceJoin,
   type NativeGraphRoots,
-} from '../fixtures/native-vertical-consumer/src/graph.js';
+} from '../../src/native-consumer/graph.js';
 
 const roots: string[] = [];
 const REQUESTER: SourceIdentity = { agent: 'did:web:requester.example', name: 'requester' };
@@ -161,7 +161,7 @@ function seed(
       digest: DIGESTS.submission!,
       mediaType: SUBMISSION_MEDIA_TYPE,
       facts: {
-        'https://jinn.network/facts/native-requester-association/1.0': {
+        'https://spec.jinn.network/facts/native-requester-association/v1': {
           runId: 'golden-run', chainId: 84532,
           coordinator: '0x1111111111111111111111111111111111111111', taskId: '7',
           taskDigest: DIGESTS.task,
@@ -195,9 +195,9 @@ function seed(
     source: SOLVER,
     records: [
       { kind: RECORD_KINDS.delivery, digest: DIGESTS.unrelatedSolutionDelivery!, mediaType: DELIVERY_MEDIA_TYPE, role: 'delivery', facts: { engagementId: `sha256:${'f'.repeat(64)}` } },
-      { kind: 'https://jinn.network/records/delivery-envelope/1.0', digest: DIGESTS.unrelatedSolutionEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'delivery-envelope', facts: { engagementId: `sha256:${'f'.repeat(64)}` } },
+      { kind: 'https://spec.jinn.network/records/delivery-signature/v1', digest: DIGESTS.unrelatedSolutionEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'delivery-envelope', facts: { engagementId: `sha256:${'f'.repeat(64)}` } },
       { kind: RECORD_KINDS.delivery, digest: DIGESTS.solutionDelivery!, mediaType: DELIVERY_MEDIA_TYPE, role: 'delivery', facts: { engagementId: EXPECTED_ENGAGEMENT_ID } },
-      { kind: 'https://jinn.network/records/delivery-envelope/1.0', digest: DIGESTS.solutionEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'delivery-envelope', facts: { engagementId: EXPECTED_ENGAGEMENT_ID } },
+      { kind: 'https://spec.jinn.network/records/delivery-signature/v1', digest: DIGESTS.solutionEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'delivery-envelope', facts: { engagementId: EXPECTED_ENGAGEMENT_ID } },
     ],
   }));
   commit(state, available({
@@ -208,7 +208,7 @@ function seed(
       { kind: RECORD_KINDS.submission, digest: DIGESTS.evaluationSubmission!, mediaType: SUBMISSION_MEDIA_TYPE, role: 'evaluation-submission', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
       { kind: RECORD_KINDS.resultEvaluation, digest: DIGESTS.verdict!, mediaType: 'application/vnd.in-toto+json', role: 'verdict', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
       { kind: RECORD_KINDS.delivery, digest: DIGESTS.evaluationDelivery!, mediaType: DELIVERY_MEDIA_TYPE, role: 'evaluation-delivery', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
-      { kind: 'https://jinn.network/records/delivery-envelope/1.0', digest: DIGESTS.evaluationEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'evaluation-delivery-envelope', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
+      { kind: 'https://spec.jinn.network/records/delivery-signature/v1', digest: DIGESTS.evaluationEnvelope!, mediaType: DSSE_ENVELOPE_MEDIA_TYPE, role: 'evaluation-delivery-envelope', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
       { kind: RECORD_KINDS.executionEvidence, digest: DIGESTS.evaluationEvidence!, mediaType: EXECUTION_EVIDENCE_MEDIA_TYPE, role: 'evaluation-evidence', facts: { evaluationId: EXPECTED_EVALUATION_ID } },
     ],
   }));
@@ -311,6 +311,36 @@ describe('native public graph discovery', () => {
     consumer.close();
   });
 
+  it('rejects a null authority time with the typed "authority time" error, not a raw TypeError', async () => {
+    // Regression for a graduation-time fix: the guard used to check `authorityTime === null`, but
+    // the object-shape helper it reads from only ever produces `undefined` for a non-object value.
+    // A `null` (or otherwise absent) authorityTime therefore fell through the guard and threw an
+    // uncaught TypeError on the very next property read (`authorityTime.chainId`) rather than this
+    // typed, named `NativeGraphError`. This is strictly a better error shape, not a bypass fix: the
+    // old code never silently accepted a bad authority time, it just crashed with the wrong error.
+    const consumer = await state();
+    seed(consumer, false, { authorityTime: null });
+    let caught: unknown;
+    try {
+      discoverNativeGraphRoots({
+        state: consumer,
+        runId: 'golden-run',
+        sources: {
+          requester: { source: REQUESTER, publicBaseUrl: 'https://requester.example' },
+          solver: { source: SOLVER, publicBaseUrl: 'https://solver.example' },
+          evaluator: { source: EVALUATOR, publicBaseUrl: 'https://evaluator.example' },
+        },
+        actors: { solverAgent: SOLVER_AGENT, evaluatorAgent: EVALUATOR_AGENT },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(NativeGraphError);
+    expect((caught as NativeGraphError).reason).toBe('public-record-fact-invalid');
+    expect((caught as NativeGraphError).message).toBe('public-record-fact-invalid: authority time');
+    consumer.close();
+  });
+
   it('rejects a primary public record whose signed announcement omits its public location', async () => {
     const consumer = await state();
     seed(consumer, true);
@@ -397,9 +427,9 @@ const spec: EvaluationSpec = {
   protocol: EVALUATION_SPEC_FORMAT_URI,
   semanticsVersion: '4',
   family: 'deterministic-process',
-  grader: { uri: 'https://jinn.network/graders/native-consumer-test' },
+  grader: { uri: 'https://spec.jinn.network/graders/native-consumer-test' },
   familyBlock: {
-    image: { uri: 'https://jinn.network/images/native-consumer-test' },
+    image: { uri: 'https://spec.jinn.network/images/native-consumer-test' },
     platform: 'linux/amd64', workspace: { root: '/workspace' }, testMaterial: [],
     parser: { id: 'native.consumer', version: '1.0.0', digest: `sha256:${'a'.repeat(64)}` },
     transitions: { failToPass: [], passToPass: [] }, timeout: 30,
@@ -424,7 +454,7 @@ function retrievalFixture(options: { failure?:
     : VALID_EVIDENCE;
   const task = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
-    profile: { uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
+    profile: { uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0', digest: { sha256: '1'.repeat(64) } },
     instructions: 'forecast', outputs: [{ name: 'prediction', mediaType: 'application/json', required: true }],
     evaluation: { name: 'evaluation-spec', digest: { sha256: documentDigest(evaluationSpec).slice(7) } },
   });
@@ -439,7 +469,7 @@ function retrievalFixture(options: { failure?:
     requester: 'https://agents.example/requester', idempotencyKey: 'consumer-test', nonce: 'nonce',
     deadline: '2026-08-03T00:00:00Z',
     annotations: {
-      'https://jinn.network/annotations/admission-receipt/1.0': {
+      'https://spec.jinn.network/annotations/admission-receipt/v1': {
         name: 'admission-receipt', digest: { sha256: documentDigest(admissionReceipt).slice(7) },
       },
     },
@@ -470,7 +500,7 @@ function retrievalFixture(options: { failure?:
   const evaluationTask = options.failure === 'evaluation-task-mismatch'
     ? sealTask({
       protocol: TASK_EXECUTION_PROTOCOL_URI,
-      profile: { uri: 'https://jinn.network/task-profiles/evaluation-task/1.0', digest: { sha256: '2'.repeat(64) } },
+      profile: { uri: 'https://spec.jinn.network/task-profiles/evaluation-task/1.0', digest: { sha256: '2'.repeat(64) } },
       instructions: 'wrong pair', outputs: [{ name: 'verdict', mediaType: 'application/vnd.in-toto+json', required: true }],
     })
     : derivedEvaluationTask;
@@ -528,7 +558,7 @@ function retrievalFixture(options: { failure?:
       source: { source: SOLVER, publicBaseUrl: solverBase },
       engagementId: EXPECTED_ENGAGEMENT_ID, solverAgent: SOLVER_AGENT,
       delivery: located(solverBase, solutionDelivery, RECORD_KINDS.delivery, DELIVERY_MEDIA_TYPE),
-      deliveryEnvelope: located(solverBase, solutionEnvelope, 'https://jinn.network/records/delivery-envelope/1.0', DSSE_ENVELOPE_MEDIA_TYPE),
+      deliveryEnvelope: located(solverBase, solutionEnvelope, 'https://spec.jinn.network/records/delivery-signature/v1', DSSE_ENVELOPE_MEDIA_TYPE),
     },
     evaluation: {
       source: { source: EVALUATOR, publicBaseUrl: evaluatorBase },
@@ -537,7 +567,7 @@ function retrievalFixture(options: { failure?:
       submission: located(evaluatorBase, evaluationSubmission, RECORD_KINDS.submission, SUBMISSION_MEDIA_TYPE),
       verdict: located(evaluatorBase, verdict, RECORD_KINDS.resultEvaluation, 'application/vnd.in-toto+json'),
       delivery: located(evaluatorBase, evaluationDelivery, RECORD_KINDS.delivery, DELIVERY_MEDIA_TYPE),
-      deliveryEnvelope: located(evaluatorBase, evaluationEnvelope, 'https://jinn.network/records/delivery-envelope/1.0', DSSE_ENVELOPE_MEDIA_TYPE),
+      deliveryEnvelope: located(evaluatorBase, evaluationEnvelope, 'https://spec.jinn.network/records/delivery-signature/v1', DSSE_ENVELOPE_MEDIA_TYPE),
       evidence: [located(evaluatorBase, evaluationEvidence, RECORD_KINDS.executionEvidence, EXECUTION_EVIDENCE_MEDIA_TYPE)],
     },
   };

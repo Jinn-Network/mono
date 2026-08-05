@@ -68,7 +68,7 @@ function recapCeremony(): ReCapCeremonyEvidence {
 
 function keyBindingFor(agent: string): KeyBinding {
   return {
-    protocol: "https://jinn.network/trust/key-binding/v1",
+    protocol: "https://spec.jinn.network/trust/key-binding/v1",
     agent,
     key: {
       publicKey: "0x04abcdef",
@@ -97,7 +97,7 @@ function authorizationStatementFor(capabilities: readonly string[]): Authorizati
   return {
     _type: "https://in-toto.io/Statement/v1",
     subject: [{ name: "input-digest", digest: { sha256: "c".repeat(64) } }],
-    predicateType: "https://jinn.network/trust/authorization/v1",
+    predicateType: "https://spec.jinn.network/trust/authorization/v1",
     predicate: {
       issuer: eoaFixture.agentIri,
       capabilities: [...capabilities],

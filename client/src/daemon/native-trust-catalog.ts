@@ -58,7 +58,7 @@ const sealedRevocation = z.object({ digest: sha256, envelope: bytes }).strict();
 const anchor = z.object({
   digest: sha256,
   locator: z.object({
-    profile: z.literal('https://jinn.network/trust/anchor-locators/base-sepolia-calldata-v1'),
+    profile: z.literal('https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1'),
     chainId: z.literal(84532),
     transactionHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/u),
     contractAddress: z.string().regex(/^0x[0-9a-fA-F]{40}$/u),

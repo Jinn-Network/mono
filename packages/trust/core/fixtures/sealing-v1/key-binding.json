@@ -10,7 +10,7 @@
     "bindings"
   ],
   "agent": "urn:uuid:11111111-1111-4111-8111-111111111111",
-  "protocol": "https://jinn.network/trust/key-binding/v1",
+  "protocol": "https://spec.jinn.network/trust/key-binding/v1",
   "key": {
     "didKey": "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz",
     "algorithm": "secp256k1",
