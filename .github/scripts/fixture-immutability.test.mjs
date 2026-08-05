@@ -18,6 +18,7 @@ test('an unchanged manifest adds nothing', () => {
   assert.deepEqual(compareFixtureManifests(baseline, baseline, { label: 'packages/trust/core' }), {
     added: [],
     resealed: [],
+    removed: [],
   });
 });
 
@@ -26,6 +27,7 @@ test('an added fixture is allowed and reported', () => {
   assert.deepEqual(compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core' }), {
     added: ['adversarial/c.json'],
     resealed: [],
+    removed: [],
   });
 });
 
@@ -54,6 +56,7 @@ test('a correction is accepted as a new fixture plus a dated erratum', () => {
   assert.deepEqual(compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core' }), {
     added: ['golden/a-corrected.json'],
     resealed: [],
+    removed: [],
   });
 });
 
@@ -63,16 +66,43 @@ test('the re-seal carve-out permits a digest change to an existing fixture id', 
   const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
   assert.deepEqual(
     compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    { added: [], resealed: ['golden/a.json'] },
+    { added: [], resealed: ['golden/a.json'], removed: [] },
   );
 });
 
-test('the re-seal carve-out still refuses a removed fixture id (ids stay append-only)', () => {
+test('the re-seal carve-out permits a removed fixture id, and reports it', () => {
+  // DR-2026-08-04 renames the trace vocabulary, and a rename reaches the manifest as a
+  // removal plus an addition. Nothing in this corpus is published, so no vector a third
+  // party pinned can break -- the same premise that makes the digest half lawful.
+  const candidate = {
+    ...baseline,
+    entries: [baseline.entries[0], { id: 'adversarial/b-renamed.json', sha256: 'bb' }],
+  };
+  assert.deepEqual(
+    compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
+    { added: ['adversarial/b-renamed.json'], resealed: [], removed: ['adversarial/b.json'] },
+  );
+});
+
+test('without the flag a removed fixture id is refused exactly as before', () => {
+  const candidate = { ...baseline, entries: [baseline.entries[0]] };
+  for (const options of [
+    { label: 'packages/trust/core' },
+    { label: 'packages/trust/core', allowReseal: false },
+  ]) {
+    assert.throws(
+      () => compareFixtureManifests(baseline, candidate, options),
+      /packages\/trust\/core: adversarial\/b\.json was removed; fixtures are append-only/,
+      'the carve-out is the only thing that admits a removal',
+    );
+  }
+});
+
+test('the re-seal carve-out reports a removal and a digest change independently', () => {
   const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }] };
-  assert.throws(
-    () => compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
-    /packages\/trust\/core: adversarial\/b\.json was removed; fixtures are append-only/,
-    'the migration may rewrite bytes but must never quietly drop a case',
+  assert.deepEqual(
+    compareFixtureManifests(baseline, candidate, { label: 'packages/trust/core', allowReseal: true }),
+    { added: [], resealed: ['golden/a.json'], removed: ['adversarial/b.json'] },
   );
 });
 
