@@ -44,8 +44,35 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
  */
 const TASK_SUBJECT_PATH = "task";
 
-/** An absolute, printable, space-free container path. */
-const CONTAINER_PATH = /^\/[\x21-\x7e]*$/;
+/**
+ * Every validator below ends with `(?![\s\S])` rather than `$`: JavaScript's `$` also matches
+ * immediately before a trailing newline, so `$`-anchored patterns accept `"grader-image\n…"`.
+ * A trailing newline is exactly the kind of smuggled-argument suffix these validators exist to
+ * refuse, so none of them may end with `$`.
+ */
+
+// The docker distribution reference grammar for the repository half of an image reference:
+//   name := [domain '/'] path-component ['/' path-component]*
+// A container reference reaches a driver in the positional argument slot, where anything that
+// is not a valid reference is parsed as an option instead — `--mount=type=bind,src=/,dst=/hostfs`
+// in that slot bind-mounts the host into the grader. Unlike a subject name (whose grammar is
+// open, which is why those are positional on disk), the reference grammar is total: a validator
+// built from it refuses nothing legitimate.
+const DOMAIN_COMPONENT = "(?:[a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9])";
+const DOMAIN = `${DOMAIN_COMPONENT}(?:\\.${DOMAIN_COMPONENT})*(?::[0-9]+)?`;
+const PATH_COMPONENT = "[a-z0-9]+(?:(?:[._]|__|[-]+)[a-z0-9]+)*";
+const TAG = "[A-Za-z0-9_][A-Za-z0-9._-]{0,127}";
+const IMAGE_REPOSITORY = new RegExp(
+  `^(?:${DOMAIN}/)?${PATH_COMPONENT}(?:/${PATH_COMPONENT})*(?::${TAG})?(?![\\s\\S])`,
+);
+/** The docker reference spec's own limit on the repository half. */
+const IMAGE_REPOSITORY_MAX_LENGTH = 255;
+
+/** `os/arch[/variant]`, the OCI platform shape. Every real value is lowercase alphanumeric. */
+const PLATFORM = /^[a-z0-9]+\/[a-z0-9]+(?:\/[a-z0-9]+)?(?![\s\S])/;
+
+/** One segment of an absolute container path; `.`/`..` are excluded separately. */
+const CONTAINER_PATH_SEGMENT = /^[A-Za-z0-9._-]+(?![\s\S])/;
 
 /** One host directory made visible to the container: host-side `source`, container-side `target`. */
 export interface ContainerMount {
@@ -120,10 +147,10 @@ function refuse(safeDetail: string): never {
   });
 }
 
-function refuseSubject(safeDetail: string): never {
+function refuseSubjectDigest(safeDetail: string): never {
   throw new EvaluationOperationalError({
     canonicalCode: "INVALID_ARGUMENT",
-    reason: "subject-not-found",
+    reason: "subject-digest-mismatch",
     recoveryAdvice: "do-not-retry",
     safeDetail,
   });
@@ -148,21 +175,46 @@ function pinnedImageReference(block: DeterministicProcessBlock): string {
     refuse("the deterministic-process image carries no sha256 digest, so it is not pinned");
   }
   const reference = image.uri ?? image.name;
-  if (typeof reference !== "string" || reference.trim().length === 0) {
+  if (typeof reference !== "string" || reference.length === 0) {
     refuse("the deterministic-process image carries no repository reference");
   }
   const at = reference.indexOf("@");
-  if (at === -1) return `${reference}@sha256:${digest}`;
+  const repository = at === -1 ? reference : reference.slice(0, at);
+  if (repository.length > IMAGE_REPOSITORY_MAX_LENGTH || !IMAGE_REPOSITORY.test(repository)) {
+    refuse("the deterministic-process image reference is not a docker repository reference");
+  }
+  if (at === -1) return `${repository}@sha256:${digest}`;
   if (reference.slice(at + 1) !== `sha256:${digest}`) {
     refuse("the deterministic-process image reference and its digest pin different images");
   }
   return reference;
 }
 
+/** The platform reaches the driver as its own argument, so it is validated like the reference. */
+function pinnedPlatform(block: DeterministicProcessBlock): string {
+  const platform = block.platform;
+  if (typeof platform !== "string" || !PLATFORM.test(platform)) {
+    refuse("the deterministic-process platform is not an os/arch[/variant] identifier");
+  }
+  return platform;
+}
+
+/**
+ * The container working directory is also the mount target, so it reaches the driver as an
+ * argument twice over. It must be absolute, must contain no `.`/`..` segment (a mount target is
+ * resolved, so `..` escapes the intended location), and must carry nothing a shell would read.
+ */
+function isContainerPath(value: string): boolean {
+  if (!value.startsWith("/")) return false;
+  const segments = value.slice(1).split("/");
+  return segments.length > 0 && segments.every((segment) =>
+    segment !== "." && segment !== ".." && CONTAINER_PATH_SEGMENT.test(segment));
+}
+
 function containerWorkdir(block: DeterministicProcessBlock): string {
   const root = (block.workspace as { root?: unknown }).root;
   if (root === undefined) return DEFAULT_GRADER_CONTAINER_WORKDIR;
-  if (typeof root !== "string" || !CONTAINER_PATH.test(root)) {
+  if (typeof root !== "string" || !isContainerPath(root)) {
     refuse("the deterministic-process workspace root is not an absolute container path");
   }
   return root;
@@ -182,7 +234,7 @@ function subjectEntry(
 ): SubjectEntry {
   const digest = material.descriptor.digest?.["sha256"];
   if (typeof digest !== "string" || !SHA256_HEX.test(digest)) {
-    refuseSubject(`the ${label} carries no sha256 digest`);
+    refuseSubjectDigest(`the ${label} carries no well-formed sha256 digest`);
   }
   const name = material.descriptor.name;
   return {
@@ -211,7 +263,11 @@ async function atomicWrite(directory: string, name: string, bytes: Uint8Array): 
 }
 
 async function provisionWorkspace(workspaceRoot: string): Promise<string> {
-  await mkdir(workspaceRoot, { recursive: true });
+  // A root this source creates is private like everything under it. A root the host already
+  // owns keeps the mode the host chose — `mkdir` reports whether it created anything.
+  if (await mkdir(workspaceRoot, { recursive: true, mode: 0o700 }) !== undefined) {
+    await chmod(workspaceRoot, 0o700);
+  }
   const workdir = join(workspaceRoot, randomUUID());
   await mkdir(workdir, { mode: 0o700 });
   await chmod(workdir, 0o700);
@@ -221,23 +277,38 @@ async function provisionWorkspace(workspaceRoot: string): Promise<string> {
   return workdir;
 }
 
-function parseReport(bytes: Uint8Array, exitCode: number): unknown {
+type ReportRead =
+  | { readonly ok: true; readonly report: unknown }
+  | { readonly ok: false; readonly detail: string; readonly cause?: unknown };
+
+/**
+ * Reads the container's report without deciding anything. It reports rather than throws so the
+ * caller can weigh a complete report against an elapsed deadline.
+ */
+async function readReport(directory: string, exitCode: number): Promise<ReportRead> {
+  const suffix = `(container exit ${exitCode})`;
+  let bytes: Uint8Array;
+  try {
+    bytes = await readFile(join(directory, GRADER_OUTPUT_NAME));
+  } catch (cause) {
+    return { ok: false, detail: `the grader container wrote no ${GRADER_OUTPUT_NAME} ${suffix}`, cause };
+  }
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (cause) {
-    fail("UNAVAILABLE", `${GRADER_OUTPUT_NAME} is not valid UTF-8 (container exit ${exitCode})`, cause);
+    return { ok: false, detail: `${GRADER_OUTPUT_NAME} is not valid UTF-8 ${suffix}`, cause };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (cause) {
-    fail("UNAVAILABLE", `${GRADER_OUTPUT_NAME} is not valid JSON (container exit ${exitCode})`, cause);
+    return { ok: false, detail: `${GRADER_OUTPUT_NAME} is not valid JSON ${suffix}`, cause };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    fail("UNAVAILABLE", `${GRADER_OUTPUT_NAME} is not a JSON object (container exit ${exitCode})`);
+    return { ok: false, detail: `${GRADER_OUTPUT_NAME} is not a JSON object ${suffix}` };
   }
-  return parsed;
+  return { ok: true, report: parsed };
 }
 
 /**
@@ -262,6 +333,7 @@ export function containerGraderReportSource(
     async read(request: GraderReportRequest): Promise<RawGraderReport> {
       const block = deterministicProcessBlock(request.specification);
       const image = pinnedImageReference(block);
+      const platform = pinnedPlatform(block);
       const workdir = containerWorkdir(block);
       const task = subjectEntry(request.task, TASK_SUBJECT_PATH, "Task subject");
       const results = request.results.map((result, index) =>
@@ -292,7 +364,7 @@ export function containerGraderReportSource(
           results,
           specification: {
             family: "deterministic-process",
-            platform: block.platform,
+            platform,
             timeoutSeconds: block.timeout,
           },
         })),
@@ -318,7 +390,7 @@ export function containerGraderReportSource(
       try {
         result = await options.runtime.run({
           image,
-          platform: block.platform,
+          platform,
           workdir,
           mounts: [{ source: hostWorkdir, target: workdir, readOnly: false }],
           env: options.env ?? {},
@@ -328,19 +400,14 @@ export function containerGraderReportSource(
         if (timeoutSignal.aborted) abortedRun(cause);
         fail("UNAVAILABLE", "the grader container could not be run", cause);
       }
-      if (timeoutSignal.aborted) abortedRun();
 
-      let bytes: Uint8Array;
-      try {
-        bytes = await readFile(join(hostWorkdir, GRADER_OUTPUT_NAME));
-      } catch (cause) {
-        fail(
-          "UNAVAILABLE",
-          `the grader container wrote no ${GRADER_OUTPUT_NAME} (container exit ${result.exitCode})`,
-          cause,
-        );
-      }
-      return { report: parseReport(bytes, result.exitCode), log: result.stdout };
+      // A complete report is a grading the container actually performed, so it is never thrown
+      // away for a deadline that elapsed at return time. Only when nothing gradeable came back
+      // does an elapsed deadline get to classify the failure.
+      const outcome = await readReport(hostWorkdir, result.exitCode);
+      if (outcome.ok) return { report: outcome.report, log: result.stdout };
+      if (timeoutSignal.aborted) abortedRun();
+      fail("UNAVAILABLE", outcome.detail, outcome.cause);
     },
   };
 }

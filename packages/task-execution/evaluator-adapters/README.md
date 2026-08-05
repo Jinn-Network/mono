@@ -30,6 +30,17 @@ grammar, which the harness runtime turns into the signed Result Evaluation.
   digest-pinned image through an injected `ContainerRuntime`, and reads back
   `grader-output.json`. It still shells out to nothing — the concrete Docker (or
   other) driver behind `ContainerRuntime` is host work (see Finding A).
+
+  Every value that leaves this source as a container argument — the image
+  reference, the platform, the working directory that is also the mount target — is
+  validated against its own grammar first, and a value that does not match is
+  refused before anything is provisioned or run. This is not defense in depth: a
+  reference that is not a reference lands in the positional slot a driver's argument
+  vector hands to `docker`, where it is read as an *option*, so an unvalidated
+  `familyBlock.image.uri` of `--mount=type=bind,src=/,dst=/hostfs` bind-mounts the
+  host into the grader. Unlike a subject name — whose grammar is open, which is why
+  subject files are positional on disk — the docker reference grammar is total, so
+  the validator refuses nothing legitimate.
 - `ResolutionSnapshotSource` — resolves a prediction market's resolution snapshot.
   The in-package implementation, `contextResolutionSnapshotSource`, reads the
   snapshot from the same supporting-context channel. A live venue-reading
