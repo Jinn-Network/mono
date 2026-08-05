@@ -241,3 +241,40 @@ describe("broadcast lock (design §6.1 cross-process lock)", () => {
     void stuck; // never resolves; not awaited
   });
 });
+
+describe("lease renewal outliving its database", () => {
+  // Found blocking an unrelated PR: the renewal timer fires from an unref'd `setInterval`, so a
+  // renewal that lands after the connection closes throws where no caller can catch it. Vitest
+  // reports it as an uncaught exception and fails the whole file -- for a lock whose owner had
+  // already finished. Same shape as every other "a writer outlived its resource" defect.
+  test("a renewal that lands after the database closes does not throw from the timer", async () => {
+    const owned = openVenueState(join(root, "renewal.db"));
+    // Renew every 1ms (leaseMs/2, floored at 1) so a tick is guaranteed inside the wait below.
+    const lock = createBroadcastLock(owned, { holderId: "renewal-holder", leaseMs: 2 });
+
+    let closeWhileHeld!: () => void;
+    const closed = new Promise<void>((resolve) => { closeWhileHeld = resolve; });
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown): void => { uncaught.push(error); };
+    process.on("uncaughtException", onUncaught);
+
+    try {
+      await lock.withSender(84532, SENDER, async () => {
+        // Close the database out from under the still-armed renewal timer, then leave time for
+        // several renewal ticks to fire against the dead connection.
+        owned.close();
+        closeWhileHeld();
+        await new Promise<void>((resolve) => setTimeout(resolve, 25));
+      });
+    } catch {
+      // `withSender`'s own release path also touches the closed database; that rejection is the
+      // caller's to see and is not what this test pins.
+    }
+
+    await closed;
+    await new Promise<void>((resolve) => setTimeout(resolve, 15));
+    process.off("uncaughtException", onUncaught);
+
+    expect(uncaught).toEqual([]);
+  });
+});

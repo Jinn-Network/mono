@@ -1,5 +1,12 @@
 # Cutover Stage 1 — Solver Flow Implementation Plan
 
+> **Addendum 2026-08-04** (per the
+> [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)):
+> operator-app deltas in this stage (the Claim policy & wiring page and its routes) build
+> against the versioned read contract (that spec §8) — payloads carry
+> `contractVersion`, schemas come from the shared module, and the routes follow the
+> intent-module law (§4.1: pure intent module, CLI and HTTP as non-invoking front-ends).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Hard-swap the operator daemon's solver flow onto the merged stack — projector-fed discovery → claim predicate → pipeline → embedded local backend (host-joined evidence) → deliver → settle — retiring the TaskEngine's solution path, `joinedSolverNets` claim gating, and new `task_runs` solution rows, with every surviving legacy transaction re-pointed through one broadcaster.

@@ -2,7 +2,7 @@ import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Onboarding, statusFor } from './Onboarding.js';
-import type { BootstrapState } from '../api/types.js';
+import type { BootstrapState } from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

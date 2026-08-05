@@ -35,6 +35,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
     });
 
     await daemon.start();
@@ -51,6 +52,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
     })).toThrow(/legacy.*restoration engine/i);
   });
 
@@ -60,6 +62,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
     };
 
@@ -74,6 +77,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
     };
 
@@ -90,6 +94,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       tasks: [{ id: 'legacy-static', description: 'legacy static task' }],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
     };
 
@@ -107,6 +112,7 @@ describe('Daemon', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath,
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
     });
     await daemon.start();
@@ -214,6 +220,7 @@ describe('Daemon — C8 loop startup', () => {
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       composition,
       evidenceDriverIntervalMs: 20,
@@ -239,6 +246,7 @@ describe('Daemon — C8 loop startup', () => {
       taskSources: [],
       dbPath: ':memory:',
       store,
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       composition,
       evidenceDriverIntervalMs: 20,
@@ -264,6 +272,7 @@ describe('Daemon — C8 loop startup', () => {
       taskSources: [],
       dbPath: ':memory:',
       store,
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       composition,
       work: {

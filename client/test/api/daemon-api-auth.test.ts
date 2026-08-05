@@ -74,7 +74,9 @@ afterEach(async () => {
 
 describe('daemon-api-auth (bearer middleware)', () => {
   it('closes promptly with a live events stream', async () => {
-    const res = await fetch(`${baseUrl}/v1/events`);
+    const res = await fetch(`${baseUrl}/v1/events`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
     expect(res.status).toBe(200);
 
     await expect(Promise.race([
@@ -83,6 +85,52 @@ describe('daemon-api-auth (bearer middleware)', () => {
     ])).resolves.toBe('closed');
     server = undefined;
     await res.body?.cancel().catch(() => undefined);
+  });
+
+  // ── Unconditional operator-class gate (§14.3) ────────────────────────────
+  //
+  // The `beforeEach` server above is constructed WITHOUT `ui` — the exact
+  // shape `daemon.ts`'s self-start branch (no `config.apiServer`) and other
+  // embedded/test callers use. Before the fix, `/v1/events`,
+  // `/v1/events/recent`, and `/v1/activity-events` were mounted unconditionally
+  // in `startApiServer` but only gated inside the `if (config.ui)` block —
+  // so a construction path without `ui` left them world-reachable. These
+  // routes must now be gated on EVERY construction path, using the bearer
+  // `apiToken` (always present) as the fallback credential.
+  it('rejects GET /v1/events with no Authorization header on a bare (no-ui) server → 401', async () => {
+    const res = await fetch(`${baseUrl}/v1/events`);
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error?: string; reason?: string };
+    expect(body.error).toBe('unauthorized');
+  });
+
+  it('rejects GET /v1/events/recent with no Authorization header on a bare (no-ui) server → 401', async () => {
+    const res = await fetch(`${baseUrl}/v1/events/recent`);
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects GET /v1/activity-events with no Authorization header on a bare (no-ui) server → 401', async () => {
+    const res = await fetch(`${baseUrl}/v1/activity-events`);
+    expect(res.status).toBe(401);
+  });
+
+  it('rejects GET /v1/activity-events/:id with no Authorization header on a bare (no-ui) server → 401', async () => {
+    const res = await fetch(`${baseUrl}/v1/activity-events/1`);
+    expect(res.status).toBe(401);
+  });
+
+  it('admits GET /v1/events/recent with the bearer apiToken on a bare (no-ui) server', async () => {
+    const res = await fetch(`${baseUrl}/v1/events/recent`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('admits GET /v1/activity-events with the bearer apiToken on a bare (no-ui) server', async () => {
+    const res = await fetch(`${baseUrl}/v1/activity-events`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(res.status).toBe(200);
   });
 
   it('rejects POST /v1/artifacts/acquire with no Authorization header → 401', async () => {
@@ -264,9 +312,41 @@ describe('daemon-api-auth (bearer middleware)', () => {
     expect(body.published).toBe(true);
   });
 
-  it('GET /v1/status stays public (no bearer required)', async () => {
+  // §14.5 (issue #2404): `/v1/status` lost its auth exemption once
+  // `/health` + `/ready` landed as the unauthenticated-safe liveness
+  // surface. The `beforeEach` server above has no `ui` configured, so
+  // `requireOperatorToken` falls back to the bearer `apiToken` — same
+  // credential every other gated route on a bare/test server uses.
+  it('rejects GET /v1/status with no Authorization header on a bare (no-ui) server → 401', async () => {
     const res = await fetch(`${baseUrl}/v1/status`);
+    expect(res.status).toBe(401);
+    const body = await res.json() as { error?: string };
+    expect(body.error).toBe('unauthorized');
+  });
+
+  it('admits GET /v1/status with the bearer apiToken on a bare (no-ui) server', async () => {
+    const res = await fetch(`${baseUrl}/v1/status`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
     expect(res.status).toBe(200);
+  });
+
+  it('GET /health stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok?: boolean };
+    expect(body.ok).toBe(true);
+  });
+
+  it('GET /ready stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/ready`);
+    expect(res.status).toBe(200);
+  });
+
+  it('GET /metrics stays public (no token required)', async () => {
+    const res = await fetch(`${baseUrl}/metrics`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toMatch(/^text\/plain/);
   });
 
   it('requires the UI token before retrying agent binding', async () => {
@@ -370,5 +450,40 @@ describe('daemon-api-auth (bearer middleware)', () => {
       });
       expect(authenticated.status).toBe(200);
     }
+  });
+
+  it('rejects the bearer apiToken ALONE on an operator-class route when ui IS configured — the two credential planes do not merge', async () => {
+    // §4.2's disposition table scopes the bearer `apiToken` to
+    // `/artifacts` + `/v1/artifacts/acquire` + the stop-hook compat path
+    // ONLY. `apiToken` sits in every spawned solver agent's own process env
+    // (learner adapters' spawnOpts.env, Hermes' bootstrap .env file) — any
+    // agent with a shell can read it. Admitting it on `Control`-class
+    // operator routes (setup, admin, claim-policy, captures, ...) would let
+    // any agent reach change-password, restart/stop, real-money faucet
+    // drip, etc. When `config.ui` is configured (every production boot via
+    // main.ts), ONLY the ui-token grants access here — this is an
+    // empirical regression for that finding, not a design restatement.
+    await server.close();
+    store.close();
+
+    store = new Store(':memory:');
+    server = await startApiServer({
+      port: 0,
+      store,
+      apiToken: TEST_TOKEN,
+      ui: { token: 'ui-token', handshakeKey: 'handshake-key' },
+    });
+    baseUrl = `http://127.0.0.1:${server.port}`;
+
+    const bearerOnly = await fetch(`${baseUrl}/v1/events/recent`, {
+      headers: { Authorization: `Bearer ${TEST_TOKEN}` },
+    });
+    expect(bearerOnly.status).toBe(401);
+
+    // Sanity: the ui-token still admits on the same server/route.
+    const uiTokenAuthed = await fetch(`${baseUrl}/v1/events/recent`, {
+      headers: { 'x-jinn-ui-token': 'ui-token' },
+    });
+    expect(uiTokenAuthed.status).toBe(200);
   });
 });

@@ -1486,6 +1486,13 @@ export class MechAdapter implements ExecutionAdapter {
 
       // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
       // nothing was yielded) so an idle-but-polling loop never looks stale.
+      // #2407 caveat (i): this for-await driver never routes through
+      // `daemon/loop-heartbeat.ts`'s `runLoop`, so it doesn't consult
+      // per-loop admission — but `engine-watcher` is registered
+      // `admission: 'always'` (spec §5), so the omission is inert today. If
+      // this loop is ever reclassified `ready-only`, gate the poll body on
+      // `getDaemonReadiness() === 'ready'` here, the same way `engine-tick`
+      // does in `harnesses/engine/engine.ts`'s `runTickLoop`.
       if (this.store) recordLoopTick(this.store, 'engine-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }
@@ -1948,6 +1955,9 @@ export class MechAdapter implements ExecutionAdapter {
 
       // #1043/#1038: heartbeat at the poll-cycle tail (every poll, even when
       // nothing was yielded) so an idle-but-polling loop never looks stale.
+      // #2407 caveat (i): see the matching comment at engine-watcher's
+      // heartbeat above — `delivery-watcher` is also `admission: 'always'`,
+      // so not consulting admission here is inert today.
       if (this.store) recordLoopTick(this.store, 'delivery-watcher');
       await new Promise(r => setTimeout(r, this.config.pollIntervalMs));
     }

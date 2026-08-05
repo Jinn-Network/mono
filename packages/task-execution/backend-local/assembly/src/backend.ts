@@ -74,6 +74,7 @@ import {
 import type {
   AttemptIdentity,
   JournalEvent,
+  OutcomeFile,
   SpawnRequest,
 } from "@jinn-network/task-execution-supervisor";
 import {
@@ -199,6 +200,31 @@ function monotonicClockIdentity(): string | undefined {
 
 function positiveSafeDuration(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+interface ShimOutcomeResult {
+  readonly exitCode?: number;
+  readonly signal?: string;
+}
+
+function shimOutcomeResult(outcome: OutcomeFile): ShimOutcomeResult {
+  return {
+    ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }),
+    ...(outcome.termSignal === null ? {} : { signal: outcome.termSignal }),
+  };
+}
+
+/**
+ * Resolves the wait once the shim has been observed dead. The liveness probe races the shim's
+ * own final moments: it can write `outcome.json` and `exit(0)` between the poll's outcome read
+ * and the probe that follows it, so the earlier miss is not by itself evidence that nothing was
+ * delivered. Re-read before concluding — only a miss that survives the death observation proves
+ * the shim exited without recording an outcome. Exported for direct coverage of this branch.
+ */
+export function resolveOutcomeAfterShimDeath(meta: string, nonce: string): ShimOutcomeResult {
+  const outcome = readOutcome(meta, nonce);
+  if (outcome === null) throw new Error("shim exited without a nonce-matching outcome");
+  return shimOutcomeResult(outcome);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -1873,13 +1899,8 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     for (;;) {
       this.recordHeartbeatStaleness(attempt, meta);
       const outcome = readOutcome(meta, nonce);
-      if (outcome !== null) {
-        return {
-          ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }),
-          ...(outcome.termSignal === null ? {} : { signal: outcome.termSignal }),
-        };
-      }
-      if (!probeShimAlive(meta).alive) throw new Error("shim exited without a nonce-matching outcome");
+      if (outcome !== null) return shimOutcomeResult(outcome);
+      if (!probeShimAlive(meta).alive) return resolveOutcomeAfterShimDeath(meta, nonce);
       await new Promise<void>((resolve) => setTimeout(resolve, 25));
     }
   }
@@ -2347,9 +2368,9 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
   private recordHeartbeatStaleness(attempt: AttemptUri, meta: string): void {
     if (this.shutdownStarted || !this.writer.acquired) return;
     if (this.journal(attempt).read().some((event) => event.type === "progress" && event.details["degradation"] === "heartbeat-stale")) return;
-    const heartbeat = readHeartbeat(meta);
-    if (heartbeat === null) return;
     try {
+      const heartbeat = readHeartbeat(meta);
+      if (heartbeat === null) return;
       const lastMonotonicMs = Number(BigInt(heartbeat.monotonicMs) / 1_000_000n);
       const nowMonotonicMs = Number(monotonicNowNs() / 1_000_000n);
       if (!Number.isSafeInteger(lastMonotonicMs) || !Number.isSafeInteger(nowMonotonicMs)

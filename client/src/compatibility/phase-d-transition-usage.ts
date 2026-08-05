@@ -1,12 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { z } from 'zod';
+
+import { writeObservation } from '../observability/write-observation.js';
 
 /**
  * Durable, monotonic compatibility diagnostics for Phase D deletion gates.
@@ -15,13 +10,25 @@ import { dirname } from 'node:path';
  * change a claim decision, or permit deletion. Phase D still requires the manifest's external
  * observation window and exact closure evidence. Production configures a file beside the daemon
  * database, and `/v1/status` exposes the snapshot for collection by the operator control plane.
+ *
+ * `native-operator-composition` (#2380) is the one exception to the "legacy deletion gate"
+ * framing above: it is positive evidence that a native-v1 instance is up, recorded once per boot
+ * at `client/src/daemon/native-phase-d-observability.ts`. Native mode has no `/v1/status`, so its
+ * durable file lives under the operator's `stateDir` instead and is shipped by the periodic
+ * status-snapshot loop (see that module) rather than an HTTP GET.
  */
-export type PhaseDTransitionSignal =
-  | 'legacy-operator-composition'
-  | 'marketplace-pipeline-invocation'
-  | 'legacy-task-submission-synthesis'
-  | 'legacy-evaluator-delivery-watcher-loaded'
-  | 'legacy-wiring-config-field';
+// The single source of truth for the signal vocabulary: both the TS union below and the Zod
+// enum used to validate every write derive from this array, so they cannot drift apart.
+const PHASE_D_TRANSITION_SIGNALS = [
+  'legacy-operator-composition',
+  'marketplace-pipeline-invocation',
+  'legacy-task-submission-synthesis',
+  'legacy-evaluator-delivery-watcher-loaded',
+  'legacy-wiring-config-field',
+  'native-operator-composition',
+] as const;
+
+export type PhaseDTransitionSignal = typeof PHASE_D_TRANSITION_SIGNALS[number];
 
 export interface PhaseDTransitionUsageCounter {
   readonly signal: PhaseDTransitionSignal;
@@ -36,12 +43,38 @@ interface PhaseDTransitionUsageState {
   readonly counters: readonly PhaseDTransitionUsageCounter[];
 }
 
+// Versioned-Zod-strict container profile (spec §7): the shape a durable state file must satisfy
+// before writeObservation will write it. z.strictObject (not z.object, which silently strips
+// unrecognized keys) so a future field added to the TS interface without a matching schema update
+// throws at write time instead of silently vanishing from the durable file (N2).
+const phaseDTransitionUsageCounterSchema = z.strictObject({
+  signal: z.enum(PHASE_D_TRANSITION_SIGNALS),
+  count: z.number().int().min(1),
+  firstObservedAt: z.string().min(1),
+  lastObservedAt: z.string().min(1),
+});
+
+const phaseDTransitionUsageStateSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  observationWindowStartedAt: z.string().min(1),
+  counters: z.array(phaseDTransitionUsageCounterSchema).readonly(),
+});
+
 export interface PhaseDTransitionUsageDiagnostics {
   readonly schemaVersion: 1;
   readonly durable: boolean;
   readonly observationWindowStartedAt: string;
   readonly counters: readonly PhaseDTransitionUsageCounter[];
 }
+
+// Exported so a container embedding these diagnostics as a subtree (e.g. the native status
+// snapshot) can compose it into its own writeObservation schema without duplicating the shape.
+export const phaseDTransitionUsageDiagnosticsSchema = z.strictObject({
+  schemaVersion: z.literal(1),
+  durable: z.boolean(),
+  observationWindowStartedAt: z.string().min(1),
+  counters: z.array(phaseDTransitionUsageCounterSchema).readonly(),
+});
 
 const counters = new Map<PhaseDTransitionSignal, PhaseDTransitionUsageCounter>();
 let storagePath: string | undefined;
@@ -67,18 +100,11 @@ function parseState(path: string): PhaseDTransitionUsageState | undefined {
 
 function persist(): void {
   if (storagePath === undefined) return;
-  mkdirSync(dirname(storagePath), { recursive: true });
-  const temporaryPath = `${storagePath}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(temporaryPath, `${JSON.stringify({
-      schemaVersion: 1,
-      observationWindowStartedAt,
-      counters: phaseDTransitionUsageSnapshot(),
-    } satisfies PhaseDTransitionUsageState, null, 2)}\n`, { flag: 'wx' });
-    renameSync(temporaryPath, storagePath);
-  } finally {
-    rmSync(temporaryPath, { force: true });
-  }
+  writeObservation(storagePath, phaseDTransitionUsageStateSchema, {
+    schemaVersion: 1,
+    observationWindowStartedAt,
+    counters: phaseDTransitionUsageSnapshot(),
+  } satisfies PhaseDTransitionUsageState);
 }
 
 /** Configure (or reload) the durable observation window used by this process. */

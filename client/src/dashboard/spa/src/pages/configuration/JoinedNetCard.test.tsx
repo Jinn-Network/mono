@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { JoinedNetCard, type JoinedNetEntry } from './JoinedNetCard.js';
-import type { SolverNetCatalogEntry } from '../../api/types.js';
+import type { SolverNetCatalogEntry } from '../../../../../api/contract/index.js';
 import { api } from '../../api/client.js';
 
 import type { JSX } from 'react';
@@ -601,7 +601,7 @@ describe('<JoinedNetCard /> — cost surfacing + confirmation gate (Issue #331 P
           },
         },
       },
-    });
+    } as never);
   });
 
   const HERMES_CATALOG: SolverNetCatalogEntry = {

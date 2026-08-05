@@ -555,16 +555,28 @@ describe('loadConfig RPC override handling', () => {
     expect(config.faucetTopupCooldownMs).toBe(24 * 60 * 60 * 1000);
   });
 
-  it('defaults reward auto-claim to disabled so operators claim OLAS manually', () => {
+  // #2407 / spec §11: overturns the manual-claim-from-the-app rationale this
+  // default previously carried (config.ts:97-99's prior comment) — that
+  // premise leaves with the SPA per OPERATOR-APP-SPEC.md's 2026-08-04
+  // amendment (§2.7): a manual claim action shipped and stays, but
+  // off-by-default was silently costing operators money and contradicted
+  // the spec's own §2.7 framing of rewards as collected automatically.
+  it('defaults reward auto-claim to ON (600000ms) in standard staking mode', () => {
     delete process.env['JINN_REWARD_CLAIM_INTERVAL_MS'];
+    const config = loadConfig();
+    expect(config.rewardClaimIntervalMs).toBe(600_000);
+  });
+
+  it('respects an explicit opt-out via JINN_REWARD_CLAIM_INTERVAL_MS=0', () => {
+    process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = '0';
     const config = loadConfig();
     expect(config.rewardClaimIntervalMs).toBe(0);
   });
 
-  it('keeps reward auto-claim available as an explicit managed-operator opt-in', () => {
-    process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = '600000';
+  it('keeps reward auto-claim overridable to a different explicit interval', () => {
+    process.env['JINN_REWARD_CLAIM_INTERVAL_MS'] = '900000';
     const config = loadConfig();
-    expect(config.rewardClaimIntervalMs).toBe(600_000);
+    expect(config.rewardClaimIntervalMs).toBe(900_000);
   });
 
   it('overrides faucet topup cap and cooldown from env (issue #560)', () => {

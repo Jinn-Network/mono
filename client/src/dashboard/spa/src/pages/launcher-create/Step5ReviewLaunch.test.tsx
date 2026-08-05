@@ -8,7 +8,7 @@ import {
 import type {
   DraftSolverNetRecord,
   LaunchedSolverNetRecord,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { api } from '../../api/client.js';
 
 vi.mock('../../api/client.js', () => ({

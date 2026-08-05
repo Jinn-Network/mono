@@ -1573,7 +1573,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2817,
+      "discoveredFirstPartySurfaces": 2865,
       "generatedOutputSources": 1305,
       "generatorSources": 575,
       "marketplaceControl": 2,
@@ -2035,6 +2035,16 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/npm-publish-workflow.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/observation-reader-gate-boundary.test.mjs"
       },
       {
         "categories": [
@@ -3984,6 +3994,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/check-no-error-leak.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/check-no-late-route-mount.mjs"
       },
       {
@@ -4114,67 +4134,17 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/scripts/generate-openapi.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/scripts/harvest-e2e-live-verify.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/claude-code.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/codex.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/common.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/cursor.ts"
-      },
-      {
-        "categories": [
-          "generatorSources"
-        ],
-        "owners": [
-          "@oaksprout",
-          "@ritsukai"
-        ],
-        "path": "client/scripts/install-hooks/gemini-cli.ts"
       },
       {
         "categories": [
@@ -4315,6 +4285,16 @@
           "@ritsukai"
         ],
         "path": "client/scripts/net-liveness-probe.ts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/scripts/phase-d-observation-collector.ts"
       },
       {
         "categories": [
@@ -5514,6 +5494,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/_support/native-config-fixture.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/_support/phase-b-closure-fixture.ts"
       },
       {
@@ -5904,6 +5894,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/admin-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/agent-binding-endpoint.test.ts"
       },
       {
@@ -5965,6 +5965,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/daemon-api-auth.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/daemon-token.test.ts"
       },
       {
         "categories": [
@@ -6044,6 +6054,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/gathered-status-cache.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/handshake.test.ts"
       },
       {
@@ -6085,6 +6105,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/harness-status-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/health-ready.test.ts"
       },
       {
         "categories": [
@@ -6174,6 +6204,36 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/metrics-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/notifications-build.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/notifications-endpoint.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/operator-artifacts-endpoint.test.ts"
       },
       {
@@ -6205,6 +6265,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/prediction-v1-build.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/restart-required-state.test.ts"
       },
       {
         "categories": [
@@ -6344,7 +6414,27 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/api/status-error-masking.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/api/status-harness-rollup.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/status-notifications-shared-config.test.ts"
       },
       {
         "categories": [
@@ -6365,6 +6455,16 @@
           "@ritsukai"
         ],
         "path": "client/test/api/status-spend.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/api/stop-hook-server-gate.test.ts"
       },
       {
         "categories": [
@@ -6434,6 +6534,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/architecture/api-cli-boundary.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/architecture/api-daemon-boundary.test.ts"
       },
       {
@@ -6465,6 +6575,16 @@
           "@ritsukai"
         ],
         "path": "client/test/architecture/client-golden-envelope/regen-golden-envelope.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/architecture/contract-browser-safety.test.ts"
       },
       {
         "categories": [
@@ -6894,6 +7014,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/bootstrap-retry.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/bootstrap.test.ts"
       },
       {
@@ -7044,6 +7174,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/integrations-hook-install.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/keys-backup.test.ts"
       },
       {
@@ -7084,6 +7224,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/onboarding-complete.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/prediction-scoreboard.test.ts"
       },
       {
@@ -7095,6 +7245,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/commands/rewards.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/commands/run-native-config.test.ts"
       },
       {
         "categories": [
@@ -7304,6 +7464,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/daemon-control-client.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/daemon-guard.test.ts"
       },
       {
@@ -7375,6 +7545,16 @@
           "@ritsukai"
         ],
         "path": "client/test/cli/index.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/cli/introspection-context.test.ts"
       },
       {
         "categories": [
@@ -7535,6 +7715,16 @@
           "@ritsukai"
         ],
         "path": "client/test/config/home-isolation.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/config/migrate-shape-v2-native-collision.test.ts"
       },
       {
         "categories": [
@@ -8004,7 +8194,27 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/daemon-startup-info.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/daemon.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/degraded-recovery.test.ts"
       },
       {
         "categories": [
@@ -8124,6 +8334,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/daemon/loop-admission.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/daemon/loop-heartbeat-instrumentation.test.ts"
       },
       {
@@ -8175,6 +8395,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-claim-policy.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-config-path.test.ts"
       },
       {
         "categories": [
@@ -8285,6 +8515,16 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-operator-state.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-phase-d-observability.test.ts"
       },
       {
         "categories": [
@@ -9493,6 +9733,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/earning/address-digests.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/earning/agent-wallet-binding.test.ts"
       },
       {
@@ -9513,7 +9763,27 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/earning/bootstrap-halt-classification.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/earning/bootstrap-mech-safe-direct.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/earning/bootstrap-run-funding-envelope.test.ts"
       },
       {
         "categories": [
@@ -9564,6 +9834,16 @@
           "@ritsukai"
         ],
         "path": "client/test/earning/faucet.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/earning/fleet-bootstrap-phase.test.ts"
       },
       {
         "categories": [
@@ -9654,6 +9934,16 @@
           "@ritsukai"
         ],
         "path": "client/test/earning/restake-receipt.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/earning/run-bootstrap-with-degrade-open.test.ts"
       },
       {
         "categories": [
@@ -10863,6 +11153,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/harnesses/engine/engine-tick-admission.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/harnesses/engine/engine-work-dir-cleanup.test.ts"
       },
       {
@@ -11674,6 +11974,16 @@
           "@ritsukai"
         ],
         "path": "client/test/harnesses/impls/learner/attribution-plugins.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/harnesses/impls/learner/candidate-admission-seam.test.ts"
       },
       {
         "categories": [
@@ -12733,6 +13043,36 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/intents"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/intents/bootstrap-retry.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/intents/onboarding-complete.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/learner"
       },
       {
@@ -12863,6 +13203,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/main/degraded-daemon-guard.e2e.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/main/harness-readiness-wiring.test.ts"
       },
       {
@@ -12984,6 +13334,16 @@
           "@ritsukai"
         ],
         "path": "client/test/monitoring/net-liveness.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/monitoring/phase-d-observation-window.test.ts"
       },
       {
         "categories": [
@@ -13124,6 +13484,16 @@
           "@ritsukai"
         ],
         "path": "client/test/observability/redact-secrets.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/observability/write-observation.test.ts"
       },
       {
         "categories": [
@@ -13294,6 +13664,16 @@
           "@ritsukai"
         ],
         "path": "client/test/preflight"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/preflight/api-bind-host.test.ts"
       },
       {
         "categories": [
@@ -13733,6 +14113,26 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/release/tier-1/T1.3-contract-conformance.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/release/tier-1/T1.3-contract-conformance.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/release/tier-2"
       },
       {
@@ -14116,6 +14516,17 @@
           "@ritsukai"
         ],
         "path": "client/test/scripts/external-consumer-acceptance.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/scripts/generate-openapi.test.ts"
       },
       {
         "categories": [
@@ -31741,6 +32152,56 @@
       },
       {
         "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/candidate-manifest.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/candidate-tree.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/evidence-provenance.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/fixtures/learner/seed-tree.json"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -31768,6 +32229,16 @@
           "@ritsukai"
         ],
         "path": "packages/policy-optimization/scripts/build.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/policy-optimization/scripts/e2e-campaign.mjs"
       },
       {
         "categories": [

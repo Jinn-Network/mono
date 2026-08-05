@@ -1,4 +1,4 @@
-import type { StructuredEvent } from '../api/types.js';
+import type { StructuredEvent } from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 
