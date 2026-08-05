@@ -1575,7 +1575,7 @@
       "decisionRecords": 3,
       "discoveredFirstPartySurfaces": 2852,
       "generatedOutputSources": 1294,
-      "generatorSources": 573,
+      "generatorSources": 575,
       "marketplaceControl": 2,
       "requiredGates": 20,
       "staticControl": 6
@@ -2115,6 +2115,26 @@
           "@ritsukai"
         ],
         "path": ".github/scripts/platform-verification-receipt.test.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/platform-verification-selection.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/platform-verification-selection.test.mjs"
       },
       {
         "categories": [
