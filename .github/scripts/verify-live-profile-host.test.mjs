@@ -38,7 +38,14 @@ import {
 
 const repoRoot = resolve(import.meta.dirname, '../..');
 const scriptPath = join(import.meta.dirname, 'verify-live-profile-host.mjs');
-const ORIGIN = 'https://jinn.network';
+// The fake host serves the *real* public surface, whose documents and whose registered
+// `resolvableIdentifiers` name spec.jinn.network after the DR-2026-08-04 re-seal
+// (component C2). A fake host on any other origin cannot serve them coherently.
+const ORIGIN = STABLE_ORIGIN;
+// A neutral origin, deliberately neither the canonical one nor the retired apex. It carries
+// the "the origin is a parameter" proofs and the stable lane's refusal of anything but
+// STABLE_ORIGIN -- both of which need an origin that is not STABLE_ORIGIN.
+const OTHER_ORIGIN = 'https://profiles.example';
 const PUBLIC_KEY_URL = 'https://keys.example/profile-manifest.pem';
 const KEY_ID = 'jinn-profile-manifest-test';
 
@@ -217,26 +224,26 @@ test('servedPathForIdentifier reuses the canonical path rule under a parameteriz
     { servedPath: 'profiles/trace-vocabulary/v1' },
   );
   assert.deepEqual(
-    servedPathForIdentifier(`${ORIGIN}/profiles/task-execution/1.0`, ORIGIN),
+    servedPathForIdentifier(`${OTHER_ORIGIN}/profiles/task-execution/1.0`, OTHER_ORIGIN),
     { servedPath: 'profiles/task-execution/1.0' },
   );
-  assert.ok(servedPathForIdentifier(`${ORIGIN}/x`, STABLE_ORIGIN).error, 'origin mismatch must be refused');
+  assert.ok(servedPathForIdentifier(`${OTHER_ORIGIN}/x`, STABLE_ORIGIN).error, 'origin mismatch must be refused');
   for (const bad of [`${STABLE_ORIGIN}/`, `${STABLE_ORIGIN}/a/../b`, `${STABLE_ORIGIN}/a?x=1`, `${STABLE_ORIGIN}/manifest.json`]) {
     assert.ok(servedPathForIdentifier(bad, STABLE_ORIGIN).error, `expected ${bad} to be refused`);
   }
 });
 
 test('a fixture document declaring a vocabulary profile is not read as a served-path claim', () => {
-  const bytes = Buffer.from(JSON.stringify({ profile: `${ORIGIN}/task-profiles/example-domain/1.0` }));
-  assert.equal(selfIdentifyingClaim('@jinn-network/x/fixtures/golden/minimal.json', bytes, ORIGIN), null);
+  const bytes = Buffer.from(JSON.stringify({ profile: `${OTHER_ORIGIN}/task-profiles/example-domain/1.0` }));
+  assert.equal(selfIdentifyingClaim('@jinn-network/x/fixtures/golden/minimal.json', bytes, OTHER_ORIGIN), null);
   assert.deepEqual(
-    selfIdentifyingClaim('profiles/thing/1.0/x.json', bytes, ORIGIN),
-    { field: 'profile', identifier: `${ORIGIN}/task-profiles/example-domain/1.0` },
+    selfIdentifyingClaim('profiles/thing/1.0/x.json', bytes, OTHER_ORIGIN),
+    { field: 'profile', identifier: `${OTHER_ORIGIN}/task-profiles/example-domain/1.0` },
   );
-  assert.equal(selfIdentifyingClaim('profiles/thing/1.0/x.md', bytes, ORIGIN), null);
-  assert.match(selfIdentifyingClaim('profiles/a.json', Buffer.from('{'), ORIGIN).error, /does not parse/u);
+  assert.equal(selfIdentifyingClaim('profiles/thing/1.0/x.md', bytes, OTHER_ORIGIN), null);
+  assert.match(selfIdentifyingClaim('profiles/a.json', Buffer.from('{'), OTHER_ORIGIN).error, /does not parse/u);
   assert.match(
-    selfIdentifyingClaim('profiles/a.json', Buffer.from(JSON.stringify({ $id: `${ORIGIN}/a`, profile: `${ORIGIN}/b` })), ORIGIN).error,
+    selfIdentifyingClaim('profiles/a.json', Buffer.from(JSON.stringify({ $id: `${OTHER_ORIGIN}/a`, profile: `${OTHER_ORIGIN}/b` })), OTHER_ORIGIN).error,
     /multiple self-identifying claims/u,
   );
 });
@@ -528,7 +535,7 @@ test('a receipt document inventory that differs from the local manifest is refus
 test('the stable lane refuses any origin other than spec.jinn.network', async () => {
   const fixture = realFixture();
   await expectFailure(
-    runArgs(fixture, { lane: 'stable', origin: ORIGIN }),
+    runArgs(fixture, { lane: 'stable', origin: OTHER_ORIGIN }),
     /stable lane must verify https:\/\/spec\.jinn\.network/u,
   );
 });
@@ -710,7 +717,7 @@ test('the CLI exits non-zero and prints FAIL when the gate refuses', () => {
     '--source-sha', sourceSha,
     '--catalog-digest', realFixture().catalogDigest,
     '--lane', 'stable',
-    '--origin', ORIGIN,
+    '--origin', OTHER_ORIGIN,
     '--public-key-url', PUBLIC_KEY_URL,
     '--expect-public-key-sha256', '0'.repeat(64),
     '--out', join(temporaryDirectory('jinn-live-host-cli-'), 'live-host-receipt.json'),

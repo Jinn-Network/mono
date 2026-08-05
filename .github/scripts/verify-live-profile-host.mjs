@@ -34,7 +34,7 @@ import { pathToFileURL } from 'node:url';
 import { assertLiteralRoutePath } from './build-profile-host-bundle.mjs';
 import { canonicalJsonBytes, catalogSha256 } from './build-prepublication-bundle.mjs';
 import { loadPlatformCatalog } from './platform-catalog.mjs';
-import { jinnIdentifierServedPath } from './public-surface-assets.mjs';
+import { CANONICAL_IDENTIFIER_ORIGIN, jinnIdentifierServedPath } from './public-surface-assets.mjs';
 import { PAYLOAD_TYPE, SIGNATURE_FILE_NAME, verifyEnvelope } from './sign-profile-manifest.mjs';
 
 export const STABLE_ORIGIN = 'https://spec.jinn.network';
@@ -44,7 +44,8 @@ export const MANIFEST_MEDIA_TYPE = 'application/json';
 // `jinnIdentifierServedPath` owns the canonical path-shape rule. Its rules are
 // origin-independent, so an identifier under any origin is rebased onto the origin
 // that helper knows and handed straight to it -- the rule is reused, never restated.
-const CANONICAL_IDENTIFIER_ORIGIN = 'https://jinn.network';
+// That origin is imported rather than restated: the helper rejects the retired apex
+// by name, so a stale local copy would fail every document rather than none.
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -106,7 +107,7 @@ export function servedPathForIdentifier(identifier, origin, label = 'Jinn identi
   try {
     return {
       servedPath: jinnIdentifierServedPath(
-        `${CANONICAL_IDENTIFIER_ORIGIN}/${identifier.slice(origin.length + 1)}`,
+        `${CANONICAL_IDENTIFIER_ORIGIN}${identifier.slice(origin.length + 1)}`,
         label,
       ),
     };
