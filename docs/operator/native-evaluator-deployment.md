@@ -18,11 +18,16 @@ for a `role: "evaluator"` deployment.
   `evaluationMethod.digest.sha256` the composition layer stamps into every verdict
   statement.
 
-Both are plain committed files, not `tsc` build artifacts — their bytes (and therefore
-their digests) are exactly what is in git. You do not need to run `yarn build` to compute
-or verify either digest, though the file must of course be present on disk at the path you
-give `deploymentModule` (true for a repo checkout, and true for the npm-published package
-since `deployments/` ships unconditionally — see `client/package.json`'s `files` array).
+A third file lives beside them but is **not committed**:
+`prediction-market-deployment.local.json`, the per-operator identity sidecar — see
+[The identity sidecar](#the-identity-sidecar-and-why-not-an-env-var) below.
+
+Both committed artifacts are plain files, not `tsc` build artifacts — their bytes (and
+therefore their digests) are exactly what is in git. You do not need to run `yarn build`
+to compute or verify either digest, though the file must of course be present on disk at
+the path you give `deploymentModule` (true for a repo checkout, and true for the
+npm-published package since `deployments/` ships unconditionally — see
+`client/package.json`'s `files` array).
 
 ## Config wiring
 
@@ -70,45 +75,92 @@ const moduleDigest = await predictionEvaluatorModuleDigest();       // -> evalua
 const evaluationMethodDigest = await predictionEvaluatorMethodDigest(); // -> evaluator.evaluationMethodDigest
 ```
 
-## Required environment variables
+**The sidecar file is deliberately not included in `moduleDigest`.** `moduleDigest` pins
+this module's *logic*, which is identical for every operator; the sidecar carries only
+per-operator *parameters* (identity, evidence root) — the same relationship
+`native-config.json` itself already has to the rest of the trusted deployment (config
+isn't digest-pinned either). Identity correctness doesn't depend on hashing the sidecar:
+see [The identity sidecar](#the-identity-sidecar-and-why-not-an-env-var).
 
-The module reads two environment variables at **import time** (once per process, before
-`evaluationHarnessDeployment` is constructed):
+## The identity sidecar, and why not an env var
 
-| Env var | Required | Purpose |
-|---|---|---|
-| `JINN_NATIVE_EVALUATOR_AGENT` | yes | The evaluator's own persistent Agent IRI. Must equal `operator.native.agent` in `native-config.json` — the composition layer refuses the deployment otherwise (`native-evaluator-composition.ts:221-223`). |
-| `JINN_NATIVE_EVALUATOR_CLAIM_EVIDENCE_DIR` | no | Root directory for the durable claim-evidence filesystem repository. Defaults to `~/.jinn-client/native-evaluator/claim-evidence`. |
+This module is imported **twice**: once by the daemon (parent) process building the
+evaluator composition, and once more by the evaluation-harness **child process** the
+daemon spawns for every attempt
+(`packages/task-execution/evaluation-harness/src/runtime.ts`'s
+`deploymentFromEnvironment()`, invoked from the compiled `dist/bin.js` the launcher
+spawns). The child's environment is **reconstructed from scratch**, not inherited from
+the daemon's shell:
 
-## The identity-parameterization design, and why
+- `packages/task-execution/evaluation-harness/src/launcher.ts`'s `launchPlan` sets a
+  fixed, small set of `JINN_ATTEMPT_*` keys.
+- `packages/task-execution/backend-local/workspace/src/dir-provisioner.ts`'s
+  `executionEnv()` is an explicit ~20-name allowlist with no slot for an arbitrary
+  operator variable.
+- `packages/task-execution/backend-local/supervisor/src/shim-script.ts` spawns the
+  harness with full env replacement, not a merge with the parent's `process.env`.
 
-`evaluatorIdentity.id` (inside the module's registration) must equal the operator's own
-Agent IRI, but `moduleDigest` pins the module's exact file bytes — and that identity is
-different for every operator. Two mechanisms would satisfy both constraints:
+**An environment variable set for the daemon therefore never reaches the spawned
+harness that actually produces a verdict.** (An earlier revision of this module used
+`JINN_NATIVE_EVALUATOR_AGENT` for exactly this reason and was wrong — the daemon booted
+fine, but every spawned evaluation attempt failed to import the module, invisibly: the
+harness maps that failure to `infrastructure`-blamed `evaluation-operational-failure`
+with nothing on stderr, by design.)
 
-1. **The module reads the identity from configuration external to the file** (an
-   environment variable), so the file's bytes — and therefore its digest — never change
-   across operators. *(chosen)*
-2. **A committed generator emits a personalized module per operator**, with each operator
-   computing and pinning their own, distinct `moduleDigest`.
+Instead, the module reads its per-operator identity from a **sidecar file next to
+itself on disk**, resolved via `import.meta.url`:
+`prediction-market-deployment.local.json`. A file on disk is visible identically to
+both processes: the spawned child imports the *exact same absolute path* as the parent
+(the launcher forwards the parent's resolved specifier unchanged), and dynamic
+`import()` reads are not sandboxed to the spawned attempt's own workspace directory.
 
-This module uses (1): `JINN_NATIVE_EVALUATOR_AGENT`. Reasoning:
+```json
+{
+  "agent": "<the evaluator's own persistent Agent IRI — must equal operator.native.agent>",
+  "claimEvidenceDir": "<optional absolute path; defaults to ~/.jinn-client/native-evaluator/claim-evidence>"
+}
+```
 
-- **One published digest, not N.** Every operator running a given release of this exact
-  file has the identical `moduleDigest` — it's a single value the project can publish in
-  release notes and every operator can diff their local file against, rather than each
-  operator's digest being unverifiable against anyone else's.
-- **No generated-file operational surface.** There is nothing to run, gitignore, or
-  re-generate on upgrade; the shipped file is the whole artifact.
-- **Matches the existing convention for `signerHandle`.** `EvaluatorDeploymentOptions`
-  (`packages/task-execution/evaluator-adapters/src/deployment.ts:20-21`) already documents
-  `signerHandle` as "deployment-owned, resolved by later host-owned composition" — i.e. a
-  value the module declares and the operator's config is expected to match, not a value
-  baked into Task material. `signerHandle` here is a fixed literal for the same reason:
-  it's a stable handle name, not a secret or a per-operator identity, so it needs no
-  parameterization at all.
+Create it with `writePredictionEvaluatorSidecar` (`client/src/native-evaluator/deployment-paths.ts`)
+or by hand at
+`client/deployments/evaluator/prediction-market-deployment.local.json` (published-package
+path: alongside the resolved `deploymentModule` path above). It is **not committed** —
+see `client/.gitignore`.
 
-The composition layer never weakens its checks to accommodate this — `moduleDigest` still
-pins exact bytes, `evaluatorIdentity.id` is still cross-checked against
-`operator.native.agent` on every construction, and reading `JINN_NATIVE_EVALUATOR_AGENT`
-happens entirely outside the digest-pinned file.
+Two independent guards mean a wrong or tampered sidecar cannot produce a trusted
+verdict, even though it isn't digest-pinned:
+
+1. **Boot-time**: the parent composition (`native-evaluator-composition.ts`) cross-checks
+   this module's declared `evaluatorIdentity.id` against the trusted
+   `operator.native.agent` config value on every construction. A sidecar naming the
+   wrong agent means the daemon refuses to start the evaluator role at all — loud, and
+   before a single attempt is spawned.
+2. **Harvest-time**: even a sidecar that differs *only* for the spawned child (e.g.
+   tampered with independently of the parent) cannot forge a trusted verdict. The
+   verdict statement's `evaluator.id` comes from this same registration, and the
+   parent's harvest step separately requires `predicate.evaluator.id === roles.agent`
+   before it will seal and publish anything
+   (`native-evaluator-composition.ts`'s `stateBackedProvisioner` harvest contract).
+
+The composition layer's checks are otherwise untouched by this design — `moduleDigest`
+still pins exact module-logic bytes; only where the per-operator *parameter* lives
+changed, from (wrong) process env to a sidecar file both processes read identically.
+
+**The sidecar is read once, at import.** Editing it does not take effect for an
+already-running daemon process, nor for an evaluation attempt already spawned; both
+pick up an edit only on their own next process start / next spawn.
+
+## Alternatives considered
+
+Two other mechanisms would also satisfy "one committed file, per-operator identity":
+
+- **A committed generator emits a personalized module per operator**, each operator
+  computing and pinning their own, distinct `moduleDigest`. Rejected: every operator
+  running a shared release would have a *different* digest, unverifiable against each
+  other, and there would be a generated-file operational surface (run it, don't
+  gitignore the wrong thing, regenerate on upgrade) this design avoids entirely.
+- **Widen the spawned child's env allowlist** to forward an operator-chosen variable.
+  Rejected without even prototyping it: that allowlist is a security boundary (it is
+  also what prevents a Task from steering which secrets a harness process can see), and
+  widening it for this deployment's convenience is a broader change than one deployment
+  module should make.
