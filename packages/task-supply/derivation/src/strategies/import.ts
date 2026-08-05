@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { Candidate, CandidateTestMaterial } from "../candidate.js";
+import { isUpstreamRfc3339, type Candidate, type CandidateTestMaterial } from "../candidate.js";
 import { documentDigest } from "../digest.js";
 import { DerivationError } from "../errors.js";
 import type { DerivationEnvironment, DerivationStrategy, StrategyDeps } from "../strategy.js";
@@ -22,6 +22,8 @@ export interface UpstreamRebenchRow {
   readonly base_commit: string;
   readonly problem_statement: string;
   readonly language: string;
+  /** Immutable upstream issue/instance time. Derivation never substitutes its own clock. */
+  readonly created_at: string;
   /** The gold patch. LOCAL-ONLY downstream: it never reaches the supply pool. */
   readonly patch: string;
   readonly test_patch: string;
@@ -67,6 +69,7 @@ export type RowRejection =
   | "gold-missing"
   | "test-material-missing"
   | "no-fail-to-pass"
+  | "invalid-provenance-timestamp"
   | "invalid-timeout"
   | "license-undeclared"
   | "license-not-permitted";
@@ -93,6 +96,7 @@ export function assessRow(
   if (row.patch.length === 0) return { ok: false, reason: "gold-missing" };
   if (row.test_patch.length === 0) return { ok: false, reason: "test-material-missing" };
   if (row.FAIL_TO_PASS.length === 0) return { ok: false, reason: "no-fail-to-pass" };
+  if (!isUpstreamRfc3339(row.created_at)) return { ok: false, reason: "invalid-provenance-timestamp" };
 
   const timeout = row.timeout ?? inputs.defaultTimeoutSeconds;
   if (!Number.isSafeInteger(timeout) || timeout <= 0) return { ok: false, reason: "invalid-timeout" };
@@ -177,6 +181,7 @@ export const importStrategy: DerivationStrategy<ImportStrategyInputs> = {
         goldPatch: encoder.encode(row.patch),
         provenance: {
           kind: "mined",
+          timestamp: row.created_at,
           upstream: {
             dataset: inputs.upstream.dataset,
             revision: inputs.upstream.revision,

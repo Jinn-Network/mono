@@ -57,9 +57,10 @@ describe("createMethodRegistry", () => {
   test("exports the default registry through the package barrel", () => {
     expect(BENCHMARKING_METHOD_REGISTRY.get("jinn.benchmarking.method/wilson", "1")).toBeDefined();
   });
-  test("declares both Task-paired methods version-robust for cross-Benchmark comparisons", () => {
+  test("declares every Task-paired method version-robust for cross-Benchmark comparisons", () => {
     const registry = createMethodRegistry();
     expect(registry.get("jinn.benchmarking.method/paired-mcnemar", "1")?.versionRobust).toBe(true);
+    expect(registry.get("jinn.benchmarking.method/provenance-cluster-sign", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/noninferiority-iut", "1")?.versionRobust).toBe(true);
     expect(registry.get("jinn.benchmarking.method/wilson", "1")?.versionRobust).toBe(false);
   });
@@ -69,13 +70,14 @@ describe("createMethodRegistry", () => {
     expect(registry.get("jinn.benchmarking.method/does-not-exist", "1")).toBeUndefined();
   });
 
-  test("registers all seven design §9.2 methods", () => {
+  test("registers all eight methods", () => {
     const registry = createMethodRegistry();
     for (const [id, version] of [
       ["jinn.benchmarking.method/wilson", "1"],
       ["jinn.benchmarking.method/avg-at-k", "1"],
       ["jinn.benchmarking.method/pass-at-k", "1"],
       ["jinn.benchmarking.method/paired-mcnemar", "1"],
+      ["jinn.benchmarking.method/provenance-cluster-sign", "1"],
       ["jinn.benchmarking.method/noninferiority-iut", "1"],
       ["jinn.benchmarking.method/clean-subset", "1"],
       ["jinn.benchmarking.method/bradley-terry", "1"],

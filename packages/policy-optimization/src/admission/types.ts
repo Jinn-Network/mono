@@ -101,6 +101,8 @@ export interface SignatureOutcome {
  */
 export interface AdmissionConsent {
   readonly crossOperator: boolean;
+  /** The live local host sets this so executable changes need consent even from its own proposer. */
+  readonly requireExecutableChangeConsent?: boolean;
   /** Payload classes the owner has explicitly approved for this candidate or this campaign. */
   readonly approvedPayloadClasses: readonly PayloadClass[];
 }

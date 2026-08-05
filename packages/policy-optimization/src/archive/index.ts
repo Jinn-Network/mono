@@ -44,10 +44,12 @@ export {
   emptyAdoptionLog,
   formatAdoptionComponentClasses,
   isAdoptionComponentClass,
+  prepareAdoption,
   rollback,
   scopeKey,
   sortAdoptionComponentClasses,
   type AdoptInput,
+  type PrepareAdoptionInput,
 } from "./adoption.js";
 export {
   appendAdoptionRecord,

@@ -106,7 +106,7 @@ describe("sealed pair", () => {
     const document = JSON.parse(decoder.decode(task.bytes)) as {
       payload: {
         instance_id: string;
-        provenance: { kind: string; sourceCommitment: string };
+        provenance: { kind: string; sourceCommitment: string; timestamp: string };
         rights: { sourceLicense: string };
       };
       inputs: { name: string; uri: string; annotations: { ref: string } }[];
@@ -116,6 +116,7 @@ describe("sealed pair", () => {
     expect(document.payload.provenance.kind).toBe("mined");
     expect(document.payload.provenance.sourceCommitment)
       .toBe(computeSourceCommitment(candidate.provenance.upstream, candidate.statement));
+    expect(document.payload.provenance.timestamp).toBe(candidate.provenance.timestamp);
     expect(document.payload.instance_id).toBe(candidate.provenance.upstream.instanceId);
     expect(document.payload.rights.sourceLicense).toBe("Apache-2.0");
     expect(document.inputs[0]).toEqual({

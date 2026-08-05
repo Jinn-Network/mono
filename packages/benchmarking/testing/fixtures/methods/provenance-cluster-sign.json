@@ -1,0 +1,477 @@
+{
+  "methodId": "jinn.benchmarking.method/provenance-cluster-sign",
+  "methodVersion": "1",
+  "parameters": {
+    "baseline": "armA",
+    "candidate": "armB"
+  },
+  "verdictRule": "unanimous",
+  "matrices": [
+    {
+      "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
+      "run": {
+        "digest": {
+          "sha256": "c53f5227cce173f08860a1b60a002d746abf03a6c55cc96dfb2bd716241b259b"
+        }
+      },
+      "closeBoundary": {
+        "at": "2026-08-04T00:00:00Z"
+      },
+      "cells": [
+        {
+          "cellKey": "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e/armA/1",
+          "taskDigest": "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:ef5d7768216459aa09c936c42d1704147c17c7226985b151a7180b5cb4c324a7"
+          ],
+          "validVerdicts": [
+            "sha256:ef5d7768216459aa09c936c42d1704147c17c7226985b151a7180b5cb4c324a7"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e/armB/1",
+          "taskDigest": "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:d042bf91e4fcdab7883c14c0aeab0a4980b7a5109db79da1adfc7730c6226401"
+          ],
+          "validVerdicts": [
+            "sha256:d042bf91e4fcdab7883c14c0aeab0a4980b7a5109db79da1adfc7730c6226401"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618/armA/1",
+          "taskDigest": "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:27475aff601edde9b2c71b2ae978a4c2941caca3eb9031c337de26b452be5e42"
+          ],
+          "validVerdicts": [
+            "sha256:27475aff601edde9b2c71b2ae978a4c2941caca3eb9031c337de26b452be5e42"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618/armB/1",
+          "taskDigest": "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:c8fe77abf8f0951d456595a312003c7a83cd53472923189853f3f3309884faf5"
+          ],
+          "validVerdicts": [
+            "sha256:c8fe77abf8f0951d456595a312003c7a83cd53472923189853f3f3309884faf5"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688/armA/1",
+          "taskDigest": "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:bc54d6f806439fa86c623d23bcc93d61eb062e6784c4ba608a8c28670bfd07ce"
+          ],
+          "validVerdicts": [
+            "sha256:bc54d6f806439fa86c623d23bcc93d61eb062e6784c4ba608a8c28670bfd07ce"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688/armB/1",
+          "taskDigest": "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:3544021ad5eedc6ec7ea7b1ce970a8cc026aba54169df1d212eb5a5e0ce9f727"
+          ],
+          "validVerdicts": [
+            "sha256:3544021ad5eedc6ec7ea7b1ce970a8cc026aba54169df1d212eb5a5e0ce9f727"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758/armA/1",
+          "taskDigest": "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:4f347697f64545c84c9a76471303297396345925c8aed962389429b7fac2f36d"
+          ],
+          "validVerdicts": [
+            "sha256:4f347697f64545c84c9a76471303297396345925c8aed962389429b7fac2f36d"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758/armB/1",
+          "taskDigest": "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:0d8d6aab25b58eae2f302b49f8f90122c1a7a72a64eab9e8145d9a118363830a"
+          ],
+          "validVerdicts": [
+            "sha256:0d8d6aab25b58eae2f302b49f8f90122c1a7a72a64eab9e8145d9a118363830a"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893/armA/1",
+          "taskDigest": "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:3d5eaac8c386cf1e8d49831e535389783ba0a2463a3b674e4f707055d4ec1892"
+          ],
+          "validVerdicts": [
+            "sha256:3d5eaac8c386cf1e8d49831e535389783ba0a2463a3b674e4f707055d4ec1892"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893/armB/1",
+          "taskDigest": "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:1549f4c9261c4fafacc650fe8dd0670c046ce8fe1a85a9a2d26cb78b51255b28"
+          ],
+          "validVerdicts": [
+            "sha256:1549f4c9261c4fafacc650fe8dd0670c046ce8fe1a85a9a2d26cb78b51255b28"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae/armA/1",
+          "taskDigest": "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae",
+          "armId": "armA",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:aad98ebccf1031f8553908dd844b806ba4ec381a041ea47f50579c41ee4cce85"
+          ],
+          "validVerdicts": [
+            "sha256:aad98ebccf1031f8553908dd844b806ba4ec381a041ea47f50579c41ee4cce85"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        },
+        {
+          "cellKey": "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae/armB/1",
+          "taskDigest": "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae",
+          "armId": "armB",
+          "replicate": 1,
+          "dispatches": 1,
+          "accounted": 1,
+          "verdicts": [
+            "sha256:13d70aaa9d9072c07b2713bac23152801b08995394ff39322686723079b28f38"
+          ],
+          "validVerdicts": [
+            "sha256:13d70aaa9d9072c07b2713bac23152801b08995394ff39322686723079b28f38"
+          ],
+          "outcome": "judged",
+          "verification": {
+            "harness": "match",
+            "model": "match",
+            "loadout": "match",
+            "isolation": "match",
+            "checksFailed": []
+          },
+          "integrityTier": "re-derivable"
+        }
+      ],
+      "exclusions": [],
+      "attrition": {
+        "perArm": {
+          "armA": {
+            "expected": 6,
+            "judged": 6,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          },
+          "armB": {
+            "expected": 6,
+            "judged": 6,
+            "unjudged": 0,
+            "unscorable": 0,
+            "expired": 0,
+            "invalidated": 0,
+            "excluded": 0,
+            "replacements": 0
+          }
+        },
+        "asymmetryFlags": []
+      },
+      "completeness": {
+        "expected": 12,
+        "judged": 12,
+        "floor": "0.5",
+        "runOutcome": "complete"
+      },
+      "assembly": {
+        "procedure": "jinn.benchmarking.assembly",
+        "version": "1.0"
+      }
+    }
+  ],
+  "verdictOutcomes": {
+    "sha256:ef5d7768216459aa09c936c42d1704147c17c7226985b151a7180b5cb4c324a7": {
+      "verdict": "fail"
+    },
+    "sha256:d042bf91e4fcdab7883c14c0aeab0a4980b7a5109db79da1adfc7730c6226401": {
+      "verdict": "pass"
+    },
+    "sha256:27475aff601edde9b2c71b2ae978a4c2941caca3eb9031c337de26b452be5e42": {
+      "verdict": "fail"
+    },
+    "sha256:c8fe77abf8f0951d456595a312003c7a83cd53472923189853f3f3309884faf5": {
+      "verdict": "pass"
+    },
+    "sha256:bc54d6f806439fa86c623d23bcc93d61eb062e6784c4ba608a8c28670bfd07ce": {
+      "verdict": "fail"
+    },
+    "sha256:3544021ad5eedc6ec7ea7b1ce970a8cc026aba54169df1d212eb5a5e0ce9f727": {
+      "verdict": "pass"
+    },
+    "sha256:4f347697f64545c84c9a76471303297396345925c8aed962389429b7fac2f36d": {
+      "verdict": "fail"
+    },
+    "sha256:0d8d6aab25b58eae2f302b49f8f90122c1a7a72a64eab9e8145d9a118363830a": {
+      "verdict": "pass"
+    },
+    "sha256:3d5eaac8c386cf1e8d49831e535389783ba0a2463a3b674e4f707055d4ec1892": {
+      "verdict": "fail"
+    },
+    "sha256:1549f4c9261c4fafacc650fe8dd0670c046ce8fe1a85a9a2d26cb78b51255b28": {
+      "verdict": "pass"
+    },
+    "sha256:aad98ebccf1031f8553908dd844b806ba4ec381a041ea47f50579c41ee4cce85": {
+      "verdict": "fail"
+    },
+    "sha256:13d70aaa9d9072c07b2713bac23152801b08995394ff39322686723079b28f38": {
+      "verdict": "pass"
+    }
+  },
+  "taskProvenance": {
+    "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e": {
+      "source": "fixture-source/f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e"
+    },
+    "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618": {
+      "source": "fixture-source/2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618"
+    },
+    "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688": {
+      "source": "fixture-source/cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688"
+    },
+    "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758": {
+      "source": "fixture-source/70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758"
+    },
+    "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893": {
+      "source": "fixture-source/db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893"
+    },
+    "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae": {
+      "source": "fixture-source/1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae"
+    }
+  },
+  "runReplicates": 1,
+  "expectedResults": {
+    "verdictRule": "unanimous",
+    "baseline": "armA",
+    "candidate": "armB",
+    "pairing": {
+      "taskDigests": [
+        "1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae",
+        "2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618",
+        "70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758",
+        "cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688",
+        "db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893",
+        "f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e"
+      ]
+    },
+    "clustering": {
+      "basis": "task-provenance-source",
+      "clusters": 6
+    },
+    "favorable": 6,
+    "unfavorable": 0,
+    "tied": 0,
+    "nonTied": 6,
+    "pValue": "0.03125",
+    "votes": [
+      {
+        "cluster": [
+          "source",
+          "fixture-source/1b587031bd3a8abcb05bfc3ff8376c828d3eaab624f57354d3c54cc345ddebae"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      },
+      {
+        "cluster": [
+          "source",
+          "fixture-source/2f47b635c0477043299a69de09b46423495f51c047c4936e7cbed74f48ebc618"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      },
+      {
+        "cluster": [
+          "source",
+          "fixture-source/70fb9a1394abb69bd09c20205dce486d2bd0835a45624b91b0008bf728e62758"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      },
+      {
+        "cluster": [
+          "source",
+          "fixture-source/cfcb01c416413d50c58524f7b11d820bcbf7d4227906d48cf1f44c848668e688"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      },
+      {
+        "cluster": [
+          "source",
+          "fixture-source/db353c8379699121a028506fb60073dac986ff83a1d0de1788c269286993e893"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      },
+      {
+        "cluster": [
+          "source",
+          "fixture-source/f06972cd3b2c731ca12cb9ce83430e3aef81b8b3c9dbb18b0ec89dc3a513ae9e"
+        ],
+        "taskDelta": 1,
+        "vote": "favorable"
+      }
+    ],
+    "excluded": {
+      "count": 0,
+      "cellKeys": []
+    },
+    "conflicted": {
+      "count": 0,
+      "cellKeys": []
+    }
+  }
+}

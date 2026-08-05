@@ -10,14 +10,24 @@ const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-policy-optimization-"))
 const consumer = join(temporaryRoot, "consumer");
 
 // Cross-tree portal dependencies, packed locally so the consumer graph resolves end-to-end
-// without reaching the registry. `task-execution-protocol`, `-profiles`, and `trust-core` are not
-// dependencies of this package — they are `benchmarking-records`', `benchmarking-run`'s, and
-// `benchmarking-aggregate`'s own runtime edges, and an unpacked transitive Jinn dependency makes
-// `npm install` reach for a registry version that does not exist.
+// without reaching the registry. The private live host deliberately acquires concrete backend,
+// evaluator, evidence, and trust edges, so the smoke consumer must materialize their complete
+// local graph as archives too.
 const PORTAL_PACKAGES = [
+  ["@jinn-network/evidence-protocol", join(packagesRoot, "evidence", "protocol"), "evidence-protocol.tgz"],
+  ["@jinn-network/evidence-repository", join(packagesRoot, "evidence", "repository"), "evidence-repository.tgz"],
+  ["@jinn-network/evidence-discovery", join(packagesRoot, "evidence", "discovery"), "evidence-discovery.tgz"],
+  ["@jinn-network/execution-recorder", join(packagesRoot, "evidence", "execution-recorder"), "execution-recorder.tgz"],
+  ["@jinn-network/attestation-issuer", join(packagesRoot, "evidence", "attestation-issuer"), "attestation-issuer.tgz"],
   ["@jinn-network/task-execution-protocol", join(packagesRoot, "task-execution", "protocol"), "task-execution-protocol.tgz"],
   ["@jinn-network/task-execution-profiles", join(packagesRoot, "task-execution", "profiles"), "task-execution-profiles.tgz"],
   ["@jinn-network/task-execution-backend", join(packagesRoot, "task-execution", "backend"), "task-execution-backend.tgz"],
+  ["@jinn-network/task-execution-supervisor", join(packagesRoot, "task-execution", "backend-local", "supervisor"), "task-execution-supervisor.tgz"],
+  ["@jinn-network/task-execution-workspace", join(packagesRoot, "task-execution", "backend-local", "workspace"), "task-execution-workspace.tgz"],
+  ["@jinn-network/task-execution-launchers", join(packagesRoot, "task-execution", "backend-local", "launchers"), "task-execution-launchers.tgz"],
+  ["@jinn-network/task-execution-evaluation-harness", join(packagesRoot, "task-execution", "evaluation-harness"), "task-execution-evaluation-harness.tgz"],
+  ["@jinn-network/task-execution-evaluator-adapters", join(packagesRoot, "task-execution", "evaluator-adapters"), "task-execution-evaluator-adapters.tgz"],
+  ["@jinn-network/task-execution-backend-local", join(packagesRoot, "task-execution", "backend-local", "assembly"), "task-execution-backend-local.tgz"],
   ["@jinn-network/trust-core", join(packagesRoot, "trust", "core"), "trust-core.tgz"],
   ["@jinn-network/benchmarking-records", join(packagesRoot, "benchmarking", "records"), "benchmarking-records.tgz"],
   ["@jinn-network/benchmarking-run", join(packagesRoot, "benchmarking", "run"), "benchmarking-run.tgz"],
@@ -136,9 +146,15 @@ const expectedJinnDependencies = [
   "@jinn-network/benchmarking-local",
   "@jinn-network/benchmarking-records",
   "@jinn-network/benchmarking-run",
+  "@jinn-network/evidence-protocol",
   "@jinn-network/policy-identity",
   "@jinn-network/policy-outcomes",
   "@jinn-network/task-execution-backend",
+  "@jinn-network/task-execution-backend-local",
+  "@jinn-network/task-execution-evaluator-adapters",
+  "@jinn-network/task-execution-profiles",
+  "@jinn-network/task-execution-protocol",
+  "@jinn-network/trust-core",
 ];
 if (jinnDependencies.join(",") !== expectedJinnDependencies.join(",")) {
   throw new Error("unexpected Jinn coupling: " + jinnDependencies.join(", "));
@@ -166,7 +182,7 @@ console.log("Installed package imports and dependency boundary verified.");
   const declaredBin = installedManifest.bin;
   const binTarget = typeof declaredBin === "string"
     ? declaredBin
-    : declaredBin?.["policy-optimization"];
+    : declaredBin?.["jinn-optimize"];
   if (typeof binTarget !== "string") throw new Error("the policy-optimization bin entry is missing");
   const binPath = join(installedRoot, binTarget);
   await access(binPath);
@@ -176,10 +192,10 @@ console.log("Installed package imports and dependency boundary verified.");
   }
   // Run it: the verb tree must be reachable from the installed tree, not only present in it.
   const usage = await run(process.execPath, [binPath], { cwd: temporaryRoot, stdio: "pipe" });
-  if (!usage.includes("optimize campaign create") || !usage.includes("optimize policy rollback")) {
-    throw new Error("the packed bin does not expose the optimize verb tree");
+  if (!usage.includes("jinn-optimize campaign prepare") || !usage.includes("Headless use never starts the guide")) {
+    throw new Error("the packed bin does not expose the headless-safe guided journey");
   }
-  console.log("Installed bin resolves, keeps its shebang, and exposes the optimize verb tree.");
+  console.log("Installed bin resolves, keeps its shebang, and exposes the headless-safe guided journey.");
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

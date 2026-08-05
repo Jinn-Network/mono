@@ -2,10 +2,9 @@
 //
 // Ground truth is computed HERE, independently of `@jinn-network/benchmarking-aggregate`'s
 // implementation (kit-precedes-implementation, program §7.6): this script re-implements the
-// closed-form Wilson interval, the exact McNemar test (ported verbatim from the already-shipped
-// `packages/core/src/paired.ts`, itself independently tested), and the Chen 2021 unbiased
-// pass@k estimator from scratch. `aggregate` is written afterward to reproduce these pinned
-// numbers, not the other way around.
+// closed-form Wilson interval, exact McNemar and whole-provenance sign tests (independently of the
+// registry), and the Chen 2021 unbiased pass@k estimator from scratch. `aggregate` is written
+// afterward to reproduce these pinned numbers, not the other way around.
 //
 // Run: `node scripts/generate-method-fixtures.mjs` from the package root. Deterministic —
 // re-running reproduces byte-identical fixture files.
@@ -56,6 +55,16 @@ function mcnemarExact(b, c) {
     cdf += term;
   }
   return Math.min(1, 2 * cdf);
+}
+
+function exactTwoSidedSign(favorable, unfavorable) {
+  const n = favorable + unfavorable;
+  if (n === 0) return 1;
+  if (favorable === 0 || unfavorable === 0) return 2 ** (1 - n);
+  const k = Math.min(favorable, unfavorable);
+  let numerator = 0;
+  for (let index = 0; index <= k; index++) numerator += binomial(n, index);
+  return Math.min(1, (2 * numerator) / (2 ** n));
 }
 
 function binomial(n, k) {
@@ -272,6 +281,7 @@ const passAtKFixture = {
         missingTaskDigests: [taskDigest("passk/t2")],
       },
     },
+    incompatible: { count: 0, tasks: [] },
     conflicted: { count: 0, cellKeys: [] },
   },
 };
@@ -350,6 +360,53 @@ const mcnemarFixture = {
     clustering: { basis: "task-provenance-source", clusters: 4 },
     clusteredPValue: "0.3173",
     designEffect: "1.0000",
+    conflicted: { count: 0, cellKeys: [] },
+  },
+};
+
+// --- fixture 3b: provenance-cluster-sign@1 -------------------------------------------------
+
+const clusterSignOutcomes = Array.from({ length: 6 }, (_, index) =>
+  [`cluster-sign/t${index + 1}`, "fail", "pass"]);
+const clusterSignCells = clusterSignOutcomes.flatMap(([label]) => [
+  cell(label, "armA", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }),
+  cell(label, "armB", 1, { outcome: "judged", verdicts: ["v"], validVerdicts: ["v"] }),
+]);
+const clusterSignVerdictOutcomes = {};
+const clusterSignTaskProvenance = {};
+for (const [label, baseline, candidate] of clusterSignOutcomes) {
+  const task = taskDigest(label);
+  clusterSignVerdictOutcomes[digest(`${label}/armA/verdict/v`)] = verdictOutcome(baseline);
+  clusterSignVerdictOutcomes[digest(`${label}/armB/verdict/v`)] = verdictOutcome(candidate);
+  clusterSignTaskProvenance[task] = { source: `fixture-source/${task}` };
+}
+const clusterSignTasks = clusterSignOutcomes.map(([label]) => taskDigest(label)).sort();
+const clusterSignFixture = {
+  methodId: "jinn.benchmarking.method/provenance-cluster-sign",
+  methodVersion: "1",
+  parameters: { baseline: "armA", candidate: "armB" },
+  verdictRule: "unanimous",
+  matrices: [matrix(clusterSignCells)],
+  verdictOutcomes: clusterSignVerdictOutcomes,
+  taskProvenance: clusterSignTaskProvenance,
+  runReplicates: 1,
+  expectedResults: {
+    verdictRule: "unanimous",
+    baseline: "armA",
+    candidate: "armB",
+    pairing: { taskDigests: clusterSignTasks },
+    clustering: { basis: "task-provenance-source", clusters: 6 },
+    favorable: 6,
+    unfavorable: 0,
+    tied: 0,
+    nonTied: 6,
+    pValue: String(exactTwoSidedSign(6, 0)),
+    votes: clusterSignTasks.map((task) => ({
+      cluster: ["source", `fixture-source/${task}`],
+      taskDelta: 1,
+      vote: "favorable",
+    })),
+    excluded: { count: 0, cellKeys: [] },
     conflicted: { count: 0, cellKeys: [] },
   },
 };
@@ -552,6 +609,7 @@ const fixtures = {
   "pass-at-k": passAtKFixture,
   "avg-at-k": avgAtKFixture,
   "paired-mcnemar": mcnemarFixture,
+  "provenance-cluster-sign": clusterSignFixture,
   "clean-subset": cleanSubsetFixture,
   "noninferiority-pass": noninferiorityPassFixture,
   "noninferiority-fail": noninferiorityFailFixture,

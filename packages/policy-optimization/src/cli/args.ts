@@ -28,7 +28,7 @@ export interface ParsedArgs {
 }
 
 /** Flags that may appear more than once; every other flag is single-valued. */
-const REPEATABLE = new Set(["seed", "approve-payload-class", "payload-class"]);
+const REPEATABLE = new Set(["seed", "approve-payload-class", "payload-class", "payload-risk"]);
 
 export function parseArgs(argv: readonly string[]): ParsedArgs {
   const words: string[] = [];

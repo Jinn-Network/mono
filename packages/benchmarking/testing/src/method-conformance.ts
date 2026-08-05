@@ -1072,7 +1072,7 @@ export function describeMethodRegistryConformance(registry: MethodRegistry): voi
           matrices: [fixture.matrix],
           verdictOutcomes: fixture.verdictOutcomes,
           taskTimestamps: fixture.taskTimestamps,
-          ...(entry.methodId === "jinn.benchmarking.method/paired-mcnemar"
+          ...(["jinn.benchmarking.method/paired-mcnemar", "jinn.benchmarking.method/provenance-cluster-sign"].includes(entry.methodId)
             ? { runReplicates: 1 }
             : {}),
           expectedResults: {},

@@ -95,6 +95,7 @@ describe("method fixture/spec completeness", () => {
       "jinn.benchmarking.method/noninferiority-iut",
       "jinn.benchmarking.method/paired-mcnemar",
       "jinn.benchmarking.method/pass-at-k",
+      "jinn.benchmarking.method/provenance-cluster-sign",
       "jinn.benchmarking.method/wilson",
     ]);
     for (const spec of specs) {
@@ -118,6 +119,7 @@ describe("method fixture/spec completeness", () => {
       "jinn.benchmarking.method/avg-at-k",
       "jinn.benchmarking.method/pass-at-k",
       "jinn.benchmarking.method/paired-mcnemar",
+      "jinn.benchmarking.method/provenance-cluster-sign",
       "jinn.benchmarking.method/noninferiority-iut",
       "jinn.benchmarking.method/clean-subset",
     ]));
@@ -125,6 +127,10 @@ describe("method fixture/spec completeness", () => {
     expect(cases.pinnedClustering).toBe("task-provenance-source");
     expect(cases.comparability).toMatchObject({ marginalCrossVersion: "reject" });
     expect(cases.replicateBoundary.pairedMcnemar).toEqual({
+      r1: "compute-exact",
+      rGreaterThan1: "typed-incompatible-input",
+    });
+    expect(cases.replicateBoundary.provenanceClusterSign).toEqual({
       r1: "compute-exact",
       rGreaterThan1: "typed-incompatible-input",
     });

@@ -50,6 +50,54 @@ export {
   validateCampaign,
 } from "./campaign.js";
 export { assertExactPin, axisValuesByteShare, isExactPin } from "./frozen-axes.js";
+export {
+  NEXT_RUN_POLICY_SNAPSHOT_FORMAT_TOKEN,
+  captureNextRunPolicySnapshot,
+  parseExactNextRunPolicySnapshot,
+  sealNextRunPolicySnapshot,
+  type CaptureNextRunPolicySnapshotInput,
+  type ExactPolicyInput,
+  type NextRunPolicyResolution,
+  type NextRunPolicySnapshot,
+  type NextRunRoute,
+  type SealedNextRunPolicySnapshot,
+} from "./next-run-policy-snapshot.js";
+export {
+  POLICY_OPTIMIZATION_ALLOCATION_ALGORITHM,
+  POLICY_OPTIMIZATION_SPLIT_MANIFEST_FORMAT_TOKEN,
+  consumePromotionGroups,
+  formPolicyOptimizationSplit,
+  parseExactPolicyOptimizationSplitManifest,
+  type PolicyOptimizationSplitManifest,
+  type PromotionConsumption,
+  type SealedPolicyOptimizationSplitManifest,
+  type SplitExclusionReason,
+  type SplitPoolCandidate,
+} from "./split-manifest.js";
+export {
+  POLICY_OPTIMIZATION_OBJECTIVE_PRESETS,
+  compileObjectivePreset,
+  noninferioritySeedFromSplitManifest,
+  type CompileObjectivePresetInput,
+  type PolicyOptimizationObjectivePreset,
+} from "./objective-presets.js";
+export {
+  SAME_OPERATOR_EVALUATION_LIMITATION,
+  projectRecommendation,
+  type ProjectRecommendationInput,
+  type RecommendationDecision,
+  type RecommendationReasonCode,
+} from "./recommendation.js";
+export {
+  LIVE_CAMPAIGN_AUTHORING_FORMAT_TOKEN,
+  LIVE_CAMPAIGN_INPUTS_FORMAT_TOKEN,
+  compileLiveCampaignAuthoringDocument,
+  compileLiveCampaignInputs,
+  type LiveCampaignAuthoringDocument,
+  type LiveCampaignCompileInput,
+  type LiveCampaignInputs,
+  type SealedLiveCampaignInputs,
+} from "./live-campaign-inputs.js";
 
 // --- review disposition M4: the two slates share no item ---
 export {
