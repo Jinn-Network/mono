@@ -1,12 +1,23 @@
 import { createDecipheriv, scryptSync } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
 import { runCli } from '../../src/cli/index.js';
-import { createNativeRequesterCommand } from '../../src/cli/commands/native-requester.js';
-import { NATIVE_ROLE_IDENTITY_ROLES, openRoleIdentitySet } from '../../src/daemon/role-identities.js';
+import {
+  createNativeRequesterCommand,
+  orderedRolesForSet,
+  ROLE_SETS,
+} from '../../src/cli/commands/native-requester.js';
+import {
+  IdentityStore,
+  listRoleIdentityKeyIds,
+  NATIVE_ROLE_IDENTITY_ROLES,
+  openRoleIdentitySet,
+  type NativeRoleIdentityRole,
+} from '../../src/daemon/role-identities.js';
 import type { CommandContext } from '../../src/cli/command.js';
 
 function captureIo() {
@@ -129,6 +140,10 @@ describe('native-vertical identity CLI surface', () => {
     const envelope = JSON.parse(io.writes.join(''));
     expect(envelope.code).toBe('invalid_invocation');
     expect(envelope.message).toMatch(/does not exist/);
+    // The library speaks `create: true` (its own boolean parameter); the CLI surface must
+    // reword to the operator's actual flag, not leak the parameter name verbatim.
+    expect(envelope.message).toMatch(/--create/);
+    expect(envelope.message).not.toMatch(/create: true/);
     expect(envelope.exampleCli).toMatch(/--create/);
     expect(io.exits).toEqual([11]);
   });
@@ -292,13 +307,120 @@ describe('native-vertical identity CLI surface', () => {
     expect(io.writes.join('')).toContain('jinn native-vertical identity --store <absolute path>');
   });
 
-  it('lists NATIVE_ROLE_IDENTITY_ROLES membership across the four sets with no gaps or overlaps', () => {
-    // Sanity guard on the fixture itself: the CLI's four role-set groupings partition every
-    // native role exactly once, matching the requester/admission/solver/evaluator stores
-    // native-production-deployment.ts opens at boot.
-    const grouped = ['requester-submission', 'requester-discovery', 'admission',
-      'solver-delivery', 'solver-settlement', 'solver-discovery',
-      'evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery'];
-    expect([...grouped].sort()).toEqual([...NATIVE_ROLE_IDENTITY_ROLES].sort());
+  it('partitions every native role into exactly one of the four ROLE_SETS (no gaps, no overlaps)', () => {
+    // Asserts against the real implementation's ROLE_SETS export, not a hardcoded literal that
+    // could silently drift from it: dropping or duplicating a role in ROLE_SETS must fail this.
+    const allMembers = Object.values(ROLE_SETS).flatMap((set) => [...set]);
+    expect(new Set(allMembers).size).toBe(allMembers.length); // no role listed in more than one set
+    expect([...allMembers].sort()).toEqual([...NATIVE_ROLE_IDENTITY_ROLES].sort()); // no gaps
+  });
+
+  it('requester/admission/solver/evaluator ROLE_SETS match the exact boot-order role lists', () => {
+    expect(orderedRolesForSet('requester')).toEqual(['requester-submission', 'requester-discovery']);
+    expect(orderedRolesForSet('admission')).toEqual(['admission']);
+    expect(orderedRolesForSet('solver')).toEqual(['solver-delivery', 'solver-settlement', 'solver-discovery']);
+    // Explicit evaluator assertion: catches a dropped member (e.g. evaluator-discovery) that a
+    // sum/sort-only partition check across all four sets could otherwise mask.
+    expect(orderedRolesForSet('evaluator')).toEqual([
+      'evaluator-verdict',
+      'evaluator-settlement',
+      'evaluator-discovery',
+    ]);
+  });
+
+  it('refuses a relative --store path', async () => {
+    const command = createNativeRequesterCommand();
+    const { ctx, io } = context(
+      ['identity', '--store', 'relative/roles.enc.json', '--roles', 'requester', '--create'],
+      { JINN_PASSWORD: 'operator-password' },
+    );
+
+    await command.run(ctx);
+
+    const envelope = JSON.parse(io.writes.join(''));
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(envelope.message).toMatch(/absolute/);
+  });
+
+  it('refuses --roles that does not match an existing store\'s owned role set', async () => {
+    const command = createNativeRequesterCommand();
+    const store = tempStorePath();
+    const env = { JINN_PASSWORD: 'operator-password' };
+
+    const created = context(['identity', '--store', store, '--roles', 'requester', '--create'], env);
+    await command.run(created.ctx);
+    expect(created.io.exits).toEqual([]);
+
+    const mismatched = context(['identity', '--store', store, '--roles', 'solver'], env);
+    await command.run(mismatched.ctx);
+
+    const envelope = JSON.parse(mismatched.io.writes.join(''));
+    expect(envelope.code).toBe('invalid_invocation');
+    expect(envelope.message).toMatch(/owned role set/);
+    expect(mismatched.io.exits).toEqual([11]);
+  });
+
+  it('creates the store file at 0600 and a freshly-created parent directory at 0700', async () => {
+    const command = createNativeRequesterCommand();
+    const store = tempStorePath();
+    const { ctx } = context(
+      ['identity', '--store', store, '--roles', 'admission', '--create'],
+      { JINN_PASSWORD: 'operator-password' },
+    );
+
+    await command.run(ctx);
+
+    expect(statSync(store).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(store)).mode & 0o777).toBe(0o700);
+  });
+
+  it('never narrows the mode of a pre-existing parent directory (MINOR 3 — no $HOME chmod)', async () => {
+    const command = createNativeRequesterCommand();
+    const root = mkdtempSync(join(tmpdir(), 'jinn-native-identity-preexisting-'));
+    const parent = join(root, 'operator-home');
+    mkdirSync(parent, { mode: 0o755 });
+    chmodSync(parent, 0o755); // mkdir's mode is umask-adjusted; force the exact starting mode.
+    const store = join(parent, 'roles.enc.json');
+    const { ctx } = context(
+      ['identity', '--store', store, '--roles', 'admission', '--create'],
+      { JINN_PASSWORD: 'operator-password' },
+    );
+
+    await command.run(ctx);
+
+    expect(statSync(parent).mode & 0o777).toBe(0o755);
+    expect(statSync(store).mode & 0o777).toBe(0o600); // the store file itself is still locked down
+  });
+
+  it('detects a lost create race and refuses to print keyIds nobody can bind to (MAJOR 1)', async () => {
+    const store = tempStorePath();
+    const password = 'operator-password';
+    const ownedRoles: readonly NativeRoleIdentityRole[] = ['admission'];
+    const originalLoadOrCreate = IdentityStore.prototype.loadOrCreate;
+    let calls = 0;
+
+    const spy = vi.spyOn(IdentityStore.prototype, 'loadOrCreate').mockImplementation(
+      async function (this: IdentityStore, now: Date, roles: readonly NativeRoleIdentityRole[]) {
+        calls += 1;
+        if (calls !== 1) return originalLoadOrCreate.call(this, now, roles);
+        // This call mints and persists its own keys first...
+        const mine = await originalLoadOrCreate.call(this, now, roles);
+        // ...but a concurrent competitor's write lands right after (e.g. the native daemon's own
+        // first boot on the same store path, which holds no lease against this CLI), clobbering
+        // the file with a different mint before the caller gets to verify.
+        await unlink(store);
+        const competitor = await IdentityStore.open({ path: store, password });
+        await originalLoadOrCreate.call(competitor, now, roles);
+        return mine;
+      },
+    );
+
+    try {
+      await expect(
+        listRoleIdentityKeyIds({ storePath: store, password, ownedRoles, create: true }),
+      ).rejects.toThrow(/creation race detected/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

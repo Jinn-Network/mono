@@ -322,8 +322,12 @@ export class IdentityStore {
   static async open(input: { readonly path: string; readonly password: string }): Promise<IdentityStore> {
     if (input.password.length === 0) throw new IdentityStoreError('identity store password is required');
     if (!isAbsolute(input.path)) throw new IdentityStoreError('identity store path must be absolute');
-    await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
-    await chmod(dirname(input.path), 0o700);
+    // `mkdir` resolves to the first directory path it actually created, or `undefined` when the
+    // whole chain already existed. Only chmod in the former case: an operator-supplied `--store`
+    // path can land inside a pre-existing directory (even $HOME), and this must never silently
+    // narrow that directory's mode.
+    const createdDir = await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
+    if (createdDir !== undefined) await chmod(dirname(input.path), 0o700);
     return new IdentityStore(input.path, input.password);
   }
 
@@ -560,9 +564,26 @@ export async function listRoleIdentityKeyIds(input: {
   }
   const store = await IdentityStore.open({ path: input.storePath, password: input.password });
   const now = input.now?.() ?? new Date();
+  const created = !existedBefore;
   const roles = await store.loadOrCreate(now, input.ownedRoles);
+  if (created) {
+    // A concurrent creator (e.g. this call racing a native daemon's own first boot on the same
+    // store path — the daemon holds no worker lease here) can win IdentityStore's atomic rename
+    // after this call already minted its own in-memory keys above. Re-read what is actually
+    // persisted and refuse to report keyIds nobody can bind to; printing them would surface only
+    // later, at boot, as a binding mismatch.
+    const persisted = await store.loadOrCreate(now, input.ownedRoles);
+    const samePersistedKeys = persisted.length === roles.length
+      && persisted.every((role, index) => role.role === roles[index]?.role && role.keyId === roles[index]?.keyId);
+    if (!samePersistedKeys) {
+      throw new IdentityStoreError(
+        `identity store creation race detected at ${input.storePath}: a concurrent writer persisted `
+        + 'different keys than this call minted; re-run to read the keys that actually won',
+      );
+    }
+  }
   return {
-    created: !existedBefore,
+    created,
     identities: roles.map((role) => ({ role: role.role, keyId: role.keyId })),
   };
 }

@@ -36,21 +36,23 @@ const OPTIONS = {
  * `daemon/native-production-deployment.ts`). Free-form role lists are deliberately not
  * accepted here: a store owning any other combination is one boot refuses to open.
  */
-const ROLE_SETS = {
+// Exported (not just used internally) so tests can assert the four-set partition against the
+// real implementation instead of a hardcoded literal that can silently drift from it.
+export const ROLE_SETS = {
   requester: new Set<NativeRoleIdentityRole>(['requester-submission', 'requester-discovery']),
   admission: new Set<NativeRoleIdentityRole>(['admission']),
   solver: new Set<NativeRoleIdentityRole>(['solver-delivery', 'solver-settlement', 'solver-discovery']),
   evaluator: new Set<NativeRoleIdentityRole>(['evaluator-verdict', 'evaluator-settlement', 'evaluator-discovery']),
 } as const;
 
-type RoleSetName = keyof typeof ROLE_SETS;
+export type RoleSetName = keyof typeof ROLE_SETS;
 
 function isRoleSetName(value: unknown): value is RoleSetName {
   return typeof value === 'string' && Object.hasOwn(ROLE_SETS, value);
 }
 
 /** Same canonical-order derivation `RoleIdentitySet.open` uses, so stores stay byte-compatible. */
-function orderedRolesForSet(name: RoleSetName): readonly NativeRoleIdentityRole[] {
+export function orderedRolesForSet(name: RoleSetName): readonly NativeRoleIdentityRole[] {
   const members = ROLE_SETS[name];
   return NATIVE_ROLE_IDENTITY_ROLES.filter((role) => members.has(role));
 }
@@ -134,7 +136,10 @@ async function runIdentity(ctx: CommandContext, parsed: Parsed): Promise<void> {
       create,
     });
   } catch (cause) {
-    return invalidIdentity(ctx, cause instanceof IdentityStoreError ? cause.message : (cause instanceof Error ? cause.message : String(cause)));
+    const message = cause instanceof IdentityStoreError ? cause.message : (cause instanceof Error ? cause.message : String(cause));
+    // `listRoleIdentityKeyIds` speaks its own `create: true` boolean parameter; the CLI operator
+    // types `--create`. Reword at this surface rather than teach the library about flag syntax.
+    return invalidIdentity(ctx, message.replace('create: true', '--create'));
   }
 
   emitResult(
