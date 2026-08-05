@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/benchmark-product-core",
   "version": "0.1.0",
-  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product skeleton — branding surface and platform consumption seam.",
+  "description": "Core of the standalone benchmark product (internal codename benchmark-product): the Tier 4 product domain — workspace, draft model, lifecycle, audit journal, principals/authority, the operations-library facade, and the CLI agent surface.",
   "private": true,
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -34,7 +34,8 @@
     "prepack": "yarn build"
   },
   "dependencies": {
-    "@jinn-network/benchmarking-records": "0.1.0"
+    "@jinn-network/benchmarking-records": "0.1.0",
+    "zod": "4.4.3"
   },
   "resolutions": {
     "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
@@ -44,5 +45,8 @@
     "@types/node": "^22.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8"
+  },
+  "bin": {
+    "benchmark-product": "./dist/cli/bin.js"
   }
 }
