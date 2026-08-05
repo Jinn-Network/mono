@@ -112,10 +112,15 @@ export function addNotificationsRoutes(app: Hono, deps: NotificationsRoutesConfi
   app.get('/v1/notifications', async (c) => {
     try {
       const status = deps.getStatus();
+      // Deliberately do NOT forward this endpoint's `now` (review round 2, finding N5) — the
+      // cache is a process-wide singleton shared with /v1/status and /v1/rewards, so a test
+      // that fakes `now` for notification-derivation reasons (password-rotation timing,
+      // claim-failed window) must not also warp the shared cache's OWN TTL bookkeeping. The
+      // cache gets its own clock (real `Date.now` in production; its own tests inject `now`
+      // directly against `getCachedGatheredStatus`, independent of this endpoint).
       const { raw, assembled } = await getCachedGatheredStatus(deps.store, status, {
         gatherRaw: deps.gatherRaw,
         assemble: deps.assemble,
-        now,
       });
       const extras = deps.getBootstrapExtras?.();
 

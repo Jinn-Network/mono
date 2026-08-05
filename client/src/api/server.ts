@@ -489,38 +489,55 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
     return new Response(new Uint8Array(data), { headers: { 'content-type': mime } });
   });
 
+  // Single shared resolver for the enriched `StatusGatherConfig` (issue #2424 review round 2,
+  // findings B1/B2). Before this, `/v1/status`'s handler built its OWN enriched wrapper
+  // (`{ ...liveStatus, discovery, harnessReadiness }`) inline, while `/v1/rewards` and
+  // `/v1/notifications` were wired with the bare `() => liveStatus` — no `discovery`, no
+  // `harnessReadiness`. Once the three shared the gather/assemble cache (F3), that divergence
+  // became load-bearing: whichever caller populated the unkeyed cache slot first decided the
+  // shape for the whole TTL window, so `/v1/status` could transiently serve
+  // `DEFAULT_HARNESS_ROLLUP` + null task outcomes (B1) — and, independent of caching,
+  // `/v1/notifications`'s OWN `harness_not_ready` derivation always read the un-enriched
+  // rollup, making that blocking kind unreachable in production regardless of the cache (B2).
+  // One resolver, called by all three, closes both: the cache slot is now always filled with
+  // the same (enriched) shape, and every consumer of `assembled.harness` sees the real rollup.
+  // `harnessReadiness` / `discovery` still dereference their holders lazily on each call, so
+  // post-bootstrap timing (registry/API constructed after `startApiServer` returns) is
+  // unchanged.
+  const resolveStatusGatherConfig = (): StatusGatherConfig | undefined => {
+    // Thread the live HarnessReadinessRegistry through to gather-status so the response
+    // carries a `harness` rollup. main.ts uses the holder shape (registry is constructed
+    // post-bootstrap); dereferencing once per request keeps server.ts decoupled from that
+    // timing. When the holder is empty (pre-bootstrap) the getter returns null and the
+    // assembler defaults to ready.
+    const reg = config.harnessReadinessRegistry;
+    const getRegistry = (): HarnessReadinessRegistry | null =>
+      reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
+    // Resolve the live DiscoveryAPI (holder pattern, same as the registry above) so status
+    // reads can enrich task-relative outcomes (#502). When the holder is empty
+    // (pre-bootstrap) this is undefined and gather-status leaves outcomes null.
+    const disc = config.discovery;
+    const liveDiscovery: DiscoveryAPI | undefined =
+      disc && 'holder' in disc ? disc.holder.current : disc;
+    return liveStatus
+      ? {
+          ...liveStatus,
+          discovery: liveDiscovery,
+          harnessReadiness: () => {
+            const live = getRegistry();
+            if (!live) return null;
+            return {
+              snapshot: live.getSnapshot(),
+              joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
+            };
+          },
+        }
+      : undefined;
+  };
+
   app.get('/v1/status', async (c) => {
     try {
-      // Thread the live HarnessReadinessRegistry through to gather-status so
-      // the response carries a `harness` rollup. main.ts uses the holder shape
-      // (registry is constructed post-bootstrap); dereferencing once per
-      // request keeps server.ts decoupled from that timing. When the holder
-      // is empty (pre-bootstrap) the getter returns null and the assembler
-      // defaults to ready.
-      const reg = config.harnessReadinessRegistry;
-      const getRegistry = (): HarnessReadinessRegistry | null =>
-        reg && 'holder' in reg ? (reg.holder.current ?? null) : (reg ?? null);
-      // Resolve the live DiscoveryAPI (holder pattern, same as the registry
-      // above) so /v1/status can enrich task-relative outcomes (#502). When
-      // the holder is empty (pre-bootstrap) this is undefined and gather-status
-      // leaves outcomes null.
-      const disc = config.discovery;
-      const liveDiscovery: DiscoveryAPI | undefined =
-        disc && 'holder' in disc ? disc.holder.current : disc;
-      const statusConfig: StatusGatherConfig | undefined = liveStatus
-        ? {
-            ...liveStatus,
-            discovery: liveDiscovery,
-            harnessReadiness: () => {
-              const live = getRegistry();
-              if (!live) return null;
-              return {
-                snapshot: live.getSnapshot(),
-                joinedHarnessesByCid: live.getJoinedHarnessesByCid(),
-              };
-            },
-          }
-        : undefined;
+      const statusConfig = resolveStatusGatherConfig();
       // Shares the ~3s TTL cache with /v1/rewards and /v1/notifications (issue #2408 review
       // finding F3) — `enrichStatusV1Tail` is the cheap, no-RPC tail (loop-completion,
       // evidence-indexing, spend, AI-units) that still runs fresh every request against the
@@ -606,7 +623,13 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   if (config.ui) {
     addRewardsRoutes(app, {
       store,
-      getStatus: () => liveStatus,
+      // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B1) — the
+      // bare `() => liveStatus` this used to pass shared the gather cache slot with an
+      // unenriched shape, which could transiently starve /v1/status of its harness/discovery
+      // enrichment. Rewards itself gains the enrichment too (harmless: rewards doesn't
+      // currently read `discovery`/`harnessReadiness`, but a future field addition no longer
+      // has to remember to wire it separately).
+      getStatus: resolveStatusGatherConfig,
     });
   }
 
@@ -616,7 +639,11 @@ export async function startApiServer(config: ApiServerConfig): Promise<ApiServer
   // for its already-computed `rpcSlotHealth` + `joinedSolverNets` — never its assembled JSON.
   addNotificationsRoutes(app, {
     store,
-    getStatus: () => liveStatus,
+    // Same enriched resolver /v1/status uses (issue #2424 review round 2, finding B2) — reading
+    // the bare, un-enriched `liveStatus` meant `assembled.harness` was always the
+    // default-ready rollup here, making `harness_not_ready` unreachable in production
+    // regardless of the shared cache. This is the fix.
+    getStatus: resolveStatusGatherConfig,
     getBootstrapExtras: () => config.bootstrap?.configReader?.(),
   });
 

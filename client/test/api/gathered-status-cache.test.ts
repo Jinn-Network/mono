@@ -118,4 +118,68 @@ describe('getCachedGatheredStatus', () => {
     expect(result.raw.dbPath).toBe(store.path);
     expect(result.assembled.statusMode).toBe('sqlite_only');
   });
+
+  // ── Single-flight (review round 2 finding N1) ──────────────────────────────────────────────
+
+  it('concurrent callers on a cache miss share exactly one underlying gather (single-flight)', async () => {
+    let resolveGather!: (raw: GatheredStatusRaw) => void;
+    const gatherRaw = vi.fn(
+      () => new Promise<GatheredStatusRaw>((resolve) => { resolveGather = resolve; }),
+    );
+    const assemble = vi.fn(() => minimalAssembled());
+
+    // Three concurrent callers, all before the gather resolves.
+    const p1 = getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    const p2 = getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    const p3 = getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+
+    expect(gatherRaw).toHaveBeenCalledTimes(1);
+
+    resolveGather(minimalRaw());
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+
+    expect(gatherRaw).toHaveBeenCalledTimes(1);
+    expect(assemble).toHaveBeenCalledTimes(1);
+    // Every caller gets its own clone, all sourced from the one gather.
+    expect(r1.raw).not.toBe(r2.raw);
+    expect(r1.raw).toEqual(r2.raw);
+    expect(r2.raw).toEqual(r3.raw);
+  });
+
+  it('a rejected gather does not poison future calls — the next call retries fresh', async () => {
+    const gatherRaw = vi
+      .fn<() => Promise<GatheredStatusRaw>>()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(minimalRaw());
+    const assemble = vi.fn(() => minimalAssembled());
+
+    await expect(getCachedGatheredStatus(store, undefined, { gatherRaw, assemble })).rejects.toThrow('boom');
+    // The in-flight slot must have been cleared on rejection, not left wedged.
+    const result = await getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    expect(result.raw).toBeDefined();
+    expect(gatherRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('concurrent callers during an in-flight gather that then rejects all see the same rejection, and the next call after that retries fresh', async () => {
+    let rejectGather!: (err: Error) => void;
+    const gatherRaw = vi
+      .fn<() => Promise<GatheredStatusRaw>>()
+      .mockImplementationOnce(
+        () => new Promise<GatheredStatusRaw>((_resolve, reject) => { rejectGather = reject; }),
+      )
+      .mockResolvedValueOnce(minimalRaw());
+    const assemble = vi.fn(() => minimalAssembled());
+
+    const p1 = getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    const p2 = getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    expect(gatherRaw).toHaveBeenCalledTimes(1);
+
+    rejectGather(new Error('boom'));
+    await expect(p1).rejects.toThrow('boom');
+    await expect(p2).rejects.toThrow('boom');
+
+    const result = await getCachedGatheredStatus(store, undefined, { gatherRaw, assemble });
+    expect(result.raw).toBeDefined();
+    expect(gatherRaw).toHaveBeenCalledTimes(2);
+  });
 });
