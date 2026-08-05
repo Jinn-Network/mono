@@ -1,0 +1,21 @@
+/* Layer order is load-bearing (WEBSITE-APP-SPEC.md §3.2):
+   1. Tailwind — preflight + utility engine.
+   2. The two byte-identical design-system copies — the canonical
+      variables and the element baseline. Never edited.
+      They are imported INTO Tailwind's `base` layer. Unlayered CSS beats
+      every layered rule regardless of specificity, so importing these
+      plainly would put `p { font-size: 14px }` above `text-sm` and every
+      other utility. In `layer(base)` they land after preflight and below
+      the utilities, which is what a baseline is.
+   3. Fumadocs — its neutral palette and docs preset.
+   4. theme.css — the bridge, unlayered and last, so it wins over 2 and 3. */
+@import 'tailwindcss';
+@import '../styles/colors_and_type.css' layer(base);
+@import '../styles/foundations.css' layer(base);
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import '../styles/theme.css';
+
+@source '../app';
+@source '../components';
+@source '../lib';

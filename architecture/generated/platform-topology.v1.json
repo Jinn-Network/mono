@@ -1,8 +1,8 @@
 {
   "counts": {
-    "adjacentEntries": 5,
+    "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 80,
+    "inventory": 81,
     "otherPackagesRootEntries": 17,
     "packagesRootEntries": 75,
     "platformV1": 50
@@ -1195,7 +1195,8 @@
       "@jinn-network/task-posting",
       "@jinn-network/trust-core",
       "@jinn-network/trust-resolve",
-      "@jinn-network/trust-testing"
+      "@jinn-network/trust-testing",
+      "@jinn-network/website"
     ],
     "platformV1": {
       "closure": {
@@ -1565,19 +1566,19 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 23,
-      "boundaryPolicies": 21,
-      "catalogManifests": 80,
+      "authorityDocuments": 24,
+      "boundaryPolicies": 22,
+      "catalogManifests": 81,
       "catalogPublicSurfaces": 1249,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
-      "decisionRecords": 3,
-      "discoveredFirstPartySurfaces": 2865,
+      "decisionRecords": 4,
+      "discoveredFirstPartySurfaces": 2868,
       "generatedOutputSources": 1305,
-      "generatorSources": 582,
+      "generatorSources": 586,
       "marketplaceControl": 2,
-      "requiredGates": 20,
+      "requiredGates": 21,
       "staticControl": 6
     },
     "paths": [
@@ -2825,6 +2826,16 @@
       },
       {
         "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/scripts/website-design-tokens.test.mjs"
+      },
+      {
+        "categories": [
           "generatorSources",
           "staticControl"
         ],
@@ -3326,6 +3337,18 @@
       },
       {
         "categories": [
+          "boundaryPolicies",
+          "generatorSources",
+          "requiredGates"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": ".github/workflows/website-ci.yml"
+      },
+      {
+        "categories": [
           "catalogManifests"
         ],
         "owners": [
@@ -3443,6 +3466,76 @@
           "@ritsukai"
         ],
         "path": "apps/broadcast-bot/test/state.test.ts"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/package.json"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/scripts"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/scripts/check-links.mjs"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/test/build-output.test.mjs"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/test/content.test.mjs"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "apps/website/WEBSITE-APP-SPEC.md"
       },
       {
         "categories": [
@@ -16975,6 +17068,16 @@
           "@ritsukai"
         ],
         "path": "log/decisions/2026-08-03-phase-c-capability-boundaries.md"
+      },
+      {
+        "categories": [
+          "decisionRecords"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "log/decisions/2026-08-04-spec-origin-and-vocabulary.md"
       },
       {
         "categories": [
@@ -40174,6 +40277,53 @@
     {
       "boundaryPolicy": {
         "kind": "workflow",
+        "path": ".github/workflows/website-ci.yml"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "class-variance-authority",
+          "clsx",
+          "fumadocs-core",
+          "fumadocs-mdx",
+          "fumadocs-ui",
+          "lucide-react",
+          "next",
+          "radix-ui",
+          "react",
+          "react-dom",
+          "tailwind-merge",
+          "zod"
+        ]
+      },
+      "domain": "devx",
+      "name": "@jinn-network/website",
+      "ownerGroup": "architecture-control",
+      "path": "apps/website",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "private",
+      "releaseGroup": "transitional-or-private",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "website-ci"
+      ],
+      "role": "developer-experience website product",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "workflow",
         "path": ".github/workflows/ci.yml"
       },
       "classification": "product",
@@ -51524,6 +51674,15 @@
       },
       {
         "conformance": [],
+        "fixtures": [],
+        "name": "@jinn-network/website",
+        "path": "apps/website",
+        "profiles": [],
+        "releaseGroup": "transitional-or-private",
+        "schemas": []
+      },
+      {
+        "conformance": [],
         "fixtures": [
           "fixtures"
         ],
@@ -53541,7 +53700,7 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 9,
+      "expectedPackageCount": 10,
       "packages": [
         "@jinn-network/autopilot",
         "@jinn-network/broadcast-bot",
@@ -53551,7 +53710,8 @@
         "@jinn-network/indexer-enrichment",
         "@jinn-network/operator-spa",
         "@jinn-network/plugin-runtime",
-        "@jinn-network/policy-optimization"
+        "@jinn-network/policy-optimization",
+        "@jinn-network/website"
       ],
       "publishPolicies": [
         "private",
@@ -53566,7 +53726,8 @@
         "indexer-enrichment-ci",
         "plugin-tree-ci",
         "policy-optimization-ci",
-        "task-supply-ci"
+        "task-supply-ci",
+        "website-ci"
       ],
       "stable": false,
       "stackPublished": false

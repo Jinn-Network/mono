@@ -13,6 +13,10 @@
       "mode": "package"
     },
     {
+      "path": "apps/website",
+      "mode": "package"
+    },
+    {
       "path": "client",
       "mode": "package"
     },
@@ -116,6 +120,10 @@
     "plugin-tree-ci": {
       "kind": "workflow",
       "path": ".github/workflows/plugin-tree-ci.yml"
+    },
+    "website-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/website-ci.yml"
     }
   },
   "releaseGroups": {
@@ -233,7 +241,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 9,
+      "expectedPackageCount": 10,
       "publishPolicies": [
         "private",
         "never"
@@ -247,7 +255,8 @@
         "indexer-enrichment-ci",
         "plugin-tree-ci",
         "policy-optimization-ci",
-        "task-supply-ci"
+        "task-supply-ci",
+        "website-ci"
       ],
       "allowedClassifications": [
         "product",
@@ -2579,6 +2588,46 @@
       "boundaryPolicy": {
         "kind": "workflow",
         "path": ".github/workflows/indexer-ci.yml"
+      }
+    },
+    {
+      "ownerGroup": "architecture-control",
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": [],
+      "name": "@jinn-network/website",
+      "path": "apps/website",
+      "domain": "devx",
+      "role": "developer-experience website product",
+      "tier": 4,
+      "tierReason": "The apex site is a product surface over the platform, not a protocol layer within it; tier 4 is the product tier.",
+      "classification": "product",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "apps/website/WEBSITE-APP-SPEC.md",
+            "status": "current"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-08-04-spec-origin-and-vocabulary.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "private",
+      "requiredGateIds": [
+        "website-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "workflow",
+        "path": ".github/workflows/website-ci.yml"
       }
     },
     {

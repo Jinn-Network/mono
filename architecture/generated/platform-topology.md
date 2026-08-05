@@ -6,11 +6,12 @@ Source authority: [`architecture/platform-packages.v1.json`](../platform-package
 
 ## Inventory
 
-The catalog contains **80** entries: **50** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **17** other entries below `packages/**`, and **5** adjacent entries.
+The catalog contains **81** entries: **50** `platform-v1` packages, **8** disabled `experimental-environment-supply` packages, **17** other entries below `packages/**`, and **6** adjacent entries.
 
 | Package | Path | Domain | Tier | Classification | Role | Stability | Release group | Publish policy | Runtime dependencies | Optional dependencies | Peer dependencies |
 | --- | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | @jinn-network/broadcast-bot | apps/broadcast-bot | repository-operations | — | repository-tooling | repository and community communications automation | stable-semantics | transitional-or-private | never | smol-toml<br>twitter-api-v2<br>viem<br>zod | — | — |
+| @jinn-network/website | apps/website | devx | 4 | product | developer-experience website product | candidate | transitional-or-private | private | class-variance-authority<br>clsx<br>fumadocs-core<br>fumadocs-mdx<br>fumadocs-ui<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>tailwind-merge<br>zod | — | — |
 | @jinn-network/client | client | operator | 4 | product | operator daemon and application | transitional | legacy-product-lines | independent | @ethereumjs/wallet<br>@grpc/grpc-js<br>@hono/node-server<br>@huggingface/transformers<br>@jinn-network/attestation-issuer<br>@jinn-network/core<br>@jinn-network/environment-record<br>@jinn-network/evidence-catalog-sqlite<br>@jinn-network/evidence-discovery<br>@jinn-network/evidence-local-runtime<br>@jinn-network/evidence-protocol<br>@jinn-network/evidence-repository<br>@jinn-network/execution-recorder<br>@jinn-network/marketplace-binding<br>@jinn-network/marketplace-pipeline<br>@jinn-network/marketplace-projector<br>@jinn-network/marketplace-venue-base<br>@jinn-network/plugin<br>@jinn-network/policy-identity<br>@jinn-network/record-discovery-client<br>@jinn-network/record-discovery-facts-task-execution<br>@jinn-network/record-discovery-protocol<br>@jinn-network/record-discovery-serve<br>@jinn-network/record-discovery-transport-http<br>@jinn-network/sdk<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>@jinn-network/trust-resolve<br>@lmoe/gliner-onnx<br>@modelcontextprotocol/sdk<br>@msgpack/msgpack<br>@noble/curves<br>@noble/ed25519<br>@noble/hashes<br>@opentelemetry/api<br>@opentelemetry/core<br>@opentelemetry/exporter-trace-otlp-grpc<br>@opentelemetry/exporter-trace-otlp-http<br>@opentelemetry/resources<br>@opentelemetry/sdk-node<br>@opentelemetry/sdk-trace-base<br>@safe-global/protocol-kit<br>@safe-global/safe-deployments<br>@safe-global/types-kit<br>@scure/bip32<br>@scure/bip39<br>@secretlint/core<br>@secretlint/secretlint-rule-preset-recommend<br>@slicekit/erc8128<br>@types/better-sqlite3<br>@x402/core<br>@x402/evm<br>@x402/fetch<br>@x402/hono<br>ajv<br>ajv-formats<br>better-sqlite3<br>bs58<br>canonicalize<br>chokidar<br>dotenv<br>hono<br>node-pty<br>protobufjs<br>safe-regex<br>semver<br>tokenlens<br>viem<br>ws<br>yaml<br>zod<br>zod-to-json-schema | @coinbase/cdp-sdk | — |
 | @jinn-network/operator-spa | client/src/dashboard/spa | operator | 4 | product | operator dashboard product | candidate | transitional-or-private | private | @hookform/resolvers<br>@radix-ui/react-alert-dialog<br>@radix-ui/react-dialog<br>@radix-ui/react-dropdown-menu<br>@radix-ui/react-label<br>@radix-ui/react-popover<br>@radix-ui/react-progress<br>@radix-ui/react-radio-group<br>@radix-ui/react-scroll-area<br>@radix-ui/react-slot<br>@radix-ui/react-switch<br>@radix-ui/react-tabs<br>@radix-ui/react-tooltip<br>@tanstack/react-query<br>@tanstack/react-table<br>class-variance-authority<br>clsx<br>html-to-image<br>lucide-react<br>react<br>react-dom<br>react-hook-form<br>sonner<br>tailwind-merge<br>tailwindcss-animate<br>wouter<br>xterm<br>xterm-addon-fit<br>xterm-addon-web-links<br>zod | — | — |
 | @jinn-network/autopilot | packages/autopilot | autopilot | 4 | transitional | vendored tier-4 product residue | transitional | transitional-or-private | private | @jinn-network/sdk<br>zod | — | — |
@@ -392,7 +393,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | experimental-task-supply | 5 | task-supply-ci | disabled | false | false | false |
 | legacy-product-lines | 6 | client-ci<br>core-ci<br>layer-ci<br>marketplace-ci<br>plugin-ci<br>sdk-ci | independent | false | false | false |
 | platform-v1 | 50 | benchmarking-ci<br>evidence-ci<br>marketplace-ci<br>record-discovery-ci<br>task-execution-ci<br>trust-ci | canary-only | true | true | false |
-| transitional-or-private | 9 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci | private<br>never | false | false | false |
+| transitional-or-private | 10 | autopilot-ci<br>broadcast-bot-ci<br>client-ci<br>environments-ci<br>indexer-ci<br>indexer-enrichment-ci<br>plugin-tree-ci<br>policy-optimization-ci<br>task-supply-ci<br>website-ci | private<br>never | false | false | false |
 
 The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canary publication is enabled. **Stable publication is disabled until live `jinn.network` profile hosting verification passes.** The 8 experimental packages remain disabled. Legacy and product lines publish independently or remain private/never-published according to the catalog.
 
@@ -454,6 +455,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 | Package | Release group | Schemas | Profiles | Fixtures | Conformance exports |
 | --- | --- | --- | --- | --- | --- |
 | @jinn-network/broadcast-bot | transitional-or-private | — | — | — | — |
+| @jinn-network/website | transitional-or-private | — | — | — | — |
 | @jinn-network/client | legacy-product-lines | schemas | — | fixtures | — |
 | @jinn-network/operator-spa | transitional-or-private | — | — | — | — |
 | @jinn-network/autopilot | transitional-or-private | — | — | — | — |
@@ -1438,24 +1440,24 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3589 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3599 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
 | --- | ---: |
-| authorityDocuments | 23 |
-| boundaryPolicies | 21 |
-| catalogManifests | 80 |
+| authorityDocuments | 24 |
+| boundaryPolicies | 22 |
+| catalogManifests | 81 |
 | catalogPublicSurfaces | 1249 |
 | catalogSchema | 2 |
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
-| decisionRecords | 3 |
-| discoveredFirstPartySurfaces | 2865 |
+| decisionRecords | 4 |
+| discoveredFirstPartySurfaces | 2868 |
 | generatedOutputSources | 1305 |
-| generatorSources | 582 |
+| generatorSources | 586 |
 | marketplaceControl | 2 |
-| requiredGates | 20 |
+| requiredGates | 21 |
 | staticControl | 6 |
 
 ## Transitional and deprecated entries
