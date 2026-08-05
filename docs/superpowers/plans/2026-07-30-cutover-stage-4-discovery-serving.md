@@ -1,6 +1,19 @@
 # Cutover Stage 4 — Discovery Serving Implementation Plan
 
-> **Addendum 2026-08-04** (per the
+> **Addendum 2026-08-05** (per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)): this
+> stage collapses into the **one-swap** with stages 2–3 (program §10). Dispositions: the
+> kit-first chain (Tasks 1–2, 4–6), the status fields (Task 7), the plugin-publication
+> carve-out (Task 10), the repoints (Tasks 11, 13) and deletions (9, 12, 14) ride the
+> swap train; **Task 3 is killed** (the 2026-08-04 addendum's separate-listener ruling —
+> the operator-API mount is never built; "lands at stage 4" now reads "lands in the
+> swap"); Task 8 is **rewritten**: its notification half is superseded by the landed
+> server-side `GET /v1/notifications` (`indexing_degraded` derives server-side), and its
+> `spa/src/api/types.ts` target no longer exists — contract types live under
+> `client/src/api/contract/`; Task 13's inter-stage handshake checks ("if `main.ts`
+> still calls it, stop — stage 2 is incomplete") dissolve — ordering is intra-train PR
+> stacking; Task 15 is superseded by the combined drain and fused gate (the
+> second-daemon probe is G-archive, unchanged in substance).
 > [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
 > §6 and the composition design §6.2 amendment): the archive mounts on its **own listener
 > only** — the "mounted twice" shape below (main operator API + opt-in separate listener)

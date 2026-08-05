@@ -1,5 +1,22 @@
 # Cutover Stage 2 — Evaluator Flow Implementation Plan
 
+> **Addendum 2026-08-05** (per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)): this
+> stage collapses into the **one-swap** with stages 3–4 (program §10). Its
+> implementation train (PR #2350) was closed as superseded: #2363 harvested the
+> primitives into the native estate, and the native derivation dissolved both blocking
+> ratifications. Dispositions: Tasks 2–6 and 9 and 13 are **done-native** (verify-only —
+> `client/src/evaluator/*`, `client/src/daemon/native-evaluator-*`); Tasks 1, 10, 14
+> re-scope onto the native path; **Tasks 7, 8, 12 are killed** (bridge-subject R2 and
+> self-signer R1 dissolved; no signing key enters the sandbox — this plan's Architecture
+> paragraph still asserts in-executor attestation signing, which was **reversed
+> 2026-08-03** (`25924bd4a`, host byte-equality reseal)); Tasks 15–16 ride the swap's
+> retirement wave; Task 17 is superseded by the combined drain
+> ([`cutover-one-swap-drain.md`](../../runbooks/cutover-one-swap-drain.md)) and the
+> fused gate. Task 11's **grader-container execution** is the one genuinely unbuilt
+> deliverable — port from `docs/salvage/stage-2/` under its README's three constraints;
+> it **blocks the gate** (DR decision 3a).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give the operator runtime an evaluator loop that observes other operators' solution deliveries, derives and posts the evaluation Submission, claims the verdict attempt, executes it as an evaluation-profile Attempt on the *same* embedded backend, settles the verdict on the venue, and gates verdict observations as decision-grade — then retires the delivery-watcher, the mech adapter's evaluation-opportunity machinery, and the legacy TaskEngine.

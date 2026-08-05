@@ -1,6 +1,20 @@
 # Cutover Stage 3 — Posting Flow Implementation Plan
 
-> **Addendum 2026-08-04** (per the
+> **Addendum 2026-08-05** (per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)): this
+> stage collapses into the **one-swap** with stages 2 and 4 (program §10). Dispositions:
+> the preflights, adoption, lifecycle exits, work-client facade, posting loop, CLI verbs
+> (Tasks 19–21), and retirements (17–18) ride the swap train; Task 12 is **re-scoped** —
+> the evaluator-seals carve-out is dissolved (contract 5 note), so what requester-side
+> sealing owes is sealing evaluation Submissions for the operator's **own posted** tasks
+> carrying private test material under capability grants; Task 22 **widens** — the
+> ruling-5 stage-3/4 split dissolves and every `jinn solver-nets` subverb retires in the
+> one train; **Task 23 is killed** (the 2026-08-04 addendum's no-mutating-routes ruling —
+> replaced by a read-plane posting-status projection through `client/src/api/contract/`);
+> Task 24 is read-only; Task 25 is superseded by the combined drain and fused gate (the
+> own-task-adoption gate fuses into G-loop). Bridge-era compatibility for legacy-posted
+> tasks is bounded by DR decision 4: the combined drain is designed to leave zero
+> non-terminal legacy-posted tasks.
 > [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
 > §4.2): the posting surface is re-ruled — posting **status** joins the read plane
 > (receipts/status projection, versioned per §8); posting **mutations** are config +
