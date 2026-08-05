@@ -71,15 +71,21 @@ test('the re-seal carve-out is gone from the script and its workflow', () => {
 
 test('a stray allowReseal option cannot re-open the gate', () => {
   // The carve-out was an option on this function. Any caller still passing it -- a stale
-  // branch, a copied invocation -- must get the strict answer, not a silent bypass.
-  const candidate = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
+  // branch, a copied invocation -- must get the strict answer, not a silent bypass. Both
+  // halves the carve-out admitted are covered: the re-sealed digest and the renamed id.
+  const edited = { ...baseline, entries: [{ id: 'golden/a.json', sha256: 'ZZ' }, baseline.entries[1]] };
+  const renamed = { ...baseline, entries: [baseline.entries[0], { id: 'adversarial/b-renamed.json', sha256: 'bb' }] };
   for (const options of [
     { label: 'packages/trust/core' },
     { label: 'packages/trust/core', allowReseal: true },
   ]) {
     assert.throws(
-      () => compareFixtureManifests(baseline, candidate, options),
+      () => compareFixtureManifests(baseline, edited, options),
       /packages\/trust\/core: golden\/a\.json changed from aa to ZZ; a published fixture is never edited, it is superseded by a new fixture plus a dated erratum/,
+    );
+    assert.throws(
+      () => compareFixtureManifests(baseline, renamed, options),
+      /packages\/trust\/core: adversarial\/b\.json was removed; fixtures are append-only/,
     );
   }
 });
