@@ -31,11 +31,11 @@
     },
     {
       "id": "autopilot-issue-1697/candidate-execution-graph.json",
-      "sha256": "5fd552a261291538f7e94dcc82c0f5f8c6a21b7dccff924c13468e9731ad0178"
+      "sha256": "40a3166c675be6acf758552b74db0ba2ef2c1f2cb337372ebebd268904f45e55"
     },
     {
       "id": "autopilot-issue-1697/conformance-report.json",
-      "sha256": "56f9cfd503ac3fd7e8bc3e3fbc685459d7c61596acf5e336455cefeb87dfac84"
+      "sha256": "0d2684e82b6a98adcd0a3c1750f39b455c9aef383bb5ff005a2f337a445872e3"
     },
     {
       "id": "autopilot-issue-1697/source-observations.json",
@@ -47,7 +47,7 @@
     },
     {
       "id": "golden-execution-evidence-v1/claims/execution-verification/execution-verification.dsse.json",
-      "sha256": "d9843f1f4689d5f0d726f7b37815afb6c04a61ae5d7ccbb5c6269cb239854034"
+      "sha256": "d683da3800f0860a8881c9affe8d9a569264254c3359995d38d18ec1962b64b1"
     },
     {
       "id": "golden-execution-evidence-v1/claims/execution-verification/public-key.pem",
@@ -55,7 +55,7 @@
     },
     {
       "id": "golden-execution-evidence-v1/claims/execution-verification/statement.json",
-      "sha256": "93bfd775f76fac78bbe41631a1cb0abbced763ed0ecb3df875d99ca641b9c702"
+      "sha256": "db97bb6a24f3190cf0a357b861c998d6c193d27d35a51413c3d44b4e3e94884d"
     },
     {
       "id": "golden-execution-evidence-v1/claims/execution-verification/verification-policy.md",
@@ -87,19 +87,19 @@
     },
     {
       "id": "golden-execution-evidence-v1/claims/result-evaluation/public-key.pem",
-      "sha256": "09c68bff5ca0344f7503aa36f0ef4ed16ce24ae443382635eb02ba7261dd4b71"
+      "sha256": "16684c7972473fe267e361290c08ea09d6989d29bee17e962535e9790148d2ce"
     },
     {
       "id": "golden-execution-evidence-v1/claims/result-evaluation/result-evaluation.dsse.json",
-      "sha256": "e54e79f14d8776e5d93ed4db1aff285cefd921e101d5dce6229cb2f6cbb01bc9"
+      "sha256": "80ae658a7015a0e5df07d99f9cf4f75c60d07e631cdbc3c48f5bc85575914382"
     },
     {
       "id": "golden-execution-evidence-v1/claims/result-evaluation/statement.json",
-      "sha256": "8bc65dacb69dc8b37196663a4746f1faf552784025c03398a178014aee6e370f"
+      "sha256": "7e41ef580944ec4b35f1fe20411d3f5416b334a064340b4856ba0af3c61c1fe8"
     },
     {
       "id": "golden-execution-evidence-v1/conformance-report.json",
-      "sha256": "76b20129919e862034e48f78d4caa8494c929bd6ad4cca133e7e14eaa6ab221b"
+      "sha256": "f2f3ee486a1944c5c52f4117e5719afaa5f05b3fa28100ebf51fb2b16c742024"
     },
     {
       "id": "golden-execution-evidence-v1/execution/evidence/in-run-tests.json",
@@ -131,7 +131,7 @@
     },
     {
       "id": "golden-execution-evidence-v1/execution/ro-crate-metadata.json",
-      "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf"
+      "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf"
     },
     {
       "id": "golden-execution-evidence-v1/execution/runtime/hosted-model.json",
@@ -166,8 +166,8 @@
       "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
     },
     {
-      "id": "golden-execution-evidence-v1/execution/trace/trajectory.jsonl",
-      "sha256": "c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483"
+      "id": "golden-execution-evidence-v1/execution/trace/trace.jsonl",
+      "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a"
     },
     {
       "id": "golden-execution-evidence-v1/public/results/slug-normalization.patch",
@@ -175,7 +175,7 @@
     },
     {
       "id": "golden-execution-evidence-v1/public/ro-crate-metadata.json",
-      "sha256": "95fbf3c50d8a90f9437801e6559237f3bdf5eed2f613870462abfae1447c79a3"
+      "sha256": "d31b6017ef4e4a23d61d510a51a13c6fff39ca344e87436cdc4c3360b69de8ed"
     },
     {
       "id": "golden-execution-evidence-v1/public/scrub/public-execution-policy.json",
@@ -183,23 +183,23 @@
     },
     {
       "id": "golden-execution-evidence-v1/public/scrub/scrub-receipt.json",
-      "sha256": "80c0e8a19c380949f28cf59b30c13b65b39a0cdda1524cc3c45ba0019c34433a"
+      "sha256": "efaa01cac74d7ddc0a9a607ac84347630e914a5506a32fc963cf61ed6100d010"
     },
     {
       "id": "golden-execution-evidence-v1/public/task/task.md",
       "sha256": "1f42fd35cecf09d1bdf953fe4c7a1c8d25fd0bcf415a6b39aa7b61f1e982ef93"
     },
     {
-      "id": "golden-execution-evidence-v1/public/trace/trajectory.public.jsonl",
+      "id": "golden-execution-evidence-v1/public/trace/trace.public.jsonl",
       "sha256": "e261de0ff9ccfc2a2c074d26a1fe0683405c3829c7127b4d0eb3d235e9491e76"
     },
     {
       "id": "golden-execution-evidence-v1/ro-crate-metadata.json",
-      "sha256": "e87fd8cd8f1a98de7a2bccd2369cf589fa2189d3290216f02e0b19f18fbcc3fd"
+      "sha256": "c723f3280d7c5d46a703eb1fd0c78c1b83562b35b3bf6ac0a40ba54ff97d30d0"
     },
     {
       "id": "task-execution-identifiers-v1/task-execution-identifiers.json",
-      "sha256": "7a1fd5e7899040cf35e61d9addfe86ac8983bf0a65240787fee21bdceb3a284b"
+      "sha256": "624da4155807fe1f81488c086700e30ebeeaf676a54f5195ad985bcab09973aa"
     }
   ],
   "errata": []

@@ -56,11 +56,11 @@ beforeAll(async () => {
       "utf8",
     ),
   );
-  golden["@context"].push({ jinn: "https://jinn.network/terms/" });
+  golden["@context"].push({ jinn: "https://spec.jinn.network/terms/" });
   entity(
     golden,
     "urn:uuid:22222222-2222-4222-8222-222222222222",
-  ).subjectOf = { "@id": "trace/trajectory.jsonl" };
+  ).subjectOf = { "@id": "trace/trace.jsonl" };
   candidateBytes = await readFile(
     fixtureUrl("autopilot-issue-1697/candidate-execution-graph.json"),
   );
@@ -98,7 +98,7 @@ describe("Execution Evidence validation", () => {
       "EXECUTOR_AGENT_CARDINALITY",
     ],
     ["runtime/runtime-specification.json", "RUNTIME_SPECIFICATION_CARDINALITY"],
-    ["trace/trajectory.jsonl", "TRACE_CARDINALITY"],
+    ["trace/trace.jsonl", "TRACE_CARDINALITY"],
     ["#duration-ms", "DURATION_MISSING"],
     ["./", "ROCRATE_ROOT_CARDINALITY"],
   ])("rejects a missing required %s entity", (id, code) => {
@@ -178,7 +178,7 @@ describe("Execution Evidence validation", () => {
   it.each([
     ["task/task.md", "object"],
     ["runtime/runtime-specification.json", "instrument"],
-    ["trace/trajectory.jsonl", "subjectOf"],
+    ["trace/trace.jsonl", "subjectOf"],
     ["results/slug-normalization.patch", "result"],
   ])("rejects a derived entity in the exact %s role", (id) => {
     const document = clone();
@@ -232,7 +232,7 @@ describe("Execution Evidence validation", () => {
     expect(codes(duration)).toContain("EXECUTION_RELATION_INVALID");
 
     const trace = clone();
-    entity(trace, "trace/trajectory.jsonl").about = {
+    entity(trace, "trace/trace.jsonl").about = {
       "@id": "urn:uuid:99999999-9999-4999-8999-999999999999",
     };
     expect(codes(trace)).toContain("EXECUTION_RELATION_INVALID");

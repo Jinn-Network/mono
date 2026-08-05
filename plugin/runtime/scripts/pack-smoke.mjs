@@ -70,9 +70,9 @@ const portals = [
     archive: "evidence-local-runtime.tgz",
   },
   {
-    name: "@jinn-network/evidence-trajectory",
-    root: join(repoRoot, "packages", "evidence", "trajectory"),
-    archive: "evidence-trajectory.tgz",
+    name: "@jinn-network/evidence-trace",
+    root: join(repoRoot, "packages", "evidence", "trace"),
+    archive: "evidence-trace.tgz",
   },
   {
     name: "@jinn-network/evidence-trace-decode",

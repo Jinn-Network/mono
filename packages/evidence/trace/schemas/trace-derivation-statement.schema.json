@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "_type": {
+      "type": "string",
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "const": "trace.json"
+          },
+          "digest": {
+            "type": "object",
+            "properties": {
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "sha256"
+            ],
+            "additionalProperties": false
+          },
+          "mediaType": {
+            "type": "string",
+            "const": "application/vnd.jinn.trace.v1+json"
+          }
+        },
+        "required": [
+          "name",
+          "digest",
+          "mediaType"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "predicateType": {
+      "type": "string",
+      "const": "https://spec.jinn.network/attestations/trace-derivation/v1"
+    },
+    "predicate": {
+      "type": "object",
+      "properties": {
+        "derivedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "producer": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        "traceSubject": {
+          "type": "string",
+          "const": "trace.json"
+        },
+        "execution": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "const": "execution.json"
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": false
+            },
+            "mediaType": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "nativeTrace": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "const": "native-trace.bin"
+            },
+            "digest": {
+              "type": "object",
+              "properties": {
+                "sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "sha256"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "name",
+            "digest"
+          ],
+          "additionalProperties": false
+        },
+        "formatIri": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+        },
+        "decoderId": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "decoderVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "vocabularyProfile": {
+          "type": "string",
+          "const": "https://spec.jinn.network/profiles/trace-vocabulary/v1"
+        },
+        "timebase": {
+          "type": "string",
+          "enum": [
+            "source-epoch-ns",
+            "synthetic-ordinal"
+          ]
+        },
+        "linkageMode": {
+          "type": "string",
+          "enum": [
+            "forward-linked",
+            "sealed-parent"
+          ]
+        }
+      },
+      "required": [
+        "derivedAt",
+        "producer",
+        "traceSubject",
+        "execution",
+        "nativeTrace",
+        "formatIri",
+        "decoderId",
+        "decoderVersion",
+        "vocabularyProfile",
+        "timebase",
+        "linkageMode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": false,
+  "$id": "https://spec.jinn.network/schemas/trace-derivation-statement/v1",
+  "title": "Jinn Trace derivation statement",
+  "$comment": "Structural validation of the decoded DSSE/in-toto statement payload only. Does not validate envelope signatures or authority trust. linkageMode is required and closed to forward-linked | sealed-parent. subject must contain exactly one trace.json entry. derivedAt uses format date-time; calendar-strict RFC 3339 (leap days, timezone, no Date.parse rollover) is enforced at runtime."
+}

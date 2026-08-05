@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trajectory";
+import { SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trace";
 
 import {
   CLAUDE_CODE_STREAM_JSON_FORMAT_IRI,
@@ -32,7 +32,7 @@ describe("claude-code-stream-json decoder", () => {
   test("declares the canonical identity for the format the launcher emits", () => {
     expect(decoder.formatIri).toBe(CLAUDE_CODE_STREAM_JSON_FORMAT_IRI);
     expect(decoder.formatIri).toBe(
-      "https://jinn.network/formats/claude-code-stream-json/v1",
+      "https://spec.jinn.network/formats/claude-code-stream-json/v1",
     );
     expect(decoder.decoderId).toBe("claude-code-stream-json");
     expect(decoder.decoderVersion).toBe("1.0.0");
@@ -73,8 +73,8 @@ describe("claude-code-stream-json decoder", () => {
       "gen_ai.request.model": "claude-opus-4-7",
       "gen_ai.usage.input_tokens": "4200",
       "gen_ai.usage.output_tokens": "380",
-      "jinn.trajectory.outcome": "success",
-      "jinn.trajectory.source.ordinal": "0",
+      "jinn.trace.outcome": "success",
+      "jinn.trace.source.ordinal": "0",
     });
     expect(decode(TOOL_LOOP).drafts[0]?.status).toEqual({ code: STATUS_CODE.OK });
   });
@@ -86,7 +86,7 @@ describe("claude-code-stream-json decoder", () => {
       "gen_ai.tool.call.id": "call_1",
       "gen_ai.tool.name": "Read",
       "gen_ai.tool.type": "function",
-      "jinn.trajectory.source.ordinal": "2",
+      "jinn.trace.source.ordinal": "2",
     });
     expect(tool.status).toEqual({ code: STATUS_CODE.OK });
   });
@@ -178,7 +178,7 @@ describe("claude-code-stream-json decoder", () => {
       ].join("\n"),
     );
     expect(decoded.drafts[0]?.status).toEqual({ code: STATUS_CODE.ERROR });
-    expect(attributes(decoded.drafts[0]!)["jinn.trajectory.outcome"]).toBe("error");
+    expect(attributes(decoded.drafts[0]!)["jinn.trace.outcome"]).toBe("error");
   });
 
   test("decoding is a pure function of its bytes", () => {

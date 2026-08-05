@@ -35,7 +35,7 @@ function makeRoutedTransport(routes: Map<string, unknown>): Transport {
 
 function makeEntry(sequence: string, previous: `sha256:${string}` | null): AnnouncementEntry {
   return parseAnnouncementEntry({
-    protocol: "https://jinn.network/record-discovery/1.0",
+    protocol: "https://spec.jinn.network/record-discovery/v1",
     source: { agent: "did:key:zAgentSourceOne", name: "feed" },
     sequence,
     previous,
@@ -44,7 +44,7 @@ function makeEntry(sequence: string, previous: `sha256:${string}` | null): Annou
       {
         announcementId: `ann-${sequence}`,
         action: "available",
-        record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
       },
     ],
   });
@@ -92,7 +92,7 @@ describe("fetchHead (§5.2)", () => {
 
   it("parses a bare (unpublished-profile) head with no signature", async () => {
     const head: SourceHead = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zAgentSourceOne/feed",
       sequence: "0000000000000001",
       entry: `sha256:${"a".repeat(64)}`,
@@ -109,7 +109,7 @@ describe("fetchHead (§5.2)", () => {
 
   it("parses a published-profile head, extracting its DSSE envelope", async () => {
     const head: SourceHead = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zAgentSourceOne/feed",
       sequence: "0000000000000001",
       entry: `sha256:${"a".repeat(64)}`,
@@ -137,14 +137,14 @@ describe("coldSync (§5.3 rule 3: walk previous toward genesis via archive pages
     const second = makeEntry("0000000000000002", entryDigest(genesis));
 
     const page1 = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: "feed",
       page: "0000000000000001",
       prevArchive: null,
       entries: [{ entry: genesis }],
     };
     const page2 = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: "feed",
       page: "0000000000000002",
       prevArchive: "0000000000000001",
@@ -171,14 +171,14 @@ describe("returningSync (§5.3 rule 5: head back to the high-water mark, not gen
     const third = makeEntry("0000000000000003", entryDigest(second));
 
     const page1 = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: "feed",
       page: "0000000000000001",
       prevArchive: null,
       entries: [{ entry: genesis }, { entry: second }],
     };
     const page2 = {
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source: "feed",
       page: "0000000000000002",
       prevArchive: "0000000000000001",
@@ -209,7 +209,7 @@ describe("resolveHeadAcrossMirrors (§5.2/§13.3: cold-start mirror disagreement
     const mirrorC: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-c.example" };
 
     const headAt = (sequence: string, issuedAt: string): SourceHead => ({
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zAgentSourceOne/feed",
       sequence,
       entry: `sha256:${"a".repeat(64)}`,
@@ -234,7 +234,7 @@ describe("resolveHeadAcrossMirrors (§5.2/§13.3: cold-start mirror disagreement
     const mirrorB: SourceEndpoint = { ...ENDPOINT, servingRoot: "https://mirror-b.example" };
 
     const headAt = (sequence: string, issuedAt: string): SourceHead => ({
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       origin: "did:key:zAgentSourceOne/feed",
       sequence,
       entry: `sha256:${"a".repeat(64)}`,

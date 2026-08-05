@@ -48,7 +48,7 @@ export interface FakeLaunchScript {
 }
 
 const DEFAULT_CAPABILITIES: LauncherCapabilities = {
-  taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0"],
+  taskProfiles: ["https://spec.jinn.network/task-profiles/repository-work/1.0"],
   inputMediaTypes: ["application/json"],
   outputMediaTypes: ["application/json"],
   structuredOutput: false,

@@ -24,7 +24,7 @@ const observation = (verdict: "pass" | "fail", n: string): PolicyOutcomeObservat
   observedAt: `2026-08-05T0${n}:00:00Z`,
   attribution: "urn:jinn:agent:solver-a",
   ref: {
-    source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+    source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
     entry: `sha256:${"a".repeat(63)}${n}`,
     announcementId: `ann-${n}`,
     record: `sha256:${"b".repeat(63)}${n}`,
@@ -53,7 +53,7 @@ describe("serializePolicyOutcomesProjection", () => {
     const parsed = JSON.parse(serializePolicyOutcomesProjection(projection)) as Record<string, unknown>;
     expect(Object.keys(parsed).sort()).toEqual(["format", "rows"]);
     expect(parsed.format).toBe(POLICY_OUTCOMES_PROJECTION_FORMAT);
-    expect(String(parsed.format).startsWith("https://jinn.network/records/")).toBe(false);
+    expect(String(parsed.format).startsWith("https://spec.jinn.network/records/")).toBe(false);
     for (const key of ["kind", "protocol", "digest", "signatures", "payloadType", "mediaType"]) {
       expect(key in parsed).toBe(false);
     }

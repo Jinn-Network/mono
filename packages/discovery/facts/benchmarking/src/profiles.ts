@@ -15,7 +15,7 @@ function loadProfile(filename: string): FactsProfileDocument {
   return parseFactsProfile(JSON.parse(readFileSync(path, "utf8")));
 }
 
-export const benchmarkProfile: FactsProfileDocument = loadProfile("benchmark.1.0.json");
-export const runProfile: FactsProfileDocument = loadProfile("run.1.0.json");
-export const matrixProfile: FactsProfileDocument = loadProfile("matrix.1.0.json");
-export const reportProfile: FactsProfileDocument = loadProfile("report.1.0.json");
+export const benchmarkProfile: FactsProfileDocument = loadProfile("benchmark.v1.json");
+export const runProfile: FactsProfileDocument = loadProfile("run.v1.json");
+export const matrixProfile: FactsProfileDocument = loadProfile("matrix.v1.json");
+export const reportProfile: FactsProfileDocument = loadProfile("report.v1.json");

@@ -61,7 +61,7 @@ afterEach(async () => {
 
 function taskBytes(overrides: Record<string, unknown> = {}): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: profile.profile,
       digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -79,7 +79,7 @@ function submissionBytes(
 ): Uint8Array {
   sequence += 1;
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:10000000-0000-4000-8000-${sequence.toString().padStart(12, "0")}`,
     task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
     requester: "urn:uuid:20000000-0000-4000-8000-000000000001",
@@ -739,7 +739,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     const submission = submissionBytes(task);
     const attempt = await acceptedAttempt(backend, task, submission);
     const delivery = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt,
       task: documentDigest(task),
       outputs: [],
@@ -764,7 +764,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     const task = taskBytes();
     const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
     const delivery = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt,
       task: documentDigest(task),
       outputs: [],
@@ -787,7 +787,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
     const task = taskBytes();
     const attempt = await acceptedAttempt(backend, task, submissionBytes(task));
     const delivery = sealDelivery({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       attempt,
       task: documentDigest(task),
       outputs: [],
@@ -808,7 +808,7 @@ describe("seal-once Delivery checkpoint (C1)", () => {
 
 test("a malformed Task is a typed invalid-document SubmissionAck", async () => {
   const backend = fixture(await stateRoot("malformed"));
-  const malformed = new TextEncoder().encode('{"protocol":"https://jinn.network/profiles/task-execution/1.0"}');
+  const malformed = new TextEncoder().encode('{"protocol":"https://spec.jinn.network/profiles/task-execution/v1"}');
   const validTask = taskBytes();
   const ack = await backend.submit(malformed, submissionBytes(validTask));
   expect(ack.accepted).toBe(false);

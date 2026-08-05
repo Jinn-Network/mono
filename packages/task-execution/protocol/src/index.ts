@@ -2,7 +2,7 @@
 // Pure, I/O-free reference implementation of the Jinn Task Execution Protocol v1.
 
 export const TASK_EXECUTION_PROTOCOL_URI =
-  "https://jinn.network/profiles/task-execution/1.0";
+  "https://spec.jinn.network/profiles/task-execution/v1";
 
 // --- sealing primitives (order, hashing, canonicalization, I-JSON) ---
 export { compareCodeUnitStrings } from "./order.js";

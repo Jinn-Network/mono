@@ -26,11 +26,15 @@ const RECORD_KINDS = [BENCHMARK_RECORD_KIND, RUN_RECORD_KIND, MATRIX_RECORD_KIND
 // segment matches SOURCE_NAME_GRAMMAR). `records` is protocol-only (Finding F3) and cannot
 // import discovery's own `assertRecordKindUri`; the authoritative check is re-applied in the
 // facts leaf (M6) at the Phase 3 merge.
-const RECORD_KIND_GRAMMAR = /^https:\/\/jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/\d+\.\d+$/;
+// Mirror of discovery's record-kind URI grammar (DR-2026-08-04, transition window closed):
+// one origin, `https://spec.jinn.network`, and one version form, `v<major>`. Mirrored rather
+// than imported because this package declares no Jinn dependency. Reference implementation:
+// packages/discovery/protocol/src/origins.ts.
+const RECORD_KIND_GRAMMAR = /^https:\/\/spec\.jinn\.network\/records\/[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\/v[1-9]\d*$/;
 
 describe("pinned identifiers", () => {
   test("protocol is the https URL form (Addendum 2026-07-28-c)", () => {
-    expect(BENCHMARKING_PROTOCOL).toBe("https://jinn.network/protocols/benchmarking/1.0");
+    expect(BENCHMARKING_PROTOCOL).toBe("https://spec.jinn.network/protocols/benchmarking/v1");
   });
 
   test("every media type matches the vnd.jinn.benchmarking.*.v1+json shape", () => {
@@ -47,10 +51,10 @@ describe("pinned identifiers", () => {
 
   test("record-kind URIs are pairwise distinct and namespaced under benchmark/benchmark-*", () => {
     expect(new Set(RECORD_KINDS).size).toBe(RECORD_KINDS.length);
-    expect(BENCHMARK_RECORD_KIND).toBe("https://jinn.network/records/benchmark/1.0");
-    expect(RUN_RECORD_KIND).toBe("https://jinn.network/records/benchmark-run/1.0");
-    expect(MATRIX_RECORD_KIND).toBe("https://jinn.network/records/benchmark-matrix/1.0");
-    expect(REPORT_RECORD_KIND).toBe("https://jinn.network/records/benchmark-report/1.0");
+    expect(BENCHMARK_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark/v1");
+    expect(RUN_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-run/v1");
+    expect(MATRIX_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-matrix/v1");
+    expect(REPORT_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v1");
   });
 
   test("assembly procedure id + version are pinned", () => {
@@ -79,5 +83,24 @@ describe("pinned identifiers", () => {
   test("trust-policy purposes are pinned strings", () => {
     expect(TRUST_POLICY_PURPOSE_BENCHMARK_PUBLISHER).toBe("benchmark-publisher");
     expect(TRUST_POLICY_PURPOSE_RUN_OWNER).toBe("run-owner");
+  });
+
+  // The regression test for the C2 narrowing. While the mirror dual-accepted, a pre-re-seal
+  // spelling matched as a valid record kind; the two literals at the head of the rejected
+  // list below are exactly the spellings that must no longer match (DR-2026-08-04).
+  test("the mirrored grammar accepts only the canonical spelling", () => {
+    expect("https://spec.jinn.network/records/benchmark/v1").toMatch(RECORD_KIND_GRAMMAR);
+    expect("https://spec.jinn.network/records/benchmark/v2").toMatch(RECORD_KIND_GRAMMAR);
+    for (const rejected of [
+      "https://jinn.network/records/benchmark/1.0",
+      "https://spec.jinn.network/records/benchmark/1.0",
+      "https://spec.jinn.network/records/benchmark/v0",
+      "https://spec.jinn.network/records/benchmark/1",
+      "https://spec.jinn.network/records/benchmark/v1/facts/v1",
+      "https://evil.jinn.network/records/benchmark/v1",
+      "https://jinn.network.evil.example/records/benchmark/v1",
+    ]) {
+      expect(rejected).not.toMatch(RECORD_KIND_GRAMMAR);
+    }
   });
 });

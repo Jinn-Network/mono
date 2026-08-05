@@ -1,0 +1,13 @@
+{
+  "profile": "https://spec.jinn.network/profiles/task-profile/v1",
+  "title": "Task Profile Format 1.0",
+  "version": "1.0",
+  "owner": "@jinn-network/task-execution-profiles",
+  "description": "The task-profile document format. Task profiles citing this URI as their protocol declare input and output conventions, evaluation families, and requirement keys for a class of work. The published profiles are indexed here.",
+  "artifacts": [
+    { "path": "task-profiles/repository-work/1.0", "mediaType": "application/json" },
+    { "path": "task-profiles/prediction-forecast/1.0", "mediaType": "application/json" },
+    { "path": "task-profiles/evaluation-task/1.0", "mediaType": "application/json" }
+  ],
+  "digestAuthority": "https://spec.jinn.network/manifest.json"
+}

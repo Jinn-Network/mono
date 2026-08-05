@@ -40,7 +40,7 @@ describe('requester source v1 durable-writer adapter', () => {
           mediaType: 'application/vnd.jinn.task-execution.submission.v1+json',
         },
         locations: [{
-          profile: 'https://jinn.network/record-discovery/location/https/1.0',
+          profile: 'https://spec.jinn.network/record-discovery/location/https/v1',
           locator: `https://requester.test/records/${recordDigest(recordBytes).slice(7)}`,
         }],
         facts: { chainId: '84532', taskId: '17' },
@@ -108,8 +108,8 @@ describe('requester source v1 durable-writer adapter', () => {
       page: sha256(new Uint8Array(Buffer.from(frozen.page.bytesBase64, 'base64'))),
       head: sha256(new Uint8Array(Buffer.from(frozen.head.bytesBase64, 'base64'))),
     }).toEqual({
-      page: 'fd38d60ebd91c4b3a1940560d5137a9bbdb5d7a34028f2be7c6ecfc5c38c1d7a',
-      head: 'e4f091e72fcad096f58c29a9c023e5445ba74c1dc9769e25c6975454381dab94',
+      page: 'a96e935e876f71bd0d18f2d0bf54f3102ea2fbdc9d39e056894ec92f4e7edad6',
+      head: '6d2a17c062bb1f8d19cb3fc7687a465dc8fba9c37bacb81a7f36455e7d55e2d1',
     });
   });
 });

@@ -4,7 +4,7 @@
     "https://w3id.org/ro/terms/workflow-run/context",
     {
       "prov": "http://www.w3.org/ns/prov#",
-      "jinn": "https://jinn.network/terms/"
+      "jinn": "https://spec.jinn.network/terms/"
     }
   ],
   "@graph": [
@@ -29,7 +29,7 @@
         "@id": "https://creativecommons.org/publicdomain/zero/1.0/"
       },
       "conformsTo": {
-        "@id": "https://jinn.network/profiles/execution-evidence/1.0"
+        "@id": "https://spec.jinn.network/profiles/execution-evidence/v1"
       },
       "creator": {
         "@id": "urn:uuid:44444444-4444-4444-8444-444444444444"
@@ -75,7 +75,7 @@
           "@id": "results/slug-normalization.patch"
         },
         {
-          "@id": "trace/trajectory.jsonl"
+          "@id": "trace/trace.jsonl"
         },
         {
           "@id": "evidence/in-run-tests.json"
@@ -92,7 +92,7 @@
       }
     },
     {
-      "@id": "https://jinn.network/profiles/execution-evidence/1.0",
+      "@id": "https://spec.jinn.network/profiles/execution-evidence/v1",
       "@type": [
         "CreativeWork",
         "Profile"
@@ -316,7 +316,7 @@
         "value": "attempt-42"
       },
       "subjectOf": {
-        "@id": "trace/trajectory.jsonl"
+        "@id": "trace/trace.jsonl"
       }
     },
     {
@@ -343,25 +343,25 @@
       }
     },
     {
-      "@id": "trace/trajectory.jsonl",
+      "@id": "trace/trace.jsonl",
       "@type": "File",
       "name": "Native synthetic execution trace",
       "encodingFormat": "application/x-ndjson",
-      "sha256": "c22dd2dae4a3dc00297f91dcfafdcf8e5fbe8541cc81e2fd5a002372f2204483",
+      "sha256": "49db69574d82af9133e1b37ab2c1b28e32067642f9fb92d45b58a789d958ff2a",
       "conformsTo": {
-        "@id": "https://jinn.network/formats/fixture-trajectory/1.0"
+        "@id": "https://spec.jinn.network/formats/fixture-trace/v1"
       },
       "about": {
         "@id": "urn:uuid:22222222-2222-4222-8222-222222222222"
       }
     },
     {
-      "@id": "https://jinn.network/formats/fixture-trajectory/1.0",
+      "@id": "https://spec.jinn.network/formats/fixture-trace/v1",
       "@type": [
         "CreativeWork",
         "Profile"
       ],
-      "name": "Synthetic fixture trajectory format 1.0"
+      "name": "Synthetic fixture trace format 1.0"
     },
     {
       "@id": "evidence/in-run-tests.json",
@@ -398,7 +398,7 @@
       "@id": "#duration-ms",
       "@type": "PropertyValue",
       "name": "durationMs",
-      "propertyID": "https://jinn.network/terms/durationMs",
+      "propertyID": "https://spec.jinn.network/terms/durationMs",
       "value": 127000,
       "unitCode": "ms"
     },
@@ -406,7 +406,7 @@
       "@id": "#input-tokens",
       "@type": "PropertyValue",
       "name": "inputTokens",
-      "propertyID": "https://jinn.network/terms/inputTokens",
+      "propertyID": "https://spec.jinn.network/terms/inputTokens",
       "value": 1800,
       "unitCode": "count"
     },
@@ -414,7 +414,7 @@
       "@id": "#output-tokens",
       "@type": "PropertyValue",
       "name": "outputTokens",
-      "propertyID": "https://jinn.network/terms/outputTokens",
+      "propertyID": "https://spec.jinn.network/terms/outputTokens",
       "value": 920,
       "unitCode": "count"
     },

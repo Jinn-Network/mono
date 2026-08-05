@@ -87,9 +87,9 @@ if (jinnDependencies.length !== expectedJinnDependencies.length
 }
 const distFiles = await readdir(${JSON.stringify(join(installedRoot, "dist"))});
 if (distFiles.some((name) => name.includes(".test."))) throw new Error("test output leaked into dist");
-await readFile(${JSON.stringify(join(installedRoot, "profiles", "chain-environment.1.0.json"))});
-await readFile(${JSON.stringify(join(installedRoot, "profiles", "crypto-environment.1.0.json"))});
-await readFile(${JSON.stringify(join(installedRoot, "profiles", "information-world.1.0.json"))});
+await readFile(${JSON.stringify(join(installedRoot, "profiles", "chain-environment.v1.json"))});
+await readFile(${JSON.stringify(join(installedRoot, "profiles", "crypto-environment.v1.json"))});
+await readFile(${JSON.stringify(join(installedRoot, "profiles", "information-world.v1.json"))});
 await readFile(${JSON.stringify(join(installedRoot, "README.md"))});
 console.log("Installed package imports, dependency boundary, and dist shape verified.");
 `,

@@ -2,10 +2,10 @@
   "fixtureVersion": 1,
   "kind": "synthetic-normative-target",
   "executionEvidenceProfile": {
-    "profile": "https://jinn.network/profiles/execution-evidence/1.0",
+    "profile": "https://spec.jinn.network/profiles/execution-evidence/v1",
     "status": "structurally-complete-local-fixture",
     "record": "execution/ro-crate-metadata.json",
-    "sha256": "dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
+    "sha256": "7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
     "externalClaimLimitation": "The reserved profile URI must resolve to the published profile before external conformance claims are emitted."
   },
   "resultEvaluationEvidence": {
@@ -24,7 +24,7 @@
   "publicationCheck": {
     "status": "conforming-structure-aware-derivative",
     "rejected": false,
-    "sourceCommitment": "sha256:dcaa588c17467cdf4939ff18d578537995c04bc700d0c0e6df3d64ddc02dd4cf",
+    "sourceCommitment": "sha256:7c55e8e528cf5760508093141a3d859218bca33a436347a7f719667ed2ad46bf",
     "derivedMetadataDigestRecordedInsideDerivative": false
   },
   "coverage": [
@@ -55,10 +55,10 @@
   "publicDerivative": {
     "status": "structurally-complete-local-fixture",
     "record": "public/ro-crate-metadata.json",
-    "sha256": "95fbf3c50d8a90f9437801e6559237f3bdf5eed2f613870462abfae1447c79a3",
+    "sha256": "d31b6017ef4e4a23d61d510a51a13c6fff39ca344e87436cdc4c3360b69de8ed",
     "sameExecutionId": "urn:uuid:22222222-2222-4222-8222-222222222222",
-    "unavailableExactArtifact": "public/trace/trajectory.jsonl",
-    "publishedDerivative": "public/trace/trajectory.public.jsonl",
+    "unavailableExactArtifact": "public/trace/trace.jsonl",
+    "publishedDerivative": "public/trace/trace.public.jsonl",
     "transferredPrivateVerification": false
   }
 }

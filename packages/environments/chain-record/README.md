@@ -6,11 +6,11 @@
 
 Two sealed record kinds:
 
-- `https://jinn.network/records/chain-environment/1.0` — one sandboxed chain world: a pinned
+- `https://spec.jinn.network/records/chain-environment/v1` — one sandboxed chain world: a pinned
   simulator runtime, an optional source anchor, a state materialization with its closure and
   fidelity classes, ordered digest-pinned fixtures, the determinism controls, the agent-facing
   capability envelope, and the verification contract.
-- `https://jinn.network/records/crypto-environment/1.0` — the composite a task references: one
+- `https://spec.jinn.network/records/crypto-environment/v1` — the composite a task references: one
   chain world, zero or more information worlds, pinned service runtimes, and the composition
   block that binds origin routing, precedence, the miss policy, the endpoint allowlist, and the
   request budget.

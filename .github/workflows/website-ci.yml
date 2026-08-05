@@ -1,0 +1,59 @@
+name: Website CI
+
+on:
+  pull_request:
+    paths:
+      - "apps/website/**"
+      - ".github/scripts/website-design-tokens.test.mjs"
+      - ".github/workflows/website-ci.yml"
+      - "docs/design/jinn-design-system/project/colors_and_type.css"
+      - "docs/design/jinn-design-system/project/foundations.css"
+  push:
+    branches: [next]
+    paths:
+      - "apps/website/**"
+      - ".github/scripts/website-design-tokens.test.mjs"
+      - ".github/workflows/website-ci.yml"
+      - "docs/design/jinn-design-system/project/colors_and_type.css"
+      - "docs/design/jinn-design-system/project/foundations.css"
+
+permissions:
+  contents: read
+
+jobs:
+  tokens:
+    name: Design token parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node --test .github/scripts/website-design-tokens.test.mjs
+
+  site:
+    name: Build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/website
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - run: yarn install --immutable
+      - run: yarn typecheck
+      - run: yarn test
+      - run: yarn check:links
+      - run: yarn build
+      - name: Verify built output
+        run: yarn test

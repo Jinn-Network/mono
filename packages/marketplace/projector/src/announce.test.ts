@@ -199,7 +199,7 @@ function makePorts() {
           recomputed.push(bytes.slice());
           return {
             taskDigest: TASK_DIGEST,
-            taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+            taskProfileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
             requesterIri: "did:key:zRequester",
             deadline: "2026-07-30T12:00:00Z",
           };
@@ -232,7 +232,7 @@ function makePorts() {
           bytes: SUBMISSION_BYTES,
           mediaType: "application/vnd.jinn.task-execution.submission.v1+json",
           locations: [{
-            profile: "https://jinn.network/record-discovery/location/ipfs/1.0",
+            profile: "https://spec.jinn.network/record-discovery/location/ipfs/v1",
             locator: "ipfs://submission",
           }],
         };
@@ -244,7 +244,7 @@ function makePorts() {
         bytes: role === "evaluation-delivery" ? EVALUATION_BYTES : DELIVERY_BYTES,
         mediaType: "application/vnd.jinn.task-execution.delivery.v1+json",
         locations: [{
-          profile: "https://jinn.network/record-discovery/location/ipfs/1.0",
+          profile: "https://spec.jinn.network/record-discovery/location/ipfs/v1",
           locator: role === "evaluation-delivery" ? "ipfs://evaluation" : "ipfs://delivery",
         }],
       };
@@ -288,7 +288,7 @@ describe("projectAnnouncements", () => {
       },
       facts: {
         taskDigest: TASK_DIGEST,
-        taskProfileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+        taskProfileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
         requesterIri: "did:key:zRequester",
         deadline: "2026-07-30T12:00:00Z",
         terms: {
@@ -594,7 +594,7 @@ describe("projectAnnouncements", () => {
     expect(result.announcements[1]).toMatchObject({
       locations: [{ locator: "ipfs://evaluation" }],
       facts: {
-        "https://jinn.network/facts/marketplace-verdict-correspondence/1.0": {
+        "https://spec.jinn.network/facts/marketplace-verdict-correspondence/v1": {
           onChainVerdictCode: 1,
           statementVerdict: "pass",
         },

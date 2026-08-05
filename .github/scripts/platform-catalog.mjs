@@ -375,6 +375,9 @@ function validateTopLevel(catalog) {
   requireObject(catalog.tierRules, 'tierRules');
   requireObject(catalog.tierRules.allowedDependencies, 'tierRules.allowedDependencies');
   if (!Array.isArray(catalog.packages)) throw new Error('packages must be an array');
+  if (catalog.resolvableIdentifiers !== undefined && !Array.isArray(catalog.resolvableIdentifiers)) {
+    throw new Error('resolvableIdentifiers must be an array');
+  }
 }
 
 function validateDefinitions(catalog, repoRoot) {

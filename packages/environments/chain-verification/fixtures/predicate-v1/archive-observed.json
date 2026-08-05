@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/chain-environment-verification/protocol/1.0",
+  "protocol": "https://spec.jinn.network/chain-environment-verification/protocol/v1",
   "scope": "component",
   "outcome": "archive-observed",
   "window": {
@@ -7,7 +7,7 @@
     "endedAt": "2026-07-31T09:04:00.000Z"
   },
   "verifier": {
-    "id": "https://jinn.network/chain-environment-verification/conformance-verifier",
+    "id": "https://spec.jinn.network/chain-environment-verification/conformance-verifier",
     "version": "0.1.0",
     "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
   },
@@ -112,31 +112,31 @@
   },
   "runs": {
     "count": 5,
-    "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+    "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
     "perRun": [
       {
-        "instanceId": "3aa3580d1-provider-a-run-0",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "instanceId": "63c57e619-provider-a-run-0",
+        "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
         "wallSeconds": 0
       },
       {
-        "instanceId": "3aa3580d1-provider-a-run-1",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "instanceId": "63c57e619-provider-a-run-1",
+        "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
         "wallSeconds": 0
       },
       {
-        "instanceId": "3aa3580d1-provider-a-run-2",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "instanceId": "63c57e619-provider-a-run-2",
+        "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
         "wallSeconds": 0
       },
       {
-        "instanceId": "3aa3580d1-provider-b-run-0",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "instanceId": "63c57e619-provider-b-run-0",
+        "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
         "wallSeconds": 0
       },
       {
-        "instanceId": "3aa3580d1-provider-b-run-1",
-        "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195",
+        "instanceId": "63c57e619-provider-b-run-1",
+        "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719",
         "wallSeconds": 0
       }
     ],
@@ -149,7 +149,7 @@
       "name": "observation",
       "mediaType": "application/json",
       "digest": {
-        "sha256": "ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+        "sha256": "d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719"
       }
     }
   },
@@ -214,14 +214,14 @@
       "observedAt": "2026-07-31T09:04:00.000Z",
       "rpcCalls": 12,
       "rpcBytes": 2880,
-      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+      "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719"
     },
     {
       "id": "provider-b",
       "observedAt": "2026-07-31T09:04:00.000Z",
       "rpcCalls": 8,
       "rpcBytes": 1920,
-      "observationDigest": "sha256:ff157a67dfb46c8fe1e111628d4d09dea2a3c81073c96afe2ea8ed99086e0195"
+      "observationDigest": "sha256:d0ca2942e46980ae3270603d93bec54f59cd3720c72528775cf3a450ab050719"
     }
   ]
 }

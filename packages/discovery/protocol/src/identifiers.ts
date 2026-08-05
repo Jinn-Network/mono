@@ -5,26 +5,30 @@
 // downstream may hardcode a copy -- import from here.
 
 // Protocol version URI, unversioned family root (§15)
-export const RECORD_DISCOVERY_FAMILY = "https://jinn.network/record-discovery" as const;
-export const RECORD_DISCOVERY_VERSION = "https://jinn.network/record-discovery/1.0" as const;
+export const RECORD_DISCOVERY_FAMILY = "https://spec.jinn.network/record-discovery" as const;
+export const RECORD_DISCOVERY_VERSION = "https://spec.jinn.network/record-discovery/v1" as const;
 
-// Record-kind URIs (§12). Grammar: `${RECORDS_ROOT}/<segment>/<major>.<minor>`,
-// segment matches SOURCE_NAME_GRAMMAR (below).
-export const RECORDS_ROOT = "https://jinn.network/records" as const;
+// Record-kind URIs (§12). Grammar: `https://spec.jinn.network/records/<segment>/v<major>`,
+// segment matches SOURCE_NAME_GRAMMAR (below), version per `./origins.ts`. DR-2026-08-04
+// fixed the origin and the major-only version form; the re-seal's transition window is
+// closed and no other spelling is recognized. `RECORDS_SEGMENT` is the container name
+// `./grammar.ts` composes the records root from.
+export const RECORDS_SEGMENT = "records" as const;
+export const RECORDS_ROOT = "https://spec.jinn.network/records" as const;
 export const RECORD_KINDS = {
-  task: "https://jinn.network/records/task/1.0",
-  submission: "https://jinn.network/records/submission/1.0",
-  delivery: "https://jinn.network/records/delivery/1.0",
-  executionEvidence: "https://jinn.network/records/execution-evidence/1.0",
-  resultEvaluation: "https://jinn.network/records/result-evaluation/1.0",
-  executionVerification: "https://jinn.network/records/execution-verification/1.0",
-  keyBinding: "https://jinn.network/records/key-binding/1.0",
-  authorization: "https://jinn.network/records/authorization/1.0",
-  trustPolicy: "https://jinn.network/records/trust-policy/1.0",
-  profileDocument: "https://jinn.network/records/profile-document/1.0",
-  evaluationSpec: "https://jinn.network/records/evaluation-spec/1.0",
-  plugin: "https://jinn.network/records/plugin/1.0",
-  checkpoint: "https://jinn.network/records/checkpoint/1.0",
+  task: "https://spec.jinn.network/records/task/v1",
+  submission: "https://spec.jinn.network/records/submission/v1",
+  delivery: "https://spec.jinn.network/records/delivery/v1",
+  executionEvidence: "https://spec.jinn.network/records/execution-evidence/v1",
+  resultEvaluation: "https://spec.jinn.network/records/result-evaluation/v1",
+  executionVerification: "https://spec.jinn.network/records/execution-verification/v1",
+  keyBinding: "https://spec.jinn.network/records/key-binding/v1",
+  authorization: "https://spec.jinn.network/records/authorization/v1",
+  trustPolicy: "https://spec.jinn.network/records/trust-policy/v1",
+  profileDocument: "https://spec.jinn.network/records/profile-document/v1",
+  evaluationSpec: "https://spec.jinn.network/records/evaluation-spec/v1",
+  plugin: "https://spec.jinn.network/records/plugin/v1",
+  checkpoint: "https://spec.jinn.network/records/checkpoint/v1",
 } as const;
 
 // Trust-layer signing scope (§5.5, program §7.11). Conformant with trust-core's
@@ -34,8 +38,8 @@ export const RECORD_KINDS = {
 export const DISCOVERY_SIGNING_SCOPE = "jinn:discovery-announcements" as const;
 
 // Location profiles (§7).
-export const LOCATION_PROFILE_HTTPS = "https://jinn.network/record-discovery/location/https/1.0" as const;
-export const LOCATION_PROFILE_IPFS = "https://jinn.network/record-discovery/location/ipfs/1.0" as const;
+export const LOCATION_PROFILE_HTTPS = "https://spec.jinn.network/record-discovery/location/https/v1" as const;
+export const LOCATION_PROFILE_IPFS = "https://spec.jinn.network/record-discovery/location/ipfs/v1" as const;
 
 // Media types (§15).
 export const MEDIA_ENTRY = "application/vnd.jinn.record-discovery.entry.v1+json" as const;

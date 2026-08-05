@@ -41,7 +41,7 @@ function content(payload: unknown): { readonly bytes: Uint8Array; readonly diges
 
 function submissionRecordBytes(taskDigestHex: string): Uint8Array {
   return new TextEncoder().encode(JSON.stringify({
-    protocol: 'https://jinn.network/tep/v1',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: SUBMISSION_URN,
     task: { digest: { sha256: taskDigestHex } },
     requester: CREATOR,

@@ -72,7 +72,7 @@ function disclosure(subjectSha256: string) {
 
 function sealLinkedRun(benchmarkDigest: `sha256:${string}`) {
   return sealRun({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     owner: "urn:uuid:22222222-2222-5222-8222-222222222222",
     benchmark: { digest: { sha256: hexOf(benchmarkDigest) } },
     closeAt: "2026-08-04T00:00:00Z",
@@ -91,7 +91,7 @@ function sealLinkedRun(benchmarkDigest: `sha256:${string}`) {
 
 function sealLinkedMatrix(runDigest: `sha256:${string}`) {
   return sealMatrix({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     run: { digest: { sha256: hexOf(runDigest) } },
     assembly: { procedure: "jinn.benchmarking.assembly", version: "1.0" },
     closeBoundary: { at: "2026-08-04T00:00:00Z" },
@@ -104,7 +104,7 @@ function sealLinkedMatrix(runDigest: `sha256:${string}`) {
 
 function sealLinkedReport(subjectDigests: readonly `sha256:${string}`[]) {
   return sealReport({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     subjects: subjectDigests.map((digest) => ({ digest: { sha256: hexOf(digest) } })),
     method: {
       id: "jinn.benchmarking.method/wilson",

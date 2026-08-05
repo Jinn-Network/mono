@@ -19,9 +19,9 @@ const TERMS: PostingTerms = {
 
 function goldenTask(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "3917f0428b2626fd2cc93675172731cc000b69d7d783f9adaf5159be56fd10a6" },
     },
     instructions: "Fix the failing test.",
@@ -31,7 +31,7 @@ function goldenTask(): Uint8Array {
 
 function goldenSubmission(taskBytes: Uint8Array, overrides: Record<string, unknown> = {}): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${crypto.randomUUID()}`,
     task: { digest: { sha256: sha256Hex(taskBytes) } },
     requester: `urn:uuid:${crypto.randomUUID()}`,
@@ -218,7 +218,7 @@ describe("makeMarketplaceBackend -- submit", () => {
       mediaType: "application/vnd.in-toto+json",
     };
     const subjectSubmission = {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: "urn:uuid:10000000-0000-4000-8000-000000000001",
       task: {
         name: subjectTask.name,
@@ -293,7 +293,7 @@ describe("makeMarketplaceBackend -- submit", () => {
     ports.posting.safe.broadcastCreateTask = broadcast;
     const backend = makeMarketplaceBackend(BASE_SEPOLIA_TODAY, ports);
 
-    const malformedTask = new TextEncoder().encode(JSON.stringify({ protocol: "https://jinn.network/profiles/task-execution/1.0" }));
+    const malformedTask = new TextEncoder().encode(JSON.stringify({ protocol: "https://spec.jinn.network/profiles/task-execution/v1" }));
     const ack = await backend.submit(malformedTask, goldenSubmission(goldenTask()));
 
     expect(ack.accepted).toBe(false);

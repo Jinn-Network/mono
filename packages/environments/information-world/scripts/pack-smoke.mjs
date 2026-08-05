@@ -224,7 +224,7 @@ import {
   parseInformationWorldRecord,
 } from "@jinn-network/information-world";
 
-if (INFORMATION_WORLD_KIND !== "https://jinn.network/records/information-world/1.0") {
+if (INFORMATION_WORLD_KIND !== "https://spec.jinn.network/records/information-world/v1") {
   throw new Error("root import failed");
 }
 await readFile(new URL(import.meta.resolve("@jinn-network/information-world/schemas/information-world.schema.json")));

@@ -1,0 +1,10 @@
+{
+  "title": "Build on Jinn",
+  "pages": [
+    "quickstart",
+    "request-from-your-app",
+    "custody",
+    "consume-evidence",
+    "implement-the-platform"
+  ]
+}

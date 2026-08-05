@@ -82,7 +82,7 @@ describe("derivation annotation extensibility (ruling §7.21, Addendum 2026-07-2
     const bytes = new TextEncoder().encode(JSON.stringify({ hello: "world" }));
     const digest = recordDigest(bytes);
     const recordFetcher: RecordFetcher = { async "fetch"() { return bytes; } };
-    const recordKind = "https://jinn.network/records/delivery/1.0";
+    const recordKind = "https://spec.jinn.network/records/delivery/v1";
 
     // §10.4 step 3 (BLOCKER fix) fetches and parses the cited entry before
     // any derivation-consistency check runs -- seed a real entry (its OWN

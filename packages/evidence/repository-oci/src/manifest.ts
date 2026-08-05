@@ -12,7 +12,7 @@ import {
 } from "@jinn-network/evidence-repository";
 
 export const OCI_EVIDENCE_PROFILE_URI =
-  "https://jinn.network/profiles/evidence-repository-oci/1.0";
+  "https://spec.jinn.network/profiles/evidence-repository-oci/v1";
 export const OCI_EVIDENCE_PROFILE_VERSION = "1.0.0";
 export const OCI_EVIDENCE_PROFILE_ANNOTATION =
   "network.jinn.evidence.profile";

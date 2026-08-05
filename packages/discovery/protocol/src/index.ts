@@ -5,6 +5,7 @@
 // implementation discipline) can only reach these names through this file.
 
 export * from "./identifiers.js";
+export * from "./origins.js";
 export * from "./grammar.js";
 export * from "./order.js";
 export * from "./hashing.js";

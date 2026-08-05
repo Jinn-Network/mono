@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/protocols/benchmarking/1.0",
+  "protocol": "https://spec.jinn.network/protocols/benchmarking/v1",
   "name": "committed-reveal-fixture",
   "description": "A committed benchmark used by the reveal-consistency conformance fixtures.",
   "version": "1.0.0",

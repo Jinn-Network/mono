@@ -31,13 +31,13 @@ const close = {
 
 describe("session feed identity", () => {
   test("declares one format IRI and media type for the feed", () => {
-    expect(SESSION_FEED_FORMAT_IRI).toBe("https://jinn.network/formats/agent-session-feed/v1");
+    expect(SESSION_FEED_FORMAT_IRI).toBe("https://spec.jinn.network/formats/agent-session-feed/v1");
     expect(SESSION_FEED_MEDIA_TYPE).toBe("application/x-ndjson");
   });
 
   test("derives an absolute executor IRI from the host name", () => {
-    expect(executorIri("Hermes")).toBe("https://jinn.network/software/agent-host/hermes");
-    expect(executorIri("Claude Code")).toBe("https://jinn.network/software/agent-host/claude-code");
+    expect(executorIri("Hermes")).toBe("https://spec.jinn.network/software/agent-host/hermes");
+    expect(executorIri("Claude Code")).toBe("https://spec.jinn.network/software/agent-host/claude-code");
     expect(() => executorIri("  ")).toThrow(PluginRuntimeError);
   });
 });

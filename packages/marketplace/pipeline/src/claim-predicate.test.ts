@@ -15,7 +15,7 @@ const BASE_FACTS: SubmissionFacts = {
   taskDigest: `sha256:${"a".repeat(64)}`,
   submission: "urn:uuid:11111111-1111-4111-8111-111111111111",
   nonce: "nonce-1",
-  profileUri: "https://jinn.network/task-profiles/repository-work/1.0",
+  profileUri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
   requirements: {},
   runnable: true,
   intendedSpendWei: 1n,

@@ -34,21 +34,21 @@
       "@id": "#task-digest",
       "@type": "PropertyValue",
       "name": "Task digest",
-      "propertyID": "https://jinn.network/schemes/task-digest",
+      "propertyID": "https://spec.jinn.network/schemes/task-digest",
       "value": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     },
     {
       "@id": "#task-profile",
       "@type": "PropertyValue",
       "name": "Task profile",
-      "propertyID": "https://jinn.network/schemes/task-profile-uri",
-      "value": "https://jinn.network/task-profiles/repository-work/1.0"
+      "propertyID": "https://spec.jinn.network/schemes/task-profile-uri",
+      "value": "https://spec.jinn.network/task-profiles/repository-work/1.0"
     },
     {
       "@id": "#github-run",
       "@type": "PropertyValue",
       "name": "GitHub Actions run",
-      "propertyID": "https://jinn.network/schemes/github",
+      "propertyID": "https://spec.jinn.network/schemes/github",
       "value": "https://github.com/Jinn-Network/mono/actions/runs/123456789"
     }
   ]

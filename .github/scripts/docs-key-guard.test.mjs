@@ -34,7 +34,7 @@ const KEY_CONTEXTS = [
   /privateKeyToAccount\(\s*["'`](0x[0-9a-fA-F]{64})/g,
   /--private-key\s+["'`]?(0x[0-9a-fA-F]{64})/g,
 ];
-const SCAN_ROOTS = ['docs', 'examples', 'spec', 'client/README.md', 'README.md', 'CLAUDE.md'];
+const SCAN_ROOTS = ['docs', 'examples', 'spec', 'client/README.md', 'README.md', 'CLAUDE.md', 'apps/website/content'];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
 function markdownAndExampleFiles(path, out = []) {

@@ -26,7 +26,7 @@ const packages = [
   ['execution-recorder-bridge', '@jinn-network/execution-recorder-bridge'],
   ['retrieval', '@jinn-network/evidence-retrieval'],
   ['contribution', '@jinn-network/evidence-contribution'],
-  ['trajectory', '@jinn-network/evidence-trajectory'],
+  ['trace', '@jinn-network/evidence-trace'],
   ['trace-decode', '@jinn-network/evidence-trace-decode'],
 ];
 
@@ -70,8 +70,8 @@ const codeEntrypoints = [
   '@jinn-network/evidence-retrieval/testing',
   '@jinn-network/evidence-contribution',
   '@jinn-network/evidence-contribution/testing',
-  '@jinn-network/evidence-trajectory',
-  '@jinn-network/evidence-trajectory/testing',
+  '@jinn-network/evidence-trace',
+  '@jinn-network/evidence-trace/testing',
   '@jinn-network/evidence-trace-decode',
   '@jinn-network/evidence-trace-decode/testing',
 ];

@@ -72,8 +72,8 @@ export function capabilities(
   resume: boolean,
   secretForwards: readonly { readonly grantKey: string; readonly target: string }[] = [],
   taskProfiles: readonly string[] = [
-    "https://jinn.network/task-profiles/repository-work/1.0",
-    "https://jinn.network/task-profiles/evaluation-task/1.0",
+    "https://spec.jinn.network/task-profiles/repository-work/1.0",
+    "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
   ],
 ): LauncherCapabilities {
   return {

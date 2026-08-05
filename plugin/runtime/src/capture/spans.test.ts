@@ -6,11 +6,11 @@ import {
   SpanSchema,
   compareCodeUnitStrings,
   deriveSpanId,
-} from "@jinn-network/evidence-trajectory";
+} from "@jinn-network/evidence-trace";
 import { describe, expect, test } from "vitest";
 
 import { parseSessionFeed } from "./feed.js";
-import { buildTrajectorySpans } from "./spans.js";
+import { buildTraceSpans } from "./spans.js";
 
 const TRACE_ID = "0".repeat(31).concat("1");
 
@@ -22,23 +22,23 @@ const golden = async () =>
 const attribute = (span: { attributes: readonly { key: string; value: unknown }[] }, key: string) =>
   span.attributes.find((entry) => entry.key === key)?.value;
 
-describe("buildTrajectorySpans", () => {
+describe("buildTraceSpans", () => {
   test("every span validates under the C1 span schema", async () => {
-    for (const span of buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID })) {
+    for (const span of buildTraceSpans({ feed: await golden(), traceId: TRACE_ID })) {
       const result = SpanSchema.safeParse(span);
       expect(result.success, JSON.stringify(result)).toBe(true);
     }
   });
 
   test("span identifiers are derived from the trace id and the array ordinal", async () => {
-    const spans = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID });
+    const spans = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID });
     spans.forEach((span, ordinal) => {
       expect(span.spanId).toBe(deriveSpanId(TRACE_ID, ordinal));
     });
   });
 
   test("span 0 is the session, parents nothing, and carries the outcome and token usage", async () => {
-    const [session] = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID });
+    const [session] = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID });
     expect(session?.parentSpanId).toBeNull();
     expect(session?.kind).toBe(SPAN_KIND.INTERNAL);
     expect(session?.name).toBe("invoke_agent Hermes");
@@ -49,17 +49,17 @@ describe("buildTrajectorySpans", () => {
     expect(attribute(session!, "gen_ai.conversation.id")).toEqual({ stringValue: "c-1" });
     expect(attribute(session!, "gen_ai.usage.input_tokens")).toEqual({ intValue: "1024" });
     expect(attribute(session!, "gen_ai.usage.output_tokens")).toEqual({ intValue: "256" });
-    expect(attribute(session!, "jinn.trajectory.outcome")).toEqual({ stringValue: "completed" });
+    expect(attribute(session!, "jinn.trace.outcome")).toEqual({ stringValue: "completed" });
     expect(session?.status).toEqual({ code: STATUS_CODE.OK });
   });
 
   test("every non-session span parents to the session span", async () => {
-    const spans = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID });
+    const spans = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID });
     for (const span of spans.slice(1)) expect(span.parentSpanId).toBe(spans[0]!.spanId);
   });
 
   test("spans follow the feed order of their terminating event", async () => {
-    const spans = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID });
+    const spans = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID });
     expect(spans.map((span) => span.name)).toEqual([
       "invoke_agent Hermes",
       "execute_tool read_file",
@@ -69,24 +69,24 @@ describe("buildTrajectorySpans", () => {
   });
 
   test("the chat span spans from the session start to the assistant turn and carries its user event", async () => {
-    const chat = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID })[2]!;
+    const chat = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID })[2]!;
     expect(chat.kind).toBe(SPAN_KIND.CLIENT);
     expect(chat.startTimeUnixNano).toBe("1785488400000000000");
     expect(chat.endTimeUnixNano).toBe("1785488403000000000");
-    expect(attribute(chat, "jinn.trajectory.turn.role")).toEqual({ stringValue: "assistant" });
-    expect(attribute(chat, "jinn.trajectory.source.ordinal")).toEqual({ intValue: "4" });
+    expect(attribute(chat, "jinn.trace.turn.role")).toEqual({ stringValue: "assistant" });
+    expect(attribute(chat, "jinn.trace.source.ordinal")).toEqual({ intValue: "4" });
     expect(attribute(chat, "gen_ai.response.model")).toEqual({ stringValue: "claude-opus-4.6" });
     expect(chat.events).toHaveLength(1);
     expect(chat.events[0]?.name).toBe("gen_ai.user.message");
     expect(chat.events[0]?.timeUnixNano).toBe("1785488401000000000");
     expect(chat.events[0]?.attributes.map((entry) => entry.key)).toEqual([
-      "jinn.trajectory.source.ordinal",
-      "jinn.trajectory.turn.role",
+      "jinn.trace.source.ordinal",
+      "jinn.trace.turn.role",
     ]);
   });
 
   test("a failed tool call becomes an ERROR span carrying its message", async () => {
-    const failing = buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID })[3]!;
+    const failing = buildTraceSpans({ feed: await golden(), traceId: TRACE_ID })[3]!;
     expect(failing.status).toEqual({ code: STATUS_CODE.ERROR, message: "read-only workspace" });
     expect(attribute(failing, "gen_ai.tool.call.id")).toEqual({ stringValue: "call-2" });
     expect(attribute(failing, "gen_ai.tool.name")).toEqual({ stringValue: "write_file" });
@@ -96,7 +96,7 @@ describe("buildTrajectorySpans", () => {
 
   test("no span carries message content", async () => {
     const serialized = JSON.stringify(
-      buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID }),
+      buildTraceSpans({ feed: await golden(), traceId: TRACE_ID }),
     );
     expect(serialized).not.toContain("Find where the retry budget");
     expect(serialized).not.toContain("RETRY_BUDGET");
@@ -104,7 +104,7 @@ describe("buildTrajectorySpans", () => {
   });
 
   test("attributes are sorted by code unit and unique in every span and event", async () => {
-    for (const span of buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID })) {
+    for (const span of buildTraceSpans({ feed: await golden(), traceId: TRACE_ID })) {
       for (const list of [span.attributes, ...span.events.map((event) => event.attributes)]) {
         const keys = list.map((entry) => entry.key);
         expect(keys).toEqual([...keys].sort(compareCodeUnitStrings));
@@ -115,8 +115,8 @@ describe("buildTrajectorySpans", () => {
 
   test("is a pure function of the feed", async () => {
     const feed = await golden();
-    expect(JSON.stringify(buildTrajectorySpans({ feed, traceId: TRACE_ID }))).toBe(
-      JSON.stringify(buildTrajectorySpans({ feed: await golden(), traceId: TRACE_ID })),
+    expect(JSON.stringify(buildTraceSpans({ feed, traceId: TRACE_ID }))).toBe(
+      JSON.stringify(buildTraceSpans({ feed: await golden(), traceId: TRACE_ID })),
     );
   });
 
@@ -126,10 +126,10 @@ describe("buildTrajectorySpans", () => {
         await readFile(new URL("../../fixtures/capture/session-minimal.ndjson", import.meta.url)),
       ),
     );
-    const spans = buildTrajectorySpans({ feed, traceId: TRACE_ID });
+    const spans = buildTraceSpans({ feed, traceId: TRACE_ID });
     expect(spans).toHaveLength(1);
     expect(spans[0]?.status).toEqual({ code: STATUS_CODE.UNSET });
-    expect(attribute(spans[0]!, "jinn.trajectory.outcome")).toEqual({ stringValue: "abandoned" });
+    expect(attribute(spans[0]!, "jinn.trace.outcome")).toEqual({ stringValue: "abandoned" });
   });
 
   test("an unclosed feed ends the session at its last event and reports abandoned", () => {
@@ -147,7 +147,7 @@ describe("buildTrajectorySpans", () => {
         JSON.stringify({ type: "user-turn", atUnixNano: "2000", text: "hello" }),
       ].join("\n") + "\n",
     );
-    const spans = buildTrajectorySpans({ feed: parseSessionFeed(bytes), traceId: TRACE_ID });
+    const spans = buildTraceSpans({ feed: parseSessionFeed(bytes), traceId: TRACE_ID });
     expect(spans).toHaveLength(1);
     expect(spans[0]?.endTimeUnixNano).toBe("2000");
     // A trailing user turn with no assistant reply lands on the session span as an event.

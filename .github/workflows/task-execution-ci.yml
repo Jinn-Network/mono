@@ -7,6 +7,11 @@ on:
         required: true
         type: string
   pull_request:
+    paths:
+      - "packages/task-execution/**"
+      - ".github/scripts/task-execution-*.test.mjs"
+      - ".github/workflows/task-execution-ci.yml"
+      - "docs/superpowers/specs/2026-07-27-task-execution-protocol-and-stack-design.md"
   push:
     branches: [next]
     paths:

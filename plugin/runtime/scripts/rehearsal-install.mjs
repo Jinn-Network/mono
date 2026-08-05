@@ -32,7 +32,7 @@ const portals = [
   { name: "@jinn-network/evidence-retrieval", root: join(repoRoot, "packages", "evidence", "retrieval"), archive: "evidence-retrieval.tgz" },
   { name: "@jinn-network/evidence-catalog-sqlite", root: join(repoRoot, "packages", "evidence", "catalog-sqlite"), archive: "evidence-catalog-sqlite.tgz" },
   { name: "@jinn-network/evidence-local-runtime", root: join(repoRoot, "packages", "evidence", "local-runtime"), archive: "evidence-local-runtime.tgz" },
-  { name: "@jinn-network/evidence-trajectory", root: join(repoRoot, "packages", "evidence", "trajectory"), archive: "evidence-trajectory.tgz" },
+  { name: "@jinn-network/evidence-trace", root: join(repoRoot, "packages", "evidence", "trace"), archive: "evidence-trace.tgz" },
   { name: "@jinn-network/evidence-trace-decode", root: join(repoRoot, "packages", "evidence", "trace-decode"), archive: "evidence-trace-decode.tgz" },
   { name: "@jinn-network/record-discovery-client", root: join(repoRoot, "packages", "discovery", "client"), archive: "record-discovery-client.tgz" },
 ];

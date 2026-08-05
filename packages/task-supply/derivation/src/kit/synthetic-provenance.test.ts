@@ -16,7 +16,7 @@ function minedSummary(): PoolEntrySummary {
     evaluationSpecDigest: digest("2"),
     receiptDigest: digest("3"),
     environmentRecordDigest: digest("4"),
-    strategyId: "https://jinn.network/derivation-strategies/import/1",
+    strategyId: "https://spec.jinn.network/derivation-strategies/import/v1",
     provenance: {
       kind: "mined",
       sourceCommitment: digest("5"),
@@ -36,7 +36,7 @@ describe("the widened provenance union leaves mined bytes untouched (F-CE5-1)", 
         + '"receiptDigest":"' + digest("3") + '",'
         + '"rights":{"sourceLicense":"MIT"},'
         + '"schemaVersion":1,'
-        + '"strategyId":"https://jinn.network/derivation-strategies/import/1",'
+        + '"strategyId":"https://spec.jinn.network/derivation-strategies/import/v1",'
         + '"taskDigest":"' + digest("1") + '"}',
     );
   });
@@ -50,12 +50,12 @@ describe("the widened provenance union leaves mined bytes untouched (F-CE5-1)", 
 describe("a synthetic entry round-trips with template lineage", () => {
   const summary: PoolEntrySummary = {
     ...minedSummary(),
-    strategyId: "https://jinn.network/derivation-strategies/chain-scenarios/1",
+    strategyId: "https://spec.jinn.network/derivation-strategies/chain-scenarios/v1",
     provenance: {
       kind: "synthetic",
       sourceCommitment: digest("6"),
       lineage: {
-        templateId: "https://jinn.network/scenario-templates/lending-lifecycle/1",
+        templateId: "https://spec.jinn.network/scenario-templates/lending-lifecycle/v1",
         templateVersion: "1.0.0",
         parameterDigest: digest("7"),
         environmentRecordDigest: digest("4"),

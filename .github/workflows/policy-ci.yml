@@ -2,6 +2,12 @@ name: Policy CI
 
 on:
   pull_request:
+    paths:
+      - "packages/policy/**"
+      - ".github/scripts/policy-*.test.mjs"
+      - ".github/workflows/policy-ci.yml"
+      - "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md"
+      - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
   push:
     branches: [next]
     paths:
@@ -10,6 +16,10 @@ on:
       - ".github/workflows/policy-ci.yml"
       - "docs/superpowers/specs/2026-08-03-policy-identity-and-outcomes-design.md"
       - "docs/superpowers/plans/2026-08-03-policy-optimization-implementation-program.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read

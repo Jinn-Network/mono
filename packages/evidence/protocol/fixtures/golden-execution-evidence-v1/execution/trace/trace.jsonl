@@ -1,0 +1,6 @@
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":1,"timestamp":"2026-07-23T15:00:00Z","type":"execution.started","executionId":"urn:uuid:22222222-2222-4222-8222-222222222222"}
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":2,"timestamp":"2026-07-23T15:00:04Z","type":"input.read","artifacts":["task/task.md","inputs/repository-tree.json","inputs/knowledge.md"]}
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":3,"timestamp":"2026-07-23T15:00:10Z","type":"model.requested","providerRequestId":"fixture-request-0001","modelIdentifier":"claude-synthetic-fixture-2026-07-01"}
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":4,"timestamp":"2026-07-23T15:01:42Z","type":"tool.called","tool":"apply-patch","result":"results/slug-normalization.patch"}
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":5,"timestamp":"2026-07-23T15:02:05Z","type":"tool.called","tool":"run-tests","evidence":"evidence/in-run-tests.json"}
+{"schemaVersion":"jinn.fixture.trace.v1","sequence":6,"timestamp":"2026-07-23T15:02:07Z","type":"execution.completed","status":"completed"}

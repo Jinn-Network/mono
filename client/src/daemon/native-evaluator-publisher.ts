@@ -12,7 +12,7 @@ import {
 } from './native-signed-source.js';
 
 const SOURCE_NAME = 'evaluator-records';
-const DELIVERY_ENVELOPE_KIND = 'https://jinn.network/records/delivery-envelope/1.0';
+const DELIVERY_SIGNATURE_KIND = 'https://spec.jinn.network/records/delivery-signature/v1';
 
 export interface NativeEvaluatorPublisher extends NativeEvaluatorPublisherPort {
   readonly handler: ArchiveHttpHandler;
@@ -30,7 +30,7 @@ function kind(role: string): string {
     case 'verdict': return RECORD_KINDS.resultEvaluation;
     case 'evaluation-delivery': return RECORD_KINDS.delivery;
     case 'evaluation-evidence': return RECORD_KINDS.executionEvidence;
-    case 'evaluation-delivery-envelope': return DELIVERY_ENVELOPE_KIND;
+    case 'evaluation-delivery-envelope': return DELIVERY_SIGNATURE_KIND;
     default: throw new Error(`unsupported evaluator publication role ${role}`);
   }
 }

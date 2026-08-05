@@ -209,7 +209,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/evidence-trace-decode@workspace:."
   dependencies:
-    "@jinn-network/evidence-trajectory": "npm:0.1.0"
+    "@jinn-network/evidence-trace": "npm:0.1.0"
     "@types/node": "npm:^22.0.0"
     typescript: "npm:^5.9.3"
     vitest: "npm:^4.1.8"
@@ -221,9 +221,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@jinn-network/evidence-trajectory@portal:../trajectory::locator=%40jinn-network%2Fevidence-trace-decode%40workspace%3A.":
+"@jinn-network/evidence-trace@portal:../trace::locator=%40jinn-network%2Fevidence-trace-decode%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@jinn-network/evidence-trajectory@portal:../trajectory::locator=%40jinn-network%2Fevidence-trace-decode%40workspace%3A."
+  resolution: "@jinn-network/evidence-trace@portal:../trace::locator=%40jinn-network%2Fevidence-trace-decode%40workspace%3A."
   dependencies:
     "@jinn-network/evidence-protocol": "npm:0.1.0"
     "@jinn-network/trust-core": "npm:0.1.0"

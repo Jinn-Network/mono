@@ -114,7 +114,7 @@ if (!allocationRefused) throw new Error("an allocation over an empty population 
 // The two observation adapters (product §8.2; program §1 C8) must be reachable post-pack, and
 // must still refuse a record missing its required joins (fail-closed, not a lucky default).
 const curated = curateAnnouncements([{
-  record: { kind: "https://jinn.network/records/delivery/1.0", digest: "sha256:" + "0".repeat(64) },
+  record: { kind: "https://spec.jinn.network/records/delivery/v1", digest: "sha256:" + "0".repeat(64) },
   provenance: {
     source: { agent: "urn:jinn:agent:smoke", name: "smoke-source" },
     entry: "sha256:" + "1".repeat(64),

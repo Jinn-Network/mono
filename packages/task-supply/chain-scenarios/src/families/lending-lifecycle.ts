@@ -185,7 +185,7 @@ function borrowerAddress(env: ChainDerivationEnvironment): string {
 }
 
 export const lendingLifecycleTemplate: ScenarioTemplate<LendingLifecycleParams> = {
-  id: "https://jinn.network/scenario-templates/lending-lifecycle/1",
+  id: "https://spec.jinn.network/scenario-templates/lending-lifecycle/v1",
   version: "1",
   compatibility: {
     closureClass: "closed-state",

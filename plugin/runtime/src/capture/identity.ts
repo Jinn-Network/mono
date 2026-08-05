@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trajectory";
+import { TRACE_RECORD_IDENTIFIER_PROPERTY } from "@jinn-network/evidence-trace";
 
 import { PluginRuntimeError } from "../errors.js";
 
@@ -13,7 +13,7 @@ import { PluginRuntimeError } from "../errors.js";
  * must not depend on C2's branch. Reconciling the two is a recorded finding.
  */
 export const SESSION_FEED_FORMAT_IRI =
-  "https://jinn.network/formats/agent-session-feed/v1" as const;
+  "https://spec.jinn.network/formats/agent-session-feed/v1" as const;
 
 export const SESSION_FEED_MEDIA_TYPE = "application/x-ndjson" as const;
 
@@ -21,28 +21,28 @@ export const SESSION_FEED_MEDIA_TYPE = "application/x-ndjson" as const;
 export const SESSION_FEED_VERSION = 1 as const;
 
 /**
- * The trajectory producer's identity. `decoderId` must be a lowercase slug
- * (`DerivationSchema` in `@jinn-network/evidence-trajectory`), and `decoderVersion` is the
+ * The trace producer's identity. `decoderId` must be a lowercase slug
+ * (`DerivationSchema` in `@jinn-network/evidence-trace`), and `decoderVersion` is the
  * span-building rule's own version — deliberately independent of the package version, so a
  * release that does not change span construction does not invalidate earlier records.
  */
-export const TRAJECTORY_BUILDER_ID = "agent-session-feed" as const;
-export const TRAJECTORY_BUILDER_VERSION = "1.0.0" as const;
+export const TRACE_BUILDER_ID = "agent-session-feed" as const;
+export const TRACE_BUILDER_VERSION = "1.0.0" as const;
 
-export const PRODUCER_IRI = "https://jinn.network/software/plugin-runtime" as const;
+export const PRODUCER_IRI = "https://spec.jinn.network/software/plugin-runtime" as const;
 export const PRODUCER_NAME = "Jinn plugin runtime" as const;
 
 export const SESSION_ID_PROPERTY =
-  "https://jinn.network/schemes/agent-session-id" as const;
+  "https://spec.jinn.network/schemes/agent-session-id" as const;
 
 /**
  * Re-exports C1's authority for the forward-link identifier IRI. Carried as an identifier on
  * the native-trace artifact entity, which is how the sealed execution record points forward at
- * its trajectory record. The trajectory record is stored as a repository artifact rather than
+ * its trace record. The trace record is stored as a repository artifact rather than
  * a record because `EVIDENCE_RECORD_FAMILIES` is a closed set
  * (`packages/evidence/repository/src/types.ts:1-5`).
  */
-export { TRAJECTORY_RECORD_IDENTIFIER_PROPERTY };
+export { TRACE_RECORD_IDENTIFIER_PROPERTY };
 
 export const CAPTURE_LICENSE = "https://spdx.org/licenses/Apache-2.0.html" as const;
 
@@ -57,5 +57,5 @@ export function executorIri(hostName: string): `${string}:${string}` {
       "The session feed's host name does not yield an executor identity.",
     );
   }
-  return `https://jinn.network/software/agent-host/${slug}`;
+  return `https://spec.jinn.network/software/agent-host/${slug}`;
 }

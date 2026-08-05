@@ -1,0 +1,15 @@
+{
+  "profile": "https://spec.jinn.network/profiles/task-execution/v1",
+  "title": "Task Execution Protocol 1.0",
+  "version": "1.0",
+  "owner": "@jinn-network/task-execution-protocol",
+  "description": "The Task Execution Protocol record family. Records citing this URI as their protocol are sealed under the record kinds indexed here.",
+  "artifacts": [
+    { "path": "schemas/task.schema.json", "mediaType": "application/schema+json" },
+    { "path": "schemas/submission.schema.json", "mediaType": "application/schema+json" },
+    { "path": "schemas/delivery.schema.json", "mediaType": "application/schema+json" },
+    { "path": "schemas/dispatch-context.schema.json", "mediaType": "application/schema+json" },
+    { "path": "schemas/observation.schema.json", "mediaType": "application/schema+json" }
+  ],
+  "digestAuthority": "https://spec.jinn.network/manifest.json"
+}
