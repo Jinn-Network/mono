@@ -1,4 +1,5 @@
 import type {
+  StatusV1Response,
   BootstrapState,
   ClaudeAuthState,
   StructuredEvent,
@@ -41,7 +42,7 @@ import type {
   ClaimPolicyConfig,
   ClaimPolicyResponse,
   ExecutionWiringConfigEntry,
-} from './types.js';
+} from '../../../../api/contract/index.js';
 import type { ProviderRef } from '../../../../harnesses/provider-ref.js';
 
 interface JsonErrorPayload {
@@ -87,7 +88,7 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getStatus: () => jfetch<unknown>('/v1/status'),
+  getStatus: () => jfetch<StatusV1Response>('/v1/status'),
   getRewards: () => jfetch<RewardsResponse>('/v1/rewards'),
   getBootstrap: () => jfetch<BootstrapState>('/v1/bootstrap'),
   getRecentEvents: (kinds?: string[], limit = 100) => {

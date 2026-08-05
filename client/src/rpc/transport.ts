@@ -235,6 +235,18 @@ export function maskRpcHost(url: string): string {
   }
 }
 
+/**
+ * Redact any `http(s)://` URL embedded in an arbitrary error message down to
+ * its hostname (via {@link maskRpcHost}). `maskRpcHost` itself only covers
+ * the boot/preflight *log* path (its three existing call sites); this is the
+ * companion used on the API-response / receipt-persistence path, where a
+ * failing paid RPC (key-in-path) would otherwise leak its key through a
+ * viem `HttpRequestError`-shaped message (spec §14.2 item 2, issue #2402).
+ */
+export function maskUrlsInMessage(message: string): string {
+  return message.replace(/https?:\/\/\S+/g, (url) => maskRpcHost(url));
+}
+
 export interface BuildFallbackTransportOptions {
   /**
    * Set to `true` to let viem rank providers by latency. Default `false` —

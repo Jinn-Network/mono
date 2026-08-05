@@ -1,4 +1,4 @@
-import type { SolverNetManifestSummary } from '../api/types.js';
+import type { SolverNetManifestSummary } from '../../../../api/contract/index.js';
 
 /**
  * ContractId of the canonical first-run demo SolverNet (SWE-rebench v2).

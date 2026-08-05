@@ -61,6 +61,12 @@ jobs:
       # call graph. Catches the Hono "matcher is already built" crash class
       # at code-review time. See jinn-mono-u34i.
       - run: yarn lint:no-late-mount
+      # No-error-leak lint: blocks raw error.message stringification in any
+      # client/src/api/ file that talks to an RPC client. Catches the
+      # credential-leak class where a viem HttpRequestError's message (which
+      # embeds the full request URL) reaches an unauthenticated response
+      # unmasked. See spec §14.2 item 2, issue #2402.
+      - run: yarn lint:no-error-leak
       # SKIP_HL_TESTS gates test/venues/hyperliquid/client.test.ts, which hits
       # the live Hyperliquid testnet. Without it, transient 429/503/ECONNREFUSED
       # from that endpoint red-gate unrelated PRs (it flaked 4 PRs on 2026-06-03).
@@ -172,6 +178,29 @@ jobs:
           name: playwright-traces
           path: client/test-results/
           retention-days: 7
+
+  degraded-daemon-guard-e2e:
+    # Issue #2407 B1/R2/R3 — spawns the REAL built binary against a loopback
+    # RPC stub to prove: (B1) checkDaemonGuard reports blocked while a halted
+    # daemon runs its degraded recovery loops; (R2) a SIGTERM delivered
+    # during that window still removes the pidfile; (R3) JINN_NO_DAEMON=1
+    # acquires and cleans up the pidfile on its own exit path too. Plain
+    # node subprocess test, no browser — needs `yarn build` first (that's
+    # why it's `test/main/*.e2e.test.ts`, auto-excluded from the `check`
+    # job's `yarn test`, which runs before `yarn build`), so this job builds
+    # via `yarn e2e:degraded-daemon-guard` itself, same pattern as
+    # `funding-sequence-e2e` above.
+    name: Degraded Daemon Guard E2E
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn e2e:degraded-daemon-guard
 
   task-creator-marketplace-e2e:
     # Task Creator marketplace-leg e2e (WP6) — SOFT GATE, not PR-blocking.

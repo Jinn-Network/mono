@@ -1,0 +1,37 @@
+[
+  {
+    "path": "policy.json",
+    "kind": "file",
+    "content": "{\"version\":1}\n"
+  },
+  {
+    "path": "skills/read-stack-trace/SKILL.md",
+    "kind": "file",
+    "content": "# Read the stack trace\n\nStart at the innermost frame that belongs to the repository under test.\n"
+  },
+  {
+    "path": "skills/bisect-regression/SKILL.md",
+    "kind": "file",
+    "content": "# Bisect a regression\n\nHalve the suspect range; never guess twice in the same direction.\n"
+  },
+  {
+    "path": "skills/run-focused-tests/SKILL.md",
+    "kind": "file",
+    "content": "# Run focused tests\n\nRun the single failing test before the module, and the module before the suite.\n"
+  },
+  {
+    "path": "skills/write-failing-test-first/SKILL.md",
+    "kind": "file",
+    "content": "# Write the failing test first\n\nA fix with no failing test in front of it is a guess.\n"
+  },
+  {
+    "path": "strategies/repository-work.md",
+    "kind": "file",
+    "content": "Orient in the repository, then change one thing.\n"
+  },
+  {
+    "path": "notes/2026-08-01.md",
+    "kind": "file",
+    "content": "The focused-test skill paid for itself twice this week.\n"
+  }
+]

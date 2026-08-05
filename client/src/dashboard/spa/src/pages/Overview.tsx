@@ -9,7 +9,7 @@ import { ActivityCard, type ActivityJoinedNet, type ActivityTask } from './overv
 import { AiUnitsPauseAlert } from './AiUnitsPauseAlert.js';
 import { computeEffectivePlugins } from './configuration/effective-plugins.js';
 import { gasSeverity } from '../notifications/derive.js';
-import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../api/types.js';
+import type { RewardsResponse, SolverNetsCatalogResponse, StakingRewardReadState } from '../../../../api/contract/index.js';
 
 /**
  * Subset of /v1/setup/bootstrap we read on /overview. The full bootstrap

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { StructuredEvent } from './types.js';
+import type { StructuredEvent } from '../../../../api/contract/index.js';
 
 export function useEventStream(filterKinds?: string[]): {
   events: StructuredEvent[];

@@ -2,7 +2,8 @@
 version: 0.1
 date: 2026-06-10
 author: opus + oaksprout
-status: proposed
+status: superseded
+superseded-by: 'docs/superpowers/specs/2026-08-03-policy-optimization-product-design.md §15.1 (2026-08-03): same product intent in dissolved SolverNet vocabulary; bundle-as-policy, novelty-vs-quality split, and auto-A/B harvested into the campaign design'
 parent-milestone: '[#2 — solvers improving on swe-rebench v2](https://github.com/Jinn-Network/mono/milestone/2)'
 parent-epic: '[#601 — EPIC: Demonstrate solver learning](https://github.com/Jinn-Network/mono/issues/601)'
 work-shape: design

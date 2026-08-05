@@ -21,7 +21,7 @@ import type {
   CaptureSummary,
   OperatorArtifact,
   OperatorArtifactsResponse,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 
 type ExecutionDataSelection =
   | { kind: 'capture'; id: string }

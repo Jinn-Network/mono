@@ -1,7 +1,7 @@
 import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Card, CardContent } from '../../components/ui/card.js';
 import { Separator } from '../../components/ui/separator.js';

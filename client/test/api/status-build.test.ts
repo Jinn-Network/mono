@@ -73,6 +73,31 @@ describe('assembleStatusV1', () => {
     expect(j.earnings.hint).toMatch(/omitted/);
   });
 
+  // Regression coverage for spec §14.2 item 2 / issue #2402: `daemon.dbPath`
+  // is an absolute filesystem path (home dir, username) on the same
+  // unauthenticated /v1/status endpoint the RPC-error masking targets. It's
+  // dropped from the assembled response even though `raw.dbPath` stays on
+  // GatheredStatusRaw for the local `jinn status` CLI roll-up.
+  it('never projects dbPath into the assembled daemon block', () => {
+    const raw: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/Users/some-operator/.jinn-client/jinn.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+    };
+    const j = assembleStatusV1(raw);
+    expect(j.daemon).not.toHaveProperty('dbPath');
+    expect(JSON.stringify(j)).not.toContain('some-operator');
+  });
+
   it('exposes the durable Phase D observation window without re-deriving it', () => {
     const raw: GatheredStatusRaw = {
       hintsScope: 'sqlite_only',
@@ -99,7 +124,34 @@ describe('assembleStatusV1', () => {
         }],
       },
     };
-    expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual(raw.phaseDTransitionUsage);
+    expect(assembleStatusV1(raw).phaseDTransitionUsage).toEqual({
+      ...raw.phaseDTransitionUsage,
+      class: 'observation',
+    });
+  });
+
+  it('tags phaseDTransitionUsage class: observation so a consumer cannot silently promote it (#2409, spec §7)', () => {
+    const raw: GatheredStatusRaw = {
+      hintsScope: 'sqlite_only',
+      shutdownState: 'running',
+      dbPath: '/tmp/x.db',
+      activityCounts: {},
+      recentActivity: [],
+      lastRewardClaimTickAt: null,
+      rewardClaimIntervalMs: 0,
+      fleet: null,
+      rpc: { ok: true },
+      master: { address: null },
+      pollIntervalMs: 5000,
+      masterDailyEstimateWei: '1000',
+      phaseDTransitionUsage: {
+        schemaVersion: 1,
+        durable: true,
+        observationWindowStartedAt: '2026-08-03T00:00:00.000Z',
+        counters: [],
+      },
+    };
+    expect(assembleStatusV1(raw).phaseDTransitionUsage?.class).toBe('observation');
   });
 
   it('carries effectiveMode from the resolver, defaulting to legacy when absent (#2380)', () => {

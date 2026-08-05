@@ -2,7 +2,7 @@ import { useMemo, useState, type JSX } from 'react';
 import type {
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Input } from '../../components/ui/input.js';
 import { cn } from '../../lib/utils.js';
 import { ensureCompletedStep } from './draft-helpers.js';

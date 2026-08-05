@@ -57,6 +57,8 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn quickstart` | Legacy compatibility alias for zero-to-running setup; prefer jinn run |
 | `jinn auth` | Legacy compatibility: check Claude authentication and persist daemon runtime mode |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
+| `jinn bootstrap-retry` | Signal a running, halted daemon to retry its bootstrap state machine |
+| `jinn onboarding-complete` | Mark onboarding complete (daemon control route if running, config file otherwise) |
 | `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
 | `jinn run` | Start the daemon in the foreground; stops on SIGINT/SIGTERM |
 | `jinn stop` | Signal a running jinn daemon to shut down gracefully |
@@ -73,6 +75,7 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn update` | Update the client package, run local Task-native preflight, and refresh integrations |
 | `jinn mcp` | Run the operator MCP server over stdio |
 | `jinn migrate-agent-id` | Backfill ERC-8004 agent_id on legacy complete services (jinn-mono-jgp) |
+| `jinn backfill-failed-deliveries` | Reclassify FAILED runs as COMPLETE when their delivery tx actually succeeded (#506) |
 | `jinn conformance` | Run the envelope + trajectory conformance suite against a signed envelope CID |
 | `jinn create` | Scaffold a new Jinn external harness or SolverPlugin package |
 | `jinn ui` | Open the operator panel in your browser (assumes daemon is running) |
@@ -85,6 +88,8 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn integrations` | Configure host AI tool integrations for Jinn |
 | `jinn codedigest-revert-check` | Decide whether an Improve commit regressed the pass rate (per-codeDigest, #764) |
 | `jinn eval` | Run a held-out slate against a checkpoint and compare its resolved rate vs the parent (#818) |
+| `jinn scrub` | Scrub eval + review tooling |
+| `jinn native-vertical` | Native requester vertical for Base Sepolia |
 <!-- skill:cli-table:end -->
 
 ## Phase 2: MCP Configuration

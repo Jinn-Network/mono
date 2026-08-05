@@ -17,7 +17,7 @@ import { api } from '../api/client.js';
 import type {
   DraftSolverNetRecord,
   LaunchedSolverNetRecord,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 
@@ -78,8 +78,12 @@ beforeEach(() => {
     chain: 'base-sepolia',
   });
   vi.mocked(api.getStatus).mockResolvedValue({
-    masterGas: { balanceWei: '1000000000000000000' },
-  });
+    masterGas: {
+      address: '0xMASTERSAFE',
+      balanceWei: '1000000000000000000',
+      dailyEstimateWei: '0',
+    },
+  } as never);
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(LAUNCHER_CREATE_STORAGE_KEY);
   }

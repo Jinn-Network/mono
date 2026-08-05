@@ -1,4 +1,23 @@
-export type StructuredEventKind = 'intent' | 'reward' | 'fleet' | 'system' | 'error' | 'log';
+/**
+ * Wire response types mirrored from the daemon (spec/2026-08-04-headless-operator-rederivation-design.md
+ * §8 artifact 2). Relocated verbatim from the former
+ * `client/src/dashboard/spa/src/api/types.ts` (deleted — see that PR's body for the drift
+ * list found while cutting the SPA over to this module). `StatusV1Response`, the
+ * `LifecycleKind` vocabulary, and the lifecycle/activity event shapes live in sibling
+ * modules (`status.ts`, `lifecycle-kind.ts`) instead of here.
+ *
+ * These are plain mirrored types, not Zod schemas — the daemon routes that serve them
+ * don't validate their own output against a runtime schema today, so restating them as
+ * Zod here would assert a rigor that doesn't exist yet. Promoting one to a real schema
+ * (and generating its OpenAPI entry) is a route-at-a-time follow-up, per §8's "structure
+ * so routes are added cheaply."
+ *
+ * `BootstrapState.steps`/`currentStep`/`services[].step` are typed off
+ * `FleetBootstrapPhase` (`fleet-bootstrap-phases.const.ts`, zero-import) rather than plain
+ * `string` — the 15-member unified fleet bootstrap phase list `bootstrap-endpoint.ts`
+ * actually serves (issue #2407), not a re-declared copy.
+ */
+import type { FleetBootstrapPhase } from './fleet-bootstrap-phases.const.js';
 
 // ── OLAS reward read state ────────────────────────────────────────────────────
 //
@@ -39,50 +58,6 @@ export interface ClaimRewardsResponse {
   error?: string;
 }
 
-// ── cost surface (#474) ─────────────────────────────────────────────────────
-//
-// Mirror of `CostSurfaceStatus` from `client/src/spend/cost-surface-status.ts`.
-// Surfaced on `/v1/status` as `costSurface` for join/settings cost UI.
-
-export interface CostSurfaceHarnessStatusWire {
-  credentialId: string | null;
-  usesPaidApiKey: boolean;
-}
-
-export interface CostSurfaceStatusWire {
-  harnesses: Record<string, CostSurfaceHarnessStatusWire>;
-}
-
-export interface StructuredEvent {
-  schemaVersion: 1;
-  id: string;
-  ts: string;
-  kind: StructuredEventKind;
-  message: string;
-  requestId?: string;
-  txHash?: string;
-  errorCode?: string;
-  details?: Record<string, unknown>;
-}
-
-export interface ActivityEventRow {
-  id: number;
-  ts: string | null;
-  kind: string;
-  requestId: string | null;
-  serviceIndex: number | null;
-  txHash: string | null;
-  solverType: string | null;
-  outcome: string | null;
-  detail: string | null;
-}
-
-export interface ActivityEventsResponse {
-  events: ActivityEventRow[];
-  nextCursor: number | null;
-  counts: Record<string, number>;
-}
-
 export type DaemonMode = 'setup' | 'running' | 'uninitialized';
 
 export interface BootstrapErrorEnvelope {
@@ -113,11 +88,11 @@ export interface RpcSlotHealth {
 export interface BootstrapState {
   schemaVersion: 1;
   mode: DaemonMode;
-  steps: string[];
-  currentStep: string;
+  steps: FleetBootstrapPhase[];
+  currentStep: FleetBootstrapPhase;
   services: Array<{
     index: number;
-    step: string;
+    step: FleetBootstrapPhase;
     safe_address?: string;
     service_id?: number;
     /** Raw error string set when a bootstrap step fails non-fatally (e.g. safe_binding_failed). */

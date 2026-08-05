@@ -1,5 +1,19 @@
 # OPERATOR-APP-SPEC
 
+> **Amended 2026-08-04** by the
+> [headless operator re-derivation design](../docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md):
+> **(1)** §2.7's "no manual claim step … rewards are collected automatically" is corrected —
+> a manual claim action shipped (`POST /api/admin/claim-rewards` / `jinn claim-rewards`) and
+> stays; the automatic reward-claim loop's default flips to **on** in standard staking mode
+> (it ships off today). **(2)** §2.10's notification taxonomy is canonical at **16 kinds, 14
+> implemented** — the two RPC-health kinds (`rpc_all_failed`, `rpc_primary_degraded`) become
+> implementable when the derivation moves server-side (`GET /v1/notifications`, that spec
+> §6.5); the derivation leaves the browser bundle. **(3)** `restart_required` changes
+> semantics from browser-session state to *config-file-newer-than-boot*, server-derived.
+> **(4)** This document migrates to the separate operator console at cutover stage 6 and
+> remains its domain model; the daemon-side contract it implies becomes the versioned read
+> contract + control plane defined in that spec.
+
 > Canonical specification of the operator app — the user-facing surface an operator interacts with to run a Jinn node.
 >
 > **What this doc is.** A model of *what* the operator app shows, *what* the operator can do, and *how* the app surfaces things that need attention. Spec, not implementation. Changes go through CODEOWNERS review with a linked [GitHub Discussion](https://github.com/Jinn-Network/mono/discussions); see [`../spec/2026-04-28-canonical-docs.md`](../spec/2026-04-28-canonical-docs.md).
@@ -169,7 +183,7 @@ Cancelling an in-flight task is out of scope for v1.
 
 ### 2.7 Rewards
 
-The OLAS the operator has earned. Rewards build up automatically as the node completes tasks and delivers verdicts, and the daemon collects them for the operator — there is no manual claim step and nothing the operator needs to do here.
+The OLAS the operator has earned. In standard staking mode the daemon's periodic reward-claim loop collects `stOLAS ExternalStakingDistributor.claim` for each staked fleet service automatically (`rewardClaimIntervalMs`, on by default — see amendment banner). A manual claim action also exists (`POST /api/admin/claim-rewards`, `jinn claim-rewards`) for an operator who wants to force a claim between loop ticks, or who has set `JINN_REWARD_CLAIM_INTERVAL_MS=0` to opt out of the automatic loop and claim manually instead.
 
 - **State**
   - lifetime OLAS earned (`claimedStakingRewardsWei`)
@@ -179,7 +193,7 @@ The OLAS the operator has earned. Rewards build up automatically as the node com
 - **Collections**
   - none
 - **Actions**
-  - none (rewards are collected automatically)
+  - claim rewards now — `idle → claiming → claimed` (`failed` terminal alternative); a manual trigger of the same claim logic the automatic loop runs
 
 ### 2.8 Bootstrap
 

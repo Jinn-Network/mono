@@ -34,7 +34,8 @@
     "/CONTRIBUTING.md",
     "/CHANGELOG.md",
     "/README.md",
-    "/LICENSE"
+    "/LICENSE",
+    "/openapi.v1.json"
   ],
   "publishConfig": {
     "access": "public"
@@ -109,6 +110,7 @@
     "build": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && yarn build:spa && tsc && chmod +x dist/bin/jinn.js && rm -rf dist/dashboard && mkdir -p dist/dashboard && cp -R src/dashboard/spa/dist/. dist/dashboard/ && rm -rf dist/templates && cp -R templates dist/templates && rm -rf dist/plugins/learner dist/plugins/local-trace-distiller && mkdir -p dist/plugins && cp -R plugins/learner dist/plugins/learner && mkdir -p dist/scripts && cp scripts/fix-node-pty.mjs scripts/swe-rebench-v2-seed-pool.json scripts/swe-rebench-v2-known-bad.json scripts/swe-rebench-v2-pytest-missing.json scripts/swe-rebench-v2-evaluator.bundle.v1.patch dist/scripts/ && mkdir -p dist/solver-types/slates && cp src/solver-types/slates/*.json dist/solver-types/slates/ && mkdir -p dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches && cp src/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/*.patch dist/harnesses/impls/swe-rebench-v2-evaluator/upstream-patches/ && node scripts/vendor-private-packages.mjs && node scripts/vendor-sdk.mjs && node scripts/write-dist-build-meta.mjs",
     "typecheck": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && tsc --noEmit",
     "lint:no-late-mount": "node scripts/check-no-late-route-mount.mjs",
+    "lint:no-error-leak": "node scripts/check-no-error-leak.mjs",
     "test": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && yarn build:layer && vitest run",
     "test:hermetic:packed-closure": "yarn build:sdk && yarn build:stack && yarn build:plugin && yarn build:core && node scripts/smoke-test-hermetic-packed-closure.mjs",
     "test:hermetic": "yarn test:hermetic:packed-closure && vitest run --config vitest.hermetic.config.ts",
@@ -118,6 +120,8 @@
     "test:claude-prediction-apy": "yarn build && JINN_TEST_CLAUDE_PREDICTION_APY=1 vitest run test/harnesses/impls/claude-mcp-prediction-apy/isolation.test.ts",
     "skill:generate": "tsx scripts/skill-generate.ts",
     "skill:check": "tsx scripts/skill-check.ts",
+    "generate:openapi": "tsx scripts/generate-openapi.ts",
+    "generate:openapi:check": "tsx scripts/generate-openapi.ts --check",
     "prepublishOnly": "yarn typecheck",
     "pack:smoke": "node scripts/smoke-test-pack.mjs && yarn consumer:acceptance && yarn pack:smoke:private-runtime",
     "pack:smoke:client-only": "node scripts/smoke-test-pack.mjs --client-only",
@@ -128,6 +132,7 @@
     "release:tier-1": "tsx scripts/release/run-tier-1.ts",
     "release:tier-1:T1.1": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.1-bootstrap-fresh-anvil.test.ts",
     "release:tier-1:T1.2": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.2-harness-readiness-contract.test.ts",
+    "release:tier-1:T1.3": "vitest run --config vitest.release-tier-1.config.ts test/release/tier-1/T1.3-contract-conformance.test.ts",
     "release:tier-1:T1.4": "playwright test --config=playwright.config.ts test/dashboard/release-prep/spa-route-smoke.e2e.test.ts",
     "release:tier-2": "tsx scripts/release/run-tier-2.ts",
     "release:tier-2:T2.2": "vitest run test/release/tier-2/T2.2-producer-evaluator.test.ts",
@@ -175,6 +180,7 @@
     "e2e:join": "yarn build && playwright test --config=playwright.config.ts test/dashboard/join.e2e.test.ts",
     "e2e:app-flow": "yarn build && playwright test --config=playwright.config.ts test/dashboard/solvernet-flow.e2e.test.ts test/dashboard/join.e2e.test.ts",
     "e2e:funding-sequence": "yarn build && playwright test --config=playwright.config.ts test/dashboard/funding-sequence.e2e.test.ts",
+    "e2e:degraded-daemon-guard": "yarn build && vitest run --config vitest.main-e2e.config.ts",
     "e2e:dashboard": "yarn build && playwright test --config=playwright.config.ts",
     "e2e:dashboard-app": "yarn build && playwright test --config=playwright.config.ts 'test/dashboard/[^/]+[.]e2e[.]test[.]ts$'",
     "e2e:donation": "vitest run test/smoke/donation-mode-smoke.test.ts test/smoke/donation-ipfs-http-smoke.test.ts",

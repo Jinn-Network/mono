@@ -173,8 +173,10 @@ jinn logs --follow
 # Dashboard UI
 open http://127.0.0.1:7331/
 
-# Direct HTTP — portfolio.v0 specifics.
-curl -s http://127.0.0.1:7331/v1/status | jq .portfolioV0
+# Direct HTTP — portfolio.v0 specifics. /v1/status is operator-class as of
+# spec §14.5 (issue #2404); pass the on-disk UI token.
+curl -s -H "x-jinn-ui-token: $(cat ~/.jinn-client/ui-token)" \
+  http://127.0.0.1:7331/v1/status | jq .portfolioV0
 ```
 
 The `portfolioV0` block shows:

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'wouter';
 import { ArrowLeft, ExternalLink, Loader2 } from 'lucide-react';
 import { api } from '../api/client.js';
-import type { ActivityEventRow, BootstrapState } from '../api/types.js';
+import type { ActivityEventRow, BootstrapState } from '../../../../api/contract/index.js';
 import { eventKindBadgeVariant, eventKindMeta } from '../lib/event-kinds.js';
 import {
   Card,
@@ -61,7 +61,11 @@ export function EventDetailPage(): JSX.Element {
     enabled: id.length > 0,
   });
 
-  const meta = data ? eventKindMeta(data.kind) : null;
+  // Unknown-kind rendering rule (§8 artifact 6): pass the row's own severity/title through
+  // so a kind this build doesn't recognize still renders the daemon's intended framing (see
+  // Events.tsx, which does the same for the list page).
+  const wire = data ? { severity: data.severity, title: data.title } : undefined;
+  const meta = data ? eventKindMeta(data.kind, wire) : null;
   const explorer = explorerBase(bootstrap?.chain);
 
   return (
@@ -123,7 +127,7 @@ export function EventDetailPage(): JSX.Element {
               <CardDescription>{meta.description}</CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
-              <Badge variant={eventKindBadgeVariant(data.kind, data.outcome)}>
+              <Badge variant={eventKindBadgeVariant(data.kind, data.outcome, wire)}>
                 {data.outcome ?? '-'}
               </Badge>
               <Badge variant="outline">{formatTimestamp(data.ts)}</Badge>
