@@ -174,6 +174,25 @@ export const DEFAULT_RUNNING_BOOTSTRAP = {
   },
 } as const;
 
+/**
+ * Empty notifications payload (issue #2408 — `GET /v1/notifications`). The SPA now consumes
+ * this endpoint directly instead of deriving notices client-side from `/v1/status` +
+ * `/v1/bootstrap` + SSE; per-test overrides register their own route AFTER `mockDaemonApi` so
+ * they win (Playwright checks routes in reverse-registration order).
+ */
+export const DEFAULT_NOTIFICATIONS_PAYLOAD = {
+  schemaVersion: 1,
+  generatedAt: new Date().toISOString(),
+  notifications: [] as Array<{
+    kind: string;
+    severity: 'blocking' | 'warning' | 'info';
+    title: string;
+    message: string;
+    jumpTo?: string;
+    details?: Record<string, unknown>;
+  }>,
+};
+
 export const DEFAULT_STATUS_PAYLOAD = {
   schemaVersion: 1,
   fleet: { services: [{ index: 1, step: 'complete', safeAddress: '0x0e767E28C6889CcD0DfB88E631a3702D56Ce24FC', agentId: 5474, safeBoundToAgent: true }] },
@@ -333,6 +352,11 @@ export async function mockDaemonApi(page: Page, _opts: MockDaemonApiOptions = {}
     (url) => url.pathname === '/v1/status',
     (route) =>
       route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_STATUS_PAYLOAD) }),
+  );
+  await page.route(
+    (url) => url.pathname === '/v1/notifications',
+    (route) =>
+      route.fulfill({ contentType: 'application/json', body: JSON.stringify(DEFAULT_NOTIFICATIONS_PAYLOAD) }),
   );
   // Catalog of SolverNet types (GET /v1/solvernets — exact path, no trailing segment).
   await page.route(

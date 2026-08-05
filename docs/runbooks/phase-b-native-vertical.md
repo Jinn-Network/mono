@@ -214,6 +214,9 @@ contents. The closure manifest is canonical JSON and carries public digests/iden
 A run is complete only when both settlement transactions are canonically finalized, every public
 source lag is zero, the independent consumer is decision-grade, and the sanitized closure manifest
 validates byte-for-byte. Before then, keep the manifest absent and leave the default mode unchanged.
+The manifest's `acceptanceCriteria` ids 1–62 are enumerated in
+[phase-b-acceptance-criteria.md](phase-b-acceptance-criteria.md); each entry's evidence digests
+must point at artifacts proving that specific criterion.
 
 This runbook intentionally records **no live run** and **no default flip**. The manual closure step
 must add the actual commit, package digests, transaction links, source heads, recovery reports, and
