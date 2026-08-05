@@ -198,7 +198,7 @@ describe("production prediction-market deployment module — real composition pa
     const backendConfig = value.backendConfigs[0]!;
     expect(backendConfig.launchers).toHaveLength(1);
     expect(backendConfig.launchers[0]!.capabilities().taskProfiles).toEqual([
-      "https://jinn.network/task-profiles/evaluation-task/1.0",
+      "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
     ]);
     expect(backendConfig.launchers[0]!.capabilities().hostSecretForwards).toEqual([]);
     await composition.close();
@@ -291,7 +291,7 @@ describe("production prediction-market deployment module — evidence writer and
     // Proves the sidecar's whitespace-padded agent (see beforeAll) was trimmed, not used verbatim.
     expect(registration!.evaluatorIdentity.id).toBe(AGENT);
     expect(registration!.evaluationMethod.uri).toBe(
-      "https://jinn.network/evaluation-methods/prediction-market/1.0",
+      "https://spec.jinn.network/evaluation-methods/prediction-market/v1",
     );
     expect(registration!.evaluationMethod.digest.sha256).toBe(
       (await predictionEvaluatorMethodDigest()).slice("sha256:".length),
@@ -368,9 +368,9 @@ function predictionDocuments(): PredictionDocuments {
   const spec = predictionSpec();
   const sealedSpecification = sealEvaluationSpec(spec);
   const subjectTask = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "4".repeat(64) },
     },
     instructions: "Submit a prediction.",
@@ -386,7 +386,7 @@ function predictionDocuments(): PredictionDocuments {
     submittedAt,
   }));
   const subjectDelivery = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:11111111-1111-4111-8111-111111111112",
     task: documentDigest(subjectTask),
     outputs: [{
@@ -404,7 +404,7 @@ function predictionDocuments(): PredictionDocuments {
     evaluationSpecDigest: sealedSpecification.digest,
   }).bytes;
   const submission = sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: `urn:uuid:${randomUUID()}`,
     task: { digest: { sha256: documentDigest(evaluationTask).slice("sha256:".length) } },
     requester: "urn:uuid:22222222-2222-4222-8222-222222222223",
@@ -463,8 +463,8 @@ async function spawnBackendFixture(root: string, docs: PredictionDocuments): Pro
   };
   const backend = makeLocalTaskExecutionBackend({
     stateRoot: root,
-    source: "https://jinn.network/software/backend-local/prediction-deployment-spawn-test",
-    executor: "https://jinn.network/software/evaluation-harness",
+    source: "https://spec.jinn.network/software/backend-local/prediction-deployment-spawn-test",
+    executor: "https://spec.jinn.network/software/evaluation-harness",
     profileStore,
     launchers: [launcher],
     provisioner(input) {
@@ -681,7 +681,7 @@ describe("production prediction-market deployment module — harvest-time identi
     const taskDigest = documentDigest(taskBytes);
     const deadline = "2026-08-03T00:00:00.000Z";
     const submissionBytes = sealSubmission({
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
       submission: "urn:uuid:00000000-0000-4000-8000-000000000030",
       task: { digest: { sha256: taskDigest.slice("sha256:".length) } },
       requester: AGENT,

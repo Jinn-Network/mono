@@ -170,7 +170,7 @@ const registration = createPredictionEvaluatorRegistration({
   signerHandle: SIGNER_HANDLE,
   evaluationMethod: {
     name: 'jinn-prediction-market-evaluator-v1',
-    uri: 'https://jinn.network/evaluation-methods/prediction-market/1.0',
+    uri: 'https://spec.jinn.network/evaluation-methods/prediction-market/v1',
     digest: { sha256: evaluationMethodDescriptorDigestHex() },
   },
   resolutionSnapshotSource: contextResolutionSnapshotSource(),
