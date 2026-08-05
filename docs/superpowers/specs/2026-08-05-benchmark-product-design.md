@@ -1,0 +1,565 @@
+# Standalone Benchmarking Product — Product Design
+
+| | |
+|---|---|
+| **Version** | 0.1 |
+| **Date** | 2026-08-05 |
+| **Author** | Packet BP-00 of the standalone benchmarking product implementation program (Claude Fable 5 session) |
+| **Shape** | `design` |
+| **Status** | draft (program authority document; local session, unreviewed by humans) |
+| **Depends on** | [`2026-07-28-benchmarking-application-design.md`](./2026-07-28-benchmarking-application-design.md) (the records and capabilities this product composes), [`2026-07-30-jinn-platform-architecture.md`](./2026-07-30-jinn-platform-architecture.md) (tier law, inclusion test, extraction gate), [`../plans/2026-08-05-standalone-benchmarking-product-program.md`](../plans/2026-08-05-standalone-benchmarking-product-program.md) (the program plan whose §3–§4 decisions this spec formalizes), and the product charter `2026-08-05-standalone-benchmarking-product-charter-v0.2.md` (v0.2, session-attached, not in-repo — product intent authority) |
+| **Does not amend** | Jinn protocol or record semantics (tiers 1–3): no TEP, evidence, trust, discovery, or profiles change; no benchmarking record kind, named check, or frozen interface change; no new record kind; no facts-profile amendment. No canonical-doc change (`PRINCIPLES.md`, `SPEC.md`, `GLOSSARY.md`, `BRAND.md`, `GROWTH.md`, `THESIS.md`, `CLAUDE.md`). No marketplace, operator-product, or catalog-procedure change |
+
+This document is the **catalog authority document** for the
+`packages/benchmark-product` tree (program plan §4.1). It formalizes the
+program plan's fixed product decisions (§3) and architecture decisions (§4);
+it does not reopen them. Where this spec fills a genuine gap the program plan
+left open, the choice is labeled as a reversible assumption and collected in
+§12.
+
+## 1. Problem statement and product definition
+
+A technical team — or an independent builder — is about to make an externally
+scrutinized comparative claim about an agent system: a new coding-agent
+version, a harness or model configuration, a skill or tool-policy change, a
+comparison destined for a README, release post, research note, customer
+discussion, or public challenge. Running an evaluation, operating it through
+an agent, and publishing a credible market-facing claim are related but
+different jobs, and today the work is fragmented across human-only
+dashboards, scripts, spreadsheets, raw logs, and ad hoc publication. A
+credible comparison requires fixing the exact task set and configurations
+before results exist, declaring what counts as success and how much
+independent judgment each result needs, accounting for every expected
+execution (including failures and missing results), and turning the outcome
+into an outward-facing claim that skeptical readers can check — without the
+claim's credibility resting solely on a self-produced chart (charter §3).
+
+**The product** is a standalone, separately branded offering with which
+humans and their delegated agents commission, run, inspect, and publish
+comparative agent benchmarks. Its category-level explanation is *"compare
+agents on the same work"*; its durable output is a **distribution-ready
+benchmark claim package**: a clear public report, complete run and evaluation
+accounting, limitations and guarantee boundaries, machine-readable evidence
+and verification references, and shareable claim assets that link back to the
+full report (charter §2, §4). The product is **agent-native and
+human-legible**: every meaningful capability available to a human is
+available to an authorized agent over the same product state, with humans as
+first-class sponsors, supervisors, and readers (charter §1, §7).
+
+The product is **not** a new name for the underlying platform, not the
+platform's canonical frontend, and not a generic evaluation suite. Jinn
+provides the execution, evidence, and verification stack on which the product
+runs; Jinn is not the product's category, identity, or customer-facing
+proposition. The product is not "Jinn Benchmarks" and carries no Jinn lexicon
+as product identity — Jinn appears only as factual infrastructure attribution
+in about, technical, and verification contexts (charter §1, §11; §9 below).
+
+First market: public comparative benchmarking for builders of coding agents,
+harnesses, skills, plugins, tools, and loadouts, making public or
+customer-facing performance claims (charter §5; program plan §3). Two-plus
+configurations are first-class; baseline-versus-candidate is a UX default,
+not a limit.
+
+## 2. Position: a Tier 4 product
+
+Under the platform architecture's layering law
+([platform architecture §3](./2026-07-30-jinn-platform-architecture.md)) this
+product is **tier 4**: a composition of tier-2 records and tier-3
+applications into a participant experience. It lives under the two mechanical
+tier-4 rules (platform architecture §5):
+
+1. **Nothing in tiers 1–3 imports it** — enforced by the frozen dependency
+   direction and the source-boundary guards.
+2. **No tier-1–3 kit, guard, or fixture references it** — no first-party
+   product's behavior is ever treated as normative for the platform.
+
+Catalog posture (program plan §4.1, registered per `architecture/README.md`'s
+atomic procedure by the implementation packet, not by this spec): tier 4,
+`classification: "product"`, `stability: "experimental"`,
+`releaseGroup: "transitional-or-private"`, `publishPolicy: "never"`,
+`ownerGroup: "architecture-control"`; own CI gate `benchmark-product-ci`;
+allowlist source-boundary policy with positive controls; authority documents:
+this spec plus the program plan.
+
+Tree: `packages/benchmark-product/core` (headless product: domain,
+operations, persistence, CLI) and `packages/benchmark-product/web` (Next.js
+GUI, milestone M3). Packages are scoped `@jinn-network/benchmark-product-*`
+under the internal codename `benchmark-product` — deliberately
+descriptive-neutral, plainly a placeholder, carrying no Jinn lexicon and no
+invented public name (§9; reversible assumption A1).
+
+**This spec proposes no tier-1–3 change, no new record kind, and no protocol
+amendment.** Everything below is product policy or presentation over the
+platform as frozen.
+
+## 3. Consumption contract
+
+The product's default posture is **REUSE**. It imports public package exports
+only: no deep imports, no copied platform code. The packages and the named
+public exports the product builds on (each verified present in the package's
+public entry, 2026-08-05):
+
+| Package | Named public exports the product consumes | Role |
+|---|---|---|
+| `@jinn-network/benchmarking-records` | `sealBenchmark`, `sealRun`, `sealMatrix`, `sealReport`, `OUTCOME_VOCABULARY`, `checkItemDistinctness` | Benchmark / Run / Matrix / Report sealing, named checks, the frozen six-value outcome vocabulary. The product **never redefines these records**; product state stores digests and bytes references (§4.5) |
+| `@jinn-network/benchmarking-run` | `planRun`, `quoteRun`, `launchAndWatch`, `resumeRun`, `assembleMatrix`, `verifyMatrix` | The run procedure. The product implements **no orchestration of its own** |
+| `@jinn-network/benchmarking-aggregate` | `produceReport`, `verifyReport`, `deriveDisclosures`, `BENCHMARKING_METHOD_REGISTRY` | Method registry, Report production/verification, statistics. The product implements **no statistic** (the policy-optimization R3 ruling, adopted verbatim) |
+| `@jinn-network/benchmarking-local` | `localAssemblyPorts`, `localPinningObservation`, `localInputScope`, `localCloseBoundary`, `integrityTierFromReceipt` | Local venue ports (assembly ports, pinning bridge, admission, scope) — the strongest currently implemented backend; M1 runs on it |
+| `@jinn-network/benchmarking-interop` | `importSweBench`, `defineBenchmark`, `importInspectEvals`, `exportEvalLog`, `exportCroissant`, `exportStaticBundle` | Import/export seams (SWE-bench, Inspect, Croissant, static bundle) |
+| `@jinn-network/task-execution-protocol` | `sealTask`, `sealSubmission`, `sealDelivery`, `deriveAttemptUri`, `foldObservations` | Task/Submission/Delivery sealing, attempt identity, observation fold |
+| `@jinn-network/task-execution-profiles` | `evaluateVerdictRule`, `sealEvaluationSpec`, `parseEvaluationSpec`, `EvaluationSpecSchema`, `VerdictRuleSchema` | EvaluationSpecs and verdict-rule reduction — where "what counts as success" is defined |
+| `@jinn-network/task-execution-backend` | `TaskExecutionBackend`, `BackendCapabilities`, `verifyPreclaim`, `TaskExecutionError` | The frozen backend contract the venues implement |
+| `@jinn-network/task-execution-backend-local` | `makeLocalTaskExecutionBackend`, `LocalTaskExecutionBackend`, `assembleCapabilities`, `projectObservations` | The local execution backend (embedded) |
+| `@jinn-network/task-execution-launchers` | `claudeCodeLauncher`, `codexLauncher`, `hermesLauncher`, `cursorLauncher`, `LauncherContract` | Harness launchers for local execution |
+| `@jinn-network/task-execution-evaluation-harness` | `runEvaluationHarness`, `evaluationLauncher`, `EvaluatorAdapter`, `defineEvaluatorRegistration` | Evaluation dispatch on the local venue |
+| `@jinn-network/task-execution-evaluator-adapters` | `createEvaluatorDeployment`, `createSweRebenchEvaluatorAdapter`, `parseSweRebenchReport`, `createSweRebenchEvaluatorRegistration`, `createPredictionEvaluatorRegistration` | Shipped evaluator adapters |
+| `@jinn-network/trust-core` | `sealSignedRecord`, `sealDsseEnvelope`, `parseDsseEnvelope`, `verifyEnvelopeBinding`, `DsseSigner` | DSSE signing for Reports; envelope binding verification |
+| `@jinn-network/benchmarking-marketplace` | `runOnMarketplace`, `marketplaceAssemblyPorts`, `marketplaceCloseBoundary`, `enforceAnchoredOrderingGate` — consumed **only behind the venue seam** (§7) | Marketplace venue; **no marketplace machinery re-implemented** |
+
+**Explicit refusals** (each is a boundary the source-boundary guard and
+review enforce):
+
+- **No deep imports** — public package entries only.
+- **No copied platform code** — no vendored record-kind or capability source
+  (the extraction-gate item 8 discipline, honored from day one; §11).
+- **No redefinition of Benchmark, Run, Matrix, or Report** — the four record
+  kinds and their frozen interfaces (benchmarking design §14) are consumed as
+  sealed bytes; the product adds no fields, no variants, no alternates.
+- **No aggregates in matrices** — the matrix never contains a conclusion
+  (benchmarking design tenet 3); the product never smuggles a score, rate, or
+  winner into any matrix-adjacent surface it produces.
+- **No new statistics** — every number in a report comes from a named,
+  versioned registry method via `@jinn-network/benchmarking-aggregate`.
+- **No `@jinn-network/core` and no `@jinn-network/sdk`** —
+  catalog-classified legacy/deprecated; not imported.
+
+## 4. Domain model
+
+Per the repo frontend rules (CLAUDE.md §Frontends), every component is
+described on four axes — **State**, **State messages**, **Collections**,
+**Actions** — and that discipline applies product-wide: the operations
+library (§5.1) is the single place these axes are defined, and every surface
+renders them. A component with zero entries on an axis says so; silence is
+ambiguous.
+
+### 4.1 Lifecycle state machine
+
+One product state machine, named states:
+
+> **draft → (preview\*) → quoted → locked → running → closed → reported →
+> published-bundle**
+
+`preview*` is a repeatable operation available before lock; it never advances
+the lifecycle (§7.2). **Lock = sealing the Run record** — the platform law
+that identity is the pre-registration (benchmarking design §7.2); after lock
+the official method is immutable by construction, and the product refuses
+draft mutation of a locked benchmark run.
+
+| From | Operation | To | Principal | Notes |
+|---|---|---|---|---|
+| — | `create` | draft | sponsor or delegated agent | new workspace draft; audit entry |
+| draft | `edit` | draft | sponsor or delegated agent | validated on write; typed errors on invalid input |
+| draft, quoted | `preview` | (unchanged) | sponsor or delegated agent | disclosed rehearsal (§7.2); produces a preview artifact, never official results (A5) |
+| draft | `quote` | quoted | sponsor or delegated agent | side-effect-free validate + price via `quoteRun` + venue facts; nothing signs, posts, or spends |
+| quoted | `edit` | draft | sponsor or delegated agent | any draft mutation invalidates the quote (A2) |
+| quoted | `lock` | locked | either, **approval-gated** | seals the Run record; refuses if validation fails; irreversible |
+| locked | `launch` | running | either, **approval-gated** (spend authority on paid venues) | dispatch via `launchAndWatch` on the configured venue |
+| running | `watch` / `resume` | running | sponsor or delegated agent | crash-safe resumption via the records' cell idempotency keys; read-only plus re-dispatch per the pre-registered replacement policy |
+| running | `cancel` | closed | either, **approval-gated** | drains to a boundary; the matrix still assembles, `runOutcome: cancelled` — cancellation is accounted, never erased |
+| running | close boundary reached | closed | (system) | `assembleMatrix`; exactly one entry per expected cell |
+| closed | `report` | reported | either, **approval-gated** | `produceReport`; DSSE-signed interpretation (A6) |
+| reported | `publish` | published-bundle | either, **approval-gated** | emits the claim package and report bundle (§8.2) |
+
+`inspect` (read any draft, run, record, or artifact) and `verify` (compose
+`verifyMatrix` + `verifyReport`) are non-advancing operations available in
+every state that has their subject.
+
+**There is no product-level "failed" state.** Failures are typed, per-cell,
+and accounted: the six-value outcome vocabulary (`judged | unjudged |
+unscorable | expired | invalidated | excluded`, benchmarking design §8.2)
+plus attrition and `runOutcome: complete | partial | cancelled` live in the
+Matrix; a failed product *operation* returns a typed error and leaves the
+lifecycle state unchanged (§4.3).
+
+### 4.2 Principals and authority
+
+Two principal roles (charter §6):
+
+- **Sponsor** — the human or team owning the comparative question, budget,
+  and publication consequences. May act directly or delegate.
+- **Delegated agent** — an agent operating the product with authority granted
+  by a sponsor. Capability parity is fixed: the agent can perform every
+  lifecycle action a human can, within its granted authority.
+
+Charter §6's five roles collapse deliberately into these two principals: the
+**human supervisor** is a sponsor exercising approval authority (no
+capability requires a supervisor distinct from the sponsor role); **report
+consumers** and **benchmark authors / tooling integrators** act outside the
+workspace and hold no lifecycle authority, so they are audiences and
+suppliers, not principals.
+
+**Approval is a permission policy, not a human-only path** (charter §6): an
+approval-gated operation checks, at the operations boundary, that the acting
+principal holds the required authority (lock, spend, cancel, publish); once
+the authority exists, an agent may execute the approved action. There is no
+capability that exists only behind a GUI click (§5.4). Default authority
+mapping — consequential operations (`lock`, `launch`, `cancel`, `publish`)
+require explicit grants; read operations require workspace membership only —
+is a v1 policy choice (A3). Concierge assistance (charter §5) acts through
+the same operations, permissions, and audit journal; there is no hidden
+human-only control plane.
+
+### 4.3 Typed error posture
+
+Every operation returns either a typed result or a typed error — never a
+silent fallback, never free-text-only failure. Error categories (v1):
+`validation` (draft content invalid), `illegal-transition` (operation not
+valid in the current state), `authority` (principal lacks the required
+grant), `venue-unavailable` / `venue-unverifiable` (§7.3), `record-integrity`
+(sealed-bytes digest mismatch on read), `execution` (backend-reported
+failure, carried through with the backend's own typing). Errors are
+machine-readable envelopes on the library surface, `--json` envelopes plus
+distinct exit codes on the CLI (§5.2), and rendered error states with retry
+guidance in the GUI.
+
+### 4.4 Audit journal
+
+One append-only JSONL journal per workspace. Every consequential operation
+(anything that creates, mutates, seals, spends, cancels, or publishes)
+appends one attributed entry:
+`{ at, actor, action, subject, inputsDigest, outcome }` — actor is the
+principal identity (sponsor or specific delegated agent), `inputsDigest` a
+digest of the operation inputs, `outcome` `ok` or the typed error code.
+Entries are never rewritten or deleted. The journal is **product state**, not
+a sealed record — it makes agent operation supervisable and concierge work
+attributable (charter §5, §7); it claims no protocol semantics.
+
+### 4.5 Workspace layout: mutable drafts vs sealed bytes
+
+The workspace is file-based with atomic writes (temp-file + rename). Two
+storage disciplines, never mixed:
+
+- **Mutable drafts** — the product's own documents (task-set selection,
+  arms, evaluation choice, assurance preset, policy, budget, notes), plain
+  JSON, freely edited before lock.
+- **Sealed bytes** — every sealed record the product touches (Benchmark,
+  Run, Matrix, Report, Tasks, EvaluationSpecs) is stored as its **exact
+  bytes** and addressed by digest. Product state references records **by
+  digest only**; nothing is ever re-canonicalized (the platform's exactness
+  property).
+
+Plus derived **artifacts** (preview outputs, results JSON, claim packages,
+report bundles) and the journal (§4.4). No SQLite in v1. Exact directory
+naming is implementation detail (A4).
+
+### 4.6 Components (four axes)
+
+| Component | State | State messages | Collections | Actions |
+|---|---|---|---|---|
+| **Workspace** | path; storage version; draft/run counts | `record-integrity` warning when stored sealed bytes fail digest check (informational; affected reads refuse with typed error) | drafts; runs; sealed records (by digest); artifacts; journal entries | `init` (workspace creation — distinct from the lifecycle `create` that starts a draft, §4.1). No other actions |
+| **Benchmark draft** | lifecycle state (`draft`/`quoted`); validation status; selected task set (digests); arms with pinning; assurance preset (§6); policy (replicates, `closeAt`, replacement, budget); venue choice | per-field validation messages, each mapping to the `edit` that resolves it; "quote invalidated by edit" (A2) | items (task digests); arms; preview artifacts; prior quotes | `edit`, `preview`, `quote`, `lock` (gated) |
+| **Quote** | expected cell count; per-cell and total price (paid venues) or time/disk estimates (local); hard-cap check; coverage facts; venue guarantee summary (§7.1) | "venue unavailable / degraded" (§7.3), mapping to venue re-selection | line items per arm × items × replicates | none of its own — a quote is a read; `lock` acts on the draft |
+| **Official run** | lifecycle state (`locked`/`running`/`closed`); Run record digest; per-cell live status (dispatched/claimed/delivered/judged); spend against cap | infra failures shown as infra (`unscorable` ≠ fail); cap-approach warning → `cancel`; stall notice → `resume` | cells (with dispatch lineage); live events | `launch` (gated), `watch`, `resume`, `cancel` (gated) |
+| **Results (Matrix)** | Matrix record digest; `runOutcome`; completeness `{expected, judged, floor}`; attrition per arm; asymmetry flags; per-axis verification states | asymmetry flag raised (informational — a validity threat surfaced, never absorbed) | cells with the six-value outcome, verdicts, dissent, cost, latency; exclusions | `inspect`, `verify`, `report` (gated), exports (EvalLog, Croissant, static bundle) |
+| **Report** | Report record digest; method id/version/parameters; `preregistered` flag; disclosures block; signature status | "recompute divergence" from `verify` (fail-loud) | subject matrices; conflicted-cell list; limitations | `inspect`, `verify`, `publish` (gated) |
+| **Claim package** | bundle version; digest links to report/matrix/run/benchmark; scope statement | none — informational asset | derived assets (headline, snippet, machine-readable claim) | `publish` produces it; `inspect` |
+| **Audit journal** | entry count; last entry | none | attributed entries (§4.4), newest last, append-only | none — read-only; appends happen only as a side effect of operations |
+| **Principals & authority** | principals with their grants; approval policy in force | "operation awaiting authority" — maps to a sponsor grant action | grants; pending approvals | grant / revoke authority (sponsor); approve pending operation (holder of the approval authority) |
+
+## 5. Surfaces: one state machine, two peer surfaces
+
+### 5.1 The operations library is the single trusted boundary
+
+`packages/benchmark-product/core` exports an **operations library** that owns
+the product state machine. All validation, authority checks, lifecycle
+transitions, and audit-journal appends live at this boundary — never in a
+surface. Surfaces are clients; a surface that bypasses the library is a bug
+by definition.
+
+### 5.2 Agent surface (M1): the library API plus a CLI
+
+The CLI is the **complete agent surface** from milestone M1 on. It follows
+the policy-optimization CLI structure (`src/cli/bin.ts` / `main.ts` /
+hand-written total `args.ts`, injected context) and adds the machine-surface
+requirements this product's agent-native contract demands: **`--json` on
+every verb**, typed error envelopes, distinct exit codes. Every artifact an agent needs is
+machine-readable on disk: results JSON, claim package, report bundle. A
+connected agent can determine — without visual interpretation — the current
+state, valid next operations, required inputs and validation errors, quote
+and authority constraints, long-running status, and result/report/asset
+identities (charter §7).
+
+### 5.3 Human surface (M3): a GUI client of the same library
+
+`packages/benchmark-product/web` is a Next.js + shadcn/ui application (per
+CLAUDE.md §Frontends, including a four-axis app spec alongside its source)
+that imports the operations library server-side. **No second
+implementation** of any operation, and **no HTTP API in v1** — the GUI calls
+the library in-process (deferred decision, §5.5).
+
+### 5.4 Capability parity, proven
+
+Commitment: every meaningful human capability has an agent-accessible
+equivalent over the same product state (charter §1, §7). Proof: a
+**generated capability matrix** (CLI verb ↔ GUI action ↔ library operation)
+checked by test from M3 on — a GUI action with no CLI/library row fails CI.
+Until M3 exists, the CLI *is* the complete surface, so parity holds by
+construction.
+
+### 5.5 Deferred surfaces (decisions recorded)
+
+- **MCP wrapper: deferred.** If added, the operator-server
+  `confirm: true` / `mcp_preview` house pattern is the template.
+- **HTTP API: deferred.** v1 surfaces are the library and the CLI; the GUI
+  consumes the library directly.
+
+## 6. Evaluation assurance presets
+
+The product separates two questions the customer answers independently
+(charter §8): *what counts as success* (the Task's sealed EvaluationSpec;
+`evaluateVerdictRule` territory) and *how a delivery becomes a verdict* (the
+assurance preset). Presets are **product policy over platform primitives**
+(program plan §4.5), mapped exactly:
+
+| Preset (product label) | Platform mapping |
+|---|---|
+| Direct check | `policy.independence: disclosed`, `evaluation.minVerdicts: 1`, method `verdictRule: sole` |
+| Separate evaluator | `independence: gating`, `minVerdicts: 1`, `distinctEvaluator: true`, `verdictRule: sole` |
+| Evaluator panel | `independence: gating`, `minVerdicts: N≥2`, `verdictRule: majority` (declared reduction) |
+| Strict agreement | `independence: gating`, `minVerdicts: N≥2`, `verdictRule: unanimous` (disagreement ⇒ conflicted, dropped-with-report) |
+
+Disclosure rules, non-negotiable:
+
+- **Preset names are product policy, never new protocol terms.** No record,
+  check, or platform interface ever learns a preset name.
+- **Every report discloses the underlying primitives satisfied** — the
+  independence mode, verdict counts, distinctness results, and reduction rule
+  actually applied (the Report's required `disclosures` block, benchmarking
+  design §9.1) — not the preset label alone.
+- **Dissent is retained.** Dissenting verdicts remain referenced in the
+  matrix and visible in the report; conflicted-cell counts and cellKeys
+  always appear in results (benchmarking design §9.2).
+- **Multiple verdicts do not prove truth.** Every report repeats the
+  residual: the stack proves *agent-distinctness*, not real-world
+  *party-independence* (charter §8; §8.1 below).
+
+## 7. Venue honesty
+
+The product presents only the guarantees the selected venue actually
+supports (charter §10). Venue facts appear at the decision points they
+affect: quote, lock, and in every produced report.
+
+### 7.1 Local vs marketplace guarantees
+
+Compiled from the benchmarking design's backend-profile table (§13) and
+pre-registration legs (§7.2); the "what a run proves" row summarizes the
+design's venue-strength statements (§3, §5, §12.2). The design is
+authoritative.
+
+| Concern | Local venue | Marketplace venue |
+|---|---|---|
+| Pre-registration strength | leg (a) structural + leg (c) append-order only — **no guarantee against the run owner**; retro-registration is possible | legs (a)+(b)+(c): anchored ordering, trust-bearing against the owner |
+| What a run proves | reproducibility and internal discipline — **not owner-honesty** | pre-registered method, completeness checkable against the owner |
+| Run pinning | `enforced` (admission gate + digest-verified materialization is a valid `match` source, benchmarking design §8.1 as amended 2026-08-03) | `attested`; verified after the fact against evidence; mismatch ⇒ `invalidated` |
+| Pinning verification today | per-axis `match` reachable | per-axis **`unverifiable` until the re-homed enforcement legs (ex-#2040/#2041) land** — disclosed, never hidden |
+| Budget / escrow | absent | required (`perCell`, `hardCap`); escrow per binding |
+| Close boundary | `closeAt` timestamp | `closeAt` + first `finalized` block at/after it (anchor required) |
+| Cost fields | `reported` (evidence resource observations) | `settled` where available, else `reported` |
+| Task privacy | items private until the owner publishes | items public at post time |
+| Venue label | `self-run` | `open-competition` (self-declared) |
+
+Product copy states the local venue's limit **in the product and in every
+report produced from a local run**: a local run's pre-registration is a
+discipline, not a proof against its own owner.
+
+### 7.2 Preview = disclosed rehearsal
+
+A **preview** is an unregistered local run: clearly labeled as a rehearsal
+everywhere it appears, it produces disposable artifacts, and it **never
+enters official results**. When any preview of a benchmark preceded the
+official run, the official report's limitations name that fact. This is the
+benchmarking design's rehearsal residual (§12.2) **disclosed rather than
+hidden**: rehearsal cannot be eliminated; the product's posture is to make
+its own rehearsal mechanism honest instead of pretending it does not exist.
+
+### 7.3 Marketplace availability and verifiability states
+
+The marketplace venue is presented through explicit, typed states — never
+silently degraded:
+
+- **`unavailable`** — the requester prerequisites the venue needs are not
+  yet built: the supply-awareness read (user journeys design §9 item B0b)
+  and artifact retrieval into the workspace (item B0c) — tracked as #2447
+  and #2448 per the program plan (§2). While unbuilt, the product says the
+  venue is unavailable and why; it does not absorb the gap.
+- **`attested`** — the venue accepted a constraint as a claim to be verified
+  after the fact (pinning posture, §7.1).
+- **`unverifiable`** — a pinning axis whose enforcement leg has not landed
+  (ex-#2040/#2041); reports carry per-axis `unverifiable` counts in their
+  disclosures rather than scoring unverified configurations silently.
+
+These are inherited platform states, surfaced honestly; closing them is
+platform work, out of this product's scope.
+
+## 8. Trust and claim boundaries
+
+### 8.1 What the product must not imply
+
+Carried from charter §10, binding on every product surface, report, and
+derived asset. The product must not imply:
+
+- that distinct agent identities prove distinct real-world parties;
+- that an evaluator majority is necessarily correct;
+- that local execution proves honesty against the run owner;
+- that every configured runtime property was independently enforced;
+- that network execution is confidential;
+- that every benchmark is cheaper on the network;
+- that a report is an official certification or universal ranking;
+- that the branded product is required to verify the underlying result.
+
+Guarantees, observations, estimates, attestations, and unverifiable claims
+are visually, linguistically, and structurally distinct wherever they appear.
+
+### 8.2 Publication integrity for derived assets
+
+Marketability never weakens disclosure (charter §10). Every derived asset —
+headline, social card, badge, README snippet, machine-readable claim — must:
+
+- identify the configuration and benchmark scope clearly enough to avoid a
+  materially broader claim;
+- preserve or link directly to the relevant limitations;
+- link to the canonical report and its verification path;
+- not hide missing cells, conflicts, or adverse results that materially
+  change the interpretation;
+- remain attributable to the report version (digest) it derives from.
+
+The **claim package** (§4.6) is the mechanical form of this rule: its assets
+embed the scope statement and digest-link to the full report, matrix, run,
+and benchmark records — evidence that outlives the product (charter §2).
+
+## 9. Branding isolation
+
+`packages/benchmark-product/core/src/branding.ts` exports a single
+`ProductBranding` object — display name (placeholder), tagline, and the
+factual attribution line *"Runs on Jinn benchmarking records — independently
+verifiable"* — consumed everywhere a product name or attribution appears
+(CLI banner, GUI chrome, report presentation, claim assets). Rules:
+
+- **Placeholder display-name posture:** the codename is plainly a
+  placeholder; a later branding engagement replaces the display name by
+  editing this one module, with no architectural change (A1).
+- **No Jinn lexicon, sigils, palette, or mythology** anywhere in product
+  surfaces. The product's visual identity is its own (and unset in v1).
+- **Factual attribution only**, and only in about/verification contexts —
+  never in the product name, primary navigation, category explanation, or
+  hero copy (charter §1, §11).
+
+## 10. Non-goals
+
+Inherited from charter §12 and the benchmarking design §19, plus the program
+plan's REJECT list (§4.8). The product is not, and does not build:
+
+- an official **leaderboard** or benchmark authority (no ranking record
+  beyond the Report);
+- a log/transcript **viewer** (Inspect's territory — `exportEvalLog` and
+  `inspect view` are the seam);
+- a task-**authoring studio** or universal evaluation development
+  environment (simple native task setup only; compose Inspect for advanced
+  authoring);
+- **marketplace matching** — coverage, quotes, dispatch, settlement stay
+  with the marketplace;
+- an **operator console** — harness/credential setup, machine readiness,
+  and safe execution stay with the operator product;
+- **billing in v1** — funding, credits, service fees, fiat display, and
+  settlement-asset handling are deferred;
+- a **confidential-execution tier** (public-first posture; charter §5);
+- a general agent-orchestration, observability, or tracing platform; a
+  model/agent hosting platform; a universal sandbox service; a provider
+  credential proxy or inference reseller; a certification body; a marketing
+  automation suite; a branded frontend for the underlying Jinn stack.
+
+And, as consumption-contract refusals restated (§3): nothing that forks
+record semantics, adds aggregates to matrices, or presents assurance preset
+names as protocol terms.
+
+## 11. Extraction-readiness posture
+
+Extraction is a consequence of readiness, never a goal (platform
+architecture §6), and a green gate is never itself authorization to move —
+extraction would require its own decision record. From day one the tree
+behaves so the gate is later mechanical:
+
+- **Own CI**: the `benchmark-product-ci` workflow gates the family; the tree
+  never rides another tree's gate.
+- **No cross-tree source reach-ins**: platform dependencies are consumed as
+  ordinary package dependencies (workspace `portal:` links until the stable
+  publish path lands — gate item 1 is honestly unsatisfiable repo-wide until
+  then, per platform architecture §6); never `src/`-path imports into
+  sibling trees.
+- **No vendored platform code** (gate item 8): platform behavior resolves
+  only to the canonical packages; the `packages/autopilot` copy is the named
+  counterexample this rule exists to prevent.
+- **Guard trio wired into CI**: package-inventory and packed-types guards
+  follow the `packages/benchmarking` family pattern; the allowlist
+  source-boundary guard (with positive controls) is cloned from the
+  policy-optimization guard (program plan §4.1).
+- **No tier-1–3 references to it**: nothing in tiers 1–3 imports the
+  product, and no tier-1–3 kit, guard, or fixture references it (§2) — kept
+  true by the same guards.
+- **Catalog hygiene**: authority documents, gate name, and boundary policy
+  registered so `generate-architecture.mjs --check` stays green.
+
+## 12. Reversible assumptions and deferred decisions
+
+Labeled assumptions made by this spec where the program plan left a genuine
+gap. Each is reversible without architectural change:
+
+- **A1 — codename and display name.** `benchmark-product` /
+  `@jinn-network/benchmark-product-*` internal codename; placeholder display
+  name in `branding.ts` (program plan §4.1's own labeled assumption,
+  restated). A branding engagement replaces the display name; renames at
+  extraction are mechanical.
+- **A2 — quote invalidation.** Any `edit` of a quoted draft returns it to
+  `draft` and invalidates the quote (a quote always describes the exact
+  draft it priced). Chosen here; the program plan names the states but not
+  this rule.
+- **A3 — default authority mapping.** `lock`, `launch`, `cancel`, `publish`
+  require explicit authority grants; read operations require workspace
+  membership. Policy defaults are v1 product policy, refined in BP-10.
+- **A4 — workspace directory naming.** The drafts/sealed/artifacts/journal
+  split is normative (§4.5); exact directory and file names are
+  implementation detail for BP-10.
+- **A5 — preview availability.** `preview` is available in `draft` and
+  `quoted` and never advances the lifecycle; the program plan's `(preview*)`
+  notation is formalized as a repeatable non-advancing operation.
+- **A6 — report authorship identity.** The Report's DSSE author identity is
+  the acting principal's signing identity as configured in the workspace;
+  the exact key-management story lands with BP-13.
+- **A7 — audit-entry shape.** The journal entry shape (§4.4) adds a
+  `subject` field and names the timestamp `at`, refining the program plan's
+  descriptive list (actor, action, timestamp, inputs digest, outcome);
+  field-level shape settles in BP-10.
+- **A8 — typed error taxonomy.** The §4.3 error categories are a v1
+  starting set, refined per operation in BP-10; the posture (typed results
+  or typed errors, never silent fallbacks) is fixed.
+
+Deferred decisions recorded (not assumptions — explicitly deferred by the
+program plan §4.4/§4.8): MCP surface; HTTP API; billing/funding/fiat;
+confidential modes; challenger-run mechanics beyond clone/rerun;
+leaderboards; marketplace-venue GUI depth. Charter §15's open items (product
+name, agent authentication details, Inspect integration depth, report
+hosting model, and others) remain open at the charter level.
+
+## 13. Provenance
+
+Authored by packet BP-00 of the standalone benchmarking product
+implementation program (program plan §5, ledger §8), in a local session with
+no remote side effects. Decision sources, in authority order: the product
+charter v0.2 (product intent), the program plan §3–§4 (fixed product and
+architecture decisions — this spec formalizes them and reopens none), the
+benchmarking application design (records and capabilities), and the platform
+architecture (tier law, inclusion test, extraction gate). Export names in §3
+were verified against each package's public entry in this worktree on
+2026-08-05. Status remains `draft` until human review; per the program
+plan's merge-readiness caveats (§9), nothing here is merge-ready until an
+owning GitHub Issue exists.
