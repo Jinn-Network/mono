@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://jinn.network/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
+  "$id": "https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
   "title": "Jinn Evidence Repository OCI Manifest",
   "description": "Canonical OCI Image Manifest serialization for one exact Jinn evidence record or artifact.",
   "oneOf": [
@@ -83,7 +83,7 @@
           ],
           "properties": {
             "network.jinn.evidence.profile": {
-              "const": "https://jinn.network/profiles/evidence-repository-oci/1.0"
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
             }
           }
         }
@@ -168,7 +168,7 @@
           ],
           "properties": {
             "network.jinn.evidence.profile": {
-              "const": "https://jinn.network/profiles/evidence-repository-oci/1.0"
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
             }
           }
         }
@@ -253,7 +253,7 @@
           ],
           "properties": {
             "network.jinn.evidence.profile": {
-              "const": "https://jinn.network/profiles/evidence-repository-oci/1.0"
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
             }
           }
         }
@@ -338,7 +338,7 @@
           ],
           "properties": {
             "network.jinn.evidence.profile": {
-              "const": "https://jinn.network/profiles/evidence-repository-oci/1.0"
+              "const": "https://spec.jinn.network/profiles/evidence-repository-oci/v1"
             }
           }
         }

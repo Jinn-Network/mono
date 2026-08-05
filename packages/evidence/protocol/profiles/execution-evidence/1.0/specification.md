@@ -1,6 +1,6 @@
 # Jinn Execution Evidence Profile 1.0
 
-**Profile URI:** `https://jinn.network/profiles/execution-evidence/1.0`
+**Profile URI:** `https://spec.jinn.network/profiles/execution-evidence/v1`
 
 **Profile version:** `1.0.0`
 
@@ -37,13 +37,13 @@ Task and Execution entities MAY carry `identifier` values. A typed identifier re
 `PropertyValue` whose `propertyID` is an absolute IRI naming the identifier scheme and whose
 `value` uses that scheme's native representation. The stable Jinn scheme-IRI spellings are:
 
-- `https://jinn.network/schemes/did-pkh` for `did:pkh` identifiers;
-- `https://jinn.network/schemes/did-key` for `did:key` identifiers;
-- `https://jinn.network/schemes/caip-19` for CAIP-19 identifiers;
-- `https://jinn.network/schemes/github` for GitHub identifiers;
-- `https://jinn.network/schemes/task-digest` for a Task's lowercase
+- `https://spec.jinn.network/schemes/did-pkh` for `did:pkh` identifiers;
+- `https://spec.jinn.network/schemes/did-key` for `did:key` identifiers;
+- `https://spec.jinn.network/schemes/caip-19` for CAIP-19 identifiers;
+- `https://spec.jinn.network/schemes/github` for GitHub identifiers;
+- `https://spec.jinn.network/schemes/task-digest` for a Task's lowercase
   `sha256:<64 lowercase hexadecimal digits>` digest; and
-- `https://jinn.network/schemes/task-profile-uri` for the absolute task-profile URI committed by
+- `https://spec.jinn.network/schemes/task-profile-uri` for the absolute task-profile URI committed by
   the Task.
 
 These identifiers corroborate cross-record identity. They do not replace the exact Task artifact,
@@ -71,7 +71,7 @@ MUST include:
 - `https://w3id.org/ro/crate/1.3/context`;
 - `https://w3id.org/ro/terms/workflow-run/context`;
 - `prov` mapped to `http://www.w3.org/ns/prov#`; and
-- `jinn` mapped to `https://jinn.network/terms/`.
+- `jinn` mapped to `https://spec.jinn.network/terms/`.
 
 Every graph entity MUST have one unique string `@id` and one or more string `@type` values.
 Relationships between graph entities MUST use reference objects containing `@id`; nested entity
@@ -198,7 +198,7 @@ The envelope MUST be a DSSE object with:
 The decoded payload MUST be valid UTF-8 JSON and an in-toto Statement v1. The Statement MUST:
 
 - use `_type` `https://in-toto.io/Statement/v1`;
-- use `predicateType` `https://jinn.network/attestations/result-evaluation/v1`;
+- use `predicateType` `https://spec.jinn.network/attestations/result-evaluation/v1`;
 - have unique subject names and lowercase SHA-256 digests;
 - contain the exact Task subject and every exact Result subject covered by the verdict; and
 - bind those names through `predicate.taskSubject` and `predicate.resultSubjects`.
@@ -212,7 +212,7 @@ carry SHA-256.
 
 Execution Verification uses the same DSSE and in-toto requirements. Its Statement MUST:
 
-- use `predicateType` `https://jinn.network/attestations/execution-verification/v1`;
+- use `predicateType` `https://spec.jinn.network/attestations/execution-verification/v1`;
 - have exactly one subject named `ro-crate-metadata.json` with its SHA-256 digest; and
 - contain `predicate.executionId`, `verifiedAt`, `verifier.id`, and `verdict`.
 

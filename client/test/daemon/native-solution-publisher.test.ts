@@ -100,8 +100,8 @@ describe('native solution public source', () => {
       page: createHash('sha256').update(pageBytes).digest('hex'),
       head: createHash('sha256').update(headBytes).digest('hex'),
     }).toEqual({
-      page: '88d2cd998efbf2e3174b14a7a6b297a9ed477104d67ad3f4c236660f738b3d4e',
-      head: 'ce12ad73a8031ba4006359414c572550d603b6605f726610abb87c7be1557320',
+      page: '2f7ef852c2dc1b8332c74bccbbcd8fe0e2a4e992bc8582d8c9aa756aab17e016',
+      head: '3cc9dcd7f620b93a79da52ddd1e2ceb12ddea61a315a38e931ca204980d8a1ba',
     });
   });
 
@@ -319,7 +319,7 @@ describe('native solution public source', () => {
       '0000000000000001',
     ));
     expect(createHash('sha256').update(pageBytes).digest('hex'))
-      .toBe('88d2cd998efbf2e3174b14a7a6b297a9ed477104d67ad3f4c236660f738b3d4e');
+      .toBe('2f7ef852c2dc1b8332c74bccbbcd8fe0e2a4e992bc8582d8c9aa756aab17e016');
   });
 
   it('takes over only an expired matching owner lease whose PID is dead', async () => {

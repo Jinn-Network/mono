@@ -62,12 +62,12 @@ describe("sequence discipline", () => {
 
 describe("assertRecordKindUri", () => {
   it("accepts a conforming record-kind URI", () => {
-    expect(() => assertRecordKindUri("https://jinn.network/records/task/1.0")).not.toThrow();
+    expect(() => assertRecordKindUri("https://spec.jinn.network/records/task/v1")).not.toThrow();
   });
 
   it("throws on a malformed record-kind URI", () => {
-    expect(() => assertRecordKindUri("https://jinn.network/records/Task/1.0")).toThrow();
-    expect(() => assertRecordKindUri("https://jinn.network/records/task")).toThrow();
+    expect(() => assertRecordKindUri("https://spec.jinn.network/records/Task/v1")).toThrow();
+    expect(() => assertRecordKindUri("https://spec.jinn.network/records/task")).toThrow();
     expect(() => assertRecordKindUri("not-a-uri")).toThrow();
   });
 

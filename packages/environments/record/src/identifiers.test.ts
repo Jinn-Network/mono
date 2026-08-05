@@ -17,7 +17,7 @@ const RECORD_KIND_GRAMMAR = /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z0
 
 describe("identifiers", () => {
   test("the record kind is the exact string the design pins", () => {
-    expect(ENVIRONMENT_RECORD_KIND).toBe("https://jinn.network/records/environment/1.0");
+    expect(ENVIRONMENT_RECORD_KIND).toBe("https://spec.jinn.network/records/environment/v1");
   });
 
   test("the record kind conforms to the discovery record-kind URI grammar", () => {
@@ -34,13 +34,16 @@ describe("identifiers", () => {
     expect(ENVIRONMENT_RECORD_MEDIA_TYPE).toBe("application/vnd.jinn.environment.v1+json");
   });
 
-  test("the published schema id is derived from the record kind", () => {
-    expect(ENVIRONMENT_RECORD_SCHEMA_ID).toBe(`${ENVIRONMENT_RECORD_KIND}/schema`);
+  // Re-homed out of the `records/` prefix (DR-2026-08-04): a record-kind URI must never be a
+  // directory prefix of a served doc, so this no longer hangs off the record kind.
+  test("the published schema id is an independent schemas/<kind>/v<major> identifier", () => {
+    expect(ENVIRONMENT_RECORD_SCHEMA_ID).toBe("https://spec.jinn.network/schemas/environment/v1");
   });
 
-  // The mirrored grammar must already accept the spelling the re-seal will mint, because
-  // C1's wave flips this package's constants and nothing else may need to move with them.
-  // No constant here uses the canonical arm yet, so only this asserts it.
+  // The mirrored grammar dual-accepts both the canonical re-seal spelling (now what the kind
+  // constant above is pinned to) and the legacy spelling (still recognized during the
+  // transition window per DR-2026-08-04). Component C2 narrows this to the canonical arm once
+  // the re-seal has landed.
   test("the mirrored grammar accepts the canonical re-seal spelling", () => {
     expect("https://spec.jinn.network/records/environment/v1").toMatch(RECORD_KIND_GRAMMAR);
     expect("https://spec.jinn.network/records/environment/v2").toMatch(RECORD_KIND_GRAMMAR);

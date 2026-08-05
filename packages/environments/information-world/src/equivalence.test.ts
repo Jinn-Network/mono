@@ -15,7 +15,7 @@ import { informationWorldRecordDigest } from "./hashing.js";
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 const shared = {
-  kind: "https://jinn.network/records/information-world/1.0",
+  kind: "https://spec.jinn.network/records/information-world/v1",
   requestKeyPolicy: {
     version: "irk1",
     headerSubset: ["accept", "content-type"],

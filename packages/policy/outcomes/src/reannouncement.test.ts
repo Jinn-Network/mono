@@ -50,7 +50,7 @@ function baseObservation(): PolicyOutcomeObservation {
     observedAt: "2026-08-05T00:00:00Z",
     attribution: "urn:jinn:agent:solver-a",
     ref: {
-      source: { agent: "https://jinn.network/agents/projector", name: "base-marketplace" },
+      source: { agent: "https://spec.jinn.network/agents/projector", name: "base-marketplace" },
       entry: `sha256:${"a".repeat(64)}`,
       announcementId: "ann-primary-001",
       record: SHARED_RECORD_DIGEST,
@@ -64,7 +64,7 @@ function reannounced(primary: PolicyOutcomeObservation): PolicyOutcomeObservatio
   return {
     ...primary,
     ref: {
-      source: { agent: "https://jinn.network/agents/mirror-projector", name: "secondary-mirror" },
+      source: { agent: "https://spec.jinn.network/agents/mirror-projector", name: "secondary-mirror" },
       entry: `sha256:${"d".repeat(64)}`,
       announcementId: "ann-secondary-001",
       record: SHARED_RECORD_DIGEST, // same underlying record content -- the SAME verdict

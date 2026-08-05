@@ -11,7 +11,7 @@ const empty: DecodeResult = {
 };
 
 const decoder = (overrides: Partial<TraceDecoder> = {}): TraceDecoder => ({
-  formatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+  formatIri: "https://spec.jinn.network/formats/claude-code-stream-json/v1",
   decoderId: "claude-code-stream-json",
   decoderVersion: "1.0.0",
   decode: () => empty,
@@ -22,28 +22,28 @@ describe("decoder registry", () => {
   test("lists its formats in a stable order regardless of registration order", () => {
     const a = decoder();
     const b = decoder({
-      formatIri: "https://jinn.network/formats/codex-exec-json/v1",
+      formatIri: "https://spec.jinn.network/formats/codex-exec-json/v1",
       decoderId: "codex-exec-json",
     });
     expect(createDecoderRegistry([a, b]).formats).toEqual(
       createDecoderRegistry([b, a]).formats,
     );
     expect(createDecoderRegistry([b, a]).formats).toEqual([
-      "https://jinn.network/formats/claude-code-stream-json/v1",
-      "https://jinn.network/formats/codex-exec-json/v1",
+      "https://spec.jinn.network/formats/claude-code-stream-json/v1",
+      "https://spec.jinn.network/formats/codex-exec-json/v1",
     ]);
   });
 
   test("get returns undefined for an unknown format rather than throwing", () => {
     expect(
-      createDecoderRegistry([decoder()]).get("https://jinn.network/formats/hermes-json/v1"),
+      createDecoderRegistry([decoder()]).get("https://spec.jinn.network/formats/hermes-json/v1"),
     ).toBeUndefined();
   });
 
   test("require is fail-closed on an unknown format", () => {
     expect(() =>
       createDecoderRegistry([decoder()]).require(
-        "https://jinn.network/formats/hermes-json/v1",
+        "https://spec.jinn.network/formats/hermes-json/v1",
       ),
     ).toThrow(UnsupportedFormatError);
   });
@@ -75,6 +75,6 @@ describe("decoder registry", () => {
   test("an empty registry is legal and resolves nothing", () => {
     const registry = createDecoderRegistry([]);
     expect(registry.formats).toEqual([]);
-    expect(registry.get("https://jinn.network/formats/hermes-json/v1")).toBeUndefined();
+    expect(registry.get("https://spec.jinn.network/formats/hermes-json/v1")).toBeUndefined();
   });
 });

@@ -2,8 +2,8 @@
   "input": {
     "op": "allOf",
     "parentDoc": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain/1.0",
       "description": "Parent: extension-tolerant payloadSchema.",
       "payloadSchema": {
         "type": "object",
@@ -17,8 +17,8 @@
       "requirementKeys": []
     },
     "sub": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain-widened/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain-widened/1.0",
       "description": "Adversarial: allOf[0] drops the parent's 'required' obligation instead of copying it exactly.",
       "payloadSchema": {
         "allOf": [
@@ -39,7 +39,7 @@
       "evaluationFamilies": [],
       "requirementKeys": [],
       "extends": {
-        "uri": "https://jinn.network/task-profiles/example-domain/1.0",
+        "uri": "https://spec.jinn.network/task-profiles/example-domain/1.0",
         "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       }
     }

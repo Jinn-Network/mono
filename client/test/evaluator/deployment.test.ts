@@ -14,7 +14,7 @@ describe("createTrustedEvaluatorDeployment", () => {
       signerHandle: "deployment-owned-evaluator-signer",
       evaluationMethod: {
         name: "evaluator-adapters-v1",
-        uri: "https://jinn.network/software/evaluator-adapters/v1",
+        uri: "https://spec.jinn.network/software/evaluator-adapters/v1",
         digest: { sha256: "9".repeat(64) },
       },
       evidenceWriter,

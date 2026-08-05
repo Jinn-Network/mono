@@ -35,7 +35,7 @@ const RECORD_KIND_GRAMMAR = /^https:\/\/(?:spec\.)?jinn\.network\/records\/[a-z0
 
 describe("pinned identifiers", () => {
   test("protocol is the https URL form (Addendum 2026-07-28-c)", () => {
-    expect(BENCHMARKING_PROTOCOL).toBe("https://jinn.network/protocols/benchmarking/1.0");
+    expect(BENCHMARKING_PROTOCOL).toBe("https://spec.jinn.network/protocols/benchmarking/v1");
   });
 
   test("every media type matches the vnd.jinn.benchmarking.*.v1+json shape", () => {
@@ -52,10 +52,10 @@ describe("pinned identifiers", () => {
 
   test("record-kind URIs are pairwise distinct and namespaced under benchmark/benchmark-*", () => {
     expect(new Set(RECORD_KINDS).size).toBe(RECORD_KINDS.length);
-    expect(BENCHMARK_RECORD_KIND).toBe("https://jinn.network/records/benchmark/1.0");
-    expect(RUN_RECORD_KIND).toBe("https://jinn.network/records/benchmark-run/1.0");
-    expect(MATRIX_RECORD_KIND).toBe("https://jinn.network/records/benchmark-matrix/1.0");
-    expect(REPORT_RECORD_KIND).toBe("https://jinn.network/records/benchmark-report/1.0");
+    expect(BENCHMARK_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark/v1");
+    expect(RUN_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-run/v1");
+    expect(MATRIX_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-matrix/v1");
+    expect(REPORT_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v1");
   });
 
   test("assembly procedure id + version are pinned", () => {
@@ -86,9 +86,10 @@ describe("pinned identifiers", () => {
     expect(TRUST_POLICY_PURPOSE_RUN_OWNER).toBe("run-owner");
   });
 
-  // The mirrored grammar must already accept the spelling the re-seal will mint, because
-  // C1's wave flips this package's constants and nothing else may need to move with them.
-  // No constant here uses the canonical arm yet, so only this asserts it.
+  // The mirrored grammar dual-accepts both the canonical re-seal spelling (now what the
+  // constants above are pinned to) and the legacy spelling (still recognized during the
+  // transition window per DR-2026-08-04). Component C2 narrows this to the canonical arm
+  // once the re-seal has landed.
   test("the mirrored grammar accepts the canonical re-seal spelling", () => {
     expect("https://spec.jinn.network/records/benchmark/v1").toMatch(RECORD_KIND_GRAMMAR);
     expect("https://spec.jinn.network/records/benchmark/v2").toMatch(RECORD_KIND_GRAMMAR);

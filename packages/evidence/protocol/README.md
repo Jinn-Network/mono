@@ -49,4 +49,4 @@ yarn pack:smoke
 ```
 
 The profile URI is reserved but is not hosted by this package:
-`https://jinn.network/profiles/execution-evidence/1.0`.
+`https://spec.jinn.network/profiles/execution-evidence/v1`.

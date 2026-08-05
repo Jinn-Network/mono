@@ -4,7 +4,7 @@
   "properties": {
     "protocol": {
       "type": "string",
-      "const": "https://jinn.network/protocols/benchmarking/1.0"
+      "const": "https://spec.jinn.network/protocols/benchmarking/v1"
     },
     "run": {
       "allOf": [

@@ -69,7 +69,7 @@ import {
   validateResultEvaluation,
 } from "@jinn-network/evidence-protocol";
 
-if (EXECUTION_EVIDENCE_PROFILE_URI !== "https://jinn.network/profiles/execution-evidence/1.0") {
+if (EXECUTION_EVIDENCE_PROFILE_URI !== "https://spec.jinn.network/profiles/execution-evidence/v1") {
   throw new Error("root import failed");
 }
 const profile = await readFile(new URL(import.meta.resolve("@jinn-network/evidence-protocol/profiles/execution-evidence/1.0/specification.md")), "utf8");

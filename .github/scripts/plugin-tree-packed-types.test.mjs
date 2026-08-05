@@ -27,7 +27,7 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/evidence-retrieval', join(root, 'packages', 'evidence', 'retrieval')],
   ['@jinn-network/evidence-catalog-sqlite', join(root, 'packages', 'evidence', 'catalog-sqlite')],
   ['@jinn-network/evidence-local-runtime', join(root, 'packages', 'evidence', 'local-runtime')],
-  ['@jinn-network/evidence-trajectory', join(root, 'packages', 'evidence', 'trajectory')],
+  ['@jinn-network/evidence-trace', join(root, 'packages', 'evidence', 'trace')],
   ['@jinn-network/evidence-trace-decode', join(root, 'packages', 'evidence', 'trace-decode')],
   ['@jinn-network/record-discovery-client', join(root, 'packages', 'discovery', 'client')],
 ];

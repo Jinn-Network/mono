@@ -15,7 +15,7 @@ export function makePredictionV1BaselineLauncher(options: LauncherOptions = {}):
     capabilities: () => capabilities([
       { key: "harness", inventory: ["prediction-v1-baseline"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-    ], false, [], ["https://jinn.network/task-profiles/prediction-forecast/1.0"]),
+    ], false, [], ["https://spec.jinn.network/task-profiles/prediction-forecast/1.0"]),
     probe: options.probe ?? (async () => ({ ready: true })),
     plan(view, paths, attempt) {
       requireHarness(view, "prediction-v1-baseline");
@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const input = process.env.JINN_ATTEMPT_INPUT;
 const out = process.env.JINN_ATTEMPT_OUT;
-const PROFILE_URI = 'https://jinn.network/task-profiles/prediction-forecast/1.0';
+const PROFILE_URI = 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0';
 const PROFILE_DIGEST = 'e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937';
 const PROBABILITY = /^(0(\\.\\d+)?|1(\\.0+)?)$/;
 const UTC = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;
@@ -44,7 +44,7 @@ function isPredictionOutput(output) {
     && isObject(properties.submittedAt) && keys(properties.submittedAt) === 'format,type' && properties.submittedAt.type === 'string' && properties.submittedAt.format === 'date-time';
 }
 function isNativeTask(doc) {
-  if (!isObject(doc) || keys(doc) !== 'evaluation,instructions,outputs,payload,profile,protocol' || doc.protocol !== 'https://jinn.network/profiles/task-execution/1.0' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
+  if (!isObject(doc) || keys(doc) !== 'evaluation,instructions,outputs,payload,profile,protocol' || doc.protocol !== 'https://spec.jinn.network/profiles/task-execution/v1' || typeof doc.instructions !== 'string' || doc.instructions.length === 0) return false;
   if (!isObject(doc.profile) || keys(doc.profile) !== 'digest,uri' || doc.profile.uri !== PROFILE_URI || !isObject(doc.profile.digest) || keys(doc.profile.digest) !== 'sha256' || doc.profile.digest.sha256 !== PROFILE_DIGEST) return false;
   if (!isObject(doc.evaluation) || keys(doc.evaluation) !== 'digest,name' || doc.evaluation.name !== 'evaluation-spec.json' || !isObject(doc.evaluation.digest) || keys(doc.evaluation.digest) !== 'sha256' || !/^[0-9a-f]{64}$/.test(doc.evaluation.digest.sha256)) return false;
   if (!Array.isArray(doc.outputs) || doc.outputs.length !== 1 || !isPredictionOutput(doc.outputs[0])) return false;

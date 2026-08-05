@@ -26,7 +26,7 @@ describe("canonical JSON", () => {
 
   test("agrees byte-for-byte with the RFC 8785 reference implementation", () => {
     const value = {
-      kind: "https://jinn.network/records/environment/1.0",
+      kind: "https://spec.jinn.network/records/environment/v1",
       image: { platform: "linux/amd64", manifestDigest: `sha256:${"a".repeat(64)}` },
       invocations: { test: [{ bin: "pytest", args: ["-q"] }] },
     };

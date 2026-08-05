@@ -31,7 +31,7 @@ const SUBMISSION_DSSE_PAYLOAD_TYPE =
 const DELIVERY_DSSE_PAYLOAD_TYPE =
   "application/vnd.jinn.marketplace.executor-binding.v1+json";
 const ADMISSION_RECEIPT_ANNOTATION_URI =
-  "https://jinn.network/annotations/admission-receipt/1.0";
+  "https://spec.jinn.network/annotations/admission-receipt/v1";
 
 export interface NativeSubjectAuthorityClaim {
   readonly requester: { readonly signerKey: string; readonly sealingTime: string };
@@ -199,7 +199,7 @@ export async function verifyNativeSubjectAuthority(input: {
   );
   const submissionAnchor = parseNativeAuthorityTimeAnchor(
     (submission.annotations as Record<string, unknown> | undefined)?.[
-      "https://jinn.network/annotations/authority-time/1.0"
+      "https://spec.jinn.network/annotations/authority-time/v1"
     ],
   );
   if (documentDigest(serializeCanonicalJson(

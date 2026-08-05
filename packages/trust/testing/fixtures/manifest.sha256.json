@@ -11,7 +11,7 @@
     },
     {
       "id": "authorization-v1/example.json",
-      "sha256": "d080db465192061ed9231c9ebe6cf1bd33077eb2bf157638844d7b02ead408a8"
+      "sha256": "03ddacedb1111f091cfc5ee4ede230ca9fd34cbd248be338e87b9f401e05e1de"
     },
     {
       "id": "binding-v1/README.md",
@@ -19,7 +19,7 @@
     },
     {
       "id": "binding-v1/example.json",
-      "sha256": "f168de621b7adf87a976fafb2286ed399b129ff2fd43f5ff1cfe2953fc5640ae"
+      "sha256": "9d7405e6934dc342e09facb71985c759003fe06e12835d6afb446bbebda69858"
     },
     {
       "id": "ceremony-v1/README.md",
@@ -35,11 +35,11 @@
     },
     {
       "id": "equivalence-v1/shared-payload-bytes.json",
-      "sha256": "4af95db9c54f240253e1b384220d3c81ece1995aecefe1a64f6545a073f8d096"
+      "sha256": "9b69da9d6e2e88754f6fe7b93a5dc66c5215013c0dad4d25d2c99248c35c8e30"
     },
     {
       "id": "equivalence-v1/task-execution-canonical-cases.json",
-      "sha256": "5ff15f0283eaebc2b2bdab025eb019fbd93cbaa6ea9c7214903886b8b4c969a9"
+      "sha256": "942e07fa28c23b2ed7795a6f4ee141e542217970b0c4da401bf3c6b3d06abac3"
     },
     {
       "id": "equivalence-v1/task-execution-oracle-digests.json",
@@ -59,7 +59,7 @@
     },
     {
       "id": "policy-v1/example.json",
-      "sha256": "0a513a2377c607ed32011fa0a4af848a238ee0277ba4d5e19fe50446b8d1eb02"
+      "sha256": "6f544720e3aff8b9db221ff81bc30ec03894e6e060bce5ce22c85b6f8ad0acc1"
     },
     {
       "id": "requester-v1/README.md",
@@ -75,7 +75,7 @@
     },
     {
       "id": "revocation-v1/example.json",
-      "sha256": "a88c270b4c1d2f69754d16b48ca0f49fbbe251de46570f18cf562c443835f318"
+      "sha256": "a74d08e53fac3dcde4d1a339832388eea0fe2f5ddd94f3e12ce009182e38b054"
     },
     {
       "id": "walkthrough-v1/README.md",

@@ -155,7 +155,7 @@ test("an unmatched finding class fails closed instead of implicitly retaining", 
 test("an unavailable graph artifact evaluates its exact policy disposition", () => {
   const input = syntheticDerivationInput();
   const traceIndex = input.sourceArtifacts.findIndex(
-    ({ entityId }) => entityId === "trace/trajectory.jsonl",
+    ({ entityId }) => entityId === "trace/trace.jsonl",
   );
   (input.sourceArtifacts as Array<unknown>).splice(traceIndex, 1);
   replacePolicy(input, (policy) => {
@@ -502,7 +502,7 @@ test("declared JSON and JSONL reject duplicate keys and invalid UTF-8", () => {
     Uint8Array.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d]),
   ]) {
     const input = syntheticDerivationInput();
-    replaceArtifact(input, "trace/trajectory.jsonl", bytes);
+    replaceArtifact(input, "trace/trace.jsonl", bytes);
     const source = validateDerivationSource(input);
     const policy = parseDerivationPolicy(input.policyBytes).value;
     expect(() => extractDerivationSurfaces(source, policy)).toThrowError(
@@ -513,7 +513,7 @@ test("declared JSON and JSONL reject duplicate keys and invalid UTF-8", () => {
 
 test.each([
   ["JSON", "runtime/runtime-specification.json", '{"value":1e400}\n'],
-  ["JSONL", "trace/trajectory.jsonl", '{"value":1e400}\n'],
+  ["JSONL", "trace/trace.jsonl", '{"value":1e400}\n'],
 ] as const)(
   "declared %s rejects non-finite parsed numbers before detector effects",
   async (_format, entityId, text) => {
@@ -681,7 +681,7 @@ test.each(["payload", "sig", "signature"])(
     const input = syntheticDerivationInput();
     replaceArtifact(
       input,
-      "trace/trajectory.jsonl",
+      "trace/trace.jsonl",
       new TextEncoder().encode(
         `${JSON.stringify({ event: "tool", [field]: "c2VjcmV0" })}\n`,
       ),
@@ -708,7 +708,7 @@ test("url-safe unpadded DSSE material participates in protected dispositions", (
   const input = syntheticDerivationInput();
   replaceArtifact(
     input,
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     new TextEncoder().encode(
       `${JSON.stringify({
         event: "tool",
@@ -742,7 +742,7 @@ test("Protocol-valid extended DSSE envelopes remain wholly signed material", () 
   const input = syntheticDerivationInput();
   replaceArtifact(
     input,
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     new TextEncoder().encode(
       `${JSON.stringify({
         event: "tool",
@@ -820,7 +820,7 @@ test.each([
     const input = syntheticDerivationInput();
     replaceArtifact(
       input,
-      "trace/trajectory.jsonl",
+      "trace/trace.jsonl",
       new TextEncoder().encode(
         `${JSON.stringify({
           event: "tool",
@@ -867,7 +867,7 @@ test("malformed RSA SPKI remains a scan surface", () => {
   const input = syntheticDerivationInput();
   replaceArtifact(
     input,
-    "trace/trajectory.jsonl",
+    "trace/trace.jsonl",
     new TextEncoder().encode(
       `${JSON.stringify({ event: "tool", publicKey: malformed })}\n`,
     ),
@@ -898,7 +898,7 @@ test.each([
     const input = syntheticDerivationInput();
     replaceArtifact(
       input,
-      "trace/trajectory.jsonl",
+      "trace/trace.jsonl",
       new TextEncoder().encode(
         `${JSON.stringify({ event: "tool", modelId: credential })}\n`,
       ),

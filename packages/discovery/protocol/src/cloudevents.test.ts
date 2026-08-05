@@ -29,7 +29,7 @@ function profile(fields: FactsProfileDocument["fields"]): FactsProfileDocument {
   return {
     protocol: RECORD_DISCOVERY_VERSION,
     kind: RECORD_KINDS.submission,
-    profile: "https://jinn.network/records/submission/facts-profile/1.0",
+    profile: "https://spec.jinn.network/facts/submission/v1",
     fields,
   };
 }

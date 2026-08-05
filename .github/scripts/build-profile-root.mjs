@@ -58,7 +58,7 @@ function assertNoPrefixCollision(documents) {
   }
 }
 
-// Most https://jinn.network/ URIs in the tree are names, not locators -- discriminator
+// Most https://spec.jinn.network/ URIs in the tree are names, not locators -- discriminator
 // values that no one fetches. The register declares the ones that must dereference, so
 // "does this URI resolve" is a checked claim rather than an argument. Entries owned by
 // packages outside the release group under build are another group's concern.

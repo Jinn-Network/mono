@@ -2,8 +2,8 @@
   "input": {
     "op": "allOf",
     "parentDoc": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain-closed/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain-closed/1.0",
       "description": "Adversarial: parent payloadSchema is closed (additionalProperties: false), so it is not extension-tolerant.",
       "payloadSchema": {
         "type": "object",
@@ -17,8 +17,8 @@
       "requirementKeys": []
     },
     "sub": {
-      "protocol": "https://jinn.network/profiles/task-profile/1.0",
-      "profile": "https://jinn.network/task-profiles/example-domain-closed-strict/1.0",
+      "protocol": "https://spec.jinn.network/profiles/task-profile/v1",
+      "profile": "https://spec.jinn.network/task-profiles/example-domain-closed-strict/1.0",
       "description": "Sub-profile over a closed parent.",
       "payloadSchema": {
         "allOf": [
@@ -40,7 +40,7 @@
       "evaluationFamilies": [],
       "requirementKeys": [],
       "extends": {
-        "uri": "https://jinn.network/task-profiles/example-domain-closed/1.0",
+        "uri": "https://spec.jinn.network/task-profiles/example-domain-closed/1.0",
         "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
       }
     }

@@ -1,5 +1,5 @@
 {
-  "protocol": "https://jinn.network/record-discovery/1.0",
+  "protocol": "https://spec.jinn.network/record-discovery/v1",
   "source": { "agent": "urn:uuid:11111111-1111-4111-8111-111111111111", "name": "feed" },
   "sequence": "0000000000000002",
   "previous": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -9,11 +9,11 @@
       "announcementId": "a2",
       "action": "available",
       "record": {
-        "kind": "https://jinn.network/records/submission/1.0",
+        "kind": "https://spec.jinn.network/records/submission/v1",
         "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
       },
       "locations": [
-        { "profile": "https://jinn.network/record-discovery/location/https/1.0", "locator": "https://example.org/records/2222" }
+        { "profile": "https://spec.jinn.network/record-discovery/location/https/v1", "locator": "https://example.org/records/2222" }
       ]
     },
     {

@@ -4,7 +4,7 @@
   "properties": {
     "kind": {
       "type": "string",
-      "const": "https://jinn.network/records/crypto-environment/1.0"
+      "const": "https://spec.jinn.network/records/crypto-environment/v1"
     },
     "chainWorld": {
       "type": "object",
@@ -337,7 +337,7 @@
     "composition"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/records/crypto-environment/1.0/schema",
+  "$id": "https://spec.jinn.network/schemas/crypto-environment/v1",
   "title": "Jinn crypto environment record",
   "description": "A sealed composite of worlds: one chain world, zero or more information worlds, pinned service runtimes, and the composition block binding origin routing, precedence, the miss policy, the reachable-endpoint allowlist, and the request budget. A task references this record; components are sealed and attested independently.",
   "propertyNames": {

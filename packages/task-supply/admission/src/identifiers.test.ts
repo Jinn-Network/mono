@@ -15,7 +15,7 @@ describe("identifiers", () => {
     // (ADMISSION_RECEIPT_ANNOTATION_URI) and its `receipt.name !== "admission-receipt"` check.
     // That tree is outside this package's import boundary, so the strings are pinned, not shared.
     expect(ADMISSION_RECEIPT_ANNOTATION_URI).toBe(
-      "https://jinn.network/annotations/admission-receipt/1.0",
+      "https://spec.jinn.network/annotations/admission-receipt/v1",
     );
     expect(ADMISSION_RECEIPT_DESCRIPTOR_NAME).toBe("admission-receipt");
   });
@@ -29,13 +29,13 @@ describe("identifiers", () => {
 
   it("names the receipt kind and policy under jinn.network URIs", () => {
     expect(ADMISSION_RECEIPT_SCHEMA_VERSION).toBe(
-      "https://jinn.network/records/differential-admission-receipt/3",
+      "https://spec.jinn.network/records/differential-admission-receipt/v3",
     );
     expect(DIFFERENTIAL_ADMISSION_PREDICATE_TYPE).toBe(
-      "https://jinn.network/attestations/differential-admission/v3",
+      "https://spec.jinn.network/attestations/differential-admission/v3",
     );
     expect(DIFFERENTIAL_ADMISSION_POLICY_V3).toStrictEqual({
-      admissionPolicyVersion: "https://jinn.network/task-admission/policy/3",
+      admissionPolicyVersion: "https://spec.jinn.network/task-admission/policy/v3",
       observationsPerSide: 2,
       requireCandidateSpecConsistency: true,
       requireDeclaredTransitionsProven: true,

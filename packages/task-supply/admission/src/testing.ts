@@ -31,7 +31,7 @@ export function goldenReceipt(): DifferentialAdmissionReceiptV3 {
   return {
     schemaVersion: ADMISSION_RECEIPT_SCHEMA_VERSION,
     admissionPolicyVersion: DIFFERENTIAL_ADMISSION_POLICY_V3.admissionPolicyVersion,
-    issuer: "https://jinn.network/agents/admission-1",
+    issuer: "https://spec.jinn.network/agents/admission-1",
     task: {
       documentDigest: digest("1"),
       evaluationSpecDigest: digest("2"),
@@ -64,7 +64,7 @@ export function goldenReceipt(): DifferentialAdmissionReceiptV3 {
  */
 export function goldenEnvironmentRecordBytes(): Uint8Array {
   return sealEnvironmentRecord({
-    kind: "https://jinn.network/records/environment/1.0",
+    kind: "https://spec.jinn.network/records/environment/v1",
     source: { repo: "owner/name", repoUrl: "https://github.com/owner/name", commit: "a".repeat(40) },
     image: {
       manifestDigest: MANIFEST,
@@ -90,7 +90,7 @@ export function goldenEvaluationSpecBytes(blockOverrides: Record<string, unknown
   // Canonical bytes — exactly what `sealEvaluationSpec` emits, and what admission requires: the
   // receipt's evaluation-spec subject is the digest of these bytes.
   return canonicalJsonBytes({
-    protocol: "https://jinn.network/profiles/evaluation-spec/1.0",
+    protocol: "https://spec.jinn.network/profiles/evaluation-spec/v1",
     family: "deterministic-process",
     familyBlock: {
       image: { uri: `ghcr.io/example/env@${MANIFEST}`, digest: { sha256: MANIFEST.slice(7) } },
@@ -275,7 +275,7 @@ export function describeTaskAdmissionConformance(
   subject: TaskAdmissionConformanceSubject,
 ): void {
   describe(`task admission conformance (${label})`, () => {
-    const deps = { issuer: "https://jinn.network/agents/kit", runInEnvironment: subject.scriptedRunner() };
+    const deps = { issuer: "https://spec.jinn.network/agents/kit", runInEnvironment: subject.scriptedRunner() };
 
     it("admits a discriminating candidate against its own environment record", async () => {
       const result = await subject.admitCandidate(
@@ -324,7 +324,7 @@ export function describeTaskAdmissionConformance(
       const reached = new Set<string>();
       for (const scenario of Object.values(subject.scriptedRunner.refusalScenarios)) {
         const result = await subject.admitCandidate(
-          { issuer: "https://jinn.network/agents/kit", runInEnvironment: scenario.runner },
+          { issuer: "https://spec.jinn.network/agents/kit", runInEnvironment: scenario.runner },
           scenario.candidate(),
           scenario.recordBytes(),
         );
@@ -342,7 +342,7 @@ export function describeTaskAdmissionConformance(
 
     it("refuses an empty side that produced no reading at all", async () => {
       const result = await subject.admitCandidate(
-        { issuer: "https://jinn.network/agents/kit", runInEnvironment: blindEmptySideRunner() },
+        { issuer: "https://spec.jinn.network/agents/kit", runInEnvironment: blindEmptySideRunner() },
         subject.goldenCandidate(),
         subject.goldenEnvironmentRecordBytes(),
       );

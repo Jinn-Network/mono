@@ -446,7 +446,7 @@ export async function buildNativeEvaluatorProductionHost(
       async backend() {
         const capabilities = await composition.backend.capabilities();
         return capabilities.signedDeliveries
-          && capabilities.taskProfiles.includes('https://jinn.network/task-profiles/evaluation-task/1.0');
+          && capabilities.taskProfiles.includes('https://spec.jinn.network/task-profiles/evaluation-task/1.0');
       },
       async evidence() {
         await evidence.runtime.sync();

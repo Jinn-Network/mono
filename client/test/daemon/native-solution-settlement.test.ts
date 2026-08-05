@@ -109,7 +109,7 @@ describe('native solution settlement port', () => {
   it('uses the durable operation ID and returns only the settlement transaction identity', async () => {
     const subject = setup();
     const deliveryBytes = sealDelivery({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       attempt: ATTEMPT,
       task: engagement.taskDigest,
       outputs: [],

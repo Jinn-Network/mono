@@ -52,7 +52,7 @@ function genesisEntry(): AnnouncementEntry {
       {
         announcementId: "ann-1",
         action: "available",
-        record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"a".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
       },
     ],
   };

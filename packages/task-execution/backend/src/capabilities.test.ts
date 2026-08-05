@@ -20,7 +20,7 @@ describe("BackendCapabilities", () => {
     };
 
     const capabilities: BackendCapabilities = {
-      taskProfiles: ["https://jinn.network/task-profiles/repository-work/1.0"],
+      taskProfiles: ["https://spec.jinn.network/task-profiles/repository-work/1.0"],
       inputMediaTypes: ["application/json"],
       outputMediaTypes: ["application/json"],
       maxArtifactBytes: 10_000_000,

@@ -9,7 +9,7 @@ const otherItemDigest = "b".repeat(64);
 
 function benchmark(reveal: Record<string, unknown>, items = [itemDigest, otherItemDigest]) {
   return sealBenchmark({
-    protocol: "https://jinn.network/protocols/benchmarking/1.0",
+    protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
     name: "promotion",
     description: "held-out promotion gate",
     version: "1.0.0",
@@ -27,7 +27,7 @@ const AFTER_RUN = { kind: "after-run", trustedRunNotClosed: true } as const;
  * referent no longer stands in: the gate re-digests what it is handed.
  */
 const DEVELOPMENT = sealBenchmark({
-  protocol: "https://jinn.network/protocols/benchmarking/1.0",
+  protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
   name: "development",
   description: "the slate dev waves run against",
   version: "1.0.0",
@@ -192,7 +192,7 @@ describe("checkExploringEntry (product §5.2, §6.3)", () => {
 
   it("refuses a gate sharing an item with the development slate, unrevealed or not", () => {
     const overlapping = sealBenchmark({
-      protocol: "https://jinn.network/protocols/benchmarking/1.0",
+      protocol: "https://spec.jinn.network/protocols/benchmarking/v1",
       name: "development",
       description: "a slate that leaks one gate item",
       version: "1.0.0",

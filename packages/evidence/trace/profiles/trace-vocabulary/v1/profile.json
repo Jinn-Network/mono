@@ -1,0 +1,12 @@
+{
+  "profile": "https://spec.jinn.network/profiles/trace-vocabulary/v1",
+  "title": "Trace Vocabulary 1.0",
+  "version": "1.0",
+  "owner": "@jinn-network/evidence-trace",
+  "description": "The trace vocabulary. Trace records and derivation statements citing this URI are sealed under the schemas indexed here.",
+  "artifacts": [
+    { "path": "schemas/trace/v1", "mediaType": "application/schema+json" },
+    { "path": "schemas/trace-derivation-statement/v1", "mediaType": "application/schema+json" }
+  ],
+  "digestAuthority": "https://spec.jinn.network/manifest.json"
+}

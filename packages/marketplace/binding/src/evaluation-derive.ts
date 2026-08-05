@@ -12,7 +12,7 @@ import {
 } from "@jinn-network/task-execution-protocol";
 
 export const ADMISSION_RECEIPT_ANNOTATION_URI =
-  "https://jinn.network/annotations/admission-receipt/1.0" as const;
+  "https://spec.jinn.network/annotations/admission-receipt/v1" as const;
 
 export interface EvaluationSubmissionFields {
   readonly submission: string;

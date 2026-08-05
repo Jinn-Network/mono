@@ -5,8 +5,8 @@ import type { AnnouncedItem } from "../item.js";
 import { factsConsistency } from "./facts-consistency.js";
 import type { FactsRecompute, RecordFactValue, RecordFetcher } from "./ports.js";
 
-const KIND = "https://jinn.network/records/benchmark-report/1.0";
-const PROFILE = "https://jinn.network/records/benchmark-report/1.0/facts/1.0";
+const KIND = "https://spec.jinn.network/records/benchmark-report/v1";
+const PROFILE = "https://spec.jinn.network/facts/benchmark-report/v1";
 
 const profile = parseFactsProfile({
   protocol: RECORD_DISCOVERY_VERSION,

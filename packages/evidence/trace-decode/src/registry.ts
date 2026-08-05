@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { compareCodeUnitStrings } from "@jinn-network/evidence-trajectory";
+import { compareCodeUnitStrings } from "@jinn-network/evidence-trace";
 
 import { DecoderContractError, UnsupportedFormatError } from "./contract.js";
 import type { TraceDecoder } from "./contract.js";

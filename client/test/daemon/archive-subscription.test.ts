@@ -31,7 +31,7 @@ function buildFixture(overrides: Partial<{ taskId: bigint; manifestDigest: `0x${
   const taskId = overrides.taskId ?? 7n;
   const manifestDigest = overrides.manifestDigest ?? (`0x${'cc'.repeat(32)}` as const);
   const taskBytes = new TextEncoder().encode(
-    JSON.stringify({ protocol: 'https://jinn.network/profiles/task-execution/1.0', taskId: taskId.toString() }),
+    JSON.stringify({ protocol: 'https://spec.jinn.network/profiles/task-execution/v1', taskId: taskId.toString() }),
   );
   const taskDigest = documentDigest(taskBytes);
   const taskCidDigest = `0x${taskDigest.slice('sha256:'.length)}` as `0x${string}`;

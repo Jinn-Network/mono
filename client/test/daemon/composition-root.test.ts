@@ -173,7 +173,7 @@ describe('native launcher executable inspection', () => {
       predictionDeployments,
     );
     await expect(prediction.inspect({
-      profileUri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      profileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       requirements: { harness: { id: 'prediction-v1-baseline' } },
     })).resolves.toMatchObject({
       launcherId: 'prediction-v1-baseline',
@@ -187,7 +187,7 @@ describe('native launcher executable inspection', () => {
     );
     const missing = buildNativeLauncherCapabilityPort([claudeCodeLauncher], missingDeployments);
     await expect(missing.inspect({
-      profileUri: 'https://jinn.network/task-profiles/repository-work/1.0',
+      profileUri: 'https://spec.jinn.network/task-profiles/repository-work/1.0',
       requirements: { harness: { id: 'claude-code' } },
     })).resolves.toMatchObject({ probe: { ready: false } });
   });
@@ -473,8 +473,8 @@ describe('buildOperatorComposition', () => {
     const capabilities = await composition.backend.capabilities();
     expect(new Set(capabilities.taskProfiles)).toEqual(
       new Set([
-        'https://jinn.network/task-profiles/repository-work/1.0',
-        'https://jinn.network/task-profiles/evaluation-task/1.0',
+        'https://spec.jinn.network/task-profiles/repository-work/1.0',
+        'https://spec.jinn.network/task-profiles/evaluation-task/1.0',
       ]),
     );
 
@@ -698,7 +698,7 @@ describe('buildOperatorComposition', () => {
 
     const capabilities = await composition.backend.capabilities();
     expect(capabilities.taskProfiles).toContain(
-      'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
     );
 
     await composition.close();

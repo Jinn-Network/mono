@@ -12,15 +12,15 @@ export function makeSampleLauncherInputs(overrides?: {
 }): { view: TaskView; paths: WorkspacePaths; attempt: AttemptIdentity } {
   const view: TaskView = {
     task: {
-      protocol: "https://jinn.network/profiles/task-execution/1.0",
-      profile: { uri: "https://jinn.network/task-profiles/repository-work/1.0", digest: { sha256: "0".repeat(64) } },
+      protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+      profile: { uri: "https://spec.jinn.network/task-profiles/repository-work/1.0", digest: { sha256: "0".repeat(64) } },
       instructions: overrides?.instructions ?? "describeLauncherContract sample instructions",
       outputs: [],
     },
     effectiveRequirements: {},
     profile: {
-      protocol: "https://jinn.network/profiles/task-profile/1.0",
-      profile: "https://jinn.network/task-profiles/repository-work/1.0",
+      protocol: "https://spec.jinn.network/profiles/task-profile/v1",
+      profile: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       description: "describeLauncherContract sample profile",
       payloadSchema: {},
       inputConventions: { slots: [] },

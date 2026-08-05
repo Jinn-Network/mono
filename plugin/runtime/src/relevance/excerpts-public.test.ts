@@ -77,14 +77,14 @@ describe("public-plane excerpts", () => {
               endTimeUnixNano: "2",
               attributes: [
                 { key: "gen_ai.tool.name", value: { stringValue: "Bash" } },
-                { key: "jinn.trajectory.source.ordinal", value: { intValue: "0" } },
+                { key: "jinn.trace.source.ordinal", value: { intValue: "0" } },
               ],
               events: [],
               status: { code: 1 },
             } as never,
           ],
         },
-        traceFormatIri: "https://jinn.network/formats/claude-code-stream-json/v1",
+        traceFormatIri: "https://spec.jinn.network/formats/claude-code-stream-json/v1",
       },
     );
     expect(outcome.excerpts.some((excerpt) => excerpt.text.includes("yarn build"))).toBe(true);

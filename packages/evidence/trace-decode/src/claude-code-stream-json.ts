@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trajectory";
-import type { Attribute, SpanStatus } from "@jinn-network/evidence-trajectory";
+import { SPAN_KIND, STATUS_CODE } from "@jinn-network/evidence-trace";
+import type { Attribute, SpanStatus } from "@jinn-network/evidence-trace";
 
 import { sortAttributes } from "./contract.js";
 import type {
@@ -12,7 +12,7 @@ import type {
 } from "./contract.js";
 
 export const CLAUDE_CODE_STREAM_JSON_FORMAT_IRI =
-  "https://jinn.network/formats/claude-code-stream-json/v1" as const;
+  "https://spec.jinn.network/formats/claude-code-stream-json/v1" as const;
 
 const DECODER_ID = "claude-code-stream-json";
 const DECODER_VERSION = "1.0.0";
@@ -76,7 +76,7 @@ function blocks(message: Record<string, unknown> | undefined): readonly unknown[
  *
  * The format carries no timestamps, so times are **source line indices** and the result
  * declares `timebase: "synthetic-ordinal"`. No message content, tool argument, or tool
- * output crosses into a span; `jinn.trajectory.source.ordinal` points back into the
+ * output crosses into a span; `jinn.trace.source.ordinal` points back into the
  * digest-bound bytes for consumers that need it.
  */
 function decodeStream(bytes: Uint8Array): DecodeResult {
@@ -193,8 +193,8 @@ function decodeStream(bytes: Uint8Array): DecodeResult {
       attributes: [
         stringAttribute("gen_ai.operation.name", "chat"),
         stringAttribute("gen_ai.provider.name", PROVIDER_NAME),
-        stringAttribute("jinn.trajectory.turn.role", "assistant"),
-        integerAttribute("jinn.trajectory.source.ordinal", index),
+        stringAttribute("jinn.trace.turn.role", "assistant"),
+        integerAttribute("jinn.trace.source.ordinal", index),
         ...(responseModel === undefined
           ? []
           : [stringAttribute("gen_ai.response.model", responseModel)]),
@@ -221,7 +221,7 @@ function decodeStream(bytes: Uint8Array): DecodeResult {
           stringAttribute("gen_ai.tool.call.id", callId),
           stringAttribute("gen_ai.tool.name", toolName),
           stringAttribute("gen_ai.tool.type", "function"),
-          integerAttribute("jinn.trajectory.source.ordinal", index),
+          integerAttribute("jinn.trace.source.ordinal", index),
         ],
         status: { code: STATUS_CODE.UNSET },
       });
@@ -241,7 +241,7 @@ function decodeStream(bytes: Uint8Array): DecodeResult {
       stringAttribute("gen_ai.agent.name", AGENT_NAME),
       stringAttribute("gen_ai.operation.name", "invoke_agent"),
       stringAttribute("gen_ai.provider.name", PROVIDER_NAME),
-      integerAttribute("jinn.trajectory.source.ordinal", rootOrdinalSource ?? 0),
+      integerAttribute("jinn.trace.source.ordinal", rootOrdinalSource ?? 0),
       ...(conversationId === undefined
         ? []
         : [stringAttribute("gen_ai.conversation.id", conversationId)]),
@@ -256,7 +256,7 @@ function decodeStream(bytes: Uint8Array): DecodeResult {
         : [integerAttribute("gen_ai.usage.output_tokens", outputTokens)]),
       ...(outcome === undefined
         ? []
-        : [stringAttribute("jinn.trajectory.outcome", outcome)]),
+        : [stringAttribute("jinn.trace.outcome", outcome)]),
     ];
   }
 

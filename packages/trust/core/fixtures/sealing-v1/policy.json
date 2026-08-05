@@ -5,7 +5,7 @@
       "did:key:z6MkhaTEeQnCVYnQwFRZmpFotWSU7Fdd5tkVEQxCwPvzMWzz"
     ]
   },
-  "protocol": "https://jinn.network/trust/policy/v1",
+  "protocol": "https://spec.jinn.network/trust/policy/v1",
   "purposes": {
     "verifier-agent": {
       "accepted": [

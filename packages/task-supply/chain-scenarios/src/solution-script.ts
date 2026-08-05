@@ -17,12 +17,12 @@ import { assertFreshFixtureAddress, normalizeAddress } from "./fixture-accounts.
 
 export const CHAIN_SOLUTION_MEDIA_TYPE = "application/vnd.jinn.chain-solution.v1+json" as const;
 export const CHAIN_SOLUTION_SCHEMA_VERSION =
-  "https://jinn.network/records/chain-solution/1" as const;
+  "https://spec.jinn.network/records/chain-solution/v1" as const;
 /** F-CE5-3: §14 pins the solution media type; the reference script is its unsigned sibling. */
 export const CHAIN_REFERENCE_SCRIPT_MEDIA_TYPE =
   "application/vnd.jinn.chain-reference-script.v1+json" as const;
 export const CHAIN_REFERENCE_SCRIPT_SCHEMA_VERSION =
-  "https://jinn.network/records/chain-reference-script/1" as const;
+  "https://spec.jinn.network/records/chain-reference-script/v1" as const;
 
 const NonEmpty = z.string().min(1);
 const Count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);

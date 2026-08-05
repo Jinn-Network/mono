@@ -12,7 +12,7 @@ import { PluginRuntimeError } from "../errors.js";
 import { createCaptureCapability } from "./capability.js";
 import {
   derivationLinkPath,
-  readTrajectoryDerivationAttestationLink,
+  readTraceDerivationAttestationLink,
 } from "./link.js";
 import { resolveCapturePaths, sessionFeedPath } from "./paths.js";
 import { SEAL_MARKER_FILENAME } from "./retention.js";
@@ -382,11 +382,11 @@ describe("sealSession amendment lifecycle", () => {
     expect(sealed.derivationAttestation.envelopeBytes.byteLength).toBeGreaterThan(0);
     expect(sealed.derivationAttestation.derivedAt).toBe("2026-07-30T09:00:06Z");
 
-    const link = await readTrajectoryDerivationAttestationLink(paths, sealed.record.digest);
+    const link = await readTraceDerivationAttestationLink(paths, sealed.record.digest);
     expect(link).toEqual({
       version: 1,
       executionDigest: sealed.record.digest,
-      trajectoryDigest: sealed.trajectory.digest,
+      traceDigest: sealed.trace.digest,
       attestationDigest: sealed.derivationAttestation.digest,
       nativeTraceDigest: sealed.nativeTrace.reference.digest,
       derivedAt: "2026-07-30T09:00:06Z",
@@ -398,6 +398,6 @@ describe("sealSession amendment lifecycle", () => {
     const markerPath = join(paths.sessionsDirectory, sessionId, SEAL_MARKER_FILENAME);
     const marker = JSON.parse(await readFile(markerPath, "utf8")) as Record<string, unknown>;
     expect(marker.derivationAttestation).toBe(sealed.derivationAttestation.digest);
-    expect(marker.trajectory).toBe(sealed.trajectory.digest);
+    expect(marker.trace).toBe(sealed.trace.digest);
   });
 });

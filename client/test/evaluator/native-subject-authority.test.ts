@@ -48,7 +48,7 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
   const evidence = artifact("execution-evidence", new TextEncoder().encode('{"evidence":"exact"}'));
   const taskBytes = sealTask({
     protocol: TASK_EXECUTION_PROTOCOL_URI,
-    profile: { uri: "https://jinn.network/task-profiles/prediction-forecast/1.0", digest: { sha256: "1".repeat(64) } },
+    profile: { uri: "https://spec.jinn.network/task-profiles/prediction-forecast/1.0", digest: { sha256: "1".repeat(64) } },
     instructions: "forecast",
     outputs: [{ name: "prediction", mediaType: "application/json", required: true }],
     evaluation: { name: "evaluation-spec", digest: { sha256: evaluationSpec.digest.slice(7) } },
@@ -60,7 +60,7 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
       { name: "task", digest: { sha256: task.digest.slice(7) } },
       { name: "evaluation-spec", digest: { sha256: evaluationSpec.digest.slice(7) } },
     ],
-    predicateType: "https://jinn.network/admission/prediction/1",
+    predicateType: "https://spec.jinn.network/admission/prediction/v1",
     predicate: { issuer: ADMISSION, authorityTime: AUTHORITY_TIME },
   };
   const receipt = artifact("admission-receipt", envelope(
@@ -77,11 +77,11 @@ function fixture(): { material: SubjectMaterial; claim: NativeSubjectAuthorityCl
     nonce: "nonce",
     deadline: "2026-08-03T00:00:00Z",
     annotations: {
-      "https://jinn.network/annotations/admission-receipt/1.0": {
+      "https://spec.jinn.network/annotations/admission-receipt/v1": {
         name: "admission-receipt",
         digest: { sha256: receipt.digest.slice(7) },
       },
-      "https://jinn.network/annotations/authority-time/1.0": AUTHORITY_TIME,
+      "https://spec.jinn.network/annotations/authority-time/v1": AUTHORITY_TIME,
     },
   });
   const submission = artifact("submission", submissionBytes);
@@ -145,7 +145,7 @@ function dependencies(input: {
         const scope = key === REQUESTER_KEY
           ? ["authorizations"]
           : key === ADMISSION_KEY
-            ? ["https://jinn.network/trust-scopes/admission-receipts/1.0"]
+            ? ["https://spec.jinn.network/trust-scopes/admission-receipts/v1"]
             : key === EXECUTOR_KEY ? ["deliveries"] : ["verdicts"];
         return {
           binding: {

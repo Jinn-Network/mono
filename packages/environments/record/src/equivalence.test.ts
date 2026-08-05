@@ -15,7 +15,7 @@ import { environmentRecordDigest } from "./hashing.js";
 const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 const shared = {
-  kind: "https://jinn.network/records/environment/1.0",
+  kind: "https://spec.jinn.network/records/environment/v1",
   source: {
     repo: "owner/name",
     repoUrl: "https://github.com/owner/name",

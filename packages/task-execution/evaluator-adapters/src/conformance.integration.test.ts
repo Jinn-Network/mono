@@ -162,9 +162,9 @@ async function buildWorkspace(options: {
 
   const sealed = sealEvaluationSpec(options.specification);
   const subjectTaskBytes = sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
-      uri: "https://jinn.network/task-profiles/repository-work/1.0",
+      uri: "https://spec.jinn.network/task-profiles/repository-work/1.0",
       digest: { sha256: "4".repeat(64) },
     },
     instructions: "Solve the task.",
@@ -179,7 +179,7 @@ async function buildWorkspace(options: {
     },
   });
   const deliveryBytes = sealDelivery({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     attempt: "urn:uuid:33333333-3333-4333-8333-333333333333",
     task: documentDigest(subjectTaskBytes),
     outputs: [{
@@ -302,7 +302,7 @@ describe("evaluator adapters conform to the real evaluation harness", () => {
 
     const statement = await readVerdictStatement(paths);
     expect(statement.predicateType).toBe(
-      "https://jinn.network/attestations/result-evaluation/v1",
+      "https://spec.jinn.network/attestations/result-evaluation/v1",
     );
     expect(statement.predicate.verdict).toBe("pass");
   });

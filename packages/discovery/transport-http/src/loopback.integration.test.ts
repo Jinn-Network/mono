@@ -64,7 +64,7 @@ function entryAt(sequence: bigint, previous: string | null): AnnouncementEntry {
       {
         announcementId: `announcement-${sequence}`,
         action: "available",
-        record: { kind: "https://jinn.network/records/submission/1.0", digest: `sha256:${"c".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"c".repeat(64)}` },
       },
     ],
   } as AnnouncementEntry;

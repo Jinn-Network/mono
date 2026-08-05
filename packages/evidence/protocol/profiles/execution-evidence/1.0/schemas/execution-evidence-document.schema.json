@@ -69,5 +69,5 @@
     "@graph"
   ],
   "additionalProperties": {},
-  "$id": "https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
+  "$id": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json"
 }

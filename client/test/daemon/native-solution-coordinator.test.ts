@@ -23,26 +23,26 @@ const SUBMISSION = 'urn:uuid:33333333-3333-4333-8333-333333333333' as const;
 const REQUESTER = 'urn:uuid:44444444-4444-4444-8444-444444444444';
 const outputBytes = new TextEncoder().encode('{"probability":0.62}');
 const evidenceBytes = serializeCanonicalJson({
-  '@context': 'https://jinn.network/evidence/context/1.0',
+  '@context': 'https://spec.jinn.network/evidence/context/v1',
   '@graph': [{
     '@id': 'urn:uuid:55555555-5555-4555-8555-555555555555',
-    '@type': 'https://jinn.network/evidence/Execution',
+    '@type': 'https://spec.jinn.network/evidence/Execution',
   }],
 });
 const envelopeBytes = new TextEncoder().encode('{"payloadType":"application/vnd.jinn.marketplace.executor-binding.v1+json"}');
 
 function exactDocuments() {
   const taskBytes = sealTask({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     profile: {
-      uri: 'https://jinn.network/task-profiles/prediction-forecast/1.0',
+      uri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
       digest: { sha256: '1'.repeat(64) },
     },
     instructions: 'Return a deterministic prediction.',
     outputs: [{ name: 'prediction', mediaType: 'application/json', required: true }],
   });
   const submissionBytes = sealSubmission({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     submission: SUBMISSION,
     task: { digest: { sha256: documentDigest(taskBytes).slice('sha256:'.length) } },
     requester: REQUESTER,
@@ -110,7 +110,7 @@ function setup(input: {
   const subject = finalizedClaim(now);
   const engagement = subject.state.getEngagement(subject.engagementId)!;
   const deliveryBytes = sealDelivery({
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: engagement.attemptUri!,
     task: documentDigest(subject.documents.taskBytes),
     outputs: [{
@@ -138,7 +138,7 @@ function setup(input: {
     recover: vi.fn(async () => input.recover ?? { classification: submitted ? 'matching' : 'absent' }),
     observe: vi.fn(async () => ({
       descriptor: {
-        protocol: 'https://jinn.network/profiles/task-execution/1.0',
+        protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
         attempt: engagement.attemptUri!,
         task: documentDigest(subject.documents.taskBytes),
         submission: SUBMISSION,

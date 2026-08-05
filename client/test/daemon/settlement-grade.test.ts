@@ -64,7 +64,7 @@ function signPreAuth(privateKey: KeyObject, payloadType: string, payloadBytes: U
 /** Builds a canonical Delivery document's fields. */
 function baseDeliveryFields() {
   return {
-    protocol: 'https://jinn.network/profiles/task-execution/1.0',
+    protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: ATTEMPT_URI,
     task: `sha256:${'1'.repeat(64)}`,
     outputs: [],
@@ -618,14 +618,14 @@ describe('executorBinding against a REAL LocalTaskExecutionBackend delivery (fin
     const keyPair = generateKeyPairSync('ed25519');
 
     const task = sealTask({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       profile: { uri: profile.profile, digest: { sha256: sealedProfile.digest.slice('sha256:'.length) } },
       instructions: 'Capture this execution.',
       outputs: [{ name: 'patch', mediaType: 'text/x-diff', required: true }],
     });
     const submissionUri = `urn:uuid:${crypto.randomUUID()}` as const;
     const submission = sealSubmission({
-      protocol: 'https://jinn.network/profiles/task-execution/1.0',
+      protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
       submission: submissionUri,
       task: { digest: { sha256: documentDigest(task).slice('sha256:'.length) } },
       requester: 'urn:uuid:40000000-0000-4000-8000-000000000001',

@@ -20,7 +20,7 @@ const SUBJECT_DIGEST = "c".repeat(64);
 const VALID_STATEMENT = {
   _type: "https://in-toto.io/Statement/v1" as const,
   subject: [{ name: "input-digest", digest: { sha256: SUBJECT_DIGEST } }],
-  predicateType: "https://jinn.network/trust/authorization/v1" as const,
+  predicateType: "https://spec.jinn.network/trust/authorization/v1" as const,
   predicate: {
     issuer: "urn:uuid:11111111-1111-4111-8111-111111111111",
     capabilities: ["deliveries:submit", "verdicts:read"],

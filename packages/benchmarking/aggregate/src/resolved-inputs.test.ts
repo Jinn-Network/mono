@@ -22,7 +22,7 @@ function envelope(payloadBytes: Uint8Array): Uint8Array {
 
 function task(provenance: Record<string, unknown>): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: { digest: { sha256: "b".repeat(64) } }, instructions: "fixture", outputs: [],
     evaluation: { digest: { sha256: "c".repeat(64) } }, payload: { provenance },
   });
@@ -32,7 +32,7 @@ function validStatement(overrides: Record<string, unknown> = {}): Record<string,
   return {
     _type: "https://in-toto.io/Statement/v1",
     subject: [{ name: "fixture", digest: { sha256: "a".repeat(64) } }],
-    predicateType: "https://jinn.network/attestations/result-evaluation/v1",
+    predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
       evaluatedAt: "2026-07-29T00:00:00Z",
       evaluator: { id: "urn:uuid:77777777-7777-5777-8777-777777777777" },
@@ -167,7 +167,7 @@ describe("authenticated anchored announcement evidence", () => {
 
   function entryBytes(overrides: Record<string, unknown> = {}): Uint8Array {
     return canonicalJsonBytes({
-      protocol: "https://jinn.network/record-discovery/1.0",
+      protocol: "https://spec.jinn.network/record-discovery/v1",
       source,
       sequence: "0000000000000001",
       previous: null,
@@ -176,7 +176,7 @@ describe("authenticated anchored announcement evidence", () => {
         announcementId: "fixture-benchmark",
         action: "available",
         record: {
-          kind: "https://jinn.network/records/benchmark/1.0",
+          kind: "https://spec.jinn.network/records/benchmark/v1",
           digest: benchmarkDigest,
         },
       }],
@@ -254,7 +254,7 @@ describe("authenticated anchored announcement evidence", () => {
         announcementId: "fixture-benchmark",
         action: "available",
         record: {
-          kind: "https://jinn.network/records/benchmark/1.0",
+          kind: "https://spec.jinn.network/records/benchmark/v1",
           digest: `sha256:${"e".repeat(64)}`,
         },
       }],

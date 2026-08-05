@@ -36,12 +36,12 @@ export type { DecoderRegistry } from "./registry.js";
 export { SHIPPED_DECODERS, createDefaultDecoderRegistry } from "./default-registry.js";
 
 // Decoding
-export { decodeTrajectory, finalizeSpans, tryDecodeTrajectory } from "./decode.js";
+export { decodeTrace, finalizeSpans, tryDecodeTrace } from "./decode.js";
 export type {
   DecodeOutcome,
-  DecodeTrajectoryInput,
+  DecodeTraceInput,
   DigestBearingDescriptor,
-  TrajectoryDocument,
+  TraceDocument,
 } from "./decode.js";
 
 // Decoders

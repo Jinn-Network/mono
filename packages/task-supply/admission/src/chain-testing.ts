@@ -76,7 +76,7 @@ export function goldenChainReceipt(): ChainAdmissionReceiptV1 {
     schemaVersion: CHAIN_ADMISSION_RECEIPT_SCHEMA_VERSION,
     admissionPolicyVersion: CHAIN_ADMISSION_POLICY_V1.admissionPolicyVersion,
     family: "state-predicate",
-    issuer: "https://jinn.network/agents/admission-1",
+    issuer: "https://spec.jinn.network/agents/admission-1",
     task: {
       documentDigest: digest("1"),
       evaluationSpecDigest: digest("2"),
@@ -320,7 +320,7 @@ export function describeChainAdmissionConformance(
 ): void {
   describe(`chain admission conformance (${label})`, () => {
     const deps: ChainAdmissionDeps = {
-      issuer: "https://jinn.network/agents/kit",
+      issuer: "https://spec.jinn.network/agents/kit",
       observeChain: subject.scriptedChainPort(),
     };
 
@@ -362,7 +362,7 @@ export function describeChainAdmissionConformance(
       const reached = new Set<string>();
       for (const scenario of Object.values(subject.scriptedChainPort.refusalScenarios)) {
         const result = await subject.admitChainCandidate(
-          { issuer: "https://jinn.network/agents/kit", observeChain: scenario.port },
+          { issuer: "https://spec.jinn.network/agents/kit", observeChain: scenario.port },
           scenario.candidate(),
           scenario.compositeDigest(),
         );
@@ -396,7 +396,7 @@ export function describeChainAdmissionConformance(
   describe(`cross-family admission (${label})`, () => {
     it("still refuses a chain spec at the SWE entry point", async () => {
       const result = await admitCandidate(
-        { issuer: "https://jinn.network/agents/kit", runInEnvironment: scriptedRunner() },
+        { issuer: "https://spec.jinn.network/agents/kit", runInEnvironment: scriptedRunner() },
         goldenSweCandidate({ evaluationSpecBytes: goldenStatePredicateSpecBytes() }),
         goldenEnvironmentRecordBytes(),
       );

@@ -27,7 +27,7 @@ const RO_CRATE_CONTEXT = "https://w3id.org/ro/crate/1.3/context";
 const WORKFLOW_RUN_CONTEXT =
   "https://w3id.org/ro/terms/workflow-run/context";
 const RO_CRATE_PROFILE = "https://w3id.org/ro/crate/1.3";
-const DURATION_PROPERTY = "https://jinn.network/terms/durationMs";
+const DURATION_PROPERTY = "https://spec.jinn.network/terms/durationMs";
 
 const ORIGIN_ROLES = {
   "producer-observed": {
@@ -863,7 +863,7 @@ export function buildExecutionEvidence(
       WORKFLOW_RUN_CONTEXT,
       {
         prov: "http://www.w3.org/ns/prov#",
-        jinn: "https://jinn.network/terms/",
+        jinn: "https://spec.jinn.network/terms/",
       },
     ],
     "@graph": builder.ordered(),

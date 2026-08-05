@@ -22,7 +22,7 @@ const ENVELOPE: CapabilityEnvelope = {
 
 function script(overrides: Partial<ReferenceScript> = {}): ReferenceScript {
   return {
-    schemaVersion: "https://jinn.network/records/chain-reference-script/1",
+    schemaVersion: "https://spec.jinn.network/records/chain-reference-script/v1",
     operations: [
       {
         op: "transactionIntent",
@@ -65,7 +65,7 @@ describe("both documents round-trip through their schemas", () => {
 
   it("parses sealed solution-script bytes back through the schema", () => {
     const solution = {
-      schemaVersion: "https://jinn.network/records/chain-solution/1",
+      schemaVersion: "https://spec.jinn.network/records/chain-solution/v1",
       operations: [
         { op: "signedTransaction", rawTransaction: "0xdeadbeef" },
         { op: "report", name: "outcome", value: true },

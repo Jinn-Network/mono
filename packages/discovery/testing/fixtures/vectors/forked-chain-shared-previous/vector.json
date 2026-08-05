@@ -18,21 +18,21 @@
     },
     "headA": {
       "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
-      "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "payload": "{\"entry\":\"sha256:e32298a758071b42cfec7bf65b5d6bf32ee53a93a210c9a37eda1c102e322642\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
       "signatures": [
         {
           "keyid": "key-1",
-          "sig": "8cf223b6def3b6ea1a9e9ae5c05569fa689e830c6786c7a5c24d8fbb54f99bba:key-1"
+          "sig": "edcfcf8cdd795a069aed5f2a0a1f036cadc46d7145b9a0c82145df21f1392e2c:key-1"
         }
       ]
     },
     "headB": {
       "payloadType": "application/vnd.jinn.record-discovery.head.v1+json",
-      "payload": "{\"entry\":\"sha256:8f3d10ec061a3a6ffcb905fb58356a94b5e882477a0d7297248afb5a15f04d01\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://jinn.network/record-discovery/1.0\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
+      "payload": "{\"entry\":\"sha256:8f3d10ec061a3a6ffcb905fb58356a94b5e882477a0d7297248afb5a15f04d01\",\"issuedAt\":\"2026-07-28T12:00:00.000Z\",\"origin\":\"did:key:zAgentSourceOne/feed\",\"protocol\":\"https://spec.jinn.network/record-discovery/v1\",\"refreshBy\":\"2026-07-29T12:00:00.000Z\",\"sequence\":\"0000000000000001\"}",
       "signatures": [
         {
           "keyid": "key-1",
-          "sig": "e3ea0136d4ae70db98b66375124e5b9e1aaeaaf836a263417fab12d5b9e5a26c:key-1"
+          "sig": "661feddd60e4c735698008f1b087b41cab6429cbbb6ff4dda7c5956f021e778f:key-1"
         }
       ]
     }

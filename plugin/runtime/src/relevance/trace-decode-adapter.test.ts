@@ -9,7 +9,7 @@ const CLAUDE_CODE = formatIriForEnvelopeFormat("claude-code-stream-json");
 
 describe("trace decode adapter", () => {
   test("the first real format resolves to a canonical IRI", () => {
-    expect(CLAUDE_CODE).toBe("https://jinn.network/formats/claude-code-stream-json/v1");
+    expect(CLAUDE_CODE).toBe("https://spec.jinn.network/formats/claude-code-stream-json/v1");
   });
 
   test("an unknown format yields no spans and does not throw", () => {
@@ -27,7 +27,7 @@ describe("trace decode adapter", () => {
     const source = createTraceSpanSource();
     expect(
       source.spansFor({
-        formatIri: "https://jinn.network/formats/backend-local-supervisor-facts/v1",
+        formatIri: "https://spec.jinn.network/formats/backend-local-supervisor-facts/v1",
         bytes: new TextEncoder().encode("{}"),
         nativeTraceDigest: DIGEST,
       }),

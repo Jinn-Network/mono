@@ -1,7 +1,7 @@
 # Jinn Evidence Repository OCI Profile 1.0
 
 Profile URI:
-`https://jinn.network/profiles/evidence-repository-oci/1.0`
+`https://spec.jinn.network/profiles/evidence-repository-oci/v1`
 
 Profile version: `1.0.0`
 

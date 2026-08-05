@@ -470,19 +470,19 @@
         "to": "@jinn-network/evidence-repository"
       },
       {
-        "from": "@jinn-network/evidence-trace-decode",
-        "kind": "runtime",
-        "to": "@jinn-network/evidence-trajectory"
-      },
-      {
-        "from": "@jinn-network/evidence-trajectory",
+        "from": "@jinn-network/evidence-trace",
         "kind": "runtime",
         "to": "@jinn-network/evidence-protocol"
       },
       {
-        "from": "@jinn-network/evidence-trajectory",
+        "from": "@jinn-network/evidence-trace",
         "kind": "runtime",
         "to": "@jinn-network/trust-core"
+      },
+      {
+        "from": "@jinn-network/evidence-trace-decode",
+        "kind": "runtime",
+        "to": "@jinn-network/evidence-trace"
       },
       {
         "from": "@jinn-network/execution-recorder",
@@ -682,12 +682,12 @@
       {
         "from": "@jinn-network/plugin-runtime",
         "kind": "runtime",
-        "to": "@jinn-network/evidence-trace-decode"
+        "to": "@jinn-network/evidence-trace"
       },
       {
         "from": "@jinn-network/plugin-runtime",
         "kind": "runtime",
-        "to": "@jinn-network/evidence-trajectory"
+        "to": "@jinn-network/evidence-trace-decode"
       },
       {
         "from": "@jinn-network/plugin-runtime",
@@ -1146,8 +1146,8 @@
       "@jinn-network/evidence-repository-ipfs",
       "@jinn-network/evidence-repository-oci",
       "@jinn-network/evidence-retrieval",
+      "@jinn-network/evidence-trace",
       "@jinn-network/evidence-trace-decode",
-      "@jinn-network/evidence-trajectory",
       "@jinn-network/execution-recorder",
       "@jinn-network/execution-recorder-bridge",
       "@jinn-network/explorer-spa",
@@ -1295,13 +1295,13 @@
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository"
         ],
-        "@jinn-network/evidence-trace-decode": [
+        "@jinn-network/evidence-trace": [
           "@jinn-network/evidence-protocol",
-          "@jinn-network/evidence-trajectory",
           "@jinn-network/trust-core"
         ],
-        "@jinn-network/evidence-trajectory": [
+        "@jinn-network/evidence-trace-decode": [
           "@jinn-network/evidence-protocol",
+          "@jinn-network/evidence-trace",
           "@jinn-network/trust-core"
         ],
         "@jinn-network/execution-recorder": [
@@ -1505,7 +1505,7 @@
           "@jinn-network/benchmarking-records",
           "@jinn-network/evidence-derivation",
           "@jinn-network/evidence-repository",
-          "@jinn-network/evidence-trajectory",
+          "@jinn-network/evidence-trace",
           "@jinn-network/record-discovery-protocol",
           "@jinn-network/task-execution-backend",
           "@jinn-network/task-execution-profiles",
@@ -20504,7 +20504,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v1.json"
       },
       {
         "categories": [
@@ -20516,7 +20516,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v1.json"
       },
       {
         "categories": [
@@ -20528,7 +20528,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/benchmarking/profiles/report.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
       },
       {
         "categories": [
@@ -20540,7 +20540,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/benchmarking/profiles/run.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json"
       },
       {
         "categories": [
@@ -20604,7 +20604,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json"
       },
       {
         "categories": [
@@ -20616,7 +20616,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json"
       },
       {
         "categories": [
@@ -20628,7 +20628,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/chain-environments/profiles/information-world.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/information-world.v1.json"
       },
       {
         "categories": [
@@ -20692,7 +20692,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/environments/profiles/environment.1.0.json"
+        "path": "packages/discovery/facts/environments/profiles/environment.v1.json"
       },
       {
         "categories": [
@@ -20756,7 +20756,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.v1.json"
       },
       {
         "categories": [
@@ -20768,7 +20768,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/evidence/profiles/execution-verification.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/execution-verification.v1.json"
       },
       {
         "categories": [
@@ -20780,7 +20780,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.v1.json"
       },
       {
         "categories": [
@@ -20844,7 +20844,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.v1.json"
       },
       {
         "categories": [
@@ -20856,7 +20856,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/delivery.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/delivery.v1.json"
       },
       {
         "categories": [
@@ -20868,7 +20868,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json"
       },
       {
         "categories": [
@@ -20880,7 +20880,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/plugin.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/plugin.v1.json"
       },
       {
         "categories": [
@@ -20892,7 +20892,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/profile-document.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/profile-document.v1.json"
       },
       {
         "categories": [
@@ -20904,7 +20904,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/submission.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/submission.v1.json"
       },
       {
         "categories": [
@@ -20916,7 +20916,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/task-execution/profiles/task.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/task.v1.json"
       },
       {
         "categories": [
@@ -20980,7 +20980,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/trust/profiles/authorization.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/authorization.v1.json"
       },
       {
         "categories": [
@@ -20992,7 +20992,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/trust/profiles/key-binding.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/key-binding.v1.json"
       },
       {
         "categories": [
@@ -21004,7 +21004,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/discovery/facts/trust/profiles/trust-policy.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/trust-policy.v1.json"
       },
       {
         "categories": [
@@ -27194,7 +27194,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/execution/trace/trajectory.jsonl"
+        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/execution/trace/trace.jsonl"
       },
       {
         "categories": [
@@ -27326,7 +27326,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/public/trace/trajectory.public.jsonl"
+        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/public/trace/trace.public.jsonl"
       },
       {
         "categories": [
@@ -28931,7 +28931,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/dist/testing.d.ts"
+        "path": "packages/evidence/trace/dist/testing.d.ts"
       },
       {
         "categories": [
@@ -28942,7 +28942,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/dist/testing.js"
+        "path": "packages/evidence/trace/dist/testing.js"
       },
       {
         "categories": [
@@ -28954,7 +28954,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures"
+        "path": "packages/evidence/trace/fixtures"
       },
       {
         "categories": [
@@ -28966,7 +28966,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1"
       },
       {
         "categories": [
@@ -28978,7 +28978,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/empty-with-spans"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/empty-with-spans"
       },
       {
         "categories": [
@@ -28990,7 +28990,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/empty-with-spans/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/empty-with-spans/document.json"
       },
       {
         "categories": [
@@ -29002,7 +29002,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/full-with-skipped"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/full-with-skipped"
       },
       {
         "categories": [
@@ -29014,7 +29014,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/full-with-skipped/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/full-with-skipped/document.json"
       },
       {
         "categories": [
@@ -29026,7 +29026,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/grafted-parent"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/grafted-parent"
       },
       {
         "categories": [
@@ -29038,7 +29038,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/grafted-parent/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/grafted-parent/document.json"
       },
       {
         "categories": [
@@ -29050,7 +29050,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/manifest.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/manifest.json"
       },
       {
         "categories": [
@@ -29062,7 +29062,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/message-content-attribute"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/message-content-attribute"
       },
       {
         "categories": [
@@ -29074,7 +29074,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/message-content-attribute/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/message-content-attribute/document.json"
       },
       {
         "categories": [
@@ -29086,7 +29086,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/namespaced-extension-preserved"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/namespaced-extension-preserved"
       },
       {
         "categories": [
@@ -29098,7 +29098,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/namespaced-extension-preserved/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/namespaced-extension-preserved/document.json"
       },
       {
         "categories": [
@@ -29110,7 +29110,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/nested-native-trace-key"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/nested-native-trace-key"
       },
       {
         "categories": [
@@ -29122,7 +29122,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/nested-native-trace-key/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/nested-native-trace-key/document.json"
       },
       {
         "categories": [
@@ -29134,7 +29134,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/partial-without-skipped"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/partial-without-skipped"
       },
       {
         "categories": [
@@ -29146,7 +29146,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/partial-without-skipped/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/partial-without-skipped/document.json"
       },
       {
         "categories": [
@@ -29158,7 +29158,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/substituted-source-digest"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/substituted-source-digest"
       },
       {
         "categories": [
@@ -29170,7 +29170,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/substituted-source-digest/document.json"
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/substituted-source-digest/document.json"
       },
       {
         "categories": [
@@ -29182,7 +29182,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/derivation"
+        "path": "packages/evidence/trace/fixtures/derivation"
       },
       {
         "categories": [
@@ -29194,7 +29194,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json"
+        "path": "packages/evidence/trace/fixtures/derivation/execution-golden-base.json"
       },
       {
         "categories": [
@@ -29206,7 +29206,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/equivalence"
+        "path": "packages/evidence/trace/fixtures/equivalence"
       },
       {
         "categories": [
@@ -29218,7 +29218,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/expected-digest.json"
+        "path": "packages/evidence/trace/fixtures/equivalence/expected-digest.json"
       },
       {
         "categories": [
@@ -29230,7 +29230,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/input-a.json"
+        "path": "packages/evidence/trace/fixtures/equivalence/input-a.json"
       },
       {
         "categories": [
@@ -29242,7 +29242,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/input-b.json"
+        "path": "packages/evidence/trace/fixtures/equivalence/input-b.json"
       },
       {
         "categories": [
@@ -29254,7 +29254,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/manifest.sha256.json"
+        "path": "packages/evidence/trace/fixtures/manifest.sha256.json"
       },
       {
         "categories": [
@@ -29266,7 +29266,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory"
+        "path": "packages/evidence/trace/fixtures/trace"
       },
       {
         "categories": [
@@ -29278,7 +29278,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-forged-span-id.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-forged-span-id.json"
       },
       {
         "categories": [
@@ -29290,7 +29290,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-forged-trace-id.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-forged-trace-id.json"
       },
       {
         "categories": [
@@ -29302,7 +29302,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-unknown-extension-key.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-unknown-extension-key.json"
       },
       {
         "categories": [
@@ -29314,7 +29314,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-unsorted-attributes.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-unsorted-attributes.json"
       },
       {
         "categories": [
@@ -29326,7 +29326,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/minimal.json"
+        "path": "packages/evidence/trace/fixtures/trace/minimal.json"
       },
       {
         "categories": [
@@ -29338,7 +29338,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/minimal.sha256"
+        "path": "packages/evidence/trace/fixtures/trace/minimal.sha256"
       },
       {
         "categories": [
@@ -29350,7 +29350,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/valid.json"
+        "path": "packages/evidence/trace/fixtures/trace/valid.json"
       },
       {
         "categories": [
@@ -29362,7 +29362,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/valid.sha256"
+        "path": "packages/evidence/trace/fixtures/trace/valid.sha256"
       },
       {
         "categories": [
@@ -29372,7 +29372,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/package.json"
+        "path": "packages/evidence/trace/package.json"
       },
       {
         "categories": [
@@ -29384,7 +29384,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/profiles"
+        "path": "packages/evidence/trace/profiles"
       },
       {
         "categories": [
@@ -29396,7 +29396,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary"
+        "path": "packages/evidence/trace/profiles/trace-vocabulary"
       },
       {
         "categories": [
@@ -29408,7 +29408,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0"
+        "path": "packages/evidence/trace/profiles/trace-vocabulary/v1"
       },
       {
         "categories": [
@@ -29420,7 +29420,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json"
+        "path": "packages/evidence/trace/profiles/trace-vocabulary/v1/profile.json"
       },
       {
         "categories": [
@@ -29432,7 +29432,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/schemas"
+        "path": "packages/evidence/trace/schemas"
       },
       {
         "categories": [
@@ -29444,7 +29444,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/schemas/trajectory-derivation-statement.schema.json"
+        "path": "packages/evidence/trace/schemas/trace-derivation-statement.schema.json"
       },
       {
         "categories": [
@@ -29456,7 +29456,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/schemas/trajectory.schema.json"
+        "path": "packages/evidence/trace/schemas/trace.schema.json"
       },
       {
         "categories": [
@@ -29466,7 +29466,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/scripts"
+        "path": "packages/evidence/trace/scripts"
       },
       {
         "categories": [
@@ -29476,7 +29476,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/scripts/clean-dist.mjs"
+        "path": "packages/evidence/trace/scripts/clean-dist.mjs"
       },
       {
         "categories": [
@@ -29486,7 +29486,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/scripts/generate-fixtures.mjs"
+        "path": "packages/evidence/trace/scripts/generate-fixtures.mjs"
       },
       {
         "categories": [
@@ -29496,7 +29496,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/scripts/generate-schemas.mjs"
+        "path": "packages/evidence/trace/scripts/generate-schemas.mjs"
       },
       {
         "categories": [
@@ -29506,7 +29506,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/scripts/pack-smoke.mjs"
+        "path": "packages/evidence/trace/scripts/pack-smoke.mjs"
       },
       {
         "categories": [
@@ -29518,7 +29518,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/evidence/trajectory/src/testing.ts"
+        "path": "packages/evidence/trace/src/testing.ts"
       },
       {
         "categories": [
@@ -36606,7 +36606,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/profiles/profiles/task-profile/1.0"
+        "path": "packages/task-execution/profiles/profiles/task-profile/v1"
       },
       {
         "categories": [
@@ -36618,7 +36618,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profile/v1/profile.json"
       },
       {
         "categories": [
@@ -37568,7 +37568,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/protocol/profiles/task-execution/1.0"
+        "path": "packages/task-execution/protocol/profiles/task-execution/v1"
       },
       {
         "categories": [
@@ -37580,7 +37580,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json"
+        "path": "packages/task-execution/protocol/profiles/task-execution/v1/profile.json"
       },
       {
         "categories": [
@@ -38742,7 +38742,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7"
       },
       {
         "categories": [
@@ -38754,7 +38754,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json"
       },
       {
         "categories": [
@@ -38766,7 +38766,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json"
       },
       {
         "categories": [
@@ -38778,7 +38778,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json"
       },
       {
         "categories": [
@@ -38790,7 +38790,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49"
       },
       {
         "categories": [
@@ -38802,7 +38802,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json"
       },
       {
         "categories": [
@@ -38814,7 +38814,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json"
       },
       {
         "categories": [
@@ -38826,7 +38826,7 @@
           "@oaksprout",
           "@ritsukai"
         ],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json"
       },
       {
         "categories": [
@@ -42005,7 +42005,57 @@
           "vitest"
         ],
         "runtime": [
-          "@jinn-network/evidence-trajectory"
+          "@jinn-network/evidence-protocol",
+          "@jinn-network/trust-core",
+          "@noble/hashes",
+          "ajv",
+          "zod"
+        ]
+      },
+      "domain": "evidence",
+      "name": "@jinn-network/evidence-trace",
+      "ownerGroup": "architecture-control",
+      "path": "packages/evidence/trace",
+      "publicSurface": {
+        "conformance": [
+          "./testing"
+        ],
+        "fixtures": [
+          "fixtures"
+        ],
+        "profiles": [
+          "profiles"
+        ],
+        "schemas": [
+          "schemas"
+        ]
+      },
+      "publishPolicy": "canary-only",
+      "releaseGroup": "platform-v1",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "evidence-ci"
+      ],
+      "role": "trace record family",
+      "stability": "candidate",
+      "supersedes": [],
+      "tier": 2,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
+      },
+      "classification": "platform",
+      "dependencies": {
+        "optional": [],
+        "peer": [
+          "vitest"
+        ],
+        "runtime": [
+          "@jinn-network/evidence-trace"
         ]
       },
       "domain": "evidence",
@@ -42032,56 +42082,6 @@
       "stability": "candidate",
       "supersedes": [],
       "tier": 3,
-      "transition": null,
-      "version": "0.1.0"
-    },
-    {
-      "boundaryPolicy": {
-        "kind": "source-boundary",
-        "path": ".github/scripts/evidence-source-boundaries.test.mjs"
-      },
-      "classification": "platform",
-      "dependencies": {
-        "optional": [],
-        "peer": [
-          "vitest"
-        ],
-        "runtime": [
-          "@jinn-network/evidence-protocol",
-          "@jinn-network/trust-core",
-          "@noble/hashes",
-          "ajv",
-          "zod"
-        ]
-      },
-      "domain": "evidence",
-      "name": "@jinn-network/evidence-trajectory",
-      "ownerGroup": "architecture-control",
-      "path": "packages/evidence/trajectory",
-      "publicSurface": {
-        "conformance": [
-          "./testing"
-        ],
-        "fixtures": [
-          "fixtures"
-        ],
-        "profiles": [
-          "profiles"
-        ],
-        "schemas": [
-          "schemas"
-        ]
-      },
-      "publishPolicy": "canary-only",
-      "releaseGroup": "platform-v1",
-      "replacedBy": [],
-      "requiredGateIds": [
-        "evidence-ci"
-      ],
-      "role": "trajectory record family",
-      "stability": "candidate",
-      "supersedes": [],
-      "tier": 2,
       "transition": null,
       "version": "0.1.0"
     },
@@ -43458,8 +43458,8 @@
           "@jinn-network/evidence-protocol",
           "@jinn-network/evidence-repository",
           "@jinn-network/evidence-retrieval",
+          "@jinn-network/evidence-trace",
           "@jinn-network/evidence-trace-decode",
-          "@jinn-network/evidence-trajectory",
           "@jinn-network/execution-recorder",
           "@jinn-network/record-discovery-client",
           "@jinn-network/record-discovery-protocol",
@@ -44525,275 +44525,275 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/benchmark/1.0/facts/1.0",
-          "servedPath": "records/benchmark/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/benchmark/v1",
+          "servedPath": "facts/benchmark/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.1.0.json",
-        "relativeSource": "profiles/benchmark.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v1.json",
+        "relativeSource": "profiles/benchmark.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/benchmark-matrix/1.0/facts/1.0",
-          "servedPath": "records/benchmark-matrix/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
+          "servedPath": "facts/benchmark-matrix/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.1.0.json",
-        "relativeSource": "profiles/matrix.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v1.json",
+        "relativeSource": "profiles/matrix.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/benchmark-report/1.0/facts/1.0",
-          "servedPath": "records/benchmark-report/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/benchmark-report/v1",
+          "servedPath": "facts/benchmark-report/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/report.1.0.json",
-        "relativeSource": "profiles/report.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json",
+        "relativeSource": "profiles/report.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/benchmark-run/1.0/facts/1.0",
-          "servedPath": "records/benchmark-run/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/benchmark-run/v1",
+          "servedPath": "facts/benchmark-run/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-benchmarking",
         "packedTargets": [],
-        "path": "packages/discovery/facts/benchmarking/profiles/run.1.0.json",
-        "relativeSource": "profiles/run.1.0.json"
+        "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json",
+        "relativeSource": "profiles/run.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/chain-environment/1.0/facts/1.0",
-          "servedPath": "records/chain-environment/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/chain-environment/v1",
+          "servedPath": "facts/chain-environment/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-chain-environments",
         "packedTargets": [],
-        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json",
-        "relativeSource": "profiles/chain-environment.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json",
+        "relativeSource": "profiles/chain-environment.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/crypto-environment/1.0/facts/1.0",
-          "servedPath": "records/crypto-environment/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/crypto-environment/v1",
+          "servedPath": "facts/crypto-environment/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-chain-environments",
         "packedTargets": [],
-        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json",
-        "relativeSource": "profiles/crypto-environment.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json",
+        "relativeSource": "profiles/crypto-environment.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/information-world/1.0/facts/1.0",
-          "servedPath": "records/information-world/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/information-world/v1",
+          "servedPath": "facts/information-world/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-chain-environments",
         "packedTargets": [],
-        "path": "packages/discovery/facts/chain-environments/profiles/information-world.1.0.json",
-        "relativeSource": "profiles/information-world.1.0.json"
+        "path": "packages/discovery/facts/chain-environments/profiles/information-world.v1.json",
+        "relativeSource": "profiles/information-world.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/environment/1.0/facts/1.0",
-          "servedPath": "records/environment/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/environment/v1",
+          "servedPath": "facts/environment/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-environments",
         "packedTargets": [],
-        "path": "packages/discovery/facts/environments/profiles/environment.1.0.json",
-        "relativeSource": "profiles/environment.1.0.json"
+        "path": "packages/discovery/facts/environments/profiles/environment.v1.json",
+        "relativeSource": "profiles/environment.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/execution-evidence/1.0/facts/1.0",
-          "servedPath": "records/execution-evidence/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/execution-evidence/v1",
+          "servedPath": "facts/execution-evidence/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-evidence",
         "packedTargets": [],
-        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.1.0.json",
-        "relativeSource": "profiles/execution-evidence.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.v1.json",
+        "relativeSource": "profiles/execution-evidence.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/execution-verification/1.0/facts/1.0",
-          "servedPath": "records/execution-verification/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/execution-verification/v1",
+          "servedPath": "facts/execution-verification/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-evidence",
         "packedTargets": [],
-        "path": "packages/discovery/facts/evidence/profiles/execution-verification.1.0.json",
-        "relativeSource": "profiles/execution-verification.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/execution-verification.v1.json",
+        "relativeSource": "profiles/execution-verification.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/result-evaluation/1.0/facts/1.0",
-          "servedPath": "records/result-evaluation/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/result-evaluation/v1",
+          "servedPath": "facts/result-evaluation/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-evidence",
         "packedTargets": [],
-        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.1.0.json",
-        "relativeSource": "profiles/result-evaluation.1.0.json"
+        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.v1.json",
+        "relativeSource": "profiles/result-evaluation.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/checkpoint/1.0/facts/1.0",
-          "servedPath": "records/checkpoint/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/checkpoint/v1",
+          "servedPath": "facts/checkpoint/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.1.0.json",
-        "relativeSource": "profiles/checkpoint.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.v1.json",
+        "relativeSource": "profiles/checkpoint.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/delivery/1.0/facts/1.0",
-          "servedPath": "records/delivery/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/delivery/v1",
+          "servedPath": "facts/delivery/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/delivery.1.0.json",
-        "relativeSource": "profiles/delivery.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/delivery.v1.json",
+        "relativeSource": "profiles/delivery.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/evaluation-spec/1.0/facts/1.0",
-          "servedPath": "records/evaluation-spec/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/evaluation-spec/v1",
+          "servedPath": "facts/evaluation-spec/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.1.0.json",
-        "relativeSource": "profiles/evaluation-spec.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json",
+        "relativeSource": "profiles/evaluation-spec.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/plugin/1.0/facts/1.0",
-          "servedPath": "records/plugin/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/plugin/v1",
+          "servedPath": "facts/plugin/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/plugin.1.0.json",
-        "relativeSource": "profiles/plugin.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/plugin.v1.json",
+        "relativeSource": "profiles/plugin.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/profile-document/1.0/facts/1.0",
-          "servedPath": "records/profile-document/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/profile-document/v1",
+          "servedPath": "facts/profile-document/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/profile-document.1.0.json",
-        "relativeSource": "profiles/profile-document.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/profile-document.v1.json",
+        "relativeSource": "profiles/profile-document.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/submission/1.0/facts/1.0",
-          "servedPath": "records/submission/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/submission/v1",
+          "servedPath": "facts/submission/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/submission.1.0.json",
-        "relativeSource": "profiles/submission.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/submission.v1.json",
+        "relativeSource": "profiles/submission.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/task/1.0/facts/1.0",
-          "servedPath": "records/task/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/task/v1",
+          "servedPath": "facts/task/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-task-execution",
         "packedTargets": [],
-        "path": "packages/discovery/facts/task-execution/profiles/task.1.0.json",
-        "relativeSource": "profiles/task.1.0.json"
+        "path": "packages/discovery/facts/task-execution/profiles/task.v1.json",
+        "relativeSource": "profiles/task.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/authorization/1.0/facts/1.0",
-          "servedPath": "records/authorization/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/authorization/v1",
+          "servedPath": "facts/authorization/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-trust",
         "packedTargets": [],
-        "path": "packages/discovery/facts/trust/profiles/authorization.1.0.json",
-        "relativeSource": "profiles/authorization.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/authorization.v1.json",
+        "relativeSource": "profiles/authorization.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/key-binding/1.0/facts/1.0",
-          "servedPath": "records/key-binding/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/key-binding/v1",
+          "servedPath": "facts/key-binding/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-trust",
         "packedTargets": [],
-        "path": "packages/discovery/facts/trust/profiles/key-binding.1.0.json",
-        "relativeSource": "profiles/key-binding.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/key-binding.v1.json",
+        "relativeSource": "profiles/key-binding.v1.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/records/trust-policy/1.0/facts/1.0",
-          "servedPath": "records/trust-policy/1.0/facts/1.0"
+          "identifier": "https://spec.jinn.network/facts/trust-policy/v1",
+          "servedPath": "facts/trust-policy/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/record-discovery-facts-trust",
         "packedTargets": [],
-        "path": "packages/discovery/facts/trust/profiles/trust-policy.1.0.json",
-        "relativeSource": "profiles/trust-policy.1.0.json"
+        "path": "packages/discovery/facts/trust/profiles/trust-policy.v1.json",
+        "relativeSource": "profiles/trust-policy.v1.json"
       },
       {
         "claim": null,
@@ -45947,8 +45947,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/chain-environment/1.0/schema",
-          "servedPath": "records/chain-environment/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/chain-environment/v1",
+          "servedPath": "schemas/chain-environment/v1"
         },
         "export": null,
         "kind": "schemas",
@@ -45960,8 +45960,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/crypto-environment/1.0/schema",
-          "servedPath": "records/crypto-environment/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/crypto-environment/v1",
+          "servedPath": "schemas/crypto-environment/v1"
         },
         "export": null,
         "kind": "schemas",
@@ -46411,8 +46411,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/information-world/1.0/schema",
-          "servedPath": "records/information-world/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/information-world/v1",
+          "servedPath": "schemas/information-world/v1"
         },
         "export": null,
         "kind": "schemas",
@@ -46652,8 +46652,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/environment/1.0/schema",
-          "servedPath": "records/environment/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/environment/v1",
+          "servedPath": "schemas/environment/v1"
         },
         "export": null,
         "kind": "schemas",
@@ -47328,8 +47328,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/execution/trace/trajectory.jsonl",
-        "relativeSource": "fixtures/golden-execution-evidence-v1/execution/trace/trajectory.jsonl"
+        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/execution/trace/trace.jsonl",
+        "relativeSource": "fixtures/golden-execution-evidence-v1/execution/trace/trace.jsonl"
       },
       {
         "claim": null,
@@ -47382,8 +47382,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/evidence-protocol",
         "packedTargets": [],
-        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/public/trace/trajectory.public.jsonl",
-        "relativeSource": "fixtures/golden-execution-evidence-v1/public/trace/trajectory.public.jsonl"
+        "path": "packages/evidence/protocol/fixtures/golden-execution-evidence-v1/public/trace/trace.public.jsonl",
+        "relativeSource": "fixtures/golden-execution-evidence-v1/public/trace/trace.public.jsonl"
       },
       {
         "claim": null,
@@ -47433,8 +47433,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json",
-          "servedPath": "profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json",
+          "servedPath": "profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47446,8 +47446,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json",
-          "servedPath": "profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json",
+          "servedPath": "profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47459,8 +47459,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json",
-          "servedPath": "profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json",
+          "servedPath": "profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47472,8 +47472,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json",
-          "servedPath": "profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json",
+          "servedPath": "profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47485,8 +47485,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json",
-          "servedPath": "profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json",
+          "servedPath": "profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47564,8 +47564,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/evidence-repository-ipfs-registration/1/registration.schema.json",
-          "servedPath": "profiles/evidence-repository-ipfs-registration/1/registration.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json",
+          "servedPath": "profiles/evidence-repository-ipfs-registration/v1/registration.schema.json"
         },
         "export": null,
         "kind": "profiles",
@@ -47676,8 +47676,8 @@
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
-          "servedPath": "profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json"
+          "identifier": "https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
+          "servedPath": "profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json"
         },
         "export": null,
         "kind": "schemas",
@@ -47933,249 +47933,249 @@
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/empty-with-spans/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/empty-with-spans/document.json",
         "relativeSource": "fixtures/adversarial-v1/empty-with-spans/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/full-with-skipped/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/full-with-skipped/document.json",
         "relativeSource": "fixtures/adversarial-v1/full-with-skipped/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/grafted-parent/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/grafted-parent/document.json",
         "relativeSource": "fixtures/adversarial-v1/grafted-parent/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/manifest.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/manifest.json",
         "relativeSource": "fixtures/adversarial-v1/manifest.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/message-content-attribute/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/message-content-attribute/document.json",
         "relativeSource": "fixtures/adversarial-v1/message-content-attribute/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/namespaced-extension-preserved/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/namespaced-extension-preserved/document.json",
         "relativeSource": "fixtures/adversarial-v1/namespaced-extension-preserved/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/nested-native-trace-key/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/nested-native-trace-key/document.json",
         "relativeSource": "fixtures/adversarial-v1/nested-native-trace-key/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/partial-without-skipped/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/partial-without-skipped/document.json",
         "relativeSource": "fixtures/adversarial-v1/partial-without-skipped/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/adversarial-v1/substituted-source-digest/document.json",
+        "path": "packages/evidence/trace/fixtures/adversarial-v1/substituted-source-digest/document.json",
         "relativeSource": "fixtures/adversarial-v1/substituted-source-digest/document.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/derivation/execution-golden-base.json",
+        "path": "packages/evidence/trace/fixtures/derivation/execution-golden-base.json",
         "relativeSource": "fixtures/derivation/execution-golden-base.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/expected-digest.json",
+        "path": "packages/evidence/trace/fixtures/equivalence/expected-digest.json",
         "relativeSource": "fixtures/equivalence/expected-digest.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/input-a.json",
+        "path": "packages/evidence/trace/fixtures/equivalence/input-a.json",
         "relativeSource": "fixtures/equivalence/input-a.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/equivalence/input-b.json",
+        "path": "packages/evidence/trace/fixtures/equivalence/input-b.json",
         "relativeSource": "fixtures/equivalence/input-b.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/manifest.sha256.json",
+        "path": "packages/evidence/trace/fixtures/manifest.sha256.json",
         "relativeSource": "fixtures/manifest.sha256.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-forged-span-id.json",
-        "relativeSource": "fixtures/trajectory/invalid-forged-span-id.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-forged-span-id.json",
+        "relativeSource": "fixtures/trace/invalid-forged-span-id.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-forged-trace-id.json",
-        "relativeSource": "fixtures/trajectory/invalid-forged-trace-id.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-forged-trace-id.json",
+        "relativeSource": "fixtures/trace/invalid-forged-trace-id.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-unknown-extension-key.json",
-        "relativeSource": "fixtures/trajectory/invalid-unknown-extension-key.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-unknown-extension-key.json",
+        "relativeSource": "fixtures/trace/invalid-unknown-extension-key.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/invalid-unsorted-attributes.json",
-        "relativeSource": "fixtures/trajectory/invalid-unsorted-attributes.json"
+        "path": "packages/evidence/trace/fixtures/trace/invalid-unsorted-attributes.json",
+        "relativeSource": "fixtures/trace/invalid-unsorted-attributes.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/minimal.json",
-        "relativeSource": "fixtures/trajectory/minimal.json"
+        "path": "packages/evidence/trace/fixtures/trace/minimal.json",
+        "relativeSource": "fixtures/trace/minimal.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/minimal.sha256",
-        "relativeSource": "fixtures/trajectory/minimal.sha256"
+        "path": "packages/evidence/trace/fixtures/trace/minimal.sha256",
+        "relativeSource": "fixtures/trace/minimal.sha256"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/valid.json",
-        "relativeSource": "fixtures/trajectory/valid.json"
+        "path": "packages/evidence/trace/fixtures/trace/valid.json",
+        "relativeSource": "fixtures/trace/valid.json"
       },
       {
         "claim": null,
         "export": null,
         "kind": "fixtures",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/fixtures/trajectory/valid.sha256",
-        "relativeSource": "fixtures/trajectory/valid.sha256"
+        "path": "packages/evidence/trace/fixtures/trace/valid.sha256",
+        "relativeSource": "fixtures/trace/valid.sha256"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
-          "servedPath": "profiles/trajectory-vocabulary/1.0"
+          "identifier": "https://spec.jinn.network/profiles/trace-vocabulary/v1",
+          "servedPath": "profiles/trace-vocabulary/v1"
         },
         "export": null,
         "kind": "profiles",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json",
-        "relativeSource": "profiles/trajectory-vocabulary/1.0/profile.json"
+        "path": "packages/evidence/trace/profiles/trace-vocabulary/v1/profile.json",
+        "relativeSource": "profiles/trace-vocabulary/v1/profile.json"
       },
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/trajectory-derivation-statement/1.0/schema",
-          "servedPath": "records/trajectory-derivation-statement/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/trace-derivation-statement/v1",
+          "servedPath": "schemas/trace-derivation-statement/v1"
         },
         "export": null,
         "kind": "schemas",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/schemas/trajectory-derivation-statement.schema.json",
-        "relativeSource": "schemas/trajectory-derivation-statement.schema.json"
+        "path": "packages/evidence/trace/schemas/trace-derivation-statement.schema.json",
+        "relativeSource": "schemas/trace-derivation-statement.schema.json"
       },
       {
         "claim": {
           "field": "$id",
-          "identifier": "https://jinn.network/records/trajectory/1.0/schema",
-          "servedPath": "records/trajectory/1.0/schema"
+          "identifier": "https://spec.jinn.network/schemas/trace/v1",
+          "servedPath": "schemas/trace/v1"
         },
         "export": null,
         "kind": "schemas",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [],
-        "path": "packages/evidence/trajectory/schemas/trajectory.schema.json",
-        "relativeSource": "schemas/trajectory.schema.json"
+        "path": "packages/evidence/trace/schemas/trace.schema.json",
+        "relativeSource": "schemas/trace.schema.json"
       },
       {
         "claim": null,
         "export": "./testing",
         "kind": "conformance",
-        "package": "@jinn-network/evidence-trajectory",
+        "package": "@jinn-network/evidence-trace",
         "packedTargets": [
           "./dist/testing.d.ts",
           "./dist/testing.js"
         ],
-        "path": "packages/evidence/trajectory/src/testing.ts",
+        "path": "packages/evidence/trace/src/testing.ts",
         "relativeSource": "src/testing.ts"
       },
       {
@@ -50236,20 +50236,20 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/profiles/task-profile/1.0",
-          "servedPath": "profiles/task-profile/1.0"
+          "identifier": "https://spec.jinn.network/profiles/task-profile/v1",
+          "servedPath": "profiles/task-profile/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "packedTargets": [],
-        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json",
-        "relativeSource": "profiles/task-profile/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profile/v1/profile.json",
+        "relativeSource": "profiles/task-profile/v1/profile.json"
       },
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/task-profiles/evaluation-task/1.0",
+          "identifier": "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
           "servedPath": "task-profiles/evaluation-task/1.0"
         },
         "export": null,
@@ -50271,7 +50271,7 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/task-profiles/prediction-forecast/1.0",
+          "identifier": "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
           "servedPath": "task-profiles/prediction-forecast/1.0"
         },
         "export": null,
@@ -50293,7 +50293,7 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/task-profiles/repository-work/1.0",
+          "identifier": "https://spec.jinn.network/task-profiles/repository-work/1.0",
           "servedPath": "task-profiles/repository-work/1.0"
         },
         "export": null,
@@ -50660,15 +50660,15 @@
       {
         "claim": {
           "field": "profile",
-          "identifier": "https://jinn.network/profiles/task-execution/1.0",
-          "servedPath": "profiles/task-execution/1.0"
+          "identifier": "https://spec.jinn.network/profiles/task-execution/v1",
+          "servedPath": "profiles/task-execution/v1"
         },
         "export": null,
         "kind": "profiles",
         "package": "@jinn-network/task-execution-protocol",
         "packedTargets": [],
-        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json",
-        "relativeSource": "profiles/task-execution/1.0/profile.json"
+        "path": "packages/task-execution/protocol/profiles/task-execution/v1/profile.json",
+        "relativeSource": "profiles/task-execution/v1/profile.json"
       },
       {
         "claim": null,
@@ -51063,8 +51063,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/entry.json",
-        "relativeSource": "fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json",
+        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/entry.json"
       },
       {
         "claim": null,
@@ -51072,8 +51072,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/evaluation-spec.sealed.json",
-        "relativeSource": "fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json",
+        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/evaluation-spec.sealed.json"
       },
       {
         "claim": null,
@@ -51081,8 +51081,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/task.sealed.json",
-        "relativeSource": "fixtures/golden/entries/641b0925c53876a94e6f434baafd1991a84fba237dffd49f211de7ae78a335cf/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json",
+        "relativeSource": "fixtures/golden/entries/2757eafa3e971c2f9f075b77ec023903fed47f9963f35ce9c36e47d8f6f1e5f7/task.sealed.json"
       },
       {
         "claim": null,
@@ -51090,8 +51090,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/entry.json",
-        "relativeSource": "fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/entry.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json",
+        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/entry.json"
       },
       {
         "claim": null,
@@ -51099,8 +51099,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/evaluation-spec.sealed.json",
-        "relativeSource": "fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/evaluation-spec.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json",
+        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/evaluation-spec.sealed.json"
       },
       {
         "claim": null,
@@ -51108,8 +51108,8 @@
         "kind": "fixtures",
         "package": "@jinn-network/task-derivation",
         "packedTargets": [],
-        "path": "packages/task-supply/derivation/fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/task.sealed.json",
-        "relativeSource": "fixtures/golden/entries/c2129c094fc5354e847cef50e3278d554a92a7cf1ec90f928969288784179057/task.sealed.json"
+        "path": "packages/task-supply/derivation/fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json",
+        "relativeSource": "fixtures/golden/entries/35a9012a54071a21d2269db35741ff8e3caa64548308b2848ab4a6a7218acd49/task.sealed.json"
       },
       {
         "claim": null,
@@ -51948,11 +51948,15 @@
         "fixtures": [
           "fixtures"
         ],
-        "name": "@jinn-network/evidence-trace-decode",
-        "path": "packages/evidence/trace-decode",
-        "profiles": [],
+        "name": "@jinn-network/evidence-trace",
+        "path": "packages/evidence/trace",
+        "profiles": [
+          "profiles"
+        ],
         "releaseGroup": "platform-v1",
-        "schemas": []
+        "schemas": [
+          "schemas"
+        ]
       },
       {
         "conformance": [
@@ -51961,15 +51965,11 @@
         "fixtures": [
           "fixtures"
         ],
-        "name": "@jinn-network/evidence-trajectory",
-        "path": "packages/evidence/trajectory",
-        "profiles": [
-          "profiles"
-        ],
+        "name": "@jinn-network/evidence-trace-decode",
+        "path": "packages/evidence/trace-decode",
+        "profiles": [],
         "releaseGroup": "platform-v1",
-        "schemas": [
-          "schemas"
-        ]
+        "schemas": []
       },
       {
         "conformance": [],
@@ -52331,281 +52331,281 @@
     ],
     "selfIdentifyingClaims": [
       {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/authorization/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "path": "packages/discovery/facts/trust/profiles/authorization.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-matrix/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/matrix.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-report/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/report.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark-run/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/run.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/benchmark/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-benchmarking",
+        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/chain-environment/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/checkpoint/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/crypto-environment/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/delivery/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/delivery.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/environment/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-environments",
+        "path": "packages/discovery/facts/environments/profiles/environment.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/evaluation-spec/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/execution-evidence/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-evidence",
+        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/execution-verification/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-evidence",
+        "path": "packages/discovery/facts/evidence/profiles/execution-verification.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/information-world/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-chain-environments",
+        "path": "packages/discovery/facts/chain-environments/profiles/information-world.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/key-binding/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "path": "packages/discovery/facts/trust/profiles/key-binding.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/plugin/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/plugin.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/profile-document/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/profile-document.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/result-evaluation/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-evidence",
+        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/submission/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/submission.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/task/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-task-execution",
+        "path": "packages/discovery/facts/task-execution/profiles/task.v1.json"
+      },
+      {
+        "field": "profile",
+        "identifier": "https://spec.jinn.network/facts/trust-policy/v1",
+        "kind": "profiles",
+        "package": "@jinn-network/record-discovery-facts-trust",
+        "path": "packages/discovery/facts/trust/profiles/trust-policy.v1.json"
+      },
+      {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/evidence-repository-ipfs-registration/1/registration.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/evidence-repository-ipfs-registration/v1/registration.schema.json",
         "kind": "profiles",
         "package": "@jinn-network/evidence-repository-ipfs",
         "path": "packages/evidence/repository-ipfs/profile/v1/registration.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/evidence-repository-oci/v1/schemas/evidence-oci-manifest.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-repository-oci",
         "path": "packages/evidence/repository-oci/profiles/evidence-repository-oci/1.0/schemas/evidence-oci-manifest.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/dsse-envelope.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/dsse-envelope.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-evidence-document.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-evidence-document.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/execution-verification-statement.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/execution-verification-statement.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/resource-descriptor.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/resource-descriptor.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json",
+        "identifier": "https://spec.jinn.network/profiles/execution-evidence/v1/schemas/result-evaluation-statement.schema.json",
         "kind": "schemas",
         "package": "@jinn-network/evidence-protocol",
         "path": "packages/evidence/protocol/profiles/execution-evidence/1.0/schemas/result-evaluation-statement.schema.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/profiles/task-execution/1.0",
+        "identifier": "https://spec.jinn.network/profiles/task-execution/v1",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-protocol",
-        "path": "packages/task-execution/protocol/profiles/task-execution/1.0/profile.json"
+        "path": "packages/task-execution/protocol/profiles/task-execution/v1/profile.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/profiles/task-profile/1.0",
+        "identifier": "https://spec.jinn.network/profiles/task-profile/v1",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
-        "path": "packages/task-execution/profiles/profiles/task-profile/1.0/profile.json"
+        "path": "packages/task-execution/profiles/profiles/task-profile/v1/profile.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/profiles/trajectory-vocabulary/1.0",
+        "identifier": "https://spec.jinn.network/profiles/trace-vocabulary/v1",
         "kind": "profiles",
-        "package": "@jinn-network/evidence-trajectory",
-        "path": "packages/evidence/trajectory/profiles/trajectory-vocabulary/1.0/profile.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/authorization/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-trust",
-        "path": "packages/discovery/facts/trust/profiles/authorization.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/benchmark-matrix/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/matrix.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/benchmark-report/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/report.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/benchmark-run/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/run.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/benchmark/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-benchmarking",
-        "path": "packages/discovery/facts/benchmarking/profiles/benchmark.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/chain-environment/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-chain-environments",
-        "path": "packages/discovery/facts/chain-environments/profiles/chain-environment.1.0.json"
+        "package": "@jinn-network/evidence-trace",
+        "path": "packages/evidence/trace/profiles/trace-vocabulary/v1/profile.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/records/chain-environment/1.0/schema",
+        "identifier": "https://spec.jinn.network/schemas/chain-environment/v1",
         "kind": "schemas",
         "package": "@jinn-network/chain-environment-record",
         "path": "packages/environments/chain-record/schemas/chain-environment.schema.json"
       },
       {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/checkpoint/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/checkpoint.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/crypto-environment/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-chain-environments",
-        "path": "packages/discovery/facts/chain-environments/profiles/crypto-environment.1.0.json"
-      },
-      {
         "field": "$id",
-        "identifier": "https://jinn.network/records/crypto-environment/1.0/schema",
+        "identifier": "https://spec.jinn.network/schemas/crypto-environment/v1",
         "kind": "schemas",
         "package": "@jinn-network/chain-environment-record",
         "path": "packages/environments/chain-record/schemas/crypto-environment.schema.json"
       },
       {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/delivery/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/delivery.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/environment/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-environments",
-        "path": "packages/discovery/facts/environments/profiles/environment.1.0.json"
-      },
-      {
         "field": "$id",
-        "identifier": "https://jinn.network/records/environment/1.0/schema",
+        "identifier": "https://spec.jinn.network/schemas/environment/v1",
         "kind": "schemas",
         "package": "@jinn-network/environment-record",
         "path": "packages/environments/record/schemas/environment.schema.json"
       },
       {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/evaluation-spec/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/evaluation-spec.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/execution-evidence/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-evidence",
-        "path": "packages/discovery/facts/evidence/profiles/execution-evidence.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/execution-verification/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-evidence",
-        "path": "packages/discovery/facts/evidence/profiles/execution-verification.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/information-world/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-chain-environments",
-        "path": "packages/discovery/facts/chain-environments/profiles/information-world.1.0.json"
-      },
-      {
         "field": "$id",
-        "identifier": "https://jinn.network/records/information-world/1.0/schema",
+        "identifier": "https://spec.jinn.network/schemas/information-world/v1",
         "kind": "schemas",
         "package": "@jinn-network/information-world",
         "path": "packages/environments/information-world/schemas/information-world.schema.json"
       },
       {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/key-binding/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-trust",
-        "path": "packages/discovery/facts/trust/profiles/key-binding.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/plugin/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/plugin.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/profile-document/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/profile-document.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/result-evaluation/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-evidence",
-        "path": "packages/discovery/facts/evidence/profiles/result-evaluation.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/submission/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/submission.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/records/task/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-task-execution",
-        "path": "packages/discovery/facts/task-execution/profiles/task.1.0.json"
+        "field": "$id",
+        "identifier": "https://spec.jinn.network/schemas/trace-derivation-statement/v1",
+        "kind": "schemas",
+        "package": "@jinn-network/evidence-trace",
+        "path": "packages/evidence/trace/schemas/trace-derivation-statement.schema.json"
       },
       {
         "field": "$id",
-        "identifier": "https://jinn.network/records/trajectory-derivation-statement/1.0/schema",
+        "identifier": "https://spec.jinn.network/schemas/trace/v1",
         "kind": "schemas",
-        "package": "@jinn-network/evidence-trajectory",
-        "path": "packages/evidence/trajectory/schemas/trajectory-derivation-statement.schema.json"
-      },
-      {
-        "field": "$id",
-        "identifier": "https://jinn.network/records/trajectory/1.0/schema",
-        "kind": "schemas",
-        "package": "@jinn-network/evidence-trajectory",
-        "path": "packages/evidence/trajectory/schemas/trajectory.schema.json"
+        "package": "@jinn-network/evidence-trace",
+        "path": "packages/evidence/trace/schemas/trace.schema.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/records/trust-policy/1.0/facts/1.0",
-        "kind": "profiles",
-        "package": "@jinn-network/record-discovery-facts-trust",
-        "path": "packages/discovery/facts/trust/profiles/trust-policy.1.0.json"
-      },
-      {
-        "field": "profile",
-        "identifier": "https://jinn.network/task-profiles/evaluation-task/1.0",
+        "identifier": "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "path": "packages/task-execution/profiles/profiles/task-profiles/evaluation-task/1.0/profile.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/task-profiles/prediction-forecast/1.0",
+        "identifier": "https://spec.jinn.network/task-profiles/prediction-forecast/1.0",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "path": "packages/task-execution/profiles/profiles/task-profiles/prediction-forecast/1.0/profile.json"
       },
       {
         "field": "profile",
-        "identifier": "https://jinn.network/task-profiles/repository-work/1.0",
+        "identifier": "https://spec.jinn.network/task-profiles/repository-work/1.0",
         "kind": "profiles",
         "package": "@jinn-network/task-execution-profiles",
         "path": "packages/task-execution/profiles/profiles/task-profiles/repository-work/1.0/profile.json"
@@ -52665,8 +52665,8 @@
         "@jinn-network/evidence-repository-ipfs",
         "@jinn-network/evidence-repository-oci",
         "@jinn-network/evidence-retrieval",
+        "@jinn-network/evidence-trace",
         "@jinn-network/evidence-trace-decode",
-        "@jinn-network/evidence-trajectory",
         "@jinn-network/execution-recorder",
         "@jinn-network/execution-recorder-bridge",
         "@jinn-network/marketplace-binding",
@@ -52922,7 +52922,7 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
-          "package": "@jinn-network/evidence-trace-decode",
+          "package": "@jinn-network/evidence-trace",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -52933,7 +52933,7 @@
           ],
           "environment": "npm-publish",
           "organization": "Jinn-Network",
-          "package": "@jinn-network/evidence-trajectory",
+          "package": "@jinn-network/evidence-trace-decode",
           "provider": "GitHub Actions",
           "repository": "mono",
           "workflow": "stack-npm-publish.yml"
@@ -53409,8 +53409,8 @@
         "@jinn-network/evidence-repository-ipfs",
         "@jinn-network/evidence-repository-oci",
         "@jinn-network/evidence-retrieval",
+        "@jinn-network/evidence-trace",
         "@jinn-network/evidence-trace-decode",
-        "@jinn-network/evidence-trajectory",
         "@jinn-network/execution-recorder",
         "@jinn-network/execution-recorder-bridge",
         "@jinn-network/marketplace-binding",

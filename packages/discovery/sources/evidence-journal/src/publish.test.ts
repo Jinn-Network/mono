@@ -42,7 +42,7 @@ function entryAt(sequence: string, previous: `sha256:${string}` | null): Announc
       {
         announcementId: `a-${sequence}`,
         action: "available",
-        record: { kind: "https://jinn.network/records/execution-evidence/1.0", digest: `sha256:${"a".repeat(64)}` },
+        record: { kind: "https://spec.jinn.network/records/execution-evidence/v1", digest: `sha256:${"a".repeat(64)}` },
       },
     ],
   };

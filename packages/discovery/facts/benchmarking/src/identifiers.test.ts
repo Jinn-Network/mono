@@ -29,15 +29,16 @@ describe("facts/benchmarking identifiers", () => {
   });
 
   it("pins the four benchmarking record-kind segments", () => {
-    expect(BENCHMARK_RECORD_KIND).toBe("https://jinn.network/records/benchmark/1.0");
-    expect(RUN_RECORD_KIND).toBe("https://jinn.network/records/benchmark-run/1.0");
-    expect(MATRIX_RECORD_KIND).toBe("https://jinn.network/records/benchmark-matrix/1.0");
-    expect(REPORT_RECORD_KIND).toBe("https://jinn.network/records/benchmark-report/1.0");
+    expect(BENCHMARK_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark/v1");
+    expect(RUN_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-run/v1");
+    expect(MATRIX_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-matrix/v1");
+    expect(REPORT_RECORD_KIND).toBe("https://spec.jinn.network/records/benchmark-report/v1");
   });
 
-  // The mirrored grammar must already accept the spelling the re-seal will mint, because
-  // C1's wave flips this package's constants and nothing else may need to move with them.
-  // No constant here uses the canonical arm yet, so only this asserts it.
+  // The mirrored grammar dual-accepts both the canonical re-seal spelling (now what the
+  // constants above are pinned to) and the legacy spelling (still recognized during the
+  // transition window per DR-2026-08-04). Component C2 narrows this to the canonical arm
+  // once the re-seal has landed.
   it("the mirrored grammar accepts the canonical re-seal spelling", () => {
     expect("https://spec.jinn.network/records/benchmark/v1").toMatch(RECORD_KIND_GRAMMAR);
     expect("https://spec.jinn.network/records/benchmark/v2").toMatch(RECORD_KIND_GRAMMAR);

@@ -53,7 +53,7 @@ afterEach(async () => {
 
 function taskBytes(): Uint8Array {
   return sealTask({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     profile: {
       uri: profile.profile,
       digest: { sha256: sealedProfile.digest.slice("sha256:".length) },
@@ -65,7 +65,7 @@ function taskBytes(): Uint8Array {
 
 function submissionBytes(task: Uint8Array): Uint8Array {
   return sealSubmission({
-    protocol: "https://jinn.network/profiles/task-execution/1.0",
+    protocol: "https://spec.jinn.network/profiles/task-execution/v1",
     submission: "urn:uuid:55555555-5555-4555-8555-555555555555",
     task: { digest: { sha256: documentDigest(task).slice("sha256:".length) } },
     requester: "urn:uuid:66666666-6666-4666-8666-666666666666",
