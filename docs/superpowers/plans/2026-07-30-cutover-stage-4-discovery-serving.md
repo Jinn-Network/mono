@@ -14,6 +14,8 @@
 > still calls it, stop — stage 2 is incomplete") dissolve — ordering is intra-train PR
 > stacking; Task 15 is superseded by the combined drain and fused gate (the
 > second-daemon probe is G-archive, unchanged in substance).
+
+> **Addendum 2026-08-04** (per the
 > [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
 > §6 and the composition design §6.2 amendment): the archive mounts on its **own listener
 > only** — the "mounted twice" shape below (main operator API + opt-in separate listener)

@@ -30,7 +30,7 @@ step 7 unfinished.
 - [ ] Remove `evaluator` from every `joinedSolverNets[<manifestCid>].roles` (or stop the
       daemon) on every fleet operator; restart
 - [ ] Confirm no new `evaluation_submitted` events after the freeze timestamp
-- [ ] `sqlite3 ~/.jinn-client/jinn.db "SELECT count(*) FROM task_runs WHERE task_role='evaluation' AND state NOT IN ('COMPLETE','FAILED','ABANDONED')"` — record the in-flight count
+- [ ] `sqlite3 ~/.jinn-client/jinn.db "SELECT count(*) FROM task_runs WHERE task_role='evaluation' AND state NOT IN ('COMPLETE','FAILED','RACE_LOST')"` — record the in-flight count
 
 ## 2. Freeze posting
 
@@ -52,23 +52,26 @@ step 7 unfinished.
 
 - [ ] Peer-sync: `peers: []`, restart; confirm no peer heartbeat for one full 60 s
       interval
-- [ ] Registry lifecycle: `GET /v1/solvernets/launched` shows every owned record in a
-      terminal state (no in-flight ERC-8004 lifecycle transition)
-- [ ] Evidence driver: `indexing.pendingRecords === 0` and `indexing.lastError === null`
-      on `/v1/status` (announce-after-indexed, contract 6)
+- [ ] Registry lifecycle: `GET /v1/solvernets/launched` (operator-token-gated) shows
+      every owned record in a terminal state (no in-flight ERC-8004 lifecycle transition)
+- [ ] Evidence driver: `evidenceIndexing.pending === 0` and
+      `evidenceIndexing.failures.length === 0` on `/v1/status`
+      (`client/src/api/contract/status.ts` shape; announce-after-indexed, contract 6)
 
 ## 5. Wait for terminal states
 
 - [ ] Poll every 5 minutes:
-      `sqlite3 ~/.jinn-client/jinn.db "SELECT count(*) FROM task_runs WHERE task_role IN ('evaluation','restoration') AND state NOT IN ('COMPLETE','FAILED','ABANDONED')"`
+      `sqlite3 ~/.jinn-client/jinn.db "SELECT count(*) FROM task_runs WHERE task_role IN ('evaluation','restoration') AND state NOT IN ('COMPLETE','FAILED','RACE_LOST')"`
 - [ ] Patience bound: 2 hours from the last freeze step
 - [ ] Cross-check the chain signal per flow (router `claimed(requestId)` for
       evaluations; delivery events for solves)
 
 ## 6. Record stragglers
 
-One table, all flows. Stragglers strand loudly via the `unreleased_attempt` state
-message — never silently (contract 10 / design §4).
+One table, all flows. This table plus the per-flow chain probe (`cast call
+claimed(requestId)`) IS the loud-stranding record (contract 10 / design §4) — the
+`unreleased_attempt` notification kind is not wired on this branch
+(`client/src/api/notifications-build.ts`) and nothing here depends on it.
 
 | taskId | attemptIndex | requestId | flow (evaluation \| solve \| post) |
 | --- | --- | --- | --- |
@@ -110,8 +113,9 @@ message — never silently (contract 10 / design §4).
 ### G-archive — second-daemon consumption
 
 - [ ] `e2e:archive-second-daemon` green against the live listener (cold sync → digest
-      retrieval → resume → live tail)
-- [ ] `runServingPlaneConformance` green against the live surface
+      retrieval → resume → live tail) — *script is train-built (former stage-4 Task 6)*
+- [ ] `runServingPlaneConformance` green against the live surface — *live-surface
+      extension is train-built (former stage-4 Task 1)*
 - [ ] Evidence: consuming daemon's operator id + the archive sequence range consumed
 
 Optional, non-gating: attach the Phase B closure manifest as Class O observational
@@ -122,14 +126,18 @@ evidence (never the cited basis for any manifest flip — headless §7).
 - [ ] Gate evidence tables complete in the PR body
 - [ ] Straggler disposition recorded (empty, or the surviving-synthesis note per DR
       decision 4)
-- [ ] Retirement wave unlocked (Wave 4); each transition-manifest flip cites
-      DR-2026-08-05 + this runbook's evidence
+- [ ] Retirement wave unlocked (Wave 4); each transition-manifest flip carries
+      `evidenceCitation: log/decisions/2026-08-05-cutover-one-swap-collapse.md` (the
+      only allowed roots are `log/decisions/` and `docs/superpowers/specs/`); this
+      runbook's evidence tables go in the flipping PR's body
 
 ## Rollback
 
 > Revert the deploy PR or pin the previous canary (specifier at the top). Rollback is
 > **all-or-nothing across the three flows** — reverting abandons the native flows'
 > in-flight engagements together. Chain state stays consistent (claims are chain facts;
-> the backend journal persists), but the reverted daemon resumes none of them and the
-> `unreleased_attempt` state message names them. The additive config migration keeps the
-> pinned generation bootable from the migrated file (contract 4).
+> the backend journal persists), but the reverted daemon resumes none of them — record
+> the abandoned set the same way as step 6 (table + `cast call claimed(requestId)`); the
+> `unreleased_attempt` notification kind is not wired and nothing here depends on it.
+> The additive config migration keeps the pinned generation bootable from the migrated
+> file (contract 4).

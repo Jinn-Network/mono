@@ -16,7 +16,7 @@ Stage 1 of the operator-daemon composition cutover is deployed and gate-green (B
 Sepolia closed loop, tasks 1216/1217). Stage 2's implementation train (PR #2350) was
 superseded: PR #2363 harvested its evaluator primitives into the native estate ("adapted
 without cherry-picking", donor SHAs in its commit bodies), and the native derivation
-dissolved both of its blocking ratifications (R1, R2 — decisions 8 below). #2350 was
+dissolved both of its blocking ratifications (R1, R2 — decision 9 below). #2350 was
 closed 2026-08-05 with its unique artifacts salvaged (`docs/salvage/stage-2/`,
 `docs/runbooks/cutover-stage-2-drain.md`). A full-ref survey (1,470 refs, both remotes)
 confirmed the remaining swap exists on no branch: the fleet daemon still constructs
@@ -37,7 +37,7 @@ all of it deleted again by stage 5. The operator ruled against carrying that cos
    "retires" columns are the union of the three, **minus the bridge-era work the
    collapse deletes outright**: the bridge-subject synthesis and its admission-receipt
    rule (register R2 — dissolved unbuilt), the self-signer grant allowance (register R1
-   — dissolved, decision 8), the operator-API archive mount (already reversed by the
+   — dissolved, decision 9), the operator-API archive mount (already reversed by the
    headless design §6), the mutating posting routes (already re-ruled by headless §4.2),
    and the inter-stage handshake checks the stage plans carried against each other.
    Stages 5 and 6 are unchanged in content; stage 5's dependency becomes "the one-swap
@@ -46,17 +46,25 @@ all of it deleted again by stage 5. The operator ruled against carrying that cos
    continues to enter as kit fixtures, never ported code (composition §6.6 / program
    contract 12). Native-v1's parallel entry point (`native-main.ts`, the per-role file
    leases, `NativeProductFileSchema`, the `Daemon` `native-v1` compatibility branch)
-   retires in the swap's retirement wave, per DR-2026-08-04-b decision 1.
+   retires at **stage 5**, not in the swap — DR-2026-08-04-b decision 1 says "when the
+   stages complete," headless §13(e) puts the `verticalMode` manifest-row flips in the
+   stage-5 branch-deletion PR, and the `legacy-operator-composition` row stays `planned`
+   through the swap (decision 7). The swap makes the parallel entry redundant; stage 5
+   deletes it.
 
 2. **One combined drain replaces contract 10's per-flow drains for the collapsed
    stages.** The drain freezes every retiring flow's intake before the single deploy:
    evaluator intake, posting, solver claims for the deploy window (operator may waive),
    peer-sync, registry lifecycle, evidence-driver publication — with one shared patience
    bound and **one** straggler table `(taskId, attemptIndex, requestId, flow)` in the
-   deploy PR body. Stragglers strand loudly through the `unreleased_attempt` state
-   message, never silently. Rollback is symmetric, honest, and now **all-or-nothing
-   across the three flows** — that is the accepted cost of the collapse, stated rather
-   than hidden. Runbook: [`docs/runbooks/cutover-one-swap-drain.md`](../../docs/runbooks/cutover-one-swap-drain.md).
+   deploy PR body. Stragglers strand **loudly and verifiably**: the straggler table in
+   the deploy PR plus the per-flow chain probe (`cast call claimed(requestId)`) are the
+   record — the `unreleased_attempt` notification kind is **documented-dead on the
+   branch** (`client/src/api/notifications-build.ts:35-38`: "NOT wired… future work"),
+   so no claim in this program rests on it; wiring it remains follow-up work, not a
+   drain precondition. Rollback is symmetric, honest, and now **all-or-nothing across
+   the three flows** — that is the accepted cost of the collapse, stated rather than
+   hidden. Runbook: [`docs/runbooks/cutover-one-swap-drain.md`](../../docs/runbooks/cutover-one-swap-drain.md).
 
 3. **The gate is a fused two-probe gate on the one deploy** (operator-selected over
    three separate probes):
@@ -118,10 +126,15 @@ all of it deleted again by stage 5. The operator ruled against carrying that cos
       contract types live under `client/src/api/contract/`.
    5. Grader-container execution has no owner on the integration branch — the shipped
       `evaluator-adapters` boundary explicitly delegates container execution to the
-      host (its "Finding A"), and the only implementation is the salvage at
-      `docs/salvage/stage-2/`. The swap train owns the port, under the salvage README's
-      three re-derivation constraints. This is the single largest genuinely-unbuilt item
-      in the collapsed scope.
+      host (the evaluator-adapters plan's finding 1, labeled "Finding A" in the salvage
+      README), and the only implementation is the salvage at `docs/salvage/stage-2/`.
+      The swap train owns the port, under the salvage README's three re-derivation
+      constraints. This is the single largest genuinely-unbuilt item in the collapsed
+      scope.
+   6. The stage-2 plan's Task 9 is titled "Evaluation Submission derivation with the
+      carve-out enforced" — the carve-out is dissolved (decision 9); the done-native
+      verification for that row verifies the **grant-free** derivation's tests, not the
+      carve-out's.
 
 7. **Transition-manifest edits ride the swap train, citing this decision record.**
    - `legacy-evaluator-delivery-watcher` → `deleted` in the retirement PR that deletes
@@ -145,8 +158,29 @@ all of it deleted again by stage 5. The operator ruled against carrying that cos
      `.github/scripts/phase-d-transition-deletion.test.mjs` (the `includes('remains
      legacy')` check follows the text). The closed `EXPECTED_TRANSITIONS` list is
      untouched: no rows are added or removed.
+   - **Three further deletion-test assertions break under the swap and are in the
+     train's scope** (each edited in the retirement PR that invalidates it, never
+     pre-emptively): (a) the `legacy-task-run-store-coupling` arm's unconditional
+     `deepEqual` on the exact `TaskRunPersistence` importer list — the list shrinks as
+     `delivery-watcher.ts`, `engine.ts`, `work-loop-corpus.ts`'s usage, and
+     `mech/adapter.ts` retire; (b) the `marketplace-pipeline` not-deleted arm's frozen
+     consumer list, which `shape-v2.ts`'s de-pipelining breaks by itself; (c) the
+     `legacy-task-submission-synthesis` deleted-arm assertion that
+     `client/src/daemon/projector-enrich.ts` not exist — that file carries non-bridge
+     exports (`ProjectorEnrichPorts`, `createProjectorEnrich`), so the flip **requires
+     splitting the synthesis out of it first**; if the split does not land in-train, the
+     row stays `migrating` regardless of the straggler table.
 
-8. **Ratification-register items R1 and R2 are dissolved** (they were
+8. **Mainnet posture: refuse and pin** (operator-selected). The swapped daemon's boot
+   gate (`assertNativeDeployment`) admits only Base Sepolia 84532 with the pinned
+   today-generation addresses — so native mode + mainnet is an **explicit boot
+   refusal** (hard error, never a silent legacy fallback), and the mainnet fleet stays
+   pinned to the pre-swap canary until a mainnet native deployment is chartered (Phase 2
+   scope). This amends the composition design §11 non-goal ("no mainnet deployment
+   decisions") to exactly this extent: the swap makes the refusal explicit; it charters
+   nothing.
+
+9. **Ratification-register items R1 and R2 are dissolved** (they were
    operator-ratification-class; this record is their disposition). R1 (self-signer
    grant / evaluator-seals carve-out): the native derivation seals evaluation
    Submissions with `capabilityGrants: {}` (`client/src/evaluator/native-evaluation-derivation.ts`)

@@ -49,7 +49,7 @@ Authored next (parallel planning agents), one per row; executed in dependency or
 | `2026-07-30-cutover-stage-2-evaluator-flow.md` | Evaluator loop (evaluation-profile Attempts on the embedded backend; evaluator-seals carve-out); durable intent store wired; verdict-gate policy assembly; retire delivery-watcher + mech-adapter evaluation machinery + legacy TaskEngine; drain runbook | stage 1; evaluator-adapters |
 | `2026-07-30-cutover-stage-3-posting-flow.md` | Posting loop (extractable work-client module); requester-side adoption; requester-side evaluation sealing; CLI `jinn tasks` lifecycle exits + `jinn policy`/`jinn wiring`; retire creator loop + launched-record generators + lifecycle publishing; posting SPA surface | stage 2 |
 | `2026-07-30-cutover-stage-4-discovery-serving.md` | Public archive mount (exposure scoping, opt-in bind, IP-disclosure copy); retire peer-sync + registry client + `client/src/discovery/`; evidence/indexing status surface; discovery kit against the live surface | stage 3; transport-http (HTTP surface) |
-| `2026-07-30-cutover-stage-5-rename-closure.md` | `client/` → `operator/` rename (paths-only commit); guard trio on the operator tree; delete `task_runs`; delete legacy config keys + prune migration backups; #2297 fix; bridge-retirement chore filed | stage 4 |
+| `2026-07-30-cutover-stage-5-rename-closure.md` | `client/` → `operator/` rename (paths-only commit); guard trio on the operator tree; delete `task_runs`; delete legacy config keys + prune migration backups; #2297 fix; bridge-retirement chore filed | stage 4 *(amended 2026-08-05 per DR-2026-08-05: the one-swap deploy PR merged and its gate green)* |
 
 ## 2. Streams, phases, critical path
 
@@ -138,7 +138,7 @@ gates.
 4. **Config migration** — additive, atomic (temp+rename), idempotent
    (`configShapeVersion`); legacy keys live until stage 5 (spec §9).
 5. **Evaluator-seals carve-out** — public evaluation specs only until stage 3 brings
-   requester-side sealing (spec §4). *Dissolved 2026-08-05 per DR-2026-08-05 decision 8:
+   requester-side sealing (spec §4). *Dissolved 2026-08-05 per DR-2026-08-05 decision 9:
    the native derivation seals evaluation Submissions grant-free
    (`capabilityGrants: {}`), so there is no carve-out; what requester-side sealing still
    owes is sealing for the operator's own posted tasks carrying private material under
@@ -156,11 +156,12 @@ gates.
    guard-forbidden in venue-base.
 9. **Bridge-era documents** — projector synthesizes legacy facts cards under a `legacy`
    derivation annotation; converged-Delivery legacy-evaluator parseability is a stage-1
-   fixture (spec §10). *Amended 2026-08-05 per DR-2026-08-05 decision 4: the bridge-era
-   window ends at the one-swap deploy, conditionally — an empty straggler table closes
-   it (and the legacy-evaluator-parseability fixture retires with the train, since no
-   legacy parser survives); a non-empty table keeps the synthesis alive for exactly
-   those subjects until stage 5.*
+   fixture (spec §10). *Amended 2026-08-05 per DR-2026-08-05 decision 4: the
+   legacy-evaluator-parseability fixture retires with the train **unconditionally** (the
+   legacy evaluator is deleted, so no parser survives to satisfy); the legacy-task
+   **synthesis** is the conditional part — an empty straggler table at deploy closes the
+   bridge-era window, a non-empty table keeps the synthesis alive for exactly those
+   subjects until stage 5.*
 10. **Drain rules** — every retiring flow drains before its swap; stragglers strand loudly
     (spec §10). *Amended 2026-08-05 per DR-2026-08-05 decision 2: the collapsed stages
     2–4 run ONE combined drain — every retiring flow's intake freezes before the single
@@ -249,8 +250,9 @@ until stage 5); the core/layer/plugin portal surface; npm publish (#2293).
 
 ### Task dispositions (summary; the stage-plan addenda carry the details)
 
-- **Stage 2 (17 tasks):** 6 done-native (verify-only: verdict gate/adapter,
-  self-evaluation, opportunities, subject material, derivation), 3 re-scope (verdict
+- **Stage 2 (17 tasks):** 7 done-native (verify-only: verdict gate/adapter,
+  self-evaluation, opportunities, subject material, derivation, the evaluator loop
+  itself — Tasks 2–6, 9, 13), 3 re-scope (verdict
   broadcaster leg, durable intent admission, composition/config/observability parity —
   the dashboard must not go dark), 3 kill (T7 bridge-subject R2, T8 self-signer R1, T12
   signer secret-forward — all dissolved), 2 keep (T15/T16 retirements), T17 superseded

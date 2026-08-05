@@ -15,6 +15,8 @@
 > own-task-adoption gate fuses into G-loop). Bridge-era compatibility for legacy-posted
 > tasks is bounded by DR decision 4: the combined drain is designed to leave zero
 > non-terminal legacy-posted tasks.
+
+> **Addendum 2026-08-04** (per the
 > [headless operator re-derivation design](../specs/2026-08-04-headless-operator-rederivation-design.md)
 > §4.2): the posting surface is re-ruled — posting **status** joins the read plane
 > (receipts/status projection, versioned per §8); posting **mutations** are config +
