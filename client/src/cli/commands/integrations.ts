@@ -7,6 +7,15 @@ import { platform, homedir } from 'node:os';
 import type { CommandContext, CommandModule } from '../command.js';
 import { emitResult } from '../output.js';
 import { emitEnvelope } from '../../errors/envelope.js';
+import { DEFAULT_STOP_HOOK_COMMAND, fileContainsHookCommand } from '../hook-installers/common.js';
+import { patchClaudeCodeSettingsJson, removeClaudeCodeHookJson } from '../hook-installers/claude-code.js';
+// codex/cursor/gemini-cli hook wiring is deliberately NOT imported here —
+// their file formats are not independently verified against those tools'
+// real hook schemas (claude-code's WAS wrong before verification caught it;
+// see the follow-up issue). The pure patch/remove functions still exist in
+// `../hook-installers/{codex,cursor,gemini-cli}.js` with test coverage in
+// `test/scripts/install-hooks.test.ts` — only the `jinn integrations
+// install` wiring is scoped down to claude-code.
 
 // ---------------------------------------------------------------------------
 // Skill content resolution
@@ -113,6 +122,80 @@ function removeTomlMcpServer(filePath: string): { ok: boolean; detail: string } 
     .trim() + '\n';
   writeFileSync(filePath, updated, 'utf-8');
   return { ok: true, detail: `Removed MCP entry from ${filePath}` };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — stop-hook config (§14.1 of
+// docs/superpowers/specs/2026-08-04-headless-operator-rederivation-design.md)
+//
+// `scripts/install-hooks/*` (moved to `src/cli/hook-installers/` in this
+// change so it can be imported here and shipped in `dist/`) had zero
+// production callers — the patcher functions existed but nothing ever wrote
+// a hook config file. This wires the claude-code one into the real
+// installer surface.
+//
+// Scope: claude-code ONLY. `.claude/settings.json`'s `hooks.Stop` shape —
+// an array of hook GROUPS, each with a `hooks: [{type,command}]` array —
+// is confirmed against this repo's own documented example
+// (apps/jinn-agent/skills/autonomous-ai-agents/claude-code/SKILL.md) and the
+// operator's live settings file. codex/cursor/gemini-cli's hook file
+// formats were NOT independently verified (a real wrong-schema bug was
+// caught here in review before this scope-down) — their pure patch/remove
+// functions still exist in `../hook-installers/{codex,cursor,gemini-cli}.js`
+// with coverage in `test/scripts/install-hooks.test.ts`, but are not wired
+// here. See the follow-up issue for verifying + wiring them.
+// ---------------------------------------------------------------------------
+
+export function claudeCodeHookFilePath(scope: 'user' | 'project'): string {
+  return scope === 'user'
+    ? join(homedir(), '.claude', 'settings.json')
+    : join(process.cwd(), '.claude', 'settings.json');
+}
+
+export function isHookFileConfigured(filePath: string, command: string): boolean {
+  if (!existsSync(filePath)) return false;
+  return fileContainsHookCommand(readFileSync(filePath, 'utf-8'), command);
+}
+
+export function installHookFile(
+  filePath: string,
+  command: string,
+  patchFn: (raw: string) => string,
+): { ok: boolean; detail: string } {
+  if (isHookFileConfigured(filePath, command)) {
+    return { ok: true, detail: `Already configured in ${filePath}` };
+  }
+  const raw = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+  let patched: string;
+  try {
+    patched = patchFn(raw);
+  } catch (err) {
+    // A hand-edited settings file with a trailing comma or similar shouldn't
+    // throw a stack trace mid-loop after other targets have already been
+    // written — surface it as an ordinary error result instead.
+    return { ok: false, detail: `Failed to parse ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, patched, 'utf-8');
+  return { ok: true, detail: `Wrote stop-hook entry to ${filePath}` };
+}
+
+export function removeHookFile(
+  filePath: string,
+  command: string,
+  removeFn: (raw: string) => string,
+): { ok: boolean; detail: string } {
+  if (!isHookFileConfigured(filePath, command)) {
+    return { ok: true, detail: existsSync(filePath) ? 'Not configured' : 'Config file does not exist' };
+  }
+  let removed: string;
+  try {
+    removed = removeFn(readFileSync(filePath, 'utf-8'));
+  } catch (err) {
+    return { ok: false, detail: `Failed to parse ${filePath}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  writeFileSync(filePath, removed, 'utf-8');
+  return { ok: true, detail: `Removed stop-hook entry from ${filePath}` };
 }
 
 // ---------------------------------------------------------------------------
@@ -238,7 +321,7 @@ function claudeDesktopConfigDir(): string {
 // Target definitions
 // ---------------------------------------------------------------------------
 
-interface TargetResult {
+export interface TargetResult {
   ok: boolean;
   detail: string;
 }
@@ -246,7 +329,7 @@ interface TargetResult {
 /** A single file change that would be made during install. */
 export interface PlanEntry {
   target: string;
-  kind: 'mcp' | 'skill';
+  kind: 'mcp' | 'skill' | 'hook';
   filePath: string;
   fileExists: boolean;
   /** Exact content that would be appended/written (not the full file). */
@@ -254,7 +337,7 @@ export interface PlanEntry {
   alreadyConfigured: boolean;
 }
 
-interface PluginTarget {
+export interface PluginTarget {
   id: string;
   name: string;
   detect(): boolean;
@@ -268,6 +351,16 @@ interface PluginTarget {
   installSkill(scope: 'user' | 'project', skillContent: string): Promise<TargetResult>;
   removeMcp(scope: 'user' | 'project'): Promise<TargetResult>;
   removeSkill(scope: 'user' | 'project'): Promise<TargetResult>;
+  /**
+   * §14.1 stop-hook wiring. Optional — only defined for targets whose real
+   * hook file format has been independently verified (currently
+   * claude-code only; codex/cursor/gemini-cli are pending a follow-up
+   * issue). `hookFilePath` powers the `--dry-run` plan preview.
+   */
+  hookFilePath?(scope: 'user' | 'project'): string | null;
+  isHookConfigured?(scope: 'user' | 'project'): boolean;
+  installHook?(scope: 'user' | 'project'): Promise<TargetResult>;
+  removeHook?(scope: 'user' | 'project'): Promise<TargetResult>;
 }
 
 function claudeSkillDir(scope: 'user' | 'project'): string {
@@ -323,6 +416,16 @@ const TARGETS: PluginTarget[] = [
     },
     async removeSkill(scope) {
       return removeClaudeSkill(claudeSkillDir(scope));
+    },
+    hookFilePath(scope) { return claudeCodeHookFilePath(scope); },
+    isHookConfigured(scope) {
+      return isHookFileConfigured(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`);
+    },
+    async installHook(scope) {
+      return installHookFile(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`, patchClaudeCodeSettingsJson);
+    },
+    async removeHook(scope) {
+      return removeHookFile(claudeCodeHookFilePath(scope), `${DEFAULT_STOP_HOOK_COMMAND} --tool claude-code`, removeClaudeCodeHookJson);
     },
   },
 
@@ -409,6 +512,8 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), '.cursor', 'rules', 'jinn.md');
       return removeCursorRule(rulePath);
     },
+    // No stop-hook wiring — cursor's real hook file format is not
+    // independently verified. See the follow-up issue.
   },
 
   // ---- vscode ----
@@ -515,6 +620,8 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), 'GEMINI.md');
       return removeSkillBlock(instrPath);
     },
+    // No stop-hook wiring — gemini-cli's real hook file format is not
+    // independently verified. See the follow-up issue.
   },
 
   // ---- antigravity ----
@@ -601,6 +708,10 @@ const TARGETS: PluginTarget[] = [
         : join(process.cwd(), 'AGENTS.md');
       return removeSkillBlock(instrPath);
     },
+    // No stop-hook wiring — codex's real hook file format is not
+    // independently verified (its MCP config is TOML; the pre-existing
+    // patcher assumed JSON, which can't live in `config.toml`). See the
+    // follow-up issue.
   },
 ];
 
@@ -628,7 +739,7 @@ function skillBlockPatch(filePath: string, content: string): string {
   return `${BLOCK_START}\n${content}\n${BLOCK_END}\n`;
 }
 
-function buildPlanEntries(
+export function buildPlanEntries(
   targets: PluginTarget[],
   scope: 'user' | 'project',
   skillContent: string,
@@ -701,6 +812,26 @@ function buildPlanEntries(
         });
       }
     }
+
+    // §14.1/F4: the hook write goes into the operator's real
+    // `~/.claude/settings.json` (or the project one) — the dry-run plan is
+    // the consent surface for that, same as MCP/skill. Not gated by
+    // --mcp-only/--skill-only; it's its own axis, matching `runInstall`.
+    const hookFp = target.hookFilePath?.(scope) ?? null;
+    if (hookFp !== null) {
+      const command = `${DEFAULT_STOP_HOOK_COMMAND} --tool ${target.id}`;
+      const alreadyConfigured = target.isHookConfigured?.(scope) ?? false;
+      entries.push({
+        target: target.id,
+        kind: 'hook',
+        filePath: hookFp,
+        fileExists: existsSync(hookFp),
+        patch: alreadyConfigured
+          ? '(already present)'
+          : `would add a Stop hook group running: ${command}`,
+        alreadyConfigured,
+      });
+    }
   }
 
   return entries;
@@ -714,6 +845,7 @@ interface ResultEntry {
   target: string;
   mcp: { status: string; detail: string };
   skill: { status: string; detail: string };
+  hook: { status: string; detail: string };
 }
 
 async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = false): Promise<void> {
@@ -841,6 +973,7 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
           target: target.id,
           mcp: { status: 'not_found', detail: `${target.name} not detected` },
           skill: { status: 'not_found', detail: `${target.name} not detected` },
+          hook: { status: 'not_found', detail: `${target.name} not detected` },
         });
       }
       continue;
@@ -867,7 +1000,20 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
       skillResult = { status: sr.ok ? 'configured' : 'error', detail: sr.detail };
     }
 
-    results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
+    // §14.1: wire the stop-hook installer in alongside MCP/skill. Not gated
+    // by --mcp-only / --skill-only — it's its own concern, always attempted
+    // when the target supports it.
+    let hookResult: { status: string; detail: string };
+    if (!target.installHook) {
+      hookResult = { status: 'not_applicable', detail: 'No stop-hook surface for this target' };
+    } else if (target.isHookConfigured?.(scope)) {
+      hookResult = { status: 'skipped', detail: 'Already configured' };
+    } else {
+      const hr = await target.installHook(scope);
+      hookResult = { status: hr.ok ? 'configured' : 'error', detail: hr.detail };
+    }
+
+    results.push({ target: target.id, mcp: mcpResult, skill: skillResult, hook: hookResult });
   }
 
   emitResult(
@@ -882,7 +1028,7 @@ async function runInstall(ctx: CommandContext, rest: string[], forceDryRun = fal
       if (data.results.length === 0) return 'No targets detected.';
       const maxLen = Math.max(...data.results.map((r) => r.target.length));
       return data.results
-        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status}`)
+        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status.padEnd(12)}Hook: ${r.hook.status}`)
         .join('\n');
     },
     {
@@ -954,6 +1100,7 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
           target: target.id,
           mcp: { status: 'not_found', detail: `${target.name} not detected` },
           skill: { status: 'not_found', detail: `${target.name} not detected` },
+          hook: { status: 'not_found', detail: `${target.name} not detected` },
         });
       }
       continue;
@@ -975,7 +1122,17 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
       skillResult = { status: r.ok ? 'removed' : 'error', detail: r.detail };
     }
 
-    results.push({ target: target.id, mcp: mcpResult, skill: skillResult });
+    let hookResult: { status: string; detail: string };
+    if (!target.removeHook) {
+      hookResult = { status: 'not_applicable', detail: 'No stop-hook surface for this target' };
+    } else if (!target.isHookConfigured?.(scope)) {
+      hookResult = { status: 'skipped', detail: 'Not configured' };
+    } else {
+      const r = await target.removeHook(scope);
+      hookResult = { status: r.ok ? 'removed' : 'error', detail: r.detail };
+    }
+
+    results.push({ target: target.id, mcp: mcpResult, skill: skillResult, hook: hookResult });
   }
 
   emitResult(
@@ -990,7 +1147,7 @@ async function runRemove(ctx: CommandContext, rest: string[]): Promise<void> {
       if (data.results.length === 0) return 'No targets detected.';
       const maxLen = Math.max(...data.results.map((r) => r.target.length));
       return data.results
-        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status}`)
+        .map((r) => `${r.target.padEnd(maxLen + 2)}MCP: ${r.mcp.status.padEnd(12)}Skill: ${r.skill.status.padEnd(12)}Hook: ${r.hook.status}`)
         .join('\n');
     },
     {

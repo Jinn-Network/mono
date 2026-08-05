@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { EventStreamList } from './EventStreamList.js';
-import type { StructuredEvent } from '../api/types.js';
+import type { StructuredEvent } from '../../../../api/contract/index.js';
 
 const events: StructuredEvent[] = [
   { schemaVersion: 1, id: '1', ts: '2026-05-20T11:45:38Z', kind: 'intent', message: 'CLAIMED', details: { requestId: '0xabc' } },

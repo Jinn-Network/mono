@@ -31,8 +31,18 @@ const profileStore: ProfileStore = {
 };
 
 afterEach(async () => {
-  await Promise.all(backends.splice(0).map((backend) => backend.shutdown()));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(backends.splice(0).map(async (backend) => {
+    await backend.drain();
+    await backend.shutdown();
+  }));
+  // A just-reaped shim can briefly finish closing its heartbeat/cancellation file after
+  // shutdown returns. Retry only cleanup of the disposable test root.
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 async function fixture(): Promise<LocalTaskExecutionBackend> {

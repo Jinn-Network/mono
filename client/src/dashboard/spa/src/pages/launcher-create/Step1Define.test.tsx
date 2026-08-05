@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { Step1Define } from './Step1Define.js';
-import type { DraftSolverNetRecord } from '../../api/types.js';
+import type { DraftSolverNetRecord } from '../../../../../api/contract/index.js';
 
 function buildDraft(overrides: Partial<DraftSolverNetRecord> = {}): DraftSolverNetRecord {
   return {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   configurePhaseDTransitionUsage,
   phaseDTransitionUsageDiagnostics,
+  phaseDTransitionUsageDiagnosticsSchema,
   phaseDTransitionUsageSnapshot,
   recordPhaseDTransitionUse,
 } from '../../src/compatibility/phase-d-transition-usage.js';
@@ -22,6 +23,19 @@ describe('Phase D transition usage diagnostics', () => {
       count: (before?.count ?? 0) + 2,
       firstObservedAt: before?.firstObservedAt ?? '2026-08-03T00:00:00.000Z',
       lastObservedAt: '2026-08-03T00:00:01.000Z',
+    });
+  });
+
+  it('records the native-operator-composition signal as positive native-presence evidence (#2380)', () => {
+    const signal = 'native-operator-composition' as const;
+    const before = phaseDTransitionUsageSnapshot().find((row) => row.signal === signal);
+    recordPhaseDTransitionUse(signal, new Date('2026-08-04T00:00:00.000Z'));
+    const row = phaseDTransitionUsageSnapshot().find((value) => value.signal === signal);
+    expect(row).toEqual({
+      signal,
+      count: (before?.count ?? 0) + 1,
+      firstObservedAt: before?.firstObservedAt ?? '2026-08-04T00:00:00.000Z',
+      lastObservedAt: '2026-08-04T00:00:00.000Z',
     });
   });
 
@@ -55,5 +69,34 @@ describe('Phase D transition usage diagnostics', () => {
       configurePhaseDTransitionUsage(undefined);
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('writes the durable state file with mode 0600 (Class O container profile, #2409)', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'jinn-phase-d-usage-mode-'));
+    const path = join(directory, 'usage.v1.json');
+    try {
+      configurePhaseDTransitionUsage(path, new Date('2026-08-04T00:00:00.000Z'));
+      recordPhaseDTransitionUse('legacy-wiring-config-field', new Date('2026-08-04T00:00:01.000Z'));
+      const mode = statSync(path).mode & 0o777;
+      expect(mode).toBe(0o600);
+    } finally {
+      configurePhaseDTransitionUsage(undefined);
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('the diagnostics schema is strict: an unrecognized field is rejected, not silently stripped (N2)', () => {
+    // A plain z.object() would silently drop an unrecognized key at parse time — a future field
+    // added to PhaseDTransitionUsageDiagnostics without updating this schema would then vanish
+    // from the durable file with no error. z.strictObject() makes that drift a loud throw instead.
+    const valid = {
+      schemaVersion: 1,
+      durable: true,
+      observationWindowStartedAt: '2026-08-04T00:00:00.000Z',
+      counters: [],
+    };
+    expect(() => phaseDTransitionUsageDiagnosticsSchema.parse(valid)).not.toThrow();
+    expect(() => phaseDTransitionUsageDiagnosticsSchema.parse({ ...valid, extra: 'unexpected' }))
+      .toThrow();
   });
 });

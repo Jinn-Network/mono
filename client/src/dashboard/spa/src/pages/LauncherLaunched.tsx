@@ -7,7 +7,7 @@ import type {
   LaunchedSolverNetRecord,
   LifecycleTarget,
   RegistryManifestResponse,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 import { Alert, AlertDescription } from '../components/ui/alert.js';
 import { Button } from '../components/ui/button.js';
 import { GeneratorPanel } from './launcher-launched/GeneratorPanel.js';

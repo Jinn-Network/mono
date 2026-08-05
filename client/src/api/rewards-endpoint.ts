@@ -5,6 +5,7 @@ import {
   sumPendingStakingRewards,
   type StatusGatherConfig,
 } from './gather-status.js';
+import { getCachedGatheredStatus } from './gathered-status-cache.js';
 import { assembleRewardsV1 } from './rewards-build.js';
 
 export interface RewardsRoutesDeps {
@@ -16,14 +17,18 @@ export interface RewardsRoutesDeps {
 }
 
 export function addRewardsRoutes(app: Hono, deps: RewardsRoutesDeps): void {
-  const gatherRaw = deps.gatherRaw ?? gatherGatheredStatusRaw;
   const sumPending = deps.sumPending ?? sumPendingStakingRewards;
   const assemble = deps.assemble ?? assembleRewardsV1;
 
   app.get('/v1/rewards', async (c) => {
     try {
       const status = deps.getStatus();
-      const raw = await gatherRaw(deps.store, status);
+      // Share the ~3s TTL cache with /v1/status and /v1/notifications (issue #2408 review
+      // finding F3) on the true production path. An explicit `gatherRaw` override (tests only)
+      // always bypasses the cache so callers get deterministic per-call behavior.
+      const raw = deps.gatherRaw
+        ? await deps.gatherRaw(deps.store, status)
+        : (await getCachedGatheredStatus(deps.store, status)).raw;
 
       if (status && raw.fleet) {
         if (raw.rpc.ok) {

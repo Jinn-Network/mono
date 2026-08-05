@@ -11,7 +11,7 @@ import {
   buildPatch,
   buildSweRebenchV2Patch,
 } from './GeneratorPanel.js';
-import type { LaunchedSolverNetRecord } from '../../api/types.js';
+import type { LaunchedSolverNetRecord } from '../../../../../api/contract/index.js';
 
 function buildRecord(
   overrides: Partial<LaunchedSolverNetRecord> = {},

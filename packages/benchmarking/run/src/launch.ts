@@ -99,10 +99,14 @@ export interface LaunchOptions {
    * `cancelledRun` after in-flight drain.
    */
   earlyClose?: boolean;
-  /** Injected clock for deadline = min(nowMs + cellWindowMs, closeAt). */
-  clock?: Clock;
-  /** @deprecated prefer `clock`; retained for older tests as epoch-ms factory. */
-  now?: () => number;
+  /**
+   * Injected clock for deadline = min(nowMs + cellWindowMs, closeAt) and for the
+   * `pastClose` dispatch gate. REQUIRED: a Run's close boundary is evaluated against
+   * a caller-supplied instant only. There is deliberately no wall-clock fallback —
+   * an implicit one made every unpinned call site a dormant time bomb that detonated
+   * when a fixture's absolute `closeAt` passed.
+   */
+  clock: Clock;
   mintSubmissionUri?: (idempotencyKey: string) => `urn:uuid:${string}`;
   requirementsOverride?: Record<string, unknown>;
   /** Fallback when `capabilities().watch` is false / `backend.watch` absent. */
@@ -133,11 +137,14 @@ function deterministicSubmissionUri(idempotencyKey: string): `urn:uuid:${string}
   return `urn:uuid:${uuid}`;
 }
 
-function resolveNow(opts: LaunchOptions): Date {
-  if (opts.clock !== undefined) return opts.clock.now();
-  if (opts.now !== undefined) return new Date(opts.now());
-  return new Date();
-}
+/**
+ * Wall-clock `Clock` for a host that genuinely wants real time.
+ *
+ * Passing this is a decision the call site makes and a reviewer can see in the diff.
+ * That is the whole point: the previous implicit fallback made the same choice
+ * invisibly, at every site that simply forgot to pass a clock.
+ */
+export const systemClock: Clock = { now: () => new Date() };
 
 /**
  * Deadline = min(nowMs + cellWindowMs, closeAt), calendar-strict RFC3339 Z.
@@ -214,7 +221,7 @@ async function waitForAttemptTerminal(
       if (opts.signal?.aborted || opts.earlyClose === true) break;
       latest = await backend.observe(attempt as never);
       if (latest.descriptor.derived.terminal) return latest;
-      if (Date.parse(closeAt) <= resolveNow(opts).getTime()) {
+      if (Date.parse(closeAt) <= opts.clock.now().getTime()) {
         return latest;
       }
     }
@@ -248,7 +255,7 @@ async function sealNewSubmission(input: {
   const submissionUri =
     opts.mintSubmissionUri?.(idempotencyKey) ?? deterministicSubmissionUri(idempotencyKey);
   const deadline = computeCellDeadline(
-    resolveNow(opts),
+    opts.clock.now(),
     run.policy.cellWindow,
     run.closeAt,
   );
@@ -418,7 +425,7 @@ function maxDispatches(run: RunRecord): number {
 }
 
 function pastClose(run: RunRecord, opts: LaunchOptions): boolean {
-  return Date.parse(run.closeAt) <= resolveNow(opts).getTime();
+  return Date.parse(run.closeAt) <= opts.clock.now().getTime();
 }
 
 function ownerCancelled(opts: LaunchOptions): boolean {

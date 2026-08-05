@@ -61,7 +61,10 @@ interface SharedCaptureState {
 const captureByHome = new Map<string, SharedCaptureState>();
 const captureInflight = new Map<string, Promise<SharedCaptureState>>();
 
-async function acquireSharedCapture(home: string): Promise<SharedCaptureState> {
+async function acquireSharedCapture(
+  home: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<SharedCaptureState> {
   for (;;) {
     const existing = captureByHome.get(home);
     if (existing) {
@@ -72,7 +75,7 @@ async function acquireSharedCapture(home: string): Promise<SharedCaptureState> {
     let inflight = captureInflight.get(home);
     if (inflight === undefined) {
       inflight = (async () => {
-        const config = resolveRuntimeConfig({ env: {}, homeDirectory: home });
+        const config = resolveRuntimeConfig({ env, homeDirectory: home });
         const log = createLineLogger("silent", () => {});
         const capture = createCaptureCapability({ producerVersion: "0.0.0-test", signer: testSigner });
         const runtime = createPluginRuntime({ config, log, capabilities: [capture] });
@@ -106,11 +109,15 @@ async function releaseSharedCapture(home: string): Promise<void> {
   }
 }
 
-async function open(home: string, role: "tools" | "session"): Promise<TestRuntime> {
-  const config = resolveRuntimeConfig({ env: {}, homeDirectory: home });
+async function open(
+  home: string,
+  role: "tools" | "session",
+  env: Readonly<Record<string, string | undefined>> = {},
+): Promise<TestRuntime> {
+  const config = resolveRuntimeConfig({ env, homeDirectory: home });
   const log = createLineLogger("silent", () => {});
 
-  const shared = role === "session" ? await acquireSharedCapture(home) : undefined;
+  const shared = role === "session" ? await acquireSharedCapture(home, env) : undefined;
   let toolsRuntime: PluginRuntime | undefined;
   if (role === "tools") {
     toolsRuntime = createPluginRuntime({ config, log });
@@ -147,5 +154,11 @@ async function open(home: string, role: "tools" | "session"): Promise<TestRuntim
   };
 }
 
-export const openSessionRuntimeForTest = (home: string): Promise<TestRuntime> => open(home, "session");
-export const openToolsRuntimeForTest = (home: string): Promise<TestRuntime> => open(home, "tools");
+export const openSessionRuntimeForTest = (
+  home: string,
+  env?: Readonly<Record<string, string | undefined>>,
+): Promise<TestRuntime> => open(home, "session", env);
+export const openToolsRuntimeForTest = (
+  home: string,
+  env?: Readonly<Record<string, string | undefined>>,
+): Promise<TestRuntime> => open(home, "tools", env);
