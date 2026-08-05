@@ -11,7 +11,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "pattern": "^https:\\/\\/(?:spec\\.)?jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/(?:v[1-9]\\d*|\\d+\\.\\d+)$"
+          "pattern": "^https:\\/\\/spec\\.jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/v[1-9]\\d*$"
         },
         "record": {
           "type": "object",
@@ -70,7 +70,7 @@
           },
           "kind": {
             "type": "string",
-            "pattern": "^https:\\/\\/(?:spec\\.)?jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/(?:v[1-9]\\d*|\\d+\\.\\d+)$"
+            "pattern": "^https:\\/\\/spec\\.jinn\\.network\\/records\\/[a-z0-9]+(?:-[a-z0-9]+)*\\/v[1-9]\\d*$"
           },
           "record": {
             "type": "object",
