@@ -16,7 +16,7 @@ import {
   verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
-import { chmod, mkdir, open as openFile, readFile, rename, unlink } from 'node:fs/promises';
+import { chmod, link, mkdir, open as openFile, readFile, rename, stat, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute } from 'node:path';
 import bs58 from 'bs58';
 import type { BindingResolver } from '@jinn-network/trust-core';
@@ -52,6 +52,8 @@ const ENVELOPE_VERSION = 1;
 const STORE_VERSION = 3;
 const SCRYPT_KEY_LENGTH = 32;
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+/** Bounds the lose-the-create-race retry loop in `IdentityStore.loadOrCreate`. */
+const MAX_CREATE_ATTEMPTS = 5;
 
 export class IdentityStoreError extends Error {
   override readonly name = 'IdentityStoreError';
@@ -322,63 +324,129 @@ export class IdentityStore {
   static async open(input: { readonly path: string; readonly password: string }): Promise<IdentityStore> {
     if (input.password.length === 0) throw new IdentityStoreError('identity store password is required');
     if (!isAbsolute(input.path)) throw new IdentityStoreError('identity store path must be absolute');
-    await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
-    await chmod(dirname(input.path), 0o700);
+    // `mkdir` resolves to the first directory path it actually created, or `undefined` when the
+    // whole chain already existed. Only chmod in the former case: an operator-supplied `--store`
+    // path can land inside a pre-existing directory (even $HOME), and this must never silently
+    // narrow that directory's mode.
+    const createdDir = await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
+    if (createdDir !== undefined) await chmod(dirname(input.path), 0o700);
     return new IdentityStore(input.path, input.password);
   }
 
+  /**
+   * Loads the persisted role set, or mints and persists one if absent. `created` reflects
+   * whether *this* call's mint is the one now on disk — never a lost race's in-memory keys (see
+   * `createExclusive`). Bounded retry: losing the create race means someone else's file is now
+   * readable, so the loop falls through to the load branch; it only spins again if that file
+   * vanishes before the reread (a second, rarer race), and gives up loudly past
+   * `MAX_CREATE_ATTEMPTS` rather than spinning forever against an adversarial deleter.
+   */
   async loadOrCreate(
     now: Date,
     ownedRoles: readonly NativeRoleIdentityRole[],
-  ): Promise<readonly StoredRoleIdentity[]> {
-    let encrypted: Uint8Array | undefined;
-    try {
-      encrypted = await readFile(this.path);
-    } catch (cause) {
-      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new IdentityStoreError(`identity store cannot be read: ${String(cause)}`);
+  ): Promise<{ readonly created: boolean; readonly roles: readonly StoredRoleIdentity[] }> {
+    for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS; attempt += 1) {
+      let encrypted: Uint8Array | undefined;
+      try {
+        // eslint-disable-next-line no-await-in-loop -- each attempt depends on the previous one's outcome.
+        encrypted = await readFile(this.path);
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+          throw new IdentityStoreError(`identity store cannot be read: ${String(cause)}`);
+        }
       }
-    }
 
-    if (encrypted === undefined) {
-      const createdAt = now.toISOString();
-      const roles = ownedRoles.map((role) => createStoredRole(role, createdAt));
-      await this.write({
-        version: STORE_VERSION,
-        metadata: { format: 'jinn.native-role-identities/2', ownedRoles, roles: metadataFor(roles) },
-        roles,
-      });
-      return roles;
-    }
+      if (encrypted === undefined) {
+        const createdAt = now.toISOString();
+        const roles = ownedRoles.map((role) => createStoredRole(role, createdAt));
+        const value: StoredIdentitySetV3 = {
+          version: STORE_VERSION,
+          metadata: { format: 'jinn.native-role-identities/2', ownedRoles, roles: metadataFor(roles) },
+          roles,
+        };
+        // eslint-disable-next-line no-await-in-loop -- see loop doc above.
+        const won = await this.createExclusive(value);
+        if (won) return { created: true, roles };
+        continue; // a concurrent creator's exclusive link won; reread and return its content.
+      }
 
-    const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password), ownedRoles);
-    if (parsed.migrated) await this.write(parsed.value);
-    return parsed.value.roles;
+      const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password), ownedRoles);
+      // eslint-disable-next-line no-await-in-loop -- see loop doc above.
+      if (parsed.migrated) await this.write(parsed.value);
+      return { created: false, roles: parsed.value.roles };
+    }
+    throw new IdentityStoreError(
+      `identity store at ${this.path} did not converge after ${MAX_CREATE_ATTEMPTS} concurrent create attempts`,
+    );
   }
 
-  private async write(value: StoredIdentitySetV3): Promise<void> {
+  private async writeTempFile(value: StoredIdentitySetV3): Promise<string> {
     const tempPath = `${this.path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
     const serialized = `${JSON.stringify(encrypt(value, this.password))}\n`;
-    let temporary: Awaited<ReturnType<typeof openFile>> | undefined;
+    const temporary = await openFile(tempPath, 'wx', 0o600);
     try {
-      temporary = await openFile(tempPath, 'wx', 0o600);
       await temporary.writeFile(serialized, 'utf8');
       await temporary.sync();
+    } finally {
       await temporary.close();
-      temporary = undefined;
-      await chmod(tempPath, 0o600);
+    }
+    await chmod(tempPath, 0o600);
+    return tempPath;
+  }
+
+  private async syncContainingDir(): Promise<void> {
+    const directory = await openFile(dirname(this.path), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  }
+
+  /**
+   * Rewrites an already-existing store (format migration only). The caller has already
+   * confirmed a store is present, so overwriting it via atomic rename is intentional here —
+   * unlike first-create, there is no "which concurrent writer should win" question to answer.
+   */
+  private async write(value: StoredIdentitySetV3): Promise<void> {
+    let tempPath: string | undefined;
+    try {
+      tempPath = await this.writeTempFile(value);
       await rename(tempPath, this.path);
+      tempPath = undefined;
       await chmod(this.path, 0o600);
-      const directory = await openFile(dirname(this.path), 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
+      await this.syncContainingDir();
     } catch (cause) {
-      await temporary?.close().catch(() => undefined);
-      await unlink(tempPath).catch(() => undefined);
+      if (tempPath !== undefined) await unlink(tempPath).catch(() => undefined);
       throw new IdentityStoreError(`identity store cannot be written atomically: ${String(cause)}`);
+    }
+  }
+
+  /**
+   * Claims `this.path` for `value` only if nothing is persisted there yet. Uses a hard link
+   * (atomic, fails EEXIST if the destination already exists) rather than `rename` (which would
+   * silently clobber a concurrent creator's already-won file with this call's own mint, or vice
+   * versa, depending purely on timing). Returns whether `value` is the one now on disk: `false`
+   * means a concurrent creator's link won this race, and its content — not `value` — is what
+   * `this.path` now holds.
+   */
+  private async createExclusive(value: StoredIdentitySetV3): Promise<boolean> {
+    let tempPath: string | undefined;
+    try {
+      tempPath = await this.writeTempFile(value);
+      try {
+        await link(tempPath, this.path);
+      } catch (cause) {
+        if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        throw cause;
+      }
+      await chmod(this.path, 0o600);
+      await this.syncContainingDir();
+      return true;
+    } catch (cause) {
+      throw new IdentityStoreError(`identity store cannot be created exclusively: ${String(cause)}`);
+    } finally {
+      if (tempPath !== undefined) await unlink(tempPath).catch(() => undefined);
     }
   }
 }
@@ -409,7 +477,7 @@ export class RoleIdentitySet {
     }
     if (required.size === 0) throw new IdentityStoreError('native process must own at least one role identity');
     const orderedRequired = NATIVE_ROLE_IDENTITY_ROLES.filter((role) => required.has(role));
-    const storedRoles = await store.loadOrCreate(now, orderedRequired);
+    const { roles: storedRoles } = await store.loadOrCreate(now, orderedRequired);
     const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
 
     for (const stored of storedRoles) {
@@ -521,4 +589,54 @@ export class RoleIdentitySet {
 
 export function openRoleIdentitySet(input: NativeRoleIdentitySetInput): Promise<RoleIdentitySet> {
   return RoleIdentitySet.open(input);
+}
+
+/** Public role material only — never a private key, never enough to sign. */
+export interface RoleIdentitySummary {
+  readonly role: NativeRoleIdentityRole;
+  readonly keyId: string;
+}
+
+/**
+ * Opens the identity store at `storePath` for `ownedRoles` (minting it first when `create` is
+ * true and no store exists yet) and returns only public role -> keyId material for trust-catalog
+ * authoring. Reuses `IdentityStore` directly rather than `RoleIdentitySet.open`: keygen/listing
+ * has no agent or binding resolver to check against, and the return shape structurally excludes
+ * the private key bytes `IdentityStore.loadOrCreate` also holds.
+ *
+ * Concurrency: correctness against a concurrent creator (e.g. this call racing a native daemon's
+ * own first boot on the same store path) lives entirely in `IdentityStore.loadOrCreate`'s
+ * exclusive-link create path, not here. A verify-after-the-fact re-read cannot be made correct —
+ * it only catches the narrow interleaving where the competing write lands inside the verify
+ * window, not the dominant one where this call's own write, read-back, and print all complete
+ * before the competitor's later write clobbers the file. `created`/`identities` below are exactly
+ * what `loadOrCreate` reports as actually persisted; there is no second read here.
+ */
+export async function listRoleIdentityKeyIds(input: {
+  readonly storePath: string;
+  readonly password: string;
+  readonly ownedRoles: readonly NativeRoleIdentityRole[];
+  readonly create: boolean;
+  readonly now?: () => Date;
+}): Promise<{ readonly created: boolean; readonly identities: readonly RoleIdentitySummary[] }> {
+  if (!isAbsolute(input.storePath)) throw new IdentityStoreError('identity store path must be absolute');
+  if (!input.create) {
+    try {
+      await stat(input.storePath);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw new IdentityStoreError(`identity store cannot be accessed: ${String(cause)}`);
+      }
+      throw new IdentityStoreError(
+        `identity store does not exist at ${input.storePath}; pass create: true to mint its role identities`,
+      );
+    }
+  }
+  const store = await IdentityStore.open({ path: input.storePath, password: input.password });
+  const now = input.now?.() ?? new Date();
+  const { created, roles } = await store.loadOrCreate(now, input.ownedRoles);
+  return {
+    created,
+    identities: roles.map((role) => ({ role: role.role, keyId: role.keyId })),
+  };
 }
