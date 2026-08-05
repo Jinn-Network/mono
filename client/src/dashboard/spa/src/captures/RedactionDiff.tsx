@@ -1,4 +1,4 @@
-import type { CaptureSpan } from '../api/types.js';
+import type { CaptureSpan } from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

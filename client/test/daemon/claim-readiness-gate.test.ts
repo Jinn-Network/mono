@@ -92,6 +92,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -131,6 +132,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -181,6 +183,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -219,6 +222,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });
@@ -253,6 +257,7 @@ describe('Daemon — claim readiness gate', () => {
       runner: new SimpleRunner(async (d) => `done: ${d}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
       harnessReadinessRegistry: registry,
     });

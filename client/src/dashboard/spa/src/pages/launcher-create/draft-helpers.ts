@@ -1,4 +1,4 @@
-import type { DraftWizardStep, DraftSolverNetRecord } from '../../api/types.js';
+import type { DraftWizardStep, DraftSolverNetRecord } from '../../../../../api/contract/index.js';
 
 /**
  * Append `step` to `completedSteps` if not already present. The wizard

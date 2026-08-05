@@ -42,9 +42,10 @@ import { probeCodexDoctor } from '../../../api/codex-doctor-endpoint.js';
  * `Harness` shell. Bridges the engine's dispatch contract
  * (`await impl.run(ctx)`) into the harness adapter + markdown plugin.
  *
- * `supports()` returns true for any non-evaluation SolverType. The registry
- * keeps this Harness as the default, so explicit specialists can still claim
- * their SolverTypes without being wrapped.
+ * `supports()` routes explicitly: an allowlist from config (derived from the
+ * operator's joined SolverNets when unconfigured), with the legacy
+ * wrap-everything posture available only behind the deprecated
+ * JINN_LEARNER_DEFAULT_ROUTING flag. See routing.ts.
  */
 export class LearnerHarness implements Harness {
   readonly name: string;

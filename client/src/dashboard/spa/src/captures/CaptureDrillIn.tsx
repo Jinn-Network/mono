@@ -1,4 +1,4 @@
-import type { CaptureDetailResponse } from '../api/types.js';
+import type { CaptureDetailResponse } from '../../../../api/contract/index.js';
 import { Button } from '../components/ui/button.js';
 import { Card, CardContent } from '../components/ui/card.js';
 import { Separator } from '../components/ui/separator.js';

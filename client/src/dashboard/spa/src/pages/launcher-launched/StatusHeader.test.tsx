@@ -4,7 +4,7 @@ import { StatusHeader } from './StatusHeader.js';
 import type {
   LaunchedSolverNetRecord,
   SolverNetManifestV1,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 
 function buildRecord(
   overrides: Partial<LaunchedSolverNetRecord> = {},

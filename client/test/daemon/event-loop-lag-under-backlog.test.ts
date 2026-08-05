@@ -52,6 +52,7 @@ describe('Daemon event-loop lag under a stale-task backlog (#397 fence)', () => 
       runner: new SimpleRunner(async (desc) => `Done: ${desc}`),
       taskSources: [],
       dbPath: ':memory:',
+      apiPort: 0, // OS picks an ephemeral port
       restorationEngine: minimalEngineConfig(),
     });
 

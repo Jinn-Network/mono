@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NetCard } from './NetCard.js';
-import type { SolverNetManifestV1 } from '../../api/types.js';
+import type { SolverNetManifestV1 } from '../../../../../api/contract/index.js';
 
 const apiMock = vi.hoisted(() => ({
   updateSolverNet: vi.fn(),

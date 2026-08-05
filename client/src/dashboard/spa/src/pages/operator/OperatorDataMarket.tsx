@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../../api/client.js';
-import type { OperatorArtifactsResponse, OperatorPricingConfig } from '../../api/types.js';
+import type { OperatorArtifactsResponse, OperatorPricingConfig } from '../../../../../api/contract/index.js';
 import {
   Card,
   CardContent,

@@ -11,13 +11,20 @@ import { TOOL_NAMES } from "./identifiers.js";
 import { openSessionRuntimeForTest, openToolsRuntimeForTest } from "./testing-harness.js";
 
 let home: string;
+let runtimes: Array<{ stop(): Promise<void> }>;
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "jinn-c7-"));
+  runtimes = [];
 });
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  // Stop every runtime opened by the test BEFORE removing its home. A losing seal in
+  // `withCaptureArchive`'s backoff loop is still writing into `capture/` until `stop()`
+  // tears the runtime down; removing the home while that write is in flight is the source
+  // of the ENOTEMPTY this ordering fixes.
+  await Promise.all(runtimes.map((runtime) => runtime.stop()));
+  await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 async function client(server: Awaited<ReturnType<typeof openSessionRuntimeForTest>>): Promise<Client> {
@@ -76,6 +83,7 @@ describe("concurrent sessions on one home", () => {
       openSessionRuntimeForTest(home),
       openSessionRuntimeForTest(home),
     ]);
+    runtimes.push(a, b);
     const [clientA, clientB] = await Promise.all([client(a), client(b)]);
     const openedA = payload(
       await clientA.callTool({ name: TOOL_NAMES.captureOpen, arguments: { sessionId: "alpha" } }),
@@ -86,14 +94,18 @@ describe("concurrent sessions on one home", () => {
     expect(openedA.feedPath).not.toBe(openedB.feedPath);
     const mode = (await stat(String(openedA.feedPath))).mode & 0o777;
     expect(mode).toBe(0o600);
-    await Promise.all([a.stop(), b.stop()]);
   });
 
   test("concurrent seals serialize without corrupting either feed", async () => {
+    // Shrink the archive busy budget well below the default 10s so a losing seal's
+    // `capture-archive-busy` outcome is actually reachable inside the test timeout below,
+    // instead of both seals serializing past it silently.
+    const shrunkBusyBudget = { JINN_PLUGIN_ARCHIVE_BUSY_TIMEOUT_MS: "200" };
     const [a, b] = await Promise.all([
-      openSessionRuntimeForTest(home),
-      openSessionRuntimeForTest(home),
+      openSessionRuntimeForTest(home, shrunkBusyBudget),
+      openSessionRuntimeForTest(home, shrunkBusyBudget),
     ]);
+    runtimes.push(a, b);
     const [clientA, clientB] = await Promise.all([client(a), client(b)]);
     const openedA = payload(
       await clientA.callTool({ name: TOOL_NAMES.captureOpen, arguments: { sessionId: "alpha" } }),
@@ -120,12 +132,12 @@ describe("concurrent sessions on one home", () => {
     }
     expect(await readFile(String(openedA.feedPath), "utf-8")).toContain("hello from alpha");
     expect(await readFile(String(openedB.feedPath), "utf-8")).toContain("hello from beta");
-    await Promise.all([a.stop(), b.stop()]);
-  });
+  }, 60_000);
 
   test("a tools-role search answers while a seal is in flight", async () => {
     const session = await openSessionRuntimeForTest(home);
     const tools = await openToolsRuntimeForTest(home);
+    runtimes.push(session, tools);
     const [sessionClient, toolsClient] = await Promise.all([client(session), client(tools)]);
     const opened = payload(
       await sessionClient.callTool({ name: TOOL_NAMES.captureOpen, arguments: { sessionId: "gamma" } }),
@@ -144,6 +156,5 @@ describe("concurrent sessions on one home", () => {
     );
     expect(typeof searched.count).toBe("number");
     await sealing;
-    await Promise.all([session.stop(), tools.stop()]);
   });
 });

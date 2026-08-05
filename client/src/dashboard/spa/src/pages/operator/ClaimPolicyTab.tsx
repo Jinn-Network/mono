@@ -2,7 +2,7 @@ import { useState, type JSX } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { api } from '../../api/client.js';
-import type { ClaimPolicyConfig, ExecutionWiringConfigEntry } from '../../api/types.js';
+import type { ClaimPolicyConfig, ExecutionWiringConfigEntry } from '../../../../../api/contract/index.js';
 import {
   Card,
   CardContent,

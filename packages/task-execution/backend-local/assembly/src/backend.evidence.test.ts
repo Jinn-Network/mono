@@ -29,6 +29,7 @@ import {
 } from "./backend.js";
 
 const roots: string[] = [];
+const backends: LocalTaskExecutionBackend[] = [];
 const profile = buildRepositoryWorkProfile();
 const sealedProfile = sealTaskProfile(profile);
 const profileStore: ProfileStore = {
@@ -38,7 +39,18 @@ const profileStore: ProfileStore = {
 };
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(backends.splice(0).map(async (backend) => {
+    await backend.drain();
+    await backend.shutdown();
+  }));
+  // A just-reaped shim can briefly finish closing its heartbeat/cancellation file after
+  // shutdown returns. Retry only cleanup of the disposable test root.
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 async function stateRoot(): Promise<string> {
@@ -113,7 +125,7 @@ function backend(
       return { manifest: [], omissions: ["patch"], integrityViolations: [] };
     },
   };
-  return makeLocalTaskExecutionBackend({
+  const instance = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:evidence-test",
     executor: "https://jinn.network/software/fake-launcher",
@@ -139,6 +151,8 @@ function backend(
     ...(deliveryExtensions === undefined ? {} : { deliveryExtensions }),
     ...(trustKeys === undefined ? {} : { trustKeys }),
   });
+  backends.push(instance);
+  return instance;
 }
 
 async function terminalSnapshot(instance: LocalTaskExecutionBackend, submission: `urn:uuid:${string}`) {
@@ -398,7 +412,7 @@ function signingBackend(
       return { manifest: [], omissions: ["patch"], integrityViolations: [] };
     },
   };
-  return makeLocalTaskExecutionBackend({
+  const instance = makeLocalTaskExecutionBackend({
     stateRoot: root,
     source: "urn:jinn:backend-local:signing-test",
     executor: "https://jinn.network/software/fake-launcher",
@@ -418,6 +432,8 @@ function signingBackend(
     now: () => "2026-07-31T00:00:00.000Z",
     ...(trustKeys === undefined ? {} : { trustKeys }),
   });
+  backends.push(instance);
+  return instance;
 }
 
 describe("executor delivery signing (finding E31)", () => {
