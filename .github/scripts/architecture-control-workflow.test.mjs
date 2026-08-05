@@ -10,12 +10,19 @@ test('PR architecture workflow exposes exact required job checks and gates reusa
   assert.match(source, /pull_request:/u);
   assert.doesNotMatch(source, /pull_request_target:/u);
   assert.match(source, /platform-architecture-control:\n\s+name: platform-architecture-control/u);
-  assert.match(source, /platform-verification:\n\s+name: platform-verification\n\s+needs:\s+platform-verification-reusable/u);
+  assert.match(source, /platform-verification:\n\s+name: platform-verification\n\s+needs:\n\s+- verification-selection\n\s+- platform-verification-reusable/u);
   assert.match(source, /uses: \.\/\.github\/workflows\/platform-verification\.yml/u);
   assert.match(source, /github\.event\.pull_request\.head\.sha/u);
   assert.match(source, /lane: canary/u);
   assert.match(source, /VERIFICATION_RESULT: \$\{\{ needs\.platform-verification-reusable\.result \}\}/u);
   assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = success/u);
+  // The reusable call is gated on the changed-package closure. The final gate still
+  // demands exact success when verification is selected, and exact `skipped` when it
+  // is not — so unselection can never launder a failed or cancelled run.
+  assert.match(source, /node \.github\/scripts\/platform-verification-selection\.mjs/u);
+  assert.match(source, /needs: verification-selection\n\s+if: needs\.verification-selection\.outputs\.run == 'true'/u);
+  assert.match(source, /test "\$\{SELECTION_RESULT\}" = success/u);
+  assert.match(source, /test "\$\{VERIFICATION_RESULT\}" = skipped/u);
   assert.doesNotMatch(source, /npm (?:publish|install)|yarn npm publish|publish-verified-platform/u);
   const topPermissions = source.match(/^permissions:\n(?<body>[\s\S]*?)\njobs:/mu)?.groups?.body;
   assert.equal(topPermissions?.trimEnd(), '  contents: read');

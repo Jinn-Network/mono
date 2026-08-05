@@ -10,6 +10,13 @@ on:
       JINN_MARKETPLACE_FORK_RPC_URL:
         required: false
   pull_request:
+    paths:
+      - "packages/marketplace/**"
+      - "contracts/**"
+      - ".github/scripts/marketplace-*.test.mjs"
+      - ".github/scripts/custody-boundaries.test.mjs"
+      - ".github/workflows/marketplace-ci.yml"
+      - "docs/superpowers/specs/2026-07-28-marketplace-binding-design.md"
   push:
     branches: [next]
     paths:

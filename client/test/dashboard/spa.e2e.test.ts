@@ -87,19 +87,27 @@ test('SPA loads at root with the onboarding flow', async ({ page }) => {
   await expect(page.getByText('Jinn · Onboarding')).toBeVisible({ timeout: 10_000 });
 });
 
-test('Onboarding renders the four-phase list', async ({ page }) => {
-  // Onboarding shows the static hero ('Welcome to Jinn.') plus a four-row
-  // list of phases (Sign in to Claude / Provisioning your wallet / Fund
-  // your wallet / Joining Jinn). The active row depends on bootstrap
-  // progress against the unreachable test RPC + claude auth state, but all
-  // four rows are always rendered.
+test('Onboarding renders the five-phase list', async ({ page }) => {
+  // Onboarding shows the static hero ('Welcome to Jinn.') plus the five-row
+  // phase list from `regions/onboarding/PhaseRow.tsx` PHASE_TITLES. The active
+  // row depends on bootstrap progress against the unreachable test RPC, but
+  // all five rows are always rendered (Onboarding.tsx maps [1..5] to PhaseRow
+  // unconditionally).
+  //
+  // There is deliberately NO "Sign in to Claude" phase — harness auth moved
+  // into phase 5 (`HarnessSelectStep`) and the unit test
+  // `regions/Onboarding.test.tsx` ("does not render a Sign in to Claude
+  // phase") pins its absence. Asserting for it here is what rotted this file
+  // while it sat outside CI.
   const url = handshakeUrl ?? `http://127.0.0.1:${PORT}/`;
   await page.goto(url);
   await expect(page.getByText('Welcome to Jinn.')).toBeVisible({ timeout: 10_000 });
-  await expect(page.getByText('Sign in to Claude', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Provisioning your wallet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Fund your wallet')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText('Joining Jinn')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Pick your first SolverNet')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Set up harness + model')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Sign in to Claude', { exact: true })).toHaveCount(0);
 });
 
 test('GET /v1/bootstrap returns a setup-mode shape', async () => {

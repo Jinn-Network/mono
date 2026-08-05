@@ -2,6 +2,18 @@ name: Environments CI
 
 on:
   pull_request:
+    paths:
+      - "packages/environments/**"
+      - ".github/scripts/environments-*.test.mjs"
+      - ".github/workflows/environments-ci.yml"
+      - "docs/superpowers/specs/2026-07-31-verified-environment-supply-design.md"
+      - "docs/superpowers/plans/2026-07-31-supply-c1-environment-record.md"
+      - "docs/superpowers/plans/2026-07-31-supply-c2-environment-verification.md"
+      - "docs/superpowers/plans/2026-07-31-chain-ce1-chain-record.md"
+      - "docs/superpowers/plans/2026-07-31-chain-ce3-chain-verification.md"
+      - "docs/superpowers/plans/2026-07-31-chain-ce4-chain-extraction.md"
+      - "docs/superpowers/plans/2026-07-31-chain-ce6-information-world.md"
+      - "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md"
   push:
     branches: [next]
     paths:
@@ -16,6 +28,10 @@ on:
       - "docs/superpowers/plans/2026-07-31-chain-ce4-chain-extraction.md"
       - "docs/superpowers/plans/2026-07-31-chain-ce6-information-world.md"
       - "docs/superpowers/specs/2026-07-31-chain-environment-family-design.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
