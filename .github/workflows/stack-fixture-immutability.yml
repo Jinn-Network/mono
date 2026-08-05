@@ -45,7 +45,7 @@ jobs:
           case "${HEAD_REF}" in
             reseal/*)
               RESEAL_FLAG="--allow-reseal DR-2026-08-04"
-              echo "::warning::DR-2026-08-04 re-seal carve-out active on ${HEAD_REF}: fixture digest changes are permitted on this branch; id removals are not."
+              echo "::warning::DR-2026-08-04 re-seal carve-out active on ${HEAD_REF}: the DR's authorized fixture changes -- re-sealed digests and renamed (removed plus re-added) ids -- are permitted on this branch. Every one of them is printed by name in this job's output."
               ;;
           esac
           node .github/scripts/fixture-immutability.mjs --base "${BASE_REF}" ${RESEAL_FLAG}

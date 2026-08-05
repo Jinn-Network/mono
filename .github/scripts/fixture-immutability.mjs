@@ -19,8 +19,20 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/u;
 // binds *published* identifiers, and none of these has ever been published -- that is the
 // whole ground on which the DR permits this, and it is why the carve-out is single-use.
 //
-// What it does NOT relax: id removals stay forbidden. Fixture ids remain append-only
-// through the re-seal, so the migration can rewrite bytes but cannot quietly drop a case.
+// The carve-out covers id REMOVAL as well as digest change. It was first written to cover
+// only the latter, and that under-covered the DR it was written for: the same DR renames
+// the trace vocabulary, and a rename reaches the manifest as a removed id plus an added
+// one. The append-only law protects published conformance vectors a third party may have
+// pinned; nothing in this corpus has ever been published, which is the identical premise
+// that makes the digest half lawful. Scoping the exception to the authorized migration is
+// the narrow move -- keeping a fixture named for the retired vocabulary would publish that
+// vocabulary permanently into the served corpus, and waiving the gate would delete the
+// check instead of bounding it.
+//
+// What it does NOT relax: the erratum rules, and the gate itself off the carve-out. Without
+// the flag a removal and a digest change both throw exactly as before, and a wrong, empty,
+// or invented DR id is an error rather than a bypass. Removals under the flag are reported,
+// never silent.
 //
 // The flag is not a default anywhere. It is applied only on `reseal/*` branches, by an
 // explicit condition in .github/workflows/stack-fixture-immutability.yml, and C2 deletes
@@ -45,9 +57,15 @@ export function parseResealAuthorization(value) {
 export function compareFixtureManifests(baseline, candidate, { label, allowReseal = false }) {
   const candidateById = new Map(candidate.entries.map((entry) => [entry.id, entry.sha256]));
   const resealed = [];
+  const removed = [];
   for (const entry of baseline.entries) {
     if (!candidateById.has(entry.id)) {
-      throw new Error(`${label}: ${entry.id} was removed; fixtures are append-only`);
+      if (!allowReseal) {
+        throw new Error(`${label}: ${entry.id} was removed; fixtures are append-only`);
+      }
+      // Same treatment as a re-sealed digest: surfaced in the run output, never swallowed.
+      removed.push(entry.id);
+      continue;
     }
     const actual = candidateById.get(entry.id);
     if (actual !== entry.sha256) {
@@ -86,6 +104,7 @@ export function compareFixtureManifests(baseline, candidate, { label, allowResea
   return {
     added: candidate.entries.map((entry) => entry.id).filter((id) => !baselineIds.has(id)),
     resealed,
+    removed,
   };
 }
 
@@ -206,18 +225,20 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       let checked = 0;
       const additions = [];
       const reseals = [];
+      const removals = [];
       for (const pkg of discoverStackPackages(root)) {
         const candidate = readFixtureManifest(join(root, pkg.directory));
         if (candidate === null) continue;
         const baseline = readManifestAtRef(base, pkg.directory);
         if (baseline === null) continue;
-        const { added, resealed } = compareFixtureManifests(baseline, candidate, {
+        const { added, resealed, removed } = compareFixtureManifests(baseline, candidate, {
           label: pkg.directory,
           allowReseal,
         });
         checked += 1;
         if (added.length > 0) additions.push(`${pkg.directory}: +${added.join(', +')}`);
         if (resealed.length > 0) reseals.push(`${pkg.directory}: ${resealed.join(', ')}`);
+        if (removed.length > 0) removals.push(`${pkg.directory}: ${removed.join(', ')}`);
       }
       console.log(`fixture immutability holds across ${checked} packages against ${base}`);
       if (additions.length > 0) {
@@ -225,6 +246,9 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
       }
       if (reseals.length > 0) {
         console.log(`${RESEAL_DR_ID} re-sealed fixture digests (carve-out active):\n  ${reseals.join('\n  ')}`);
+      }
+      if (removals.length > 0) {
+        console.log(`${RESEAL_DR_ID} removed fixture ids (carve-out active; each must reappear under its re-sealed name):\n  ${removals.join('\n  ')}`);
       }
     }
   } catch (error) {
