@@ -1,8 +1,9 @@
+import { spawn } from 'node:child_process';
 import { createDecipheriv, scryptSync } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
-import { unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { BindingResolver, ResolvedBinding } from '@jinn-network/trust-core';
 import { runCli } from '../../src/cli/index.js';
@@ -68,6 +69,24 @@ function decryptStoredRoles(storePath: string, password: string): DecryptedStore
 function tempStorePath(): string {
   const root = mkdtempSync(join(tmpdir(), 'jinn-native-identity-cli-'));
   return join(root, 'identity', 'roles.enc.json');
+}
+
+const CLIENT_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), '../..');
+const TSX_BIN = join(CLIENT_ROOT, 'node_modules', '.bin', 'tsx');
+const JINN_ENTRY = join(CLIENT_ROOT, 'src', 'bin', 'jinn.ts');
+
+/** Spawns a real `jinn native-vertical identity ...` child process (genuine OS concurrency). */
+function runIdentityCli(args: readonly string[], env: NodeJS.ProcessEnv): Promise<{ readonly stdout: string; readonly exitCode: number | null }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(TSX_BIN, [JINN_ENTRY, 'native-vertical', 'identity', ...args], {
+      cwd: CLIENT_ROOT,
+      env: { ...process.env, ...env },
+    });
+    let stdout = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => resolvePromise({ stdout, exitCode: code }));
+  });
 }
 
 function alwaysBindingResolver(): BindingResolver {
@@ -392,35 +411,61 @@ describe('native-vertical identity CLI surface', () => {
     expect(statSync(store).mode & 0o777).toBe(0o600); // the store file itself is still locked down
   });
 
-  it('detects a lost create race and refuses to print keyIds nobody can bind to (MAJOR 1)', async () => {
+  it('IdentityStore.loadOrCreate: concurrent creators all converge on exactly one persisted keyset (MAJOR 1, in-process)', async () => {
+    // No spy, no mock: real IdentityStore instances, real fs, genuinely concurrent async work
+    // via Promise.all. The exclusivity guarantee lives in createExclusive's hard-link EEXIST
+    // check, which the OS enforces — this proves it directly rather than through an injected
+    // interleaving that only exercises one narrow ordering.
     const store = tempStorePath();
     const password = 'operator-password';
-    const ownedRoles: readonly NativeRoleIdentityRole[] = ['admission'];
-    const originalLoadOrCreate = IdentityStore.prototype.loadOrCreate;
-    let calls = 0;
+    const roles: readonly NativeRoleIdentityRole[] = ['admission'];
+    const now = new Date('2026-08-05T00:00:00.000Z');
+    const CONCURRENCY = 8;
 
-    const spy = vi.spyOn(IdentityStore.prototype, 'loadOrCreate').mockImplementation(
-      async function (this: IdentityStore, now: Date, roles: readonly NativeRoleIdentityRole[]) {
-        calls += 1;
-        if (calls !== 1) return originalLoadOrCreate.call(this, now, roles);
-        // This call mints and persists its own keys first...
-        const mine = await originalLoadOrCreate.call(this, now, roles);
-        // ...but a concurrent competitor's write lands right after (e.g. the native daemon's own
-        // first boot on the same store path, which holds no lease against this CLI), clobbering
-        // the file with a different mint before the caller gets to verify.
-        await unlink(store);
-        const competitor = await IdentityStore.open({ path: store, password });
-        await originalLoadOrCreate.call(competitor, now, roles);
-        return mine;
-      },
+    const results = await Promise.all(
+      Array.from({ length: CONCURRENCY }, async () => {
+        const instance = await IdentityStore.open({ path: store, password });
+        return instance.loadOrCreate(now, roles);
+      }),
     );
 
-    try {
-      await expect(
-        listRoleIdentityKeyIds({ storePath: store, password, ownedRoles, create: true }),
-      ).rejects.toThrow(/creation race detected/);
-    } finally {
-      spy.mockRestore();
-    }
+    const keyIds = new Set(results.map((result) => result.roles[0]?.keyId));
+    expect(keyIds.size).toBe(1); // every concurrent caller reports the same persisted key — no phantom
+    expect(results.filter((result) => result.created).length).toBe(1); // exactly one caller actually won
   });
+
+  it(
+    'real two-process concurrent --create never prints a phantom keyId (MAJOR 1, process-level)',
+    async () => {
+      // Genuine OS-level process concurrency: two separate `jinn native-vertical identity
+      // --create` invocations, spawned as real child processes racing on the same store path —
+      // not a spy injecting a chosen interleaving. Mirrors the reviewer's race2.sh harness.
+      const ITERATIONS = 6;
+      for (let iteration = 0; iteration < ITERATIONS; iteration += 1) {
+        const store = tempStorePath();
+        const env = { JINN_PASSWORD: 'operator-password' };
+
+        // eslint-disable-next-line no-await-in-loop -- each iteration is a fresh independent race.
+        const [a, b] = await Promise.all([
+          runIdentityCli(['--store', store, '--roles', 'admission', '--create'], env),
+          runIdentityCli(['--store', store, '--roles', 'admission', '--create'], env),
+        ]);
+        // eslint-disable-next-line no-await-in-loop -- see above.
+        const truth = await runIdentityCli(['--store', store, '--roles', 'admission'], env);
+
+        expect(truth.exitCode).toBe(0);
+        const truthKeyId = (JSON.parse(truth.stdout) as { identities: { keyId: string }[] }).identities[0]?.keyId;
+        expect(truthKeyId).toMatch(/^did:key:z/);
+
+        for (const result of [a, b]) {
+          // Fall-through-to-load design (createExclusive loses -> reread the winner): both
+          // concurrent creators always exit 0 and report the winner's keyId, never a phantom.
+          expect(result.exitCode).toBe(0);
+          const parsed = JSON.parse(result.stdout) as { identities: { keyId: string }[] };
+          expect(parsed.identities[0]?.keyId).toBe(truthKeyId);
+        }
+      }
+    },
+    60_000,
+  );
 });
