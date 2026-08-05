@@ -3,7 +3,7 @@ import { Card } from '../../components/ui/card.js';
 import { Button } from '../../components/ui/button.js';
 import { Separator } from '../../components/ui/separator.js';
 import { TooltipProvider } from '../../components/ui/tooltip.js';
-import type { StakingRewardReadState } from '../../api/types.js';
+import type { StakingRewardReadState } from '../../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

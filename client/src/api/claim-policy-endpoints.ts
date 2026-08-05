@@ -22,6 +22,7 @@ import {
   ExecutionWiringConfigEntrySchema,
 } from '../config/shape-v2.js';
 import type { JinnConfig } from '../config.js';
+import { markRestartRequired } from './restart-required-state.js';
 
 export interface ClaimPolicyRoutesConfig {
   readonly configPath: string;
@@ -65,6 +66,9 @@ export function addClaimPolicyRoutes(app: Hono, config: ClaimPolicyRoutesConfig)
     }
     const current = config.readConfig();
     config.writeConfig(config.configPath, { ...current, claimPolicy: parsed.data.claimPolicy });
+    // Neither key is hot-applied (module docstring) — always restart-required. See
+    // restart-required-state.ts (issue #2408 review F1).
+    markRestartRequired();
     return c.json({ restartRequired: true });
   });
 
@@ -92,6 +96,7 @@ export function addClaimPolicyRoutes(app: Hono, config: ClaimPolicyRoutesConfig)
       ...current,
       executionWiring: parsed.data.executionWiring,
     });
+    markRestartRequired();
     return c.json({ restartRequired: true });
   });
 }

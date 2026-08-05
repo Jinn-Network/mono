@@ -94,11 +94,18 @@ export const JinnConfigSchema = z.object({
 
   /**
    * How often the daemon attempts stOLAS ExternalStakingDistributor.claim for each staked
-   * fleet service (ms). Default 0 so operators claim OLAS manually from the app.
-   * Set JINN_REWARD_CLAIM_INTERVAL_MS=600000 for managed/headless auto-claim.
+   * fleet service (ms). Default 600000 (10 min) — on by default in standard staking mode.
+   * This overturns the manual-claim-from-the-app rationale this field previously carried:
+   * OPERATOR-APP-SPEC.md's 2026-08-04 amendment (§2.7) corrects the spec's claim that
+   * rewards need no manual step — a manual claim action shipped and stays (POST
+   * /api/admin/claim-rewards / jinn claim-rewards, for an operator who wants to force a
+   * claim or has opted out of the loop), but the loop's off-by-default premise (that the
+   * app was the only claim path, so defaulting off just meant "claim from the app instead")
+   * left with the SPA — off-by-default was silently costing operators money. Set
+   * JINN_REWARD_CLAIM_INTERVAL_MS=0 to opt back out and claim manually only.
    * Env: JINN_REWARD_CLAIM_INTERVAL_MS
    */
-  rewardClaimIntervalMs: z.number().int().min(0).default(0),
+  rewardClaimIntervalMs: z.number().int().min(0).default(600_000),
 
   /**
    * How often the daemon checks agent EOA and Safe balances and tops them up from the master

@@ -32,6 +32,7 @@ export {
   defaultClassifyTerminal,
   launchAndWatch,
   resumeRun,
+  systemClock,
   CellCorrespondenceError,
 } from "./launch.js";
 export type {

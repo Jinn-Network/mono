@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { resolveUiToken } from '../../src/cli/daemon-control-client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const clientRoot = resolve(__dirname, '..', '..');
@@ -342,7 +343,13 @@ async function sleep(ms: number): Promise<void> {
 
 async function fetchStatus(port: number): Promise<unknown | null> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/v1/status`);
+    // /v1/status is operator-class as of spec §14.5 (issue #2404) — send the
+    // on-disk UI token via the shared resolver (cli/daemon-control-client.ts),
+    // or a real daemon returns a permanent 401 this poll loop would otherwise
+    // read as "not ready yet" and time out on.
+    const response = await fetch(`http://127.0.0.1:${port}/v1/status`, {
+      headers: { 'x-jinn-ui-token': resolveUiToken() ?? '' },
+    });
     if (!response.ok) return null;
     return await response.json();
   } catch {

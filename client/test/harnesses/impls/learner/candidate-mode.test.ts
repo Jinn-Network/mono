@@ -290,7 +290,9 @@ describe('candidate mode — sealed manifest emission', () => {
 
       expect(manifest.policy.formatToken).toBe(EXECUTION_TUPLE_FORMAT_TOKEN);
       expect(manifest.policy.harness).toBe('claude-code');
-      expect(manifest.policy.model).toBe('claude-haiku-4-5-20251001');
+      // F-C9-2: the axis is an object keyed by `id`, per substrate §4.1. A bare id string
+      // satisfies no model constraint and is refused as constraint-shaped at admission.
+      expect(manifest.policy.model).toEqual({ id: 'claude-haiku-4-5-20251001' });
       expect(manifest.policy.loadout).toEqual({
         kind: HARNESS_STATE_LOADOUT_KIND,
         name: emission.loadoutName,

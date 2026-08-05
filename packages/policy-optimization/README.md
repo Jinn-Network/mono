@@ -40,6 +40,64 @@ implements **no execution, assembly, or aggregation machinery** — re-implement
 forbidden duplication (§6.1), and statistics reach this product only as `benchmarking-aggregate`
 method-registry references (program ruling R3). The source-boundary guard enforces both.
 
+## Running your first campaign
+
+```bash
+cd packages/policy-optimization
+yarn install
+yarn e2e:campaign
+```
+
+One miniature campaign, whole, in a few seconds. It touches no network, spends no money, reads
+none of your operator state, and writes only inside a fresh temporary directory it prints on the
+first line. Add `--dir <path>` to keep the campaign somewhere you choose, `--without-learner` to
+run with the reference proposer alone, `--help` for the rest.
+
+If `yarn install` is your first in this tree, build the portal dependencies first — the same
+dependency-order list [`.github/workflows/policy-optimization-ci.yml`](../../.github/workflows/policy-optimization-ci.yml)
+runs, which is `packages/task-execution/protocol` through `packages/task-execution/testing`.
+
+### What you will watch happen
+
+Eleven stages, each printed with the digests it produced:
+
+1. **Slates sealed** — a four-instance development Benchmark and a **committed** three-instance
+   promotion Benchmark, checked item-disjoint before either is used.
+2. **Campaign sealed** — the document that fixes what is optimized, what counts as better, and the
+   budget. It never fixes how candidates are made.
+3. **Evidence bundle assembled** — the proposer's input, frozen and exclusion-filtered on instance,
+   repository, and `unattributable`. You will see it **refuse** a contaminated list rather than
+   quietly drop rows.
+4. **Reference proposer enumerated** — deterministic skill ablation. No model call, no clock.
+5. **Admission** — eleven checks per candidate. Five candidates enter; four more are refused, one
+   per real reason (a body naming a held-out repository, an unapproved executable hook, a silently
+   changed frozen axis, provenance naming a bundle the campaign never issued).
+6. **Development wave** — quoted, dispatched, assembled, reported. One cell is deliberately handed
+   the wrong loadout, and you will see it surface as `loadout=mismatch` and be invalidated.
+7. **Allocation decided** — pruning, journaled together with the rows and Reports it read.
+8. **Promotion run** — the committed gate revealed at `CONFIRMING`, run flat, exactly once.
+9. **Archive derived** — lineage, measured history, and a frontier that is a *set*, not a ranking.
+10. **Campaign CLOSED** — a recommendation and a signed Report. Never an activation.
+11. **Adopt, then rollback** — and the run pinning you end on is byte-identical to the one you began
+    on.
+
+It finishes by printing the paths worth opening: the journal (replay it, it reconstructs the
+campaign), the derived archive projection (safe to delete), and the append-only adoption log
+(not).
+
+### What the run does not prove
+
+The last thing it prints, always, is the honest half — the campaign ran on the **local venue**, so
+its recommendation is *operator-local*: it protects an honest owner from self-deception and proves
+nothing to a stranger. The full list is §11's, printed in the run's own output rather than left
+here for you to go and find. Read it; a campaign that prints a recommendation without printing
+that list is the exact self-deception §11 exists to name.
+
+### The same run, as a test
+
+`src/e2e/campaign.test.ts` asserts what `yarn e2e:campaign` narrates — same `runE2ECampaign`,
+different consumer. `yarn test` runs it, so the demo cannot rot while the suite is green.
+
 ## The campaign document
 
 ```
@@ -484,6 +542,51 @@ discriminant is read from each file's own `formatToken` and the digest is derive
 That is the difference between verifying a seed and being told about one.
 
 ## Findings
+
+### C9 — the end-to-end campaign
+
+Four findings, all surfaced by being the first consumer to compose the whole product rather than
+any one part of it. Three were real defects and are fixed; one is a boundary the program should
+eventually move.
+
+- **F-C9-1 (boundary, filed not patched).** `client/` cannot import this package, and this package
+  cannot import `client/`. Both directions are enforced —
+  `architecture/platform-packages.v1.json` puts this package in release group
+  `transitional-or-private`, which `@jinn-network/client`'s group does not allow depending on, and
+  `.github/scripts/policy-optimization-source-boundaries.test.mjs` denies `@jinn-network/client`
+  **by name**. So the C6 → C7c seam is the sealed bytes and nothing else: the client-side test
+  (`client/test/harnesses/impls/learner/candidate-admission-seam.test.ts`) runs the shipped
+  `LearnerHarness` in candidate mode and writes what it emits into `fixtures/learner/`; this side
+  admits those exact bytes through the unmodified gate; the evidence-bundle provenance runs the
+  other way, authored here and consumed there as opaque input. The cost is a two-file fixture
+  contract that nothing but a byte-equality assertion keeps in step. Where it should live instead:
+  a small conformance-fixture package both tiers may depend on (the `benchmarking-records` / TEP
+  conformance-kit pattern already solves exactly this one tier down), or — better — this product
+  consuming a *published* learner candidate through the #2117–#2120 checkpoint train, which is the
+  real distribution path and would make the fixture redundant. Neither is in this program's scope.
+- **F-C9-2 (real defect, fixed in `client/`).** The shipped learner emitted the `model` axis as a
+  bare id string. Substrate §4.1 spells it `{"id": …}`; `modelConstraintAdmits` reads
+  `.provider`/`.id` off both sides, so a bare string satisfies no model constraint; and this
+  package's `isExactPin` refuses a non-`{id}` model as constraint-shaped. Because every v0 campaign
+  freezes the model axis (the mutation surface is exactly `["loadout"]`), the bare spelling made
+  **every** candidate the learner could emit unadmittable into **every** campaign — a total seam
+  break invisible to unit tests on either side, because neither side owned both spellings.
+  Disposition: fixed in `client/src/harnesses/impls/learner/candidate.ts`, because the substrate is
+  the authority and that side had departed from it. Reconciling the other way (relaxing the
+  campaign fixture to the bare string) was available, and would have made the fixture pass while
+  leaving every real candidate unadmittable.
+- **F-C9-3 (ordering, fixed here).** `frontier-updated` is legal at `EXPLORING` and `CONFIRMING`
+  and `closed` is terminal (§5.2), so the archive's frontier must be journaled **before** the
+  campaign closes. The projection under `derived/` is re-derivable at any later time; the journal
+  line saying which policies were non-dominated when the campaign ended is not.
+- **F-C9-4 (real defect, fixed here).** Runtime Observations carry `string | number | boolean`, so
+  an object-shaped axis value travels as JSON text — but the bridge's `decodeValue` re-parses only
+  text beginning `{` or `[`. A scalar axis sent through `JSON.stringify` therefore arrives as a
+  string *with its quote characters in it* and contradicts the pin it was meant to corroborate.
+  The e2e's first draft did exactly that, and every honest cell reported `harness: "mismatch"`. The
+  bridge's own behavior is correct and documented; what this found is how easy it is for a producer
+  to get wrong, and that a fidelity check which fails on every cell reads like noise rather than
+  like a bug.
 
 ### C7d — the archive and the CLI
 

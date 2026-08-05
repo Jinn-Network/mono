@@ -49,7 +49,14 @@ afterEach(async () => {
     await backend.drain();
     await backend.shutdown();
   }));
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  // A just-reaped shim can briefly finish closing its heartbeat/cancellation file after
+  // shutdown returns. Retry only cleanup of the disposable test root.
+  await Promise.all(roots.splice(0).map((root) => rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
+  })));
 });
 
 function taskBytes(overrides: Record<string, unknown> = {}): Uint8Array {

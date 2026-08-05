@@ -61,6 +61,10 @@ interface IntegrationInstallResultEntry {
   target: string;
   mcp: { status: string; detail: string };
   skill: { status: string; detail: string };
+  // Optional: older `integrations install` builds (before the stop-hook
+  // installer wiring) don't emit this axis. Absent must never be conflated
+  // with `ok` — see the flatMap below, which only inspects it when present.
+  hook?: { status: string; detail: string };
 }
 
 function summarizeIntegrationInstall(
@@ -78,6 +82,7 @@ function summarizeIntegrationInstall(
       const failedParts: string[] = [];
       if (result.mcp.status === 'error') failedParts.push(`MCP: ${result.mcp.detail}`);
       if (result.skill.status === 'error') failedParts.push(`Skill: ${result.skill.detail}`);
+      if (result.hook?.status === 'error') failedParts.push(`Hook: ${result.hook.detail}`);
       if (failedParts.length === 0) return [];
       return [`${result.target} (${failedParts.join('; ')})`];
     });

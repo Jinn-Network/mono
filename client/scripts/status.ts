@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { loadConfig, getConfigPathFromArgs } from '../src/config.js';
 import { FleetStateStore } from '../src/earning/store.js';
 import type { StatusV1Response } from '../src/api/status-build.js';
+import { resolveUiToken } from '../src/cli/daemon-control-client.js';
 
 dotenvConfig({ path: join(dirname(fileURLToPath(import.meta.url)), '..', '.env') });
 
@@ -103,9 +104,16 @@ async function printOfflineFleetSummary(earningDir: string): Promise<void> {
 async function main(): Promise<void> {
   const config = loadConfig(getConfigPathFromArgs());
   const url = `http://127.0.0.1:${config.apiPort}/v1/status`;
+  // `/v1/status` is operator-class as of spec §14.5 (issue #2404) — send the
+  // on-disk UI token via the same resolver the CLI's control client and
+  // introspection-context.ts use (cli/daemon-control-client.ts).
+  const token = resolveUiToken();
 
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: token ? { 'x-jinn-ui-token': token } : {},
+    });
     if (!res.ok) {
       const text = await res.text();
       console.error(`HTTP ${res.status} from ${url}`);

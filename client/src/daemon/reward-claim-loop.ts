@@ -10,15 +10,9 @@
 import type { PublicClient } from 'viem';
 import type { WalletClient } from 'viem';
 import { FleetStateStore } from '../earning/store.js';
-import {
-  listStolasClaimTargets,
-  tickStolasDistributorClaims,
-  type StolasClaimTickResult,
-} from '../earning/stolas-claim.js';
-import type { FleetState } from '../earning/types.js';
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
-import { displayFleetServiceIndex } from '../earning/fleet-display-index.js';
+import { claimRewardsIntent } from '../intents/claim-rewards.js';
 import { runLoop } from './loop-heartbeat.js';
 
 export interface RewardClaimLoopConfig {
@@ -34,57 +28,6 @@ export interface RewardClaimLoopConfig {
   jinnStore?: Store;
 }
 
-export type RewardClaimTickConfig = Omit<RewardClaimLoopConfig, 'intervalMs'> & {
-  /** When true, per-service claim failures can throw (CLI); daemon omits. */
-  strict?: boolean;
-};
-
-export async function runRewardClaimOnce(cfg: RewardClaimTickConfig): Promise<StolasClaimTickResult> {
-  const state = await cfg.store.load(cfg.chain);
-  const targets = listStolasClaimTargets(state.services);
-  return tickStolasDistributorClaims(cfg.publicClient, cfg.masterWallet, {
-    distributorAddress: cfg.distributorAddress,
-    stakingMode: state.staking_mode,
-    targets,
-    strict: cfg.strict,
-  });
-}
-
-export function recordRewardClaimResult(
-  jinnStore: Store,
-  state: FleetState,
-  result: StolasClaimTickResult,
-  distributorAddress: string | undefined,
-  source = 'reward-claim',
-): void {
-  if (result.claims.length === 0) return;
-  const serviceByStakingId = new Map<number, (typeof state.services)[number]>();
-  for (const svc of state.services) {
-    if (svc.service_id != null) serviceByStakingId.set(svc.service_id, svc);
-  }
-  for (const claim of result.claims) {
-    const svc = serviceByStakingId.get(claim.serviceId);
-    if (!svc) continue;
-    const serviceIndex = displayFleetServiceIndex(svc);
-    jinnStore.recordRewardClaim({
-      ts: new Date().toISOString(),
-      serviceIndex,
-      serviceId: claim.serviceId,
-      stakingProxy: claim.stakingProxy,
-      distributor: distributorAddress ?? '0x',
-      txHash: claim.txHash,
-      amountWei: claim.amountWei,
-    });
-    emitEvent(jinnStore, {
-      kind: 'reward_claimed',
-      serviceIndex,
-      txHash: claim.txHash,
-      outcome: 'ok',
-      detail: `Submitted distributor.claim for service ${claim.serviceId} (pre-split queue: ${claim.amountWei} wei; operator collector-slot share only)`,
-    }, source);
-  }
-}
-
 export class RewardClaimLoop {
   private stopped = false;
 
@@ -95,16 +38,19 @@ export class RewardClaimLoop {
   }
 
   async runOnce(): Promise<void> {
-    const result = await runRewardClaimOnce(this.config);
-    if (!this.config.jinnStore || result.claims.length === 0) return;
-    const state = await this.config.store.load(this.config.chain);
-    recordRewardClaimResult(
-      this.config.jinnStore,
-      state,
-      result,
-      this.config.distributorAddress,
-      'reward-claim',
-    );
+    // Delegates entirely to the intent module (client/src/intents/claim-rewards.ts)
+    // — tick, record, and the module-level single-flight that serializes this
+    // loop's ticks against the CLI verb's and the admin route's. `strict` is
+    // omitted (loop mode): per-service failures are counted, never thrown.
+    await claimRewardsIntent({
+      publicClient: this.config.publicClient,
+      masterWallet: this.config.masterWallet,
+      fleetStore: this.config.store,
+      chain: this.config.chain,
+      distributorAddress: this.config.distributorAddress,
+      jinnStore: this.config.jinnStore,
+      source: 'reward-claim',
+    });
   }
 
   async run(): Promise<void> {

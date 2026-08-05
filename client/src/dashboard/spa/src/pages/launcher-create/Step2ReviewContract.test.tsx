@@ -5,7 +5,7 @@ import {
   PREDICTION_V1_TEMPLATE,
   SWE_REBENCH_V2_V1_TEMPLATE,
 } from './templates.js';
-import type { DraftSolverNetRecord } from '../../api/types.js';
+import type { DraftSolverNetRecord } from '../../../../../api/contract/index.js';
 
 function buildDraft(overrides: Partial<DraftSolverNetRecord> = {}): DraftSolverNetRecord {
   return {

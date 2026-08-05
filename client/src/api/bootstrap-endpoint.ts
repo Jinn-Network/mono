@@ -14,6 +14,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readBootstrapError } from '../errors/persisted-bootstrap-error.js';
 import { MIGRATIONS_FILE } from '../earning/store.js';
+import {
+  FLEET_BOOTSTRAP_PHASES,
+  FLEET_BOOTSTRAP_PHASE_INDEX,
+  type FleetBootstrapPhase,
+} from '../earning/fleet-bootstrap-phase.js';
 
 /** Per-slot boot-probe health (#913). Host masked by the daemon before this point. */
 export interface RpcSlotHealthEntry {
@@ -44,25 +49,13 @@ export interface BootstrapEndpointConfig {
   };
 }
 
-const STEPS = [
-  'wallet',
-  'safe_predicted',
-  'awaiting_funding',
-  'safe_deployed',
-  'service_created',
-  'service_activated',
-  'agents_registered',
-  'service_deployed',
-  'service_staked',
-  'staked',
-  'mech_deployed',
-  'agent_registered',
-  'safe_binding_pending',
-  'complete',
-] as const;
-
-type Step = typeof STEPS[number];
-const STEP_INDEX = new Map<Step, number>(STEPS.map((s, i) => [s, i]));
+// The fleet-phase display list. Previously a hand-maintained 14-entry copy
+// that silently dropped `awaiting_stake` (issue #2407) — now the single
+// typed union from earning/fleet-bootstrap-phase.ts (15 entries: 4
+// pre-service phases + all 11 ServiceSteps).
+const STEPS = FLEET_BOOTSTRAP_PHASES;
+type Step = FleetBootstrapPhase;
+const STEP_INDEX = FLEET_BOOTSTRAP_PHASE_INDEX;
 const RUNNING_STEPS = new Set<Step>(['safe_binding_pending', 'complete']);
 
 interface ServiceState {

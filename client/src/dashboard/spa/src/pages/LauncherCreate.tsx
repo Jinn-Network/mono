@@ -5,7 +5,7 @@ import type {
   BootstrapState,
   DraftSolverNetRecord,
   DraftSolverNetRecordPatch,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 import { Alert, AlertDescription, AlertTitle } from '../components/ui/alert.js';
 import { Step1Define } from './launcher-create/Step1Define.js';
 import { Step2ReviewContract } from './launcher-create/Step2ReviewContract.js';
