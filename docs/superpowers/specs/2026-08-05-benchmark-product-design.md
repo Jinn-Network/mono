@@ -550,6 +550,26 @@ leaderboards; marketplace-venue GUI depth. Charter §15's open items (product
 name, agent authentication details, Inspect integration depth, report
 hosting model, and others) remain open at the charter level.
 
+**Addendum — 2026-08-05, packet BP-10 (implementation refinements recorded
+against this spec's labeled assumptions; no §4/§5/§6 decision reopened):**
+
+- **A8 realized.** The v1 error-code set as implemented: `validation`,
+  `illegal-transition`, `authority-denied` (the §4.3 `authority` category),
+  `record-integrity`, `journal-integrity`, `not-found`, `conflict`,
+  `invalid-invocation`; `venue-unavailable`, `venue-unverifiable`, and
+  `execution` reserved for the venue and launch packets.
+- **A3 realized.** The gated-operation set enforced at the operations
+  boundary is `lock`, `launch`, `cancel`, `report`, `publish` — §4.1's
+  approval-gated rows; A3's prose omits `report` and this addendum keeps the
+  table authoritative. Workspace membership is required for every operation,
+  reads included.
+- **§6 mapping refinement.** `evaluator-panel` and `strict-agreement`
+  resolve `distinctEvaluator: true` (the §6 table names the field explicitly
+  only for `separate-evaluator`; a panel of non-distinct evaluator
+  identities would not be a panel). Overridable through the preset's
+  resolved primitive overrides, and disclosed like every other resolved
+  primitive.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

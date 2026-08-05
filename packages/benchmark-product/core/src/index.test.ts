@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
+import * as entry from "./index.js";
 import { BENCHMARKING_PROTOCOL, PRODUCT_VERSION } from "./index.js";
 
 describe("PRODUCT_VERSION", () => {
@@ -12,5 +13,19 @@ describe("PRODUCT_VERSION", () => {
 describe("platform seam", () => {
   test("re-exports BENCHMARKING_PROTOCOL from @jinn-network/benchmarking-records", () => {
     expect(BENCHMARKING_PROTOCOL).toBe("https://spec.jinn.network/protocols/benchmarking/v1");
+  });
+});
+
+describe("public surface", () => {
+  test("the operations facade, domain model, and CLI are all exported from the entry", () => {
+    for (const name of [
+      "initWorkspace", "createDraft", "updateDraft", "getDraft", "listDrafts", "inspectDraft",
+      "transition", "isDraftMutable", "resolveAssurance", "parseDraftSpec", "draftIdFromName",
+      "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
+    ] as const) {
+      expect(typeof entry[name], name).toBe("function");
+    }
+    expect(entry.LIFECYCLE_STATES).toContain("published-bundle");
+    expect(entry.GATED_OPERATIONS).toContain("lock");
   });
 });
