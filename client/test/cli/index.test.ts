@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/cli/index.js';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { startApiServer } from '../../src/api/server.js';
+import { Store } from '../../src/store/store.js';
+import { defaultTokenPath } from '../../src/api/ui-token.js';
 
 function captureIo() {
   const writes: string[] = [];
@@ -87,6 +90,50 @@ describe('runCli', () => {
     expect(parsed.details?.field).toBe('config');
     expect(parsed.details?.code).toBe('config_file_not_found');
     expect(io.exits).toEqual([11]);
+  });
+
+  // Review finding L1 (issue #2404 / spec §14.5): a /v1/status 401 gets a
+  // machine-readable shape rather than falling into the generic `fatal`
+  // bucket. `ErrorCode` has no `unauthorized` member (by design — don't mint
+  // one), so the discriminator lives in `details.reason`.
+  it('emits invalid_invocation with details.reason=unauthorized when /v1/status 401s', async () => {
+    await withTempFleetEnv(async () => {
+      const store = new Store(':memory:');
+      const server = await startApiServer({
+        port: 0,
+        store,
+        apiToken: 'bearer-not-used-here',
+        ui: { token: 'the-real-token', handshakeKey: 'handshake-key' },
+      });
+      const prevApiPort = process.env.JINN_API_PORT;
+      // Everything from here — env mutation, the deliberately-wrong token
+      // write, the CLI dispatch — lives inside one try/finally so a failure
+      // anywhere still restores the env var and closes the server; leaking
+      // either would make every later test in this file resolve HTTP merges
+      // against this same (now stale) server (jinn-mono review finding for
+      // #2404: this exact leak was caught in an earlier draft).
+      try {
+        process.env.JINN_API_PORT = String(server.port);
+        const tokenPath = defaultTokenPath();
+        mkdirSync(dirname(tokenPath), { recursive: true });
+        // Deliberately write a WRONG token so the merge fetch inside
+        // `gatherIntrospectionRaw` gets a real 401 from the server above.
+        writeFileSync(tokenPath, 'wrong-token\n', { mode: 0o600 });
+
+        const io = captureIo();
+        await runCli(['status'], { writer: io.writer, exit: io.exit, stdoutIsTty: false });
+        const parsed = JSON.parse(io.writes[io.writes.length - 1]);
+        expect(parsed.code).toBe('invalid_invocation');
+        expect(parsed.exitCode).toBe(11);
+        expect(parsed.details?.reason).toBe('unauthorized');
+        expect(io.exits).toEqual([11]);
+      } finally {
+        if (prevApiPort === undefined) delete process.env.JINN_API_PORT;
+        else process.env.JINN_API_PORT = prevApiPort;
+        await server.close();
+        store.close();
+      }
+    });
   });
 
   it('prints fleet-manage help for fleet scale --help', async () => {

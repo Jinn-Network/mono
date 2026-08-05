@@ -1,26 +1,17 @@
 import type { Store } from '../store/store.js';
 import { getFileLogger } from './file-logger.js';
+import { LIFECYCLE_KINDS, type LifecycleKind } from '../api/contract/lifecycle-kind.js';
 
-export const ALLOWED_LIFECYCLE_KINDS = [
-  'task_posted',
-  'intent_registry_failed',
-  'request_claimed',
-  'delivery_submitted',
-  'evaluation_submitted',
-  'reward_claimed',
-  'balance_topup',
-  'engine_transition',
-  'corpus_knowledge',
-  'tick_error',
-  'race_lost',
-  'spend_cap_reached',
-  'ai_units_cap_reached',
-  'startup',
-  'shutdown',
-  'harvest_admitted',
-] as const;
+/**
+ * @deprecated Kept as an alias so existing importers don't need a rename. The vocabulary
+ * itself now lives in `../api/contract/lifecycle-kinds.const.ts`
+ * (spec/2026-08-04-headless-operator-rederivation-design.md §8 artifact 6, one hop past
+ * `lifecycle-kind.ts`, which re-exports it alongside the Zod schema built from it) — that
+ * module, not this one, is the source of truth both the daemon and the SPA import from.
+ */
+export const ALLOWED_LIFECYCLE_KINDS = LIFECYCLE_KINDS;
 
-export type LifecycleKind = (typeof ALLOWED_LIFECYCLE_KINDS)[number];
+export type { LifecycleKind };
 
 export interface LifecycleEvent {
   kind: LifecycleKind;

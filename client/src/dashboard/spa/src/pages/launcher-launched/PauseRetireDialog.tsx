@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import type { LifecycleTarget } from '../../api/types.js';
+import type { LifecycleTarget } from '../../../../../api/contract/index.js';
 import {
   AlertDialog,
   AlertDialogAction,

@@ -26,6 +26,7 @@ import { randomBytes as cryptoRandomBytes } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
+import { resolveApiBindHost, isLoopbackBindHost } from './preflight/api-bind-host.js';
 import { Store } from './store/store.js';
 import { startApiServer, isEmbeddedAgentEnabled, type ApiServer } from './api/server.js';
 import { setDefaultTxSubmissionLedger, withEoaBroadcastLock } from './tx-retry.js';
@@ -35,6 +36,7 @@ import { CapturePublishUnavailableError } from './api/captures.js';
 import { invalidatePredictionOperatorStatusCache } from './api/gather-status.js';
 import type { LauncherGeneratorStateSnapshot } from './api/launcher-status.js';
 import { ensureUiToken } from './api/ui-token.js';
+import { daemonApiTokenPath, ensureDaemonApiToken } from './api/daemon-token.js';
 import { decideUiAutoOpen } from './cli/ui-auto-open-gate.js';
 import { getFileLogger, closeFileLogger } from './observability/file-logger.js';
 import { emitProgress } from './observability/progress.js';
@@ -54,8 +56,16 @@ import { applyDeploymentReadinessGate } from './preflight/deployment-readiness.j
 import { ensureStableCwd } from './preflight/stable-cwd.js';
 import { detectAuthContext } from './preflight/claude-auth.js';
 import { FleetBootstrapper, recoverEvictedService as recoverEvictedServiceFn } from './earning/bootstrap.js';
-import { runFleetBootstrap, SetupBootstrapHalted } from './earning/bootstrap-run.js';
+import { runFleetBootstrap, runBootstrapWithDegradeOpen } from './earning/bootstrap-run.js';
+import { isEconomicBootstrapHalt, isPendingMasterFundingHalt } from './earning/bootstrap-halt-classification.js';
+import { startDegradedRecoveryLoops } from './daemon/degraded-recovery.js';
+import {
+  setDaemonReadiness,
+  getDaemonReadiness,
+  buildLoopMetricsSnapshot,
+} from './daemon/loop-heartbeat.js';
 import { applyChainGasOverrides, getChainConfig } from './earning/contracts.js';
+import { addressSetFromChainConfig, isAddressDigestCheckOverridden, verifyBroadcastTargetAddressSet } from './earning/address-digests.js';
 import { getJinnRouterAddress } from './contracts/addresses.js';
 import { FleetStateStore } from './earning/store.js';
 import { isOperationalServiceStep } from './earning/types.js';
@@ -65,6 +75,12 @@ import { MechAdapter } from './adapters/mech/adapter.js';
 import { ClaudeRunner } from './runner/claude.js';
 import type { RunnerContext } from './runner/runner.js';
 import { Daemon } from './daemon/daemon.js';
+import {
+  buildDaemonStartupInfo,
+  resolveMainEntryEffectiveMode,
+  type DaemonStartupInfo,
+} from './daemon/daemon-startup-info.js';
+import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
@@ -211,6 +227,18 @@ if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') 
   config.network = 'testnet';
   config.rpcUrl = 'https://base-sepolia-rpc.publicnode.com';
 }
+// #2380: same resolver `cli/commands/run.ts` used to route between this legacy entry and
+// native-main.ts. Recomputed here (not threaded through argv) so /v1/status and daemon_started
+// report the real resolved mode rather than assuming 'legacy'. `jinn run` only ever reaches this
+// entry when the resolver already chose legacy — but `jinn quickstart` imports main.ts directly,
+// unrouted (review #2380), so the reported mode is clamped to 'legacy' (what this entry actually
+// runs) with a loud warning on disagreement, rather than trusting the raw decision.
+const verticalDecision = resolveConfiguredOperatorVerticalMode(config);
+const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
+  resolveMainEntryEffectiveMode(verticalDecision);
+if (verticalModeWarning !== undefined) {
+  console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
 // action-authority / plugin-scope shape is still in design. Set
@@ -272,20 +300,7 @@ function configFileHasTopLevelKey(configPath: string | undefined, key: string): 
   }
 }
 
-export interface DaemonStartupInfo {
-  schemaVersion: 1;
-  generatedAt: string;
-  kind: 'daemon_started';
-  pid: number;
-  network: 'testnet' | 'mainnet';
-  phase: 'phase-1b' | 'phase-0';
-  apiPort: number;
-  masterAddress: `0x${string}`;
-  safeAddress: `0x${string}`;
-  mechAddress: `0x${string}`;
-  serviceIndex: number;
-  serviceId: number | null;
-}
+export type { DaemonStartupInfo };
 
 export interface SetupHaltedInfo {
   schemaVersion: 1;
@@ -321,21 +336,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // singleton here also runs the startup age-based cleanup of stale rotations.
   getFileLogger();
 
-  // ── Daemon API bearer token (jinn-mono-pr64 hardening) ───────────────────
+  // ── Daemon API bearer token (jinn-mono-pr64 hardening; §14.2) ────────────
   //
   // Cost-mutating API routes (`POST /v1/artifacts/acquire`, `POST /artifacts`)
-  // require an `Authorization: Bearer <token>` header. Read from env when
-  // operators want a stable token (e.g. multi-process tools); otherwise
-  // generate a fresh one per daemon process. Logged only as an 8-char prefix.
-  // The token is forwarded to the MCP subprocess via `DAEMON_API_TOKEN` env
-  // so `acquire_artifact` and `submit_restoration_result` can authenticate
-  // their calls back to the daemon.
+  // and the `POST /api/stop-hook` compat path require an
+  // `Authorization: Bearer <token>` header. Read from env when operators
+  // want a stable token (e.g. multi-process tools); otherwise resolve the
+  // token persisted at `<earningDir>/daemon-api-token` (mode 0600),
+  // generating it once on first boot. Persistence (not a fresh random value
+  // per boot) is required so an externally-installed stop-hook — the only
+  // production consumer of the bearer on the stop-hook route — has a stable
+  // value it can resolve when `DAEMON_API_TOKEN` isn't already in its own
+  // environment; see `jinn-stop-hook.ts`'s file-fallback. Logged only as an
+  // 8-char prefix. The token is forwarded to the MCP subprocess via
+  // `DAEMON_API_TOKEN` env so `acquire_artifact` and
+  // `submit_restoration_result` can authenticate their calls back to the
+  // daemon.
   const envToken = process.env['DAEMON_API_TOKEN']?.trim();
-  const apiToken = envToken && envToken.length > 0
-    ? envToken
-    : cryptoRandomBytes(32).toString('hex');
-  if (!envToken) {
-    console.log(`[main] Generated DAEMON_API_TOKEN (prefix=${apiToken.slice(0, 8)}...)`);
+  const daemonApiTokenFilePath = daemonApiTokenPath(config.earningDir);
+  let apiToken: string;
+  if (envToken && envToken.length > 0) {
+    apiToken = envToken;
+  } else {
+    const resolved = ensureDaemonApiToken(daemonApiTokenFilePath);
+    apiToken = resolved.token;
+    const verb = resolved.source === 'generated' ? 'Generated' : 'Loaded';
+    console.log(`[main] ${verb} DAEMON_API_TOKEN at ${daemonApiTokenFilePath} (prefix=${apiToken.slice(0, 8)}...)`);
   }
 
   // The keystore-presence probe happens twice: once now (to decide initial
@@ -368,6 +394,38 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // fail-loud on chain-id mismatch against the head provider.
   lastL2Probe = await probeFallbackChain(config.rpcUrls, config.network, 'L2');
   console.error(summarizeFallbackChain('L2', config.rpcUrls));
+
+  // Pinned broadcast-target address-set digest (#2407, spec §5). Integrity
+  // class — fail closed, never degrade-open: a resolved
+  // {staking proxy, distributor, marketplace, router, OLAS token} set that
+  // doesn't match the checked-in per-network digest means this daemon would
+  // broadcast against unexpected contracts (deployment-artifact paths are
+  // env-overridable; address fields are otherwise only presence-checked).
+  if (isAddressDigestCheckOverridden()) {
+    console.warn(
+      '[main] JINN_ADDRESS_DIGEST_OVERRIDE is set — skipping the pinned broadcast-target ' +
+        'address-set digest check. Only use this for a local Anvil fork or another deployment ' +
+        'deliberately not matching the pinned production address set.',
+    );
+  } else {
+    const addressSetCheck = verifyBroadcastTargetAddressSet({
+      chainId: CHAIN_CONFIG.chainId,
+      // #2407 L2: goes through the same helper the test suite calls against
+      // getChainConfig(...) directly, rather than reconstructing the set
+      // inline here — one place for the router fallback to live, so the
+      // test suite's coverage is the production set, not a narrower stand-in.
+      set: addressSetFromChainConfig(CHAIN_CONFIG),
+    });
+    if (!addressSetCheck.ok) {
+      emitEnvelope({
+        code: 'invalid_invocation',
+        message: addressSetCheck.message,
+        hint: 'Verify the resolved deployment-artifact paths (testnetL2DeploymentPath / testnetMechDeploymentPath / testnetStolasDeploymentPath / JINN_TESTNET_*_DEPLOYMENT), or set JINN_ADDRESS_DIGEST_OVERRIDE=1 for a deliberately non-production deployment (e.g. a local Anvil fork).',
+        exampleCli: 'jinn doctor --human',
+        details: { field: 'addressSetDigest', chainId: CHAIN_CONFIG.chainId, diverged: addressSetCheck.diverged },
+      });
+    }
+  }
 
   const portPreflight = await checkApiPortAvailable(config.apiPort);
   if (!portPreflight.ok) {
@@ -502,7 +560,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
 
   const uiToken = ensureUiToken();
   const handshakeKey = cryptoRandomBytes(16).toString('hex');
-  const apiBindHost = process.env['JINN_API_BIND_HOST'] ?? '127.0.0.1';
+  // §14.4: env override wins, else the config-file value, else loopback.
+  // Previously this only ever read the env var, so `apiBindHost` written
+  // into the config file was silently dead — the auth gate (§14.3) must be
+  // unconditional BEFORE this activates, since a non-loopback bind now
+  // actually exposes operator-class routes to the network (bearer/token-
+  // gated, but reachable).
+  const apiBindHost = resolveApiBindHost(config.apiBindHost);
+  if (!isLoopbackBindHost(apiBindHost)) {
+    console.warn(
+      `[main] WARNING: apiBindHost is "${apiBindHost}" (non-loopback) — the daemon API ` +
+      'is reachable from other hosts on the network, not just this machine. Operator-class ' +
+      'routes are token-gated, but the bind host is your outer firewall — make sure this is intentional.',
+    );
+  }
   const operatorArtifactsConfig = {
     publicEndpoint: config.operator?.publicEndpoint ?? `http://localhost:${config.apiPort}`,
     defaultPriceUsdc: config.operator?.defaultPriceUsdc ?? '0',
@@ -572,6 +643,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // via the `latestVersion` getter threaded into the ApiServer status config.
   const latestVersionHolder: { current: string | null } = { current: null };
 
+  // #2405 (spec §4.1 intent-module law): `POST /api/admin/claim-rewards` is a
+  // thin front-end over `claimRewardsIntent`, built from the daemon's OWN
+  // signer/client objects — never re-derived from the keystore, never routed
+  // through the CLI module. Those objects (`publicClient`, `masterWallet`,
+  // `earningStore`) aren't constructed until after bootstrap completes, well
+  // after `startApiServer` registers the route (same eager-register /
+  // late-populate holder pattern as `joinApplierHolder` above).
+  const claimRewardsRouteHolder: {
+    current: import('./api/admin-endpoint.js').ClaimRewardsRouteContext | undefined;
+  } = { current: undefined };
+
   // hjex.6: retry signal for the bootstrap halt-and-resume loop.
   // When a SetupBootstrapHalted is caught (fatal non-funding error or funding
   // timeout), main() waits on this promise instead of returning, so the setup
@@ -589,6 +671,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       bindHost: apiBindHost,
       corpus: () => corpusForApi,
       ui: { token: uiToken, handshakeKey },
+      // GET /ready + GET /metrics (spec §5/§6.1–§6.2, issue #2404). Injected
+      // (rather than server.ts importing daemon/loop-heartbeat.js directly)
+      // per the api→daemon architecture boundary — see the field docstrings
+      // on ApiServerConfig in server.ts.
+      getDaemonReadiness,
+      getLoopSnapshot: () => buildLoopMetricsSnapshot(sharedStore),
       hermesDoctor: {
         hermesPath: config.hermesPath,
         hermesDoctorTimeoutMs: config.hermesDoctorTimeoutMs,
@@ -618,6 +706,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
               await closeCaptureReceiver();
             },
           }),
+        claimRewards: { holder: claimRewardsRouteHolder },
       },
       harnessStatus: {
         getStatus: async () => {
@@ -1157,19 +1246,172 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     setupController.refresh({ keystoreExists: true, allComplete: false });
   }
 
-  // hjex.6: halt-and-resume loop for bootstrap retries.
-  // When failBootstrap() throws SetupBootstrapHalted, we wait for the operator
-  // to click Retry in the SPA (which resolves retryBootstrapResolve) rather
-  // than returning and exiting. On each retry, we loop back and call bootstrap()
-  // again. bootstrap() is idempotent — completed steps are no-ops.
-  let bootstrapResult;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
+  // set or a container/compose auth context) this fails loud and exits when a
+  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
+  // Outside a deployment context it only logs advisories — a plain local
+  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
+  // unfit environment refuses before we touch the pidfile.
+  //
+  // #2407 B1: this and the pidfile block below used to run much later, right
+  // before Daemon construction — AFTER the entire bootstrap retry loop and
+  // any degrade-open recovery window. That left the whole degraded window
+  // with no `daemon.pid` on disk, so `checkDaemonGuard` (cli/daemon-guard.ts)
+  // reported `not-running` and a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would race the
+  // degraded recovery loops' signer, and a second `jinn run` would start a
+  // second degraded set. Both gates now run here, before the retry loop and
+  // any degraded loops can start.
+  await applyDeploymentReadinessGate(
+    {
+      stateDir: config.stateDir,
+      earningDir: config.earningDir,
+      runtimeMode: config.runtimeMode,
+    },
+    {
+      env: process.env,
+      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
+      detectAuthContext,
+    },
+  );
+
+  const pidPath = join(config.earningDir, 'daemon.pid');
+  applyPidfileLivenessGate(pidPath);
+
+  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
+  const removePidfile = () => {
     try {
-      bootstrapResult = await runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress });
-      break; // success — exit the retry loop
-    } catch (err) {
-      if (err instanceof SetupBootstrapHalted) {
+      unlinkSync(pidPath);
+    } catch {
+      /* ignore */
+    }
+  };
+  process.on('exit', removePidfile);
+
+  // #2407 R2: a SIGINT/SIGTERM delivered during the bootstrap retry loop or
+  // the degrade-open window (before the full Daemon's own graceful
+  // SIGINT/SIGTERM handlers exist, further down) hits Node's default signal
+  // disposition, which terminates the process WITHOUT running
+  // `process.on('exit', ...)` handlers — `exit` fires for a clean return or
+  // `process.exit()`, not for a bare signal termination. Without this, a
+  // stale `daemon.pid` survives the process: on a normal host it
+  // self-heals (`checkPidfileLiveness`'s ESRCH branch), but in a container
+  // the daemon is PID 1 and `checkDaemonGuard` deliberately treats a
+  // pid-1 record as BLOCKING (preflight/pidfile-liveness.ts's
+  // self-or-pid1-container inversion, cli/daemon-guard.ts's docstring) —
+  // every CLI verb would refuse until a daemon happened to rewrite the
+  // file. This minimal early handler is superseded by the real graceful
+  // shutdown handlers once the full Daemon is constructed (see
+  // `process.removeListener` calls right before those are installed,
+  // further down) — it exists only to cover the window between here and
+  // there.
+  const removePidfileOnEarlySignal = (): void => {
+    removePidfile();
+    process.exit(0);
+  };
+  process.once('SIGINT', removePidfileOnEarlySignal);
+  process.once('SIGTERM', removePidfileOnEarlySignal);
+
+  // hjex.6: halt-and-resume loop for bootstrap retries, extracted into
+  // `runBootstrapWithDegradeOpen` (earning/bootstrap-run.ts, #2407 M3) so its
+  // ORDERING — degraded loops start before readiness flips 'degraded'; on
+  // retry, degraded recovery's `stop()` is awaited to completion BEFORE the
+  // next `runFleetBootstrap()` attempt; 'ready' flips only after a
+  // successful attempt, i.e. before the full Daemon is constructed below —
+  // is independently unit-tested rather than only reachable by spawning the
+  // whole daemon (main.ts itself stays impractical to test directly).
+  //
+  // The master-EOA signer/client used by degraded recovery is derived once
+  // here (cheap, no network calls) rather than per-halt: it's the same
+  // every time, and deriving it eagerly keeps `startDegraded` below
+  // synchronous, matching `runBootstrapWithDegradeOpen`'s sync
+  // `startDegraded` contract without threading async through it.
+  //
+  // #2407 R8: this derivation (specifically `decryptMnemonic`, which throws
+  // on a wrong JINN_PASSWORD) must stay INSIDE the try below — outside it,
+  // a bad password would propagate past the setupApiServer/store teardown
+  // this try's catch performs, leaving the listener bound and SQLite open.
+  let bootstrapResult;
+  try {
+    const degradedMnemonic = await decryptMnemonic(
+      await new FleetStateStore(config.earningDir).loadMnemonicKeystore(),
+      PASSWORD,
+    );
+    const degradedMasterAccount = deriveMasterSigner(degradedMnemonic);
+    const degradedPublicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
+    const degradedMasterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, degradedMasterAccount);
+
+    bootstrapResult = await runBootstrapWithDegradeOpen({
+      runBootstrap: () => runFleetBootstrap({ config, password: PASSWORD, network: NETWORK_CHAIN, emitProgress }),
+      setReadiness: setDaemonReadiness,
+      // #2407 / spec §5: degrade-open boot. An economic-class halt (funding
+      // shortfall, incomplete fleet, a recoverable on-chain error) must not
+      // leave the daemon fully dark while the caller awaits the retry signal
+      // — any part of the fleet that's ALREADY operational needs its
+      // eviction/checkpoint/balance-topup/reward-claim loops to keep running
+      // so a self-healing condition doesn't compound (ratifies
+      // earning/bootstrap.ts's #773/#789/#917 decision: eviction recovery
+      // belongs to the running eviction loop, never an inline boot-time
+      // broadcast). Integrity-class halts (bootstrap-halt-classification.ts)
+      // stay fail-closed — no degraded loops. Standalone-recovery-runner
+      // variant, not the full `Daemon` class: `Daemon` needs
+      // mechAddress/safeAddress/composition/adapter resolved from a
+      // COMPLETED bootstrap, none of which exist mid-halt — see
+      // degraded-recovery.ts's docstring.
+      startDegraded: (envelope) => {
+        if (!isEconomicBootstrapHalt(envelope)) {
+          console.log('[main] Halt cause is integrity-class — staying fail-closed (no degraded recovery loops).');
+          return null;
+        }
+        try {
+          const handle = startDegradedRecoveryLoops({
+            earningDir: config.earningDir,
+            network: NETWORK_CHAIN,
+            publicClient: degradedPublicClient,
+            masterWallet: degradedMasterWallet,
+            mnemonic: degradedMnemonic,
+            rpcUrl: config.rpcUrl,
+            chainConfig: CHAIN_CONFIG,
+            intervals: {
+              evictionCheckIntervalMs: config.evictionCheckIntervalMs,
+              checkpointIntervalMs: config.checkpointIntervalMs,
+              // #2407 B2: omit balance-topup while a master-EOA
+              // funding_required halt is pending — it drains the exact
+              // balance the funding poller below is waiting to see cross
+              // the threshold (an absorbing state). See
+              // isPendingMasterFundingHalt's docstring. This exact
+              // predicate-to-interval-zero wiring join is inspection-covered,
+              // not independently unit-tested: isPendingMasterFundingHalt
+              // itself is tested (bootstrap-halt-classification.test.ts) and
+              // startDegradedRecoveryLoops' 0-disables-the-loop behavior is
+              // tested (degraded-recovery.test.ts) separately.
+              balanceTopupIntervalMs: isPendingMasterFundingHalt(envelope) ? 0 : config.balanceTopupIntervalMs,
+              rewardClaimIntervalMs: config.rewardClaimIntervalMs,
+            },
+            stakingMode: config.stakingMode,
+            jinnStore: sharedStore,
+          });
+          console.log(
+            '[main] Degraded readiness: recovery loops (eviction-check, checkpoint, ' +
+              'balance-topup, reward-claim) running for the already-operational fleet ' +
+              'while this halt is retried; claim/work path stays closed.' +
+              (isPendingMasterFundingHalt(envelope) ? ' balance-topup omitted (pending master-EOA funding halt).' : ''),
+          );
+          return handle;
+        } catch (degradedErr) {
+          console.error(
+            '[main] Failed to start degraded recovery loops (non-fatal — still waiting for retry):',
+            degradedErr instanceof Error ? degradedErr.message : degradedErr,
+          );
+          return null;
+        }
+      },
+      // hjex.6: Auto-resume funding poller. When the halt is a funding
+      // shortfall, poll the master EOA balance every
+      // JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance meets
+      // or exceeds the required amount, auto-signal the retry loop. Only
+      // runs while the halt signal is pending; stops on any signal.
+      awaitRetry: async (envelope) => {
         // Install the retry signal so the endpoint can unblock us.
         const retrySignal = new Promise<void>((resolve, reject) => {
           retryBootstrapResolve = resolve;
@@ -1177,14 +1419,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         });
         console.log('[main] Bootstrap halted. Waiting for retry signal from the dashboard...');
 
-        // hjex.6: Auto-resume funding poller.
-        // When the halt is a funding shortfall, poll the master EOA balance
-        // every JINN_FUNDING_POLL_INTERVAL_MS (default 15s). When the balance
-        // meets or exceeds the required amount, auto-signal the retry loop.
-        // Only runs while the halt signal is pending; stops on any signal.
         let fundingPollHandle: ReturnType<typeof setTimeout> | null = null;
-        const isHaltedOnFunding = err.envelope.code === 'funding_required';
-        const haltDetails = err.envelope.details as Record<string, unknown> | undefined;
+        const isHaltedOnFunding = envelope.code === 'funding_required';
+        const haltDetails = envelope.details as Record<string, unknown> | undefined;
         const haltAddress = typeof haltDetails?.['address'] === 'string'
           ? haltDetails['address'] as `0x${string}`
           : null;
@@ -1237,19 +1474,22 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           }
         }
         console.log('[main] Retry triggered — re-running bootstrap...');
-        continue; // loop back to the bootstrap() call
-      }
-      // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
-      // tear down the API we just started so we don't leave a dangling listener.
-      await setupApiServer.close().catch(() => undefined);
-      await closeCaptureReceiver();
-      sharedStore.close();
-      throw err;
-    }
+      },
+    });
+  } catch (err) {
+    // If bootstrap throws an unexpected error (vs. SetupBootstrapHalted),
+    // tear down the API we just started so we don't leave a dangling listener.
+    await setupApiServer.close().catch(() => undefined);
+    await closeCaptureReceiver();
+    sharedStore.close();
+    throw err;
   }
 
   // Bootstrap completed — flip the controller into 'running' so any waiters
-  // (future loops gated on this) unblock.
+  // (future loops gated on this) unblock. `runBootstrapWithDegradeOpen`
+  // already flipped readiness to 'ready' before returning — this is the
+  // no-restart transition: the same process falls straight through to the
+  // existing full-boot code below, no restart-daemon.ts invocation needed.
   setupController.refresh({ keystoreExists: true, allComplete: true });
 
   // ── --no-daemon: exit cleanly after bootstrap completes ──────────────────
@@ -1320,6 +1560,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   const publicClient = createJinnPublicClient(config.rpcUrls, NETWORK_CHAIN);
   publicClientForLauncher = publicClient;
   const masterWallet = createJinnWalletClient(config.rpcUrls, NETWORK_CHAIN, masterAccount);
+
+  // #2405: populate the claim-rewards route holder now that the daemon's own
+  // signer/client objects exist — reuses `sharedStore` (already open for the
+  // daemon's lifetime) rather than opening a second handle onto the same
+  // SQLite file the way a fresh CLI process would.
+  claimRewardsRouteHolder.current = {
+    publicClient,
+    masterWallet,
+    fleetStore: earningStore,
+    chain: NETWORK_CHAIN,
+    distributorAddress: CHAIN_CONFIG.distributorAddress,
+    jinnStore: sharedStore,
+  };
 
   const evictionRecovery =
     config.stakingMode === 'standard' &&
@@ -2312,6 +2565,8 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       // the daemon's `evictionCheck` predicate (~line 2520 below).
       stOlasDistributorAddress: CHAIN_CONFIG.distributorAddress,
       network: config.network,
+      // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+      effectiveMode: reportedEffectiveMode,
       pollIntervalMs: config.pollIntervalMs,
       masterEthDailyEstimateWei: config.masterEthDailyEstimateWei,
       rewardClaimIntervalMs: config.rewardClaimIntervalMs,
@@ -2494,43 +2749,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     console.log('[watchdog] auto-restart ENABLED (stale loop → non-zero exit)');
   }
 
-  // Write pidfile so `jinn stop` can find us. First, refuse the run if another
-  // daemon already owns this earning directory — see issue #649. The gate
-  // handles all three branches (refuse-and-exit, unlink-stale-and-continue,
-  // proceed); the writeFileSync below MUST stay outside the helper so the
-  // "// DO NOT add store mutations above this line — see #649" invariant is
-  // visible right here at the call site.
-  // Deployment-readiness gate (#958). In a deployment context (JINN_STATE_DIR
-  // set or a container/compose auth context) this fails loud and exits when a
-  // hard check fails (writable-volume, state-on-volume, agent-cli-non-root).
-  // Outside a deployment context it only logs advisories — a plain local
-  // `jinn run` is NEVER newly gated here. Runs before the pidfile gate so an
-  // unfit environment refuses before we touch the pidfile.
-  await applyDeploymentReadinessGate(
-    {
-      stateDir: config.stateDir,
-      earningDir: config.earningDir,
-      runtimeMode: config.runtimeMode,
-    },
-    {
-      env: process.env,
-      getuid: typeof process.getuid === 'function' ? process.getuid.bind(process) : undefined,
-      detectAuthContext,
-    },
-  );
-
-  const pidPath = join(config.earningDir, 'daemon.pid');
-  applyPidfileLivenessGate(pidPath);
-
-  writeFileSyncMain(pidPath, String(process.pid) + '\n', 'utf-8');
-  const removePidfile = () => {
-    try {
-      unlinkSync(pidPath);
-    } catch {
-      /* ignore */
-    }
-  };
-  process.on('exit', removePidfile);
+  // #2407 B1: the deployment-readiness gate + pidfile acquisition used to live
+  // here, AFTER the entire bootstrap retry loop — which left the whole
+  // degrade-open window (part 2) with no pidfile on disk at all. During that
+  // window `checkDaemonGuard` (cli/daemon-guard.ts) reads `daemon.pid` and
+  // reports `not-running`, so a concurrent `jinn withdraw` / `jinn bootstrap`
+  // / `jinn fleet scale` / `jinn solver-plugins publish` would proceed against
+  // the same signer as the degraded recovery loops, and a second `jinn run`
+  // would start a second degraded set entirely. Both gates now run near the
+  // top of `main()`, immediately before the bootstrap retry loop (see
+  // `setDaemonReadiness('bootstrapping')` above) — `pidPath` / `removePidfile`
+  // stay in scope for the shutdown handler below unchanged.
 
   // Graceful shutdown — Daemon doesn't own the API server or Store in this
   // flow (they were created in setup-mode before bootstrap), so we close
@@ -2568,6 +2797,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     return shutdownPromise;
   };
 
+  // #2407 R2: the early signal handler installed right after the pidfile
+  // write (bootstrap-retry-loop window) is superseded here — remove it
+  // before installing the real graceful handlers so a signal from this
+  // point on always drains through `shutdown()` (Daemon.stop(), file
+  // logger flush, etc.) rather than racing an immediate `process.exit(0)`.
+  process.removeListener('SIGINT', removePidfileOnEarlySignal);
+  process.removeListener('SIGTERM', removePidfileOnEarlySignal);
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
@@ -2630,20 +2866,19 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     versionCheckTimer.unref();
   }
 
-  return {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    kind: 'daemon_started',
+  return buildDaemonStartupInfo({
     pid: process.pid,
     network: config.network,
-    phase: config.network === 'testnet' ? 'phase-1b' : 'phase-0',
     apiPort: config.apiPort,
     masterAddress,
     safeAddress,
     mechAddress,
     serviceIndex,
     serviceId,
-  };
+    // #2380: clamped to what this legacy entry actually runs — see resolveMainEntryEffectiveMode.
+    effectiveMode: reportedEffectiveMode,
+    implVersion: buildInfo.implVersion,
+  });
 }
 
 // ── Harness readiness registry factory ───────────────────────────────────────

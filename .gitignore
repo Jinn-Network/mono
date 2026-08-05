@@ -38,6 +38,8 @@ growth/.local/
 
 packages/*/node_modules/
 packages/*/dist/
+# `yarn e2e:campaign` scratch build (packages/policy-optimization)
+packages/*/.e2e-build/
 packages/*/.yarn/cache/
 packages/*/.yarn/install-state.gz
 packages/evidence/*/dist/
@@ -91,3 +93,8 @@ examples/external-restorer-impls/*/.yarn/install-state.gz
 # yarn PnP local install artefacts (per-machine; never committed)
 packages/*/.pnp.cjs
 packages/*/.pnp.loader.mjs
+
+# observation-reader-gate-boundary.test.mjs's synthetic-violation fixture directory; a killed
+# test run can leave this behind, and an uncommitted leftover here fails the NEXT
+# generate-architecture.mjs --check step with a misleading drift error (issue #2409, F8).
+.github/scripts/.tmp-observation-reader-guard-*

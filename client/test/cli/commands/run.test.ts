@@ -15,6 +15,9 @@ function makeFakeDeps(overrides: Partial<RunDeps> = {}): RunDeps {
       apiPort: 7331,
     })) as unknown as RunDeps['loadConfig'],
     getConfigPathFromArgs: vi.fn(() => undefined) as unknown as RunDeps['getConfigPathFromArgs'],
+    loadNativeConfig: vi.fn(() => {
+      throw new Error('loadNativeConfig should not be called: no native-config.json exists in these fixtures');
+    }) as unknown as RunDeps['loadNativeConfig'],
     checkRpcNetwork: vi.fn(async () => ({ ok: true as const })) as unknown as RunDeps['checkRpcNetwork'],
     rpcNetworkFailureHint: vi.fn(() => 'fix rpc') as unknown as RunDeps['rpcNetworkFailureHint'],
     checkApiPortAvailable: vi.fn(async () => ({ ok: true as const, port: 7331 })) as unknown as RunDeps['checkApiPortAvailable'],

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import { runT11BootstrapFreshAnvil } from '../../test/release/tier-1/T1.1-bootstrap-fresh-anvil.js';
 import { runT12HarnessReadinessContract } from '../../test/release/tier-1/T1.2-harness-readiness-contract.js';
+import { runT13ContractConformance } from '../../test/release/tier-1/T1.3-contract-conformance.js';
 import { type ScenarioVerdict, ScenarioVerdictSchema, classifyFailure, type FailClass } from './scenario-types.js';
 
 export interface RunTier1Options {
@@ -94,7 +95,7 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   await fs.mkdir(outputDir, { recursive: true });
 
   // All Tier 1 scenarios run in parallel (spec §3 — tier wall-clock is
-  // the max of its scenarios, not the sum). T1.1-T1.2 are in-process callables;
+  // the max of its scenarios, not the sum). T1.1-T1.3 are in-process callables;
   // T1.4 spawns a Playwright subprocess. Each is wrapped so an unexpected throw
   // (rather than a returned fail verdict) becomes an agent-crash verdict —
   // keeps the scenarioId paired with its runner, no index correlation.
@@ -110,6 +111,12 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
       id: 'T1.2',
       run: () => runT12HarnessReadinessContract({
         evidencePath: path.join(outputDir, 'T1.2.log'),
+      }),
+    },
+    {
+      id: 'T1.3',
+      run: () => runT13ContractConformance({
+        evidencePath: path.join(outputDir, 'T1.3.log'),
       }),
     },
     {
@@ -161,6 +168,7 @@ export async function runTier1(opts: RunTier1Options = {}): Promise<RunTier1Resu
   const MARKER_KEY_BY_SCENARIO: Record<string, string> = {
     'T1.1': 'tier-1-bootstrap',
     'T1.2': 'tier-1-harness-readiness',
+    'T1.3': 'tier-1-contract-conformance',
     'T1.4': 'tier-1-spa-route-smoke',
   };
 

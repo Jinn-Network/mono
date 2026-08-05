@@ -15,7 +15,7 @@ import { api } from '../api/client.js';
 import type {
   LaunchedSolverNetRecord,
   SolverNetManifestSummary,
-} from '../api/types.js';
+} from '../../../../api/contract/index.js';
 
 import type { JSX } from 'react';
 

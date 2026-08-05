@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState, type JSX } from 'react';
 import { Router, Route, Switch, Redirect } from 'wouter';
 import { api } from './api/client.js';
-import type { BootstrapState } from './api/types.js';
+import type { BootstrapState } from './../../../api/contract/index.js';
 import { useConnectionState } from './api/connection-state.js';
 import { LoadingScreen } from './regions/LoadingScreen.js';
 import { Onboarding } from './regions/Onboarding.js';

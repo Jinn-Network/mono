@@ -57,6 +57,8 @@ This gives you the `jinn` operator CLI. The built-in MCP server is invoked via `
 | `jinn quickstart` | Legacy compatibility alias for zero-to-running setup; prefer jinn run |
 | `jinn auth` | Legacy compatibility: check Claude authentication and persist daemon runtime mode |
 | `jinn bootstrap` | Advance the fleet state machine toward a running daemon |
+| `jinn bootstrap-retry` | Signal a running, halted daemon to retry its bootstrap state machine |
+| `jinn onboarding-complete` | Mark onboarding complete (daemon control route if running, config file otherwise) |
 | `jinn fund-requirements` | List addresses that need funding before the next bootstrap step |
 | `jinn run` | Start the daemon in the foreground; stops on SIGINT/SIGTERM |
 | `jinn stop` | Signal a running jinn daemon to shut down gracefully |

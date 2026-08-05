@@ -18,8 +18,12 @@ function freshStore(): Store {
   return new Store(join(mkdtempSync(join(tmpdir(), 'set-status-config-')), 'jinn.db'));
 }
 
+// `/v1/status` is operator-class as of spec §14.5 (issue #2404); every server built
+// below passes `apiToken: 't'` and no `ui`, so the bearer token is the gate credential.
 async function fetchStatus(server: ApiServer): Promise<Record<string, unknown>> {
-  const res = await fetch(`http://127.0.0.1:${server.port}/v1/status`);
+  const res = await fetch(`http://127.0.0.1:${server.port}/v1/status`, {
+    headers: { Authorization: 'Bearer t' },
+  });
   return (await res.json()) as Record<string, unknown>;
 }
 

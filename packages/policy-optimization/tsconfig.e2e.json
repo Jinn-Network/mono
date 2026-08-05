@@ -1,0 +1,9 @@
+{
+  "// why": "The end-to-end campaign demo is test-only (it drives the TEP conformance kit's in-memory backend, a devDependency), so `tsconfig.build.json` excludes it from `dist/`. `yarn e2e:campaign` compiles it here instead, to a scratch directory nothing packs.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": ".e2e-build",
+    "declaration": false
+  },
+  "exclude": ["src/**/*.test.ts"]
+}
