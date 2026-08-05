@@ -20,6 +20,7 @@ import * as os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { resolveUiToken } from '../../src/cli/daemon-control-client.js';
 import {
   createPublicClient,
   decodeEventLog,
@@ -292,7 +293,13 @@ function isFleetLoopReady(status: unknown): boolean {
 
 async function fetchStatus(port: number): Promise<unknown | null> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/v1/status`);
+    // /v1/status is operator-class as of spec §14.5 (issue #2404) — send the
+    // on-disk UI token via the shared resolver (cli/daemon-control-client.ts),
+    // or a real daemon returns a permanent 401 this poll loop would otherwise
+    // read as "not ready yet" and time out on.
+    const response = await fetch(`http://127.0.0.1:${port}/v1/status`, {
+      headers: { 'x-jinn-ui-token': resolveUiToken() ?? '' },
+    });
     if (!response.ok) return null;
     return await response.json();
   } catch {

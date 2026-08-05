@@ -256,7 +256,8 @@
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
       "targetPullRequest": "Phase D2 pipeline deletion",
-      "status": "deleted"
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-04-legacy-taskengine-carve-archival.md"
     },
     {
       "id": "direct-public-posttask-composition",
@@ -294,7 +295,8 @@
         "command": "node --test .github/scripts/phase-d-transition-deletion.test.mjs"
       },
       "targetPullRequest": "Completed by Phase C4",
-      "status": "deleted"
+      "status": "deleted",
+      "evidenceCitation": "log/decisions/2026-08-03-phase-c-capability-boundaries.md"
     },
     {
       "id": "legacy-task-run-store-coupling",

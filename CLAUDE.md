@@ -94,7 +94,8 @@ Routing is governed by three Project (v2) single-select fields set at Friday tri
 ## Repository Structure
 
 ```
-jinn-cli-agents/ Git subtree — historical Jinn agent repo (IMPORTANT: see below)
+legacy/jinn-cli-agents-reference/  Git subtree — historical Jinn agent repo, retained as
+                 read-only reference (IMPORTANT: see below)
 
 client/          TypeScript daemon — the main runnable component
   src/
@@ -165,7 +166,7 @@ docs/            Design specs and implementation plans
 
 ## jinn-cli-agents Reference
 
-**Always check `jinn-cli-agents/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context:
+**Always check `legacy/jinn-cli-agents-reference/` when working on OLAS integration, staking, tokenomics, or Phase 1 contracts.** This subtree (from github.com/oaksprout/jinn-gemini) contains a wealth of relevant context. It is retained deliberately as reference material — the `-reference` suffix marks it consulted-but-never-built: it carries no `package.json`, is in no workspace, and nothing in the repository imports from it. Paths below are relative to that directory:
 
 - `contracts/staking/` — JinnRouter.sol (the deployed router), DeliveryActivityChecker, WhitelistedRequesterActivityChecker, deployment JSONs with all on-chain addresses
 - `docs/context/olas-protocol.md` — Full OLAS architecture: governance (veOLAS, Governor, Timelock), registries, tokenomics (Treasury, Dispenser, Depository, Tokenomics epochs)
@@ -308,6 +309,8 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | faucetDailyTopupCap | JINN_FAUCET_DAILY_TOPUP_CAP | 10 — max faucet drips one "Top up from faucet" click issues in a batch, and the per-24h ceiling per wallet (#560) |
 | faucetTopupCooldownMs | JINN_FAUCET_TOPUP_COOLDOWN_MS | 86400000 (24h) — once the daily cap is reached, the top-up action stays disabled until this window elapses since the first call of that batch (#560) |
 | _(none — env-only)_  | JINN_EVAL_DISK_FLOOR_GB | 20 (free-disk floor in GB before each swe-rebench-v2 eval round; below it the runner prunes Docker and aborts the run cleanly if still short) |
+| _(none — env-only)_  | JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS | 300000 (5 min) — wall-clock bound per short-lived CLI shell-out in the swe-rebench-v2 stack (`docker image inspect`, `docker rmi`, the `docker … prune` family, `git rev-parse`). On expiry the child is SIGTERMed (SIGKILL after 10s) and the call rejects with a typed `CommandTimeoutError`, distinct from a real non-zero Docker exit. Set `0` to disable; empty means unset, not disabled. Without it a wedged Docker daemon hangs a run indefinitely — and because the per-round prune runs in a `finally`, it blocked the grade job before its attempt record was written. |
+| _(none — env-only)_  | JINN_SWE_REBENCH_DOCKER_PULL_TIMEOUT_MS | 1800000 (30 min) — separate, far larger bound for `docker pull`; multi-GB eval images legitimately take many minutes on a cold cache. Same expiry semantics as above; `0` disables. |
 | _(none — env-only)_  | JINN_AUTOPILOT_CLEANUP_ENABLED | enabled in active mode (default on). Opt out with `false`. Each active cycle sweeps dead attempt worktrees under `~/.jinn-client/autopilot/attempts/v2/`. |
 | _(none — env-only)_  | JINN_AUTOPILOT_ATTEMPT_GRACE_MS | 1800000 (30 minutes). Dead dirty/ahead/preparing attempts are removed after this grace; clean+pushed attempts are removed immediately. |
 | _(none — env-only)_  | JINN_AUTOPILOT_DISK_FLOOR_GB | 10. Below this free-disk floor on the attempts directory, autopilot force-evicts oldest dead attempts and pauses new worktree-creating claims until space recovers. |
@@ -315,6 +318,7 @@ Config file first, env var override. File at `~/.jinn-client/config.json` or `--
 | _(none — env-only)_  | JINN_NET_LIVENESS_WEBHOOK_URL | unset — generic incoming-webhook URL (Slack-compatible) for the cron-driven net-liveness probe (#1044, `yarn net-liveness`, `docs/runbooks/net-liveness.md`). Unset → NO-OP: the probe still classifies and logs, it just never posts. |
 | _(none — env-only)_  | JINN_NET_LIVENESS_THRESHOLD_MINUTES | 30 — staleness threshold (minutes) for the net-liveness probe; converted to Base block-space at 30 blocks/min. |
 | _(none — env-only)_  | JINN_VERSION_CHECK | enabled (default). Gates the start-time npm-registry check (#641) that logs one line when a newer `@jinn-network/client` has been published and backs the dashboard's `update_available` banner. Opt out with `0` / `false` / `no` / empty. Best-effort — a registry outage degrades silently, never gates boot. |
+| _(none — flag/env-only)_  | JINN_NATIVE_CONFIG_PATH | unset — path to the native-v1 structured config file for `jinn run --native-config <path>` (issue #2378). Resolution order: `--native-config` flag > this env var > default `~/.jinn-client/native-config.json`. Deliberately never the legacy `config.json` — the legacy loader's shape-v2 migration and native's strict schema are mutually unsatisfiable on one file, so native gets its own file, own resolver, own loader (`client/src/daemon/native-config-path.ts`), never routed through `loadConfig`/`migrateConfigShapeV2`. Naming a native config that resolves to effective mode `legacy` (an omitted or explicit `operator.verticalMode: "legacy"`) is `invalid_invocation`, never a silent legacy boot. |
 
 `JINN_PASSWORD` is env-only — never in config files.
 

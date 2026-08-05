@@ -147,6 +147,41 @@ describe('update command', () => {
     expect(exits).toEqual([]);
   });
 
+  // F4 fold: `summarizeIntegrationInstall` must not report `ok` when only
+  // the hook axis errored — the `hook` field is optional on the result
+  // shape (older `integrations install` builds don't emit it), so a naive
+  // reader that only checks `mcp`/`skill` silently swallows hook failures.
+  it('reports a hook-install error even when mcp and skill both succeeded', async () => {
+    const earningDir = await makeEarningDir();
+    const integrationsRunMock = vi.fn(async (ctx: CommandContext) => {
+      ctx.writer.write(JSON.stringify({
+        results: [
+          {
+            target: 'claude-code',
+            mcp: { status: 'configured', detail: 'MCP installed' },
+            skill: { status: 'configured', detail: 'skill installed' },
+            hook: { status: 'error', detail: 'failed to write .claude/settings.json' },
+          },
+        ],
+      }));
+    });
+
+    const cmd = makeUpdateCommand(earningDir, integrationsRunMock);
+    const { envelopes, exits } = await runCommand(cmd, { argv: ['--json', '--skip-npm'] });
+
+    const payload = envelopes[envelopes.length - 1] as {
+      ok: boolean;
+      steps: Array<{ step: string; status: string; detail: string }>;
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.steps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ step: 'integrations-install', status: 'error' }),
+    ]));
+    expect(payload.steps.find((step) => step.step === 'integrations-install')?.detail)
+      .toContain('claude-code');
+    expect(exits).toEqual([]);
+  });
+
   it('preserves complete local earning fields during Task-native preflight', async () => {
     const earningDir = await makeEarningDir();
     const store = new FleetStateStore(earningDir);

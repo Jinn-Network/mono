@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SolverNetManifestSummary } from '../api/types.js';
+import type { SolverNetManifestSummary } from '../../../../api/contract/index.js';
 import {
   DEMO_CONTRACT_ID,
   isDemoSolverNet,

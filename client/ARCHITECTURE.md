@@ -76,7 +76,7 @@ The two-mode design — onboarding takeover, then operating dashboard — is int
 
 ### 3.3 Auth and binding
 
-The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
+The SPA is loopback-only by default. On startup the daemon prints a one-shot handshake URL with a random `?k=<key>` query param; the launcher opens it and the SPA exchanges the key for a `jinn_ui_token` cookie via `/auth/handshake`. Cost-mutating routes additionally require a bearer token (`DAEMON_API_TOKEN`, generated per-process unless the operator pins one). `GET /v1/status` is token-gated like every other operator-class route (spec §14.5); `GET /health`, `GET /ready`, and `GET /metrics` are the deliberate exception — shallow, unauthenticated-safe liveness/readiness/metrics endpoints for supervisors and scrapers (spec §6.1–§6.2). Details: `src/api/handshake.ts`, `src/api/ui-token.ts`, `src/api/health-endpoint.ts`, `src/api/metrics-endpoint.ts`, the SPA dev README at [`src/dashboard/spa/README.md`](src/dashboard/spa/README.md).
 
 ## 4. The CLI substrate
 

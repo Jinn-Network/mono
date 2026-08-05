@@ -97,7 +97,7 @@ import {
   runHarnessWithFreezeFence,
   type FreezeViolation,
 } from '../../daemon/freeze-fence.js';
-import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
+import { recordLoopTick, getDaemonReadiness } from '../../daemon/loop-heartbeat.js';
 import { harnessStateDirName, harnessNameMatches } from '../names.js';
 import { recordTaskCost } from '../../spend/record.js';
 import {
@@ -892,13 +892,23 @@ export class TaskEngine {
   /**
    * Drive `tick()` on a fixed interval until `stop()` is called.
    * Errors thrown by tick() itself are logged and do not stop the loop.
+   *
+   * `engine-tick` is `admission: 'ready-only'` (#2407, spec §5) — the
+   * claim/work path — but this loop drives its own inline while-loop rather
+   * than routing through `daemon/loop-heartbeat.ts`'s `runLoop`, so the
+   * admission check is consulted directly here against the shared daemon
+   * readiness holder. Heartbeat still stamps every iteration regardless, so
+   * an intentionally-paused loop during a `degraded` window never looks
+   * stale to the watchdog.
    */
   async runTickLoop(intervalMs: number): Promise<void> {
     while (!this.stopped) {
-      try {
-        await this.tick({ wait: false });
-      } catch (err) {
-        console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
+      if (getDaemonReadiness() === 'ready') {
+        try {
+          await this.tick({ wait: false });
+        } catch (err) {
+          console.error('[harness-engine] tick loop error (continuing):', err instanceof Error ? err.message : err);
+        }
       }
       recordLoopTick(this.store, 'engine-tick'); // #1043 loop watchdog
       if (this.stopped) break;

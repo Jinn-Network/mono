@@ -1,17 +1,20 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import {
   type NativeOperatorHealth,
   type NativeOperatorHost,
 } from './daemon/native-operator-host.js';
+import type { NativeProductConfig } from './daemon/native-product-config.js';
 import {
-  NativeProductFileSchema,
-  type NativeProductConfig,
-} from './daemon/native-product-config.js';
+  loadNativeProductConfigFile,
+  resolveNativeConfigPath,
+} from './daemon/native-config-path.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
 import type { OperatorVerticalDecision } from './daemon/native-vertical-mode.js';
+import {
+  recordNativeOperatorComposition,
+  startNativeStatusSnapshotLoop,
+  type NativeStatusSnapshotLoopHandle,
+} from './daemon/native-phase-d-observability.js';
 
 export interface NativeDeploymentFactoryInput {
   readonly config: NativeProductConfig;
@@ -22,21 +25,34 @@ export interface NativeMainDeps {
   readonly loadConfig: () => NativeProductConfig;
   readonly buildHost: (input: NativeDeploymentFactoryInput) => Promise<NativeOperatorHost>;
   readonly installSignalHandlers?: boolean;
+  /**
+   * Phase D observability (#2380): records the `native-operator-composition` durable counter as
+   * positive native-presence evidence. Mirrors `daemon.ts`'s `legacy-operator-composition`,
+   * recorded once the mode is validly selected. Optional and undefined ⇒ skipped, so existing ad
+   * hoc test deps objects are unaffected; `PRODUCTION_DEPS` always wires the real function.
+   */
+  readonly recordNativeComposition?: (config: NativeProductConfig) => void;
+  /**
+   * Phase D observability (#2380): starts native's status surface — periodic durable snapshots
+   * of `phaseDTransitionUsageDiagnostics()` plus instance identity into `stateDir`, since native
+   * has no `/v1/status`. Started only after post-start health is decision-ready; its `stop()` is
+   * folded into the existing shutdown path. Optional and undefined ⇒ skipped.
+   */
+  readonly startStatusSnapshotLoop?: (input: {
+    readonly config: NativeProductConfig;
+    readonly decision: OperatorVerticalDecision;
+    readonly refreshHealth: () => Promise<NativeOperatorHealth>;
+  }) => NativeStatusSnapshotLoopHandle;
 }
 
+/**
+ * Resolves and loads via `daemon/native-config-path.js` — its own file,
+ * its own `--native-config` flag, never `--config` / the legacy default
+ * (see issue #2378). `jinn run` resolves the identical path before
+ * deciding to invoke this entry, so the two can never disagree.
+ */
 function loadNativeProductConfig(): NativeProductConfig {
-  const index = process.argv.indexOf('--config');
-  const path = index >= 0 && process.argv[index + 1]
-    ? process.argv[index + 1]!
-    : join(homedir(), '.jinn-client', 'config.json');
-  if (!existsSync(path)) throw new Error(`native-v1 structured config is missing: ${path}`);
-  let raw: unknown;
-  try { raw = JSON.parse(readFileSync(path, 'utf8')); } catch (cause) {
-    throw new Error(`native-v1 structured config is not JSON: ${String(cause)}`);
-  }
-  const parsed = NativeProductFileSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(`native-v1 structured config is invalid: ${parsed.error.message}`);
-  return parsed.data;
+  return loadNativeProductConfigFile(resolveNativeConfigPath());
 }
 
 async function buildProductionHost(input: NativeDeploymentFactoryInput): Promise<NativeOperatorHost> {
@@ -48,6 +64,12 @@ const PRODUCTION_DEPS: NativeMainDeps = {
   loadConfig: loadNativeProductConfig,
   buildHost: buildProductionHost,
   installSignalHandlers: true,
+  recordNativeComposition: recordNativeOperatorComposition,
+  startStatusSnapshotLoop: (input) => startNativeStatusSnapshotLoop({
+    stateDir: input.config.operator.native.stateDir,
+    decision: input.decision,
+    refreshHealth: input.refreshHealth,
+  }),
 };
 
 function validateStartedHealth(health: NativeOperatorHealth): void {
@@ -79,12 +101,22 @@ export async function main(deps: NativeMainDeps = PRODUCTION_DEPS): Promise<{
   if (decision.effectiveMode !== 'native-v1') {
     throw new Error(`native entry refused effective mode ${decision.effectiveMode} (${decision.readiness})`);
   }
+  // #2380: record native presence as positive evidence as soon as the mode is validly selected —
+  // mirrors daemon.ts's legacy-operator-composition recording point (post-validation, pre-start).
+  deps.recordNativeComposition?.(config);
   const host = await deps.buildHost({ config, decision });
+  let snapshotLoop: NativeStatusSnapshotLoopHandle | undefined;
   try {
     await host.start();
     const health = await host.health();
     validateStartedHealth(health);
-    const stop = async () => { await host.close(); };
+    // #2380: native's status surface — only started once health is decision-ready, so snapshots
+    // never represent a not-yet-running instance.
+    snapshotLoop = deps.startStatusSnapshotLoop?.({ config, decision, refreshHealth: () => host.health() });
+    const stop = async () => {
+      snapshotLoop?.stop();
+      await host.close();
+    };
     if (deps.installSignalHandlers === true) {
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
@@ -97,6 +129,7 @@ export async function main(deps: NativeMainDeps = PRODUCTION_DEPS): Promise<{
       health,
     };
   } catch (cause) {
+    snapshotLoop?.stop();
     try {
       await host.close();
     } catch (cleanupCause) {

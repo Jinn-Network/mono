@@ -2,11 +2,12 @@
 
 import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
+  probeShimAlive,
   readShimFingerprint,
   requestShimCancellation,
   spawnShim,
@@ -19,6 +20,13 @@ const waitForJson = async (path: string): Promise<Record<string, unknown>> => {
     try { return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>; } catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
   }
   throw new Error("shim did not write outcome.json");
+};
+const waitForFile = async (path: string): Promise<void> => {
+  for (let index = 0; index < 250; index++) {
+    if (existsSync(path)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`file never appeared: ${path}`);
 };
 const waitForExit = async (child: ChildProcess): Promise<void> => {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -47,16 +55,37 @@ it("survives SIGTERM aimed at its group and remains the outcome recorder", async
   dirs.push(root);
   const metaDir = join(root, "meta");
   const secretsDir = join(root, "secrets");
+  const ready = join(root, "harness-ready");
+  const release = join(root, "harness-release");
   mkdirSync(metaDir, { recursive: true });
   mkdirSync(secretsDir, { recursive: true });
+  // The harness's lifetime is causal on this test, not on a timer: it announces itself, then
+  // blocks until the test releases it. A timed harness can be reaped before the signal lands,
+  // which turns the assertion below into ESRCH noise instead of a statement about the shim.
   const child = spawnShim(
     { attemptId: "attempt-2", nonce: "nonce-2", metaDir, secretsDir },
-    { argv: [process.execPath, "-e", "setTimeout(() => process.exit(0), 40)"], env: {}, cwd: root },
+    {
+      argv: [
+        process.execPath,
+        "-e",
+        `const fs = require('node:fs');`
+        + `fs.writeFileSync(${JSON.stringify(ready)}, '1');`
+        + `const timer = setInterval(() => {`
+        + ` if (fs.existsSync(${JSON.stringify(release)})) { clearInterval(timer); process.exit(0); }`
+        + `}, 10);`,
+      ],
+      env: {},
+      cwd: root,
+    },
   );
   const fingerprint = await waitForJson(join(metaDir, "shim.json"));
+  await waitForFile(ready);
+  // If the window has collapsed this fails by name, rather than throwing ESRCH out of the kill.
+  expect(probeShimAlive(metaDir).alive).toBe(true);
   // The harness is deliberately in a separate group; this direct shim signal proves that its
   // signal trap survives and continues to record the harness's natural result.
   process.kill(Number(fingerprint["pid"]), "SIGTERM");
+  writeFileSync(release, "1");
   const outcome = await waitForJson(join(metaDir, "outcome.json"));
   await waitForExit(child);
   expect(outcome).toMatchObject({ exitCode: 0, termSignal: null });

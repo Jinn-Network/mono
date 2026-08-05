@@ -516,9 +516,9 @@ test('Task-execution production source never orders or formats with the host loc
 // files as plain text (the established `packages/task-supply/curation` "drift" pattern —
 // `.github/scripts/task-supply-curation-guards.test.mjs`) and asserts the mirrored constants and
 // the cross-unit golden digest still agree. A third independent implementation exists in
-// `@jinn-network/policy-identity` (`packages/policy/identity/src/hash-profile.ts`, C1) on the
-// as-yet-unmerged `claude/policy-c1-kit` branch; it is not asserted here because it is not part
-// of this tree yet, but it is bound to the same golden digest constant.
+// `@jinn-network/policy-identity` (`packages/policy/identity/src/hash-profile.ts`, C1) — merged
+// with #2368 and asserted below, so all three pairwise mirrors are bound (program review MAJOR 1:
+// the "not part of this tree yet" exclusion expired when the substrate merged).
 function extractStringArrayLiteral(source, label) {
   const labelIndex = source.indexOf(label);
   assert.ok(labelIndex !== -1, `label "${label}" not found`);
@@ -550,6 +550,28 @@ test('the mirrored learner-public.v1 profile constants match client/src/harnesse
     extractStringArrayLiteral(workspaceSource, 'LEARNER_PUBLIC_V1_ALLOWED_FILES = ['),
     extractStringArrayLiteral(clientSource, 'allowedFiles: ['),
     'the workspace mirror\'s allowed files drifted from client\'s allowedFiles',
+  );
+  // Third mirror (program review MAJOR 1): @jinn-network/policy-identity ships the same
+  // tables in packages/policy/identity/src/tokens.ts. Binding identity<->client here makes
+  // all three pairwise agreements guarded (workspace<->client above; identity<->workspace
+  // follows transitively).
+  const identitySource = readFileSync(
+    join(root, 'packages', 'policy', 'identity', 'src', 'tokens.ts'), 'utf8',
+  );
+  assert.deepEqual(
+    extractStringArrayLiteral(identitySource, 'LEARNER_PUBLIC_V1_EXCLUDED_ROOTS = ['),
+    extractStringArrayLiteral(clientSource, 'ignoreRelPaths: ['),
+    "the policy-identity mirror's excluded roots drifted from client's ignoreRelPaths",
+  );
+  assert.deepEqual(
+    extractStringArrayLiteral(identitySource, 'LEARNER_PUBLIC_V1_ALLOWED_DIRS = ['),
+    extractStringArrayLiteral(clientSource, 'allowedDirs: ['),
+    "the policy-identity mirror's allowed dirs drifted from client's allowedDirs",
+  );
+  assert.deepEqual(
+    extractStringArrayLiteral(identitySource, 'LEARNER_PUBLIC_V1_ALLOWED_FILES = ['),
+    extractStringArrayLiteral(clientSource, 'allowedFiles: ['),
+    "the policy-identity mirror's allowed files drifted from client's allowedFiles",
   );
 });
 

@@ -2,7 +2,7 @@ import { useState, type JSX } from 'react';
 import type {
   SolverNetCatalogEntry,
   SolverNetManifestV1,
-} from '../../api/types.js';
+} from '../../../../../api/contract/index.js';
 import { Badge } from '../../components/ui/badge.js';
 import { Button } from '../../components/ui/button.js';
 import { Label } from '../../components/ui/label.js';

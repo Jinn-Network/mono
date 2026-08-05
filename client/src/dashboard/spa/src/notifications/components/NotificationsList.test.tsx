@@ -8,9 +8,9 @@ import type { OperatorNotification } from '../taxonomy.js';
 import type { JSX } from 'react';
 
 const notices: OperatorNotification[] = [
-  { kind: 'harness_not_ready', severity: 'blocking', message: 'Claude not authenticated', jumpTo: '/operator/memberships' },
-  { kind: 'funding_low', severity: 'warning', message: '1 day runway' },
-  { kind: 'no_solvernets_joined', severity: 'info', message: 'No SolverNets joined' },
+  { kind: 'harness_not_ready', severity: 'blocking', title: 'Harness not ready', message: 'Claude not authenticated', jumpTo: '/operator/memberships' },
+  { kind: 'funding_low', severity: 'warning', title: 'Gas runway low', message: '1 day runway' },
+  { kind: 'no_solvernets_joined', severity: 'info', title: 'No SolverNets joined', message: 'No SolverNets joined' },
 ];
 
 function MemoryRouter({ children }: { children: React.ReactNode }): JSX.Element {

@@ -94,7 +94,12 @@ export interface ExecuteWaveInput {
    * dispatchable until reveal — the discipline is enforced by arithmetic here, not only by policy.
    */
   readonly taskBytesFor: (taskDigestHex: string) => Uint8Array | Promise<Uint8Array>;
-  readonly launch?: WaveLaunchOptions;
+  /**
+   * REQUIRED, because `WaveLaunchOptions` carries the required `clock`. Deliberately not
+   * defaulted to a wall clock: the wave fixtures carry absolute `closeAt` instants, so a
+   * default would just relocate the time bomb instead of defusing it.
+   */
+  readonly launch: WaveLaunchOptions;
 }
 
 function terminalKindOf(events: readonly CellStatusEvent[]): CellStatusEvent | undefined {
@@ -115,7 +120,7 @@ export async function executeWave(input: ExecuteWaveInput): Promise<WaveExecutio
   await quoteWave(plan, input.backend);
   const events: CellStatusEvent[] = [];
   for await (const event of launchAndWatch(plan.benchmark.record, plan.run.record, input.backend, {
-    ...(input.launch ?? {}),
+    ...input.launch,
     runDigest: plan.run.digest,
     taskBytesFor: input.taskBytesFor,
   })) {

@@ -1,7 +1,7 @@
 import { useState, type JSX } from 'react';
 import { toPng } from 'html-to-image';
 import { api } from '../api/client.js';
-import type { DebugReportManifest } from '../api/types.js';
+import type { DebugReportManifest } from '../../../../api/contract/index.js';
 
 /**
  * One-click operator debug report (issue #420 §6).

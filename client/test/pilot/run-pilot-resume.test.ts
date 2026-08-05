@@ -8,9 +8,18 @@ function runPilot(args: string[]): { status: number | null; stdout: string; stde
   const result = spawnSync('node_modules/.bin/tsx', ['scripts/run-pilot.ts', ...args], {
     cwd: process.cwd(),
     encoding: 'utf-8',
-    // CI runners can sit under the eval runner's 20 GB default disk floor;
-    // pin a tiny positive floor so regrade tests exercise grading, not disk.
-    env: { ...process.env, JINN_EVAL_DISK_FLOOR_GB: '1' },
+    // `resolveDiskFloorBytes` (eval-runner.ts) requires a positive value, then does
+    // `Math.floor(parsed * 1e9)` — this resolves to a ~1000-byte floor that no real
+    // filesystem trips, neutralizing the gate. 1 GB (the previous value here) is a real
+    // threshold: these regrade tests go red whenever the host drops under 1 GB free, and
+    // the fake `scripts/eval.py` stub in this file never touches Docker or disk, so the
+    // gate is pure noise for this suite.
+    env: { ...process.env, JINN_EVAL_DISK_FLOOR_GB: '0.000001' },
+    // A wedged Docker daemon can hang the child indefinitely; spawnSync blocks the event
+    // loop, so vitest's 30s testTimeout can never fire to rescue it. This timeout is
+    // containment for the test worker, not a fix for the underlying gap — `runDocker` /
+    // `defaultCommandRunner` still have no timeout of their own (tracked separately).
+    timeout: 120_000,
   });
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }

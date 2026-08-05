@@ -32,8 +32,12 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { EvalRunner } from './index.js';
 import {
+  CommandTimeoutError,
   defaultCommandRunner,
+  resolveCommandTimeoutMs,
   resolveImageDigest as resolveSubstrateImageDigest,
+  runCommandWithTimeout,
+  type CommandRunner,
 } from '../../../solver-types/_swe-rebench-v2-substrate.js';
 
 /**
@@ -169,14 +173,33 @@ export interface PythonEvalRunnerOptions {
    * Set to 0 to disable.
    */
   evalTimeoutMs?: number;
+  /**
+   * Runner for this class's `docker` CLI calls (digest resolve + per-round
+   * prune). Defaults to `defaultCommandRunner`. Injectable so the timeout path
+   * is testable without a real wedged daemon.
+   */
+  commandRunner?: CommandRunner;
+  /**
+   * Wall-clock timeout (ms) per `docker` CLI call. Explicit value >
+   * `JINN_SWE_REBENCH_COMMAND_TIMEOUT_MS` env > the substrate default (5 min).
+   * Set to 0 to disable. Distinct from {@link evalTimeoutMs}, which bounds the
+   * (much longer-running) eval.py invocation.
+   */
+  dockerCommandTimeoutMs?: number;
 }
 
 /**
- * Spawn `docker <args>`, resolving regardless of outcome — a failed cleanup
- * command is logged, never thrown (#476: cleanup must not break the eval loop).
+ * Spawn `docker <args>` under a wall-clock bound, resolving regardless of
+ * outcome — a failed cleanup command is logged, never thrown (#476: cleanup
+ * must not break the eval loop).
+ *
+ * The bound is load-bearing beyond tidiness: `pruneRound` runs in `runEval`'s
+ * `finally`, so an unbounded `docker rmi` against a wedged daemon blocked the
+ * grade job *before* its attempt record was written, stranding the run.
+ * A timeout is logged distinctly from a real Docker failure.
  */
-function runDocker(args: string[]): Promise<void> {
-  return defaultCommandRunner('docker', args)
+function runDocker(runner: CommandRunner, args: string[], timeoutMs: number): Promise<void> {
+  return runCommandWithTimeout(runner, 'docker', args, timeoutMs)
     .then((res) => {
       if (res.exitCode !== 0) {
         const detail = (res.stderr || res.stdout).trim();
@@ -187,6 +210,13 @@ function runDocker(args: string[]): Promise<void> {
       }
     })
     .catch((err: unknown) => {
+      if (err instanceof CommandTimeoutError) {
+        console.warn(
+          `[swe-rebench-v2] docker ${args.join(' ')} timed out after ${err.timeoutMs}ms and was ` +
+            `killed — the Docker daemon may be wedged`,
+        );
+        return;
+      }
       const reason = err instanceof Error ? err.message : String(err);
       console.warn(`[swe-rebench-v2] docker ${args.join(' ')} failed to spawn: ${reason}`);
     });
@@ -194,16 +224,16 @@ function runDocker(args: string[]): Promise<void> {
 
 /**
  * Production `pruneRound`: remove the round's image, then prune stopped
- * containers and build cache. Each step is best-effort.
+ * containers and build cache. Each step is best-effort and individually bounded.
  */
-async function defaultPruneRound(image: string): Promise<void> {
-  if (image) await runDocker(['rmi', '-f', image]);
-  await runDocker(['container', 'prune', '-f']);
-  await runDocker(['builder', 'prune', '-f']);
-}
-
-async function defaultResolveImageDigest(imageName: string): Promise<string | null> {
-  return resolveSubstrateImageDigest(imageName, defaultCommandRunner);
+async function defaultPruneRound(
+  image: string,
+  runner: CommandRunner,
+  timeoutMs: number,
+): Promise<void> {
+  if (image) await runDocker(runner, ['rmi', '-f', image], timeoutMs);
+  await runDocker(runner, ['container', 'prune', '-f'], timeoutMs);
+  await runDocker(runner, ['builder', 'prune', '-f'], timeoutMs);
 }
 
 /**
@@ -326,11 +356,15 @@ export class PythonEvalRunner implements EvalRunner {
   private readonly evalTimeoutMs: number;
 
   constructor(private readonly opts: PythonEvalRunnerOptions) {
-    this.pruneRound = opts.pruneRound ?? defaultPruneRound;
+    const runner = opts.commandRunner ?? defaultCommandRunner;
+    const dockerTimeoutMs = resolveCommandTimeoutMs(opts.dockerCommandTimeoutMs);
+    this.pruneRound = opts.pruneRound ?? ((image) => defaultPruneRound(image, runner, dockerTimeoutMs));
     this.diskFloorBytes = resolveDiskFloorBytes(opts.diskFloorBytes);
     this.freeDiskBytes = opts.freeDiskBytes ?? defaultFreeDiskBytes;
-    this.systemPrune = opts.systemPrune ?? (() => runDocker(['system', 'prune', '-f']));
-    this.resolveImageDigest = opts.resolveImageDigest ?? defaultResolveImageDigest;
+    this.systemPrune = opts.systemPrune
+      ?? (() => runDocker(runner, ['system', 'prune', '-f'], dockerTimeoutMs));
+    this.resolveImageDigest = opts.resolveImageDigest
+      ?? ((image) => resolveSubstrateImageDigest(image, runner, dockerTimeoutMs));
     this.evalTimeoutMs = resolveEvalTimeoutMs(opts.evalTimeoutMs);
   }
 
