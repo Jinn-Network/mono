@@ -27,6 +27,15 @@
  * — runs FIRST, and the draft transition runs LAST. A crash anywhere before that final write
  * leaves the draft "closed" and `report` fully retryable; a crash after it leaves "reported" with
  * every other artifact already in place, since nothing follows the transition.
+ *
+ * BP-20 (spec §7.2, "preview = disclosed rehearsal"): "When any preview of a benchmark preceded
+ * the official run, the official report's limitations name that fact." A preview is refused once
+ * a draft is locked (`../operations/preview.ts`'s transition guard), so every entry in this
+ * draft's preview log necessarily precedes THIS run's lock by construction — reading the log here
+ * is a pure fact-lookup about already-finalized history, not a judgment call this module makes.
+ * That read, and the resulting `limitations`/`previewDisclosure` input plumbing, happen entirely
+ * before `produceReport` — pure reads and pure input construction, so they change nothing about
+ * the crash-safety ordering above.
  */
 
 import {
@@ -43,6 +52,7 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import { buildClaimPackage, writeClaimPackage, type ClaimPackage } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
 import { createReportDsseSigner, loadOrCreateReportSigningKey } from "../report/signing.js";
+import { previewDisclosureLine, readPreviewLog } from "../run/preview-log.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
@@ -110,6 +120,16 @@ export function runReport(
       const reportKey = loadOrCreateReportSigningKey(clockedContext.workspaceDir);
       const signer = createReportDsseSigner(reportKey);
 
+      // BP-20 (spec §7.2): a pure read of this draft's own preview log — every logged preview
+      // necessarily precedes this run's lock (module header). `previewed` is `undefined`'s own
+      // presence check narrowed alongside `count > 0`, so both branches below can trust
+      // `previewLog` is defined wherever they read it.
+      const previewLog = readPreviewLog(clockedContext.workspaceDir, input.draftId);
+      const limitations =
+        previewLog !== undefined && previewLog.count > 0
+          ? [...LOCAL_VENUE_LIMITS, previewDisclosureLine(previewLog)]
+          : LOCAL_VENUE_LIMITS;
+
       let produced: ProducedReport;
       try {
         produced = await produceReport(
@@ -118,7 +138,7 @@ export function runReport(
             subjects: [matrixBytes],
             method: { id: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
             verdictRule,
-            limitations: LOCAL_VENUE_LIMITS,
+            limitations,
             author: runState.owner,
           },
           signer,
@@ -159,6 +179,9 @@ export function runReport(
         reportEnvelopeSha256,
         venueHonesty,
         verificationCommandVerb: VERIFICATION_VERB,
+        ...(previewLog !== undefined && previewLog.count > 0
+          ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
+          : {}),
       });
       writeClaimPackage(clockedContext.workspaceDir, input.draftId, claimPackage);
 

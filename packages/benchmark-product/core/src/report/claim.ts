@@ -11,6 +11,11 @@
  * `conflicted`, `completeness`, and `attrition` are always present, even when they carry
  * unwelcome numbers (a conflicted cell, an incomplete run) — spec §8.2's whole point is that the
  * claim package cannot be more flattering than the sealed records it cites.
+ *
+ * BP-20 (spec §7.2): the optional `rehearsal` block names any disclosed preview that preceded
+ * this run's lock, verbatim from the caller's `previewDisclosure` input — used previews are named
+ * in the official record; its absence means no preview preceded lock. Same "extracted, never
+ * recomputed" posture as everything else this builder emits.
  */
 
 import { z } from "zod";
@@ -26,6 +31,13 @@ const CLI_BIN_NAME = "benchmark-product";
 export const CLAIM_PACKAGE_SCHEMA_ID = "benchmark-product.claim-package/1";
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
+
+/** Mirrors `../run/preview-log.ts`'s own (unexported) `Rfc3339Schema` — restated here rather than
+ * reached across the module boundary for one regex. */
+const Rfc3339Schema = z.string().regex(
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
+  "must be an RFC3339 timestamp",
+);
 
 const WilsonIntervalSchema = z.object({ low: z.string(), high: z.string() });
 const HeadlineArmSchema = z.object({
@@ -95,6 +107,12 @@ export const ClaimPackageSchema = z.object({
     checks: z.array(z.string().min(1)).min(1),
     trustRoot: z.string().min(1),
   }),
+  /** BP-20 (spec §7.2): present only when a preview preceded this run's lock — see module
+   * header. Optional and additive; absent on every claim package built before this change. */
+  rehearsal: z.object({
+    previewCount: z.number().int().positive(),
+    timestamps: z.array(Rfc3339Schema).min(1),
+  }).optional(),
 });
 
 export type ClaimPackage = z.infer<typeof ClaimPackageSchema>;
@@ -112,6 +130,10 @@ export interface BuildClaimPackageInput {
   readonly venueHonesty: VenueHonesty;
   /** The CLI verb this package's `verification.command` names, e.g. `"verify"`. */
   readonly verificationCommandVerb: string;
+  /** BP-20 (spec §7.2): when present, this draft had at least one disclosed preview before this
+   * run's lock — `buildClaimPackage` carries it into the `rehearsal` block verbatim. Absent means
+   * the caller found no preview log entry, i.e. no preview preceded lock. */
+  readonly previewDisclosure?: { readonly previewCount: number; readonly timestamps: readonly string[] };
 }
 
 interface WilsonSubjectResults {
@@ -226,6 +248,14 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
       checks: [...VERIFICATION_CHECKS],
       trustRoot: "Signatures verify against this workspace's own report key; there is no third-party trust anchor on the self-run venue.",
     },
+    ...(input.previewDisclosure !== undefined
+      ? {
+          rehearsal: {
+            previewCount: input.previewDisclosure.previewCount,
+            timestamps: [...input.previewDisclosure.timestamps],
+          },
+        }
+      : {}),
   };
 }
 

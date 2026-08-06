@@ -61,7 +61,17 @@ export {
 
 // BP-12: run wiring (spec §4.1 quoted through closed) — quote, lock, launch/resume, status,
 // collect, results. `run-*.ts` sibling modules, extending the facade per this file's own header.
-export { runQuote, type RunQuoteDeps, type RunQuoteInput, type RunQuoteResult } from "./run-quote.js";
+export {
+  runQuote,
+  type RunQuoteDeps,
+  type RunQuoteInput,
+  type RunQuoteResult,
+  // BP-20 (spec §4.6 Quote row): the presentation types `runQuote`'s result carries.
+  type QuoteArmSize,
+  type QuoteCoverageRefusal,
+  type QuoteEstimatedWallTime,
+  type QuotePresentation,
+} from "./run-quote.js";
 export { runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
 export {
   runLaunch,
@@ -90,3 +100,9 @@ export {
 // own durable state.
 export { runReport, type RunReportInput, type RunReportResult } from "./report.js";
 export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResult } from "./verify.js";
+
+// BP-20: disposable previews (spec §7.2) — `preview` rehearses a draft's solve cells against an
+// ephemeral subset benchmark and a disposable scratch venue; it never enters official state.
+// Ungated (any workspace member may preview) and non-advancing (draft/quoted lifecycle state is
+// unchanged either way, spec §4.1 assumption A5).
+export { runPreview, type PreviewArtifact, type RunPreviewDeps, type RunPreviewInput, type RunPreviewResult } from "./preview.js";

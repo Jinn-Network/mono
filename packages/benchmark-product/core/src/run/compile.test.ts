@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION } from "@jinn-network/benchmarking-records";
+import { BENCHMARKING_METHOD_IDS, BENCHMARKING_METHOD_VERSION, parseBenchmark } from "@jinn-network/benchmarking-records";
 import { BenchmarkProductError } from "../errors.js";
 import { armAdd } from "../operations/arms.js";
 import type { OperationContext } from "../operations/context.js";
@@ -10,7 +10,8 @@ import { createDraft, readDraftDocument } from "../operations/drafts.js";
 import { initWorkspace } from "../operations/init.js";
 import { sampleInit } from "../operations/sample.js";
 import { VENUE_ISOLATION_POLICY } from "../venue/venue.js";
-import { compileDraft } from "./compile.js";
+import { getSealedBytes } from "../workspace/sealed-store.js";
+import { compileDraft, compilePreviewRun } from "./compile.js";
 
 let workspaceDir: string;
 
@@ -202,5 +203,146 @@ describe("compileDraft — success path", () => {
       closeAt: "2026-08-06T00:00:00Z",
     });
     expect(compiled.plannedRun.record.budget).toEqual({ perCell: { solve: "0.1", evaluate: "0.05" }, hardCap: "10", unit: "USD" });
+  });
+});
+
+describe("compilePreviewRun — product-policy refusals (BP-20)", () => {
+  test("refuses validation when the draft has no attached benchmark", () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    const created = createDraft(contextFor(clock), { draftId: "draft-1", name: "No Benchmark" });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+
+    try {
+      compilePreviewRun({
+        workspaceDir,
+        draft: created.result.draft,
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).code).toBe("validation");
+    }
+  });
+
+  test("refuses validation with fewer than 2 arms", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    try {
+      compilePreviewRun({
+        workspaceDir,
+        draft: document,
+        owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+        closeAt: "2026-08-06T00:00:00Z",
+      });
+      expect.unreachable("expected a refusal");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(BenchmarkProductError);
+      expect((cause as BenchmarkProductError).code).toBe("validation");
+      expect((cause as BenchmarkProductError).issues[0]?.path).toBe("spec.arms");
+    }
+  });
+});
+
+describe("compilePreviewRun — subsetting (BP-20)", () => {
+  test("no itemLimit rehearses every item in the attached benchmark", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    const compiled = compilePreviewRun({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+    });
+
+    expect(compiled.itemCount).toBe(3);
+    expect(compiled.previewBenchmarkRecord.items).toHaveLength(3);
+  });
+
+  test("itemLimit subsets to the first N items", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    const compiled = compilePreviewRun({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+      itemLimit: 1,
+    });
+
+    expect(compiled.itemCount).toBe(1);
+    expect(compiled.previewBenchmarkRecord.items).toHaveLength(1);
+
+    const fullDocument = document.spec.taskSet.kind === "benchmark"
+      ? parseBenchmark(getSealedBytes(workspaceDir, document.spec.taskSet.benchmarkSha256))
+      : undefined;
+    expect(fullDocument).toBeDefined();
+    if (fullDocument === undefined) return;
+    expect(compiled.previewBenchmarkRecord.items).toEqual(fullDocument.items.slice(0, 1));
+  });
+
+  test("an itemLimit above the benchmark's item count is capped silently, not refused", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    const compiled = compilePreviewRun({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+      itemLimit: 999,
+    });
+
+    expect(compiled.itemCount).toBe(3);
+  });
+
+  test("the ephemeral subset benchmark's digest never lands in the sealed store", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    const compiled = compilePreviewRun({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+      itemLimit: 1,
+    });
+
+    expect(compiled.previewBenchmarkSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(() => getSealedBytes(workspaceDir, compiled.previewBenchmarkSha256)).toThrowError(BenchmarkProductError);
+  });
+
+  test("the compiled plannedRun references the ephemeral subset digest, not the official one", async () => {
+    const clock = makeClock();
+    const draftId = await setUpDraftWithSample(clock);
+    addTwoDistinctArms(clock, draftId);
+    const document = readDraftDocument(workspaceDir, draftId);
+
+    const compiled = compilePreviewRun({
+      workspaceDir,
+      draft: document,
+      owner: "urn:uuid:00000000-0000-5000-8000-000000000001",
+      closeAt: "2026-08-06T00:00:00Z",
+      itemLimit: 1,
+    });
+
+    expect(compiled.plannedRun.record.benchmark.digest.sha256).toBe(compiled.previewBenchmarkSha256);
+    const officialSha256 = document.spec.taskSet.kind === "benchmark" ? document.spec.taskSet.benchmarkSha256 : undefined;
+    expect(compiled.previewBenchmarkSha256).not.toBe(officialSha256);
   });
 });

@@ -99,6 +99,12 @@
       "description": "Seals the Run record and transitions the draft to locked (authority-gated)."
     },
     {
+      "operation": "runPreview",
+      "cliVerb": "preview",
+      "authorityGated": false,
+      "description": "Runs a disposable rehearsal of the draft's arms on the local venue in a throwaway area; never official evidence, never advances the lifecycle."
+    },
+    {
       "operation": "runQuote",
       "cliVerb": "quote",
       "authorityGated": false,

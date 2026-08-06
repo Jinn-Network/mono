@@ -322,6 +322,15 @@ describe("CLI lifecycle — init through verify, runCli only, real local venue (
         context,
       );
       expect(quote.exitCode).toBe(0);
+      // BP-20: human-mode quote output also renders the §4.6 presentation (run size, coverage,
+      // hard cap) below the existing first line — no preview has run for this draft yet, so no
+      // "estimated wall time" line should appear (never an invented estimate).
+      expect(quote.stdout).toContain("run size: 6 solve + 6 evaluation = 12 cells");
+      expect(quote.stdout).toContain("baseline: 3 solve + 3 evaluation");
+      expect(quote.stdout).toContain("sample-uniform: 3 solve + 3 evaluation");
+      expect(quote.stdout).toContain("coverage: supported keys");
+      expect(quote.stdout).toContain("hard cap: not declared");
+      expect(quote.stdout).not.toContain("estimated wall time");
 
       const lock = await runCli(
         ["lock", "--workspace", workspaceDir, "--principal", "sponsor-1", "--draft", draftId],

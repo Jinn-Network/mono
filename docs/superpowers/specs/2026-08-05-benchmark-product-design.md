@@ -700,6 +700,42 @@ no §4/§5/§6 decision reopened):**
   now test-enforced (bidirectional operation↔verb parity test; BP-14
   formalizes the capability matrix).
 
+**Addendum — 2026-08-06, packet BP-20 (previews as disclosed rehearsal +
+quote presentation depth; no §4/§7 decision reopened):**
+
+- **A5 realized (preview mechanics).** `preview` is an ungated operation,
+  legal in `draft` and `quoted` only, refused typed once locked. It runs the
+  draft's arms × a caller-bounded item subset (first N items; default all)
+  on the real local venue rooted in a throwaway scratch area
+  (`previews/<draftId>/<previewId>/scratch`), via an EPHEMERAL in-memory
+  subset Benchmark and planned Run whose bytes are never stored in the
+  sealed store. Scope is solve-cells-only (no evaluation legs), labeled as
+  such in the artifact. No Run is sealed, no lifecycle state advances, the
+  draft file is not rewritten (§4.6's "preview artifacts" collection lives
+  in the `previews/` area, keyed by draftId, so the drafts store stays
+  byte-stable across previews); the only official-state write is the §4.4
+  audit entry.
+- **§7.2 disclosure realized.** Every preview appends to a per-draft
+  preview log (`previews/<draftId>/log.json`); each preview artifact leads
+  with the marker "rehearsal — not official evidence". At `report` time a
+  non-empty log adds one disclosure line (count + timestamps) to the sealed
+  Report's `limitations` and a structured `rehearsal` block
+  (`{ previewCount, timestamps }`) to the claim package; an un-previewed run
+  carries neither. Run compilation reads only the draft spec, so the
+  preview log is excluded from the sealed Run by construction —
+  test-enforced byte-identity between previewed and un-previewed
+  compilation.
+- **§4.6 Quote row deepened.** `quote` now returns a machine-readable
+  presentation: run size (solve cells, required evaluation cells =
+  solve × resolved `minVerdicts`, per-arm line items), coverage facts
+  (venue-supported pinning keys and per-arm refusals derived from the
+  venue's real capabilities), the hard-cap check result, and — only when
+  the draft's preview log carries real rehearsal timings — a wall-time
+  estimate labeled `estimate-from-rehearsal`. Estimates are never
+  synthesized from anything but rehearsal data; absent previews, the field
+  is absent. CLI verb `preview` (`--items <n>`, `--json`) added; parity
+  matrix regenerated.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

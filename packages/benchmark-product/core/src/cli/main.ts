@@ -46,6 +46,7 @@ import {
   runCollect,
   runLaunch,
   runLock,
+  runPreview,
   runQuote,
   runReport,
   runResults,
@@ -57,6 +58,7 @@ import {
   type ArmWarning,
   type OperationContext,
   type OperationResult,
+  type QuotePresentation,
   type RunLaunchDeps,
 } from "../operations/index.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
@@ -87,6 +89,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--role sponsor|delegated-agent] [--operations <csv>]
   authority revoke --workspace <dir> --principal <id> --grantee <id> [--operations <csv>]
   authority show   --workspace <dir> --principal <id>
+  preview          --workspace <dir> --principal <id> --draft <draftId> [--items <n>]
   quote            --workspace <dir> --principal <id> --draft <draftId>
   lock             --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
@@ -118,6 +121,7 @@ const ARM_LIST_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const AUTHORITY_GRANT_FLAGS = ["workspace", "principal", "json", "grantee", "role", "operations"] as const;
 const AUTHORITY_REVOKE_FLAGS = ["workspace", "principal", "json", "grantee", "operations"] as const;
 const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
+const PREVIEW_FLAGS = ["workspace", "principal", "json", "draft", "items"] as const;
 const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -187,6 +191,15 @@ function parseOperationsList(raw: string): readonly string[] {
     .split(",")
     .map((token) => token.trim())
     .filter((token) => token.length > 0);
+}
+
+/** Parses `--items`; refuses `"invalid-invocation"` naming `--items` unless it is a positive integer. */
+function parseItemsFlag(raw: string): number {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    refuse("invalid-invocation", "--items", "--items must be a positive integer");
+  }
+  return value;
 }
 
 function handleInit(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
@@ -397,7 +410,63 @@ function handleAuthorityShow(args: ParsedArgs, context: CliContext, jsonMode: bo
   return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// ── BP-20: preview (disposable rehearsal, spec §7.2) ──────────────────────────────────────────
+
+async function handlePreview(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PREVIEW_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const itemsRaw = optional(args, "items");
+  const items = itemsRaw === undefined ? undefined : parseItemsFlag(itemsRaw);
+
+  const result = await runPreview(opContext, { draftId, ...(items !== undefined ? { items } : {}) });
+  return renderResult(result, jsonMode, (value) => {
+    const { preview } = value;
+    const lines = [
+      `previewed draft ${value.draft.draftId}: ${preview.previewId}, ${preview.cellCount} rehearsal cell(s) `
+        + `across ${preview.arms.length} arm(s) — rehearsal, not official evidence`,
+    ];
+    for (const arm of preview.arms) {
+      const parts = [`${arm.outcomes.delivered} delivered`, `${arm.outcomes.failed} failed`];
+      if (arm.outcomes.expired > 0) parts.push(`${arm.outcomes.expired} expired`);
+      if (arm.outcomes.cancelled > 0) parts.push(`${arm.outcomes.cancelled} cancelled`);
+      lines.push(`  ${arm.armId}: ${parts.join(", ")}`);
+    }
+    return `${lines.join("\n")}\n`;
+  });
+}
+
 // ── BP-13: run-path verbs (quote through verify) ─────────────────────────────────────────────
+
+/** Renders `presentation` (BP-20, spec §4.6 Quote row) as human-mode lines: run size overall and
+ * per arm, coverage (supported keys, and any refusals), the hard-cap check, and — only when this
+ * draft has disclosed preview history — a wall-time estimate (never an invented one). */
+function renderQuotePresentation(presentation: QuotePresentation): readonly string[] {
+  const { runSize, coverage, hardCap, estimatedWallTime } = presentation;
+  const lines = [`run size: ${runSize.solveCells} solve + ${runSize.evaluationCells} evaluation = ${runSize.totalCells} cells`];
+  for (const arm of runSize.perArm) {
+    lines.push(`  ${arm.armId}: ${arm.solveCells} solve + ${arm.evaluationCells} evaluation`);
+  }
+  lines.push(`coverage: supported keys ${coverage.supportedKeys.join(", ")}`);
+  for (const refusal of coverage.refusals) {
+    lines.push(`  refused ${refusal.armId}/${refusal.key}: ${refusal.detail}`);
+  }
+  if (!hardCap.declared) {
+    lines.push("hard cap: not declared");
+  } else if (hardCap.breached) {
+    lines.push(`hard cap: BREACHED — ${hardCap.detail}`);
+  } else {
+    lines.push("hard cap: within cap");
+  }
+  if (estimatedWallTime !== undefined) {
+    lines.push(
+      `estimated wall time (from ${estimatedWallTime.previewCount} rehearsal preview(s)): `
+        + `~${estimatedWallTime.projectedSolveMs} ms solve total (${estimatedWallTime.meanCellMs} ms/cell `
+        + `over ${estimatedWallTime.rehearsedCells} rehearsed cells)`,
+    );
+  }
+  return lines;
+}
 
 async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
   assertKnownFlags(args, QUOTE_FLAGS);
@@ -410,6 +479,7 @@ async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: bool
     for (const error of value.quote.errors) {
       lines.push(`${error.code}: ${error.detail}`);
     }
+    lines.push(...renderQuotePresentation(value.presentation));
     return `${lines.join("\n")}\n`;
   });
 }
@@ -531,6 +601,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["authority grant", handleAuthorityGrant],
   ["authority revoke", handleAuthorityRevoke],
   ["authority show", handleAuthorityShow],
+  ["preview", handlePreview],
   ["quote", handleQuote],
   ["lock", handleLock],
   ["launch", handleLaunch],
