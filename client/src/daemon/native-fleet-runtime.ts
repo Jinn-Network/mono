@@ -110,24 +110,56 @@ const FLEET_STORE_ROLES: Readonly<Record<'solver' | 'requester', readonly Native
 };
 
 /**
- * `verifyVerdictObservation` still has NO production implementation anywhere in the repo — the
- * Phase-B binding-resolver backing stores (`BindingStore` / `AnchorReadClient` / policy) that
- * `VerdictObservationGatePorts` needs do not exist yet. `composition-root.ts` ships the legacy
- * counterpart (`refuseLegacyVerdictObservation`) for exactly this reason.
+ * The DEFAULT `verifyVerdictObservation`, and the fall-through the late-bound indirection keeps
+ * until M4b's real adapter is installed.
  *
- * The native path gets the same posture, not a weaker one: a loud, named throw.
- * `projectAnnouncements` turns it into a fail-CLOSED refusal, so no verdict is ever projected as
- * "verified" on evidence this operator cannot check. M4 (the native evaluator loop) is where the
- * real gate lands; until then a native boot that reaches a VerdictDeliveryClaimed refuses it,
- * which is the correct answer, not a degraded one.
+ * `projectorPorts.verifyVerdictObservation` is built here, BEFORE the evaluator composition exists
+ * (`buildFleetNativeEvaluator` runs later in `main.ts`, and the durable evaluator `state` the real
+ * adapter reads does not exist yet). So the runtime hands the projector a stable late-bound port
+ * (`createLateBoundVerdictObservation`) whose slot defaults to this refuse and is REPLACED with the
+ * real adapter once `state` exists. A verdict that reaches the projector before the evaluator is up
+ * — or on a native-solver-only operator that runs no evaluator at all — still hits this default and
+ * refuses loudly. `projectAnnouncements` turns the throw into a fail-CLOSED verdict refusal, so no
+ * verdict is ever projected as "verified" on evidence this operator has not durably re-checked.
  */
 export function refuseNativeVerdictObservation(): never {
   throw new NativeFleetAssemblyError(
     'verifyVerdictObservation has no production implementation on the native fleet path either: '
-    + 'the Phase-B binding-resolver backing stores (BindingStore/AnchorReadClient/policy) do not '
-    + 'exist in the repo. M4 (native evaluator loop) owns the decision-grade gate; until then this '
-    + 'refuses fail-closed rather than projecting an unverified verdict (one-swap M2, #2461)',
+    + 'the real M4b adapter is not installed yet (a verdict reached the projector before the '
+    + 'evaluator loop was up, or this operator runs no evaluator). Refusing fail-closed rather than '
+    + 'projecting an unverified verdict (one-swap M2/M4b, #2461)',
   );
+}
+
+/**
+ * A settable indirection for the projector's `verifyVerdictObservation` port (one-swap M4b, #2461).
+ *
+ * The projector captures `port` at composition-build time. `port` reads a mutable slot on every
+ * call: until `install` runs it delegates to {@link refuseNativeVerdictObservation} (fail-closed);
+ * after, it delegates to the real M4b adapter. Because the projector holds the stable `port`
+ * closure and the slot is read per-call, a projector tick that fires between runtime-build and
+ * evaluator-install refuses (the default) — it never crashes and never sees a half-built adapter.
+ * `install` is one-shot: a second install throws, so a wiring bug that double-installs is loud.
+ */
+export interface LateBoundVerdictObservation {
+  readonly port: NativeProjectorExactPorts['verifyVerdictObservation'];
+  install(adapter: NativeProjectorExactPorts['verifyVerdictObservation']): void;
+}
+
+export function createLateBoundVerdictObservation(): LateBoundVerdictObservation {
+  let installed: NativeProjectorExactPorts['verifyVerdictObservation'] | undefined;
+  return {
+    port: async (event, material) =>
+      installed === undefined ? refuseNativeVerdictObservation() : installed(event, material),
+    install(adapter) {
+      if (installed !== undefined) {
+        throw new NativeFleetAssemblyError(
+          'native verdict-observation adapter is already installed; the late-bound gate is set exactly once',
+        );
+      }
+      installed = adapter;
+    },
+  };
 }
 
 export interface FleetNativeRuntime {
@@ -152,6 +184,13 @@ export interface FleetNativeRuntime {
   readonly records: NativePublicRecordTransport;
   /** The single Agent IRI every role family in this fleet shares. */
   readonly agentIri: string;
+  /**
+   * Installs the real M4b verdict-observation adapter into the projector's late-bound port, once
+   * `buildFleetNativeEvaluator` has produced the durable evaluator `state` the adapter reads. Called
+   * exactly once by `main.ts`'s native branch; until then the port refuses fail-closed. See
+   * {@link createLateBoundVerdictObservation}.
+   */
+  readonly installVerdictObservation: LateBoundVerdictObservation['install'];
 }
 
 export interface FleetNativeRuntimeInput {
@@ -300,6 +339,11 @@ export async function buildFleetNativeRuntime(
     },
   };
 
+  // The projector captures this port at composition-build time, BEFORE `buildFleetNativeEvaluator`
+  // produces the durable evaluator state the real M4b adapter reads. `main.ts` installs the real
+  // adapter through `installVerdictObservation` once that state exists; until then the stable port
+  // refuses fail-closed. See `createLateBoundVerdictObservation`.
+  const lateBoundVerdict = createLateBoundVerdictObservation();
   const projectorPorts: NativeProjectorExactPorts = {
     resolveRecord: buildNativeResolveRecord(
       chain,
@@ -308,7 +352,7 @@ export async function buildFleetNativeRuntime(
         requesterSubmission: identities.get('requester-submission'),
       }),
     ),
-    verifyVerdictObservation: refuseNativeVerdictObservation,
+    verifyVerdictObservation: lateBoundVerdict.port,
   };
 
   const discovery = await buildFleetNativeDiscovery({
@@ -329,5 +373,6 @@ export async function buildFleetNativeRuntime(
     trust,
     records,
     agentIri,
+    installVerdictObservation: lateBoundVerdict.install,
   };
 }

@@ -67,6 +67,7 @@ import {
   NativeEvaluatorCoordinator,
   type NativeEvaluatorChainReconciliationPort,
   type NativeEvaluatorCoordinatorResult,
+  type NativeEvaluatorVerdictVerificationPort,
 } from "./native-evaluator-coordinator.js";
 import {
   openNativeEvaluatorPublisher,
@@ -151,6 +152,13 @@ export interface NativeEvaluatorComposition {
   readonly backend: LocalTaskExecutionBackend;
   readonly publisher: NativeEvaluatorPublisher;
   readonly coordinator: NativeEvaluatorCoordinator;
+  /**
+   * The SAME decision-grade verdict verification port the coordinator drives. Surfaced (one-swap
+   * M4b, #2461) so the projector's `verifyVerdictObservation` adapter re-checks the operator's own
+   * announced verdicts through this exact gate instance — never a second construction that could
+   * drift from the settlement path.
+   */
+  readonly verification: NativeEvaluatorVerdictVerificationPort;
   tick(): Promise<{
     readonly sourceEvents: number;
     readonly coordinator: readonly NativeEvaluatorCoordinatorResult[];
@@ -689,6 +697,7 @@ export async function buildNativeEvaluatorComposition(
     evidence: input.backend.evidence,
   };
   const backend = (input.constructBackend ?? makeLocalTaskExecutionBackend)(backendConfig);
+  const verification = buildNativeEvaluatorVerdictVerification(input.verification);
   let publisher: NativeEvaluatorPublisher | undefined;
   try {
     publisher = await openNativeEvaluatorPublisher({
@@ -711,7 +720,7 @@ export async function buildNativeEvaluatorComposition(
         getRecord: (reference) => input.backend.evidence.repository.getRecord(reference),
       },
       publisher,
-      verification: buildNativeEvaluatorVerdictVerification(input.verification),
+      verification,
     });
 
     return {
@@ -719,6 +728,7 @@ export async function buildNativeEvaluatorComposition(
       backend,
       publisher,
       coordinator,
+      verification,
       async tick() {
         // Recover durable claim/backend/publication/settlement work before touching the network
         // source. A source outage or a newly tampered entry must not strand work already owned.
