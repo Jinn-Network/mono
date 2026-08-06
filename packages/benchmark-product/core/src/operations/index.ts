@@ -76,8 +76,17 @@ export { runStatus, type RunStatusCell, type RunStatusCounts, type RunStatusResu
 export { runCollect, type RunCollectInput, type RunCollectResult } from "./run-collect.js";
 export {
   runResults,
+  LOCAL_VENUE_LIMITS,
+  unverifiableAxisCounts,
   type RunResultsCell,
   type RunResultsDocument,
   type RunResultsVerdict,
   type VenueHonesty,
 } from "./run-results.js";
+
+// BP-13: report production + verification (spec §7.1/§8.2/§12.1) — `report` seals the Report
+// record and the claim package from a closed run's sealed Matrix; `verify` independently
+// re-derives the Matrix (and, once reported, the Report and claim package) from the workspace's
+// own durable state.
+export { runReport, type RunReportInput, type RunReportResult } from "./report.js";
+export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResult } from "./verify.js";

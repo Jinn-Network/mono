@@ -13,7 +13,7 @@ import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
-import { readRunJournalEntries } from "../run/journal.js";
+import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
@@ -281,6 +281,71 @@ describe("runLaunch — drives a full 2-arm run to completion (fake backend)", (
       return doc.requirements?.harness?.id === "evaluation-harness";
     });
     expect(evalSubmits).toHaveLength(6);
+  }, 30_000);
+});
+
+/**
+ * The exact progress line a journal entry produces (BP-13, `../run/drive.ts`'s own `onProgress`
+ * emission points) — `undefined` for entry kinds that emit no line ("launched",
+ * "submission-accepted", "delivery", "closed"). Used to assert `onProgress` sees exactly the
+ * journal's own cell-event/evaluation entries, in the journal's own append order — the strongest
+ * ordering claim available, since `driveCellEvents` emits each line synchronously right after the
+ * journal write it describes.
+ */
+function expectedProgressLine(entry: RunJournalEntry): string | undefined {
+  if (entry.kind === "cell-event") return `${entry.event.cellKey} ${entry.event.kind}`;
+  if (entry.kind === "evaluation") {
+    return entry.evaluationTerminal === "could-not-grade" ? `${entry.cellKey} could-not-grade` : `${entry.cellKey} judged`;
+  }
+  return undefined;
+}
+
+describe("runLaunch — onProgress streaming (BP-13)", () => {
+  test("emits one line per cell-event and evaluation terminal, in the journal's own append order", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const lines: string[] = [];
+
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(backend),
+      onProgress: (line) => lines.push(line),
+    });
+    expect(outcome.ok).toBe(true);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const expectedLines = entries.map(expectedProgressLine).filter((line): line is string => line !== undefined);
+
+    // 6 cells x (dispatch + delivered cell-events) + 6 judged evaluation terminals = 18 lines.
+    expect(expectedLines).toHaveLength(18);
+    expect(lines).toEqual(expectedLines);
+  }, 30_000);
+
+  test("omitting onProgress leaves the journal and return value byte-identical (purely additive)", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock, "draft-with-progress");
+    await setUpLockedDraft(clock, "draft-without-progress");
+    const { backend: backendA } = makeStatefulFakeBackend();
+    const { backend: backendB } = makeStatefulFakeBackend();
+
+    const withProgress = await runLaunch(contextFor(clock), { draftId: "draft-with-progress" }, {
+      createVenue: () => fakeVenue(backendA),
+      onProgress: () => {},
+    });
+    const withoutProgress = await runLaunch(contextFor(clock), { draftId: "draft-without-progress" }, {
+      createVenue: () => fakeVenue(backendB),
+    });
+    expect(withProgress.ok).toBe(true);
+    expect(withoutProgress.ok).toBe(true);
+    if (!withProgress.ok || !withoutProgress.ok) return;
+    expect(withProgress.result.draft.state).toBe(withoutProgress.result.draft.state);
+
+    const entriesWith = readRunJournalEntries(workspaceDir, "draft-with-progress");
+    const entriesWithout = readRunJournalEntries(workspaceDir, "draft-without-progress");
+    // Compared by kind/shape rather than by exact bytes — the two drafts share one advancing
+    // clock, so their `at` stamps genuinely differ — but the SEQUENCE of journal-entry kinds an
+    // identical 2-arm run produces must be identical whether or not `onProgress` is supplied.
+    expect(entriesWith.map((entry) => entry.kind)).toEqual(entriesWithout.map((entry) => entry.kind));
   }, 30_000);
 });
 

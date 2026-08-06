@@ -52,6 +52,10 @@ import type { OperationResult } from "./result.js";
 
 export interface RunLaunchDeps {
   readonly createVenue?: typeof createLocalVenue;
+  /** Live diagnostic stream (BP-13) threaded straight through to `DriveDeps.onProgress` — see
+   * `../run/drive.ts`'s own header for exactly what it emits and when. Optional; absent leaves
+   * `runLaunch`/`runResume` byte-identical to before this deliverable. */
+  readonly onProgress?: (line: string) => void;
 }
 
 export interface RunLaunchInput {
@@ -157,6 +161,7 @@ export function runLaunch(
           owner: loaded.owner,
           cellWindowMs: loaded.runRecord.policy.cellWindow,
           liveClock: context.clock,
+          onProgress: deps.onProgress,
         };
 
         const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, backend, {
@@ -225,6 +230,7 @@ export function runResume(
           owner: loaded.owner,
           cellWindowMs: loaded.runRecord.policy.cellWindow,
           liveClock: context.clock,
+          onProgress: deps.onProgress,
         };
 
         if (outstanding.length > 0) {

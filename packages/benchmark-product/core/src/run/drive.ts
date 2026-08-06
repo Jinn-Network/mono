@@ -15,6 +15,17 @@
  * - `driveCellEvents` — folds a `CellStatusEvent` stream into the run journal and, on delivery,
  *   runs the evaluation leg synchronously in-line (prepare → seal Submission → submit through
  *   the same proxy → drain → observe → harvest the verdict or record a could-not-grade fact).
+ *
+ * BP-13: `DriveDeps.onProgress`, when supplied, receives one short `<cellKey> <kind>` line right
+ * after each cell-event journal write, plus `<cellKey> judged` / `<cellKey> could-not-grade` right
+ * after each evaluation-leg terminal is journaled (`journalCouldNotGrade`, the success tail of
+ * `dispatchEvaluation`). It is a live stream for a long-running CLI verb (`launch`/`resume`) to
+ * surface, never a substitute for the journal itself — purely additive, so a caller that omits it
+ * sees byte-identical journal and return-value behavior. It is a diagnostic sink only: it can
+ * NEVER fail the run. Every call site goes through `emitProgress`, which swallows anything the
+ * sink throws (e.g. EPIPE from `process.stderr.write` when the reader end of a pipe like
+ * `launch | head` has closed) — a broken diagnostic stream is not a reason to abort a run whose
+ * journal writes are already durable.
  */
 
 import { parseCellKey } from "@jinn-network/benchmarking-records";
@@ -134,6 +145,21 @@ export interface DriveDeps {
   readonly cellWindowMs: number;
   /** The live, unfrozen clock — journal timestamps reflect when each event actually happened. */
   readonly liveClock: () => string;
+  /** Live diagnostic stream (BP-13, CLI `launch`/`resume`) — one short line per journaled
+   * cell-event or evaluation terminal, emitted right after the journal write it describes.
+   * Optional and purely additive: absent, nothing streams, and every journal write and return
+   * value here is byte-identical either way. */
+  readonly onProgress?: (line: string) => void;
+}
+
+/** Calls `deps.onProgress` and swallows anything it throws — see `DriveDeps.onProgress`'s own
+ * doc comment: the diagnostic stream can never fail the run. */
+function emitProgress(deps: DriveDeps, line: string): void {
+  try {
+    deps.onProgress?.(line);
+  } catch {
+    // Diagnostic sink only — deliberately swallowed.
+  }
 }
 
 function journalCouldNotGrade(
@@ -151,6 +177,7 @@ function journalCouldNotGrade(
     ...(extra.evalTaskSha256 !== undefined ? { evalTaskSha256: extra.evalTaskSha256 } : {}),
     ...(extra.evalAttempt !== undefined ? { evalAttempt: extra.evalAttempt } : {}),
   });
+  emitProgress(deps, `${cellKey} could-not-grade`);
 }
 
 /** Seals + submits + watches the evaluation leg for a prepared evaluation cell (module header). */
@@ -231,6 +258,7 @@ async function dispatchEvaluation(
     evalAttempt,
     verdictSha256,
   });
+  emitProgress(deps, `${cellKey} judged`);
 }
 
 /**
@@ -328,6 +356,7 @@ export async function driveCellEvents(
 ): Promise<void> {
   for await (const event of events) {
     appendRunJournalEntry(deps.workspaceDir, deps.draftId, { kind: "cell-event", at: deps.liveClock(), event });
+    emitProgress(deps, `${event.cellKey} ${event.kind}`);
     if (event.kind === "delivered") {
       await driveEvaluationForDelivery(deps, event);
     }

@@ -1,19 +1,30 @@
 /**
  * The CLI's dispatch table (spec §5.2) — the complete agent surface through
- * BP-11. Fifteen operational verbs over the operations facade (`init`,
+ * BP-13. Twenty-four operational verbs over the operations facade (`init`,
  * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
  * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
- * `arm list`, `authority grant`, `authority revoke`, `authority show`), plus
- * `help`. Every verb takes `--json` for a machine-readable envelope; every
- * failure is a typed error envelope with a distinct exit code (§4.3).
- * `runCli` never throws and never touches `process` — `bin.ts` is the only
- * file in this package that does.
+ * `arm list`, `authority grant`, `authority revoke`, `authority show`,
+ * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
+ * `report`, `verify`), plus `help`. Every verb takes `--json` for a
+ * machine-readable envelope; every failure is a typed error envelope with a
+ * distinct exit code (§4.3). `runCli` never throws and never touches
+ * `process` — `bin.ts` is the only file in this package that does.
  *
  * `runCli` is `async` because `sample.init` (spec: the bundled sample
  * benchmark) runs through `operateAsync`, not `operate` — building and
  * sealing the sample is itself async. A verb handler may return a
  * `CliResult` directly or a `Promise<CliResult>`; the dispatch always
  * `await`s it, so a synchronous handler pays nothing for the `await`.
+ *
+ * `launch` and `resume` (BP-13, the run path's two long-running verbs) also
+ * pass `context.progress` through to the operations facade as `onProgress`,
+ * but ONLY in human mode — `--json` mode's stdout stays the single
+ * machine-parseable envelope this file always rendered, nothing streams.
+ * `bin.ts` wires `progress` to stderr, so even in human mode stdout carries
+ * only the final rendered result.
+ *
+ * `CLI_VERB_NAMES` (BP-13) is the parity anchor `./parity.test.ts` checks
+ * against the operations facade's own exports — see that test's header.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
@@ -32,11 +43,21 @@ import {
   initWorkspace,
   inspectDraft,
   listDrafts,
+  runCollect,
+  runLaunch,
+  runLock,
+  runQuote,
+  runReport,
+  runResults,
+  runResume,
+  runStatus,
+  runVerify,
   sampleInit,
   updateDraft,
   type ArmWarning,
   type OperationContext,
   type OperationResult,
+  type RunLaunchDeps,
 } from "../operations/index.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
@@ -66,6 +87,15 @@ Verbs (every verb accepts --json for a machine-readable envelope):
                    [--role sponsor|delegated-agent] [--operations <csv>]
   authority revoke --workspace <dir> --principal <id> --grantee <id> [--operations <csv>]
   authority show   --workspace <dir> --principal <id>
+  quote            --workspace <dir> --principal <id> --draft <draftId>
+  lock             --workspace <dir> --principal <id> --draft <draftId>
+  launch           --workspace <dir> --principal <id> --draft <draftId>
+  resume           --workspace <dir> --principal <id> --draft <draftId>
+  status           --workspace <dir> --principal <id> --draft <draftId>
+  collect          --workspace <dir> --principal <id> --draft <draftId>
+  results          --workspace <dir> --principal <id> --draft <draftId>
+  report           --workspace <dir> --principal <id> --draft <draftId>
+  verify           --workspace <dir> --principal <id> --draft <draftId>
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
@@ -88,6 +118,15 @@ const ARM_LIST_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const AUTHORITY_GRANT_FLAGS = ["workspace", "principal", "json", "grantee", "role", "operations"] as const;
 const AUTHORITY_REVOKE_FLAGS = ["workspace", "principal", "json", "grantee", "operations"] as const;
 const AUTHORITY_SHOW_FLAGS = ["workspace", "principal", "json"] as const;
+const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const RESUME_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const RESULTS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -358,6 +397,122 @@ function handleAuthorityShow(args: ParsedArgs, context: CliContext, jsonMode: bo
   return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// ── BP-13: run-path verbs (quote through verify) ─────────────────────────────────────────────
+
+async function handleQuote(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, QUOTE_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runQuote(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [`quoted draft ${value.draft.draftId}: ${value.quote.expectedCellCount} cells, ok=${value.quote.ok}`];
+    for (const error of value.quote.errors) {
+      lines.push(`${error.code}: ${error.detail}`);
+    }
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+function handleLock(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, LOCK_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = runLock(opContext, { draftId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `locked draft ${value.draft.draftId}: run ${value.runSha256}, closes ${value.closeAt}\n`,
+  );
+}
+
+/** `launch`'s `RunLaunchDeps`: `onProgress` streams to `context.progress` in human mode only —
+ * `--json` mode's stdout stays the single machine-parseable envelope (module header). */
+function launchDeps(context: CliContext, jsonMode: boolean): RunLaunchDeps {
+  return jsonMode ? {} : { onProgress: context.progress };
+}
+
+async function handleLaunch(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, LAUNCH_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runLaunch(opContext, { draftId }, launchDeps(context, jsonMode));
+  return renderResult(result, jsonMode, (value) => `launched draft ${value.draft.draftId}: run complete\n`);
+}
+
+async function handleResume(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, RESUME_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runResume(opContext, { draftId }, launchDeps(context, jsonMode));
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `resumed draft ${draftId}: ${value.outstandingCount} outstanding, ${value.evaluationCatchUpCount} evaluation catch-ups\n`,
+  );
+}
+
+function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, STATUS_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = runStatus(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => {
+    const lines = [
+      value.closeAt !== undefined ? `state ${value.state}, closeAt ${value.closeAt}` : `state ${value.state}`,
+      ...value.cells.map((cell) => `${cell.cellKey}\t${cell.status}\t${cell.dispatches}`),
+      `expected ${value.counts.expected}, dispatched ${value.counts.dispatched}, delivered ${value.counts.delivered}, `
+        + `judged ${value.counts.judged}, failed ${value.counts.failed}`,
+    ];
+    return `${lines.join("\n")}\n`;
+  });
+}
+
+async function handleCollect(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, COLLECT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runCollect(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => `collected draft ${value.draft.draftId}: matrix ${value.matrixSha256}\n`);
+}
+
+function handleResults(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
+  assertKnownFlags(args, RESULTS_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = runResults(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function handleReport(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, REPORT_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runReport(opContext, { draftId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) =>
+      `reported draft ${value.draft.draftId}: report ${value.reportSha256}, preregistered=${value.preregistered}, claim written\n`,
+  );
+}
+
+async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, VERIFY_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runVerify(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) => `verified draft ${value.draftId}: ${value.checks.join(", ")}\n`);
+}
+
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -376,7 +531,20 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["authority grant", handleAuthorityGrant],
   ["authority revoke", handleAuthorityRevoke],
   ["authority show", handleAuthorityShow],
+  ["quote", handleQuote],
+  ["lock", handleLock],
+  ["launch", handleLaunch],
+  ["resume", handleResume],
+  ["status", handleStatus],
+  ["collect", handleCollect],
+  ["results", handleResults],
+  ["report", handleReport],
+  ["verify", handleVerify],
 ]);
+
+/** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks
+ * every operations-facade export maps onto (module header). */
+export const CLI_VERB_NAMES: readonly string[] = [...VERBS.keys()];
 
 function usageResult(jsonMode: boolean): CliResult {
   if (jsonMode) {

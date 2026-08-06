@@ -655,6 +655,51 @@ reopened):**
   advances its lifecycle `state`. Quote invalidation (A2) is enforced by a
   spec digest recorded at quote time and re-checked at lock.
 
+**Addendum — 2026-08-06, packet BP-13 (report leg + complete run-path CLI;
+no §4/§5/§6 decision reopened):**
+
+- **§3 row activated: `@jinn-network/benchmarking-aggregate`.** Consumed
+  public exports: `produceReport`, `verifyReport`,
+  `BENCHMARKING_METHOD_REGISTRY`, and their port types — the Report
+  production/verification seam (M1 method `wilson@1`, `verdictRule: sole`
+  under the Direct-check preset).
+- **Verdict canonicality correction (repository fact, amends the BP-12
+  addendum's verbatim-wrap note).** The aggregation boundary
+  (`resolveVerdictOutcome`) requires every Matrix-referenced verdict DSSE
+  payload to be the exact trust-core canonical encoding; the harness's
+  pretty-printed statement bytes can never satisfy it. `sealVerdictStatement`
+  now seals `canonicalJsonBytes(statement)` — a content-preserving
+  re-encoding of the harness's own statement, signed once at seal time. A
+  statement carrying a non-safe-integer JSON number refuses fail-loud (the
+  prediction adapter's scores are decimal strings; the real venue is
+  unaffected).
+- **Preregistration realization.** `derivePreregistered` compares the Run's
+  `analysisPlan` entry parameters against the report method tuple with
+  `verdictRule` merged in by `produceReport`; the compiled `analysisPlan`
+  therefore carries `{ verdictRule }` from the draft's resolved assurance
+  preset. `ProduceReportInput.method.parameters` stays `{}` per the M1
+  composition dossier; the merge is the platform's.
+- **A6 realized (report authorship and key management).** The Report's DSSE
+  author is the run-owner IRI; signing uses a second workspace-held Ed25519
+  key (`venue/report-signing-key.pem`, `did:key` keyid), separate from the
+  verdict key — role separation (venue evaluator vs report author) and
+  independent rotation; on the self-run venue the same operator holds both,
+  disclosed, never hidden. `verify`'s authenticity leg resolves a
+  workspace-local synthesized genesis binding built from the workspace's own
+  key material — no third-party attestation, no anchoring — the §7.1
+  self-run trust root, named in the claim package's verification section.
+- **Claim package realization (§8.2, §4.6).** The machine-readable claim
+  package is materialized at `report` time as a workspace-derived artifact
+  (`artifacts/<draftId>/claim-package.json`, one of §4.5's "claim packages");
+  the later `publish` packet emits it as the public bundle per §4.1 —
+  report-time materialization does not reopen §4.1's publish semantics.
+- **§5.2 completed for the run path.** CLI verbs `quote`, `lock`, `launch`,
+  `resume`, `status`, `collect`, `results`, `report`, `verify`, each with
+  `--json`; long-running `launch`/`resume` stream one progress line per cell
+  event on a diagnostic stream (stderr) in human mode only. §5.4 parity is
+  now test-enforced (bidirectional operation↔verb parity test; BP-14
+  formalizes the capability matrix).
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

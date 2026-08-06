@@ -413,6 +413,128 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
   });
 });
 
+describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
+  test("a dispatch event with no onProgress supplied journals exactly as before (byte-identical)", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({});
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toEqual([{ kind: "cell-event", at: "2026-08-05T00:00:00Z", event: events[0] }]);
+  });
+
+  test("delivered + judged: onProgress sees exactly one line per cell-event, then one 'judged' line", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const evalDeliveryDigestHex = "1".repeat(64);
+    const verdictEnvelopeHex = "2".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: {
+        "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)],
+        "att-eval-1": [fakeDeliveryRef("att-eval-1", evalDeliveryDigestHex)],
+      },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliveryDigestHex}`]: utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }] }),
+        [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }),
+      },
+      artifactBytesByDigest: {
+        [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }),
+        [verdictEnvelopeHex]: utf8({ envelope: true }),
+      },
+      observeResult: fakeSnapshot("att-eval-1", "delivered"),
+    });
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) });
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+    const lines: string[] = [];
+
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, liveClock: clock, onProgress: (line) => lines.push(line) },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    expect(lines).toEqual([`${cellKey} delivered`, `${cellKey} judged`]);
+  });
+
+  test("delivered + could-not-grade (no attempt on the event): onProgress sees the could-not-grade line", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({});
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered" },
+    ];
+    const lines: string[] = [];
+
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock, onProgress: (line) => lines.push(line) },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    expect(lines).toEqual([`${CELL_A} delivered`, `${CELL_A} could-not-grade`]);
+  });
+
+  test("an onProgress that always throws does not prevent the drive from completing and journaling normally", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+
+    const solveDeliveryDigestHex = "d".repeat(64);
+    const predictionArtifactHex = "e".repeat(64);
+    const evalDeliveryDigestHex = "1".repeat(64);
+    const verdictEnvelopeHex = "2".repeat(64);
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: {
+        "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)],
+        "att-eval-1": [fakeDeliveryRef("att-eval-1", evalDeliveryDigestHex)],
+      },
+      deliveryBytesByDigest: {
+        [`sha256:${solveDeliveryDigestHex}`]: utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }] }),
+        [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }),
+      },
+      artifactBytesByDigest: {
+        [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }),
+        [verdictEnvelopeHex]: utf8({ envelope: true }),
+      },
+      observeResult: fakeSnapshot("att-eval-1", "delivered"),
+    });
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) });
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+    let onProgressCalls = 0;
+    const throwingOnProgress = (): void => {
+      onProgressCalls += 1;
+      throw new Error("EPIPE: simulated broken diagnostic sink");
+    };
+
+    await expect(
+      driveCellEvents(
+        { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, liveClock: clock, onProgress: throwingOnProgress },
+        (async function* () { for (const event of events) yield event; })(),
+      ),
+    ).resolves.toBeUndefined();
+
+    // The sink was actually exercised (and threw) at least twice — once for the cell-event,
+    // once for the "judged" evaluation terminal — yet the drive completed and journaled as if
+    // no onProgress had been supplied at all.
+    expect(onProgressCalls).toBeGreaterThanOrEqual(2);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries.some((entry) => entry.kind === "cell-event")).toBe(true);
+    expect(entries.some((entry) => entry.kind === "delivery")).toBe(true);
+    expect(entries.some((entry) => entry.kind === "evaluation" && "verdictSha256" in entry)).toBe(true);
+  });
+});
+
 describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored delivery bytes", () => {
   test("re-derives and dispatches evaluation from an already-journaled delivery, no backend delivery re-fetch", async () => {
     const clock = makeClock();

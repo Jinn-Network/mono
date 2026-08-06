@@ -17,4 +17,8 @@ export interface CliContext {
   readonly cwd: string;
   /** Returns an RFC 3339 timestamp. Injected so a test's output is a function of its inputs. */
   readonly clock: () => string;
+  /** Live diagnostic stream for a long-running verb (`launch`, `resume`, BP-13) — one short line
+   * per drive event, written as the run progresses. Distinct from the buffered `CliResult` the
+   * verb eventually returns; optional, and absent in every verb that isn't long-running. */
+  readonly progress?: (line: string) => void;
 }
