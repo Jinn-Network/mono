@@ -1,0 +1,161 @@
+{
+  "schemaVersion": "jinn-requester-preflight-golden.v1",
+  "provenance": "client/src/tasks/submit-preflight.ts at integration/evidence-v1; legacy categories creator|funds|rpc|contracts|indexer|gateway|solverNet map to config|funds|venue|target|freshness|documents",
+  "categoryOrder": ["config", "funds", "venue", "target", "freshness", "documents"],
+  "freshnessReserveMs": 60000,
+  "funds": [
+    {
+      "name": "both balances cover a single-claim budget",
+      "input": {
+        "safeBalanceWei": "2000",
+        "agentBalanceWei": "3000",
+        "solutionMaxDeliveryRateWei": "500",
+        "verdictMaxDeliveryRateWei": "500",
+        "maxClaims": 1,
+        "agentGasReserveWei": "1000"
+      },
+      "expect": { "ok": true }
+    },
+    {
+      "name": "budget scales with maxClaims",
+      "input": {
+        "safeBalanceWei": "2000",
+        "agentBalanceWei": "9000",
+        "solutionMaxDeliveryRateWei": "500",
+        "verdictMaxDeliveryRateWei": "500",
+        "maxClaims": 3,
+        "agentGasReserveWei": "1000"
+      },
+      "expect": { "error": { "category": "funds", "code": "safe-underfunded" } }
+    },
+    {
+      "name": "agent EOA must also cover the outer Safe exec value plus gas reserve",
+      "input": {
+        "safeBalanceWei": "2000",
+        "agentBalanceWei": "1500",
+        "solutionMaxDeliveryRateWei": "500",
+        "verdictMaxDeliveryRateWei": "500",
+        "maxClaims": 1,
+        "agentGasReserveWei": "1000"
+      },
+      "expect": { "error": { "category": "funds", "code": "agent-underfunded" } }
+    },
+    {
+      "name": "exact-equality balances pass",
+      "input": {
+        "safeBalanceWei": "1000",
+        "agentBalanceWei": "2000",
+        "solutionMaxDeliveryRateWei": "500",
+        "verdictMaxDeliveryRateWei": "500",
+        "maxClaims": 1,
+        "agentGasReserveWei": "1000"
+      },
+      "expect": { "ok": true }
+    }
+  ],
+  "freshness": [
+    {
+      "name": "all three deadlines live beyond the reserve",
+      "input": {
+        "nowMs": 1000000,
+        "claimWindowEndMs": 1200000,
+        "submissionDeadlineMs": 1300000,
+        "sessionDeadlineMs": 1400000
+      },
+      "expect": { "ok": true }
+    },
+    {
+      "name": "claim window inside the reserve is expired",
+      "input": {
+        "nowMs": 1000000,
+        "claimWindowEndMs": 1030000,
+        "submissionDeadlineMs": 1300000,
+        "sessionDeadlineMs": 1400000
+      },
+      "expect": {
+        "error": { "category": "freshness", "code": "request-expired", "expired": ["claim window end"] }
+      }
+    },
+    {
+      "name": "a deadline exactly at now plus reserve is expired",
+      "input": {
+        "nowMs": 1000000,
+        "claimWindowEndMs": 1060000,
+        "submissionDeadlineMs": 1300000,
+        "sessionDeadlineMs": 1400000
+      },
+      "expect": {
+        "error": { "category": "freshness", "code": "request-expired", "expired": ["claim window end"] }
+      }
+    },
+    {
+      "name": "a non-finite deadline is expired and every offender is named",
+      "input": {
+        "nowMs": 1000000,
+        "claimWindowEndMs": null,
+        "submissionDeadlineMs": 1010000,
+        "sessionDeadlineMs": 1400000
+      },
+      "expect": {
+        "error": {
+          "category": "freshness",
+          "code": "request-expired",
+          "expired": ["claim window end", "submission deadline"]
+        }
+      }
+    }
+  ],
+  "target": [
+    {
+      "name": "exactly one live candidate selects without a hint",
+      "input": {
+        "candidates": [
+          { "postingKey": "a", "workKind": "repository-work", "profileUri": "urn:p:1", "live": true },
+          { "postingKey": "b", "workKind": "repository-work", "profileUri": "urn:p:1", "live": false }
+        ]
+      },
+      "expect": { "ok": true, "postingKey": "a" }
+    },
+    {
+      "name": "explicit key must be live",
+      "input": {
+        "explicitPostingKey": "b",
+        "candidates": [
+          { "postingKey": "a", "workKind": "repository-work", "profileUri": "urn:p:1", "live": true },
+          { "postingKey": "b", "workKind": "repository-work", "profileUri": "urn:p:1", "live": false }
+        ]
+      },
+      "expect": { "error": { "category": "target", "code": "explicit-not-live" } }
+    },
+    {
+      "name": "two live candidates without a hint are ambiguous",
+      "input": {
+        "candidates": [
+          { "postingKey": "a", "workKind": "repository-work", "profileUri": "urn:p:1", "live": true },
+          { "postingKey": "b", "workKind": "repository-work", "profileUri": "urn:p:1", "live": true }
+        ]
+      },
+      "expect": { "error": { "category": "target", "code": "ambiguous-target" } }
+    },
+    {
+      "name": "work-kind narrows an otherwise ambiguous set",
+      "input": {
+        "requestedWorkKind": "evaluation",
+        "candidates": [
+          { "postingKey": "a", "workKind": "repository-work", "profileUri": "urn:p:1", "live": true },
+          { "postingKey": "b", "workKind": "evaluation", "profileUri": "urn:p:2", "live": true }
+        ]
+      },
+      "expect": { "ok": true, "postingKey": "b" }
+    },
+    {
+      "name": "no live candidate",
+      "input": {
+        "candidates": [
+          { "postingKey": "a", "workKind": "repository-work", "profileUri": "urn:p:1", "live": false }
+        ]
+      },
+      "expect": { "error": { "category": "target", "code": "no-live-target" } }
+    }
+  ]
+}
