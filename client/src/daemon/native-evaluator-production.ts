@@ -155,8 +155,16 @@ export async function buildNativeEvaluatorProductionHost(
       module: config.evaluator.deploymentModule,
       moduleDigest: config.evaluator.moduleDigest as `sha256:${string}`,
       signerHandle: config.evaluator.signerHandle,
-      evaluationMethodDigest: config.evaluator.evaluationMethodDigest as `sha256:${string}`,
+      // Branded `NativeEvaluationMethodDigests` (single digest or per-registration map) straight
+      // from the config — no cast (native-product-config.ts brands it).
+      evaluationMethodDigest: config.evaluator.evaluationMethodDigest,
     },
+    // Container-graded registrations (swe-rebench-v2) declare their binding here; a missing binding
+    // for a container-graded registration is refused at composition (one-swap M4c, #2467). Omitted
+    // for a prediction-only deployment, leaving today's boot path unchanged.
+    ...(config.evaluator.graderReportSources === undefined
+      ? {}
+      : { graderReportSources: config.evaluator.graderReportSources }),
   });
   scope.defer(composition.close);
   const endpoint = await input.infrastructure.mountPublicSource(composition.publisher.handler);
