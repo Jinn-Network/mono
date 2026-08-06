@@ -1574,7 +1574,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2910,
+      "discoveredFirstPartySurfaces": 2914,
       "generatedOutputSources": 1305,
       "generatorSources": 590,
       "marketplaceControl": 2,
@@ -7657,6 +7657,16 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "client/test/cli/commands/tasks-lifecycle.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "client/test/cli/commands/tasks-machine-dry-run-fs.test.ts"
       },
       {
@@ -8888,6 +8898,26 @@
           "@ritsukai"
         ],
         "path": "client/test/daemon/native-fleet-evaluator.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-fleet-posting-mount.test.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/daemon/native-fleet-posting.test.ts"
       },
       {
         "categories": [
@@ -13988,6 +14018,16 @@
           "@ritsukai"
         ],
         "path": "client/test/native-requester/work-client/fixtures/preflight-behavior.golden.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/native-requester/work-client/lifecycle.test.ts"
       },
       {
         "categories": [
