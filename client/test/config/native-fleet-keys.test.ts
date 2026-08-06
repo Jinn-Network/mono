@@ -15,6 +15,8 @@ import {
   NativeCompositionModeSchema,
   NativeIpfsConfigSchema,
   NativePublicBaseUrlSchema,
+  NativeRecordSourceSchema,
+  NativeRecordSourcesSchema,
 } from '../../src/config/native-sections.js';
 
 function writeConfig(extra: Record<string, unknown>): string {
@@ -37,6 +39,7 @@ describe('M2 fleet config keys', () => {
     expect(config.agentIri).toBeUndefined();
     expect(config.ipfs).toBeUndefined();
     expect(config.publicBaseUrl).toBeUndefined();
+    expect(config.recordSources).toBeUndefined();
   });
 
   it('round-trip through the loader when set', () => {
@@ -50,6 +53,40 @@ describe('M2 fleet config keys', () => {
     expect(config.agentIri).toBe('urn:jinn:operator:fleet-one');
     expect(config.ipfs).toEqual({ apiUrl: 'https://ipfs.example/' });
     expect(config.publicBaseUrl).toBe('https://records.example/');
+  });
+
+  // One-swap M3 (#2461): the fifth key, added by the milestone that consumes it.
+  it('round-trips recordSources and refuses a duplicate source identity', () => {
+    const source = {
+      role: 'requester',
+      agent: 'urn:jinn:requester:one',
+      name: 'requester',
+      baseUrl: 'https://requester.example',
+    };
+    expect(loadConfig(writeConfig({ recordSources: [source] })).recordSources).toEqual([source]);
+    // Two entries with the same (agent, name) would be two checkpoints for one history.
+    expect(NativeRecordSourcesSchema.safeParse([source, { ...source, baseUrl: 'https://other.example' }]).success)
+      .toBe(false);
+    // Distinct identities are fine; role selection happens at composition, not at load.
+    expect(NativeRecordSourcesSchema.safeParse([
+      source,
+      { ...source, role: 'evaluator', agent: 'urn:jinn:evaluator:one', name: 'evaluator' },
+    ]).success).toBe(true);
+  });
+
+  it('keeps each record source strict and HTTP(S)', () => {
+    const source = {
+      role: 'requester',
+      agent: 'urn:jinn:requester:one',
+      name: 'requester',
+      baseUrl: 'https://requester.example',
+    };
+    expect(NativeRecordSourceSchema.safeParse(source).success).toBe(true);
+    expect(NativeRecordSourceSchema.safeParse({ ...source, baseUrl: 'ftp://x.example' }).success).toBe(false);
+    expect(NativeRecordSourceSchema.safeParse({ ...source, role: 'launcher' }).success).toBe(false);
+    expect(NativeRecordSourceSchema.safeParse({ ...source, baseURL: 'x' }).success).toBe(false);
+    // An empty list is a misconfiguration, not "no sources" — absence is how you say that.
+    expect(NativeRecordSourcesSchema.safeParse([]).success).toBe(false);
   });
 
   it('accepts only the two composition modes composition-root.ts declares', () => {
@@ -82,6 +119,8 @@ describe('M2 fleet config keys', () => {
   it('cannot express a network, chain, or contract', () => {
     expect(Object.keys(NativeIpfsConfigSchema.shape)).toEqual(['apiUrl']);
     expect(NativeCompositionModeSchema.options).not.toContain('mainnet');
+    expect(Object.keys(NativeRecordSourceSchema.shape).sort())
+      .toEqual(['agent', 'baseUrl', 'name', 'role']);
     for (const schema of [NativeAgentIriSchema, NativePublicBaseUrlSchema]) {
       expect('shape' in schema).toBe(false);
     }

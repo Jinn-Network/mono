@@ -1,11 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
-import {
-  NATIVE_REQUESTER_ASSOCIATION_FACT,
-  decodeNativeRequesterAnnouncement,
-  parseNativeAuthorityTimeAnchor,
-} from '../native-requester/requester.js';
 import { Store } from '../store/store.js';
 import { NativeClaimCoordinator } from './native-claim-coordinator.js';
 import { evaluateNativeClaim } from './native-claim-policy.js';
@@ -15,7 +10,9 @@ import {
   syncNativeMarketplaceEvents,
 } from './native-canonical-observations.js';
 import { buildNativeDiscoverySources } from './native-discovery-trust.js';
+import { drainNativeDiscoveryWithdrawals } from './native-discovery-withdrawals.js';
 import { createNativeDiscoveryConsumer } from './native-discovery.js';
+import { buildNativeRequesterAnnouncementDecode } from './native-requester-decode.js';
 import type {
   NativeInfrastructurePrimitives,
   NativeSolverWritePrimitives,
@@ -23,6 +20,7 @@ import type {
 import { createNativeOperatorHost, type NativeOperatorHost } from './native-operator-host.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProductConfig } from './native-product-config.js';
+import { buildNativeSolutionCorrections } from './native-solution-corrections.js';
 import { openNativeSolutionPublisher } from './native-solution-publisher.js';
 import { NativeSolutionCoordinator } from './native-solution-coordinator.js';
 import { buildNativeSolutionSettlementPort } from './native-solution-settlement.js';
@@ -33,11 +31,9 @@ import { openOperatorEvidence } from './evidence-join.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
 import { NativeConstructionScope } from './native-construction-scope.js';
-import { publicationKey } from './native-operation-identity.js';
 // One assembly, two callers (one-swap M2): these bodies were extracted verbatim from this file
 // so the fleet daemon's native composition builds the same graph rather than a second copy.
 import {
-  address,
   buildNativeClaimPolicy,
   buildNativeEvaluationSpecResolver,
   buildNativeExactDocuments,
@@ -45,13 +41,8 @@ import {
   closeAll,
   countActiveNativeEngagements,
   digest,
-  hash,
-  object,
   roleKeyIds,
-  uint,
 } from './native-assembly.js';
-
-const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
 
 interface SolverProductionInput {
   readonly config: NativeProductConfig;
@@ -139,123 +130,10 @@ export async function buildNativeSolverProductionHost(
   scope.defer(publisher.close);
   const endpoint = await input.infrastructure.mountPublicSource(publisher.handler);
   scope.defer(endpoint.close);
-  store.db.exec(`
-    CREATE TABLE IF NOT EXISTS native_solution_discovery_corrections (
-      event_key TEXT NOT NULL,
-      action TEXT NOT NULL,
-      delivery_digest TEXT NOT NULL,
-      announcement_id TEXT NOT NULL,
-      source_sequence TEXT NOT NULL,
-      entry_digest TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      PRIMARY KEY (event_key, action)
-    );
-  `);
-
-  const deliveryPublicationFor = (event: ReturnType<NativeMarketplaceEventRepository['solutionCandidates']>[number]) => {
-    const facts = event.facts as { readonly taskId: bigint; readonly attemptIndex: number };
-    return store.db.prepare(
-      `SELECT a.engagement_id, a.record_digest, a.media_type, a.family, a.name, a.exact_bytes,
-              p.publication_key, p.source_id
-         FROM native_engagements e
-         JOIN native_solution_artifacts a ON a.engagement_id = e.engagement_id AND a.role = 'delivery'
-         JOIN native_publication_outbox p ON p.engagement_id = e.engagement_id
-           AND p.role = 'delivery' AND p.record_digest = a.record_digest AND p.status = 'published'
-        WHERE e.task_id = ? AND e.attempt_index = ?`,
-    ).get(facts.taskId.toString(10), facts.attemptIndex) as {
-      engagement_id: `sha256:${string}`; record_digest: `sha256:${string}`; media_type: string;
-      family: string; name: string | null; exact_bytes: Uint8Array;
-      publication_key: `sha256:${string}`; source_id: string;
-    } | undefined;
-  };
-
-  const reconcileSignedReorgCorrections = async (): Promise<void> => {
-    for (const orphan of marketplaceEvents.orphanedSolutionCandidates()) {
-      const exists = store.db.prepare(
-        `SELECT 1 FROM native_solution_discovery_corrections WHERE event_key = ? AND action = 'withdrawn'`,
-      ).get(orphan.eventKey);
-      if (exists !== undefined) continue;
-      const delivery = deliveryPublicationFor(orphan.event);
-      if (delivery === undefined) continue;
-      const latestAvailable = store.db.prepare(
-        `SELECT announcement_id FROM native_solution_discovery_corrections
-          WHERE delivery_digest = ? AND action = 'available' ORDER BY rowid DESC LIMIT 1`,
-      ).get(delivery.record_digest) as { announcement_id: string } | undefined;
-      const withdrawalKey = publicationKey({
-        sourceId: delivery.source_id,
-        role: 'delivery',
-        recordDigest: delivery.record_digest,
-        availabilityState: `withdrawn:${orphan.event.derivation.blockHash.toLowerCase()}`,
-      });
-      const receipt = await publisher.withdraw({
-        withdrawalKey,
-        targetAnnouncementId: latestAvailable?.announcement_id ?? delivery.publication_key,
-        recordDigest: delivery.record_digest,
-        bytes: delivery.exact_bytes,
-        mediaType: delivery.media_type,
-        timestamp: orphan.orphanedAt,
-        reason: 'reorged',
-      });
-      store.db.prepare(
-        `INSERT INTO native_solution_discovery_corrections
-          (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)
-         VALUES (?, 'withdrawn', ?, ?, ?, ?, ?)`,
-      ).run(orphan.eventKey, delivery.record_digest, withdrawalKey, receipt.sequence, receipt.entryDigest, orphan.orphanedAt);
-    }
-    for (const event of marketplaceEvents.solutionCandidates()) {
-      const delivery = deliveryPublicationFor(event);
-      if (delivery === undefined) continue;
-      const hadWithdrawal = store.db.prepare(
-        `SELECT 1 FROM native_solution_discovery_corrections
-          WHERE delivery_digest = ? AND action = 'withdrawn' LIMIT 1`,
-      ).get(delivery.record_digest);
-      if (hadWithdrawal === undefined) continue;
-      const key = [event.derivation.chainId, event.derivation.contract.toLowerCase(),
-        event.derivation.blockHash.toLowerCase(), event.derivation.txHash.toLowerCase(),
-        event.derivation.logIndex].join(':');
-      const exists = store.db.prepare(
-        `SELECT 1 FROM native_solution_discovery_corrections WHERE event_key = ? AND action = 'available'`,
-      ).get(key);
-      if (exists !== undefined) continue;
-      const announcementId = publicationKey({
-        sourceId: delivery.source_id,
-        role: 'delivery',
-        recordDigest: delivery.record_digest,
-        availabilityState: `available:${event.derivation.blockHash.toLowerCase()}`,
-      });
-      const timestamp = new Date().toISOString();
-      const receipt = await publisher.publish({
-        publication: {
-          publicationKey: announcementId,
-          engagementId: delivery.engagement_id,
-          sourceId: delivery.source_id,
-          role: 'delivery',
-          recordDigest: delivery.record_digest,
-          availability: 'available',
-          status: 'intent',
-          detail: { canonicalBlockHash: event.derivation.blockHash },
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        },
-        artifact: {
-          engagementId: delivery.engagement_id,
-          role: 'delivery',
-          family: delivery.family,
-          mediaType: delivery.media_type,
-          name: delivery.name,
-          digest: delivery.record_digest,
-          bytes: delivery.exact_bytes,
-          createdAt: timestamp,
-        },
-        bytes: delivery.exact_bytes,
-      });
-      store.db.prepare(
-        `INSERT INTO native_solution_discovery_corrections
-          (event_key, action, delivery_digest, announcement_id, source_sequence, entry_digest, created_at)
-         VALUES (?, 'available', ?, ?, ?, ?, ?)`,
-      ).run(key, delivery.record_digest, announcementId, receipt.sequence, receipt.entryDigest, timestamp);
-    }
-  };
+  // The DDL this reconciler needs moved to `NATIVE_OPERATOR_STATE_SCHEMA` (one-swap M3, #2461):
+  // `Store`'s constructor runs it, so this host and the fleet daemon both get the table from
+  // `Store` instead of whichever one happened to `exec` it first.
+  const corrections = buildNativeSolutionCorrections({ store, publisher, marketplaceEvents });
   const requesterSources = config.sources.filter(({ role }) => role === 'requester');
   if (requesterSources.length !== 1) throw new Error('native solver requires exactly one requester source');
   const transport = createHttpTransport('');
@@ -269,46 +147,15 @@ export async function buildNativeSolverProductionHost(
     store,
     sources,
     transport,
-    async decode(discoveryInput) {
-      await input.trust.assertFresh();
-      const facts = object(discoveryInput.announcement.facts, 'requester facts');
-      const association = object(facts[ASSOCIATION], 'requester association');
-      const authorityTime = parseNativeAuthorityTimeAnchor(association['authorityTime']);
-      if (!await input.infrastructure.authorityTime.verifyFinalized(authorityTime)) {
-        throw new Error('native requester authority time is not canonical and finalized');
-      }
-      const submissionLocation = discoveryInput.announcement.locations ?? [];
-      if (submissionLocation.length !== 1) throw new Error('native requester announcement must advertise one Submission location');
-      const submissionBytes = await input.infrastructure.records.byLocation(submissionLocation[0]!.locator);
-      const lookup = {
-        chainId: Number(uint(association['chainId'], 'chainId')),
-        coordinator: address(association['coordinator'], 'coordinator'),
-        creator: address(association['creator'], 'creator'),
-        taskId: uint(association['taskId'], 'taskId'),
-        taskDigest: digest(association['taskDigest'], 'taskDigest'),
-        txHash: hash(association['txHash'], 'txHash'),
-        terms: (() => {
-          const terms = object(association['postingTerms'], 'posting terms');
-          if (terms['allowSolverSelfEvaluation'] !== false) {
-            throw new Error('native requester permits solver self-evaluation');
-          }
-          return {
-            solutionMaxDeliveryRateWei: uint(terms['solutionMaxDeliveryRateWei'], 'solution rate'),
-            verdictMaxDeliveryRateWei: uint(terms['verdictMaxDeliveryRateWei'], 'verdict rate'),
-            responseTimeoutSeconds: uint(terms['responseTimeoutSeconds'], 'response timeout'),
-            allowSolverSelfEvaluation: false as const,
-          };
-        })(),
-        maxClaims: 1 as const,
-      };
-      const canonical = await input.infrastructure.solver!.canonicalTaskCreated(lookup);
-      if (canonical === null) throw new Error('native TaskCreated is not canonical and finalized');
-      return decodeNativeRequesterAnnouncement({
-        discovery: discoveryInput,
-        canonicalTaskCreated: canonical,
-        submissionBytes,
-      });
-    },
+    // One decode, two callers (one-swap M3, #2461): extracted verbatim to
+    // `native-requester-decode.ts` so the fleet daemon installs THE SAME canonical-and-finalized
+    // gate rather than a second one that could drift.
+    decode: buildNativeRequesterAnnouncementDecode({
+      assertTrustFresh: () => input.trust.assertFresh(),
+      verifyAuthorityTime: (anchor) => input.infrastructure.authorityTime.verifyFinalized(anchor),
+      recordByLocation: (locator) => input.infrastructure.records.byLocation(locator),
+      canonicalTaskCreated: (expected) => input.infrastructure.solver!.canonicalTaskCreated(expected),
+    }),
   });
 
   const exactDocuments = buildNativeExactDocuments(input.infrastructure.records);
@@ -378,35 +225,9 @@ export async function buildNativeSolverProductionHost(
       await input.lease.renew();
       claim.renewWorker();
       await syncVenue();
-      await reconcileSignedReorgCorrections();
+      await corrections.reconcile();
       await discovery.sync();
-      for (const withdrawal of discovery.takePendingWithdrawals()) {
-        const target = store.db.prepare(
-          `SELECT id, card_json FROM native_discovery_cards
-            WHERE source_agent = ? AND source_name = ? AND announcement_id = ?
-            ORDER BY id DESC LIMIT 1`,
-        ).get(withdrawal.source.agent, withdrawal.source.name, withdrawal.retracts) as {
-          id: number; card_json: string;
-        } | undefined;
-        if (target === undefined) throw new Error('requester withdrawal target is absent from authenticated history');
-        const card = JSON.parse(target.card_json) as {
-          record?: { digest?: string };
-          facts?: Record<string, unknown>;
-        };
-        const taskDigest = card.facts?.['taskDigest'];
-        const submissionDigest = card.record?.digest;
-        if (typeof taskDigest === 'string' && typeof submissionDigest === 'string') {
-          store.db.prepare(
-            `UPDATE native_engagements SET state = 'withdrawn', updated_at = ?
-              WHERE task_digest = ? AND submission_digest = ?
-                AND state IN ('discovered', 'eligible')`,
-          ).run(new Date().toISOString(), taskDigest, submissionDigest);
-        }
-        store.db.prepare(
-          `UPDATE native_discovery_cards SET acknowledged_at = ? WHERE id = ? AND acknowledged_at IS NULL`,
-        ).run(new Date().toISOString(), target.id);
-        discovery.acknowledgeWithdrawal(withdrawal);
-      }
+      await drainNativeDiscoveryWithdrawals({ store, discovery });
       for (const queued of discovery.takePending()) {
         const documents = await exactDocuments({
           taskDigest: digest(queued.card.facts['taskDigest'], 'taskDigest'),

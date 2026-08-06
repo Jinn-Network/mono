@@ -228,6 +228,61 @@ export const NativePublicBaseUrlSchema = z
     return protocol === 'https:' || protocol === 'http:';
   }, 'must use HTTP(S)');
 
+/**
+ * The signed public record sources this operator consumes — `sources` in
+ * `daemon/native-product-config.ts`.
+ *
+ * One-swap M3 (#2461): M1/M2 did not carry this key, and without it the fleet daemon cannot build
+ * a native discovery consumer at all (`buildNativeDiscoverySources` resolves each configured
+ * source's `.well-known` introduction and installs policy-scoped signed-chain verification against
+ * it). M3 is the milestone that consumes it, so it lands here. Recorded as M3 finding 1.
+ *
+ * Named `recordSources` rather than the landed `sources` — the SECOND recorded exception to the
+ * names-as-landed rule after M2's `agentIri`, for the same reason. On the native product config
+ * `sources` sits inside `operator.native`, where the noun is unambiguous; at the root of a
+ * `config.json` that already carries `taskSources`, `peers` and `harvest.sources`, a bare
+ * `sources` reads as "the tasks I generate from". Same value, same shape, unambiguous name.
+ *
+ * The one invariant enforced here is the one `NativeOperatorConfigSchema` enforces: a source
+ * identity (`agent` + `name`) may not appear twice. WHICH roles a process requires is a function
+ * of the loops it runs — M3 needs exactly one `requester` source for the solver loop, and refuses
+ * at composition rather than at load, so an operator who configures an evaluator source ahead of
+ * M4 is not blocked by the loader.
+ */
+export const NativeRecordSourceSchema = z
+  .object({
+    role: z.enum(['requester', 'solver', 'evaluator']),
+    agent: NativeAgentIriSchema,
+    name: z.string().min(1),
+    baseUrl: z
+      .string()
+      .url()
+      .refine((value) => {
+        const { protocol } = new URL(value);
+        return protocol === 'https:' || protocol === 'http:';
+      }, 'must use HTTP(S)'),
+  })
+  .strict();
+export type NativeRecordSource = z.infer<typeof NativeRecordSourceSchema>;
+
+export const NativeRecordSourcesSchema = z
+  .array(NativeRecordSourceSchema)
+  .min(1)
+  .superRefine((value, context) => {
+    const seen = new Set<string>();
+    for (const [index, source] of value.entries()) {
+      const key = `${source.agent}\0${source.name}`;
+      if (seen.has(key)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [index],
+          message: 'duplicate source identity',
+        });
+      }
+      seen.add(key);
+    }
+  });
+
 /** Confirmation depth the native infrastructure treats as finalized. */
 export const NativeFinalityConfigSchema = z
   .object({ confirmations: z.number().int().positive() })
