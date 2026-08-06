@@ -31,6 +31,13 @@ import {
   ExecutionWiringConfigEntrySchema,
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
+import {
+  NativeEvaluatorConfigSchema,
+  NativeFinalityConfigSchema,
+  NativeIdentityStoresConfigSchema,
+  NativeTrustPolicyGenesisDigestSchema,
+  NativeTrustRootsPathSchema,
+} from './config/native-sections.js';
 import { migrateConfigShapeV2, type ConfigMigrationReport } from './config/migrate-shape-v2.js';
 import { recordPhaseDTransitionUse } from './compatibility/phase-d-transition-usage.js';
 
@@ -500,6 +507,33 @@ export const JinnConfigSchema = z.object({
   claimPolicy: ClaimPolicyConfigSchema.optional(),
   executionWiring: z.array(ExecutionWiringConfigEntrySchema).optional(),
   posting: z.array(PostingConfigEntrySchema).optional(),
+
+  /**
+   * Dark shape-v2 native sections (one-swap M1, umbrella #2461,
+   * DR-2026-08-05). The config surface the swap's native machinery reads,
+   * landed ahead of the machinery itself and consumed by nothing today.
+   *
+   * All optional and absent-tolerant, matching the stage-1 keys above: an
+   * operator who runs none of the native loops carries none of these keys.
+   * Each section is `.strict()` in `config/native-sections.ts` so a typo
+   * inside a configured section refuses instead of being silently dropped;
+   * the root deliberately stays non-strict.
+   *
+   * These carry no network, chainId, or contract coupling — native mode on
+   * mainnet is an explicit boot refusal (`assertNativeDeployment`, DR
+   * decision 8), never something a config file can express as a fallback.
+   * Enablement semantics (including `evaluator.enabled`) belong to M2's mode
+   * selection: on the pre-swap daemon these keys are inert, so a stray
+   * `enabled: true` annotates nothing and refuses nothing.
+   *
+   * No env overrides — a dark surface has nothing to override. Env vars are
+   * added by the milestone that gives a key runtime meaning.
+   */
+  evaluator: NativeEvaluatorConfigSchema.optional(),
+  identityStores: NativeIdentityStoresConfigSchema.optional(),
+  trustRootsPath: NativeTrustRootsPathSchema.optional(),
+  trustPolicyGenesisDigest: NativeTrustPolicyGenesisDigestSchema.optional(),
+  finality: NativeFinalityConfigSchema.optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the
