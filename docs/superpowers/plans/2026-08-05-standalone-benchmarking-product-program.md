@@ -244,3 +244,13 @@ demonstrated end-to-end on the real local backend and verified. 441
 tests, guards green. Second drift note: origin/integration/evidence-v1
 advanced a further 13 commits past 0bf0c786; refresh still awaiting
 explicit human approval.
+
+| BP-20 | integrated | `9ad21c6b1` | `571169c9b` (worktree bench-bp20) | PASS, 3 non-blocking fixed + delta-confirmed (sonnet reviewer) | see git log 2026-08-06 |
+
+BP-20 verification: 485/485 tests; preview purity proven (byte-identical
+sealed Run across previewed/un-previewed paths; official-state sha256
+snapshot unchanged by previews); disclosure plumbing in report
+limitations + claim package; quote presentation (run size, coverage,
+caps, estimate-from-rehearsal only from real timings). Engine gap
+recorded for BP-21: evaluation dispatch does not yet honor minVerdicts
+(quote presents it as committed requirement, honestly framed).
