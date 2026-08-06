@@ -62,6 +62,11 @@ export const RunStateSchema = z.object({
   closedAt: Rfc3339Schema.optional(),
   /** sha256 hex of the sealed Matrix record's exact bytes, set at `run.collect`. */
   matrixSha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the sealed Report record's exact PAYLOAD bytes, set at `report` (BP-13). */
+  reportSha256: Sha256HexSchema.optional(),
+  /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
+  reportEnvelopeSha256: Sha256HexSchema.optional(),
+  reportedAt: Rfc3339Schema.optional(),
 });
 
 export type RunState = z.infer<typeof RunStateSchema>;

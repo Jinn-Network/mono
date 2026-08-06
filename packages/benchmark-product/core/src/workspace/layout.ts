@@ -69,3 +69,9 @@ export function runJournalPath(workspaceDir: string, draftId: string): string {
 export function resultsArtifactPath(workspaceDir: string, draftId: string): string {
   return join(artifactsDir(workspaceDir), draftId, "results.json");
 }
+
+/** `<ws>/artifacts/<draftId>/claim-package.json` — the derived claim package artifact (BP-13,
+ * spec §8.2). */
+export function claimPackageArtifactPath(workspaceDir: string, draftId: string): string {
+  return join(artifactsDir(workspaceDir), draftId, "claim-package.json");
+}

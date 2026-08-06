@@ -20,6 +20,7 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/environment-record", ["environments", "record"]],
   ["@jinn-network/task-execution-profiles", ["task-execution", "profiles"]],
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
+  ["@jinn-network/benchmarking-aggregate", ["benchmarking", "aggregate"]],
   ["@jinn-network/task-admission", ["task-supply", "admission"]],
   ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
   ["@jinn-network/task-execution-backend", ["task-execution", "backend"]],
@@ -111,6 +112,7 @@ if (!PRODUCT_BRANDING.attribution.includes("independently verifiable")) {
 const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoot, "package.json"))}, "utf8"));
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
+  "@jinn-network/benchmarking-aggregate",
   "@jinn-network/benchmarking-interop",
   "@jinn-network/benchmarking-local",
   "@jinn-network/benchmarking-records",

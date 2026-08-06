@@ -85,8 +85,11 @@ export interface RunResultsDocument {
 
 /** Plain-language statements of what a local, self-run venue does and does not prove (spec §7.1).
  * Never hidden, never softened into a stronger claim — this is the disclosure the design
- * requires "in the product and in every report produced from a local run". */
-const LOCAL_VENUE_LIMITS: readonly string[] = [
+ * requires "in the product and in every report produced from a local run". Exported (BP-13) so
+ * `../operations/report.ts` can pass the same limits into every sealed Report, and
+ * `../report/claim.ts` into every claim package's `venueHonesty` block — one list, never
+ * duplicated. */
+export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "This is a local, self-run venue: the same operator controls task dispatch, execution, and evaluation.",
   "Pre-registration here is a discipline enforced by this tool, not a proof against the run's own owner — nothing prevents the owner from having altered the record before publishing it.",
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is vacuous: this venue's launchers admit only one isolation policy, so matching it proves nothing about containment strength.",
@@ -124,7 +127,9 @@ function toResultsCell(workspaceDir: string, cell: MatrixCell): RunResultsCell {
   };
 }
 
-function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHonesty["unverifiableAxisCounts"] {
+/** Exported (BP-13) so `../report/claim.ts` builds its `venueHonesty` block from the same
+ * per-axis tally, rather than duplicating this walk over the matrix's cells. */
+export function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHonesty["unverifiableAxisCounts"] {
   const axes = ["harness", "model", "loadout", "isolation"] as const;
   const counts = { harness: 0, model: 0, loadout: 0, isolation: 0 };
   for (const cell of cells) {

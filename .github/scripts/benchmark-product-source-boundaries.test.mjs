@@ -20,11 +20,12 @@
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor` +
 // `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters` (the
-// real evaluation leg), and `trust-core` (DSSE verdict signing). Everything else the design's §3
-// table names (`benchmarking-aggregate`, `benchmarking-marketplace`, the `evidence-*` family,
-// `environment-record`) is scope for a later packet and stays refused here until a packet adds it.
-// Marketplace, every other product, and the client are denied outright, same as the
-// policy-optimization precedent.
+// real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// verification) added `benchmarking-aggregate` (`produceReport`/`verifyReport`, the §9.2 method
+// registry). Everything else the design's §3 table names (`benchmarking-marketplace`, the
+// `evidence-*` family, `environment-record`) is scope for a later packet and stays refused here
+// until a packet adds it. Marketplace, every other product, and the client are denied outright,
+// same as the policy-optimization precedent.
 //
 // **No deep imports (product design §3, "no deep imports — public package entries only").** A
 // specifier that reaches past a Jinn package's public root -- `@jinn-network/<name>/src/...` or
@@ -60,6 +61,7 @@ function sourceRoots() {
 }
 
 const ALLOWED_JINN_PACKAGES = [
+  '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local',
   '@jinn-network/benchmarking-records',
@@ -110,7 +112,6 @@ const EXPLICITLY_DENIED = [
   '@jinn-network/environment-record',
   // Not yet admitted: each is scope for a later packet (product design §3), added deliberately when
   // that packet wires it up.
-  '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-marketplace',
   // Deep-import exemplars (exact specifiers, not wildcards): refused by the deep-import rule even
   // though `benchmarking-records` is allow-listed and `task-execution-protocol` is a portal

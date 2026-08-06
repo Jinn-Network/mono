@@ -56,7 +56,8 @@ jobs:
       # real runtime dependencies, not the prior test-only `task-execution-launchers`
       # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
       # leg (evaluation-harness, evaluator-adapters, backend-local, benchmarking-run,
-      # benchmarking-local).
+      # benchmarking-local), then BP-13's `benchmarking-aggregate` (Report production/
+      # verification -- depends only on records + trust-core, both already built earlier).
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
@@ -64,6 +65,7 @@ jobs:
           (cd packages/environments/record && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
@@ -128,7 +130,7 @@ jobs:
       # --ignore-scripts` ships whatever `dist/` is on disk — so every runtime portal dependency
       # needs its build here too, not only the product's. This mirrors
       # `benchmark-product-packed-types.test.mjs`'s own `CROSS_TREE_PACKAGES` exactly, same order:
-      # every one of the product's 15 direct runtime dependencies plus the 6 transitive-only
+      # every one of the product's 16 direct runtime dependencies plus the 6 transitive-only
       # portal resolutions (evidence-* / attestation-issuer) that package.json's `resolutions`
       # block declares for them.
       - name: Build portal dependencies from source
@@ -138,6 +140,7 @@ jobs:
           (cd packages/environments/record && yarn install --immutable && yarn build)
           (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
           (cd packages/task-execution/backend && yarn install --immutable && yarn build)

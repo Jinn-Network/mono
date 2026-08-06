@@ -21,20 +21,44 @@
  * ).sort()` key order); `sealSignedRecord` re-canonicalizes via `@jinn-network/trust-core`'s
  * `canonicalJsonBytes`, which is COMPACT (no whitespace, `compareCodeUnitStrings` key order).
  * The two canonicalizers never produce the same bytes for any non-trivial object, so the
- * byte-equality assertion is unsatisfiable for genuine harness output (confirmed empirically by
- * this module's own integration test against the real, compiled evaluation-harness binary — see
- * `./venue.integration.test.ts`). This module therefore does not reconstruct the payload at all:
- * it DSSE-wraps the harness's `out/verdict` bytes VERBATIM (`dssePreAuthEncoding` +
- * `sealDsseEnvelope` directly), which is both simpler and a more literal reading of "seal-once" —
- * the harness's bytes already are the sealed record; this module signs and wraps them, never
- * re-derives them.
+ * byte-equality assertion `sealSignedRecord` performs is unsatisfiable for genuine harness
+ * output (confirmed empirically by this module's own integration test against the real, compiled
+ * evaluation-harness binary — see `./venue.integration.test.ts`). That earlier "wrap verbatim"
+ * reasoning stands as far as it goes: it is a correct read of *this module's own* seal-once
+ * posture, and of why `sealSignedRecord`'s particular byte-equality assertion cannot be reused
+ * here.
+ *
+ * BP-13 CORRECTION (F1): it is not, however, sufficient. The aggregation boundary this module's
+ * output feeds — `@jinn-network/benchmarking-aggregate`'s `resolveVerdictOutcome`
+ * (`resolved-inputs.ts`'s `parseCanonicalJson`) — requires every referenced verdict's DSSE
+ * payload bytes to be the EXACT trust-core canonical (compact, code-unit-sorted) encoding of the
+ * statement; `bytesEqual(bytes, canonicalJsonBytes(value))` is asserted at wilson-recompute time,
+ * not just at seal time. Wrapping the harness's pretty-printed bytes verbatim therefore sealed a
+ * verdict that would fail `verifyReport`/`produceReport`'s own recompute for every real evaluation
+ * — the earlier fix satisfied this module's local tests but not the boundary one packet later
+ * actually reads through. The correction: after the evaluator-id and spec-digest validations
+ * below, this module re-encodes the PARSED statement with trust-core's `canonicalJsonBytes` and
+ * DSSE-wraps and signs THOSE bytes — a semantic-content-preserving re-encoding of the harness's
+ * own statement (same fields, same values, canonical byte order/whitespace), signed once at seal
+ * time. This is still "seal once, never re-derive the platform's judgment of the statement's
+ * content" in spirit: no field is added, dropped, or recomputed, only re-serialized.
+ *
+ * One consequence, deliberately fail-loud rather than silently reshaping data:
+ * `canonicalJsonBytes` refuses any JSON number that is not an exact safe integer (program ruling
+ * §7.14 — fractional/non-integer quantities must be encoded as decimal strings). A statement
+ * whose harness wrote an inherently fractional `measurements[].value` as a JSON number, not a
+ * string, cannot be canonicalized and is refused here as a typed `"execution"` error rather than
+ * silently truncated or NaN-coerced. The real local venue is unaffected: the prediction evaluator
+ * adapter (`@jinn-network/task-execution-evaluator-adapters`) declares every Brier measurement's
+ * `type` as `"string"` and formats them with `toFixed`, so its harness output never carries this
+ * shape — see `./venue.integration.test.ts` for the empirical proof against the real binary.
  */
 
 import { generateKeyPairSync, sign as edSign, createPrivateKey, createHash, type KeyObject } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
 import { refuse } from "../errors.js";
 
@@ -136,8 +160,11 @@ function decodeUtf8Json(bytes: Uint8Array, label: string): unknown {
   }
 }
 
-function parseVerdictStatement(bytes: Uint8Array, label: string): VerdictStatementView {
-  const json = decodeUtf8Json(bytes, label);
+/** Validates already-decoded JSON against the Result Evaluation Statement shape and projects the
+ * product-scope view. Split out of `parseVerdictStatement` so a caller that already has the
+ * decoded JSON (`sealVerdictStatement`, which also needs it for canonicalization) can validate
+ * without decoding the same bytes a second time. */
+function parseVerdictStatementJson(json: unknown, label: string): VerdictStatementView {
   const parsed = VerdictStatementSchema.safeParse(json);
   if (!parsed.success) {
     refuse("execution", label, `${label} does not conform to the expected Result Evaluation Statement shape`);
@@ -154,6 +181,11 @@ function parseVerdictStatement(bytes: Uint8Array, label: string): VerdictStateme
   };
 }
 
+function parseVerdictStatement(bytes: Uint8Array, label: string): VerdictStatementView {
+  const json = decodeUtf8Json(bytes, label);
+  return parseVerdictStatementJson(json, label);
+}
+
 export interface SealVerdictStatementInput {
   /** The harness's own unsigned `out/verdict` bytes, verbatim. */
   readonly statementBytes: Uint8Array;
@@ -168,14 +200,18 @@ export interface SealVerdictStatementInput {
 /**
  * Validates the harness's unsigned statement against this evaluation cell's exact authority
  * (evaluator identity, EvaluationSpec digest — mirrors `native-evaluator-composition.ts`'s
- * checks), then DSSE-wraps `input.statementBytes` VERBATIM — no re-serialization, no
- * re-canonicalization (see the module-level comment above for why: the two canonicalizers in
- * this stack disagree byte-for-byte, so reconstructing the payload and asserting equality can
- * never succeed against real harness output). The signature covers exactly the bytes the harness
- * wrote.
+ * checks), then re-encodes the PARSED statement as trust-core canonical bytes and DSSE-wraps and
+ * signs THOSE bytes (see the module-level comment above, BP-13 correction F1: the aggregation
+ * boundary this seals for requires the exact canonical encoding, not the harness's own
+ * pretty-printed bytes). A statement that cannot be canonicalized — most commonly a
+ * `measurements[].value` written as a non-safe-integer JSON number rather than a decimal string —
+ * is refused as a typed `"execution"` error rather than silently reshaped.
  */
 export async function sealVerdictStatement(input: SealVerdictStatementInput): Promise<Uint8Array> {
-  const view = parseVerdictStatement(input.statementBytes, "verdict statement");
+  // Decode once — the validation view and the canonicalization below both consume this same
+  // parsed JSON, rather than each re-decoding `input.statementBytes` independently.
+  const parsedStatement = decodeUtf8Json(input.statementBytes, "verdict statement");
+  const view = parseVerdictStatementJson(parsedStatement, "verdict statement");
   if (view.evaluatorId !== input.evaluatorId) {
     refuse(
       "execution",
@@ -190,14 +226,28 @@ export async function sealVerdictStatement(input: SealVerdictStatementInput): Pr
       "verdict statement evaluation specification digest does not match this evaluation cell's EvaluationSpec",
     );
   }
-  const preAuthEncoding = dssePreAuthEncoding(VERDICT_DSSE_PAYLOAD_TYPE, input.statementBytes);
+
+  let canonicalBytes: Uint8Array;
+  try {
+    canonicalBytes = canonicalJsonBytes(parsedStatement);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    refuse(
+      "execution",
+      "verdict statement",
+      `verdict statement cannot be canonicalized (§7.14 — fractional measurement values must be `
+        + `decimal strings, not JSON numbers): ${detail}`,
+    );
+  }
+
+  const preAuthEncoding = dssePreAuthEncoding(VERDICT_DSSE_PAYLOAD_TYPE, canonicalBytes);
   const signatures = await input.signer({
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
-    payloadBytes: input.statementBytes,
+    payloadBytes: canonicalBytes,
     preAuthEncoding,
   });
   return sealDsseEnvelope({
-    payloadBytes: input.statementBytes,
+    payloadBytes: canonicalBytes,
     signatures,
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
   });

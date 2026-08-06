@@ -157,8 +157,10 @@ describe("compileDraft — success path", () => {
     expect(compiled.plannedRun.record.venue).toEqual({ kind: "self-run" });
     expect(compiled.plannedRun.record.closeAt).toBe("2026-08-06T00:00:00Z");
     expect(compiled.plannedRun.record.policy.submissionBaseline).toEqual({ isolationPolicy: VENUE_ISOLATION_POLICY });
+    // BP-13 F2: parameters carries the direct-check preset's resolved verdictRule ("sole") — the
+    // exact shape produceReport's derivePreregistered compares against (report.ts ~line 299).
     expect(compiled.plannedRun.record.analysisPlan).toEqual([
-      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+      { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: { verdictRule: "sole" } },
     ]);
     expect(compiled.benchmarkSha256).toBe(document.spec.taskSet.kind === "benchmark" ? document.spec.taskSet.benchmarkSha256 : undefined);
     expect(compiled.benchmarkRecord.items.length).toBeGreaterThanOrEqual(2);

@@ -32,6 +32,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@jinn-network/benchmark-product-core@workspace:."
   dependencies:
+    "@jinn-network/benchmarking-aggregate": "npm:0.1.0"
     "@jinn-network/benchmarking-interop": "npm:0.1.0"
     "@jinn-network/benchmarking-local": "npm:0.1.0"
     "@jinn-network/benchmarking-records": "npm:0.1.0"
@@ -54,6 +55,15 @@ __metadata:
   bin:
     benchmark-product: ./dist/cli/bin.js
   languageName: unknown
+  linkType: soft
+
+"@jinn-network/benchmarking-aggregate@portal:../../benchmarking/aggregate::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/benchmarking-aggregate@portal:../../benchmarking/aggregate::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A."
+  dependencies:
+    "@jinn-network/benchmarking-records": "npm:0.1.0"
+    "@jinn-network/trust-core": "npm:0.1.0"
+  languageName: node
   linkType: soft
 
 "@jinn-network/benchmarking-interop@portal:../../benchmarking/interop::locator=%40jinn-network%2Fbenchmark-product-core%40workspace%3A.":

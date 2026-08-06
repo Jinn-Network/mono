@@ -37,12 +37,14 @@ const PRODUCT_PACKAGES = [
 // `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor`
 // + `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
-// (the real evaluation leg), and `trust-core` (DSSE verdict signing). New edges are added
-// deliberately, one PR at a time, in this map and in the source-boundary guard's allow-list
-// together.
+// (the real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
+// verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
+// method registry. New edges are added deliberately, one PR at a time, in this map and in the
+// source-boundary guard's allow-list together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
+      '@jinn-network/benchmarking-aggregate',
       '@jinn-network/benchmarking-interop',
       '@jinn-network/benchmarking-local',
       '@jinn-network/benchmarking-records',
@@ -78,6 +80,7 @@ const JINN_DEPENDENCY_GRAPH = new Map([
 
 const SIBLING_TREE_DIRS = new Map([
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
+  ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],

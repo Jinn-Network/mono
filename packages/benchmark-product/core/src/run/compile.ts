@@ -13,6 +13,17 @@
  * re-raised as this product's typed `"validation"` error carrying the platform's own detail —
  * this module never redefines what a valid Run record is, it only forwards the platform's
  * judgment through the product's typed-error posture (spec §4.3).
+ *
+ * BP-13 CORRECTION (F2): the sole `analysisPlan` entry's `parameters` carries the draft's
+ * resolved `verdictRule` (`{ verdictRule: resolvedAssurance.verdictRule }`), not `{}`.
+ * `@jinn-network/benchmarking-aggregate`'s `produceReport` merges `verdictRule` into the method's
+ * own parameters tuple before comparing it against a Run's sealed `analysisPlan` entries
+ * (`report.ts`'s `derivePreregistered`, exact-JSON equality) to derive `preregistered`. An empty
+ * `parameters` object here can never equal that merged tuple, so every report produced from a
+ * Run compiled this way would derive `preregistered: false` regardless of how genuinely
+ * pre-registered the analysis was — this field is what BP-13's Report operation reads back to
+ * prove pre-registration, so it must already carry the exact shape `produceReport` will compare
+ * against.
  */
 
 import {
@@ -100,7 +111,11 @@ export function compileDraft(input: CompileDraftInput): CompiledRun {
         submissionBaseline: { isolationPolicy: VENUE_ISOLATION_POLICY },
       },
       analysisPlan: [
-        { method: BENCHMARKING_METHOD_IDS.wilson, version: BENCHMARKING_METHOD_VERSION, parameters: {} },
+        {
+          method: BENCHMARKING_METHOD_IDS.wilson,
+          version: BENCHMARKING_METHOD_VERSION,
+          parameters: { verdictRule: resolvedAssurance.verdictRule },
+        },
       ],
       ...(spec.budget !== undefined ? { budget: spec.budget } : {}),
       venue: { kind: "self-run" },

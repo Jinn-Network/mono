@@ -35,17 +35,20 @@ const codeEntrypoints = [
 // full RUNTIME dependency closure -- direct dependencies plus every transitive @jinn-network edge
 // (none is on the registry), in dependency order (pack/install order): protocol + records (BP-01),
 // BP-11's intake edges (interop, task-admission, and their transitives environment-record /
-// trust-core / profiles), and BP-12's real local-venue stack (backend, backend-local, supervisor,
+// trust-core / profiles), BP-12's real local-venue stack (backend, backend-local, supervisor,
 // workspace, launchers, the evaluation-harness + evaluator-adapters pair, benchmarking-run,
 // benchmarking-local, and the evidence-* / attestation-issuer transitives the evaluation-harness
-// pair pulls in). Each `npm pack` is independent, and `--ignore-scripts` ships whatever `dist/` is
-// on disk -- CI builds every one of these before this script runs.
+// pair pulls in), and BP-13's `benchmarking-aggregate` (Report production/verification -- depends
+// only on records + trust-core, both already earlier in this list). Each `npm pack` is independent,
+// and `--ignore-scripts` ships whatever `dist/` is on disk -- CI builds every one of these before
+// this script runs.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
