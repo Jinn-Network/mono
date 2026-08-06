@@ -19,6 +19,7 @@
  *   because the R1 read-plane repoint needs the native tables where the API layer already looks.
  *   The caller passes that Store in; this module never constructs one.
  */
+import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
 import { createNativeRequesterSubmissionResolver } from '../native-requester/requester.js';
@@ -50,6 +51,36 @@ import {
 
 export class NativeFleetAssemblyError extends Error {
   override readonly name = 'NativeFleetAssemblyError';
+}
+
+/**
+ * Escrow spend bound for an operator who configured no `claimPolicy.spendCapWei`.
+ *
+ * PERMISSIVE, not zero — the same convention `composition-root.ts`'s `buildOperatorCaps` states
+ * for the legacy path (the F7-REVERSED no-claim-nothing ruling): "an unconfigured cap is
+ * permissive, not zero, because the host's USD rolling-window gates remain the operative spend
+ * bound." `'0'` is a DISTINCT, deliberate claim-nothing state that the operator app renders as
+ * such, so translating absence into it would silently reclassify "I never set a cap" as "I refuse
+ * every task".
+ *
+ * It matters here specifically: `evaluateNativeClaim` refuses on a zero `maxSpendWei` with reason
+ * `spend-policy`, which would mask the `finality-policy` refusal M3's discovery decode is supposed
+ * to surface — an operator debugging the swap would chase the wrong signal.
+ *
+ * `required()` is deliberately NOT used for this key either: demanding a cap from an operator who
+ * never set one contradicts the same ruling.
+ */
+const PERMISSIVE_ESCROW_MAX_WEI = (2n ** 256n - 1n).toString();
+
+/**
+ * `claimPolicy.spendCapWei` -> the native claim policy's `escrowMaxWei`. Absent is permissive; a
+ * configured value — INCLUDING `'0'` — flows through untouched. Exported so the distinction is
+ * tested directly rather than only through a fully-assembled runtime.
+ */
+export function resolveFleetEscrowMaxWei(
+  claimPolicy: JinnConfig['claimPolicy'],
+): string {
+  return claimPolicy?.spendCapWei ?? PERMISSIVE_ESCROW_MAX_WEI;
 }
 
 /**
@@ -139,6 +170,17 @@ export async function buildFleetNativeRuntime(
   const publicBaseUrl = required(config.publicBaseUrl, 'publicBaseUrl');
   const solverStore = required(identityStores.solver, 'identityStores.solver');
   const requesterStore = required(identityStores.requester, 'identityStores.requester');
+  // Schema-legal but never correct: `NativeIdentityStoresConfigSchema` only refuses a
+  // requester/admission collapse, so one path under both `solver` and `requester` parses fine and
+  // then fails deep inside `IdentityStore.loadOrCreate` with "identity store role set does not
+  // equal the explicitly owned role set" — an opaque error about a config mistake. Refuse it here,
+  // by name, before either store is opened.
+  if (solverStore === requesterStore) {
+    throw new NativeFleetAssemblyError(
+      'config.identityStores.solver and config.identityStores.requester name the same file; each '
+      + 'role family owns its own custody, and one store cannot hold both role sets',
+    );
+  }
 
   const records = createBaseSepoliaRecordTransport({
     ipfsApiUrl,
@@ -188,7 +230,7 @@ export async function buildFleetNativeRuntime(
   });
 
   const exactDocumentsByDigest = buildNativeExactDocuments(records);
-  const nativeRequesterStateDir = `${input.stateRoot}/native-requester`;
+  const nativeRequesterStateDir = join(input.stateRoot, 'native-requester');
 
   const claimRuntime: NativeClaimRuntimeInput = {
     operatorAgent: agentIri,
@@ -207,7 +249,7 @@ export async function buildFleetNativeRuntime(
         mechMarketplace: chain.mechMarketplace,
         activityChecker: chain.activityChecker,
       },
-      transactionCaps: { escrowMaxWei: String(config.claimPolicy?.spendCapWei ?? '0') },
+      transactionCaps: { escrowMaxWei: resolveFleetEscrowMaxWei(config.claimPolicy) },
     }),
     // Fail-CLOSED, deliberately. `native-solver-production.ts` can pass `true` here because its
     // discovery consumer's decode already refused any card whose TaskCreated was not canonical and
@@ -218,7 +260,7 @@ export async function buildFleetNativeRuntime(
     activeEngagements: () => countActiveNativeEngagements(state),
     worker: { ownerId: input.workerOwnerId, ttlMs: 30_000 },
     solution: {
-      publisherRootDir: `${input.stateRoot}/native-public/solver`,
+      publisherRootDir: join(input.stateRoot, 'native-public', 'solver'),
       publicBaseUrl,
       exactDocuments: exactDocumentsByDigest,
       resolveEvaluationSpec: buildNativeEvaluationSpecResolver(records),

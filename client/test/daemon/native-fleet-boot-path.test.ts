@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { resolveFleetCompositionMode } from '../../src/daemon/native-composition-mode.js';
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '../../src');
@@ -82,19 +82,31 @@ describe('legacy boot path is unchanged by the native assembly', () => {
     ]);
   });
 
-  it('constructs nothing native when the mode is legacy', async () => {
-    // A spy on the assembly entry point: selecting legacy must not reach it. Written as an
-    // explicit guard rather than a comment so a future `buildFleetNativeRuntime()` call that
-    // escapes the `COMPOSITION_MODE === 'native'` branch is caught.
-    const runtime = await import('../../src/daemon/native-fleet-runtime.js');
-    const build = vi.spyOn(runtime, 'buildFleetNativeRuntime');
-    const mode = resolveFleetCompositionMode({
-      compositionMode: undefined,
-      configuredNetwork: 'testnet',
-    });
-    if (mode === 'native') await runtime.buildFleetNativeRuntime({} as never);
-    expect(build).not.toHaveBeenCalled();
-    build.mockRestore();
+});
+
+describe('native assembly config refusals', () => {
+  it('names the missing key rather than failing somewhere downstream', async () => {
+    const { buildFleetNativeRuntime } = await import('../../src/daemon/native-fleet-runtime.js');
+    await expect(buildFleetNativeRuntime({
+      config: {} as never,
+    } as never)).rejects.toThrow(/compositionMode "native" requires config\.agentIri/u);
+  });
+
+  it('refuses one identity-store file claiming both the solver and requester role sets', async () => {
+    const { buildFleetNativeRuntime } = await import('../../src/daemon/native-fleet-runtime.js');
+    // Schema-legal: `NativeIdentityStoresConfigSchema` only refuses a requester/admission collapse.
+    // Without this guard the failure surfaces deep inside `IdentityStore.loadOrCreate` as
+    // "identity store role set does not equal the explicitly owned role set".
+    await expect(buildFleetNativeRuntime({
+      config: {
+        agentIri: 'urn:jinn:operator:fleet-one',
+        identityStores: { solver: '/tmp/roles.enc.json', requester: '/tmp/roles.enc.json' },
+        trustRootsPath: '/tmp/trust.json',
+        trustPolicyGenesisDigest: `sha256:${'a'.repeat(64)}`,
+        ipfs: { apiUrl: 'https://ipfs.example' },
+        publicBaseUrl: 'https://records.example',
+      } as never,
+    } as never)).rejects.toThrow(/name the same file/u);
   });
 });
 
