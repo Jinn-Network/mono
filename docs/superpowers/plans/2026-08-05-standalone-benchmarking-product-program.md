@@ -204,3 +204,21 @@ gated-operation test for lock/launch; consume attachBenchmarkToDraft
 conflict rule + stored admission receipts. Session-worktree build order
 note for BP-12 CI: attestation-issuer -> evaluation-harness ->
 evaluator-adapters -> backend-local/assembly.
+
+| BP-12 | integrated | `ca11be3b5` | `376711829` (worktree bench-bp12) | NEEDS CHANGES -> PASS all 9 criteria (sonnet reviewer, 2 rounds) | see git log 2026-08-06 |
+
+BP-12 note — **hierarchy deviation, disclosed**: the packet coordinator
+wedged after both implementers finished; the MASTER coordinator performed
+final assembly directly (flattened mode for this packet's completion):
+battery verification (389/389, build, pack:smoke, guards 11/11),
+dispatched the independent reviewer, applied the one blocking fix
+(copied platform Task-predicate removed from the sample-uniform runner —
+now reads the product provisioner's fixed input/task.json with a minimal
+sanity check), re-review PASS, commit. Implementer work was authored by
+two sonnet implementers under the (pre-wedge) packet coordinator.
+Reviewer non-blocking notes carried forward: evaluation-harness bin.js
+relative-URL entrypoint coupling (fragile to that package's build
+layout); computeCloseAt 3-line duplication in run-quote/run-lock.
+Verification includes: AC2 real-backend integration test (2 arms x 3
+items reaching judged, verifyMatrix ok, no task-execution-testing
+import); resume idempotency (no double-posting); gated lock/launch e2e.
