@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  NativeEvaluationMethodDigestsSchema,
   NativeEvaluatorConfigSchema,
   NativeFinalityConfigSchema,
   NativeIdentityStoresConfigSchema,
   NativeTrustPolicyGenesisDigestSchema,
   NativeTrustRootsPathSchema,
+  type NativeEvaluationMethodDigests,
 } from '../../src/config/native-sections.js';
 
 const DIGEST = `sha256:${'ab'.repeat(32)}` as const;
@@ -125,6 +127,21 @@ describe('dark shape-v2 native sections — evaluator', () => {
       NativeEvaluatorConfigSchema.parse(evaluatorBlock({ workspaceRoot: '/tmp/work' })),
     ).toThrow();
   });
+
+  // The type annotations below are the assertion: a plain `string` is not
+  // assignable to `sha256:${string}`, so this test stops COMPILING if the
+  // schemas ever lose the brand `native-evaluator-composition.ts` consumes.
+  it('brands parsed digests with the template-literal type the composition consumes', () => {
+    const single: NativeEvaluationMethodDigests =
+      NativeEvaluationMethodDigestsSchema.parse(DIGEST);
+    const perRegistration: NativeEvaluationMethodDigests =
+      NativeEvaluationMethodDigestsSchema.parse({ prediction: DIGEST });
+    const moduleDigest: `sha256:${string}` =
+      NativeEvaluatorConfigSchema.parse(evaluatorBlock()).moduleDigest;
+    const genesis: `sha256:${string}` = NativeTrustPolicyGenesisDigestSchema.parse(DIGEST);
+
+    expect([single, perRegistration, moduleDigest, genesis]).toHaveLength(4);
+  });
 });
 
 describe('dark shape-v2 native sections — identityStores', () => {
@@ -200,18 +217,46 @@ describe('dark shape-v2 native sections — trust roots and finality', () => {
   });
 
   // DR-2026-08-05 decision 8 (mainnet refuse-and-pin): none of these sections
-  // name a network, a chainId, or a contract address, so no combination of them
+  // names a network, a chainId, or a contract address, so no combination of them
   // can express "native on mainnet". The refusal is the boot gate's job
   // (`assertNativeDeployment`), never a schema-level coupling that could be
   // relaxed into a silent fallback.
-  it('carries no network, chain, or contract coupling', () => {
-    const shapes = JSON.stringify([
-      NativeEvaluatorConfigSchema.parse(evaluatorBlock()),
-      NativeIdentityStoresConfigSchema.parse({ solver: '/s.json' }),
-      NativeFinalityConfigSchema.parse({ confirmations: 3 }),
+  //
+  // Asserted over the schema DECLARATIONS, not over instances the test built:
+  // this goes red when a field is ADDED, which is the event that would break
+  // decision 8. The exact-key-set form is deliberate — any new field on these
+  // sections should force a re-read of the decision before the test is updated.
+  it('declares no network, chain, or contract field on any section', () => {
+    const evaluatorKeys = Object.keys(NativeEvaluatorConfigSchema.shape);
+    const identityStoreKeys = Object.keys(NativeIdentityStoresConfigSchema.innerType().shape);
+    const finalityKeys = Object.keys(NativeFinalityConfigSchema.shape);
+
+    expect(evaluatorKeys.sort()).toEqual([
+      'deploymentModule',
+      'enabled',
+      'evaluationMethodDigest',
+      'graderReportSources',
+      'moduleDigest',
+      'signerHandle',
     ]);
-    for (const forbidden of ['network', 'chainId', 'mainnet', 'taskCoordinator', 'generation']) {
-      expect(shapes).not.toContain(forbidden);
+    expect(identityStoreKeys.sort()).toEqual(['admission', 'evaluator', 'requester', 'solver']);
+    expect(finalityKeys).toEqual(['confirmations']);
+
+    const declared = [...evaluatorKeys, ...identityStoreKeys, ...finalityKeys];
+    for (const forbidden of [
+      'network',
+      'chain',
+      'chainId',
+      'generation',
+      'contracts',
+      'taskCoordinator',
+      'jinnRouter',
+      'mechMarketplace',
+      'activityChecker',
+      'rpcUrl',
+      'safeAddress',
+    ]) {
+      expect(declared).not.toContain(forbidden);
     }
   });
 });

@@ -40,9 +40,18 @@
 import { isAbsolute } from 'node:path';
 import { z } from 'zod/v3';
 
+/**
+ * The regex is the whole runtime check. The `.transform()` adds nothing at
+ * runtime — it exists so the INFERRED type is the `sha256:${string}` template
+ * literal the native composition consumes (`NativeEvaluationMethodDigests`,
+ * `deployment.moduleDigest`, `expectedPolicyGenesisDigest`). Without it every
+ * consumption site pays a narrowing cast for a shape the parser already
+ * guaranteed.
+ */
 const Sha256Digest = z
   .string()
-  .regex(/^sha256:[0-9a-f]{64}$/u, 'must be a sha256:<64 lowercase hex> digest');
+  .regex(/^sha256:[0-9a-f]{64}$/u, 'must be a sha256:<64 lowercase hex> digest')
+  .transform((value) => value as `sha256:${string}`);
 
 const AbsolutePath = z.string().min(1).refine(isAbsolute, 'must be an absolute path');
 
@@ -74,12 +83,21 @@ export type NativeGraderReportBinding = z.infer<typeof NativeGraderReportBinding
  * One digest every configured registration's evaluation-method descriptor must
  * declare, or an exact per-`registrationId` map for a deployment serving more
  * than one method (PR #2463).
+ *
+ * The `satisfies` clause is a compile-time seam check against
+ * `native-evaluator-composition.ts`'s `NativeEvaluationMethodDigests`: this
+ * schema's parsed output must remain assignable to the type the composition
+ * accepts, without importing it. Should the two ever diverge, this file stops
+ * compiling rather than M2 discovering it at the consumption site.
  */
+export type NativeEvaluationMethodDigests =
+  | `sha256:${string}`
+  | Readonly<Record<string, `sha256:${string}`>>;
+
 export const NativeEvaluationMethodDigestsSchema = z.union([
   Sha256Digest,
   z.record(z.string().min(1), Sha256Digest),
-]);
-export type NativeEvaluationMethodDigests = z.infer<typeof NativeEvaluationMethodDigestsSchema>;
+]) satisfies z.ZodType<NativeEvaluationMethodDigests, z.ZodTypeDef, unknown>;
 
 /**
  * The evaluator deployment this operator runs.
