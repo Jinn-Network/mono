@@ -1,35 +1,18 @@
 import { join } from 'node:path';
-import {
-  type SettlementGradeVerification,
-} from '@jinn-network/marketplace-binding';
-import {
-  buildEvaluationTaskProfile,
-  checkAdmissionReceipt,
-  DsseEnvelopeSchema,
-  sealTaskProfile,
-} from '@jinn-network/task-execution-profiles';
-import {
-  SubmissionRecordSchema,
-  documentDigest,
-} from '@jinn-network/task-execution-protocol';
-import {
-  parseDsseEnvelope,
-  verifyEnvelopeBinding,
-} from '@jinn-network/trust-core';
-import type { NativeEnvelopeAuthorityPort } from '../evaluator/native-verdict-verification.js';
-import { createVerdictGate } from '../evaluator/verdict-gate.js';
 import { Store } from '../store/store.js';
 import {
   NativeCanonicalObservationRepository,
   NativeMarketplaceEventRepository,
   syncNativeMarketplaceEvents,
 } from './native-canonical-observations.js';
-import { buildNativeEvaluatorComposition } from './native-evaluator-composition.js';
+import {
+  assembleNativeEvaluatorComposition,
+  refusedSettlementGrade,
+} from './native-evaluator-assembly.js';
 import {
   buildNativeEvaluatorOpportunityReader,
-  type NativeEvaluatorOpportunityReader,
 } from './native-evaluator-opportunity-source.js';
-import { NativeEvaluatorStateRepository, type NativeEvaluationRow } from './native-evaluator-state.js';
+import { NativeEvaluatorStateRepository } from './native-evaluator-state.js';
 import type {
   NativeEvaluatorWritePrimitives,
   NativeInfrastructurePrimitives,
@@ -37,15 +20,12 @@ import type {
 import { createNativeOperatorHost, type NativeOperatorHost } from './native-operator-host.js';
 import type { NativeProductConfig } from './native-product-config.js';
 import {
-  buildNativeWorkspaceRuntime,
   buildPinnedNodeLauncherDeployment,
 } from './native-solver-backend.js';
 import { openOperatorEvidence } from './evidence-join.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
 import { NativeConstructionScope } from './native-construction-scope.js';
-
-const DELIVERY_PAYLOAD_TYPE = 'application/vnd.jinn.marketplace.executor-binding.v1+json';
 
 interface EvaluatorProductionInput {
   readonly config: NativeProductConfig;
@@ -70,133 +50,6 @@ function chain(config: NativeProductConfig['operator']['native']) {
     mechMarketplace: config.contracts.mechMarketplace as `0x${string}`,
     activityChecker: config.contracts.activityChecker as `0x${string}`,
   } as const;
-}
-
-function refusedSettlementGrade(detail: string): SettlementGradeVerification {
-  return {
-    executorBinding: { status: 'invalid', detail },
-    dispatchBinding: { status: 'failed', detail },
-    evaluationSpecification: { status: 'failed', detail },
-  };
-}
-
-function oneArtifact(state: NativeEvaluatorStateRepository, evaluation: NativeEvaluationRow, role: string) {
-  const values = state.listSubjectArtifacts(evaluation.evaluationId).filter((value) => value.role === role);
-  if (values.length !== 1) throw new Error(`evaluation ${evaluation.evaluationId} has no unique ${role}`);
-  return values[0]!;
-}
-
-function parseJson(bytes: Uint8Array, label: string): unknown {
-  try {
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-  } catch (cause) {
-    throw new Error(`${label} is not exact UTF-8 JSON: ${String(cause)}`);
-  }
-}
-
-function uniqueSigner(bytes: Uint8Array, label: string): string {
-  const envelope = parseDsseEnvelope(bytes);
-  const signers = [...new Set(envelope.signatures.map(({ keyid }) => keyid).filter(
-    (keyid): keyid is string => typeof keyid === 'string' && keyid.length > 0,
-  ))];
-  if (signers.length !== 1) throw new Error(`${label} does not have exactly one signer identity`);
-  return signers[0]!;
-}
-
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  return left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
-}
-
-function deliveryAuthority(input: {
-  readonly trust: NativeTrustAuthority;
-  readonly policyPurpose: string;
-}): NativeEnvelopeAuthorityPort {
-  return {
-    async verify(value) {
-      try {
-        const envelope = parseDsseEnvelope(value.envelopeBytes);
-        if (envelope.payloadType !== DELIVERY_PAYLOAD_TYPE) {
-          return { ok: false, reason: 'delivery-envelope-payload-type-mismatch' };
-        }
-        if (!sameBytes(envelope.payloadBytes, value.payloadBytes)) {
-          return { ok: false, reason: 'delivery-envelope-payload-mismatch' };
-        }
-        const result = await verifyEnvelopeBinding({
-          envelopeBytes: value.envelopeBytes,
-          key: value.signerKey,
-          agent: value.agent,
-          family: value.family,
-          atTime: value.atTime,
-        }, {
-          bindingResolver: input.trust.bindingResolver,
-          witnessVerifier: input.trust.witnessVerifier,
-          dsseVerifier: input.trust.dsseVerifier,
-          policy: input.trust.policy(input.policyPurpose),
-        });
-        return result.ok
-          ? { ok: true }
-          : { ok: false, reason: `${result.reason ?? 'binding-refused'}${result.detail === undefined ? '' : `:${result.detail}`}` };
-      } catch (cause) {
-        return { ok: false, reason: `delivery-authority-dependency:${String(cause)}` };
-      }
-    },
-  };
-}
-
-function authorityClaim(input: {
-  readonly state: NativeEvaluatorStateRepository;
-  readonly opportunities: NativeEvaluatorOpportunityReader;
-  readonly config: NativeProductConfig['operator']['native'];
-  readonly roles: RoleIdentitySet;
-}) {
-  const solverSources = input.config.sources.filter(({ role }) => role === 'solver');
-  if (solverSources.length !== 1) throw new Error('native evaluator requires one solver authority source');
-  return async (evaluation: NativeEvaluationRow) => {
-    const association = input.opportunities.association(evaluation.subjectTaskDigest);
-    if (association === undefined) throw new Error('signed requester authority metadata is unavailable');
-    const submission = SubmissionRecordSchema.parse(parseJson(
-      oneArtifact(input.state, evaluation, 'submission').bytes,
-      'subject Submission',
-    ));
-    if (submission.requester !== association.requesterAgent) {
-      throw new Error('subject requester does not equal the signed requester source Agent');
-    }
-    const task = oneArtifact(input.state, evaluation, 'task');
-    const evaluationSpec = oneArtifact(input.state, evaluation, 'evaluation-spec');
-    const receiptArtifact = oneArtifact(input.state, evaluation, 'admission-receipt');
-    const receiptEnvelope = DsseEnvelopeSchema.parse(parseJson(receiptArtifact.bytes, 'admission receipt'));
-    const receipt = checkAdmissionReceipt({
-      envelope: receiptEnvelope,
-      expectedTaskDigest: task.digest,
-      expectedEvaluationSpecDigest: evaluationSpec.digest,
-    });
-    if (!receipt.ok) throw new Error(`admission receipt is not authoritative: ${receipt.reason}`);
-    const requesterEnvelope = oneArtifact(input.state, evaluation, 'requester-envelope');
-    const solutionEnvelope = oneArtifact(input.state, evaluation, 'solution-delivery-envelope');
-    const evaluator = input.roles.get('evaluator-verdict');
-    return {
-      requester: {
-        signerKey: uniqueSigner(requesterEnvelope.bytes, 'requester envelope'),
-        sealingTime: association.sealedAt,
-      },
-      admission: {
-        signerKey: uniqueSigner(receiptArtifact.bytes, 'admission receipt'),
-        effectiveTime: association.sealedAt,
-      },
-      executor: {
-        signerKey: uniqueSigner(solutionEnvelope.bytes, 'solution Delivery envelope'),
-        agent: solverSources[0]!.agent,
-        declarationKey: input.opportunities.settlementDeclarationKey(evaluation.advertisedDeliveryDigest),
-        address: evaluation.solutionOperator,
-      },
-      evaluator: {
-        signerKey: evaluator.keyId,
-        agent: input.roles.agent,
-        declarationKey: input.roles.get('evaluator-settlement').keyId,
-        address: input.config.safeAddress,
-      },
-    };
-  };
 }
 
 function closeAll(actions: readonly (() => void | Promise<void>)[]): () => Promise<void> {
@@ -262,117 +115,47 @@ export async function buildNativeEvaluatorProductionHost(
         candidate.toLowerCase() === config.marketplaceAgentAddress!.toLowerCase(),
     });
   };
+  const evaluatorRead = input.infrastructure.evaluator;
   const opportunities = await buildNativeEvaluatorOpportunityReader({
-    config,
+    sources: config.sources,
+    jinnRouter: config.contracts.jinnRouter as `0x${string}`,
     store,
     trust: input.trust,
-    infrastructure: input.infrastructure,
+    infrastructure: {
+      records: input.infrastructure.records,
+      authorityTime: input.infrastructure.authorityTime,
+      evaluator: evaluatorRead,
+    },
     events: marketplaceEvents,
     syncVenue,
   });
-  const evaluationProfile = buildEvaluationTaskProfile();
-  const evaluationProfileDigest = sealTaskProfile(evaluationProfile).digest;
   const deployment = await buildPinnedNodeLauncherDeployment(
     config.runtime.nodeExecutableDigest as `sha256:${string}`,
   );
   if (!(await deployment.probe()).ready) throw new Error('pinned evaluator Node launcher is not ready');
-  const subjectAuthority = {
-    bindingResolver: input.trust.bindingResolver,
-    witnessVerifier: input.trust.witnessVerifier,
-    dsseVerifier: input.trust.dsseVerifier,
-    requesterPolicy: input.trust.policy('native:requester-submission'),
-    admissionAgentPolicy: input.trust.policy('admission-agent'),
-    executorPolicy: input.trust.policy('native:solver-delivery'),
-    evaluatorAuthority: {
-      async resolve(value: {
-        readonly signerKey: string;
-        readonly declarationKey: string;
-        readonly agent: string;
-        readonly address: string;
-        readonly atTime: string;
-        readonly purpose: 'native:solver-settlement' | 'native:evaluator-settlement';
-      }) {
-        if (value.purpose === 'native:evaluator-settlement'
-          && (value.signerKey !== input.roles.get('evaluator-verdict').keyId
-            || value.declarationKey !== input.roles.get('evaluator-settlement').keyId
-            || value.agent !== input.roles.agent
-            || value.address.toLowerCase() !== config.safeAddress.toLowerCase())) {
-          return { ok: false as const, reason: 'evaluator declaration does not equal scoped custody/configuration' };
-        }
-        try {
-          await input.trust.verifyOnchainAuthority({
-            key: value.declarationKey,
-            agent: value.agent,
-            address: value.address as `0x${string}`,
-            atTime: value.atTime,
-            purpose: value.purpose,
-          });
-          return { ok: true as const };
-        } catch (cause) {
-          return { ok: false as const, reason: String(cause) };
-        }
-      },
-    },
-  };
-  const evaluatorRead = input.infrastructure.evaluator;
-  const composition = await buildNativeEvaluatorComposition({
+  const composition = await assembleNativeEvaluatorComposition({
     roles: input.roles,
     state,
-    coordinatorAddress: config.contracts.taskCoordinator as `0x${string}`,
-    evaluatorAddress: config.safeAddress as `0x${string}`,
-    operatorIdentity: {
+    trust: input.trust,
+    evidence: evidence.ports,
+    launcherDeployment: deployment,
+    opportunities,
+    verdictPorts: writes.verdict,
+    chainReads: evaluatorRead,
+    identity: {
       safeAddress: config.safeAddress,
-      agentEoa: config.marketplaceAgentAddress,
+      marketplaceAgentAddress: config.marketplaceAgentAddress,
       agentIri: config.agent,
+      taskCoordinator: config.contracts.taskCoordinator as `0x${string}`,
+      publicBaseUrl: config.publicBaseUrl,
+      stateDir: config.stateDir,
+      sources: config.sources,
     },
     deployment: {
       module: config.evaluator.deploymentModule,
       moduleDigest: config.evaluator.moduleDigest as `sha256:${string}`,
       signerHandle: config.evaluator.signerHandle,
       evaluationMethodDigest: config.evaluator.evaluationMethodDigest as `sha256:${string}`,
-    },
-    backend: {
-      stateRoot: join(config.stateDir, 'evaluator-backend'),
-      source: config.agent,
-      executor: config.agent,
-      profileStore: { get: (candidate) => candidate === evaluationProfileDigest ? evaluationProfile : undefined },
-      launcherDeployment: deployment,
-      workspaceRuntime: buildNativeWorkspaceRuntime(),
-      evidence: evidence.ports,
-      maxConcurrentAttempts: 1,
-    },
-    publisher: {
-      rootDir: join(config.stateDir, 'public', 'evaluator'),
-      publicBaseUrl: config.publicBaseUrl,
-    },
-    opportunities: opportunities.source,
-    subject: { fetcher: opportunities.fetcher },
-    authority: {
-      claim: authorityClaim({ state, opportunities, config, roles: input.roles }),
-      dependencies: subjectAuthority,
-    },
-    deadline: (evaluation) => opportunities.deadline(evaluation.subjectTaskDigest, evaluation.createdAt),
-    verdictPorts: writes.verdict,
-    chain: evaluatorRead.chain,
-    verification: {
-      gate: createVerdictGate({
-        bindingResolver: input.trust.bindingResolver,
-        witnessVerifier: input.trust.witnessVerifier,
-        dsseVerifier: input.trust.dsseVerifier,
-        admissionAgentPolicy: input.trust.policy('admission-agent'),
-        evaluatorPolicy: input.trust.policy('evaluator-eligibility'),
-        requesterPolicy: input.trust.policy('native:requester-submission'),
-      }),
-      solutionDeliveryAuthority: deliveryAuthority({
-        trust: input.trust,
-        policyPurpose: 'native:solver-delivery',
-      }),
-      evaluationDeliveryAuthority: deliveryAuthority({
-        trust: input.trust,
-        policyPurpose: 'native:evaluator-verdict',
-      }),
-      preSettlementClaimTime: evaluatorRead.preSettlementClaimTime,
-      blockTime: evaluatorRead.blockTime,
     },
   });
   scope.defer(composition.close);

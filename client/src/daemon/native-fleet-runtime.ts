@@ -53,9 +53,10 @@ import {
   nativeDiscoveryDecodeProvedCanonical,
 } from './native-fleet-discovery.js';
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
+import type { NativePublicRecordTransport } from './native-infrastructure-bundle.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProjectorExactPorts } from './native-projector-ports.js';
-import { openNativeTrustCatalog } from './native-trust-catalog.js';
+import { openNativeTrustCatalog, type NativeTrustAuthority } from './native-trust-catalog.js';
 import {
   RoleIdentitySet,
   openRoleIdentitySet,
@@ -141,6 +142,16 @@ export interface FleetNativeRuntime {
    * input — `buildOperatorComposition` never sees it.
    */
   readonly discovery: NativeDiscoveryConsumer;
+  /**
+   * The trust catalog and record transport this module already owns, exposed so the fleet evaluator
+   * loop (one-swap M4a, #2461) reuses THIS operator's single trust catalog — one `bindingResolver`
+   * instance — rather than re-opening a second one. `RoleIdentitySet.merge` and the evaluator
+   * composition both require the same `bindingResolver` the solver/requester sets were opened with.
+   */
+  readonly trust: NativeTrustAuthority;
+  readonly records: NativePublicRecordTransport;
+  /** The single Agent IRI every role family in this fleet shares. */
+  readonly agentIri: string;
 }
 
 export interface FleetNativeRuntimeInput {
@@ -309,5 +320,14 @@ export async function buildFleetNativeRuntime(
     canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
   });
 
-  return { identities, claimRuntime, projectorPorts, nativeRequesterStateDir, discovery };
+  return {
+    identities,
+    claimRuntime,
+    projectorPorts,
+    nativeRequesterStateDir,
+    discovery,
+    trust,
+    records,
+    agentIri,
+  };
 }
