@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createHttpTransport } from '@jinn-network/record-discovery-transport-http';
-import { documentDigest } from '@jinn-network/task-execution-protocol';
 import {
   NATIVE_REQUESTER_ASSOCIATION_FACT,
   decodeNativeRequesterAnnouncement,
@@ -22,7 +21,7 @@ import type {
   NativeSolverWritePrimitives,
 } from './native-infrastructure-bundle.js';
 import { createNativeOperatorHost, type NativeOperatorHost } from './native-operator-host.js';
-import { NativeOperatorStateRepository, type NativeEngagementRow } from './native-operator-state.js';
+import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProductConfig } from './native-product-config.js';
 import { openNativeSolutionPublisher } from './native-solution-publisher.js';
 import { NativeSolutionCoordinator } from './native-solution-coordinator.js';
@@ -35,6 +34,22 @@ import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { RoleIdentitySet } from './role-identities.js';
 import { NativeConstructionScope } from './native-construction-scope.js';
 import { publicationKey } from './native-operation-identity.js';
+// One assembly, two callers (one-swap M2): these bodies were extracted verbatim from this file
+// so the fleet daemon's native composition builds the same graph rather than a second copy.
+import {
+  address,
+  buildNativeClaimPolicy,
+  buildNativeEvaluationSpecResolver,
+  buildNativeExactDocuments,
+  chain,
+  closeAll,
+  countActiveNativeEngagements,
+  digest,
+  hash,
+  object,
+  roleKeyIds,
+  uint,
+} from './native-assembly.js';
 
 const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
 
@@ -50,77 +65,6 @@ interface SolverProductionInput {
     release(): Promise<void>;
   };
   readonly roles: RoleIdentitySet;
-}
-
-function object(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${label} is not an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function digest(value: unknown, label: string): `sha256:${string}` {
-  if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value)) {
-    throw new Error(`${label} is not a canonical sha256 digest`);
-  }
-  return value as `sha256:${string}`;
-}
-
-function address(value: unknown, label: string): `0x${string}` {
-  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{40}$/u.test(value)) {
-    throw new Error(`${label} is not an EVM address`);
-  }
-  return value as `0x${string}`;
-}
-
-function hash(value: unknown, label: string): `0x${string}` {
-  if (typeof value !== 'string' || !/^0x[0-9a-fA-F]{64}$/u.test(value)) {
-    throw new Error(`${label} is not a 32-byte hash`);
-  }
-  return value as `0x${string}`;
-}
-
-function uint(value: unknown, label: string): bigint {
-  if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    throw new Error(`${label} is not a canonical unsigned integer`);
-  }
-  return BigInt(value);
-}
-
-function chain(config: NativeProductConfig['operator']['native']) {
-  return {
-    chainId: config.chainId,
-    generation: config.generation,
-    taskCoordinator: config.contracts.taskCoordinator as `0x${string}`,
-    jinnRouter: config.contracts.jinnRouter as `0x${string}`,
-    mechMarketplace: config.contracts.mechMarketplace as `0x${string}`,
-    activityChecker: config.contracts.activityChecker as `0x${string}`,
-  } as const;
-}
-
-function roleKeyIds(roles: RoleIdentitySet): Readonly<Record<string, string>> {
-  return {
-    'solver-delivery': roles.get('solver-delivery').keyId,
-    'solver-settlement': roles.get('solver-settlement').keyId,
-    'solver-discovery': roles.get('solver-discovery').keyId,
-  };
-}
-
-function nonterminal(state: string): boolean {
-  return !['solution-settled', 'lost', 'failed'].includes(state);
-}
-
-function closeAll(actions: readonly (() => void | Promise<void>)[]): () => Promise<void> {
-  let closed = false;
-  return async () => {
-    if (closed) return;
-    closed = true;
-    const failures: unknown[] = [];
-    for (const action of actions) {
-      try { await action(); } catch (cause) { failures.push(cause); }
-    }
-    if (failures.length > 0) throw new AggregateError(failures, 'native solver cleanup failed');
-  };
 }
 
 /** Product-owned native solver graph; the infrastructure object contributes I/O only. */
@@ -153,14 +97,7 @@ export async function buildNativeSolverProductionHost(
   scope.defer(solver.close);
   const verification = buildNativeSolutionVerification({
     identities: input.roles,
-    resolveEvaluationSpec: async (expected) => {
-      try {
-        const bytes = await input.infrastructure.records.byDigest(expected);
-        return documentDigest(bytes) === expected ? bytes : undefined;
-      } catch {
-        return undefined;
-      }
-    },
+    resolveEvaluationSpec: buildNativeEvaluationSpecResolver(input.infrastructure.records),
   });
   const writeSession = await input.infrastructure.activateWrites({
     role: 'solver',
@@ -374,17 +311,7 @@ export async function buildNativeSolverProductionHost(
     },
   });
 
-  const exactDocuments = async (engagement: Pick<NativeEngagementRow, 'taskDigest' | 'submissionDigest'>) => {
-    const [taskBytes, submissionBytes] = await Promise.all([
-      input.infrastructure.records.byDigest(engagement.taskDigest),
-      input.infrastructure.records.byDigest(engagement.submissionDigest),
-    ]);
-    if (documentDigest(taskBytes) !== engagement.taskDigest
-      || documentDigest(submissionBytes) !== engagement.submissionDigest) {
-      throw new Error('native exact Task/Submission retrieval changed digest');
-    }
-    return { taskBytes, submissionBytes };
-  };
+  const exactDocuments = buildNativeExactDocuments(input.infrastructure.records);
   const claim = new NativeClaimCoordinator({
     state,
     chain: chain(config),
@@ -396,15 +323,8 @@ export async function buildNativeSolverProductionHost(
         submissionBytes: documents.submissionBytes,
         backend: solver.backend,
         launcher: solver.launcher,
-        policy: {
-          chainId: config.chainId,
-          coordinator: config.contracts.taskCoordinator,
-          generation: config.generation,
-          maxSpendWei: BigInt(config.transactionCaps.escrowMaxWei),
-          minDeadlineLeadMs: 5 * 60 * 1_000,
-          maxConcurrent: 1,
-        },
-        activeEngagements: state.listEngagements().filter(({ state }) => nonterminal(state)).length,
+        policy: buildNativeClaimPolicy(config),
+        activeEngagements: countActiveNativeEngagements(state),
         canonicalFinalized: true,
         now: new Date(),
       }),
