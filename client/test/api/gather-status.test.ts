@@ -256,6 +256,65 @@ describe('gatherStatusForApi', () => {
     });
   });
 
+  it('native mode enriches solve outcomes from the native observation store, not discovery (R2 dual-read)', async () => {
+    mockStatusRpc();
+    const { gatherStatusForApi } = await import('../../src/api/gather-status.js');
+
+    await withTempStore(async (store) => {
+      // A native solve engagement in a terminal (settled → COMPLETE) state.
+      const digest = `sha256:${'a'.repeat(64)}`;
+      store.db
+        .prepare(
+          `INSERT INTO native_engagements
+            (engagement_id, chain_id, coordinator, task_id, role, operator_agent, task_digest,
+             submission_uri, submission_digest, state, attempt_index, attempt_uri, request_id,
+             policy_json, capability_json, created_at, updated_at)
+           VALUES ('eng-701', '84532', '0xcoord', '701', 'solver', '0xop', ?,
+                   'urn:uuid:00000000-0000-0000-0000-000000000701', 'sha256:${'b'.repeat(64)}',
+                   'solution-settled', 0, NULL, '0xreq701', '{}', '{}',
+                   '2026-08-01T00:00:02.000Z', '2026-08-01T00:00:05.000Z')`,
+        )
+        .run(digest);
+      store.db.exec(`
+        CREATE TABLE IF NOT EXISTS native_canonical_observations (
+          observation_id TEXT PRIMARY KEY, observation_json TEXT NOT NULL, accepted_at TEXT NOT NULL
+        );
+      `);
+      store.db
+        .prepare(
+          `INSERT INTO native_canonical_observations (observation_id, observation_json, accepted_at)
+           VALUES ('obs-701', ?, '2026-08-01T00:00:06.000Z')`,
+        )
+        .run(
+          JSON.stringify({
+            id: 'obs-701',
+            type: 'network.jinn.task-execution.attempt-terminal.v1',
+            taskdigest: digest,
+            data: { state: 'delivered' },
+          }),
+        );
+
+      // Discovery is supplied but must NOT be consulted in native mode.
+      const getVerdictTallies = vi.fn(async () => new Map([['701', { pass: 0, fail: 9 }]]));
+      const discovery = { getVerdictTallies } as unknown as import('../../src/discovery/types.js').DiscoveryAPI;
+
+      const status = await gatherStatusForApi(store, {
+        earningDir: mkdtempSync(join(tmpdir(), 'jinn-status-native-')),
+        rpcUrl: 'http://127.0.0.1:0',
+        network: 'testnet' as const,
+        pollIntervalMs: 5000,
+        rewardClaimIntervalMs: 0,
+        discovery,
+        config: { compositionMode: 'native' } as unknown as JinnConfig,
+      });
+
+      expect(getVerdictTallies).not.toHaveBeenCalled();
+      const row = status.taskRuns?.recentTasks.find((r) => r.taskId === '701');
+      expect(row?.state).toBe('COMPLETE');
+      expect(row?.outcome).toBe('pass');
+    });
+  });
+
   it('caches Prediction operator diagnostic failures for repeated status polls', async () => {
     mockStatusRpc();
     const buildPredictionOperatorStatus = vi.fn(async () => {
