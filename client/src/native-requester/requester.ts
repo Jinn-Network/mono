@@ -95,6 +95,13 @@ import {
 // internal snapshot fixture directory; that storage detail must not leak into
 // the accepted requester command contract.
 const FIXTURE = 'prediction-forecast-golden.json' as const;
+
+/**
+ * The single today-mode requester fixture name, exported so a composing host (the fleet posting
+ * write path, one-swap M5e) can name the `NativeRequesterRequest.fixture` it drives `request()`
+ * with without duplicating the literal. `request()` still refuses any other value.
+ */
+export const NATIVE_REQUESTER_FIXTURE = FIXTURE;
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const NATIVE_REQUESTER_ASSOCIATION_FACT = 'https://spec.jinn.network/facts/native-requester-association/v1';
 const UINT256_MAX = (1n << 256n) - 1n;

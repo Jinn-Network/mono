@@ -582,6 +582,20 @@ export const JinnConfigSchema = z.object({
   publicBaseUrl: NativePublicBaseUrlSchema.optional(),
 
   /**
+   * One-swap M5e (umbrella #2461) — the DISTINCT admission Agent IRI the requester WRITE path
+   * needs. The requester seals an admission receipt with a signer whose custody
+   * (`identityStores.admission`) is separate from the requester's own (design: admission is a
+   * distinct authority from the requester it admits for). Absent on a legacy boot and unread there;
+   * the native requester write path is simply unavailable (posting stays fail-closed) when this or
+   * `identityStores.admission` is missing, rather than the loader refusing an operator who will
+   * never post. Must differ from `agentIri` — the runtime refuses an admission Agent equal to the
+   * requester Agent at assembly.
+   *
+   * No env override: like the other native keys, admission custody is a config-file decision.
+   */
+  admissionAgent: NativeAgentIriSchema.optional(),
+
+  /**
    * One-swap M3 (umbrella #2461) — the signed public record sources the native discovery consumer
    * pulls from. Absent on a legacy boot and unread there; native mode refuses at boot when it is
    * missing or carries no `requester` source, for the same reason M2's four keys do.

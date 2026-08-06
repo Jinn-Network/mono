@@ -23,15 +23,16 @@
  *  - `reconcile` is a no-op: no durable posting draft can exist until `post` is live, so there is
  *    nothing to reconcile. It stays as the loop's first tick step so the reconcile-before-admit
  *    ordering is already wired for when `post` lands.
- *  - `post` is the single FAIL-CLOSED seam. Turning a resolved target into a broadcast `TaskCreated`
- *    needs two pieces neither the fleet graph nor M5a's requester yet provides on this path: the
- *    config -> request task construction (the native requester's `request()` is still bound to the
- *    golden fixture — see `createNativeRequester` in `../native-requester/requester.ts`), and the
- *    venue -> requester posting bridge (the fleet `main.ts` graph builds a `composition.venue` +
- *    one-Safe broadcaster, not the native-infrastructure requester write primitives
- *    `createNativeRequesterPostTask` needs). Until that bridge lands (M5d finding, a later posting
- *    milestone), `post` throws a typed {@link RequesterError} rather than fabricate a post or
- *    broadcast the wrong (fixture) work. The loop turns that throw into a visible per-target skip.
+ *  - `post` is live in native mode WHENEVER the caller injects a `postTask` write port (one-swap
+ *    M5e, #2461). That port is the requester WRITE path — `buildFleetRequesterWrite` over the
+ *    composition's ONE Safe broadcaster (`native-fleet-requester-write.ts`) — closing the M5d
+ *    finding's two gaps: the config -> request task construction and the venue -> requester posting
+ *    bridge. `post` runs AFTER the loop's per-target preflight (`posting-loop.ts` calls preflight
+ *    then `post`), so it only reaches the write path once funds/freshness passed. When no write
+ *    port is injected (a legacy/solver-only boot, or an operator without requester admission
+ *    custody), `post` stays the FAIL-CLOSED seam it was in M5d: it throws a typed
+ *    {@link RequesterError} rather than fabricate a post, and the loop surfaces the throw as a
+ *    visible per-target skip.
  *
  * Provenance ledger (M5d, 3rd shared-discovery consumer): the requester posting path is NOT a
  * `native_discovery_*` consumer. The solver (M3) reads the shared Store's `native_discovery_*`
@@ -87,6 +88,21 @@ export interface FleetPostingRuntimeInput {
    * `entry.launchedRecordPath` off disk and parsing it with `LaunchedSolverNetRecordSchema`.
    */
   readonly resolveLaunchedTarget?: (entry: PostingConfigEntry) => ResolvedPostingTarget;
+  /**
+   * The requester WRITE port (one-swap M5e, #2461). When present, `post` drives it to turn a
+   * resolved target into a real broadcast `TaskCreated` and return the on-chain task id; when
+   * absent, `post` stays the M5d fail-closed seam (throws). `main.ts` builds this from
+   * `buildFleetRequesterWrite` over the composition's ONE Safe broadcaster, so a post here is the
+   * SAME single-nonce authority the solver/evaluator/verdict legs serialize through — never a
+   * second wallet or venue.
+   */
+  readonly postTask?: (target: PostingLoopTarget) => Promise<{ readonly taskId?: string }>;
+  /**
+   * Optional warn sink for the per-target launched-record resolution guard. A malformed launched
+   * record degrades that entry to `live: false` (skipped) rather than stranding the whole tick; the
+   * warn makes the degradation visible instead of silent. `main.ts` passes the daemon logger.
+   */
+  readonly logger?: { warn(message: string): void };
   now?(): number;
 }
 
@@ -134,9 +150,22 @@ export function buildFleetPostingRuntime(input: FleetPostingRuntimeInput): Fleet
     // No durable posting draft can exist until `post` is live; the reconcile step is wired for then.
     reconcile: async () => {},
 
+    // Per-entry isolation (M5e hardening of the M5d finding): resolving a launched record can throw
+    // (unreadable/invalid record). Resolve each entry inside its own try so one malformed record
+    // degrades to a skipped `live: false` target rather than stranding the whole tick — a single
+    // bad posting entry never blinds the loop to the others.
     listTargets: async (): Promise<readonly PostingLoopTarget[]> =>
       entries.map((entry) => {
-        const resolved = resolve(entry);
+        let resolved: ResolvedPostingTarget;
+        try {
+          resolved = resolve(entry);
+        } catch (err) {
+          input.logger?.warn(
+            `[posting] launched record for ${entry.workKind} did not resolve — skipping this target `
+            + `(live=false): ${err instanceof Error ? err.message : String(err)}`,
+          );
+          resolved = { profileUri: entry.workKind, live: false };
+        }
         return {
           postingKey: entry.workKind,
           workKind: entry.workKind,
@@ -167,15 +196,20 @@ export function buildFleetPostingRuntime(input: FleetPostingRuntimeInput): Fleet
       return { claimWindowEndMs: live, submissionDeadlineMs: live, sessionDeadlineMs: live };
     },
 
+    // Live in native mode when a requester WRITE port is injected (M5e); otherwise the M5d
+    // fail-closed seam. The loop has already run this target's funds/freshness preflight before it
+    // calls `post` (`posting-loop.ts`), so reaching the write port means preflight passed.
     post: async (target: PostingLoopTarget): Promise<{ readonly taskId?: string }> => {
-      throw new RequesterError(
-        'broadcast',
-        'posting-bridge-unwired',
-        `native posting broadcast is not yet wired for ${target.postingKey}: turning a resolved `
-        + 'posting target into a TaskCreated needs the config->request task construction and the '
-        + 'venue->requester posting bridge (M5d finding). Refusing fail-closed rather than posting '
-        + 'the wrong work.',
-      );
+      if (input.postTask === undefined) {
+        throw new RequesterError(
+          'broadcast',
+          'posting-bridge-unwired',
+          `native posting broadcast is not wired for ${target.postingKey}: no requester write port `
+          + 'was injected (a legacy/solver-only boot, or an operator without requester admission '
+          + 'custody). Refusing fail-closed rather than posting the wrong work.',
+        );
+      }
+      return input.postTask(target);
     },
 
     now,

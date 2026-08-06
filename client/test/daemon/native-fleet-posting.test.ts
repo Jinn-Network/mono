@@ -26,6 +26,8 @@ function runtime(opts: {
   resolve?: (e: PostingConfigEntry) => ResolvedPostingTarget;
   balances?: Record<string, bigint>;
   now?: number;
+  postTask?: (target: { readonly postingKey: string }) => Promise<{ readonly taskId?: string }>;
+  logger?: { warn(message: string): void };
 }) {
   const balances = opts.balances ?? { [SAFE]: 10n, [AGENT]: 20n };
   return buildFleetPostingRuntime({
@@ -34,6 +36,8 @@ function runtime(opts: {
     agentEoaAddress: AGENT,
     readBalanceWei: async (address) => balances[address] ?? 0n,
     resolveLaunchedTarget: opts.resolve ?? (() => ({ profileUri: 'p', live: true })),
+    ...(opts.postTask === undefined ? {} : { postTask: opts.postTask as never }),
+    ...(opts.logger === undefined ? {} : { logger: opts.logger }),
     ...(opts.now === undefined ? {} : { now: () => opts.now! }),
   });
 }
@@ -77,6 +81,26 @@ describe('listTargets — real config + launched-record resolution', () => {
     const rt = runtime({ entries: [entry({ generatorEnabled: false })] });
     expect((await rt.ports.listTargets())[0]!.generatorEnabled).toBe(false);
   });
+
+  it('isolates a malformed launched record: one bad entry degrades to live=false, others survive', async () => {
+    const warnings: string[] = [];
+    const rt = runtime({
+      entries: [entry({ workKind: 'good' }), entry({ workKind: 'bad' })],
+      resolve: (e) => {
+        if (e.workKind === 'bad') throw new Error('launched record is unreadable');
+        return { profileUri: 'urn:m:good', live: true };
+      },
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    // The whole tick does NOT throw even though one entry's resolve threw.
+    const targets = await rt.ports.listTargets();
+    expect(targets).toHaveLength(2);
+    expect(targets.find((t) => t.postingKey === 'good')).toMatchObject({ live: true, profileUri: 'urn:m:good' });
+    const bad = targets.find((t) => t.postingKey === 'bad')!;
+    expect(bad.live).toBe(false);
+    // The degradation is visible, not silent.
+    expect(warnings.some((w) => w.includes('bad') && w.includes('live=false'))).toBe(true);
+  });
 });
 
 describe('probeFunds — real live balances, no fabricated rate barrier', () => {
@@ -113,13 +137,29 @@ describe('reconcile — no-op until post is live', () => {
   });
 });
 
-describe('post — the fail-closed seam', () => {
+describe('post — fail-closed when no requester write port is injected', () => {
   it('refuses with a typed broadcast RequesterError rather than fabricate a post', async () => {
     const rt = runtime({ entries: [entry()] });
     const target = (await rt.ports.listTargets())[0]!;
     await expect(rt.ports.post(target)).rejects.toSatisfy((err: unknown) =>
       isRequesterError(err) && err.category === 'broadcast' && err.code === 'posting-bridge-unwired',
     );
+  });
+});
+
+describe('post — live via the injected requester write port (M5e)', () => {
+  it('drives the injected postTask for the target and returns its task id', async () => {
+    const seen: string[] = [];
+    const rt = runtime({
+      entries: [entry({ workKind: 'repo' })],
+      postTask: async (target) => {
+        seen.push(target.postingKey);
+        return { taskId: '4242' };
+      },
+    });
+    const target = (await rt.ports.listTargets())[0]!;
+    expect(await rt.ports.post(target)).toEqual({ taskId: '4242' });
+    expect(seen).toEqual(['repo']);
   });
 });
 
