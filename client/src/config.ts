@@ -156,6 +156,23 @@ export const JinnConfigSchema = z.object({
    */
   apiBindHost: z.string().optional(),
 
+  /**
+   * The public record-discovery archive plane (headless design §6; one-swap M6). Off by
+   * default. When `enabled`, the native daemon serves its signed solver-records archive on a
+   * SEPARATE listener carrying no other route — never on the operator API. Serving from a
+   * residential connection discloses this machine's IP address to every consumer; the
+   * operator app says so where the opt-in lives, and the daemon logs it on bind. The default
+   * host is loopback so an accidental enable stays local; widen it deliberately.
+   * Env: JINN_PUBLIC_ARCHIVE (enable), JINN_PUBLIC_ARCHIVE_BIND_HOST, JINN_PUBLIC_ARCHIVE_PORT.
+   */
+  publicArchive: z
+    .object({
+      enabled: z.boolean().default(false),
+      host: z.string().default('127.0.0.1'),
+      port: z.number().int().positive().default(7332),
+    })
+    .default({}),
+
   /** Path to claude CLI binary */
   claudePath: z.string().default('claude'),
 
@@ -1135,6 +1152,28 @@ export function loadConfig(configPath?: string): JinnConfig {
   }
   if (env['JINN_API_PORT'])          merged.apiPort = parseInt(env['JINN_API_PORT'], 10);
   if (env['JINN_API_BIND_HOST'])     merged.apiBindHost = env['JINN_API_BIND_HOST'];
+  {
+    // Public archive plane: env wins over the config file (regression guard — `apiBindHost`
+    // once shipped inert by reading only its env var and ignoring the config field).
+    const current = (merged.publicArchive ?? {}) as Record<string, unknown>;
+    const next: Record<string, unknown> = { ...current };
+    let touched = false;
+    if (env['JINN_PUBLIC_ARCHIVE'] !== undefined) {
+      const raw = env['JINN_PUBLIC_ARCHIVE'].trim().toLowerCase();
+      next.enabled = raw === '' ? true : !(raw === '0' || raw === 'false' || raw === 'no');
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_BIND_HOST']) {
+      next.host = env['JINN_PUBLIC_ARCHIVE_BIND_HOST'];
+      next.enabled = true;
+      touched = true;
+    }
+    if (env['JINN_PUBLIC_ARCHIVE_PORT']) {
+      next.port = Number.parseInt(env['JINN_PUBLIC_ARCHIVE_PORT'], 10);
+      touched = true;
+    }
+    if (touched) merged.publicArchive = next;
+  }
   if (env['JINN_CLAUDE_PATH'])       merged.claudePath = env['JINN_CLAUDE_PATH'];
   if (env['JINN_CLAUDE_MODEL'])      merged.claudeModel = env['JINN_CLAUDE_MODEL'];
   if (env['JINN_HERMES_PATH'])       merged.hermesPath = env['JINN_HERMES_PATH'];
@@ -1665,6 +1704,9 @@ const TRACKED_ENV_VARS = [
   'JINN_BALANCE_TOPUP_INTERVAL_MS',
   'JINN_API_PORT',
   'JINN_API_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE',
+  'JINN_PUBLIC_ARCHIVE_BIND_HOST',
+  'JINN_PUBLIC_ARCHIVE_PORT',
   'JINN_CLAUDE_PATH',
   'JINN_CLAUDE_MODEL',
   'JINN_HERMES_PATH',
