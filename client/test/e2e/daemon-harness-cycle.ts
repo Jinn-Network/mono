@@ -37,6 +37,16 @@ import { jsonRpc as anvilJsonRpc } from '../_support/chain/anvil.js';
 import { TaskRunPersistence } from '../../src/harnesses/engine/persistence.js';
 
 async function main(): Promise<void> {
+  // One-swap M7 (#2461): the native variant. `JINN_E2E_MODE=native` forks Base Sepolia 84532 and
+  // exercises the native fleet boot legs (the legacy variant below keeps its Base-mainnet fork).
+  // Delegated to keep one public command (`yarn e2e:daemon-harness`) with a mode switch, matching
+  // the existing `JINN_E2E_HARNESS` selector convention.
+  if ((process.env['JINN_E2E_MODE'] ?? 'legacy').toLowerCase() === 'native') {
+    const { runNativeFleetLoop } = await import('./native-fleet-loop.js');
+    await runNativeFleetLoop();
+    return;
+  }
+
   const harness = harnessSelectorFromEnv();
 
   // Skip cleanly (exit 0) when the selected harness's API key is absent.
