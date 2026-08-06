@@ -30,6 +30,8 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "generate:parity": "node scripts/generate-parity-matrix.mjs",
+    "check:parity": "node scripts/generate-parity-matrix.mjs --check",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "prepack": "yarn build"
   },

@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "@jinn-network/benchmark-product-core@0.1.0",
+  "entries": [
+    {
+      "operation": "armAdd",
+      "cliVerb": "arm add",
+      "authorityGated": false,
+      "description": "Adds a solver arm (pinning) to a draft."
+    },
+    {
+      "operation": "armList",
+      "cliVerb": "arm list",
+      "authorityGated": false,
+      "description": "Lists a draft's arms."
+    },
+    {
+      "operation": "armRemove",
+      "cliVerb": "arm remove",
+      "authorityGated": false,
+      "description": "Removes an arm from a draft."
+    },
+    {
+      "operation": "armUpdate",
+      "cliVerb": "arm update",
+      "authorityGated": false,
+      "description": "Updates an existing arm's pinning and/or notes."
+    },
+    {
+      "operation": "authorityGrant",
+      "cliVerb": "authority grant",
+      "authorityGated": false,
+      "description": "Grants workspace membership and/or gated-operation grants to a principal (sponsor-only)."
+    },
+    {
+      "operation": "authorityRevoke",
+      "cliVerb": "authority revoke",
+      "authorityGated": false,
+      "description": "Revokes a principal's gated-operation grants (sponsor-only)."
+    },
+    {
+      "operation": "authorityShow",
+      "cliVerb": "authority show",
+      "authorityGated": false,
+      "description": "Reads the workspace's authority policy."
+    },
+    {
+      "operation": "createDraft",
+      "cliVerb": "draft create",
+      "authorityGated": false,
+      "description": "Creates a new draft in a workspace, optionally seeded from a spec file."
+    },
+    {
+      "operation": "getDraft",
+      "cliVerb": "draft show",
+      "authorityGated": false,
+      "description": "Reads one draft's current document."
+    },
+    {
+      "operation": "importSweBenchRows",
+      "cliVerb": "import swebench",
+      "authorityGated": false,
+      "description": "Imports SWE-bench rows as a sealed benchmark attached to a draft."
+    },
+    {
+      "operation": "initWorkspace",
+      "cliVerb": "init",
+      "authorityGated": false,
+      "description": "Creates a new workspace directory and its founding-sponsor authority policy."
+    },
+    {
+      "operation": "inspectDraft",
+      "cliVerb": "inspect",
+      "authorityGated": false,
+      "description": "Resolves and displays a draft's arms, benchmark, and assurance settings."
+    },
+    {
+      "operation": "listDrafts",
+      "cliVerb": "draft list",
+      "authorityGated": false,
+      "description": "Lists every draft in a workspace."
+    },
+    {
+      "operation": "runCollect",
+      "cliVerb": "collect",
+      "authorityGated": false,
+      "description": "Assembles and seals the Matrix once the run's close boundary is reached."
+    },
+    {
+      "operation": "runLaunch",
+      "cliVerb": "launch",
+      "authorityGated": true,
+      "description": "Launches the locked run on the real local venue (authority-gated)."
+    },
+    {
+      "operation": "runLock",
+      "cliVerb": "lock",
+      "authorityGated": true,
+      "description": "Seals the Run record and transitions the draft to locked (authority-gated)."
+    },
+    {
+      "operation": "runQuote",
+      "cliVerb": "quote",
+      "authorityGated": false,
+      "description": "Prices a compiled run against the local venue's capabilities, without spending."
+    },
+    {
+      "operation": "runReport",
+      "cliVerb": "report",
+      "authorityGated": true,
+      "description": "Produces the sealed Report and claim package from the closed run's Matrix (authority-gated)."
+    },
+    {
+      "operation": "runResults",
+      "cliVerb": "results",
+      "authorityGated": false,
+      "description": "Reads the sealed Matrix as a results document with venue-honesty disclosures."
+    },
+    {
+      "operation": "runResume",
+      "cliVerb": "resume",
+      "authorityGated": false,
+      "description": "Resumes an interrupted run, dispatching only outstanding work."
+    },
+    {
+      "operation": "runStatus",
+      "cliVerb": "status",
+      "authorityGated": false,
+      "description": "Reads per-cell live status folded from the run journal."
+    },
+    {
+      "operation": "runVerify",
+      "cliVerb": "verify",
+      "authorityGated": false,
+      "description": "Independently re-derives the Matrix (and, once reported, the Report and claim package) from durable workspace state."
+    },
+    {
+      "operation": "sampleInit",
+      "cliVerb": "sample init",
+      "authorityGated": false,
+      "description": "Attaches the bundled sample benchmark to a draft."
+    },
+    {
+      "operation": "updateDraft",
+      "cliVerb": "draft update",
+      "authorityGated": false,
+      "description": "Applies a JSON patch to a draft's spec."
+    }
+  ],
+  "exclusions": [
+    {
+      "name": "unverifiableAxisCounts",
+      "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
+    },
+    {
+      "name": "cancel",
+      "reason": "\"cancel\" is in authority/policy.ts's GATED_OPERATIONS but no shipped operation uses it as an action name yet — reserved for a later packet"
+    },
+    {
+      "name": "publish",
+      "reason": "\"publish\" is in authority/policy.ts's GATED_OPERATIONS but no shipped operation uses it as an action name yet — reserved for a later packet"
+    }
+  ]
+}
