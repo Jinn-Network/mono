@@ -72,4 +72,15 @@ describe('public archive plane exposure scoping', () => {
     const res = await app.request('/sources/marketplace/head', { method: 'POST' });
     expect(res.status).toBe(405);
   });
+
+  it('is boot-inert: building the app binds no listener — only startPublicArchiveServer does', () => {
+    // The archive plane must not open a socket as a side effect of construction. main.ts gates
+    // the actual bind behind COMPOSITION_MODE === "native" && publicArchive.enabled (default off),
+    // so a default/legacy boot starts nothing. This asserts the construction half of that: the
+    // returned value is a plain Hono app with no `listen`/`address`, not a live server.
+    const app = buildPublicArchiveApp({ handler: seeded.handler });
+    expect(app).toBeDefined();
+    expect((app as unknown as { address?: unknown }).address).toBeUndefined();
+    expect((app as unknown as { listen?: unknown }).listen).toBeUndefined();
+  });
 });
