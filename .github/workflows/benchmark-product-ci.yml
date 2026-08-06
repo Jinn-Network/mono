@@ -50,10 +50,13 @@ jobs:
           corepack enable
           corepack prepare yarn@4.13.0 --activate
       # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
-      # is what the next one's type resolution reads. The full graph (BP-11): the runtime closure
-      # (protocol, trust-core, environment-record, profiles, records, task-admission, interop) plus
-      # the launcher chain (backend, supervisor, workspace, launchers) the test-only
-      # `task-execution-launchers` devDependency needs.
+      # is what the next one's type resolution reads. The full graph: BP-11's runtime closure
+      # (protocol, trust-core, environment-record, profiles, records, task-admission, interop),
+      # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
+      # real runtime dependencies, not the prior test-only `task-execution-launchers`
+      # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
+      # leg (evaluation-harness, evaluator-adapters, backend-local, benchmarking-run,
+      # benchmarking-local).
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
@@ -67,6 +70,16 @@ jobs:
           (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
       - name: Verify Benchmark Product core
         working-directory: packages/benchmark-product/core
         run: |
@@ -113,8 +126,11 @@ jobs:
           path: packages/benchmark-product/core/dist
       # The packed consumer installs the whole RUNTIME graph from tarballs, and `npm pack
       # --ignore-scripts` ships whatever `dist/` is on disk — so every runtime portal dependency
-      # needs its build here too, not only the product's. The launcher chain is dev-only and a
-      # packed consumer never installs it, so it is deliberately absent here.
+      # needs its build here too, not only the product's. This mirrors
+      # `benchmark-product-packed-types.test.mjs`'s own `CROSS_TREE_PACKAGES` exactly, same order:
+      # every one of the product's 15 direct runtime dependencies plus the 6 transitive-only
+      # portal resolutions (evidence-* / attestation-issuer) that package.json's `resolutions`
+      # block declares for them.
       - name: Build portal dependencies from source
         run: |
           (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
@@ -124,5 +140,19 @@ jobs:
           (cd packages/benchmarking/records && yarn install --immutable && yarn build)
           (cd packages/task-supply/admission && yarn install --immutable && yarn build)
           (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
       - name: Compile the packed public entrypoint consumer
         run: node .github/scripts/benchmark-product-packed-types.test.mjs

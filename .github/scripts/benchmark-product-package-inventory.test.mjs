@@ -29,44 +29,69 @@ const PRODUCT_PACKAGES = [
 // The approved runtime graph. BP-01 wired `benchmarking-records`; BP-11 (task intake) added
 // `benchmarking-interop` (SWE-bench import + defineBenchmark), `task-admission` (golden
 // prediction-snapshot fixture + admission receipts for the bundled sample), and
-// `task-execution-protocol` (sealTask for the sample's re-sealed Tasks), plus the
-// `task-execution-launchers` devDependency (the sample's launcher shape-contract test runs the
-// real prediction-v1-baseline subprocess). New edges are added deliberately, one PR at a time,
-// in this map and in the source-boundary guard's allow-list together.
+// `task-execution-protocol` (sealTask for the sample's re-sealed Tasks). BP-12 (the official run
+// path) promoted `task-execution-launchers` from devDependency to a real runtime dependency (the
+// real local venue's real subprocess-spawning solve launchers) and added the rest of the real
+// local-venue stack as runtime dependencies: `benchmarking-run` (quote/launch/resume/assemble/
+// verify), `benchmarking-local` (`localAssemblyPorts`), `task-execution-backend` +
+// `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor`
+// + `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
+// sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
+// (the real evaluation leg), and `trust-core` (DSSE verdict signing). New edges are added
+// deliberately, one PR at a time, in this map and in the source-boundary guard's allow-list
+// together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
       '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-local',
       '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
       '@jinn-network/task-admission',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-profiles',
       '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-core',
     ],
-    devDependencies: ['@jinn-network/task-execution-launchers'],
+    devDependencies: [],
     optionalDependencies: [], peerDependencies: [],
     // Portals whose own edges must resolve inside this project: none of these six is imported here
     // -- the source-boundary guard denies each by name -- but the declared dependencies above
     // depend on them, and none is published to a registry, so their portal resolutions have to be
     // declared too or `install` sends them to versions that do not exist.
-    // trust-core + environment-record: task-admission's edges. task-execution-profiles:
-    // benchmarking-interop's (and the launcher package's) edge. backend + supervisor + workspace:
-    // the launcher package's edges.
     portalResolutions: [
+      '@jinn-network/attestation-issuer',
       '@jinn-network/environment-record',
-      '@jinn-network/task-execution-backend',
-      '@jinn-network/task-execution-profiles',
-      '@jinn-network/task-execution-supervisor',
-      '@jinn-network/task-execution-workspace',
-      '@jinn-network/trust-core',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
     ],
   }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
+  ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
+  ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
   ['@jinn-network/environment-record', join(root, 'packages', 'environments', 'record')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
+  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
   ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
   ['@jinn-network/task-execution-profiles', join(root, 'packages', 'task-execution', 'profiles')],
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],

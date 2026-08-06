@@ -608,6 +608,53 @@ reopened):**
   each Task — recorded here so no later packet mistakes this for an
   oversight.
 
+**Addendum — 2026-08-06, packet BP-12 (§3 consumption-contract activation for
+the run path; no §3 refusal, §4/§5/§6 decision, or record semantics
+reopened):**
+
+- **§3 rows activated.** BP-12 begins importing, as runtime dependencies,
+  packages the §3 table already names: `@jinn-network/benchmarking-run`
+  (`planRun`, `quoteRun`, `launchAndWatch`, `resumeRun`, `assembleMatrix`,
+  `verifyMatrix`), `@jinn-network/benchmarking-local`
+  (`localAssemblyPorts`), `@jinn-network/task-execution-backend` (types),
+  `@jinn-network/task-execution-backend-local`
+  (`makeLocalTaskExecutionBackend`), `@jinn-network/task-execution-launchers`
+  (`predictionV1BaselineLauncher`, `LauncherContract` — promoted from the
+  BP-11 test-only devDependency to runtime, superseding that addendum note),
+  `@jinn-network/task-execution-evaluation-harness` (`/launcher` entry:
+  `makeEvaluationLauncher`), `@jinn-network/task-execution-evaluator-adapters`
+  (`createEvaluatorDeployment`, prediction registration),
+  `@jinn-network/task-execution-profiles` (`deriveEvaluationTask`, profile
+  builders, `parseEvaluationSpec`, `VERDICT_DSSE_PAYLOAD_TYPE`),
+  `@jinn-network/task-execution-workspace` (`harvest`, provisioner types),
+  `@jinn-network/task-execution-supervisor` (attempt-identity types), and
+  `@jinn-network/trust-core` (`sealDsseEnvelope`, `dssePreAuthEncoding`,
+  `parseDsseEnvelope`, `DsseSigner`).
+- **Verdict DSSE wrapping (dossier G2), realized with one repository-fact
+  correction.** The dossier's cited pattern (`sealSignedRecord` + payload
+  byte-equality, `client/src/daemon/native-evaluator-composition.ts`) cannot
+  hold against a real spawned evaluation harness: the harness writes
+  `out/verdict` via the attestation-issuer's pretty-printed
+  `deterministicJsonBytes`, while `sealSignedRecord` re-canonicalizes via
+  trust-core's compact `canonicalJsonBytes`, so the byte-equality assertion
+  is unsatisfiable. The product wraps the harness's statement bytes
+  verbatim (`dssePreAuthEncoding` + `sealDsseEnvelope`), never
+  re-canonicalizing — recorded in `src/venue/signing.ts`.
+- **Venue honesty realizations (§7.1).** Local-venue identity resolution
+  echoes the venue's own recorded claims (solver = run owner; evaluator =
+  the verdict's claimed evaluator identity) — a disclosed self-run
+  limitation, not independent verification. The bundled sample's evaluation
+  context derives a deterministic resolution snapshot from each sample
+  task's own payload, labeled sample-resolution data in
+  `src/venue/resolution.ts`; it grades the bundled sample deterministically
+  and attests nothing about any real market.
+- **A4 refinement (run-path state).** Run-side product state lives beside
+  the draft, not on it: `runs/<draftId>.json` (run state), a per-run
+  append-only journal `runs/<draftId>.journal.jsonl`, and
+  `artifacts/<draftId>/results.json`; the draft document itself only
+  advances its lifecycle `state`. Quote invalidation (A2) is enforced by a
+  spec digest recorded at quote time and re-checked at lock.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

@@ -22,6 +22,20 @@ const CROSS_TREE_DEPENDENCIES = [
   ["@jinn-network/benchmarking-records", ["benchmarking", "records"]],
   ["@jinn-network/task-admission", ["task-supply", "admission"]],
   ["@jinn-network/benchmarking-interop", ["benchmarking", "interop"]],
+  ["@jinn-network/task-execution-backend", ["task-execution", "backend"]],
+  ["@jinn-network/task-execution-supervisor", ["task-execution", "backend-local", "supervisor"]],
+  ["@jinn-network/task-execution-workspace", ["task-execution", "backend-local", "workspace"]],
+  ["@jinn-network/task-execution-launchers", ["task-execution", "backend-local", "launchers"]],
+  ["@jinn-network/evidence-protocol", ["evidence", "protocol"]],
+  ["@jinn-network/evidence-repository", ["evidence", "repository"]],
+  ["@jinn-network/evidence-discovery", ["evidence", "discovery"]],
+  ["@jinn-network/execution-recorder", ["evidence", "execution-recorder"]],
+  ["@jinn-network/attestation-issuer", ["evidence", "attestation-issuer"]],
+  ["@jinn-network/task-execution-evaluation-harness", ["task-execution", "evaluation-harness"]],
+  ["@jinn-network/task-execution-evaluator-adapters", ["task-execution", "evaluator-adapters"]],
+  ["@jinn-network/task-execution-backend-local", ["task-execution", "backend-local", "assembly"]],
+  ["@jinn-network/benchmarking-run", ["benchmarking", "run"]],
+  ["@jinn-network/benchmarking-local", ["benchmarking", "local"]],
 ];
 const temporaryRoot = await mkdtemp(join(tmpdir(), "jinn-benchmark-product-core-"));
 const consumer = join(temporaryRoot, "consumer");
@@ -98,9 +112,20 @@ const packageJson = JSON.parse(await readFile(${JSON.stringify(join(installedRoo
 const jinnDependencies = Object.keys(packageJson.dependencies ?? {}).filter((name) => name.startsWith("@jinn-network/"));
 const expectedJinnDependencies = [
   "@jinn-network/benchmarking-interop",
+  "@jinn-network/benchmarking-local",
   "@jinn-network/benchmarking-records",
+  "@jinn-network/benchmarking-run",
   "@jinn-network/task-admission",
+  "@jinn-network/task-execution-backend",
+  "@jinn-network/task-execution-backend-local",
+  "@jinn-network/task-execution-evaluation-harness",
+  "@jinn-network/task-execution-evaluator-adapters",
+  "@jinn-network/task-execution-launchers",
+  "@jinn-network/task-execution-profiles",
   "@jinn-network/task-execution-protocol",
+  "@jinn-network/task-execution-supervisor",
+  "@jinn-network/task-execution-workspace",
+  "@jinn-network/trust-core",
 ];
 if (jinnDependencies.length !== expectedJinnDependencies.length
     || jinnDependencies.some((name) => !expectedJinnDependencies.includes(name))) {

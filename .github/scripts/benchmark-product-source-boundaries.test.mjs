@@ -12,13 +12,19 @@
 // defineBenchmark — the import seam), `task-execution-protocol` (sealTask / documentDigest — the
 // bundled sample re-seals native prediction-forecast Tasks), `task-admission` (the golden
 // prediction-snapshot fixture plus admitPredictionSnapshot / sealPredictionSnapshotAdmissionReceipt —
-// the sample's admission receipts), and `task-execution-launchers` (TEST-ONLY devDependency: the
-// sample's shape-contract test runs the real prediction-v1-baseline launcher subprocess; no non-test
-// source file may import it, enforced below). Everything else the design's §3 table names
-// (`benchmarking-run`, `benchmarking-aggregate`, `benchmarking-local`, the rest of the
-// `task-execution-*` family, `trust-core`, `benchmarking-marketplace`) is scope for later packets
-// (M1+) and stays refused here until a packet adds it. Marketplace, every other product, and the
-// client are denied outright, same as the policy-optimization precedent.
+// the sample's admission receipts), and `task-execution-launchers` (at the time, a TEST-ONLY
+// devDependency). BP-12 (the official run path) promoted `task-execution-launchers` to a real
+// runtime edge (the real local venue's real subprocess-spawning solve launchers, `src/venue/venue.ts`)
+// and added the rest of the real local-venue stack: `benchmarking-run` (quote/launch/resume/assemble/
+// verify), `benchmarking-local` (`localAssemblyPorts`), `task-execution-backend` +
+// `task-execution-backend-local` (the real local execution backend), `task-execution-supervisor` +
+// `task-execution-workspace` (subprocess supervision), `task-execution-profiles` (task profile
+// sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters` (the
+// real evaluation leg), and `trust-core` (DSSE verdict signing). Everything else the design's §3
+// table names (`benchmarking-aggregate`, `benchmarking-marketplace`, the `evidence-*` family,
+// `environment-record`) is scope for a later packet and stays refused here until a packet adds it.
+// Marketplace, every other product, and the client are denied outright, same as the
+// policy-optimization precedent.
 //
 // **No deep imports (product design §3, "no deep imports — public package entries only").** A
 // specifier that reaches past a Jinn package's public root -- `@jinn-network/<name>/src/...` or
@@ -55,18 +61,29 @@ function sourceRoots() {
 
 const ALLOWED_JINN_PACKAGES = [
   '@jinn-network/benchmarking-interop',
+  '@jinn-network/benchmarking-local',
   '@jinn-network/benchmarking-records',
+  '@jinn-network/benchmarking-run',
   '@jinn-network/task-admission',
+  '@jinn-network/task-execution-backend',
+  '@jinn-network/task-execution-backend-local',
+  '@jinn-network/task-execution-evaluation-harness',
+  '@jinn-network/task-execution-evaluator-adapters',
   '@jinn-network/task-execution-launchers',
+  '@jinn-network/task-execution-profiles',
   '@jinn-network/task-execution-protocol',
+  '@jinn-network/task-execution-supervisor',
+  '@jinn-network/task-execution-workspace',
+  '@jinn-network/trust-core',
 ];
 
 // Packages admitted for test files only (devDependencies): a `.test.ts` may import them, non-test
-// source may not. Today: the launcher package, imported solely by the sample intake's
-// shape-contract test, which runs the real launcher subprocess against the bundled sample Tasks.
-const TEST_ONLY_JINN_PACKAGES = [
-  '@jinn-network/task-execution-launchers',
-];
+// source may not. BP-12 promoted the one prior entry (`task-execution-launchers`) to a real
+// runtime dependency (the local venue imports it from non-test source), so this list is empty for
+// now — kept as a named, still-enforced list (`test-only packages are imported by test files
+// alone`, below) rather than deleted, so a future test-only edge has a home without re-adding the
+// mechanism.
+const TEST_ONLY_JINN_PACKAGES = [];
 
 // Named so the denial is a positive assertion rather than a consequence of the allow-list, and so a
 // reader can see which families were considered and refused.
@@ -88,20 +105,12 @@ const EXPLICITLY_DENIED = [
   '@jinn-network/task-curation',
   '@jinn-network/task-derivation',
   '@jinn-network/task-posting',
-  '@jinn-network/task-execution-backend-local',
-  // Denied by name even though each resolves through this tree's portal graph: they are the
-  // allow-listed packages' own runtime edges, never this product's imports.
-  '@jinn-network/trust-core',
+  // Denied by name even though it resolves through this tree's portal graph: an allow-listed
+  // package's own runtime edge, never this product's import.
   '@jinn-network/environment-record',
-  '@jinn-network/task-execution-profiles',
-  '@jinn-network/task-execution-supervisor',
-  '@jinn-network/task-execution-workspace',
-  '@jinn-network/task-execution-backend',
   // Not yet admitted: each is scope for a later packet (product design §3), added deliberately when
   // that packet wires it up.
-  '@jinn-network/benchmarking-run',
   '@jinn-network/benchmarking-aggregate',
-  '@jinn-network/benchmarking-local',
   '@jinn-network/benchmarking-marketplace',
   // Deep-import exemplars (exact specifiers, not wildcards): refused by the deep-import rule even
   // though `benchmarking-records` is allow-listed and `task-execution-protocol` is a portal
@@ -217,12 +226,18 @@ test('benchmark-product source imports only its approved Jinn dependencies', () 
 test('benchmark-product actually imports the dependencies it declares (positive control)', () => {
   // Without this the boundary test above could pass vacuously if an edge were silently dropped -- an
   // absent edge is not the same claim as an audited one. Every allow-listed package must have at
-  // least one live import; a name on the list with zero imports is an unused declaration.
+  // least one live import; a name on the list with zero imports is an unused declaration. Matched
+  // via `packageSpecifierMatches` (bare specifier OR a subpath of it), not exact string equality --
+  // `task-execution-evaluation-harness` is imported only via its `/launcher` secondary entry point
+  // (`src/venue/venue.ts`), never the bare package specifier.
   const roots = sourceRoots();
   if (roots.length === 0) return;
-  const imported = new Set(roots.flatMap(files).flatMap((file) => specifiers(readFileSync(file, 'utf8'))));
+  const imported = roots.flatMap(files).flatMap((file) => specifiers(readFileSync(file, 'utf8')));
   for (const name of ALLOWED_JINN_PACKAGES) {
-    assert.ok(imported.has(name), `expected at least one import of ${name}`);
+    assert.ok(
+      imported.some((specifier) => packageSpecifierMatches(specifier, name)),
+      `expected at least one import of ${name}`,
+    );
   }
 });
 

@@ -58,3 +58,26 @@ export {
   type AuthorityGrantInput,
   type AuthorityRevokeInput,
 } from "./authority-ops.js";
+
+// BP-12: run wiring (spec §4.1 quoted through closed) — quote, lock, launch/resume, status,
+// collect, results. `run-*.ts` sibling modules, extending the facade per this file's own header.
+export { runQuote, type RunQuoteDeps, type RunQuoteInput, type RunQuoteResult } from "./run-quote.js";
+export { runLock, type RunLockInput, type RunLockResult } from "./run-lock.js";
+export {
+  runLaunch,
+  runResume,
+  type RunLaunchDeps,
+  type RunLaunchInput,
+  type RunLaunchResult,
+  type RunResumeInput,
+  type RunResumeResult,
+} from "./run-launch.js";
+export { runStatus, type RunStatusCell, type RunStatusCounts, type RunStatusResult } from "./run-status.js";
+export { runCollect, type RunCollectInput, type RunCollectResult } from "./run-collect.js";
+export {
+  runResults,
+  type RunResultsCell,
+  type RunResultsDocument,
+  type RunResultsVerdict,
+  type VenueHonesty,
+} from "./run-results.js";

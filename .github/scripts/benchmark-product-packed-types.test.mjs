@@ -33,12 +33,13 @@ const codeEntrypoints = [
 // Cross-tree Jinn dependencies the product references, packed as `file:` deps so NodeNext resolves
 // them (program plan §4.1; record-discovery-packed-types.test.mjs precedent). This is the product's
 // full RUNTIME dependency closure -- direct dependencies plus every transitive @jinn-network edge
-// (none is on the registry): protocol + records (BP-01), then per BP-11's intake edges interop
-// (-> records, profiles, protocol), task-admission (-> environment-record, protocol, trust-core),
-// and their transitives. The `task-execution-launchers` devDependency is deliberately absent: a
-// packed consumer installs runtime dependencies only. Each `npm pack` is independent, and
-// `--ignore-scripts` ships whatever `dist/` is on disk -- CI builds every one of these before this
-// script runs.
+// (none is on the registry), in dependency order (pack/install order): protocol + records (BP-01),
+// BP-11's intake edges (interop, task-admission, and their transitives environment-record /
+// trust-core / profiles), and BP-12's real local-venue stack (backend, backend-local, supervisor,
+// workspace, launchers, the evaluation-harness + evaluator-adapters pair, benchmarking-run,
+// benchmarking-local, and the evidence-* / attestation-issuer transitives the evaluation-harness
+// pair pulls in). Each `npm pack` is independent, and `--ignore-scripts` ships whatever `dist/` is
+// on disk -- CI builds every one of these before this script runs.
 const CROSS_TREE_PACKAGES = [
   ['@jinn-network/task-execution-protocol', join(root, 'packages', 'task-execution', 'protocol')],
   ['@jinn-network/trust-core', join(root, 'packages', 'trust', 'core')],
@@ -47,6 +48,20 @@ const CROSS_TREE_PACKAGES = [
   ['@jinn-network/benchmarking-records', join(root, 'packages', 'benchmarking', 'records')],
   ['@jinn-network/task-admission', join(root, 'packages', 'task-supply', 'admission')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],
+  ['@jinn-network/task-execution-backend', join(root, 'packages', 'task-execution', 'backend')],
+  ['@jinn-network/task-execution-supervisor', join(root, 'packages', 'task-execution', 'backend-local', 'supervisor')],
+  ['@jinn-network/task-execution-workspace', join(root, 'packages', 'task-execution', 'backend-local', 'workspace')],
+  ['@jinn-network/task-execution-launchers', join(root, 'packages', 'task-execution', 'backend-local', 'launchers')],
+  ['@jinn-network/evidence-protocol', join(root, 'packages', 'evidence', 'protocol')],
+  ['@jinn-network/evidence-repository', join(root, 'packages', 'evidence', 'repository')],
+  ['@jinn-network/evidence-discovery', join(root, 'packages', 'evidence', 'discovery')],
+  ['@jinn-network/execution-recorder', join(root, 'packages', 'evidence', 'execution-recorder')],
+  ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
+  ['@jinn-network/task-execution-evaluation-harness', join(root, 'packages', 'task-execution', 'evaluation-harness')],
+  ['@jinn-network/task-execution-evaluator-adapters', join(root, 'packages', 'task-execution', 'evaluator-adapters')],
+  ['@jinn-network/task-execution-backend-local', join(root, 'packages', 'task-execution', 'backend-local', 'assembly')],
+  ['@jinn-network/benchmarking-run', join(root, 'packages', 'benchmarking', 'run')],
+  ['@jinn-network/benchmarking-local', join(root, 'packages', 'benchmarking', 'local')],
 ];
 
 function run(command, args, options = {}) {

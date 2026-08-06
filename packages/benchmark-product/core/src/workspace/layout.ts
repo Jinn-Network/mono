@@ -15,6 +15,7 @@ export const RECORDS_DIRNAME = "records";
 export const ARTIFACTS_DIRNAME = "artifacts";
 export const JOURNAL_FILENAME = "journal.jsonl";
 export const AUTHORITY_FILENAME = "authority.json";
+export const RUNS_DIRNAME = "runs";
 
 export function workspaceMetadataPath(workspaceDir: string): string {
   return join(workspaceDir, WORKSPACE_METADATA_FILENAME);
@@ -47,4 +48,24 @@ export function journalPath(workspaceDir: string): string {
 /** The per-workspace authority policy document (spec §4.2). */
 export function authorityPath(workspaceDir: string): string {
   return join(workspaceDir, AUTHORITY_FILENAME);
+}
+
+/** Official-run state and per-run journals (BP-12: run wiring, spec §4.1 locked→…→closed). */
+export function runsDir(workspaceDir: string): string {
+  return join(workspaceDir, RUNS_DIRNAME);
+}
+
+/** `<ws>/runs/<draftId>.json` — the RunState document for a draft's official run. */
+export function runStatePath(workspaceDir: string, draftId: string): string {
+  return join(runsDir(workspaceDir), `${draftId}.json`);
+}
+
+/** `<ws>/runs/<draftId>.journal.jsonl` — the append-only per-run cell-status journal. */
+export function runJournalPath(workspaceDir: string, draftId: string): string {
+  return join(runsDir(workspaceDir), `${draftId}.journal.jsonl`);
+}
+
+/** `<ws>/artifacts/<draftId>/results.json` — the derived results artifact (spec §4.5). */
+export function resultsArtifactPath(workspaceDir: string, draftId: string): string {
+  return join(artifactsDir(workspaceDir), draftId, "results.json");
 }
