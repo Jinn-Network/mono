@@ -55,6 +55,15 @@ describe('M2 fleet config keys', () => {
     expect(config.publicBaseUrl).toBe('https://records.example/');
   });
 
+  // One-swap M5e (#2461): the requester WRITE path's distinct admission Agent IRI. Absent-tolerant
+  // (a legacy or write-less operator never sets it) and round-trips as an Agent IRI when set.
+  it('round-trips admissionAgent and refuses a non-Agent-IRI value', () => {
+    expect(loadConfig(writeConfig({})).admissionAgent).toBeUndefined();
+    expect(loadConfig(writeConfig({ admissionAgent: 'urn:jinn:admission:fleet-one' })).admissionAgent)
+      .toBe('urn:jinn:admission:fleet-one');
+    expect(() => loadConfig(writeConfig({ admissionAgent: 'not an agent iri' }))).toThrow();
+  });
+
   // One-swap M3 (#2461): the fifth key, added by the milestone that consumes it.
   it('round-trips recordSources and refuses a duplicate source identity', () => {
     const source = {

@@ -29,7 +29,13 @@ import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
 // carries `discovery?`, which is what `nativeDiscoveryDecodeProvedCanonical` reads, so it is the
 // more exact type as well.
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
-import { createNativeRequesterSubmissionResolver } from '../native-requester/requester.js';
+import {
+  createNativeRequesterSubmissionResolver,
+  type NativeAuthorityTimeAnchor,
+  type NativeRequesterIdentity,
+  type NativeRequesterRoles,
+} from '../native-requester/requester.js';
+import type { CanonicalTaskCreatedReader } from './native-fleet-requester-write.js';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
 import { buildNativeResolveRecord } from './composition-root.js';
@@ -106,7 +112,11 @@ export function resolveFleetEscrowMaxWei(
  */
 const FLEET_STORE_ROLES: Readonly<Record<'solver' | 'requester', readonly NativeRoleIdentityRole[]>> = {
   solver: ['solver-delivery', 'solver-settlement', 'solver-discovery'],
-  requester: ['requester-submission'],
+  // `requester-discovery` joins `requester-submission` (M5e): the requester WRITE path signs the
+  // source announcement (discovery) as well as the Submission envelope. Provisioning both is a
+  // deploy-time concern — the fleet is dark until Wave 3 sets `compositionMode`, so widening the
+  // required requester roles now regresses no live operator.
+  requester: ['requester-submission', 'requester-discovery'],
 };
 
 /**
@@ -162,9 +172,35 @@ export function createLateBoundVerdictObservation(): LateBoundVerdictObservation
   };
 }
 
+/**
+ * Everything the fleet requester WRITE path (`buildFleetRequesterWrite`, one-swap M5e) needs that
+ * this runtime can build BEFORE the composition venue exists — the role authority, the shared
+ * authority-time and canonical reads, and the identity/location metadata. `main.ts` completes it
+ * with the composition's ONE Safe broadcaster (`venue.safe`), the venue posting WAL/scope ports,
+ * and the IPFS pin, then hands the assembled port to the posting loop.
+ *
+ * Present only when the operator provisioned requester admission custody
+ * (`config.admissionAgent` + `config.identityStores.admission`); absent otherwise, in which case the
+ * posting loop's `post` stays the M5d fail-closed seam.
+ */
+export interface FleetRequesterWriteAuthority {
+  readonly requesterAgent: string;
+  readonly admissionAgent: string;
+  readonly publicBaseUrl: string;
+  readonly requesterStateDir: string;
+  readonly roles: NativeRequesterRoles;
+  readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
+  readonly canonicalTaskCreated: CanonicalTaskCreatedReader;
+}
+
 export interface FleetNativeRuntime {
   readonly identities: RoleIdentitySet;
   readonly claimRuntime: NativeClaimRuntimeInput;
+  /**
+   * The requester WRITE authority (one-swap M5e). `undefined` when the operator configured no
+   * admission custody — the posting path then has no live write port and stays fail-closed.
+   */
+  readonly requesterWrite?: FleetRequesterWriteAuthority;
   readonly projectorPorts: NativeProjectorExactPorts;
   readonly nativeRequesterStateDir: string;
   /**
@@ -364,8 +400,26 @@ export async function buildFleetNativeRuntime(
     canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
   });
 
+  // One-swap M5e: the requester WRITE authority, built only when the operator provisioned admission
+  // custody. The admission signer is a DISTINCT Agent from the requester (design: admission is a
+  // separate authority), so it is a SEPARATE role set — `RoleIdentitySet.merge` refuses two agents,
+  // and rightly. The dispatch port routes `admission` to that set and every other requester role to
+  // the merged fleet identities (which now own `requester-submission` + `requester-discovery`).
+  const requesterWrite = await buildFleetRequesterWriteAuthority({
+    config,
+    agentIri,
+    publicBaseUrl,
+    password: input.password,
+    trust,
+    identities,
+    nativeRequesterStateDir,
+    authorityTime: createBaseSepoliaAuthorityTime(input.publicClient).latestFinalized,
+    canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
+  });
+
   return {
     identities,
+    ...(requesterWrite === undefined ? {} : { requesterWrite }),
     claimRuntime,
     projectorPorts,
     nativeRequesterStateDir,
@@ -374,5 +428,72 @@ export async function buildFleetNativeRuntime(
     records,
     agentIri,
     installVerdictObservation: lateBoundVerdict.install,
+  };
+}
+
+/**
+ * Builds the requester WRITE authority, or `undefined` when the operator provisioned no admission
+ * custody. Refuses loudly (never silently degrades to no-post) when admission custody is present but
+ * malformed: an admission Agent equal to the requester Agent, or an admission store equal to the
+ * requester store, is a custody fault the schema does not catch across the two config sections.
+ *
+ * The admission role set is opened SEPARATELY from the merged fleet identities because it is bound
+ * to a distinct Agent IRI (`RoleIdentitySet.merge` refuses two agents). The returned `roles` port
+ * dispatches `admission` to that set and every other requester role to the merged identities, which
+ * — after the M5e widening of `FLEET_STORE_ROLES.requester` — own both `requester-submission` and
+ * `requester-discovery`.
+ */
+async function buildFleetRequesterWriteAuthority(input: {
+  readonly config: JinnConfig;
+  readonly agentIri: string;
+  readonly publicBaseUrl: string;
+  readonly password: string;
+  readonly trust: NativeTrustAuthority;
+  readonly identities: RoleIdentitySet;
+  readonly nativeRequesterStateDir: string;
+  readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
+  readonly canonicalTaskCreated: CanonicalTaskCreatedReader;
+}): Promise<FleetRequesterWriteAuthority | undefined> {
+  const admissionAgent = input.config.admissionAgent;
+  const admissionStore = input.config.identityStores?.admission;
+  if (admissionAgent === undefined || admissionStore === undefined) return undefined;
+
+  const requesterStore = input.config.identityStores?.requester;
+  if (admissionAgent === input.agentIri) {
+    throw new NativeFleetAssemblyError(
+      'config.admissionAgent equals config.agentIri; the requester admission authority must be a '
+      + 'distinct Agent from the requester it admits for',
+    );
+  }
+  if (requesterStore !== undefined && admissionStore === requesterStore) {
+    throw new NativeFleetAssemblyError(
+      'config.identityStores.admission equals config.identityStores.requester; admission custody '
+      + 'must be a distinct store from the requester custody',
+    );
+  }
+
+  const admissionSet = await openRoleIdentitySet({
+    agent: admissionAgent,
+    requiredRoles: ['admission'],
+    storePath: admissionStore,
+    password: input.password,
+    bindingResolver: input.trust.bindingResolver,
+    verifyRoleBinding: input.trust.verifyRoleBinding,
+  });
+
+  const roles: NativeRequesterRoles = {
+    get(role): NativeRequesterIdentity {
+      return role === 'admission' ? admissionSet.get('admission') : input.identities.get(role);
+    },
+  };
+
+  return {
+    requesterAgent: input.agentIri,
+    admissionAgent,
+    publicBaseUrl: input.publicBaseUrl,
+    requesterStateDir: input.nativeRequesterStateDir,
+    roles,
+    authorityTime: input.authorityTime,
+    canonicalTaskCreated: input.canonicalTaskCreated,
   };
 }

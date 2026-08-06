@@ -2689,11 +2689,42 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // `buildPostingLoop` gate then makes the loop inert unless `posting[]` is non-empty.
     if (nativeRuntime !== undefined) {
       const { buildFleetPostingRuntime } = await import('./daemon/native-fleet-posting.js');
+      // One-swap M5e (#2461): the requester WRITE port. Built only when the runtime produced the
+      // requester write authority (admission custody configured). It reuses the composition's ONE
+      // Safe broadcaster (`composition.venue.safe` — the SAME single-nonce authority the solver,
+      // evaluator and verdict legs serialize through) plus that venue's posting WAL and scope store;
+      // it opens NO second wallet or venue. When the authority is absent, `postTask` stays undefined
+      // and the posting loop's `post` remains the M5d fail-closed seam.
+      let fleetPostTask:
+        | ((target: import('./daemon/posting-loop.js').PostingLoopTarget) => Promise<{ readonly taskId?: string }>)
+        | undefined;
+      if (nativeRuntime.requesterWrite !== undefined) {
+        const { buildFleetRequesterWrite } = await import('./daemon/native-fleet-requester-write.js');
+        const { createRegistryPinPort } = await import('@jinn-network/marketplace-binding');
+        const ipfsApiUrl = config.ipfs?.apiUrl;
+        if (ipfsApiUrl === undefined) {
+          throw new Error('native requester write path requires config.ipfs.apiUrl to pin the task document');
+        }
+        const requesterWrite = buildFleetRequesterWrite({
+          ...nativeRuntime.requesterWrite,
+          creatorSafe: safeAddress as `0x${string}`,
+          safeBroadcast: composition.venue.safe,
+          intents: composition.venue.intents,
+          observe: composition.venue.observe,
+          ipfsPin: createRegistryPinPort({
+            registryUrl: ipfsApiUrl,
+            fetchImpl: globalThis.fetch.bind(globalThis),
+          }),
+        });
+        fleetPostTask = (target) => requesterWrite.postTarget(target);
+      }
       const postingRuntime = buildFleetPostingRuntime({
         config,
         safeAddress: safeAddress as `0x${string}`,
         agentEoaAddress,
         readBalanceWei: (address) => publicClient.getBalance({ address }),
+        logger: { warn: (message) => console.warn(message) },
+        ...(fleetPostTask === undefined ? {} : { postTask: fleetPostTask }),
       });
       postingConfig = {
         compositionMode: COMPOSITION_MODE,
