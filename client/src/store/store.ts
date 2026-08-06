@@ -16,6 +16,7 @@ import {
   PROJECTOR_OBSERVATIONS_SCHEMA,
 } from '../daemon/projector-cursor.js';
 import { TASK_RUNS_SCHEMA, TaskRunPersistence } from './task-run-persistence.js';
+import { NativeTaskRunReadModel } from './native-task-run-read-model.js';
 import { PHASE_RUNS_SCHEMA, PhaseRunStore } from './phase-runs.js';
 import type { TaskRunReadModel } from '../types/task-run-read-model.js';
 import type { TxSubmissionKey, TxSubmissionLedgerEntry } from '../tx-retry.js';
@@ -649,8 +650,20 @@ export class Store {
    * Read-only task-run view for the status/build endpoints (#1584). Returns a
    * `TaskRunReadModel` backed by the engine persistence layer, keeping the
    * concrete `TaskRunPersistence` construction out of `api/`.
+   *
+   * Dual-read (one-swap R1, umbrella #2461, DR-2026-08-05): `compositionMode`
+   * selects the SOURCE behind the SAME port. `'native'` returns a read model
+   * over the native aggregate tables (`native_engagements` / `native_evaluations`)
+   * so the status plane reflects native solver + evaluator work; every other
+   * value (absent / `undefined` / `'legacy'`) returns the byte-unchanged legacy
+   * `TaskRunPersistence` over `task_runs`. Both boots work while the daemon is
+   * dark — a legacy operator reads `task_runs`, a flipped native operator reads
+   * the native tables — because in a single boot only one source is populated.
    */
-  taskRunReadModel(): TaskRunReadModel {
+  taskRunReadModel(compositionMode?: 'legacy' | 'native'): TaskRunReadModel {
+    if (compositionMode === 'native') {
+      return new NativeTaskRunReadModel(this.db);
+    }
     return new TaskRunPersistence(this.db);
   }
 

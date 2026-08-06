@@ -597,6 +597,19 @@ async function gatherServiceBalances(
   return { byDisplay: out, errorsByDisplay };
 }
 
+/**
+ * Which read-plane source `Store.taskRunReadModel()` should sit behind for this
+ * boot (one-swap R1, umbrella #2461, DR-2026-08-05). `compositionMode: "native"`
+ * — set only by Wave 3's deploy PR, and validly reachable only after
+ * `assertNativeDeployment` passed at boot — reads the native aggregate tables;
+ * every other value (absent / `"legacy"`) keeps the byte-unchanged legacy
+ * `task_runs` read. Dark until the deploy flips the key, so on every legacy
+ * boot this returns `"legacy"` and the read plane is unchanged.
+ */
+function readPlaneMode(status: StatusGatherConfig | undefined): 'legacy' | 'native' {
+  return status?.config?.compositionMode === 'native' ? 'native' : 'legacy';
+}
+
 /** Collect status inputs without assembling the legacy mega-response. */
 export async function gatherGatheredStatusRaw(
   store: Store,
@@ -616,7 +629,7 @@ export async function gatherGatheredStatusRaw(
     outcome: row.outcome,
   }));
   const lastRewardClaimTickAt = store.getConfigValue('last_reward_claim_tick_at');
-  const taskRunReadModel = store.taskRunReadModel();
+  const taskRunReadModel = store.taskRunReadModel(readPlaneMode(status));
   const daily = resolveMasterDailyEstimateWei(
     status?.masterEthDailyEstimateWei,
     status?.pollIntervalMs ?? 5000,
@@ -952,7 +965,7 @@ export async function enrichStatusV1Tail(
   // inferred type carries a `[x: string]: unknown` index signature that a plain
   // `export interface` from these owning modules doesn't declare. The values are
   // identical; only the two types' declared shape differs.
-  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(), {
+  body.loopCompletion = gatherLoopCompletion(store.taskRunReadModel(readPlaneMode(status)), {
     cacheKey: store.db,
   }) as StatusV1Response['loopCompletion'];
   if (status?.engine?.implStateDirRoot) {
