@@ -38,6 +38,7 @@
  */
 
 import { isAbsolute } from 'node:path';
+import { AgentIriSchema } from '@jinn-network/trust-core';
 import { z } from 'zod/v3';
 
 /**
@@ -160,6 +161,72 @@ export const NativeIdentityStoresConfigSchema = z
     }
   });
 export type NativeIdentityStoresConfig = z.infer<typeof NativeIdentityStoresConfigSchema>;
+
+/**
+ * Which composition the ONE fleet daemon assembles (one-swap M2, umbrella #2461).
+ *
+ * This is the flip switch. `composition-root.ts` takes `mode: 'legacy' | 'native'` and refuses to
+ * default it ("callers cannot silently downgrade native boot"); this key is the operator-facing
+ * spelling of exactly that argument, in exactly that vocabulary, so the deploy PR throws one
+ * switch and nothing else.
+ *
+ * ABSENT MEANS LEGACY, and so does an explicit `'legacy'`. There is no readiness heuristic here
+ * and no receipt that flips the default: M2 lands the native assembly dark, and Wave 3's deploy PR
+ * is the change that sets this key.
+ *
+ * Deliberately NOT `operator.verticalMode`. That key (with `operator.native`) is the product
+ * boundary of the parallel `native-main.ts` entry point, which retires at stage 5 (DR-2026-08-05
+ * decision 1), and its resolver hard-errors on `native-v1` without a complete `operator.native`
+ * block. Reusing it would couple the fleet flip to a schema scheduled for deletion and to a
+ * chain/contract block that DR-2026-08-05 decision 8 deliberately removed from operator config.
+ * The two keys are independent: `operator.verticalMode` selects an ENTRY POINT, this selects a
+ * COMPOSITION inside the one fleet daemon.
+ */
+export const NativeCompositionModeSchema = z.enum(['legacy', 'native']);
+export type NativeCompositionMode = z.infer<typeof NativeCompositionModeSchema>;
+
+/**
+ * This operator's durable Agent IRI — `agent` in `daemon/native-product-config.ts`, the value
+ * every native role binding is resolved against and the one `composition-root.ts` checks
+ * `nativeClaimRuntime.operatorAgent` equals.
+ *
+ * M1 landed `identityStores` without it (M1 finding 4): a store path alone cannot open a
+ * `RoleIdentitySet`, which requires the Agent IRI as well. Named `agentIri` rather than the landed
+ * `agent` — a deliberate, recorded exception to the names-as-landed rule, because a bare root-level
+ * `agent` on a config file that also carries harness, solver-net and engine settings reads as "the
+ * agent I run", not "the identity my keys bind to". Same value, same validator
+ * (`AgentIriSchema`, `@jinn-network/trust-core`), unambiguous name.
+ */
+export const NativeAgentIriSchema = z
+  .string()
+  .min(1)
+  .refine((value) => AgentIriSchema.safeParse(value).success, 'must be an accepted Agent IRI');
+
+/**
+ * IPFS **API** endpoint the native record transport POSTs `/api/v0/block/get` against.
+ *
+ * Distinct from the legacy `ipfsRegistryUrl` (pin API) and `ipfsGatewayUrl` (read-only HTTP
+ * gateway) already on this config: neither serves block-level retrieval, and the native transport
+ * verifies the sha256 of every fetched block against the requested digest, so a gateway that
+ * re-encodes or redirects is not a substitute.
+ */
+export const NativeIpfsConfigSchema = z
+  .object({ apiUrl: z.string().url() })
+  .strict();
+export type NativeIpfsConfig = z.infer<typeof NativeIpfsConfigSchema>;
+
+/**
+ * Public base URL this operator's own signed record source is reachable at — `publicBaseUrl` in
+ * `daemon/native-product-config.ts`. The native solution publisher stamps it into every
+ * announcement's advertised location, so peers resolve deliveries from it.
+ */
+export const NativePublicBaseUrlSchema = z
+  .string()
+  .url()
+  .refine((value) => {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  }, 'must use HTTP(S)');
 
 /** Confirmation depth the native infrastructure treats as finalized. */
 export const NativeFinalityConfigSchema = z

@@ -541,6 +541,52 @@ export class RoleIdentitySet {
     );
   }
 
+  /**
+   * Unions several per-store role sets into the ONE `RoleIdentitySet` the fleet daemon's native
+   * composition takes (one-swap M2, umbrella #2461).
+   *
+   * `identityStores` (config shape-v2, M1) is keyed by role FAMILY — requester, admission, solver,
+   * evaluator — each a separate encrypted file, and `RoleIdentitySet.open` loads exactly one of
+   * them. `composition-root.ts`'s native mode, however, reads across families off a single set:
+   * `solver-delivery` / `solver-settlement` / `solver-discovery` for delivery signing, publication
+   * and settlement, plus `requester-submission` for the projector's requester-association
+   * resolver. A multi-role fleet process therefore has to present one set over several stores.
+   *
+   * This is a union, never a widening of authority. Every input set was already opened by
+   * `RoleIdentitySet.open`, so each key in it has already proved its own effective-time binding,
+   * scope and non-revocation. Merging adds no role that no store owned, re-resolves nothing, and
+   * caches no decision: `resolveEffective` on the merged set still goes back to the resolver at
+   * the signed record's own effective time.
+   *
+   * Refuses two things outright rather than picking a winner: an empty input, and sets that do not
+   * share one Agent IRI (a merged set has exactly one `agent`, and `composition-root.ts` checks it
+   * against `nativeClaimRuntime.operatorAgent`). A role owned by two sets is also a refusal — two
+   * files claiming the same signing authority is a custody fault, not something to resolve by
+   * order.
+   */
+  static merge(sets: readonly RoleIdentitySet[]): RoleIdentitySet {
+    const [first, ...rest] = sets;
+    if (first === undefined) throw new IdentityStoreError('native role identity merge requires at least one set');
+    for (const set of rest) {
+      if (set.agent !== first.agent) {
+        throw new IdentityStoreError('native role identity sets do not share one Agent IRI');
+      }
+      if (set.bindingResolver !== first.bindingResolver) {
+        throw new IdentityStoreError('native role identity sets do not share one binding resolver');
+      }
+    }
+    const byRole = new Map<NativeRoleIdentityRole, NativeRoleIdentity>();
+    for (const set of sets) {
+      for (const [role, identity] of set.byRole) {
+        if (byRole.has(role)) {
+          throw new IdentityStoreError(`native role "${role}" is owned by more than one identity store`);
+        }
+        byRole.set(role, identity);
+      }
+    }
+    return new RoleIdentitySet(first.agent, byRole, first.bindingResolver, first.now);
+  }
+
   get(role: NativeRoleIdentityRole): NativeRoleIdentity {
     const identity = this.byRole.get(role);
     if (identity === undefined) throw new IdentityStoreError(`native role identity "${role}" is unavailable`);
