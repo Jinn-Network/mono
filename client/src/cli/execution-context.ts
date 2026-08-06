@@ -13,7 +13,7 @@ import { isOperationalServiceStep, type FleetState, type ServiceState } from '..
 import { decryptMnemonic, deriveMasterSigner, walletPrivateKeyAtIndex } from '../earning/wallet.js';
 import { base as baseChain, baseSepolia } from 'viem/chains';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
-import { MechAdapter } from '../adapters/mech/adapter.js';
+import { MechRequesterAdapter } from '../adapters/mech/requester-adapter.js';
 import { createClients } from '../adapters/mech/safe.js';
 import { createDirectSafeBroadcaster } from '../adapters/mech/direct-safe-broadcaster.js';
 import { Store } from '../store/store.js';
@@ -38,7 +38,13 @@ export interface CliExecutionContext extends CliSignerContext {
   jinnStore: Store;
   /** First complete service with Safe + mech (daemon / creator semantics). */
   primaryService: ServiceState;
-  adapter: MechAdapter;
+  /**
+   * Requester-only execution adapter — the CLI's `jinn tasks submit` posting
+   * path. Carved off the full `MechAdapter` (one-swap R4) so the legacy mech
+   * adapter can retire in Phase D without breaking the CLI; `TaskPostingService`
+   * only ever calls `postTask` / `recoverTaskPost`.
+   */
+  adapter: MechRequesterAdapter;
 }
 
 function mergeArgvForConfig(argv?: string[]): string | undefined {
@@ -247,23 +253,20 @@ export async function createCliExecutionContext(
     primaryService.safe_address as `0x${string}`,
   );
 
-  const adapter = new MechAdapter(
-    {
-      rpcUrl: config.rpcUrl,
-      mechMarketplaceAddress: marketplaceAddress,
-      routerAddress,
-      mechContractAddress: primaryService.mech_address as `0x${string}`,
-      safeAddress: primaryService.safe_address as `0x${string}`,
-      agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
-      ipfsRegistryUrl: config.ipfsRegistryUrl,
-      ipfsGatewayUrl: config.ipfsGatewayUrl,
-      pollIntervalMs: config.pollIntervalMs,
-      chainId: config.network === 'testnet' ? 84532 : 8453,
-      routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
-      broadcaster,
-    },
-    jinnStore,
-  );
+  const adapter = new MechRequesterAdapter({
+    rpcUrl: config.rpcUrl,
+    mechMarketplaceAddress: marketplaceAddress,
+    routerAddress,
+    mechContractAddress: primaryService.mech_address as `0x${string}`,
+    safeAddress: primaryService.safe_address as `0x${string}`,
+    agentEoaPrivateKey: agentEoaPrivateKey as `0x${string}`,
+    ipfsRegistryUrl: config.ipfsRegistryUrl,
+    ipfsGatewayUrl: config.ipfsGatewayUrl,
+    pollIntervalMs: config.pollIntervalMs,
+    chainId: config.network === 'testnet' ? 84532 : 8453,
+    routerClaimDeliveryVariant: chainConfig.routerClaimDeliveryVersion,
+    broadcaster,
+  });
 
   try {
     await adapter.initialize();
