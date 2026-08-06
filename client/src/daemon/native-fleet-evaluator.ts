@@ -243,9 +243,17 @@ export async function buildFleetNativeEvaluator(
         module: evaluatorDeployment.deploymentModule,
         moduleDigest: evaluatorDeployment.moduleDigest as `sha256:${string}`,
         signerHandle: evaluatorDeployment.signerHandle,
-        evaluationMethodDigest: evaluatorDeployment.evaluationMethodDigest as `sha256:${string}`,
+        // Branded `NativeEvaluationMethodDigests` (single digest or per-registration map) — no cast
+        // (native-sections.ts brands it). The map form lets one deployment serve prediction AND
+        // swe-rebench with per-registration digests.
+        evaluationMethodDigest: evaluatorDeployment.evaluationMethodDigest,
       },
-      // graderReportSources deliberately omitted — prediction-only for M4a; M4c wires it.
+      // Container-graded registrations (swe-rebench-v2) declare their `deployment-owned` binding
+      // here (one-swap M4c, #2467). A container-graded registration with no binding is refused at
+      // composition; omitted for a prediction-only deployment, leaving the M4a boot path unchanged.
+      ...(evaluatorDeployment.graderReportSources === undefined
+        ? {}
+        : { graderReportSources: evaluatorDeployment.graderReportSources }),
     });
   } catch (cause) {
     await evidence.close().catch(() => undefined);
