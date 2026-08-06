@@ -48,6 +48,13 @@ import {
   type NativeAuthorityTimeAnchor,
   type NativeRequesterRoles,
 } from '../native-requester/requester.js';
+import {
+  adoptPostedTask,
+  isRequesterError,
+  type AdoptionDecision,
+  type DeliveryObservePort,
+} from '../native-requester/work-client/index.js';
+import type { AdoptionReceiptStore } from './native-adoption-receipt-store.js';
 import type { PostingLoopTarget } from './posting-loop.js';
 
 /**
@@ -101,6 +108,15 @@ export interface FleetRequesterWriteInput {
   readonly authorityTime: () => Promise<NativeAuthorityTimeAnchor>;
   /** Reuses the runtime's ONE canonical read (`solverReads.canonicalTaskCreated`). */
   readonly canonicalTaskCreated: CanonicalTaskCreatedReader;
+  /**
+   * The durable adoption-receipt sink (one-swap M5f). The G-loop adopt leg reads this operator's own
+   * posted associations, observes + verifies each delivery, and records an accepted decision here.
+   * `has()` makes adoption adopt-once: an already-adopted task is skipped on later reconcile ticks.
+   * `main.ts` builds a {@link AdoptionReceiptStore} under the requester state dir.
+   */
+  readonly adoptionReceipts: AdoptionReceiptStore;
+  /** Optional info/warn sink for adoption outcomes — a new accepted adoption logs info, a refusal a loud warn. */
+  readonly logger?: { info(message: string): void; warn(message: string): void };
   /** Overrides the fleet default terms (tests). Production uses {@link FLEET_REQUESTER_POSTING_TERMS}. */
   readonly postingTerms?: PostingTerms;
   readonly now?: () => Date;
@@ -114,8 +130,20 @@ export interface FleetRequesterWrite {
    * durable canonical association without re-broadcasting.
    */
   postTarget(target: PostingLoopTarget): Promise<{ readonly taskId?: string }>;
-  /** Reconciles any durable posting draft/WAL before the loop admits new posts (loop first step). */
+  /**
+   * Reconciles any durable posting draft/WAL before the loop admits new posts, THEN runs the adopt
+   * leg (M5f) over this operator's own posted tasks. This is the loop's first tick step, so a
+   * delivery from a second operator is observed, verified and adopted before the next post.
+   */
   reconcile(): Promise<void>;
+  /**
+   * The G-loop adopt leg (M5f): for each posted task not yet adopted, observe its delivery, verify it
+   * fail-closed against the posted Submission, and record a durable accepted decision. READ + RECORD
+   * — never a broadcast. Returns the decisions recorded THIS pass (empty when nothing new was
+   * delivered). A per-task refusal (tamper / non-correspondence) is a loud skip, never fatal to the
+   * pass. Exposed for direct test drive; production reaches it through {@link reconcile}.
+   */
+  adopt(): Promise<readonly AdoptionDecision[]>;
 }
 
 const RUN_ID_ALLOWED = /[^A-Za-z0-9._-]/gu;
@@ -168,8 +196,61 @@ export function buildFleetRequesterWrite(input: FleetRequesterWriteInput): Fleet
     },
     now: input.now ?? (() => new Date()),
   });
+  // The adoption observe surface is the SAME venue observe port the write path already holds — no
+  // second observe consumer is opened (program contract 2, the M4a/M5d shared-store discipline). The
+  // delegating literal preserves each method's own closure `this`.
+  const adoptionPort: DeliveryObservePort & { readonly receipts: AdoptionReceiptStore } = {
+    observe: (ref) => input.observe.observe(ref),
+    deliveries: (attempt) => input.observe.deliveries(attempt),
+    fetchDelivery: (ref) => input.observe.fetchDelivery(ref),
+    receipts: input.adoptionReceipts,
+  };
+  const now = input.now ?? (() => new Date());
+
+  async function adopt(): Promise<readonly AdoptionDecision[]> {
+    const associations = await requester.postedAssociations();
+    const decisions: AdoptionDecision[] = [];
+    for (const association of associations) {
+      const taskId = association.taskId.toString(10);
+      // Adopt-once: a task already on the durable receipt is skipped silently (no re-verify, no
+      // re-log). This is what keeps a reconcile tick quiet for tasks already closed.
+      // eslint-disable-next-line no-await-in-loop -- bounded by the operator's own posted-task count.
+      if (await input.adoptionReceipts.has(taskId)) continue;
+      try {
+        // eslint-disable-next-line no-await-in-loop -- deliberately sequential; small, bounded set.
+        const decision = await adoptPostedTask(
+          {
+            facts: {
+              taskId: association.taskId,
+              taskDigest: association.taskDigest,
+              submissionUri: association.submissionUri,
+            },
+            now,
+          },
+          adoptionPort,
+        );
+        if (decision !== null) {
+          decisions.push(decision);
+          input.logger?.info(`[adopt] adopted task ${taskId} delivery ${decision.deliveryDigest}`);
+        }
+      } catch (err) {
+        // Fail-closed refusal (tampered / non-corresponding delivery) OR a transient observe error:
+        // a loud skip that never strands the other posted tasks and never adopts garbage.
+        const detail = isRequesterError(err)
+          ? `${err.category}/${err.code}: ${err.message}`
+          : err instanceof Error ? err.message : String(err);
+        input.logger?.warn(`[adopt] skipped task ${taskId}: ${detail}`);
+      }
+    }
+    return decisions;
+  }
+
   return {
-    reconcile: () => requester.reconcile(),
+    adopt,
+    async reconcile() {
+      await requester.reconcile();
+      await adopt();
+    },
     async postTarget(target) {
       const result = await requester.request({
         network: 'base-sepolia',

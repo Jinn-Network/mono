@@ -840,6 +840,20 @@ class NativeRequesterState {
     return stored === undefined ? undefined : toAssociation(stored);
   }
 
+  /** Every durable canonical association this requester has posted (read-only; mirrors `allDrafts`). */
+  async allAssociations(): Promise<readonly NativeRequesterAssociation[]> {
+    try {
+      const names = (await readdir(this.associationsDir())).filter((name) => name.endsWith('.json')).sort();
+      const stored = await Promise.all(
+        names.map((name) => readJson<StoredAssociation>(join(this.associationsDir(), name))),
+      );
+      return stored.filter((value): value is StoredAssociation => value !== undefined).map(toAssociation);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
   async writeAssociation(key: string, association: NativeRequesterAssociation): Promise<void> {
     const stored: StoredAssociation = { ...association, taskId: association.taskId.toString(10) };
     await writeJsonAtomic(this.associationPath(key), stored);
@@ -1722,6 +1736,12 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
   reconcile(): Promise<void>;
   request(input: NativeRequesterRequest): Promise<NativeRequesterResult>;
   handleDiscoveryRequest(request: Request): Promise<Response>;
+  /**
+   * Read-only enumeration of this operator's own posted tasks (the durable canonical associations).
+   * The one-swap M5f adoption leg reads these to observe + adopt deliveries for tasks THIS requester
+   * posted; it opens no new store — it reads the same durable association directory `request` writes.
+   */
+  postedAssociations(): Promise<readonly NativeRequesterAssociation[]>;
 } {
   const state = new NativeRequesterState(deps.stateDir);
   const source: SourceIdentity = { agent: deps.requesterAgent, name: 'requester' };
@@ -1993,5 +2013,8 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       return { association, reused: false };
     },
     handleDiscoveryRequest: handler,
+    async postedAssociations(): Promise<readonly NativeRequesterAssociation[]> {
+      return state.allAssociations();
+    },
   };
 }

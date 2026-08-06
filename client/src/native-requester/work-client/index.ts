@@ -9,3 +9,4 @@ export {
 export type { RequesterErrorCategory } from './errors.js';
 export * from './preflight/index.js';
 export * from './lifecycle/index.js';
+export * from './delivery.js';
