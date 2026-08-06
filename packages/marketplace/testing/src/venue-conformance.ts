@@ -26,3 +26,19 @@ export type {
 } from "./venue-log-source-conformance.js";
 export { anvilAvailable, describeForkVenueConformance, withForkVenue } from "./venue-fork.js";
 export type { ForkVenueDeployment, ForkVenueSubject } from "./venue-fork.js";
+export {
+  CHUNK_PLAN_FIXTURES,
+  LEGACY_BOUNDED_SCAN_RULES,
+  LEGACY_CHUNK_CONSTANTS,
+  LEGACY_UNCHUNKED_LOOKBACK_FLOOR_BLOCKS,
+  PUBLIC_BASE_GETLOGS_RANGE_CAP_BLOCKS,
+  describeChunkPlanConformance,
+} from "./legacy-chunking-fixtures.js";
+export type {
+  ChunkPlanFixture,
+  ChunkPlanSubject,
+  ChunkRange,
+  ChunkWidthConvention,
+  LegacyBoundedScanRule,
+  LegacyChunkConstant,
+} from "./legacy-chunking-fixtures.js";
