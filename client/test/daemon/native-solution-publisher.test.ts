@@ -463,4 +463,40 @@ describe('native solution public source', () => {
       signer: signing,
     })).rejects.toThrow(/journal|archive|head|record|signature|conflict|JSON/u);
   });
+
+  it('relays a live announcement to a tail subscriber (one-swap M6)', async () => {
+    const stateRoot = await root();
+    const publisher = await openNativeSolutionPublisher({
+      rootDir: stateRoot,
+      publicBaseUrl: 'http://127.0.0.1',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: signer(),
+    });
+    closers.push(() => publisher.close());
+
+    // Relays are live-from-now (§9.3): open the tail BEFORE publishing.
+    const tailRes = await publisher.handler(
+      new Request('http://127.0.0.1/sources/solver-records/tail'),
+    );
+    expect(tailRes.status).toBe(200);
+    expect(tailRes.headers.get('content-type') ?? '').toContain('text/event-stream');
+    const reader = tailRes.body!.getReader();
+
+    await publisher.publish(artifact(new TextEncoder().encode('{"delivery":1}'), 1));
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let announcement = false;
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline && !announcement) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes('event: announcement')) announcement = true;
+    }
+    await reader.cancel();
+    expect(announcement).toBe(true);
+    // The relayed frame is the CloudEvents announcement envelope naming the record.
+    expect(buffer).toContain('network.jinn.record-discovery.announcement');
+  });
 });

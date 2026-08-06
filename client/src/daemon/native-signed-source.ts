@@ -16,6 +16,8 @@ import {
   recordDigest,
   recordPath,
   sealJson,
+  toAnnouncementEvent,
+  type AnnouncedItem,
   type AnnouncementEntry,
   type Announcement,
   type SourceHead,
@@ -40,12 +42,18 @@ import {
 import {
   createArchiveHttpHandler,
   createFsBlobStore,
+  createInMemoryTailSource,
   type ArchiveHttpHandler,
 } from '@jinn-network/record-discovery-transport-http';
 
 const JSON_MEDIA_TYPE = 'application/json';
 const HEAD_MEDIA_TYPE = 'application/vnd.jinn.record-discovery.head.v1+json';
 const DEFAULT_OWNER_TTL_MS = 30_000;
+/**
+ * Bounded, non-archival SSE replay window (record-discovery design §9.3). Live consumers
+ * resume through `Last-Event-ID`; a cursor evicted from this window is told to cold-sync.
+ */
+const DEFAULT_TAIL_REPLAY_WINDOW = 256;
 
 export type NativeSignedSourceFaultBoundary =
   | 'after-record-before-journal'
@@ -926,6 +934,8 @@ export async function openNativeSignedSource(input: {
   readonly ownerFile: string;
   readonly ownershipError: (message: string) => Error;
   readonly faults?: NativeSignedSourceFaults;
+  /** Bounded SSE replay window for live tail consumers (§9.3). Defaults to 256 entries. */
+  readonly replayWindow?: number;
   readonly owner?: {
     readonly now?: () => Date;
     readonly ttlMs?: number;
@@ -948,6 +958,9 @@ export async function openNativeSignedSource(input: {
   const statePath = join(input.rootDir, 'source-state.json');
   const journalPath = join(input.rootDir, 'append-journal.json');
   const store = createFsBlobStore(join(input.rootDir, 'public'));
+  // In-memory SSE relay: `serve` writes only the static layout, so a live tail needs a
+  // process-local feed (§9.3). The publish path drives it; the archive handler serves it.
+  const tail = createInMemoryTailSource(input.replayWindow ?? DEFAULT_TAIL_REPLAY_WINDOW);
   try {
     const loaded = await readJson<SourceState | SourceStateV1>(statePath);
     const state: SourceState = loaded === undefined
@@ -1043,6 +1056,22 @@ export async function openNativeSignedSource(input: {
             : {}),
         });
         await syncWellKnown();
+        // Relay the new announcement to live tail subscribers as its CloudEvents envelope
+        // (§9.1). Withdrawals name no record and are recovered via the chain walk, not the
+        // announcement stream, so only `available` items are relayed.
+        if (announcement.action === 'available') {
+          const item: AnnouncedItem = {
+            record: announcement.record,
+            ...(announcement.facts === undefined ? {} : { facts: announcement.facts }),
+            ...(announcement.locations === undefined ? {} : { locations: announcement.locations }),
+            provenance: {
+              source: input.source,
+              entry: receipt.entryDigest,
+              announcementId: announcement.announcementId,
+            },
+          };
+          tail.publish('announcement', JSON.stringify(toAnnouncementEvent(item, undefined)));
+        }
         resolve({ location, sequence: receipt.sequence, entryDigest: receipt.entryDigest });
       }).catch(reject);
       return response;
@@ -1051,7 +1080,11 @@ export async function openNativeSignedSource(input: {
     return {
       sourceId,
       publish,
-      handler: createArchiveHttpHandler({ reader: store, ...(basePath === '' ? {} : { basePath }) }),
+      handler: createArchiveHttpHandler({
+        reader: store,
+        tail: tail.source,
+        ...(basePath === '' ? {} : { basePath }),
+      }),
       async close(): Promise<void> {
         if (closed) return;
         closed = true;

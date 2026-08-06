@@ -2494,6 +2494,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // `work`/projector/evidence-driver config below is gated on it being defined.
   let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
   let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
+  // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate
+  // listener over the native signed solver-records source; closed in `shutdown()` below.
+  let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
   if (config.network === 'testnet') {
     const { buildOperatorComposition } = await import('./daemon/composition-root.js');
     const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
@@ -2560,6 +2563,24 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     adapter.setBroadcaster(composition.broadcaster);
     deliveryDeps.broadcaster = composition.broadcaster;
     reputationFeedback?.client.setBroadcaster(composition.broadcaster);
+
+    // One-swap M6 (#2461): expose the native signed archive on its OWN listener when the
+    // operator opts in (`publicArchive.enabled`; default off, loopback host). Structural
+    // exposure scoping — the listener carries only the archive handler, never an operator
+    // route (headless design §6). Legacy and default boots start nothing here.
+    if (COMPOSITION_MODE === 'native' && config.publicArchive.enabled) {
+      const publisher = composition.nativeSolutionPublisher;
+      if (publisher === undefined) {
+        console.warn('[archive] publicArchive.enabled but the native solution publisher is absent — not serving.');
+      } else {
+        const { startPublicArchiveServer } = await import('./api/public-archive-server.js');
+        publicArchiveServer = await startPublicArchiveServer({
+          handler: publisher.handler,
+          host: config.publicArchive.host,
+          port: config.publicArchive.port,
+        });
+      }
+    }
 
     // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
     // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
@@ -2845,6 +2866,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
+        await publicArchiveServer?.close().catch(() => undefined);
         await closeCaptureReceiver();
       } catch (err) {
         exitCode = 1;

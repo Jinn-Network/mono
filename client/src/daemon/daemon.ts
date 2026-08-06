@@ -428,6 +428,14 @@ export class Daemon {
         intervalMs: config.evidenceDriverIntervalMs ?? 30_000,
         store: this.store,
       });
+      // One-swap M6 (#2461): thread the driver into the status config so `/v1/status` carries
+      // the `evidenceIndexing` block and `GET /v1/notifications` derives `evidence_indexing_failed`.
+      // The producer was previously unconnected — the consumer paths existed, but nothing set
+      // `evidenceDriver`, so the block was always absent. `EvidenceDriverLoop` structurally
+      // satisfies `EvidenceIndexingSource` (failures()/pending()).
+      if (config.status) {
+        config.status.evidenceDriver = () => this.evidenceDriverLoop ?? null;
+      }
     }
   }
 

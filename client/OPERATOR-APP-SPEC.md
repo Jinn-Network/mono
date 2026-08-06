@@ -452,6 +452,36 @@ claim authority at cutover stage 1; memberships (§2.4) remain the legacy view u
   - evidence indexing failed — one or more evidence records failed to index. Action: none yet;
     the driver retries. Informational. See §2.10 `evidence_indexing_failed`.
 
+### 2.16 Record Archive
+
+The operator's signed, append-only record-discovery archive — the public read surface over the
+work this operator has completed and announced. It is served on its OWN listener when the
+operator opts in (headless design §6); the operator API is never widened to publish it. Surfaced
+read-only on the Network tab (§2.11). Serving is a config opt-in (`publicArchive.enabled`,
+default off; `JINN_PUBLIC_ARCHIVE*`), restart-required — the SPA renders the posture, it does not
+toggle it.
+
+- **Static**
+  - evidence indexing — the driver's cached count of records pending indexing and its cached
+    indexing-failure list (`/v1/status` `evidenceIndexing`). Absent until the native evidence
+    driver runs.
+  - public serving posture — off by default. When enabled, the archive is served on a separate
+    listener (default loopback host, port 7332); enabling a non-loopback bind discloses this
+    machine's IP address to every consumer.
+  - **Actions** — none in the SPA. Public serving is a config opt-in (restart-required); the app
+    shows the posture and the IP-disclosure tradeoff, it does not enable serving.
+- **Collections** — none. The archive's own entries are protocol data (records, heads, archive
+  pages, the SSE tail), consumed by other daemons over the serving plane, not an operator event
+  stream rendered here.
+- **State messages**
+  - evidence indexing degraded — one or more evidence records failed to index; the announcement
+    stream stalls until they clear (contract 6). Action: none; the driver retries automatically.
+    Warning. Derived server-side and delivered as §2.10 `evidence_indexing_failed` — the card
+    renders the server's severity and message, never a client kind→copy map (headless design §8).
+  - serving discloses your IP — when public serving is enabled, anyone who fetches the archive
+    learns this machine's IP address. Plain-speech safety copy shown wherever the serving posture
+    is described; names the mirror/static-host alternative. Informational, no action.
+
 ## 3. Cross-cutting concerns
 
 ### 3.1 Explorer URLs

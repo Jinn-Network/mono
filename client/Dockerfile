@@ -63,6 +63,7 @@ COPY packages/marketplace/venue-base/package.json packages/marketplace/venue-bas
 COPY packages/discovery/client/package.json packages/discovery/client/yarn.lock packages/discovery/client/.yarnrc.yml ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/package.json packages/discovery/facts/task-execution/yarn.lock packages/discovery/facts/task-execution/.yarnrc.yml ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/package.json packages/discovery/transport-http/yarn.lock packages/discovery/transport-http/.yarnrc.yml ./packages/discovery/transport-http/
+COPY packages/discovery/testing/package.json packages/discovery/testing/yarn.lock packages/discovery/testing/.yarnrc.yml ./packages/discovery/testing/
 RUN corepack enable && cd client && yarn install --immutable
 
 # Copy portal-package sources before the client build; `yarn build` builds them
@@ -110,6 +111,7 @@ COPY packages/marketplace/venue-base/tsconfig.json ./packages/marketplace/venue-
 COPY packages/discovery/client/tsconfig.json ./packages/discovery/client/
 COPY packages/discovery/facts/task-execution/tsconfig.json ./packages/discovery/facts/task-execution/
 COPY packages/discovery/transport-http/tsconfig.json ./packages/discovery/transport-http/
+COPY packages/discovery/testing/tsconfig.json ./packages/discovery/testing/
 COPY packages/evidence/protocol/src/ ./packages/evidence/protocol/src/
 COPY packages/evidence/repository/src/ ./packages/evidence/repository/src/
 COPY packages/evidence/discovery/src/ ./packages/evidence/discovery/src/
@@ -140,6 +142,7 @@ COPY packages/marketplace/venue-base/src/ ./packages/marketplace/venue-base/src/
 COPY packages/discovery/client/src/ ./packages/discovery/client/src/
 COPY packages/discovery/facts/task-execution/src/ ./packages/discovery/facts/task-execution/src/
 COPY packages/discovery/transport-http/src/ ./packages/discovery/transport-http/src/
+COPY packages/discovery/testing/src/ ./packages/discovery/testing/src/
 COPY packages/evidence/catalog-sqlite/README.md ./packages/evidence/catalog-sqlite/README.md
 COPY packages/evidence/discovery/README.md ./packages/evidence/discovery/README.md
 COPY packages/evidence/discovery/docs/ ./packages/evidence/discovery/docs/
