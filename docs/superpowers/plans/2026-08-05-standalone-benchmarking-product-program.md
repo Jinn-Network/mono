@@ -222,3 +222,25 @@ layout); computeCloseAt 3-line duplication in run-quote/run-lock.
 Verification includes: AC2 real-backend integration test (2 arms x 3
 items reaching judged, verifyMatrix ok, no task-execution-testing
 import); resume idempotency (no double-posting); gated lock/launch e2e.
+
+| BP-13 | integrated | `f09032b09` | `5314010aa` (worktree bench-bp13) | FAIL-with-fixes -> PASS (sonnet reviewer, independent battery re-run) | see git log 2026-08-06 |
+| BP-14 | integrated | post-BP-13 head | committed in session worktree (flattened packet, disclosed) | NEEDS CHANGES -> PASS (stale-dist fix; sonnet reviewer) | see git log 2026-08-06 |
+
+BP-13 verification: 440 tests; crash-safety reorder (writes before the
+irreversible reported transition) + verify reads sealed Run owner; F1
+verdict-canonicality fact (aggregate requires trust-core canonical DSSE
+payload bytes; sealVerdictStatement seals canonicalJsonBytes) and F2
+preregistration verdictRule-merge fact recorded as spec addenda.
+
+BP-14 (shape test, flattened: one sonnet implementer + master-coordinator
+evidence run + independent sonnet reviewer, 2 rounds): parity matrix
+(24 entries, 3 gated, 3 honest exclusions), m1-walkthrough harness with
+unconditional clean rebuild, recorded evidence run exit 0 (16 commands,
+6/6 judged, verify ok, delegated-agent lock+launch). Evidence doc:
+2026-08-06-benchmark-product-m1-evidence.md.
+
+**M1 COMPLETE** (2026-08-06): agent-interface-first walking skeleton
+demonstrated end-to-end on the real local backend and verified. 441
+tests, guards green. Second drift note: origin/integration/evidence-v1
+advanced a further 13 commits past 0bf0c786; refresh still awaiting
+explicit human approval.
