@@ -1,5 +1,13 @@
 # Evaluator Adapters Implementation Plan
 
+> **Addendum 2026-08-05** (per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)):
+> this plan's finding 1 ("nobody executes the `deterministic-process` container")
+> hands off container execution to "the stage-2 evaluator loop" — that hand-off
+> re-homes onto the **one-swap train** (DR decision 6 finding 5): the
+> container-executing `GraderReportSource` is a swap deliverable and blocks the swap's
+> gate (DR decision 3a). Prior art is preserved at `docs/salvage/stage-2/`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build `packages/task-execution/evaluator-adapters/` — a fresh, parse-only tier-3 package supplying the swe-rebench and prediction `EvaluatorAdapter` implementations, their parser identities, and the deployment facade the evaluation harness loads through its parser allowlist.

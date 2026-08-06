@@ -1,5 +1,20 @@
 # Cutover Stage 5 — Rename and Closure Implementation Plan
 
+> **Addendum 2026-08-05** (per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md)): stages
+> 2–4 collapsed into one wholesale swap. The Global Constraints dependency reads:
+> *depends on the one-swap deploy PR merged and its two-probe gate green*. Baseline
+> assumption 1 restates as: *the swap has landed — `client/src/discovery/`, peer-sync,
+> the registry client, the delivery-watcher, the mech adapter's evaluation machinery,
+> the legacy TaskEngine, the creator loop, the launched-record generators, and lifecycle
+> publishing are gone; the native evaluator and posting flows and the public archive
+> listener are live.* Baseline assumption 2 restates as: *the swap retired the legacy
+> TaskEngine, so what remains of `task_runs` is residual — Task 8 discovers the exact
+> residue.* Everything else in this plan (rename mechanics, guard trio, findings F1–F7,
+> legacy-key deletion, backup pruning) is unchanged; the headless §13 stage-5 addition
+> (`verticalMode` manifest rows flip in the branch-deletion PR) stands, and DR-2026-08-05
+> decision 7 lists which transition-manifest rows remain for this stage.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Close the operator-daemon cutover — rename `client/` → `operator/` as one paths-only commit, install the operator tree's first guard trio, delete the `task_runs` state machine and the legacy SolverNet config keys, fix the repository's last cross-tree import violation (#2297), and file the bridge-retirement chore.

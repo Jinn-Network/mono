@@ -457,7 +457,32 @@ Operator-app deltas ride the stage that forces them: stage 1 the Claim policy & 
 > contract artifacts and on re-homing the `e2e:app-flow` / `e2e:funding-sequence` gates
 > onto the console's pipeline first.
 
-**Bridge-era document rules (stages 1–3).** Until stage 3, every claimable task is
+> **Amended 2026-08-05** per
+> [DR-2026-08-05](../../../log/decisions/2026-08-05-cutover-one-swap-collapse.md):
+> **stages 2, 3, and 4 collapse into one wholesale swap** — one PR train into
+> `integration/evidence-v1`, one combined drain
+> ([`docs/runbooks/cutover-one-swap-drain.md`](../../runbooks/cutover-one-swap-drain.md)),
+> one deploy PR, one fused two-probe gate (G-loop: a natively-posted own task solved by a
+> second operator and container-graded through the native evaluator to a
+> `decisionGrade: true` verdict and requester-side adoption; G-archive: second-daemon
+> archive consumption + serving-plane kit). The three stage rows above read as a single
+> row whose "swaps in" and "retires" columns are the union of theirs, **minus the
+> bridge-era work the collapse deletes outright**: the bridge-subject synthesis and its
+> admission-receipt rule (register R2 — dissolved unbuilt), the self-signer grant
+> allowance (register R1 — dissolved by the 2026-08-03 host byte-equality reseal and the
+> native derivation's `capabilityGrants: {}`), the operator-API archive mount (already
+> reversed above), the mutating posting routes (already re-ruled above), and the
+> inter-stage handshake checks the stage plans carried against each other. Native-v1's
+> runtime is the machinery swapped in; its parallel entry point becomes redundant at the
+> swap and **retires at stage 5** with the `verticalMode` manifest-row flips
+> (DR-2026-08-04-b decision 1, headless §13(e)). Stages 5 and 6 are unchanged in content;
+> stage 5's dependency reads "the one-swap deploy PR merged and its gate green." The
+> support/earning loops are **not** in the swap — their re-derivation is stage 6's job
+> (headless design §1).
+
+**Bridge-era document rules (stages 1–3).** *Amended 2026-08-05 per DR-2026-08-05: with
+stages 2–4 collapsed, "stages 1–3" reads "until the one-swap deploy" and the window
+closes per DR decision 4's straggler conditional.* Until stage 3, every claimable task is
 legacy-posted and carries no sealed Submission. The projector synthesizes the facts card
 for such tasks from the anchored task document under a `legacy` derivation annotation, and
 the `SubmissionFacts` mapper accepts it as a declared bridge input until stage 5. In the
@@ -499,7 +524,10 @@ Standing rules across all stages:
   the retiring discovery floor until stage 4, plus the new projector). The window is
   accepted explicitly and kept short; readers share the venue-base log source where the
   seam allows, and the fleet-wide RPC-quota shape of the 2026-05-23 incident is the reason
-  the window is named here rather than discovered later.
+  the window is named here rather than discovered later. *Amended 2026-08-05 per
+  DR-2026-08-05: the one-swap collapse ends the whole window at one deploy — both legacy
+  readers retire together instead of across two stage boundaries, which is part of the
+  collapse's rationale.*
 
 ## 11. Non-goals
 
@@ -523,7 +551,12 @@ Standing rules across all stages:
 - **No new protocol or record semantics anywhere.** This design writes adapters, a host, and
   a schedule; every contract it implements is owned elsewhere.
 - **No mainnet deployment decisions.** The cutover proves itself on the testnet fleet;
-  chain-config selection stays config.
+  chain-config selection stays config. *Amended 2026-08-05 per DR-2026-08-05 decision 8
+  (refuse and pin): the swapped daemon's boot gate admits only Base Sepolia 84532 with
+  the pinned today-generation addresses — native + mainnet is an explicit boot refusal,
+  never a silent legacy fallback, and the mainnet fleet stays pinned to the pre-swap
+  canary until a mainnet native deployment is chartered (Phase 2 scope). The non-goal
+  otherwise stands: nothing here charters that deployment.*
 
 ## 12. Follow-ups and hand-offs
 

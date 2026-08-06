@@ -1,5 +1,13 @@
 # Cutover stage 2 — drain and deploy runbook
 
+> **Superseded 2026-08-05** per
+> [DR-2026-08-05](../../log/decisions/2026-08-05-cutover-one-swap-collapse.md): stages
+> 2–4 collapsed into one swap with one combined drain —
+> [`cutover-one-swap-drain.md`](cutover-one-swap-drain.md) is the operative runbook.
+> The R1/R2 merge-block below is **dissolved** (DR decision 9): the host byte-equality
+> reseal and the grant-free native derivation removed both ratification needs. This file
+> is retained as the historical stage-2 procedure; do not run it.
+
 Contract 10 (evaluator flow). Run in order. Do not deploy with step 2 unfinished.
 
 > **Merge blocked** on human ratification of addenda §3 **R1** (self-signer grant) and **R2**
