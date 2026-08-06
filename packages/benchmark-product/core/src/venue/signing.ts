@@ -54,8 +54,8 @@
  * shape — see `./venue.integration.test.ts` for the empirical proof against the real binary.
  */
 
-import { generateKeyPairSync, sign as edSign, createPrivateKey, createHash, type KeyObject } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { generateKeyPairSync, randomUUID, sign as edSign, createPrivateKey, createPublicKey, createHash, type KeyObject } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope, sealDsseEnvelope, type DsseSigner } from "@jinn-network/trust-core";
@@ -64,6 +64,13 @@ import { refuse } from "../errors.js";
 
 const PEM_FILE_NAME = "verdict-signing-key.pem";
 const SIDECAR_FILE_NAME = "verdict-signing-key.json";
+const EVALUATORS_DIR_NAME = "evaluators";
+
+/** The pre-BP-21 single-evaluator identity: the IRI the legacy top-level key pair
+ * (`<workspaceDir>/venue/verdict-signing-key.pem`) signed under. `readEvaluatorPublicKeys` still
+ * maps that pair to this IRI so verdicts sealed before the multi-evaluator layout stay
+ * verifiable. */
+export const LEGACY_VERDICT_EVALUATOR_ID = "urn:jinn:benchmark-product:local-venue:prediction-evaluator";
 
 export interface VerdictSigningKey {
   readonly keyId: string;
@@ -72,6 +79,10 @@ export interface VerdictSigningKey {
 
 interface SigningKeySidecar {
   readonly keyId: string;
+}
+
+interface EvaluatorSigningKeySidecar extends SigningKeySidecar {
+  readonly evaluatorId: string;
 }
 
 function deriveKeyId(publicKey: KeyObject): string {
@@ -90,6 +101,20 @@ function toVerdictSigningKey(privateKey: KeyObject, keyId: string): VerdictSigni
 }
 
 /**
+ * Atomically writes one key-material file: temp file (created 0600) + rename, so a crash can
+ * never leave a torn half-written PEM or sidecar, and the file is never observable with a mode
+ * looser than 0600 (the mode is set at temp-file creation and travels through the rename —
+ * deliberately NOT `../fs/atomic.ts`'s `atomicWriteFileSync`, which does not set a mode and
+ * would leave key material umask-readable). Crash-safety across the PAIR of files is handled by
+ * the callers' write order plus their recovery branch, not by this helper.
+ */
+function writeKeyFileAtomicSync(path: string, data: string): void {
+  const temporary = `${path}.tmp-${randomUUID()}`;
+  writeFileSync(temporary, data, { mode: 0o600 });
+  renameSync(temporary, path);
+}
+
+/**
  * Loads the workspace's Ed25519 verdict-signing key, generating it on first use. Never commits a
  * key, never places it under an attempt's `secrets/` — it lives at
  * `<workspaceDir>/venue/verdict-signing-key.pem` (PKCS8 PEM, mode 0600) with a small JSON sidecar
@@ -101,19 +126,146 @@ export function loadOrCreateVerdictSigningKey(workspaceDir: string): VerdictSign
   const pemPath = join(venueDir, PEM_FILE_NAME);
   const sidecarPath = join(venueDir, SIDECAR_FILE_NAME);
 
-  if (existsSync(pemPath) && existsSync(sidecarPath)) {
-    const pem = readFileSync(pemPath, "utf8");
-    const privateKey = createPrivateKey({ key: pem, format: "pem", type: "pkcs8" });
-    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as SigningKeySidecar;
-    return toVerdictSigningKey(privateKey, sidecar.keyId);
+  if (existsSync(pemPath)) {
+    const privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
+    if (existsSync(sidecarPath)) {
+      const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as SigningKeySidecar;
+      return toVerdictSigningKey(privateKey, sidecar.keyId);
+    }
+    // Crash recovery: the PEM landed but the sidecar write never did (the mint below writes the
+    // PEM first). The key id is derivable from the PEM itself — complete the interrupted mint
+    // rather than regenerate; the actual key material is never silently replaced.
+    const keyId = deriveKeyId(createPublicKey(privateKey));
+    writeKeyFileAtomicSync(sidecarPath, `${JSON.stringify({ keyId } satisfies SigningKeySidecar, null, 2)}\n`);
+    return toVerdictSigningKey(privateKey, keyId);
+  }
+  if (existsSync(sidecarPath)) {
+    // The PEM is the key material; without it there is nothing to recover, and minting a fresh
+    // key where one was already recorded would be a silent key replacement — refuse instead.
+    refuse(
+      "execution",
+      "venue/verdict-signing-key.pem",
+      "verdict signing key PEM is missing but its sidecar exists — key material lost; refusing to silently mint a replacement key",
+    );
   }
 
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const keyId = deriveKeyId(publicKey);
   const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
-  writeFileSync(pemPath, pem, { mode: 0o600 });
-  writeFileSync(sidecarPath, `${JSON.stringify({ keyId } satisfies SigningKeySidecar, null, 2)}\n`, { mode: 0o600 });
+  // Each file lands atomically (temp + rename), PEM before sidecar — the recovery branch above
+  // understands exactly this order's one possible crash residue (PEM without sidecar).
+  writeKeyFileAtomicSync(pemPath, pem);
+  writeKeyFileAtomicSync(sidecarPath, `${JSON.stringify({ keyId } satisfies SigningKeySidecar, null, 2)}\n`);
   return toVerdictSigningKey(privateKey, keyId);
+}
+
+/**
+ * Loads the workspace's per-evaluator Ed25519 verdict-signing keys, minting each on first use
+ * (BP-21 multi-evaluator venue). One key per evaluator, at
+ * `<workspaceDir>/venue/evaluators/<i>/verdict-signing-key.pem` (PKCS8 PEM, mode 0600, `i`
+ * 1-based) with a JSON sidecar carrying `{ keyId, evaluatorId }`. Idempotent: re-loading with the
+ * same evaluator list returns the same keys; a persisted slot whose sidecar names a different
+ * evaluator id is refused rather than silently re-bound.
+ *
+ * HONESTY (product design spec §6): these distinct keys prove AGENT-DISTINCTNESS only — that N
+ * separately-keyed evaluator agents each signed their own verdict. The same operator mints and
+ * holds every one of them on a self-run venue; nothing here is third-party or party-independent
+ * verification.
+ */
+export function loadOrCreateEvaluatorSigningKeys(
+  workspaceDir: string,
+  evaluators: readonly { readonly id: string }[],
+): { readonly id: string; readonly key: VerdictSigningKey }[] {
+  return evaluators.map((evaluator, index) => {
+    const slotDir = join(workspaceDir, "venue", EVALUATORS_DIR_NAME, String(index + 1));
+    mkdirSync(slotDir, { recursive: true });
+    const pemPath = join(slotDir, PEM_FILE_NAME);
+    const sidecarPath = join(slotDir, SIDECAR_FILE_NAME);
+
+    if (existsSync(pemPath)) {
+      const privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
+      if (existsSync(sidecarPath)) {
+        const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as EvaluatorSigningKeySidecar;
+        if (sidecar.evaluatorId !== evaluator.id) {
+          refuse(
+            "execution",
+            `venue/evaluators/${index + 1}/verdict-signing-key.json`,
+            `persisted evaluator signing key ${index + 1} belongs to "${sidecar.evaluatorId}", not "${evaluator.id}"`,
+          );
+        }
+        return { id: evaluator.id, key: toVerdictSigningKey(privateKey, sidecar.keyId) };
+      }
+      // Crash recovery: the PEM landed but the sidecar write never did (the mint below writes
+      // the PEM first). No binding was ever recorded for this slot, so completing the
+      // interrupted mint — same key, this slot's requested evaluator id — is exactly what the
+      // crashed call was doing; the key material is never silently replaced.
+      const keyId = deriveKeyId(createPublicKey(privateKey));
+      writeKeyFileAtomicSync(
+        sidecarPath,
+        `${JSON.stringify({ keyId, evaluatorId: evaluator.id } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
+      );
+      return { id: evaluator.id, key: toVerdictSigningKey(privateKey, keyId) };
+    }
+    if (existsSync(sidecarPath)) {
+      // The PEM is the key material; without it there is nothing to recover, and minting a
+      // fresh key under an already-recorded binding would be a silent key replacement — refuse.
+      refuse(
+        "execution",
+        `venue/evaluators/${index + 1}/verdict-signing-key.pem`,
+        `evaluator signing key ${index + 1} PEM is missing but its sidecar exists — key material lost; refusing to silently mint a replacement key`,
+      );
+    }
+
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const keyId = deriveKeyId(publicKey);
+    const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
+    // Each file lands atomically (temp + rename), PEM before sidecar — the recovery branch
+    // above understands exactly this order's one possible crash residue (PEM without sidecar).
+    writeKeyFileAtomicSync(pemPath, pem);
+    writeKeyFileAtomicSync(
+      sidecarPath,
+      `${JSON.stringify({ keyId, evaluatorId: evaluator.id } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
+    );
+    return { id: evaluator.id, key: toVerdictSigningKey(privateKey, keyId) };
+  });
+}
+
+/**
+ * The workspace's evaluator public-key registry (evaluatorId → public `KeyObject`), for verifying
+ * verdict DSSE signatures fail-closed: a verdict whose signer key is not in this map (or whose
+ * signature does not verify against its evaluator's entry) must be rejected by the caller. Scans
+ * every `venue/evaluators/<i>/` slot and ALSO maps the legacy top-level pair to `LEGACY_VERDICT_EVALUATOR_ID`
+ * when it exists. Public keys derive from the private PEMs via `createPublicKey` — no new files.
+ */
+export function readEvaluatorPublicKeys(workspaceDir: string): Map<string, KeyObject> {
+  const registry = new Map<string, KeyObject>();
+  const venueDir = join(workspaceDir, "venue");
+
+  const legacyPemPath = join(venueDir, PEM_FILE_NAME);
+  if (existsSync(legacyPemPath)) {
+    const privateKey = createPrivateKey({ key: readFileSync(legacyPemPath, "utf8"), format: "pem", type: "pkcs8" });
+    registry.set(LEGACY_VERDICT_EVALUATOR_ID, createPublicKey(privateKey));
+  }
+
+  const evaluatorsDir = join(venueDir, EVALUATORS_DIR_NAME);
+  if (!existsSync(evaluatorsDir)) return registry;
+  for (const entry of readdirSync(evaluatorsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const pemPath = join(evaluatorsDir, entry.name, PEM_FILE_NAME);
+    const sidecarPath = join(evaluatorsDir, entry.name, SIDECAR_FILE_NAME);
+    if (!existsSync(pemPath) && !existsSync(sidecarPath)) continue;
+    if (!existsSync(pemPath) || !existsSync(sidecarPath)) {
+      refuse(
+        "execution",
+        `venue/evaluators/${entry.name}`,
+        `evaluator key slot "${entry.name}" is missing its ${existsSync(pemPath) ? "sidecar" : "PEM"} file`,
+      );
+    }
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as EvaluatorSigningKeySidecar;
+    const privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
+    registry.set(sidecar.evaluatorId, createPublicKey(privateKey));
+  }
+  return registry;
 }
 
 /** Adapts a `VerdictSigningKey` to `@jinn-network/trust-core`'s injected `DsseSigner` port. */

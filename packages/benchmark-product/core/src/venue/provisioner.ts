@@ -47,6 +47,25 @@ export interface SelectedProvisioner {
   readonly contract: ProvisionerContract;
 }
 
+/**
+ * The Submission requirement key naming which venue evaluator identity an evaluation attempt runs
+ * under (BP-21). Defined here rather than in `./venue.ts` because both modules need it and
+ * `./venue.ts` already imports from this module — `./venue.ts` re-exports it as the public home.
+ */
+export const EVALUATOR_REQUIREMENT_KEY = "jinn.benchmark-product/evaluator";
+
+/**
+ * One venue evaluator identity paired with its own DSSE signer.
+ *
+ * HONESTY (product design spec §6): distinct evaluator identities and keys prove
+ * AGENT-DISTINCTNESS only — the same operator runs every one of them on a self-run venue. Nothing
+ * here is third-party or party-independent verification.
+ */
+export interface VenueEvaluatorSigner {
+  readonly id: string;
+  readonly signer: DsseSigner;
+}
+
 export interface EvaluationCellMaterials {
   readonly subjectTaskBytes: Uint8Array;
   readonly subjectDeliveryBytes: Uint8Array;
@@ -132,15 +151,34 @@ interface EvaluationProvisionerOptions {
   readonly dispatchContextBytes: Uint8Array;
   readonly taskSha256: string;
   readonly registry: EvaluationCellRegistry;
-  readonly evaluatorId: string;
-  readonly signer: DsseSigner;
+  /** The raw `EVALUATOR_REQUIREMENT_KEY` value from the dispatching Submission's requirements. */
+  readonly requestedEvaluator: unknown;
+  readonly evaluators: readonly VenueEvaluatorSigner[];
+  readonly contextVariation?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
 }
 
 function evaluationProvisionerContract(options: EvaluationProvisionerOptions): ProvisionerContract {
   let materials: EvaluationCellMaterials | undefined;
+  let evaluator: VenueEvaluatorSigner | undefined;
   return {
     workspaceKind: (): WorkspaceKind => "dir",
     async setup(_view, paths) {
+      // Resolve the attempt's evaluator BEFORE anything is written: a missing or unknown
+      // evaluator requirement is a caller bug, never silently defaulted (BP-21).
+      const requested = options.requestedEvaluator;
+      if (typeof requested !== "string") {
+        throw new Error(
+          `benchmark-product local venue evaluation Submission carries no "${EVALUATOR_REQUIREMENT_KEY}" `
+          + "requirement -- every evaluation attempt must name the venue evaluator identity it runs under",
+        );
+      }
+      evaluator = options.evaluators.find((candidate) => candidate.id === requested);
+      if (evaluator === undefined) {
+        throw new Error(
+          `benchmark-product local venue evaluation Submission names unknown evaluator "${requested}" -- `
+          + `known evaluator identities: ${options.evaluators.map((candidate) => candidate.id).join(", ")}`,
+        );
+      }
       await ensureWorkspaceDirectories(paths);
       materials = options.registry.get(options.taskSha256);
       if (materials === undefined) {
@@ -150,6 +188,9 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
           + "returned taskBytes submitted, before this evaluation Task is dispatched",
         );
       }
+      const evaluationContextBytes = options.contextVariation === undefined
+        ? materials.evaluationContextBytes
+        : options.contextVariation(evaluator.id, materials.evaluationContextBytes);
       await Promise.all([
         writeFile(join(paths.input, "task.sealed"), options.sealedTaskBytes),
         writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes),
@@ -157,21 +198,21 @@ function evaluationProvisionerContract(options: EvaluationProvisionerOptions): P
         writeFile(join(paths.input, "subject-delivery.json"), materials.subjectDeliveryBytes),
         ...materials.resultArtifacts.map((artifact) => writeFile(join(paths.input, artifact.name), artifact.bytes)),
         writeFile(join(paths.input, "evaluation-spec.json"), materials.evaluationSpecBytes),
-        writeFile(join(paths.input, "evaluation-context.json"), materials.evaluationContextBytes),
+        writeFile(join(paths.input, "evaluation-context.json"), evaluationContextBytes),
       ]);
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {
-      if (materials === undefined) {
+      if (materials === undefined || evaluator === undefined) {
         throw new Error("benchmark-product local venue harvest ran before setup registered evaluation-cell materials");
       }
       const verdictPath = join(paths.out, "verdict");
       const statementBytes = new Uint8Array(await readFile(verdictPath));
       const envelopeBytes = await sealVerdictStatement({
         statementBytes,
-        evaluatorId: options.evaluatorId,
+        evaluatorId: evaluator.id,
         expectedEvaluationSpecificationSha256: sha256Hex(materials.evaluationSpecBytes),
-        signer: options.signer,
+        signer: evaluator.signer,
       });
       const temporary = `${verdictPath}.sealed`;
       await writeFile(temporary, envelopeBytes, { mode: 0o600, flag: "wx" });
@@ -207,8 +248,16 @@ function unsupportedProfileProvisionerContract(profileUri: string | undefined): 
 
 export interface CreateLocalProvisionerOptions {
   readonly registry: EvaluationCellRegistry;
-  readonly evaluatorId: string;
-  readonly signer: DsseSigner;
+  /** Ordered venue evaluator identities, each with its own signing key (see `VenueEvaluatorSigner`
+   * for the honesty posture). The dispatching Submission's `EVALUATOR_REQUIREMENT_KEY` requirement
+   * selects exactly one of these per evaluation attempt. */
+  readonly evaluators: readonly VenueEvaluatorSigner[];
+  /**
+   * TEST-ONLY hook: rewrites the registered `input/evaluation-context.json` bytes per selected
+   * evaluator. It exists solely so tests can manufacture a controlled evaluator disagreement;
+   * production callers never set it.
+   */
+  readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
 }
 
 export function createLocalProvisioner(
@@ -230,8 +279,11 @@ export function createLocalProvisioner(
           dispatchContextBytes: input.dispatchContextBytes,
           taskSha256: sha256Hex(input.sealedTaskBytes),
           registry: options.registry,
-          evaluatorId: options.evaluatorId,
-          signer: options.signer,
+          requestedEvaluator: input.submission.requirements?.[EVALUATOR_REQUIREMENT_KEY],
+          evaluators: options.evaluators,
+          ...(options.evaluationContextVariationForTesting === undefined
+            ? {}
+            : { contextVariation: options.evaluationContextVariationForTesting }),
         }),
       };
     }

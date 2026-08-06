@@ -736,6 +736,31 @@ quote presentation depth; no §4/§7 decision reopened):**
   is absent. CLI verb `preview` (`--items <n>`, `--json`) added; parity
   matrix regenerated.
 
+**Addendum — 2026-08-06, packet BP-21 (multi-evaluator assurance on the local
+venue; no §4/§6/§7 decision reopened):**
+
+- **Independence recon finding (§6/§7.1).** The platform's
+  `checkEvaluatorIndependence` tests fail-closed identity resolution plus
+  solver/evaluator Agent-IRI distinctness. On the self-run venue the product
+  now satisfies it truthfully in the agent-distinctness sense: evaluator
+  identities are distinct workspace-minted Ed25519 keys (one per
+  `venue/evaluators/<i>/` slot, plus the legacy pair), and the product's
+  assembly trust resolver resolves an evaluator claim only after verifying
+  the verdict's DSSE signature against that identity's registered workspace
+  public key — fail-closed to `unresolved` otherwise. Party-independence
+  remains unproven and disclosed (§6 residual): the same operator mints and
+  holds every key. Consequence: NO assurance preset refuses at lock on the
+  local venue; all four presets run.
+- **Per-attempt evaluator selection mechanism.** Each evaluation leg names
+  its evaluator via a product-namespaced Submission requirement key
+  (`jinn.benchmark-product/evaluator`), declared by a product-owned wrapper
+  of the evaluation launcher's capabilities. Submission-only requirement
+  keys merge freely under the platform's tighten-only merge; the key is
+  declared in the backend's `runPinning` inventory.
+- **Test-only disagreement hook, disclosed.** The venue exposes
+  `evaluationContextVariationForTesting`, used only by tests to manufacture
+  controlled evaluator disagreement; it never runs in production paths.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

@@ -120,6 +120,7 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-venue-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-venue-verdict-key" }],
     prepareEvaluationCell: () => {
       throw new Error("not used");
     },

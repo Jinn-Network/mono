@@ -36,7 +36,7 @@ import {
 } from "../run/drive.js";
 import {
   appendRunJournalEntry,
-  deliveredWithoutEvaluation,
+  evaluationGaps,
   foldRunJournal,
   outstandingCells,
   readRunJournalEntries,
@@ -139,9 +139,14 @@ export function runLaunch(
 
       appendRunJournalEntry(clockedContext.workspaceDir, input.draftId, { kind: "launched", at: context.clock() });
 
+      // From the SEALED Run record, never the draft — the Run is the pre-registration (BP-21).
+      // The product's compile always sets policy.evaluation, but the platform schema leaves
+      // minVerdicts optional, so default defensively.
+      const minVerdicts = loaded.runRecord.policy.evaluation?.minVerdicts ?? 1;
+
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock });
+        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock, evaluatorCount: minVerdicts });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
@@ -160,6 +165,7 @@ export function runLaunch(
           runSha256: loaded.runSha256,
           owner: loaded.owner,
           cellWindowMs: loaded.runRecord.policy.cellWindow,
+          minVerdicts,
           liveClock: context.clock,
           onProgress: deps.onProgress,
         };
@@ -208,9 +214,12 @@ export function runResume(
         }
       }
 
+      // From the SEALED Run record, never the draft (BP-21) — same reasoning as runLaunch.
+      const minVerdicts = loaded.runRecord.policy.evaluation?.minVerdicts ?? 1;
+
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock });
+        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock, evaluatorCount: minVerdicts });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
@@ -229,6 +238,7 @@ export function runResume(
           runSha256: loaded.runSha256,
           owner: loaded.owner,
           cellWindowMs: loaded.runRecord.policy.cellWindow,
+          minVerdicts,
           liveClock: context.clock,
           onProgress: deps.onProgress,
         };
@@ -252,17 +262,19 @@ export function runResume(
         // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as any
         // carried over from before it, without re-driving a solve dispatch for either.
         const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-        const gaps = deliveredWithoutEvaluation(freshFold).filter(
-          (cell): cell is typeof cell & { deliverySha256: string } => cell.deliverySha256 !== undefined,
+        const gaps = evaluationGaps(freshFold, minVerdicts).filter(
+          (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
+            gap.cell.deliverySha256 !== undefined,
         );
         if (gaps.length > 0) {
           await driveEvaluationCatchUp(
             driveDeps,
-            gaps.map((cell) => ({
-              cellKey: cell.cellKey,
-              lastDispatch: cell.lastDispatch,
-              deliverySha256: cell.deliverySha256,
-              ...(cell.deliveryOutputs !== undefined ? { deliveryOutputs: cell.deliveryOutputs } : {}),
+            gaps.map((gap) => ({
+              cellKey: gap.cell.cellKey,
+              lastDispatch: gap.cell.lastDispatch,
+              deliverySha256: gap.cell.deliverySha256,
+              ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
+              missingEvalIndexes: gap.missingEvalIndexes,
             })),
           );
         }

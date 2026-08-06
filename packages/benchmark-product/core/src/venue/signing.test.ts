@@ -1,5 +1,5 @@
 import { createPrivateKey, createPublicKey, verify as edVerify } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,10 +7,16 @@ import { canonicalJsonBytes, dssePreAuthEncoding, parseDsseEnvelope } from "@jin
 import { BenchmarkProductError } from "../errors.js";
 import {
   createVerdictDsseSigner,
+  loadOrCreateEvaluatorSigningKeys,
   loadOrCreateVerdictSigningKey,
+  readEvaluatorPublicKeys,
   readVerdictEnvelope,
   sealVerdictStatement,
 } from "./signing.js";
+
+const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
+const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
+const LEGACY_EVALUATOR = "urn:jinn:benchmark-product:local-venue:prediction-evaluator";
 
 const SPEC_DIGEST = "a".repeat(64);
 const OTHER_SPEC_DIGEST = "b".repeat(64);
@@ -64,6 +70,125 @@ describe("loadOrCreateVerdictSigningKey", () => {
     expect(second.keyId).toBe(first.keyId);
     const message = new TextEncoder().encode("probe");
     expect(second.sign(message)).toEqual(first.sign(message));
+  });
+
+  it("completes a half-minted pair (PEM present, sidecar lost) with the SAME key instead of regenerating", () => {
+    const first = loadOrCreateVerdictSigningKey(workspaceDir);
+    rmSync(join(workspaceDir, "venue", "verdict-signing-key.json"));
+
+    const second = loadOrCreateVerdictSigningKey(workspaceDir);
+    expect(second.keyId).toBe(first.keyId);
+    const message = new TextEncoder().encode("probe");
+    expect(second.sign(message)).toEqual(first.sign(message));
+    const sidecar = JSON.parse(readFileSync(join(workspaceDir, "venue", "verdict-signing-key.json"), "utf8"));
+    expect(sidecar).toEqual({ keyId: first.keyId });
+  });
+
+  it("refuses when the PEM is missing but the sidecar survives — key material lost, never silently re-minted", () => {
+    loadOrCreateVerdictSigningKey(workspaceDir);
+    rmSync(join(workspaceDir, "venue", "verdict-signing-key.pem"));
+    expect(() => loadOrCreateVerdictSigningKey(workspaceDir)).toThrow(BenchmarkProductError);
+  });
+
+  it("writes both key files with owner-only mode (0600)", () => {
+    loadOrCreateVerdictSigningKey(workspaceDir);
+    expect(statSync(join(workspaceDir, "venue", "verdict-signing-key.pem")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(workspaceDir, "venue", "verdict-signing-key.json")).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("loadOrCreateEvaluatorSigningKeys", () => {
+  it("mints one distinct key per evaluator under venue/evaluators/<i>/ with {keyId, evaluatorId} sidecars", () => {
+    const keys = loadOrCreateEvaluatorSigningKeys(workspaceDir, [
+      { id: EVALUATOR_1 },
+      { id: EVALUATOR_2 },
+    ]);
+    expect(keys.map((entry) => entry.id)).toEqual([EVALUATOR_1, EVALUATOR_2]);
+    expect(keys[0]!.key.keyId).toMatch(/^benchmark-product-verdict-[0-9a-f]{16}$/);
+    expect(keys[1]!.key.keyId).toMatch(/^benchmark-product-verdict-[0-9a-f]{16}$/);
+    expect(keys[0]!.key.keyId).not.toBe(keys[1]!.key.keyId);
+    const message = new TextEncoder().encode("probe");
+    expect(keys[0]!.key.sign(message)).not.toEqual(keys[1]!.key.sign(message));
+
+    for (const [index, entry] of keys.entries()) {
+      const dir = join(workspaceDir, "venue", "evaluators", String(index + 1));
+      expect(readFileSync(join(dir, "verdict-signing-key.pem"), "utf8")).toContain("PRIVATE KEY");
+      const sidecar = JSON.parse(readFileSync(join(dir, "verdict-signing-key.json"), "utf8"));
+      expect(sidecar).toEqual({ keyId: entry.key.keyId, evaluatorId: entry.id });
+    }
+  });
+
+  it("is idempotent: re-loading returns the same keys", () => {
+    const first = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }, { id: EVALUATOR_2 }]);
+    const second = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }, { id: EVALUATOR_2 }]);
+    const message = new TextEncoder().encode("probe");
+    for (const [index, entry] of second.entries()) {
+      expect(entry.key.keyId).toBe(first[index]!.key.keyId);
+      expect(entry.key.sign(message)).toEqual(first[index]!.key.sign(message));
+    }
+  });
+
+  it("refuses a persisted slot whose sidecar names a different evaluator id", () => {
+    loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_2 }]))
+      .toThrow(BenchmarkProductError);
+  });
+
+  it("completes a half-minted slot (PEM present, sidecar lost) with the SAME key instead of regenerating", () => {
+    const [first] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    expect(first).toBeDefined();
+    rmSync(join(workspaceDir, "venue", "evaluators", "1", "verdict-signing-key.json"));
+
+    const [second] = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    expect(second).toBeDefined();
+    expect(second!.key.keyId).toBe(first!.key.keyId);
+    const message = new TextEncoder().encode("probe");
+    expect(second!.key.sign(message)).toEqual(first!.key.sign(message));
+    const sidecar = JSON.parse(readFileSync(join(workspaceDir, "venue", "evaluators", "1", "verdict-signing-key.json"), "utf8"));
+    expect(sidecar).toEqual({ keyId: first!.key.keyId, evaluatorId: EVALUATOR_1 });
+  });
+
+  it("refuses a slot whose PEM is missing but sidecar survives — key material lost, never silently re-minted", () => {
+    loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    rmSync(join(workspaceDir, "venue", "evaluators", "1", "verdict-signing-key.pem"));
+    expect(() => loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]))
+      .toThrow(BenchmarkProductError);
+  });
+
+  it("writes every slot's key files with owner-only mode (0600)", () => {
+    loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    const dir = join(workspaceDir, "venue", "evaluators", "1");
+    expect(statSync(join(dir, "verdict-signing-key.pem")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(dir, "verdict-signing-key.json")).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("readEvaluatorPublicKeys", () => {
+  it("maps each minted evaluator id to the public key that verifies its signatures, fail-closed across evaluators", () => {
+    const keys = loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }, { id: EVALUATOR_2 }]);
+    const registry = readEvaluatorPublicKeys(workspaceDir);
+    expect([...registry.keys()].sort()).toEqual([EVALUATOR_1, EVALUATOR_2]);
+
+    const message = new TextEncoder().encode("probe");
+    const signature = Buffer.from(keys[0]!.key.sign(message));
+    expect(edVerify(null, Buffer.from(message), registry.get(EVALUATOR_1)!, signature)).toBe(true);
+    // Evaluator 2's public key must NOT verify evaluator 1's signature.
+    expect(edVerify(null, Buffer.from(message), registry.get(EVALUATOR_2)!, signature)).toBe(false);
+  });
+
+  it("includes the legacy top-level pair under the legacy evaluator IRI when present", () => {
+    const legacy = loadOrCreateVerdictSigningKey(workspaceDir);
+    loadOrCreateEvaluatorSigningKeys(workspaceDir, [{ id: EVALUATOR_1 }]);
+    const registry = readEvaluatorPublicKeys(workspaceDir);
+    expect([...registry.keys()].sort()).toEqual([EVALUATOR_1, LEGACY_EVALUATOR]);
+
+    const message = new TextEncoder().encode("probe");
+    const signature = Buffer.from(legacy.sign(message));
+    expect(edVerify(null, Buffer.from(message), registry.get(LEGACY_EVALUATOR)!, signature)).toBe(true);
+  });
+
+  it("returns an empty map when the workspace holds no signing keys", () => {
+    expect(readEvaluatorPublicKeys(workspaceDir).size).toBe(0);
   });
 });
 

@@ -20,7 +20,7 @@ import {
   type ProxiedBackend,
 } from "./drive.js";
 import { readRunJournalEntries } from "./journal.js";
-import type { LocalVenue } from "../venue/venue.js";
+import { EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
 
 let workspaceDir: string;
 
@@ -134,10 +134,19 @@ function storeSubjectTaskAndSpec(): { taskSha256: string; evaluationSpecSha256: 
   return { taskSha256, evaluationSpecSha256 };
 }
 
-function fakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }): LocalVenue {
+function evaluatorIri(index: number): string {
+  return `urn:jinn:benchmark-product:local-venue:evaluator-${index}`;
+}
+
+function fakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }, evaluatorCount = 1): LocalVenue {
+  const evaluators = Array.from({ length: evaluatorCount }, (_, i) => ({
+    id: evaluatorIri(i + 1),
+    keyId: `fake-key-${i + 1}`,
+  }));
   return {
     backend: undefined as unknown as LocalVenue["backend"],
-    verdictKeyId: "fake-key",
+    verdictKeyId: evaluators[0]!.keyId,
+    evaluators,
     prepareEvaluationCell: () => prepared,
     async shutdown() {},
   };
@@ -155,13 +164,26 @@ describe("createRecordingProxy", () => {
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 1 });
+    expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 1, leg: "solve" });
     if (entries[0]?.kind === "submission-accepted") {
       expect(entries[0].submissionSha256).toBe(sha256Hex(submissionBytes));
     }
   });
 
-  test("journals submission-accepted from an eval-shaped nonce (eval:<runSha256>:<cellKey>:<dispatch>)", async () => {
+  test("journals submission-accepted with leg 'evaluation' from an eval-shaped nonce (eval:<runSha256>:e<i>:<cellKey>:<dispatch>)", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({});
+    const proxy = createRecordingProxy(backend, { workspaceDir, draftId: "draft-1", liveClock: clock });
+
+    const nonce = `eval:${"f".repeat(64)}:e1:${CELL_A}:2`;
+    const submissionBytes = utf8({ nonce, submission: "urn:uuid:00000000-0000-4000-8000-000000000002" });
+    await proxy.submit(new Uint8Array([1]), submissionBytes);
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 2, leg: "evaluation" });
+  });
+
+  test("journals leg 'evaluation' from a legacy eval nonce without the e<i> segment", async () => {
     const clock = makeClock();
     const backend = makeFakeBackend({});
     const proxy = createRecordingProxy(backend, { workspaceDir, draftId: "draft-1", liveClock: clock });
@@ -171,7 +193,7 @@ describe("createRecordingProxy", () => {
     await proxy.submit(new Uint8Array([1]), submissionBytes);
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
-    expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 2 });
+    expect(entries[0]).toMatchObject({ kind: "submission-accepted", cellKey: CELL_A, dispatch: 2, leg: "evaluation" });
   });
 
   test("a submission with no parseable nonce is not journaled but still delegates", async () => {
@@ -209,7 +231,7 @@ describe("driveCellEvents — non-terminal / non-delivered events", () => {
       { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -223,7 +245,7 @@ describe("driveCellEvents — non-terminal / non-delivered events", () => {
       { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "cancelled", detail: "run-cancelled" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(1);
@@ -273,7 +295,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
 
@@ -308,7 +330,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -323,7 +345,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -354,7 +376,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -380,7 +402,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -404,7 +426,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
       { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array([9]), taskSha256: "9".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -421,7 +443,7 @@ describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
       { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" },
     ];
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
       (async function* () { for (const event of events) yield event; })(),
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
@@ -459,7 +481,7 @@ describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
     const lines: string[] = [];
 
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, liveClock: clock, onProgress: (line) => lines.push(line) },
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock, onProgress: (line) => lines.push(line) },
       (async function* () { for (const event of events) yield event; })(),
     );
 
@@ -475,7 +497,7 @@ describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
     const lines: string[] = [];
 
     await driveCellEvents(
-      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock, onProgress: (line) => lines.push(line) },
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock, onProgress: (line) => lines.push(line) },
       (async function* () { for (const event of events) yield event; })(),
     );
 
@@ -518,7 +540,7 @@ describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
 
     await expect(
       driveCellEvents(
-        { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, liveClock: clock, onProgress: throwingOnProgress },
+        { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock, onProgress: throwingOnProgress },
         (async function* () { for (const event of events) yield event; })(),
       ),
     ).resolves.toBeUndefined();
@@ -532,6 +554,141 @@ describe("driveCellEvents — onProgress (BP-13, purely additive)", () => {
     expect(entries.some((entry) => entry.kind === "cell-event")).toBe(true);
     expect(entries.some((entry) => entry.kind === "delivery")).toBe(true);
     expect(entries.some((entry) => entry.kind === "evaluation" && "verdictSha256" in entry)).toBe(true);
+  });
+});
+
+/** Scripts a backend where BOTH evaluation legs deliver the same verdict envelope — enough to
+ * exercise the per-leg dispatch bookkeeping (keys, evaluator requirements, journal entries)
+ * without a stateful fake. */
+function makeTwoLegBackend(submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[]): ProxiedBackend {
+  const solveDeliveryDigestHex = "d".repeat(64);
+  const predictionArtifactHex = "e".repeat(64);
+  const evalDeliveryDigestHex = "1".repeat(64);
+  const verdictEnvelopeHex = "2".repeat(64);
+  return makeFakeBackend({
+    deliveriesByAttempt: {
+      "att-solve-1": [fakeDeliveryRef("att-solve-1", solveDeliveryDigestHex)],
+      "att-eval-1": [fakeDeliveryRef("att-eval-1", evalDeliveryDigestHex)],
+    },
+    deliveryBytesByDigest: {
+      [`sha256:${solveDeliveryDigestHex}`]: utf8({ outputs: [{ name: "prediction", digest: { sha256: predictionArtifactHex } }] }),
+      [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }),
+    },
+    artifactBytesByDigest: {
+      [predictionArtifactHex]: utf8({ probabilityYes: "0.5" }),
+      [verdictEnvelopeHex]: utf8({ envelope: true }),
+    },
+    observeResult: fakeSnapshot("att-eval-1", "delivered"),
+    calls: { submits },
+  });
+}
+
+describe("driveCellEvents — minVerdicts > 1 dispatches one evaluation leg per evaluator (BP-21)", () => {
+  test("two legs: distinct idempotency keys, distinct evaluator requirements, both verdicts journaled with evaluator + evalIndex", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const backend = makeTwoLegBackend(submits);
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) }, 2);
+    const runSha256 = "r".repeat(64);
+    const lines: string[] = [];
+
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256, owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 2, liveClock: clock, onProgress: (line) => lines.push(line) },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    // Exactly two evaluation Submissions, one per leg, with leg-distinct keys and evaluators.
+    expect(submits).toHaveLength(2);
+    const docs = submits.map((call) => JSON.parse(new TextDecoder().decode(call.submissionBytes)) as {
+      idempotencyKey?: string;
+      nonce?: string;
+      requirements?: Record<string, unknown>;
+    });
+    expect(docs.map((doc) => doc.idempotencyKey)).toEqual([
+      `eval:${runSha256}:e1:${cellKey}:1`,
+      `eval:${runSha256}:e2:${cellKey}:1`,
+    ]);
+    expect(docs.map((doc) => doc.nonce)).toEqual(docs.map((doc) => doc.idempotencyKey));
+    expect(docs.map((doc) => doc.requirements?.[EVALUATOR_REQUIREMENT_KEY])).toEqual([
+      evaluatorIri(1),
+      evaluatorIri(2),
+    ]);
+    for (const doc of docs) {
+      expect(doc.requirements?.["harness"]).toEqual({ id: "evaluation-harness", version: "0.1.0" });
+    }
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const evaluationEntries = entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluationEntries).toHaveLength(2);
+    expect(evaluationEntries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(1), evalIndex: 1 });
+    expect(evaluationEntries[1]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
+    expect(evaluationEntries.every((entry) => entry.kind === "evaluation" && entry.verdictSha256 !== undefined)).toBe(true);
+
+    // Per-leg progress lines carry the e<i>/<n> suffix when minVerdicts > 1.
+    expect(lines).toEqual([`${cellKey} delivered`, `${cellKey} judged e1/2`, `${cellKey} judged e2/2`]);
+  });
+
+  test("a failing leg journals could-not-grade for that leg only; the other leg still completes", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const inner = makeTwoLegBackend(submits);
+    let evalSubmitCount = 0;
+    const backend: ProxiedBackend = {
+      ...inner,
+      submit: async (taskBytes, submissionBytes) => {
+        evalSubmitCount += 1;
+        if (evalSubmitCount === 1) {
+          submits.push({ taskBytes, submissionBytes });
+          return { accepted: false, error: { category: "execution", detail: "leg-1 rejected" } as never };
+        }
+        return inner.submit(taskBytes, submissionBytes);
+      },
+    };
+    const venue = fakeVenue({ taskBytes: new Uint8Array([1, 2, 3]), taskSha256: sha256Hex(new Uint8Array([1, 2, 3])) }, 2);
+    const lines: string[] = [];
+
+    const events: CellStatusEvent[] = [
+      { cellKey, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-solve-1" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner-1", cellWindowMs: 3_600_000, minVerdicts: 2, liveClock: clock, onProgress: (line) => lines.push(line) },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const evaluationEntries = entries.filter((entry) => entry.kind === "evaluation");
+    expect(evaluationEntries).toHaveLength(2);
+    expect(evaluationEntries[0]).toMatchObject({
+      cellKey,
+      evaluationTerminal: "could-not-grade",
+      detail: "leg-1 rejected",
+      evaluator: evaluatorIri(1),
+      evalIndex: 1,
+    });
+    expect(evaluationEntries[1]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
+    expect(evaluationEntries[1]?.kind === "evaluation" && evaluationEntries[1].verdictSha256 !== undefined).toBe(true);
+
+    expect(lines).toEqual([`${cellKey} delivered`, `${cellKey} could-not-grade e1/2`, `${cellKey} judged e2/2`]);
+  });
+
+  test("refuses loudly when the venue has fewer evaluator identities than minVerdicts (wiring bug)", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({});
+    const venue = fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }, 1);
+
+    await expect(
+      driveCellEvents(
+        { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 2, liveClock: clock },
+        (async function* () {})(),
+      ),
+    ).rejects.toThrow(/evaluator/);
   });
 });
 
@@ -557,13 +714,55 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     const venue = fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) });
 
     await driveEvaluationCatchUp(
-      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, liveClock: clock },
-      [{ cellKey, lastDispatch: 1, deliverySha256, deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }] }],
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      [{ cellKey, lastDispatch: 1, deliverySha256, deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }], missingEvalIndexes: [1] }],
     );
 
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     // No "delivery" entry is re-written — only the evaluation leg runs.
     expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
     expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: "4".repeat(64) });
+  });
+
+  test("catch-up with missingEvalIndexes [2] re-runs exactly leg 2 (BP-21)", async () => {
+    const clock = makeClock();
+    const { taskSha256 } = storeSubjectTaskAndSpec();
+    const cellKey = `${taskSha256}/arm-a/1`;
+
+    const solveDeliveryBytes = utf8({ outputs: [{ name: "prediction", digest: { sha256: "e".repeat(64) } }] });
+    const deliverySha256 = putSealedBytes(workspaceDir, solveDeliveryBytes);
+    const predictionBytes = utf8({ probabilityYes: "0.5" });
+    const predictionSha256 = putSealedBytes(workspaceDir, predictionBytes);
+
+    const evalDeliveryDigestHex = "1".repeat(64);
+    const verdictEnvelopeHex = "2".repeat(64);
+    const submits: { taskBytes: Uint8Array; submissionBytes: Uint8Array }[] = [];
+    const backend = makeFakeBackend({
+      deliveriesByAttempt: { "att-eval-1": [fakeDeliveryRef("att-eval-1", evalDeliveryDigestHex)] },
+      deliveryBytesByDigest: { [`sha256:${evalDeliveryDigestHex}`]: utf8({ outputs: [{ name: "verdict", digest: { sha256: verdictEnvelopeHex } }] }) },
+      artifactBytesByDigest: { [verdictEnvelopeHex]: utf8({ envelope: true }) },
+      observeResult: fakeSnapshot("att-eval-1", "delivered"),
+      calls: { submits },
+    });
+    const venue = fakeVenue({ taskBytes: new Uint8Array([4, 5]), taskSha256: "4".repeat(64) }, 2);
+    const runSha256 = "r".repeat(64);
+
+    await driveEvaluationCatchUp(
+      { workspaceDir, draftId: "draft-1", venue, backend, runSha256, owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 2, liveClock: clock },
+      [{ cellKey, lastDispatch: 1, deliverySha256, deliveryOutputs: [{ name: "prediction", sha256: predictionSha256 }], missingEvalIndexes: [2] }],
+    );
+
+    // Exactly ONE evaluation Submission — leg 2's, keyed and evaluator-pinned for leg 2.
+    expect(submits).toHaveLength(1);
+    const doc = JSON.parse(new TextDecoder().decode(submits[0]!.submissionBytes)) as {
+      idempotencyKey?: string;
+      requirements?: Record<string, unknown>;
+    };
+    expect(doc.idempotencyKey).toBe(`eval:${runSha256}:e2:${cellKey}:1`);
+    expect(doc.requirements?.[EVALUATOR_REQUIREMENT_KEY]).toBe(evaluatorIri(2));
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
+    expect(entries[0]).toMatchObject({ cellKey, evaluator: evaluatorIri(2), evalIndex: 2 });
   });
 });

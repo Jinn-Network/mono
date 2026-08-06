@@ -162,6 +162,7 @@ async function driveInterruptedLaunch(clock: () => string, draftId: string): Pro
       runSha256: runState.runSha256,
       owner: runState.owner,
       cellWindowMs: runRecord.policy.cellWindow,
+      minVerdicts: runRecord.policy.evaluation?.minVerdicts ?? 1,
       liveClock: clock,
     };
 
@@ -238,6 +239,11 @@ describe("interruption / resume on the real local venue (AC4)", () => {
       );
       expect(evaluationEntriesBeforeResume).toHaveLength(1);
       expect(evaluationEntriesBeforeResume[0]?.verdictSha256).toBeDefined();
+      // BP-21: the evaluation entry is evaluator-attributed even at minVerdicts 1.
+      expect(evaluationEntriesBeforeResume[0]).toMatchObject({
+        evaluator: "urn:jinn:benchmark-product:local-venue:evaluator-1",
+        evalIndex: 1,
+      });
 
       // ── resume through the PUBLIC operation, real venue (no injected deps) ──────────────
       const resumed = await runResume(contextFor(clock), { draftId });
@@ -293,11 +299,16 @@ describe("interruption / resume on the real local venue (AC4)", () => {
       // The cell that completed before the crash in particular: exactly one solve submission.
       expect(solveCountByCellKey.get(completedCellKey)).toBe(1);
 
-      // Every eval idempotency key appears exactly once — no re-posted evaluation Submission.
+      // Every eval idempotency key appears exactly once — no re-posted evaluation Submission —
+      // and each carries the leg marker (BP-21 nonce shape: eval:<run>:e<i>:<cellKey>:<dispatch>).
       expect(evalEntries).toHaveLength(6);
       const evalIdempotencyKeys = evalEntries.map((entry) => idempotencyKeyOf(entry.submissionSha256));
-      expect(evalIdempotencyKeys.every((key) => typeof key === "string" && key.length > 0)).toBe(true);
+      expect(evalIdempotencyKeys.every((key) => typeof key === "string" && key.includes(":e1:"))).toBe(true);
       expect(new Set(evalIdempotencyKeys).size).toBe(evalEntries.length);
+
+      // The recording proxy leg-tags every submission-accepted entry (BP-21).
+      expect(solveEntries.every((entry) => entry.leg === "solve")).toBe(true);
+      expect(evalEntries.every((entry) => entry.leg === "evaluation")).toBe(true);
     },
     240_000,
   );

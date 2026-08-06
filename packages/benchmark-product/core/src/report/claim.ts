@@ -16,6 +16,12 @@
  * this run's lock, verbatim from the caller's `previewDisclosure` input — used previews are named
  * in the official record; its absence means no preview preceded lock. Same "extracted, never
  * recomputed" posture as everything else this builder emits.
+ *
+ * BP-21 (spec §6): the required `assurance` block states the draft's preset (a product-policy
+ * label) AND the platform primitives it resolved to, plus the fixed agent-distinctness
+ * disclosure. The one deliberate exception to "never cross-check here": `buildClaimPackage`
+ * THROWS when the stated primitives disagree with what the sealed Run record's own policy
+ * carries — a claim stating primitives the sealed Run does not carry would be dishonest.
  */
 
 import { z } from "zod";
@@ -71,6 +77,30 @@ const DisclosuresSchema = z.object({
   pinningUnverifiableCounts: PinningUnverifiableCountsSchema,
 });
 
+/** The fixed sentence every claim package's assurance block carries (BP-21, spec §6/§7.1): what
+ * distinct evaluator identities on this venue actually prove. Never softened per-claim. */
+const ASSURANCE_DISCLOSURE =
+  "Distinct evaluator identities are workspace-minted keys; they prove agent-distinctness, "
+  + "not party-independence, on this self-run venue.";
+
+const ResolvedAssuranceSchema = z.object({
+  independence: z.enum(["gating", "disclosed"]),
+  minVerdicts: z.number().int().min(1),
+  distinctEvaluator: z.boolean(),
+  verdictRule: z.enum(["sole", "majority", "unanimous"]),
+});
+
+/** BP-21 (spec §6): the claim states the assurance preset AND the platform primitives it resolved
+ * to, never the label alone — preset names are product policy, the primitives are what the sealed
+ * Run actually carries (`buildClaimPackage` throws if the two disagree). */
+const AssuranceBlockSchema = z.object({
+  /** Product preset label (product policy) — never a substitute for `resolved`. */
+  preset: z.string().min(1),
+  resolved: ResolvedAssuranceSchema,
+  /** The fixed agent-distinctness disclosure (`ASSURANCE_DISCLOSURE`). */
+  disclosure: z.string().min(1),
+});
+
 export const ClaimPackageSchema = z.object({
   claimSchema: z.literal(CLAIM_PACKAGE_SCHEMA_ID),
   scope: z.object({
@@ -99,6 +129,7 @@ export const ClaimPackageSchema = z.object({
   completeness: z.unknown(),
   attrition: z.unknown(),
   conflicted: ConflictedSchema,
+  assurance: AssuranceBlockSchema,
   disclosures: DisclosuresSchema,
   limitations: z.array(z.string()),
   venueHonesty: z.unknown(),
@@ -130,6 +161,19 @@ export interface BuildClaimPackageInput {
   readonly venueHonesty: VenueHonesty;
   /** The CLI verb this package's `verification.command` names, e.g. `"verify"`. */
   readonly verificationCommandVerb: string;
+  /** BP-21 (spec §6): the draft's assurance preset (a product-policy label) and the platform
+   * primitives it resolved to. `buildClaimPackage` cross-checks the primitives against what the
+   * sealed Run record itself carries and THROWS on any disagreement — a claim that states
+   * primitives the sealed Run does not carry would be dishonest. */
+  readonly assurance: {
+    readonly preset: string;
+    readonly resolved: {
+      readonly independence: "gating" | "disclosed";
+      readonly minVerdicts: number;
+      readonly distinctEvaluator: boolean;
+      readonly verdictRule: "sole" | "majority" | "unanimous";
+    };
+  };
   /** BP-20 (spec §7.2): when present, this draft had at least one disclosed preview before this
    * run's lock — `buildClaimPackage` carries it into the `rehearsal` block verbatim. Absent means
    * the caller found no preview log entry, i.e. no preview preceded lock. */
@@ -204,6 +248,27 @@ const VERIFICATION_CHECKS: readonly string[] = [
  * — no filesystem access, no recomputation of anything the cited records already settled. */
 export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
   const { reportRecord } = input;
+
+  // BP-21: the assurance block may only state primitives the sealed Run record itself carries.
+  // `../run/compile.ts` seals the first three into `policy` at lock time and `verdictRule` into
+  // `analysisPlan[0].parameters` (BP-13 F2) — all four are checked against the sealed Run.
+  const { resolved } = input.assurance;
+  const policy = input.runRecord.policy;
+  const analysisParameters = input.runRecord.analysisPlan?.[0]?.parameters as
+    | { readonly verdictRule?: unknown }
+    | undefined;
+  if (
+    policy.independence !== resolved.independence
+    || policy.evaluation.minVerdicts !== resolved.minVerdicts
+    || policy.evaluation.distinctEvaluator !== resolved.distinctEvaluator
+    || analysisParameters?.verdictRule !== resolved.verdictRule
+  ) {
+    throw new Error(
+      "claim package: the stated assurance primitives do not match what the sealed Run record carries"
+      + " — a claim stating primitives the sealed Run does not carry would be dishonest",
+    );
+  }
+
   const wilsonResults = wilsonSubjectResults(reportRecord);
   const disclosuresPerSubject = (reportRecord.disclosures?.perSubject ?? []) as readonly DisclosurePerSubjectShape[];
   const taskCount = new Set(input.matrixRecord.cells.map((cell) => cell.taskDigest)).size;
@@ -236,6 +301,11 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     completeness: input.matrixRecord.completeness,
     attrition: input.matrixRecord.attrition,
     conflicted: { count: wilsonResults.conflicted.count, cellKeys: [...wilsonResults.conflicted.cellKeys] },
+    assurance: {
+      preset: input.assurance.preset,
+      resolved: { ...resolved },
+      disclosure: ASSURANCE_DISCLOSURE,
+    },
     disclosures: {
       perSubject: (reportRecord.disclosures?.perSubject ?? []) as unknown[],
       integrityTierCounts: summedIntegrityTierCounts(disclosuresPerSubject),

@@ -5,13 +5,14 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
-import { sealDsseEnvelope } from "@jinn-network/trust-core";
+import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
-import { readRunJournalEntries } from "../run/journal.js";
+import { appendRunJournalEntry, readRunJournalEntries } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { resultsArtifactPath, runJournalPath } from "../workspace/layout.js";
-import { sha256Hex } from "../workspace/sealed-store.js";
+import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { LEGACY_VERDICT_EVALUATOR_ID, loadOrCreateVerdictSigningKey } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
@@ -51,12 +52,16 @@ function utf8(json: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(json));
 }
 
-function buildVerdictEnvelope(input: { evaluatorId: string; evaluationSpecificationSha256: string }): Uint8Array {
+/** An HONEST fixture verdict (BP-21): claims the workspace's legacy evaluator identity and is
+ * genuinely signed with that identity's workspace-registered key, so the assembly trust
+ * resolver's fail-closed DSSE signature verification resolves it — a fixture claiming a foreign
+ * IRI or carrying a garbage signature would (correctly) resolve "unresolved". */
+function buildVerdictEnvelope(input: { verdict?: "pass" | "fail"; evaluationSpecificationSha256: string }): Uint8Array {
   const statement = {
     predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
-      evaluator: { id: input.evaluatorId },
-      verdict: "pass",
+      evaluator: { id: LEGACY_VERDICT_EVALUATOR_ID },
+      verdict: input.verdict ?? "pass",
       evaluationSpecification: { digest: { sha256: input.evaluationSpecificationSha256 } },
       measurements: [
         { name: "integrity", value: true },
@@ -65,10 +70,12 @@ function buildVerdictEnvelope(input: { evaluatorId: string; evaluationSpecificat
       evaluatedAt: "2026-01-01T00:00:00Z",
     },
   };
+  const key = loadOrCreateVerdictSigningKey(workspaceDir);
+  const payloadBytes = utf8(statement);
   return sealDsseEnvelope({
-    payloadBytes: utf8(statement),
+    payloadBytes,
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
-    signatures: [{ signature: new Uint8Array([1, 2, 3, 4]), keyid: "fake-key" }],
+    signatures: [{ signature: key.sign(dssePreAuthEncoding(VERDICT_DSSE_PAYLOAD_TYPE, payloadBytes)), keyid: key.keyId }],
   });
 }
 
@@ -102,7 +109,7 @@ function makeStatefulFakeBackend(evaluationSpecSha256: string): { backend: Proxi
       const isEval = doc.requirements?.harness?.id === "evaluation-harness";
       let artifactHex: string;
       if (isEval) {
-        artifactHex = store(buildVerdictEnvelope({ evaluatorId: "urn:jinn:test:evaluator", evaluationSpecificationSha256: evaluationSpecSha256 }));
+        artifactHex = store(buildVerdictEnvelope({ evaluationSpecificationSha256: evaluationSpecSha256 }));
       } else {
         artifactHex = store(utf8({ probabilityYes: "0.5", submittedAt: "2026-01-01T00:00:00Z" }));
       }
@@ -156,6 +163,7 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-venue-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-venue-verdict-key" }],
     prepareEvaluationCell: (input) => {
       const taskBytes = utf8({ fakeEvalTask: true, subjectDigest: sha256Hex(input.subjectTaskBytes) });
       return { taskBytes, taskSha256: sha256Hex(taskBytes) };
@@ -215,14 +223,18 @@ describe("runResults — full document", () => {
     expect(results.runOutcome).toBe("complete");
     expect(results.completeness).toMatchObject({ expected: 6, judged: 6 });
     expect(results.cells).toHaveLength(6);
-    expect(results.conflictedCells).toEqual([]);
+    expect(results.dissentCells).toEqual([]);
 
     for (const cell of results.cells) {
       expect(cell.outcome, cell.cellKey).toBe("judged");
       expect(cell.verdicts, cell.cellKey).toHaveLength(1);
       expect(cell.verdicts[0]?.verdict).toBe("pass");
+      expect(cell.verdicts[0]?.evaluator).toBe(LEGACY_VERDICT_EVALUATOR_ID);
       expect(cell.verdicts[0]?.measurements).toMatchObject({ integrity: true, resolved: true });
       expect(cell.verdicts[0]?.sha256).toMatch(/^[a-f0-9]{64}$/);
+      // validVerdicts is presented in the same bare-hex form as `verdicts` — here every stored
+      // verdict is valid, so the two lists name the same digests.
+      expect(cell.validVerdicts, cell.cellKey).toEqual([cell.verdicts[0]?.sha256]);
     }
 
     expect(results.venueHonesty.venue).toBe("self-run");
@@ -313,5 +325,64 @@ describe("runResults — an expected-but-never-dispatched cell", () => {
     // Every axis's unverifiable count includes this never-dispatched cell.
     expect(outcome.result.venueHonesty.unverifiableAxisCounts.harness).toBeGreaterThanOrEqual(1);
     expect(outcome.result.venueHonesty.unverifiableAxisCounts.isolation).toBeGreaterThanOrEqual(1);
+  }, 30_000);
+});
+
+describe("runResults — dissent visibility", () => {
+  test("a cell whose stored verdicts disagree is named in dissentCells, with every verdict retained", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "draft-1", name: "Dissent" });
+    const sample = await sampleInit(contextFor(clock), { draftId: "draft-1" });
+    expect(sample.ok).toBe(true);
+    if (!sample.ok) return;
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    const quoted = await runQuote(contextFor(clock), { draftId: "draft-1" });
+    expect(quoted.ok).toBe(true);
+    const locked = runLock(contextFor(clock), { draftId: "draft-1" });
+    expect(locked.ok).toBe(true);
+
+    const { backend } = makeStatefulFakeBackend(sample.result.evaluationSpecSha256);
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    // Manufacture controlled disagreement for exactly one cell: seal a second, disagreeing
+    // (fail) verdict and journal it as that cell's second evaluation leg — the exact durable
+    // facts a second leg would have left behind.
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const firstEvaluation = entries.find((entry) => entry.kind === "evaluation" && entry.verdictSha256 !== undefined);
+    expect(firstEvaluation).toBeDefined();
+    if (firstEvaluation === undefined || firstEvaluation.kind !== "evaluation") return;
+    const failEnvelope = buildVerdictEnvelope({ verdict: "fail", evaluationSpecificationSha256: sample.result.evaluationSpecSha256 });
+    const failSha256 = putSealedBytes(workspaceDir, failEnvelope);
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "evaluation",
+      at: clock(),
+      cellKey: firstEvaluation.cellKey,
+      verdictSha256: failSha256,
+      evaluator: LEGACY_VERDICT_EVALUATOR_ID,
+      evalIndex: 2,
+    });
+
+    const collected = await runCollect(contextFor(clock), { draftId: "draft-1" });
+    expect(collected.ok).toBe(true);
+
+    const outcome = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+
+    // Dissent = disagreeing STORED verdicts, retained and visible — never dropped.
+    expect(outcome.result.dissentCells).toEqual([firstEvaluation.cellKey]);
+    const dissenting = outcome.result.cells.find((cell) => cell.cellKey === firstEvaluation.cellKey);
+    expect(dissenting).toBeDefined();
+    expect(dissenting?.verdicts).toHaveLength(2);
+    expect(new Set(dissenting?.verdicts.map((verdict) => verdict.verdict))).toEqual(new Set(["pass", "fail"]));
+
+    // Multiplicity alone is not dissent: every other cell carries a single verdict and stays out.
+    for (const cell of outcome.result.cells) {
+      if (cell.cellKey === firstEvaluation.cellKey) continue;
+      expect(cell.verdicts, cell.cellKey).toHaveLength(1);
+    }
   }, 30_000);
 });

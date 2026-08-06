@@ -34,6 +34,7 @@ import { readVerdictEnvelope } from "../venue/signing.js";
 import { SOLVE_HARNESS_PINS } from "../venue/venue.js";
 import { resultsArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
+import { readRunJournalEntries } from "./journal.js";
 
 const SIX_FRACTION_DIGITS = /^-?\d+\.\d{6}$/;
 
@@ -153,6 +154,18 @@ describe("official run path — public operations only, real local venue (AC2)",
       if (!launched.ok) throw new Error("unreachable");
       expect(launched.result.draft.state).toBe("running");
 
+      // Every evaluation journal entry is evaluator-attributed (BP-21): minVerdicts 1 means one
+      // leg per cell, served by the venue's first evaluator identity.
+      const journalEntries = readRunJournalEntries(workspaceDir, draftId);
+      const evaluationJournalEntries = journalEntries.filter((entry) => entry.kind === "evaluation");
+      expect(evaluationJournalEntries).toHaveLength(6);
+      for (const entry of evaluationJournalEntries) {
+        expect(entry).toMatchObject({
+          evaluator: "urn:jinn:benchmark-product:local-venue:evaluator-1",
+          evalIndex: 1,
+        });
+      }
+
       // ── 5. status ────────────────────────────────────────────────────────────────────────
       const status = runStatus(contextFor(clock), { draftId });
       expect(status.ok).toBe(true);
@@ -181,6 +194,11 @@ describe("official run path — public operations only, real local venue (AC2)",
       for (const cell of matrix.cells) {
         expect(cell.outcome, cell.cellKey).toBe("judged");
         expect(cell.integrityTier, cell.cellKey).toBe("re-derivable");
+        // The trust resolver (BP-21) resolves this identity ONLY after verifying the real
+        // verdict envelope's DSSE signature against evaluator-1's workspace-registered key —
+        // "unresolved" here would mean the signature-verifying resolver failed against genuine
+        // venue-signed verdicts.
+        expect(cell.evaluator, cell.cellKey).toBe("urn:jinn:benchmark-product:local-venue:evaluator-1");
         // The venue wires an exact {id, version} pin plus a matching launcherDeployments
         // identity digest for every harness it serves (venue.ts's own header) — the harness
         // axis is therefore expected to verify as "match" against the real backend's admission

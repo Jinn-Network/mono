@@ -127,6 +127,7 @@ function stubVenue(keys: BackendCapabilities["runPinning"]["keys"] = DEFAULT_RUN
       },
     } as unknown as LocalVenue["backend"],
     verdictKeyId: "stub-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "stub-key" }],
     prepareEvaluationCell: () => {
       throw new Error("not used by runQuote");
     },
@@ -209,6 +210,7 @@ function previewVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-preview-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-preview-verdict-key" }],
     prepareEvaluationCell: () => {
       throw new Error("not used");
     },

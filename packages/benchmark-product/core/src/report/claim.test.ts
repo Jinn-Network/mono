@@ -20,6 +20,18 @@ const MATCH_ALL = { harness: "match", model: "match", loadout: "match", isolatio
 const AUTHOR = "urn:uuid:33333333-3333-5333-8333-333333333333";
 const REPORT_KEY = "did:key:zReportFixture";
 
+/** Matches the fixture Run's own sealed policy below (BP-21): the claim's assurance block must
+ * state primitives the sealed Run actually carries, or `buildClaimPackage` throws. */
+const FIXTURE_ASSURANCE = {
+  preset: "direct-check",
+  resolved: {
+    independence: "disclosed",
+    minVerdicts: 1,
+    distinctEvaluator: false,
+    verdictRule: "sole",
+  },
+} as const;
+
 function verdictEnvelope(verdict: "pass" | "fail", label: string): Uint8Array {
   const subjectDigest = sha256Hex(new TextEncoder().encode(label));
   const payload = canonicalJsonBytes({
@@ -74,7 +86,7 @@ async function buildFixture(): Promise<Fixture> {
       cellWindow: 60_000,
       replacement: { allowed: false },
       independence: "disclosed",
-      evaluation: {},
+      evaluation: { minVerdicts: 1, distinctEvaluator: false },
       submissionBaseline: {},
     },
     analysisPlan: [{
@@ -206,6 +218,7 @@ describe("buildClaimPackage", () => {
       reportEnvelopeSha256: sha256Hex(produced.envelope),
       venueHonesty: venueHonestyFor(matrixRecord),
       verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
     });
 
     expect(claim.claimSchema).toBe(CLAIM_PACKAGE_SCHEMA_ID);
@@ -230,6 +243,7 @@ describe("buildClaimPackage", () => {
       reportEnvelopeSha256: sha256Hex(produced.envelope),
       venueHonesty: venueHonestyFor(matrixRecord),
       verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
     });
 
     expect(claim.conflicted.count).toBe(1);
@@ -271,6 +285,7 @@ describe("buildClaimPackage", () => {
       reportEnvelopeSha256: sha256Hex(produced.envelope),
       venueHonesty: venueHonestyFor(matrixRecord),
       verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
     });
 
     const rawResults = produced.record.results as unknown as {
@@ -302,6 +317,7 @@ describe("buildClaimPackage", () => {
       reportEnvelopeSha256,
       venueHonesty: venueHonestyFor(matrixRecord),
       verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
     });
 
     expect(claim.scope).toEqual({
@@ -323,5 +339,83 @@ describe("buildClaimPackage", () => {
     expect(claim.verification.command).toContain("verify");
     expect(claim.verification.checks.length).toBeGreaterThan(0);
     expect(claim.verification.trustRoot.length).toBeGreaterThan(0);
+  });
+
+  it("carries the assurance block — preset, resolved primitives, and the agent-distinctness disclosure — and the schema requires it", async () => {
+    const { matrix, run, produced } = await buildFixture();
+    const matrixRecord = parseMatrix(matrix.bytes);
+    const runRecord = parseRun(run.bytes);
+
+    const claim = buildClaimPackage({
+      draftId: "draft-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord,
+      runSha256: run.digest.slice("sha256:".length),
+      matrixRecord,
+      matrixSha256: matrix.digest.slice("sha256:".length),
+      reportRecord: produced.record,
+      reportSha256: sha256Hex(produced.bytes),
+      reportEnvelopeSha256: sha256Hex(produced.envelope),
+      venueHonesty: venueHonestyFor(matrixRecord),
+      verificationCommandVerb: "verify",
+      assurance: FIXTURE_ASSURANCE,
+    });
+
+    // The preset name is product policy; the claim states BOTH the preset and the primitives.
+    expect(claim.assurance.preset).toBe("direct-check");
+    expect(claim.assurance.resolved).toEqual(FIXTURE_ASSURANCE.resolved);
+    expect(claim.assurance.disclosure).toContain("agent-distinctness");
+    expect(claim.assurance.disclosure).toContain("party-independence");
+
+    // The block is REQUIRED — a claim without it does not satisfy the schema.
+    expect(ClaimPackageSchema.safeParse({ ...claim, assurance: undefined }).success).toBe(false);
+  });
+
+  it("throws when the stated assurance primitives disagree with what the sealed Run carries", async () => {
+    const { matrix, run, produced } = await buildFixture();
+    const matrixRecord = parseMatrix(matrix.bytes);
+    const runRecord = parseRun(run.bytes);
+    const base = {
+      draftId: "draft-1",
+      benchmarkSha256: "b".repeat(64),
+      runRecord,
+      runSha256: run.digest.slice("sha256:".length),
+      matrixRecord,
+      matrixSha256: matrix.digest.slice("sha256:".length),
+      reportRecord: produced.record,
+      reportSha256: sha256Hex(produced.bytes),
+      reportEnvelopeSha256: sha256Hex(produced.envelope),
+      venueHonesty: venueHonestyFor(matrixRecord),
+      verificationCommandVerb: "verify",
+    } as const;
+
+    // The fixture Run's policy carries minVerdicts 1 / independence "disclosed"; a claim stating
+    // otherwise would name primitives the sealed Run does not carry.
+    expect(() =>
+      buildClaimPackage({
+        ...base,
+        assurance: { ...FIXTURE_ASSURANCE, resolved: { ...FIXTURE_ASSURANCE.resolved, minVerdicts: 2 } },
+      }),
+    ).toThrow(/sealed Run/);
+    expect(() =>
+      buildClaimPackage({
+        ...base,
+        assurance: { ...FIXTURE_ASSURANCE, resolved: { ...FIXTURE_ASSURANCE.resolved, independence: "gating" } },
+      }),
+    ).toThrow(/sealed Run/);
+    expect(() =>
+      buildClaimPackage({
+        ...base,
+        assurance: { ...FIXTURE_ASSURANCE, resolved: { ...FIXTURE_ASSURANCE.resolved, distinctEvaluator: true } },
+      }),
+    ).toThrow(/sealed Run/);
+    // verdictRule lives in the sealed Run's analysisPlan parameters (BP-13 F2), not its policy —
+    // the fixture Run pre-registered "sole", so a claim stating "majority" must throw too.
+    expect(() =>
+      buildClaimPackage({
+        ...base,
+        assurance: { ...FIXTURE_ASSURANCE, resolved: { ...FIXTURE_ASSURANCE.resolved, verdictRule: "majority" } },
+      }),
+    ).toThrow(/sealed Run/);
   });
 });

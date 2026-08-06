@@ -21,7 +21,7 @@ import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import { authorityGrant } from "./authority-ops.js";
 import type { OperationContext } from "./context.js";
-import { createDraft, readDraftDocument } from "./drafts.js";
+import { createDraft, readDraftDocument, updateDraft } from "./drafts.js";
 import { initWorkspace } from "./init.js";
 import { runLaunch, runResume } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
@@ -57,13 +57,21 @@ function contextFor(clock: () => string, principal = "sponsor-1"): OperationCont
   return { workspaceDir, principal, clock };
 }
 
-async function setUpLockedDraft(clock: () => string, draftId = "draft-1"): Promise<void> {
+async function setUpLockedDraft(
+  clock: () => string,
+  draftId = "draft-1",
+  assurance?: { preset: string; overrides?: Record<string, unknown> },
+): Promise<void> {
   initWorkspace(contextFor(clock));
   const created = createDraft(contextFor(clock), { draftId, name: "Launch Test" });
   expect(created.ok).toBe(true);
   await sampleInit(contextFor(clock), { draftId });
   armAdd(contextFor(clock), { draftId, armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
   armAdd(contextFor(clock), { draftId, armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+  if (assurance !== undefined) {
+    const updated = updateDraft(contextFor(clock), { draftId, patch: { assurance } });
+    expect(updated.ok).toBe(true);
+  }
   const quoted = await runQuote(contextFor(clock), { draftId });
   expect(quoted.ok).toBe(true);
   const locked = runLock(contextFor(clock), { draftId });
@@ -170,10 +178,15 @@ function makeStatefulFakeBackend(): { backend: ProxiedBackend; submits: { taskBy
   return { backend, submits };
 }
 
-function fakeVenue(backend: ProxiedBackend): LocalVenue {
+function fakeVenue(backend: ProxiedBackend, evaluatorCount = 1): LocalVenue {
+  const evaluators = Array.from({ length: evaluatorCount }, (_, i) => ({
+    id: `urn:jinn:benchmark-product:local-venue:evaluator-${i + 1}`,
+    keyId: `fake-verdict-key-${i + 1}`,
+  }));
   return {
     backend: backend as unknown as LocalVenue["backend"],
-    verdictKeyId: "fake-verdict-key",
+    verdictKeyId: evaluators[0]!.keyId,
+    evaluators,
     prepareEvaluationCell: (input) => {
       const taskBytes = utf8({
         fakeEvalTask: true,
@@ -281,6 +294,95 @@ describe("runLaunch — drives a full 2-arm run to completion (fake backend)", (
       return doc.requirements?.harness?.id === "evaluation-harness";
     });
     expect(evalSubmits).toHaveLength(6);
+  }, 30_000);
+});
+
+describe("runLaunch — minVerdicts threads from the SEALED Run into the venue and drive (BP-21)", () => {
+  test("a minVerdicts-2 assurance mints a 2-evaluator venue and dispatches 2 evaluation legs per delivered cell", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock, "draft-1", { preset: "direct-check", overrides: { minVerdicts: 2 } });
+    const { backend, submits } = makeStatefulFakeBackend();
+    const venueOptions: { evaluatorCount?: number }[] = [];
+
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: (options) => {
+        venueOptions.push({ ...(options.evaluatorCount !== undefined ? { evaluatorCount: options.evaluatorCount } : {}) });
+        return fakeVenue(backend, 2);
+      },
+    });
+    expect(outcome.ok).toBe(true);
+
+    // The venue was created with one evaluator identity per required verdict.
+    expect(venueOptions).toEqual([{ evaluatorCount: 2 }]);
+
+    // 6 solve cells x 2 legs = 12 evaluation Submissions, leg-distinct keys and evaluators.
+    const evalDocs = submits
+      .map((call) => JSON.parse(new TextDecoder().decode(call.submissionBytes)) as {
+        idempotencyKey?: string;
+        requirements?: Record<string, unknown>;
+      })
+      .filter((doc) => (doc.requirements?.["harness"] as { id?: string } | undefined)?.id === "evaluation-harness");
+    expect(evalDocs).toHaveLength(12);
+    expect(evalDocs.filter((doc) => doc.idempotencyKey?.includes(":e1:")).length).toBe(6);
+    expect(evalDocs.filter((doc) => doc.idempotencyKey?.includes(":e2:")).length).toBe(6);
+    expect(new Set(evalDocs.map((doc) => doc.idempotencyKey)).size).toBe(12);
+
+    // Every cell journals one evaluation entry per leg, evaluator- and index-attributed.
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const evaluationEntries = entries.filter(
+      (entry): entry is Extract<RunJournalEntry, { kind: "evaluation" }> => entry.kind === "evaluation",
+    );
+    expect(evaluationEntries).toHaveLength(12);
+    const byCell = new Map<string, number[]>();
+    for (const entry of evaluationEntries) {
+      expect(entry.verdictSha256).toBeDefined();
+      expect(entry.evaluator).toBe(`urn:jinn:benchmark-product:local-venue:evaluator-${entry.evalIndex}`);
+      byCell.set(entry.cellKey, [...(byCell.get(entry.cellKey) ?? []), entry.evalIndex ?? 0]);
+    }
+    expect(byCell.size).toBe(6);
+    for (const [cellKey, evalIndexes] of byCell) {
+      expect(evalIndexes.sort((a, b) => a - b), cellKey).toEqual([1, 2]);
+    }
+  }, 30_000);
+});
+
+describe("runResume — minVerdicts-aware evaluation catch-up (BP-21)", () => {
+  test("a dropped leg-2 evaluation entry resumes exactly leg 2, not leg 1", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock, "draft-1", { preset: "direct-check", overrides: { minVerdicts: 2 } });
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend, 2),
+    });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const legTwoEntries = fullEntries.filter((entry) => entry.kind === "evaluation" && entry.evalIndex === 2);
+    expect(legTwoEntries).toHaveLength(6);
+    const [dropped] = legTwoEntries;
+    if (dropped?.kind !== "evaluation") throw new Error("unreachable");
+    const gapCellKey = dropped.cellKey;
+    overwriteRunJournal("draft-1", fullEntries.filter((entry) => entry !== dropped));
+
+    const { backend: resumeBackend, submits } = makeStatefulFakeBackend();
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(resumeBackend, 2),
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.outstandingCount).toBe(0);
+    expect(outcome.result.evaluationCatchUpCount).toBe(1);
+
+    // Exactly ONE evaluation Submission was re-dispatched — leg 2's.
+    expect(submits).toHaveLength(1);
+    const doc = JSON.parse(new TextDecoder().decode(submits[0]!.submissionBytes)) as { idempotencyKey?: string };
+    expect(doc.idempotencyKey).toContain(":e2:");
+    expect(doc.idempotencyKey).toContain(gapCellKey);
+
+    const afterEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const gapEvaluations = afterEntries.filter((entry) => entry.kind === "evaluation" && entry.cellKey === gapCellKey);
+    expect(gapEvaluations).toHaveLength(2);
+    expect(gapEvaluations.map((entry) => (entry.kind === "evaluation" ? entry.evalIndex : 0)).sort()).toEqual([1, 2]);
   }, 30_000);
 });
 

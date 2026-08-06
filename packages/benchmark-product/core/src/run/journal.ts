@@ -56,6 +56,8 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     cellKey: z.string(),
     dispatch: z.number().int().positive(),
     submissionSha256: Sha256HexSchema,
+    /** Which leg's Submission this is (BP-21). Optional: legacy entries carry no leg. */
+    leg: z.enum(["solve", "evaluation"]).optional(),
   }),
   z.object({
     kind: z.literal("delivery"),
@@ -79,6 +81,12 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     verdictSha256: Sha256HexSchema.optional(),
     evaluationTerminal: z.literal("could-not-grade").optional(),
     detail: z.string().optional(),
+    /** The evaluator identity IRI this leg named via `EVALUATOR_REQUIREMENT_KEY` (BP-21).
+     * Optional: legacy single-evaluator entries carry neither field. */
+    evaluator: z.string().optional(),
+    /** 1-based evaluation-leg index within `policy.evaluation.minVerdicts` (BP-21). A fold
+     * treats an entry without one as leg 1 (the only leg a legacy journal ever ran). */
+    evalIndex: z.number().int().min(1).optional(),
   }),
   z.object({ kind: z.literal("closed"), at: Rfc3339Schema, matrixSha256: Sha256HexSchema }),
 ]);
@@ -137,6 +145,14 @@ export function readRunJournalEntries(workspaceDir: string, draftId: string): Ru
  */
 export type CellStatus = "pending" | "dispatched" | "claimed" | "delivered" | "judged" | "failed" | "expired" | "cancelled";
 
+/** One journaled verdict, in journal order (BP-21). `evaluator`/`evalIndex` are absent on
+ * verdicts folded from legacy single-evaluator entries. */
+export interface CellVerdictFold {
+  readonly sha256: string;
+  readonly evaluator?: string;
+  readonly evalIndex?: number;
+}
+
 export interface CellJournalFold {
   readonly cellKey: string;
   readonly armId: string;
@@ -150,8 +166,18 @@ export interface CellJournalFold {
   readonly submissionSha256?: string;
   readonly deliverySha256?: string;
   readonly deliveryOutputs?: readonly { readonly name: string; readonly sha256: string }[];
+  /** Every journaled verdict for the current dispatch, in journal order (BP-21). */
+  readonly verdicts: readonly CellVerdictFold[];
+  /** The FIRST verdict's sha256 — the stable single-verdict bridge for downstream consumers
+   * (`run-status.ts`, `assembly-ports.ts`) that predate multi-leg evaluation. */
   readonly verdictSha256?: string;
+  /** Set when at least one evaluation leg journaled could-not-grade (with multiple legs this
+   * is NOT "the evaluation failed" — other legs may have journaled verdicts; consult
+   * `verdicts` and `completedEvalIndexes` for per-leg accounting). */
   readonly evaluationTerminal?: "could-not-grade";
+  /** Ascending, deduplicated 1-based leg indexes with a terminal (a verdict OR a
+   * could-not-grade entry). Entries without an evalIndex count as index 1 (legacy folds). */
+  readonly completedEvalIndexes: readonly number[];
   readonly detail?: string;
 }
 
@@ -168,12 +194,13 @@ interface MutableFold {
   submissionSha256?: string;
   deliverySha256?: string;
   deliveryOutputs?: { name: string; sha256: string }[];
-  verdictSha256?: string;
+  verdicts: CellVerdictFold[];
   evaluationTerminal?: "could-not-grade";
+  completedEvalIndexes: Set<number>;
 }
 
 function statusFor(fold: MutableFold): CellStatus {
-  if (fold.verdictSha256 !== undefined) return "judged";
+  if (fold.verdicts.length > 0) return "judged";
   switch (fold.lastKind) {
     case "dispatch":
       return "dispatched";
@@ -201,7 +228,15 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
   const ensure = (cellKey: string, armId: string, replicate: number): MutableFold => {
     const existing = byCell.get(cellKey);
     if (existing !== undefined) return existing;
-    const fresh: MutableFold = { cellKey, armId, replicate, dispatches: 0, lastDispatch: 0 };
+    const fresh: MutableFold = {
+      cellKey,
+      armId,
+      replicate,
+      dispatches: 0,
+      lastDispatch: 0,
+      verdicts: [],
+      completedEvalIndexes: new Set(),
+    };
     byCell.set(cellKey, fresh);
     return fresh;
   };
@@ -220,8 +255,9 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
         fold.detail = undefined;
         fold.deliverySha256 = undefined;
         fold.deliveryOutputs = undefined;
-        fold.verdictSha256 = undefined;
+        fold.verdicts = [];
         fold.evaluationTerminal = undefined;
+        fold.completedEvalIndexes = new Set();
       } else {
         fold.replaceableReason = event.replaceableReason;
         if (event.detail !== undefined) fold.detail = event.detail;
@@ -229,7 +265,11 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
     } else if (entry.kind === "submission-accepted") {
       const fold = ensure(entry.cellKey, "", 0);
       if (entry.dispatch > fold.lastDispatch) fold.lastDispatch = entry.dispatch;
-      fold.submissionSha256 = entry.submissionSha256;
+      // `submissionSha256` is the SOLVE Submission's digest. An entry marked `leg: "evaluation"`
+      // must not overwrite it (pre-BP-21, the evaluation Submission's entry clobbered the solve
+      // digest here — leg-less legacy entries keep that last-wins behavior verbatim, since a
+      // legacy journal offers no way to tell the two legs apart).
+      if (entry.leg !== "evaluation") fold.submissionSha256 = entry.submissionSha256;
     } else if (entry.kind === "delivery") {
       const fold = ensure(entry.cellKey, "", 0);
       fold.deliverySha256 = entry.deliverySha256;
@@ -237,8 +277,17 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       if (entry.attempt !== undefined) fold.attempt = entry.attempt;
     } else if (entry.kind === "evaluation") {
       const fold = ensure(entry.cellKey, "", 0);
-      if (entry.verdictSha256 !== undefined) fold.verdictSha256 = entry.verdictSha256;
+      if (entry.verdictSha256 !== undefined) {
+        fold.verdicts.push({
+          sha256: entry.verdictSha256,
+          ...(entry.evaluator !== undefined ? { evaluator: entry.evaluator } : {}),
+          ...(entry.evalIndex !== undefined ? { evalIndex: entry.evalIndex } : {}),
+        });
+      }
       if (entry.evaluationTerminal !== undefined) fold.evaluationTerminal = entry.evaluationTerminal;
+      // Either terminal (verdict or could-not-grade) completes its leg. Legacy entries without
+      // an evalIndex count as leg 1 — the only leg a pre-BP-21 journal ever ran.
+      fold.completedEvalIndexes.add(entry.evalIndex ?? 1);
       if (entry.detail !== undefined) fold.detail = entry.detail;
     }
     // "launched" and "closed" carry no per-cell accounting.
@@ -257,8 +306,10 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       ...(fold.submissionSha256 !== undefined ? { submissionSha256: fold.submissionSha256 } : {}),
       ...(fold.deliverySha256 !== undefined ? { deliverySha256: fold.deliverySha256 } : {}),
       ...(fold.deliveryOutputs !== undefined ? { deliveryOutputs: fold.deliveryOutputs } : {}),
-      ...(fold.verdictSha256 !== undefined ? { verdictSha256: fold.verdictSha256 } : {}),
+      verdicts: fold.verdicts,
+      ...(fold.verdicts[0] !== undefined ? { verdictSha256: fold.verdicts[0].sha256 } : {}),
       ...(fold.evaluationTerminal !== undefined ? { evaluationTerminal: fold.evaluationTerminal } : {}),
+      completedEvalIndexes: [...fold.completedEvalIndexes].sort((a, b) => a - b),
       ...(fold.detail !== undefined ? { detail: fold.detail } : {}),
     });
   }
@@ -303,7 +354,7 @@ export function outstandingCells(
       const nonReplaceableTerminal =
         (cell.status === "delivered" || cell.status === "judged"
           || cell.status === "cancelled" || cell.status === "failed");
-      const completedEvaluation = cell.verdictSha256 !== undefined || cell.evaluationTerminal !== undefined;
+      const completedEvaluation = cell.verdicts.length > 0 || cell.evaluationTerminal !== undefined;
       return !nonReplaceableTerminal && !completedEvaluation;
     })
     .map((coord) => {
@@ -329,11 +380,25 @@ export function outstandingCells(
     });
 }
 
-/** Delivered cells with no evaluation entry yet — the evaluation-only resume gap. */
-export function deliveredWithoutEvaluation(
+/**
+ * Delivered cells (status "delivered" or "judged") whose completed evaluation legs do not cover
+ * every index in `1..minVerdicts` — the evaluation-only resume gap, per leg (BP-21). "judged"
+ * qualifies because the very first verdict flips the fold's status while later legs may still be
+ * missing. `missingEvalIndexes` lists the uncovered indexes in ascending order.
+ */
+export function evaluationGaps(
   fold: ReadonlyMap<string, CellJournalFold>,
-): CellJournalFold[] {
-  return [...fold.values()].filter(
-    (cell) => cell.status === "delivered" && cell.verdictSha256 === undefined && cell.evaluationTerminal === undefined,
-  );
+  minVerdicts: number,
+): { cell: CellJournalFold; missingEvalIndexes: number[] }[] {
+  const gaps: { cell: CellJournalFold; missingEvalIndexes: number[] }[] = [];
+  for (const cell of fold.values()) {
+    if (cell.status !== "delivered" && cell.status !== "judged") continue;
+    const completed = new Set(cell.completedEvalIndexes);
+    const missingEvalIndexes: number[] = [];
+    for (let evalIndex = 1; evalIndex <= minVerdicts; evalIndex += 1) {
+      if (!completed.has(evalIndex)) missingEvalIndexes.push(evalIndex);
+    }
+    if (missingEvalIndexes.length > 0) gaps.push({ cell, missingEvalIndexes });
+  }
+  return gaps;
 }

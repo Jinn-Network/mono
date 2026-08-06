@@ -35,6 +35,9 @@ const CLOSED_OR_LATER_STATES = new Set(["closed", "reported", "published-bundle"
 export interface RunResultsVerdict {
   readonly sha256: string;
   readonly verdict: string;
+  /** The verdict statement's own claimed evaluator IRI (BP-21) — one per verdict, since a
+   * multi-verdict cell's verdicts each carry their own evaluator identity. */
+  readonly evaluator: string;
   readonly measurements: Readonly<Record<string, boolean | number | string>>;
 }
 
@@ -53,6 +56,9 @@ export interface RunResultsCell {
   };
   readonly integrityTier: MatrixCell["integrityTier"];
   readonly verdicts: readonly RunResultsVerdict[];
+  /** The matrix cell's own `validVerdicts` (BP-21), verbatim, in the same bare-hex form as
+   * `verdicts` — the subset of stored verdicts that passed the platform's per-verdict checks. */
+  readonly validVerdicts: readonly string[];
   readonly cost?: MatrixCell["cost"];
   readonly latencyMs?: number;
 }
@@ -79,7 +85,11 @@ export interface RunResultsDocument {
   readonly completeness: MatrixRecord["completeness"];
   readonly attrition: MatrixRecord["attrition"];
   readonly cells: readonly RunResultsCell[];
-  readonly conflictedCells: readonly string[];
+  /** Cells whose STORED verdicts disagree — more than one distinct verdict value among them
+   * (BP-21, spec §9.2: dissenting verdicts remain referenced and visible). Dissent here is
+   * distinct from the report-stage "conflicted" reduction outcome (design §9.2), which lives in
+   * the Report's own results and in the claim package. */
+  readonly dissentCells: readonly string[];
   readonly venueHonesty: VenueHonesty;
 }
 
@@ -94,15 +104,19 @@ export const LOCAL_VENUE_LIMITS: readonly string[] = [
   "Pre-registration here is a discipline enforced by this tool, not a proof against the run's own owner — nothing prevents the owner from having altered the record before publishing it.",
   "Run pinning on the harness, model, and loadout axes is enforced by an admission gate at dispatch time. The isolation axis is vacuous: this venue's launchers admit only one isolation policy, so matching it proves nothing about containment strength.",
   "Cost figures, where present, are self-reported by this venue and were never independently settled.",
-  "Distinct solver and evaluator identities prove agent-distinctness only — not that they are independent real-world parties.",
+  "Distinct solver and evaluator identities prove agent-distinctness only — each evaluator identity is backed by its own workspace-minted signing key, whose verdict signature this product verifies — not that they are independent real-world parties.",
 ];
+
+function bareSha256(digest: string): string {
+  return digest.startsWith("sha256:") ? digest.slice("sha256:".length) : digest;
+}
 
 function verdictsFor(workspaceDir: string, digests: readonly string[]): RunResultsVerdict[] {
   return digests.map((prefixedDigest) => {
-    const sha256 = prefixedDigest.startsWith("sha256:") ? prefixedDigest.slice("sha256:".length) : prefixedDigest;
+    const sha256 = bareSha256(prefixedDigest);
     const envelopeBytes = getSealedBytes(workspaceDir, sha256);
     const view = readVerdictEnvelope(envelopeBytes);
-    return { sha256, verdict: view.verdict, measurements: view.measurements };
+    return { sha256, verdict: view.verdict, evaluator: view.evaluatorId, measurements: view.measurements };
   });
 }
 
@@ -122,6 +136,7 @@ function toResultsCell(workspaceDir: string, cell: MatrixCell): RunResultsCell {
     },
     integrityTier: cell.integrityTier,
     verdicts: verdictsFor(workspaceDir, cell.verdicts),
+    validVerdicts: cell.validVerdicts.map(bareSha256),
     ...(cell.cost !== undefined ? { cost: cell.cost } : {}),
     ...(cell.latencyMs !== undefined ? { latencyMs: cell.latencyMs } : {}),
   };
@@ -140,12 +155,15 @@ export function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHones
   return counts;
 }
 
-/** A cell with more than one recorded verdict carries dissent (spec §9.2: "Dissenting verdicts
- * remain referenced in the matrix and visible in the report"). Under M1's Direct-check preset
- * (at most one verdict per cell) this is always empty — correctly so — and stays correct
- * unimplemented for later multi-verdict presets (evaluator-panel, strict-agreement). */
-function conflictedCellKeys(cells: readonly MatrixCell[]): string[] {
-  return cells.filter((cell) => cell.verdicts.length > 1).map((cell) => cell.cellKey);
+/** Dissent (spec §9.2: "Dissenting verdicts remain referenced in the matrix and visible in the
+ * report") = a cell whose STORED verdicts carry more than one distinct verdict value — mere
+ * multiplicity is agreement, not dissent (BP-21: an evaluator-panel cell whose verdicts all say
+ * "pass" carries none). Distinct from the report-stage "conflicted" reduction outcome (design
+ * §9.2), which lives in the Report's own results and in the claim package. */
+function dissentCellKeys(cells: readonly RunResultsCell[]): string[] {
+  return cells
+    .filter((cell) => new Set(cell.verdicts.map((verdict) => verdict.verdict)).size > 1)
+    .map((cell) => cell.cellKey);
 }
 
 export function runResults(
@@ -193,7 +211,7 @@ export function runResults(
         completeness: matrix.completeness,
         attrition: matrix.attrition,
         cells,
-        conflictedCells: conflictedCellKeys(matrix.cells),
+        dissentCells: dissentCellKeys(cells),
         venueHonesty: {
           venue: "self-run",
           preRegistration: "structural-and-append-order-only",

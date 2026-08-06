@@ -19,7 +19,9 @@
  * BP-13: `DriveDeps.onProgress`, when supplied, receives one short `<cellKey> <kind>` line right
  * after each cell-event journal write, plus `<cellKey> judged` / `<cellKey> could-not-grade` right
  * after each evaluation-leg terminal is journaled (`journalCouldNotGrade`, the success tail of
- * `dispatchEvaluation`). It is a live stream for a long-running CLI verb (`launch`/`resume`) to
+ * `dispatchEvaluation`) — with an ` e<i>/<n>` leg suffix when `minVerdicts > 1` (BP-21; the
+ * minVerdicts=1 output stays byte-identical). It is a live stream for a long-running CLI verb
+ * (`launch`/`resume`) to
  * surface, never a substitute for the journal itself — purely additive, so a caller that omits it
  * sees byte-identical journal and return-value behavior. It is a diagnostic sink only: it can
  * NEVER fail the run. Every call site goes through `emitProgress`, which swallows anything the
@@ -43,7 +45,8 @@ import type {
   TwoPartyEngagement,
 } from "@jinn-network/task-execution-backend";
 import { sealSubmission, type ProtocolObservation, type ResourceDescriptor } from "@jinn-network/task-execution-protocol";
-import { EVALUATION_HARNESS_PIN, type LocalVenue } from "../venue/venue.js";
+import { refuse } from "../errors.js";
+import { EVALUATION_HARNESS_PIN, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "../venue/venue.js";
 import { getSealedBytes, putSealedBytes } from "../workspace/sealed-store.js";
 import { appendRunJournalEntry } from "./journal.js";
 import { deterministicUuidUri } from "./state.js";
@@ -74,9 +77,10 @@ export interface RecordingProxyDeps {
  * Parses `<...>:<cellKey>:<dispatch>` — the LAST two `:`-delimited segments — out of a
  * Submission's `nonce`. A solve dispatch's nonce IS exactly `<cellKey>:<dispatch>`
  * (`benchmarking-run`'s `launch.ts`); this product's own evaluation Submissions use
- * `eval:<runSha256>:<cellKey>:<dispatch>` (`./drive.ts`'s own `dispatchEvaluation`, below) — a
- * cellKey never itself contains `:`, so the last-two-segments rule reads correctly under both
- * shapes without the proxy needing to know which kind of Submission it is looking at.
+ * `eval:<runSha256>:e<evalIndex>:<cellKey>:<dispatch>` (`./drive.ts`'s own `dispatchEvaluation`,
+ * below — the leg marker sits in the MIDDLE precisely so cellKey and dispatch stay the last two
+ * segments) — a cellKey never itself contains `:`, so the last-two-segments rule reads correctly
+ * under both shapes without the proxy needing to know which kind of Submission it is looking at.
  */
 function cellKeyAndDispatchFromNonce(nonce: string): { cellKey: string; dispatch: number } | undefined {
   const parts = nonce.split(":");
@@ -111,7 +115,7 @@ export function createRecordingProxy(
       }
       const nonce = typeof parsed?.nonce === "string" ? parsed.nonce : undefined;
       const coord = nonce === undefined ? undefined : cellKeyAndDispatchFromNonce(nonce);
-      if (coord !== undefined) {
+      if (coord !== undefined && nonce !== undefined) {
         const submissionSha256 = putSealedBytes(deps.workspaceDir, submissionBytes);
         appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
           kind: "submission-accepted",
@@ -119,6 +123,9 @@ export function createRecordingProxy(
           cellKey: coord.cellKey,
           dispatch: coord.dispatch,
           submissionSha256,
+          // The `eval:` prefix is this driver's own evaluation-nonce marker (see
+          // `cellKeyAndDispatchFromNonce`'s doc comment); everything else is a solve dispatch.
+          leg: nonce.startsWith("eval:") ? "evaluation" : "solve",
         });
       }
       return backend.submit(taskBytes, submissionBytes, engagement);
@@ -143,6 +150,10 @@ export interface DriveDeps {
   readonly runSha256: string;
   readonly owner: string;
   readonly cellWindowMs: number;
+  /** `policy.evaluation.minVerdicts` from the SEALED Run record (integer >= 1) — how many
+   * evaluation legs each delivered solve cell gets, one per distinct venue evaluator identity
+   * (BP-21). The venue must have been created with `evaluatorCount >= minVerdicts`. */
+  readonly minVerdicts: number;
   /** The live, unfrozen clock — journal timestamps reflect when each event actually happened. */
   readonly liveClock: () => string;
   /** Live diagnostic stream (BP-13, CLI `launch`/`resume`) — one short line per journaled
@@ -162,11 +173,17 @@ function emitProgress(deps: DriveDeps, line: string): void {
   }
 }
 
+/** ` e<i>/<n>` when minVerdicts > 1 and the line is leg-attributed; empty otherwise — keeps the
+ * minVerdicts=1 progress output byte-identical to the pre-BP-21 single-leg stream. */
+function legSuffix(deps: DriveDeps, evalIndex: number | undefined): string {
+  return deps.minVerdicts > 1 && evalIndex !== undefined ? ` e${evalIndex}/${deps.minVerdicts}` : "";
+}
+
 function journalCouldNotGrade(
   deps: DriveDeps,
   cellKey: string,
   detail: string,
-  extra: { evalTaskSha256?: string; evalAttempt?: string } = {},
+  extra: { evalTaskSha256?: string; evalAttempt?: string; evaluator?: string; evalIndex?: number } = {},
 ): void {
   appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
     kind: "evaluation",
@@ -176,18 +193,72 @@ function journalCouldNotGrade(
     detail,
     ...(extra.evalTaskSha256 !== undefined ? { evalTaskSha256: extra.evalTaskSha256 } : {}),
     ...(extra.evalAttempt !== undefined ? { evalAttempt: extra.evalAttempt } : {}),
+    ...(extra.evaluator !== undefined ? { evaluator: extra.evaluator } : {}),
+    ...(extra.evalIndex !== undefined ? { evalIndex: extra.evalIndex } : {}),
   });
-  emitProgress(deps, `${cellKey} could-not-grade`);
+  emitProgress(deps, `${cellKey} could-not-grade${legSuffix(deps, extra.evalIndex)}`);
 }
 
-/** Seals + submits + watches the evaluation leg for a prepared evaluation cell (module header). */
+/**
+ * Journals one could-not-grade terminal PER LEG for a failure that precedes any leg-specific
+ * work (no attempt reference, unreadable delivery, missing EvaluationSpec, prepare failure).
+ * Fanning the shared failure out per leg keeps the fold's per-leg accounting
+ * (`completedEvalIndexes`) convergent: every leg in `evalIndexes` gets its terminal, so a later
+ * `evaluationGaps` sweep does not re-attempt legs that can never be graded. No `evaluator` is
+ * recorded — the failure happened before any evaluator was selected for these legs.
+ */
+function journalCouldNotGradeLegs(
+  deps: DriveDeps,
+  cellKey: string,
+  detail: string,
+  evalIndexes: readonly number[],
+  extra: { evalTaskSha256?: string } = {},
+): void {
+  for (const evalIndex of evalIndexes) {
+    journalCouldNotGrade(deps, cellKey, detail, { ...extra, evalIndex });
+  }
+}
+
+/** The 1-based leg indexes a fresh delivery runs: `1..minVerdicts`. */
+function allEvalIndexes(deps: DriveDeps): number[] {
+  return Array.from({ length: deps.minVerdicts }, (_, i) => i + 1);
+}
+
+/**
+ * Refuses loudly on wiring bugs before any leg work starts: a non-integer/sub-1 `minVerdicts`,
+ * or a venue minted with fewer evaluator identities than `minVerdicts` demands. These are
+ * caller bugs (`run-launch.ts` creates the venue with `evaluatorCount: minVerdicts`), never
+ * per-cell facts — degrading them into per-cell could-not-grade entries would paper a broken
+ * assembly over the whole run's evaluation record.
+ */
+function requireEvaluatorCoverage(deps: DriveDeps): void {
+  if (!Number.isSafeInteger(deps.minVerdicts) || deps.minVerdicts < 1) {
+    refuse("validation", "minVerdicts", "minVerdicts must be an integer >= 1");
+  }
+  if (deps.venue.evaluators.length < deps.minVerdicts) {
+    refuse(
+      "execution",
+      "venue.evaluators",
+      `venue has ${deps.venue.evaluators.length} evaluator identities but policy.evaluation.minVerdicts is `
+        + `${deps.minVerdicts} — the venue must be created with evaluatorCount >= minVerdicts`,
+    );
+  }
+}
+
+/** Seals + submits + watches ONE evaluation leg (`evalIndex`, 1-based) for a prepared evaluation
+ * cell (module header): evaluator `deps.venue.evaluators[evalIndex - 1]`, leg-distinct
+ * idempotency key/nonce `eval:<runSha256>:e<evalIndex>:<cellKey>:<dispatch>`. */
 async function dispatchEvaluation(
   deps: DriveDeps,
   cellKey: string,
   dispatch: number,
   prepared: { readonly taskBytes: Uint8Array; readonly taskSha256: string },
+  evalIndex: number,
 ): Promise<void> {
-  const idempotencyKey = `eval:${deps.runSha256}:${cellKey}:${dispatch}`;
+  // `requireEvaluatorCoverage` already refused a venue too small for minVerdicts at drive entry.
+  const evaluator = deps.venue.evaluators[evalIndex - 1]!;
+  const legExtra = { evalTaskSha256: prepared.taskSha256, evaluator: evaluator.id, evalIndex };
+  const idempotencyKey = `eval:${deps.runSha256}:e${evalIndex}:${cellKey}:${dispatch}`;
   const submissionUri = deterministicUuidUri(idempotencyKey);
   const deadline = new Date(Date.parse(deps.liveClock()) + deps.cellWindowMs).toISOString();
   const evalSubmissionBytes = sealSubmission({
@@ -198,12 +269,12 @@ async function dispatchEvaluation(
     nonce: idempotencyKey,
     idempotencyKey,
     deadline,
-    requirements: { harness: EVALUATION_HARNESS_PIN },
+    requirements: { harness: EVALUATION_HARNESS_PIN, [EVALUATOR_REQUIREMENT_KEY]: evaluator.id },
   });
 
   const ack = await deps.backend.submit(prepared.taskBytes, evalSubmissionBytes);
   if (!ack.accepted) {
-    journalCouldNotGrade(deps, cellKey, ack.error.detail ?? ack.error.category, { evalTaskSha256: prepared.taskSha256 });
+    journalCouldNotGrade(deps, cellKey, ack.error.detail ?? ack.error.category, legExtra);
     return;
   }
   await deps.backend.drain();
@@ -214,7 +285,7 @@ async function dispatchEvaluation(
       deps,
       cellKey,
       `evaluation attempt terminal state: ${snapshot.descriptor.derived.state}`,
-      { evalTaskSha256: prepared.taskSha256, ...(evalAttempt !== undefined ? { evalAttempt } : {}) },
+      { ...legExtra, ...(evalAttempt !== undefined ? { evalAttempt } : {}) },
     );
     return;
   }
@@ -223,7 +294,7 @@ async function dispatchEvaluation(
   const deliveryRef = refs.at(-1);
   if (deliveryRef === undefined) {
     journalCouldNotGrade(deps, cellKey, "evaluation attempt delivered but no Delivery was recorded", {
-      evalTaskSha256: prepared.taskSha256,
+      ...legExtra,
       evalAttempt,
     });
     return;
@@ -235,14 +306,14 @@ async function dispatchEvaluation(
   const verdictOutput = delivery.outputs.find((output) => output.name === "verdict");
   if (verdictOutput?.digest?.sha256 === undefined) {
     journalCouldNotGrade(deps, cellKey, "evaluation delivery carries no verdict output", {
-      evalTaskSha256: prepared.taskSha256,
+      ...legExtra,
       evalAttempt,
     });
     return;
   }
   if (deps.backend.fetchArtifact === undefined) {
     journalCouldNotGrade(deps, cellKey, "backend does not support fetchArtifact", {
-      evalTaskSha256: prepared.taskSha256,
+      ...legExtra,
       evalAttempt,
     });
     return;
@@ -257,13 +328,19 @@ async function dispatchEvaluation(
     evalTaskSha256: prepared.taskSha256,
     evalAttempt,
     verdictSha256,
+    evaluator: evaluator.id,
+    evalIndex,
   });
-  emitProgress(deps, `${cellKey} judged`);
+  emitProgress(deps, `${cellKey} judged${legSuffix(deps, evalIndex)}`);
 }
 
 /**
  * The tail shared by a fresh delivery and a resumed (already-journaled) one: resolve the
- * subject Task's bound EvaluationSpec, prepare the evaluation cell, and dispatch it.
+ * subject Task's bound EvaluationSpec, prepare the evaluation cell ONCE (every leg grades the
+ * same derived evaluation Task), then dispatch each leg in `evalIndexes` in order. A per-leg
+ * failure never aborts the remaining legs — it journals could-not-grade for that leg and
+ * continues; a pre-leg failure (spec resolution / prepare) fans out per leg
+ * (`journalCouldNotGradeLegs`) so every requested leg still reaches a journaled terminal.
  */
 async function prepareAndDispatchEvaluation(
   deps: DriveDeps,
@@ -271,6 +348,7 @@ async function prepareAndDispatchEvaluation(
   dispatch: number,
   subjectDeliveryBytes: Uint8Array,
   resultArtifacts: readonly { readonly name: string; readonly bytes: Uint8Array }[],
+  evalIndexes: readonly number[],
 ): Promise<void> {
   const taskDigestHex = parseCellKey(cellKey).taskDigest;
   const subjectTaskBytes = getSealedBytes(deps.workspaceDir, taskDigestHex);
@@ -279,7 +357,7 @@ async function prepareAndDispatchEvaluation(
   };
   const evaluationSpecSha256 = subjectTaskDoc.evaluation?.digest?.sha256;
   if (evaluationSpecSha256 === undefined) {
-    journalCouldNotGrade(deps, cellKey, "subject Task carries no bound EvaluationSpec digest");
+    journalCouldNotGradeLegs(deps, cellKey, "subject Task carries no bound EvaluationSpec digest", evalIndexes);
     return;
   }
   const evaluationSpecBytes = getSealedBytes(deps.workspaceDir, evaluationSpecSha256);
@@ -291,7 +369,18 @@ async function prepareAndDispatchEvaluation(
     evaluationSpecBytes,
   });
 
-  await dispatchEvaluation(deps, cellKey, dispatch, prepared);
+  for (const evalIndex of evalIndexes) {
+    try {
+      await dispatchEvaluation(deps, cellKey, dispatch, prepared, evalIndex);
+    } catch (cause) {
+      const evaluator = deps.venue.evaluators[evalIndex - 1];
+      journalCouldNotGrade(deps, cellKey, cause instanceof Error ? cause.message : String(cause), {
+        evalTaskSha256: prepared.taskSha256,
+        ...(evaluator !== undefined ? { evaluator: evaluator.id } : {}),
+        evalIndex,
+      });
+    }
+  }
 }
 
 /** Fetches a delivered solve cell's outputs from the backend, journals the delivery, then
@@ -300,7 +389,7 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
   const { cellKey, dispatch } = event;
   const attempt = event.attempt;
   if (attempt === undefined) {
-    journalCouldNotGrade(deps, cellKey, "delivered cell-event carried no attempt reference");
+    journalCouldNotGradeLegs(deps, cellKey, "delivered cell-event carried no attempt reference", allEvalIndexes(deps));
     return;
   }
 
@@ -308,7 +397,7 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
     const refs = await deps.backend.deliveries(attempt as AttemptUri);
     const deliveryRef = refs.at(-1);
     if (deliveryRef === undefined) {
-      journalCouldNotGrade(deps, cellKey, "no Delivery recorded for a delivered attempt");
+      journalCouldNotGradeLegs(deps, cellKey, "no Delivery recorded for a delivered attempt", allEvalIndexes(deps));
       return;
     }
     const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
@@ -318,7 +407,7 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
     };
 
     if (deps.backend.fetchArtifact === undefined) {
-      journalCouldNotGrade(deps, cellKey, "backend does not support fetchArtifact");
+      journalCouldNotGradeLegs(deps, cellKey, "backend does not support fetchArtifact", allEvalIndexes(deps));
       return;
     }
     const resultArtifacts: { name: string; bytes: Uint8Array }[] = [];
@@ -340,9 +429,11 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
       outputs: journaledOutputs,
     });
 
-    await prepareAndDispatchEvaluation(deps, cellKey, dispatch, deliveryBytes, resultArtifacts);
+    await prepareAndDispatchEvaluation(deps, cellKey, dispatch, deliveryBytes, resultArtifacts, allEvalIndexes(deps));
   } catch (cause) {
-    journalCouldNotGrade(deps, cellKey, cause instanceof Error ? cause.message : String(cause));
+    // Reached only from pre-leg work (delivery fetch/journal, spec resolution, prepare) — the
+    // per-leg loop inside prepareAndDispatchEvaluation catches its own legs' failures.
+    journalCouldNotGradeLegs(deps, cellKey, cause instanceof Error ? cause.message : String(cause), allEvalIndexes(deps));
   }
 }
 
@@ -354,6 +445,7 @@ export async function driveCellEvents(
   deps: DriveDeps,
   events: AsyncIterable<CellStatusEvent>,
 ): Promise<void> {
+  requireEvaluatorCoverage(deps);
   for await (const event of events) {
     appendRunJournalEntry(deps.workspaceDir, deps.draftId, { kind: "cell-event", at: deps.liveClock(), event });
     emitProgress(deps, `${event.cellKey} ${event.kind}`);
@@ -363,26 +455,30 @@ export async function driveCellEvents(
   }
 }
 
-/** A delivered-but-unevaluated cell, as folded from the run journal (`./journal.js`'s
- * `deliveredWithoutEvaluation`) — everything needed to re-run only the evaluation leg without
- * touching the backend for the solve side again (the delivery is already durably stored). */
+/** A delivered cell with at least one missing evaluation leg, as folded from the run journal
+ * (`./journal.js`'s `evaluationGaps`) — everything needed to re-run only the missing legs
+ * without touching the backend for the solve side again (the delivery is already durably
+ * stored). */
 export interface DeliveredCellGap {
   readonly cellKey: string;
   readonly lastDispatch: number;
   readonly deliverySha256: string;
   readonly deliveryOutputs?: readonly { readonly name: string; readonly sha256: string }[];
+  /** The uncovered 1-based leg indexes (ascending) — ONLY these legs are re-run. */
+  readonly missingEvalIndexes: readonly number[];
 }
 
 /**
- * Re-runs only the evaluation leg for cells that delivered but never reached an evaluation
- * entry (interrupted between delivery and verdict, or between verdict-submit and observe). Reads
- * the already-journaled delivery straight from the sealed-bytes store — the solve side is done;
- * nothing here re-contacts the backend for it.
+ * Re-runs only the missing evaluation legs for cells that delivered but never reached a
+ * journaled terminal for every leg (interrupted between delivery and verdict, or between
+ * verdict-submit and observe). Reads the already-journaled delivery straight from the
+ * sealed-bytes store — the solve side is done; nothing here re-contacts the backend for it.
  */
 export async function driveEvaluationCatchUp(
   deps: DriveDeps,
   gaps: readonly DeliveredCellGap[],
 ): Promise<void> {
+  requireEvaluatorCoverage(deps);
   for (const gap of gaps) {
     try {
       const deliveryBytes = getSealedBytes(deps.workspaceDir, gap.deliverySha256);
@@ -390,9 +486,10 @@ export async function driveEvaluationCatchUp(
         name: output.name,
         bytes: getSealedBytes(deps.workspaceDir, output.sha256),
       }));
-      await prepareAndDispatchEvaluation(deps, gap.cellKey, gap.lastDispatch, deliveryBytes, resultArtifacts);
+      await prepareAndDispatchEvaluation(deps, gap.cellKey, gap.lastDispatch, deliveryBytes, resultArtifacts, gap.missingEvalIndexes);
     } catch (cause) {
-      journalCouldNotGrade(deps, gap.cellKey, cause instanceof Error ? cause.message : String(cause));
+      // Pre-leg failure (stored bytes unreadable) — fan out so every missing leg terminates.
+      journalCouldNotGradeLegs(deps, gap.cellKey, cause instanceof Error ? cause.message : String(cause), gap.missingEvalIndexes);
     }
   }
 }

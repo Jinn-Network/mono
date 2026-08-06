@@ -115,7 +115,8 @@ export function runReport(
       const matrixRecord = parseMatrix(matrixBytes);
       const runRecord = parseRun(getSealedBytes(clockedContext.workspaceDir, runState.runSha256));
 
-      const verdictRule = resolveAssurance(document.spec.assurance).verdictRule;
+      const resolvedAssurance = resolveAssurance(document.spec.assurance);
+      const verdictRule = resolvedAssurance.verdictRule;
       const ports = buildMethodPorts(clockedContext.workspaceDir);
       const reportKey = loadOrCreateReportSigningKey(clockedContext.workspaceDir);
       const signer = createReportDsseSigner(reportKey);
@@ -179,6 +180,9 @@ export function runReport(
         reportEnvelopeSha256,
         venueHonesty,
         verificationCommandVerb: VERIFICATION_VERB,
+        // BP-21 (spec §6): the claim states the preset AND the resolved primitives, never the
+        // label alone; buildClaimPackage cross-checks these against the sealed Run's own policy.
+        assurance: { preset: document.spec.assurance.preset, resolved: resolvedAssurance },
         ...(previewLog !== undefined && previewLog.count > 0
           ? { previewDisclosure: { previewCount: previewLog.count, timestamps: previewLog.previews.map((preview) => preview.at) } }
           : {}),

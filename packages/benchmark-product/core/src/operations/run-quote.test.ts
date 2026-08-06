@@ -200,6 +200,7 @@ describe("runQuote — dependency-injected venue (test seam)", () => {
         },
       } as unknown as LocalVenue["backend"],
       verdictKeyId: "stub-key",
+      evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "stub-key" }],
       prepareEvaluationCell: () => {
         throw new Error("not used by runQuote");
       },

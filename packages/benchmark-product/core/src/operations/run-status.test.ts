@@ -126,6 +126,7 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-verdict-key" }],
     prepareEvaluationCell: (input) => {
       const taskBytes = utf8({ fakeEvalTask: true, subjectDigest: sha256Hex(input.subjectTaskBytes) });
       return { taskBytes, taskSha256: sha256Hex(taskBytes) };

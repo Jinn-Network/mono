@@ -6,13 +6,14 @@ import { parseMatrix } from "@jinn-network/benchmarking-records";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
-import { sealDsseEnvelope } from "@jinn-network/trust-core";
+import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { runJournalPath } from "../workspace/layout.js";
 import { getSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { LEGACY_VERDICT_EVALUATOR_ID, loadOrCreateVerdictSigningKey } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
 import type { OperationContext } from "./context.js";
@@ -51,13 +52,16 @@ function utf8(json: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(json));
 }
 
-/** A real DSSE-wrapped Result Evaluation Statement — `readVerdictEnvelope` (signing.ts) requires
- * an actual envelope shape, not arbitrary bytes; the signature itself is never verified by it. */
-function buildVerdictEnvelope(input: { evaluatorId: string; evaluationSpecificationSha256: string }): Uint8Array {
+/** A real DSSE-wrapped Result Evaluation Statement, HONESTLY signed (BP-21): it claims the
+ * workspace's legacy evaluator identity and carries a genuine signature by that identity's
+ * workspace-registered key, because the assembly trust resolver now verifies the signature
+ * fail-closed — a fixture with a garbage signature or a foreign IRI would (correctly) resolve
+ * "unresolved". */
+function buildVerdictEnvelope(input: { evaluationSpecificationSha256: string }): Uint8Array {
   const statement = {
     predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
-      evaluator: { id: input.evaluatorId },
+      evaluator: { id: LEGACY_VERDICT_EVALUATOR_ID },
       verdict: "pass",
       evaluationSpecification: { digest: { sha256: input.evaluationSpecificationSha256 } },
       measurements: [
@@ -67,10 +71,12 @@ function buildVerdictEnvelope(input: { evaluatorId: string; evaluationSpecificat
       evaluatedAt: "2026-01-01T00:00:00Z",
     },
   };
+  const key = loadOrCreateVerdictSigningKey(workspaceDir);
+  const payloadBytes = utf8(statement);
   return sealDsseEnvelope({
-    payloadBytes: utf8(statement),
+    payloadBytes,
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
-    signatures: [{ signature: new Uint8Array([1, 2, 3, 4]), keyid: "fake-key" }],
+    signatures: [{ signature: key.sign(dssePreAuthEncoding(VERDICT_DSSE_PAYLOAD_TYPE, payloadBytes)), keyid: key.keyId }],
   });
 }
 
@@ -104,7 +110,7 @@ function makeStatefulFakeBackend(evaluationSpecSha256: string): { backend: Proxi
       const isEval = doc.requirements?.harness?.id === "evaluation-harness";
       let artifactHex: string;
       if (isEval) {
-        artifactHex = store(buildVerdictEnvelope({ evaluatorId: "urn:jinn:test:evaluator", evaluationSpecificationSha256: evaluationSpecSha256 }));
+        artifactHex = store(buildVerdictEnvelope({ evaluationSpecificationSha256: evaluationSpecSha256 }));
       } else {
         artifactHex = store(utf8({ probabilityYes: "0.5", submittedAt: "2026-01-01T00:00:00Z" }));
       }
@@ -158,6 +164,7 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-venue-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-venue-verdict-key" }],
     prepareEvaluationCell: (input) => {
       const taskBytes = utf8({ fakeEvalTask: true, subjectDigest: sha256Hex(input.subjectTaskBytes) });
       return { taskBytes, taskSha256: sha256Hex(taskBytes) };
@@ -281,17 +288,18 @@ describe("runCollect — full assembly (fake backend, driven run)", () => {
     expect(matrix.cells).toHaveLength(6);
     expect(matrix.completeness).toMatchObject({ expected: 6, judged: 6, runOutcome: "complete" });
 
-    // run-collect.ts's trust resolver echoes each verdict's OWN claimed evaluator IRI (the
-    // venue's real evaluator identity, `readVerdictEnvelope`'s `evaluatorId`) — this fixture's
-    // fake backend stamps every verdict with "urn:jinn:test:evaluator" (see buildVerdictEnvelope
-    // above), so that is exactly what the resolved identity should be.
+    // The trust resolver (BP-21) resolves each verdict's claimed evaluator IRI only after
+    // verifying the envelope's DSSE signature against that identity's workspace-registered key —
+    // this fixture's verdicts claim the legacy evaluator identity and are genuinely signed by
+    // the workspace's legacy key (buildVerdictEnvelope above), so they resolve to it; an
+    // unsigned or foreign-keyed verdict would resolve "unresolved" instead.
     for (const cell of matrix.cells) {
       expect(cell.outcome, cell.cellKey).toBe("judged");
       expect(cell.verification.harness, cell.cellKey).toBe("match");
       // The bundled sample's real admission receipt (BP-11) makes this a re-derivable cell.
       expect(cell.integrityTier, cell.cellKey).toBe("re-derivable");
       expect(cell.solver, cell.cellKey).toBe(runState?.owner);
-      expect(cell.evaluator, cell.cellKey).toBe("urn:jinn:test:evaluator");
+      expect(cell.evaluator, cell.cellKey).toBe(LEGACY_VERDICT_EVALUATOR_ID);
     }
 
     const closedEntry = readRunJournalEntries(workspaceDir, "draft-1").find((entry) => entry.kind === "closed");

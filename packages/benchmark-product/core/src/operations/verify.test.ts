@@ -10,7 +10,7 @@ import type { ProxiedBackend } from "../run/drive.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sealedRecordPath, sha256Hex } from "../workspace/sealed-store.js";
-import { createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
+import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { readAuditEntries } from "../audit/journal.js";
 import { armAdd } from "./arms.js";
@@ -126,7 +126,10 @@ function makeStatefulFakeBackend(
       let artifactHex: string;
       if (isEval) {
         const envelope = await buildReportGradeVerdictEnvelope(workspaceDirForKey, {
-          evaluatorId: "urn:jinn:test:evaluator",
+          // The legacy evaluator identity is what the workspace's legacy verdict-signing key
+          // maps to in the evaluator registry (BP-21) — claiming any other IRI over this key
+          // would (correctly) resolve "unresolved" in the signature-verifying trust resolver.
+          evaluatorId: LEGACY_VERDICT_EVALUATOR_ID,
           evaluationSpecificationSha256: evaluationSpecSha256,
           verdict: "pass",
         });
@@ -184,6 +187,7 @@ function fakeVenue(backend: ProxiedBackend): LocalVenue {
   return {
     backend: backend as unknown as LocalVenue["backend"],
     verdictKeyId: "fake-venue-verdict-key",
+    evaluators: [{ id: "urn:jinn:benchmark-product:local-venue:evaluator-1", keyId: "fake-venue-verdict-key" }],
     prepareEvaluationCell: (input) => {
       const taskBytes = utf8({ fakeEvalTask: true, subjectDigest: sha256Hex(input.subjectTaskBytes) });
       return { taskBytes, taskSha256: sha256Hex(taskBytes) };

@@ -15,15 +15,20 @@
  * set, the run-journal fold, the workspace's admission receipts, and the run owner) and get back
  * the identical `AssemblyPorts` bundle `assembleMatrix`/`verifyMatrix` require.
  *
- * This module is a pure code motion out of `run-collect.ts` — no behavior change from what that
- * module did inline before this extraction.
+ * Originally a pure code motion out of `run-collect.ts`. BP-21 changed two behaviors INSIDE the
+ * shared construction (so collect and verify still cannot drift): every stored verdict of a cell
+ * flows into assembly (not just the first — the pre-BP-21 single-verdict bridge), and the trust
+ * resolver's evaluator resolution is signature-verified fail-closed (see the resolver comment in
+ * `buildRunAssemblyPorts`).
  */
 
+import { verify as cryptoVerify, type KeyObject } from "node:crypto";
 import type { CellCoord, RunRecord } from "@jinn-network/benchmarking-records";
 import { localAssemblyPorts } from "@jinn-network/benchmarking-local";
 import type { AssemblyPorts, InScopeCell, InScopeVerdict } from "@jinn-network/benchmarking-run";
+import { dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { parseEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
-import { readVerdictEnvelope } from "../venue/signing.js";
+import { readEvaluatorPublicKeys, readVerdictEnvelope } from "../venue/signing.js";
 import { VENUE_ISOLATION_INVENTORY } from "../venue/venue.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
@@ -56,20 +61,60 @@ function subjectEvaluationSpecRef(
   }
 }
 
+/** ONE `InScopeVerdict` per stored verdict, in journal order (BP-21) — a multi-leg cell's
+ * verdicts all flow to assembly, dissent included; dropping any would let the sealed Matrix be
+ * more flattering than the journal. */
 function buildVerdicts(workspaceDir: string, cell: CellJournalFold, evaluationSpec: EvaluationSpec | undefined): InScopeVerdict[] {
-  if (cell.verdictSha256 === undefined) return [];
-  const envelopeBytes = getSealedBytes(workspaceDir, cell.verdictSha256);
-  const view = readVerdictEnvelope(envelopeBytes);
-  return [{
-    digest: `sha256:${cell.verdictSha256}` as const,
-    record: {
-      evaluationSpecification: `sha256:${view.evaluationSpecificationSha256}`,
-      evaluator: view.evaluatorId,
-      verdict: view.verdict,
-    },
-    measurements: view.measurements,
-    ...(evaluationSpec !== undefined ? { evaluationSpec } : {}),
-  }];
+  return cell.verdicts.map((verdict) => {
+    const envelopeBytes = getSealedBytes(workspaceDir, verdict.sha256);
+    const view = readVerdictEnvelope(envelopeBytes);
+    return {
+      digest: `sha256:${verdict.sha256}` as const,
+      record: {
+        evaluationSpecification: `sha256:${view.evaluationSpecificationSha256}`,
+        evaluator: view.evaluatorId,
+        verdict: view.verdict,
+      },
+      measurements: view.measurements,
+      ...(evaluationSpec !== undefined ? { evaluationSpec } : {}),
+    };
+  });
+}
+
+/**
+ * Fail-closed evaluator resolution (BP-21): the claimed evaluator IRI resolves ONLY when the
+ * verdict envelope's own DSSE signature verifies against that identity's workspace-registered
+ * public key (`readEvaluatorPublicKeys` — per-evaluator slots plus the legacy pair). Anything
+ * else — a claim outside the registry, missing or unreadable envelope bytes, a parse failure, no
+ * verifying signature, any thrown error — returns `"unresolved"`, NEVER throws: assembly must
+ * proceed and derive the honest outcome from an unresolved identity, not crash.
+ */
+function resolveEvaluatorClaim(
+  workspaceDir: string,
+  evidenceRef: unknown,
+  loadEvaluatorKeys: () => ReadonlyMap<string, KeyObject>,
+): string | "unresolved" {
+  try {
+    const ref = evidenceRef as { claim?: unknown; verdictDigest?: unknown } | undefined;
+    const claim = ref?.claim;
+    const verdictDigest = ref?.verdictDigest;
+    if (typeof claim !== "string" || claim.length === 0) return "unresolved";
+    if (typeof verdictDigest !== "string" || !verdictDigest.startsWith("sha256:")) return "unresolved";
+    const publicKey = loadEvaluatorKeys().get(claim);
+    if (publicKey === undefined) return "unresolved";
+    const envelope = parseDsseEnvelope(getSealedBytes(workspaceDir, verdictDigest.slice("sha256:".length)));
+    const preAuthEncoding = Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes));
+    const signed = envelope.signatures.some((signature) => {
+      try {
+        return cryptoVerify(null, preAuthEncoding, publicKey, Buffer.from(signature.sig, "base64"));
+      } catch {
+        return false;
+      }
+    });
+    return signed ? claim : "unresolved";
+  } catch {
+    return "unresolved";
+  }
 }
 
 /** Builds one `InScopeCell` per expected coordinate, entirely from the journal fold + sealed
@@ -132,6 +177,13 @@ export function buildRunAssemblyPorts(input: BuildRunAssemblyPortsInput): Assemb
   const { workspaceDir, runRecord, expected, fold, owner, receiptsByTaskDigest } = input;
   const cells = buildInScopeCells(workspaceDir, expected, fold);
 
+  // Loaded lazily and memoized: the registry scan itself can refuse on a broken key slot, and
+  // that failure must resolve THIS claim "unresolved" (inside resolveEvaluatorClaim's try/catch),
+  // never crash port construction.
+  let evaluatorKeys: Map<string, KeyObject> | undefined;
+  const loadEvaluatorKeys = (): ReadonlyMap<string, KeyObject> =>
+    (evaluatorKeys ??= readEvaluatorPublicKeys(workspaceDir));
+
   return localAssemblyPorts({
     inputScope: { cellsForRun: () => cells },
     pinning: {
@@ -154,21 +206,18 @@ export function buildRunAssemblyPorts(input: BuildRunAssemblyPortsInput): Assemb
     },
     trust: {
       // Solver identity is this run's own owner (the product's deterministic run-owner IRI).
-      // Evaluator identity is resolved from the verdict's OWN claimed evaluator IRI
-      // (`evidenceRef.claim` — `assemble.ts` passes `verdict.record.evaluator`, which
-      // `buildVerdicts` above set to `view.evaluatorId` from `readVerdictEnvelope`, i.e. the
-      // venue's real evaluator identity, e.g. `EVALUATOR_ID` in venue.ts). On this local
-      // self-run venue that is an echo of what the venue itself recorded, not an
-      // independently verified identity — the same operator controls both roles here; this
-      // resolver discloses that fact rather than manufacturing a false appearance of
-      // third-party verification.
+      // Evaluator identity (BP-21): the verdict's claimed evaluator IRI (`evidenceRef.claim` —
+      // `assemble.ts` passes `verdict.record.evaluator` alongside `verdictDigest`) resolves
+      // ONLY after this resolver verifies the verdict envelope's DSSE signature against that
+      // identity's workspace-registered public key — proof the claimed evaluator identity
+      // actually signed THIS verdict with a workspace-registered key, i.e. genuine
+      // AGENT-distinctness, fail-closed to "unresolved" otherwise. It still cannot and does
+      // not claim party-independence: the same operator mints and holds every evaluator key on
+      // this self-run venue — disclosed rather than dressed up as third-party verification.
       resolveAgent: async (evidenceRef) => {
         const role = (evidenceRef as { role?: string } | undefined)?.role;
         if (role === "solver") return owner;
-        if (role === "evaluator") {
-          const claim = (evidenceRef as { claim?: unknown } | undefined)?.claim;
-          return typeof claim === "string" && claim.length > 0 ? claim : "unresolved";
-        }
+        if (role === "evaluator") return resolveEvaluatorClaim(workspaceDir, evidenceRef, loadEvaluatorKeys);
         return "unresolved";
       },
     },

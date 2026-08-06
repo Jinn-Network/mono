@@ -7,7 +7,7 @@ import { appendFsyncedLineSync } from "../fs/atomic.js";
 import { runJournalPath } from "../workspace/layout.js";
 import {
   appendRunJournalEntry,
-  deliveredWithoutEvaluation,
+  evaluationGaps,
   foldRunJournal,
   outstandingCells,
   readRunJournalEntries,
@@ -42,6 +42,36 @@ describe("append / read round trip", () => {
         event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "urn:jinn:attempt:1" },
       },
       { kind: "closed", at: "2026-08-05T00:10:00Z", matrixSha256: HEX("c") },
+    ];
+    for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
+  });
+
+  test("evaluation entries with evaluator + evalIndex round-trip; legacy entries without them stay valid (BP-21)", () => {
+    const entries: RunJournalEntry[] = [
+      // Legacy shape — no evaluator, no evalIndex.
+      { kind: "evaluation", at: "2026-08-05T00:00:00Z", cellKey: CELL_A, evalTaskSha256: HEX("f"), verdictSha256: HEX("1") },
+      // BP-21 shape — per-leg attribution.
+      {
+        kind: "evaluation",
+        at: "2026-08-05T00:00:01Z",
+        cellKey: CELL_A,
+        evalTaskSha256: HEX("f"),
+        verdictSha256: HEX("2"),
+        evaluator: "urn:jinn:benchmark-product:local-venue:evaluator-2",
+        evalIndex: 2,
+      },
+    ];
+    for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
+  });
+
+  test("submission-accepted entries with a leg round-trip; legacy entries without one stay valid (BP-21)", () => {
+    const entries: RunJournalEntry[] = [
+      // Legacy shape — no leg.
+      { kind: "submission-accepted", at: "2026-08-05T00:00:00Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
+      { kind: "submission-accepted", at: "2026-08-05T00:00:01Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("8"), leg: "solve" },
+      { kind: "submission-accepted", at: "2026-08-05T00:00:02Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("7"), leg: "evaluation" },
     ];
     for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
@@ -167,6 +197,74 @@ describe("foldRunJournal — per-cell status", () => {
   });
 });
 
+describe("foldRunJournal — multi-leg evaluation accounting (BP-21)", () => {
+  test("verdicts accumulate in journal order with evaluator + evalIndex; verdictSha256 bridges to the FIRST verdict", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, evalTaskSha256: HEX("f"), verdictSha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+      { kind: "evaluation", at: "t2", cellKey: CELL_A, evalTaskSha256: HEX("f"), verdictSha256: HEX("2"), evaluator: "urn:e:2", evalIndex: 2 },
+    ]);
+    const cell = fold.get(CELL_A);
+    expect(cell?.verdicts).toEqual([
+      { sha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+      { sha256: HEX("2"), evaluator: "urn:e:2", evalIndex: 2 },
+    ]);
+    expect(cell?.verdictSha256).toBe(HEX("1"));
+    expect(cell?.completedEvalIndexes).toEqual([1, 2]);
+    expect(cell?.status).toBe("judged");
+  });
+
+  test("a legacy evaluation entry without evalIndex counts as index 1", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, evalTaskSha256: HEX("f"), verdictSha256: HEX("1") },
+    ]);
+    const cell = fold.get(CELL_A);
+    expect(cell?.verdicts).toEqual([{ sha256: HEX("1") }]);
+    expect(cell?.completedEvalIndexes).toEqual([1]);
+  });
+
+  test("a could-not-grade leg completes its index without adding a verdict; evaluationTerminal is set", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, verdictSha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+      { kind: "evaluation", at: "t2", cellKey: CELL_A, evaluationTerminal: "could-not-grade", detail: "leg 2 failed", evaluator: "urn:e:2", evalIndex: 2 },
+    ]);
+    const cell = fold.get(CELL_A);
+    expect(cell?.verdicts).toEqual([{ sha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 }]);
+    expect(cell?.completedEvalIndexes).toEqual([1, 2]);
+    expect(cell?.evaluationTerminal).toBe("could-not-grade");
+  });
+
+  test("a submission-accepted entry with leg 'evaluation' does NOT clobber the solve submission digest", () => {
+    const fold = foldRunJournal([
+      { kind: "submission-accepted", at: "t0", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), leg: "solve" },
+      { kind: "submission-accepted", at: "t1", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("8"), leg: "evaluation" },
+    ]);
+    expect(fold.get(CELL_A)?.submissionSha256).toBe(HEX("9"));
+  });
+
+  test("a legacy submission-accepted entry without a leg keeps the old last-wins behavior", () => {
+    const fold = foldRunJournal([
+      { kind: "submission-accepted", at: "t0", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9") },
+      { kind: "submission-accepted", at: "t1", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("8") },
+    ]);
+    expect(fold.get(CELL_A)?.submissionSha256).toBe(HEX("8"));
+  });
+
+  test("a fresh dispatch resets the verdicts array and completedEvalIndexes along with the rest", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, verdictSha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+      { kind: "cell-event", at: "t2", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, kind: "dispatch", attempt: "att-2" } },
+    ]);
+    const cell = fold.get(CELL_A);
+    expect(cell?.verdicts).toEqual([]);
+    expect(cell?.completedEvalIndexes).toEqual([]);
+    expect(cell?.verdictSha256).toBeUndefined();
+  });
+});
+
 const EXPECTED = [
   { cellKey: CELL_A, armId: "arm-a", replicate: 1, taskDigest: HEX("a") },
   { cellKey: CELL_B, armId: "arm-a", replicate: 1, taskDigest: HEX("b") },
@@ -234,22 +332,62 @@ describe("outstandingCells", () => {
   });
 });
 
-describe("deliveredWithoutEvaluation", () => {
-  test("finds delivered cells missing an evaluation entry", () => {
+describe("evaluationGaps", () => {
+  test("a delivered cell with no evaluation legs at all is missing every index 1..minVerdicts", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+    ]);
+    const gaps = evaluationGaps(fold, 3);
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]?.cell.cellKey).toBe(CELL_A);
+    expect(gaps[0]?.missingEvalIndexes).toEqual([1, 2, 3]);
+  });
+
+  test("a partially evaluated cell (1 of 3 legs done) is missing exactly the uncovered indexes, ascending", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, verdictSha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+    ]);
+    const gaps = evaluationGaps(fold, 3);
+    // The first verdict flips the fold's status to "judged" — a judged cell with uncovered
+    // legs is still a gap (status is a solve-side summary, not per-leg accounting).
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]?.missingEvalIndexes).toEqual([2, 3]);
+  });
+
+  test("empty when every leg is covered (verdict or could-not-grade)", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
+      { kind: "evaluation", at: "t1", cellKey: CELL_A, verdictSha256: HEX("1"), evaluator: "urn:e:1", evalIndex: 1 },
+      { kind: "evaluation", at: "t2", cellKey: CELL_A, evaluationTerminal: "could-not-grade", evaluator: "urn:e:2", evalIndex: 2 },
+    ]);
+    expect(evaluationGaps(fold, 2)).toEqual([]);
+  });
+
+  test("legacy single-entry folds (no evalIndex) satisfy minVerdicts 1 exactly as before", () => {
     const fold = foldRunJournal([
       { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
       { kind: "cell-event", at: "t1", event: { cellKey: CELL_B, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-2" } },
       { kind: "evaluation", at: "t2", cellKey: CELL_B, evalTaskSha256: HEX("f"), verdictSha256: HEX("1") },
     ]);
-    const gap = deliveredWithoutEvaluation(fold);
-    expect(gap.map((cell) => cell.cellKey)).toEqual([CELL_A]);
+    const gaps = evaluationGaps(fold, 1);
+    expect(gaps.map((gap) => gap.cell.cellKey)).toEqual([CELL_A]);
+    expect(gaps[0]?.missingEvalIndexes).toEqual([1]);
   });
 
-  test("empty when every delivered cell has an evaluation entry", () => {
+  test("a legacy could-not-grade entry (no evalIndex) covers index 1 — not a gap at minVerdicts 1", () => {
     const fold = foldRunJournal([
       { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "delivered", attempt: "att-1" } },
       { kind: "evaluation", at: "t1", cellKey: CELL_A, evalTaskSha256: HEX("f"), evaluationTerminal: "could-not-grade" },
     ]);
-    expect(deliveredWithoutEvaluation(fold)).toEqual([]);
+    expect(evaluationGaps(fold, 1)).toEqual([]);
+  });
+
+  test("non-delivered cells (dispatched, failed, cancelled) are never gaps", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" } },
+      { kind: "cell-event", at: "t1", event: { cellKey: CELL_B, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false } },
+    ]);
+    expect(evaluationGaps(fold, 2)).toEqual([]);
   });
 });
