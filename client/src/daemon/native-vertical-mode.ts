@@ -47,7 +47,12 @@ function sameDeployment(actual: MarketplaceChainConfig, expected: MarketplaceCha
     && sameAddress(actual.activityChecker, expected.activityChecker);
 }
 
-function assertNativeDeployment(input: {
+/**
+ * The native boot gate. Exported (one-swap M2) so the ONE fleet daemon runs the identical
+ * refusal before it assembles any native runtime — DR-2026-08-05 decision 8: native + mainnet
+ * is an explicit, loud boot refusal, never a silent fall back to the legacy composition.
+ */
+export function assertNativeDeployment(input: {
   readonly network: 'mainnet' | 'testnet';
   readonly chain: MarketplaceChainConfig;
 }): void {
