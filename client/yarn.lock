@@ -1082,6 +1082,7 @@ __metadata:
     "@jinn-network/record-discovery-facts-task-execution": "npm:0.1.0"
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     "@jinn-network/record-discovery-serve": "npm:0.1.0"
+    "@jinn-network/record-discovery-testing": "portal:../packages/discovery/testing"
     "@jinn-network/record-discovery-transport-http": "npm:0.1.0"
     "@jinn-network/sdk": "npm:0.2.0"
     "@jinn-network/task-admission": "npm:0.1.0"
@@ -1448,6 +1449,20 @@ __metadata:
   dependencies:
     "@jinn-network/record-discovery-protocol": "npm:0.1.0"
     zod: "npm:4.4.3"
+  languageName: node
+  linkType: soft
+
+"@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@jinn-network/record-discovery-testing@portal:../packages/discovery/testing::locator=%40jinn-network%2Fclient%40workspace%3A."
+  dependencies:
+    "@jinn-network/record-discovery-protocol": "npm:0.1.0"
+    zod: "npm:4.4.3"
+  peerDependencies:
+    vitest: ^4.1.8
+  peerDependenciesMeta:
+    vitest:
+      optional: true
   languageName: node
   linkType: soft
 

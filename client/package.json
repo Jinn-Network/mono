@@ -163,6 +163,7 @@
     "e2e:swe-rebench-v2": "tsx test/e2e/swe-rebench-v2.test.ts",
     "e2e:hermes": "tsx test/e2e/hermes-agent-full-cycle.ts",
     "e2e:daemon-harness": "tsx test/e2e/daemon-harness-cycle.ts",
+    "e2e:archive-second-daemon": "tsx test/e2e/archive-second-daemon.ts",
     "e2e:task-creator": "tsx test/e2e/task-creator-marketplace.ts",
     "e2e:capture": "tsx scripts/e2e-capture-validate.ts",
     "staking": "tsx test/e2e/staking.ts",
@@ -317,6 +318,7 @@
   },
   "devDependencies": {
     "@jinn-network/jinn-layer": "portal:../packages/layer",
+    "@jinn-network/record-discovery-testing": "portal:../packages/discovery/testing",
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.9.1",
     "@types/semver": "^7.7.1",
