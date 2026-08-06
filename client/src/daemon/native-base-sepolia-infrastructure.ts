@@ -397,7 +397,22 @@ function sha256Digest(value: Hex): `sha256:${string}` {
   return `sha256:${value.slice(2).toLowerCase()}`;
 }
 
-function marketplaceChain(input: NativeInfrastructureFactoryInput): MarketplaceChainConfig {
+/**
+ * The only two fields the canonical READ primitives take off the infrastructure factory input:
+ * this operator's Safe (whose claims they filter to) and the chain identity they refuse outside
+ * of. Named separately (one-swap M2, umbrella #2461) so the ONE fleet daemon can build the same
+ * readers from its shape-v2 `config.json` and the pinned `BASE_SEPOLIA_TODAY` deployment, without
+ * assembling the full `NativeInfrastructureFactoryInput` — most of which describes write custody,
+ * a public listener and an IPFS API that the read path never touches.
+ * `NativeInfrastructureFactoryInput` satisfies this structurally, so `createNativeInfrastructure`
+ * keeps passing exactly what it always passed.
+ */
+export interface NativeCanonicalReadIdentity {
+  readonly safeAddress: `0x${string}`;
+  readonly chain: NativeInfrastructureFactoryInput['chain'];
+}
+
+function marketplaceChain(input: NativeCanonicalReadIdentity): MarketplaceChainConfig {
   return {
     chainId: input.chain.chainId,
     generation: input.chain.generation,
@@ -576,7 +591,7 @@ function createRequesterReads(input: {
 }
 
 export function createBaseSepoliaEvaluatorReads(input: {
-  readonly config: NativeInfrastructureFactoryInput;
+  readonly config: NativeCanonicalReadIdentity;
   readonly publicClient: PublicClient;
   readonly records: NativePublicRecordTransport;
 }): NativeEvaluatorReadPrimitives {
@@ -758,8 +773,14 @@ async function canonicalTransactionBlock(input: {
   };
 }
 
-function createSolverReads(input: {
-  readonly config: NativeInfrastructureFactoryInput;
+/**
+ * Canonical, finalized-only solver reads over a plain viem `PublicClient`. Exported (one-swap M2)
+ * so the ONE fleet daemon builds the SAME readers the native solver host does rather than a second
+ * implementation of "is this claim canonical" — the fleet path already owns a `PublicClient` and
+ * has no `NativeInfrastructurePrimitives`.
+ */
+export function createSolverReads(input: {
+  readonly config: NativeCanonicalReadIdentity;
   readonly publicClient: PublicClient;
   readonly records: NativePublicRecordTransport;
 }): NativeSolverReadPrimitives {

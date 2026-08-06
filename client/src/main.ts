@@ -22,7 +22,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync as writeFileSyncMain } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
-import { randomBytes as cryptoRandomBytes } from 'node:crypto';
+import { randomBytes as cryptoRandomBytes, randomUUID as cryptoRandomUUID } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadConfig, getConfigPathFromArgs, DEFAULT_CONFIG_PATH, DEFAULT_TESTNET_RPC_URLS } from './config.js';
@@ -81,6 +81,7 @@ import {
   type DaemonStartupInfo,
 } from './daemon/daemon-startup-info.js';
 import { resolveConfiguredOperatorVerticalMode } from './daemon/native-vertical-config.js';
+import { resolveFleetCompositionMode } from './daemon/native-composition-mode.js';
 import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
@@ -222,6 +223,14 @@ if (passwordResolution.source === 'generated') {
 
 const CONFIG_PATH = getConfigPathFromArgs();
 const config = loadConfig(CONFIG_PATH);
+/**
+ * One-swap M2 (#2461): the network AS WRITTEN, captured before the pre-launch clamp below rewrites
+ * mainnet to testnet. `resolveFleetCompositionMode` gates on THIS value, not the clamped one — an
+ * operator who wrote `network: "mainnet"` with `compositionMode: "native"` must see the refusal
+ * (DR-2026-08-05 decision 8). Letting the clamp turn that into a quiet native-on-testnet boot would
+ * be exactly the silent fallback the decision forbids.
+ */
+const CONFIGURED_NETWORK: 'mainnet' | 'testnet' = config.network;
 if (config.network === 'mainnet' && process.env['JINN_ENABLE_MAINNET'] !== '1') {
   console.warn('[main] Mainnet is disabled before launch; using testnet defaults.');
   config.network = 'testnet';
@@ -238,6 +247,24 @@ const { effectiveMode: reportedEffectiveMode, warning: verticalModeWarning } =
   resolveMainEntryEffectiveMode(verticalDecision);
 if (verticalModeWarning !== undefined) {
   console.warn(`[main] WARNING: ${verticalModeWarning}`);
+}
+/**
+ * One-swap M2 (#2461, DR-2026-08-05): which composition this ONE fleet daemon assembles.
+ *
+ * Absent `compositionMode` is legacy, so today's boot is byte-identical — nothing native is
+ * constructed and `native-fleet-runtime.js` is not even imported. Wave 3's deploy PR sets the key.
+ *
+ * Resolved HERE, at the top of boot, deliberately: `assertNativeDeployment` throws on native +
+ * mainnet, and that refusal must happen before a wallet is unlocked or a loop is built, not
+ * halfway through composition. Distinct from `verticalDecision` above, which selects an ENTRY
+ * POINT (this file vs. the retiring `native-main.ts`); this selects a COMPOSITION inside this one.
+ */
+const COMPOSITION_MODE = resolveFleetCompositionMode({
+  compositionMode: config.compositionMode,
+  configuredNetwork: CONFIGURED_NETWORK,
+});
+if (COMPOSITION_MODE === 'native') {
+  console.log('[main] composition mode: native (one-swap; compositionMode="native")');
 }
 // Issue #326: the embedded Claude agent chat surface (right rail + onboarding
 // "Ask Claude" panel + /api/agent/ws bridge) is hidden by default while its
@@ -2476,8 +2503,36 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     const profilesByDigest = new Map(
       profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
     );
+    // One-swap M2 (#2461): built ONLY when `compositionMode: "native"` selected it. The dynamic
+    // import keeps the native runtime graph (trust catalog, record transport, Base Sepolia read
+    // clients) off a legacy boot's module graph entirely — a default config loads none of it.
+    const nativeRuntime = COMPOSITION_MODE === 'native'
+      ? await (await import('./daemon/native-fleet-runtime.js')).buildFleetNativeRuntime({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress,
+          stateRoot: join(config.earningDir, '..', 'native'),
+          password: PASSWORD,
+          workerOwnerId: cryptoRandomUUID(),
+        })
+      : undefined;
     composition = await buildOperatorComposition({
-      mode: 'legacy',
+      ...(nativeRuntime === undefined
+        ? {
+            mode: 'legacy' as const,
+            // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
+            // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without
+            // it, and `buildOperatorComposition` refuses a native composition that receives one.
+            legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
+          }
+        : {
+            mode: 'native' as const,
+            nativeRoleIdentities: nativeRuntime.identities,
+            nativeClaimRuntime: nativeRuntime.claimRuntime,
+            nativeProjectorPorts: nativeRuntime.projectorPorts,
+            nativeRequesterStateDir: nativeRuntime.nativeRequesterStateDir,
+          }),
       config,
       publicClient,
       // Service Safe is owned by the agent EOA (index N), not the master (index 0).
@@ -2491,9 +2546,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
       profileStore: { get: (digest) => profilesByDigest.get(digest) },
       store: sharedStore,
-      // The bridge signer is explicitly legacy-only. Native delivery/discovery keys must come
-      // from a persistent, effective-time-trusted RoleIdentitySet; native boot refuses without it.
-      legacyBridgeSigner: deriveLegacyBridgeSigner(agentPrivateKey),
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
 

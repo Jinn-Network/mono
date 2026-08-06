@@ -32,9 +32,13 @@ import {
   PostingConfigEntrySchema,
 } from './config/shape-v2.js';
 import {
+  NativeAgentIriSchema,
+  NativeCompositionModeSchema,
   NativeEvaluatorConfigSchema,
   NativeFinalityConfigSchema,
   NativeIdentityStoresConfigSchema,
+  NativeIpfsConfigSchema,
+  NativePublicBaseUrlSchema,
   NativeTrustPolicyGenesisDigestSchema,
   NativeTrustRootsPathSchema,
 } from './config/native-sections.js';
@@ -534,6 +538,30 @@ export const JinnConfigSchema = z.object({
   trustRootsPath: NativeTrustRootsPathSchema.optional(),
   trustPolicyGenesisDigest: NativeTrustPolicyGenesisDigestSchema.optional(),
   finality: NativeFinalityConfigSchema.optional(),
+
+  /**
+   * One-swap M2 (umbrella #2461, DR-2026-08-05) — the four keys the native machinery needs that
+   * M1's dark surface did not carry, plus the flip switch itself.
+   *
+   * `compositionMode` selects which composition the ONE fleet daemon assembles. **Absent means
+   * legacy**, and so does an explicit `'legacy'`; M2 lands the native assembly dark and Wave 3's
+   * deploy PR is the change that sets this key. Native mode is additionally gated at boot by
+   * `assertNativeDeployment` (testnet + the pinned `BASE_SEPOLIA_TODAY` deployment only) — native
+   * on mainnet is a loud refusal, never a silent legacy fallback (DR decision 8).
+   *
+   * The other three are the values `RoleIdentitySet.open`, the native record transport, and the
+   * native solution publisher need and cannot infer: `agentIri` (M1 finding 4 — an identity-store
+   * path alone cannot open a role set), `ipfs.apiUrl`, and `publicBaseUrl`. All optional; native
+   * mode refuses at boot when one is missing, rather than the loader refusing a legacy operator
+   * who will never run native.
+   *
+   * No env overrides: the flip is a config-file decision, deliberately not something an env var
+   * on a restarted container can do silently.
+   */
+  compositionMode: NativeCompositionModeSchema.optional(),
+  agentIri: NativeAgentIriSchema.optional(),
+  ipfs: NativeIpfsConfigSchema.optional(),
+  publicBaseUrl: NativePublicBaseUrlSchema.optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the
