@@ -2656,6 +2656,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           password: PASSWORD,
           stateRoot: join(config.earningDir, '..', 'native'),
         });
+        // One-swap M4b (#2461): CLOSE FLIP-GATE 1. The projector was handed a late-bound
+        // verdict-observation port that refuses fail-closed by default; now that the durable
+        // evaluator `state` and the coordinator's own verification gate exist, install the REAL
+        // adapter so the projector re-verifies this operator's own announced verdicts against
+        // durable state instead of refusing them.
+        const { buildNativeVerdictObservationAdapter } =
+          await import('./daemon/native-verdict-observation.js');
+        nativeRuntime.installVerdictObservation(buildNativeVerdictObservationAdapter({
+          state: fleetEvaluator.state,
+          verification: fleetEvaluator.composition.verification,
+        }));
         evaluatorConfig = {
           composition: fleetEvaluator.composition,
           pollIntervalMs: config.pollIntervalMs,

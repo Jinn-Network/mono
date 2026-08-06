@@ -10,7 +10,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveFleetCompositionMode } from '../../src/daemon/native-composition-mode.js';
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '../../src');
@@ -123,7 +123,46 @@ describe('refuseNativeVerdictObservation', () => {
     expect(() => refuseNativeVerdictObservation()).toThrow(
       /no production implementation on the native fleet path/u,
     );
-    // M4 is named in the message so the next reader knows where the real gate lands.
-    expect(() => refuseNativeVerdictObservation()).toThrow(/M4/u);
+    // M4b is named in the message so the next reader knows where the real gate lands.
+    expect(() => refuseNativeVerdictObservation()).toThrow(/M4b/u);
+  });
+});
+
+describe('createLateBoundVerdictObservation (one-swap M4b)', () => {
+  const event = {} as never;
+  const material = {} as never;
+
+  it('refuses fail-closed by DEFAULT — a verdict before evaluator-install never fabricates', async () => {
+    const { createLateBoundVerdictObservation } = await import(
+      '../../src/daemon/native-fleet-runtime.js'
+    );
+    const lateBound = createLateBoundVerdictObservation();
+    // Boot-inertness / race-safety: the stable port the projector captured refuses (not crashes)
+    // for every tick that fires before `install`.
+    await expect(lateBound.port(event, material)).rejects.toThrow(
+      /no production implementation on the native fleet path/u,
+    );
+  });
+
+  it('delegates to the installed adapter after install, forwarding the exact args', async () => {
+    const { createLateBoundVerdictObservation } = await import(
+      '../../src/daemon/native-fleet-runtime.js'
+    );
+    const lateBound = createLateBoundVerdictObservation();
+    const result = { gate: { decisionGrade: true, failures: [] }, statementVerdict: 'pass' as const };
+    const adapter = vi.fn(async () => result);
+    lateBound.install(adapter);
+    await expect(lateBound.port(event, material)).resolves.toBe(result);
+    expect(adapter).toHaveBeenCalledWith(event, material);
+  });
+
+  it('is one-shot — a second install throws loudly rather than silently swapping the gate', async () => {
+    const { createLateBoundVerdictObservation } = await import(
+      '../../src/daemon/native-fleet-runtime.js'
+    );
+    const lateBound = createLateBoundVerdictObservation();
+    lateBound.install(vi.fn(async () => ({ gate: { decisionGrade: true, failures: [] } })));
+    expect(() => lateBound.install(vi.fn(async () => ({ gate: { decisionGrade: true, failures: [] } }))))
+      .toThrow(/already installed/u);
   });
 });
