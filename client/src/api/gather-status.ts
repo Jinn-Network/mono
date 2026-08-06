@@ -49,7 +49,8 @@ import {
   type PredictionV1Status,
 } from './prediction-v1-build.js';
 import { gatherTaskRunsStatus, applyOutcomes } from './task-runs-build.js';
-import type { DiscoveryAPI, VerdictTallyResult } from '../discovery/types.js';
+import type { DiscoveryAPI } from '../discovery/types.js';
+import type { VerdictTally } from '../types/verdict-tally-read-model.js';
 import { gatherLoopCompletion, gatherImplStateCadence } from './loop-completion-build.js';
 import type { EvidenceIndexingSource } from '../types/evidence-indexing.js';
 import { buildInfo } from '../build-info.js';
@@ -654,25 +655,43 @@ export async function gatherGatheredStatusRaw(
     taskRuns = undefined;
   }
 
-  // Enrich task-relative outcomes from the network's verdict tallies
+  // Enrich task-relative outcomes from the verdict tallies
   // (spec/2026-05-22-run-outcome.md). DISPLAY signal — degrade silently to
-  // null on any discovery failure; never surface a wrong 'fail'.
-  if (taskRuns && status?.discovery) {
-    try {
-      const solveTaskIds = [
-        ...new Set(
-          [...taskRuns.recentTasks, ...taskRuns.inFlight]
-            .filter((r) => r.taskRole !== 'evaluation' && r.state === 'COMPLETE' && r.taskId)
-            .map((r) => r.taskId as string),
-        ),
-      ];
-      const tallies: Map<string, VerdictTallyResult> = solveTaskIds.length
-        ? await status.discovery.getVerdictTallies({ taskIds: solveTaskIds })
-        : new Map();
-      applyOutcomes(taskRuns.recentTasks, tallies);
-      applyOutcomes(taskRuns.inFlight, tallies);
-    } catch {
-      // Outcomes stay null → SPA renders '—'/'awaiting'.
+  // null on any failure; never surface a wrong 'fail'.
+  //
+  // Dual-read (one-swap R2, umbrella #2461, DR-2026-08-05): legacy mode reads
+  // the network indexer through `DiscoveryAPI.getVerdictTallies` (byte-unchanged
+  // — gated on a threaded `status.discovery` exactly as before); native mode
+  // reads the native projector's canonical observation store through the neutral
+  // `Store.verdictTallyReadModel()` port, because the legacy `discovery/` tree
+  // never runs under `compositionMode: "native"`. Dark on every legacy boot.
+  if (taskRuns) {
+    const verdictMode = readPlaneMode(status);
+    const discovery = status?.discovery;
+    if (verdictMode === 'native' || discovery) {
+      try {
+        const solveTaskIds = [
+          ...new Set(
+            [...taskRuns.recentTasks, ...taskRuns.inFlight]
+              .filter((r) => r.taskRole !== 'evaluation' && r.state === 'COMPLETE' && r.taskId)
+              .map((r) => r.taskId as string),
+          ),
+        ];
+        let tallies: Map<string, VerdictTally>;
+        if (solveTaskIds.length === 0) {
+          tallies = new Map();
+        } else if (verdictMode === 'native') {
+          tallies = store.verdictTallyReadModel().getVerdictTallies({ taskIds: solveTaskIds });
+        } else {
+          // Legacy: `discovery` is defined here (the branch requires it when not
+          // native), so the byte-unchanged network read fires as before.
+          tallies = await discovery!.getVerdictTallies({ taskIds: solveTaskIds });
+        }
+        applyOutcomes(taskRuns.recentTasks, tallies);
+        applyOutcomes(taskRuns.inFlight, tallies);
+      } catch {
+        // Outcomes stay null → SPA renders '—'/'awaiting'.
+      }
     }
   }
 
