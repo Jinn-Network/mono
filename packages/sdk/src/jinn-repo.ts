@@ -27,8 +27,10 @@ import {
   AutopilotSessionCapsuleSchema,
   GitHubRepositorySlugSchema,
 } from './autopilot-session.js';
+import { IssueRelayRoundV1Schema } from './issue-relay.js';
 
 export const JINN_REPO_SCHEMA_VERSION = 'jinn-repo.v1' as const;
+export const JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES = 2 * 1024 * 1024;
 
 const sharedFields = {
   schemaVersion: z.literal(JINN_REPO_SCHEMA_VERSION),
@@ -64,9 +66,10 @@ export const JinnRepoMergedPrTaskSchema = z.object({
   issue_number: z.never().optional(),
   effort: z.never().optional(),
   session: z.never().optional(),
+  relay: z.never().optional(),
 });
 
-export const JinnRepoLiveIssueTaskSchema = z.object({
+const JinnRepoLiveIssueTaskObjectSchema = z.object({
   ...legacyCommonFields,
   source: z.literal('live-issue'),
   // The open GitHub issue this task snapshots.
@@ -78,7 +81,33 @@ export const JinnRepoLiveIssueTaskSchema = z.object({
   test_files: z.never().optional(),
   test_cmd: z.never().optional(),
   session: z.never().optional(),
+  relay: IssueRelayRoundV1Schema.optional(),
 });
+
+type LiveIssueTaskShape = z.infer<typeof JinnRepoLiveIssueTaskObjectSchema>;
+
+function requireLiveIssueRelaySpecSize(
+  task: LiveIssueTaskShape,
+  ctx: z.RefinementCtx,
+): void {
+  if (task.relay === undefined) return;
+  const canonicalBytes = new TextEncoder().encode(
+    `${JSON.stringify(task, null, 2)}\n`,
+  ).byteLength;
+  if (canonicalBytes > JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['problem_statement'],
+      message:
+        'Relay live-issue spec exceeds the 2 MiB canonical UTF-8 byte limit',
+    });
+  }
+}
+
+export const JinnRepoLiveIssueTaskSchema =
+  JinnRepoLiveIssueTaskObjectSchema.superRefine(
+    requireLiveIssueRelaySpecSize,
+  );
 
 const autopilotSessionTaskFields = {
   ...sharedFields,
@@ -93,6 +122,7 @@ const autopilotSessionTaskFields = {
   test_cmd: z.never().optional(),
   issue_number: z.never().optional(),
   effort: z.never().optional(),
+  relay: z.never().optional(),
 };
 
 const JinnRepoAutopilotSessionTaskObjectSchema = z.object(
@@ -140,9 +170,26 @@ export const JinnRepoTaskSchema = z.preprocess((val) => {
   return val;
 }, z.discriminatedUnion('source', [
   JinnRepoMergedPrTaskSchema,
-  JinnRepoLiveIssueTaskSchema,
+  JinnRepoLiveIssueTaskObjectSchema,
   JinnRepoAutopilotSessionTaskObjectSchema,
 ])).superRefine((task, ctx) => {
+  if (task.source === 'live-issue' && task.relay !== undefined) {
+    requireLiveIssueRelaySpecSize(task, ctx);
+    if (task.base_commit !== task.relay.inputHead) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['base_commit'],
+        message: 'base_commit must match relay.inputHead',
+      });
+    }
+    if (task.repo !== task.relay.targetRepository) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['repo'],
+        message: 'repo must match relay.targetRepository',
+      });
+    }
+  }
   if (task.source !== 'autopilot-session') return;
   requireAutopilotSessionBindings(task, ctx);
 });

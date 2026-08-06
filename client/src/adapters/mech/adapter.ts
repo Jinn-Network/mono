@@ -73,19 +73,28 @@ import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';
 import { formatRpcError } from '../../rpc-error-context.js';
+import { marketplaceTaskBudgetWei } from '../../tasks/submit-preflight.js';
 import {
   SOLUTION_ENVELOPE_CID_CONTEXT_KEY,
   SOLUTION_TASK_CID_CONTEXT_KEY,
   RESTORATION_TASK_CID_CONTEXT_KEY,
   AUTOPILOT_EVALUATION_CONTEXT_KEY,
+  ISSUE_RELAY_EVALUATION_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
 import {
   JinnRepoAutopilotSessionTaskSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
+  JinnRepoLegacySolutionPayloadSchema,
+  JinnRepoLiveIssueTaskSchema,
+  type IssueRelayRoundV1,
+  type JinnRepoLiveIssueTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
   admitAutopilotEvaluationOpportunity,
 } from '../../harnesses/impls/jinn-repo-evaluator/autopilot-evaluation-context.js';
+import {
+  admitIssueRelayEvaluationOpportunity,
+} from '../../harnesses/impls/jinn-repo-evaluator/issue-relay-context.js';
 import { signTaskV1 } from '../../tasks/signing.js';
 import type { SignedTaskV1, TaskClaimPolicy, TaskV1 } from '../../types/task-document.js';
 
@@ -698,6 +707,15 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const manifestDigest = keccak256(toBytes(signedTask.solverNetManifestCid));
     const policy = this.contractPolicyForTask(restorationState);
+    await options?.assertFunding?.({
+      creatorSafe: this.config.safeAddress,
+      solverNetManifestCid: signedTask.solverNetManifestCid,
+      proposedSpendWei: marketplaceTaskBudgetWei({
+        solutionMaxDeliveryRateWei: deliveryRate,
+        verdictMaxDeliveryRateWei: deliveryRate,
+        maxClaims: policy.maxClaims,
+      }),
+    });
 
     const taskSubmission = await submitTask(
       this.publicClient,
@@ -862,6 +880,9 @@ export class MechAdapter implements ExecutionAdapter {
     solutionEnvelopeCid: string;
     taskCid?: string;
     autopilotEvaluationContext?: Record<string, unknown>;
+    issueRelayEvaluationContext?: Record<string, unknown>;
+    /** Relay binds the runtime evaluation id to the canonical marketplace task id. */
+    evaluationSourceTaskId?: string;
   }): Task {
     // Strip the restoration execution-profile pin. It asserts against the
     // solver harness/model/version; evaluation resolves a different Harness
@@ -881,7 +902,8 @@ export class MechAdapter implements ExecutionAdapter {
     return {
       ...restorationTask,
       ...(signedTask !== undefined ? { signedTask } : {}),
-      id: `${params.task.id}:evaluation:${params.attemptIndex}`,
+      id:
+        `${params.evaluationSourceTaskId ?? params.task.id}:evaluation:${params.attemptIndex}`,
       role: 'evaluation',
       restorationRequestId: params.solutionRequestId,
       attemptId: params.solutionRequestId,
@@ -896,6 +918,12 @@ export class MechAdapter implements ExecutionAdapter {
           ? {
               [AUTOPILOT_EVALUATION_CONTEXT_KEY]:
                 params.autopilotEvaluationContext,
+            }
+          : {}),
+        ...(params.issueRelayEvaluationContext
+          ? {
+              [ISSUE_RELAY_EVALUATION_CONTEXT_KEY]:
+                params.issueRelayEvaluationContext,
             }
           : {}),
       },
@@ -1265,6 +1293,7 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const resultData = (resultPayload.data as string) ?? JSON.stringify(resultPayload);
     let autopilotEvaluationContext: Record<string, unknown> | undefined;
+    let issueRelayEvaluationContext: Record<string, unknown> | undefined;
     if (
       restoration.task.spec?.['source'] === 'autopilot-session'
     ) {
@@ -1308,7 +1337,7 @@ export class MechAdapter implements ExecutionAdapter {
       }
 
       const observation =
-        await this.config.autopilotEvaluationContextResolver?.resolve({
+        await this.config.evaluationContextResolvers?.autopilot?.resolve({
           task: parsedTask.data,
           solution: parsedSolution.data,
           taskId: solution.taskId,
@@ -1338,6 +1367,84 @@ export class MechAdapter implements ExecutionAdapter {
       autopilotEvaluationContext =
         admission.context as unknown as Record<string, unknown>;
     }
+    if (
+      restoration.task.spec?.['source'] === 'live-issue'
+      && restoration.task.spec?.['relay'] !== undefined
+    ) {
+      const parsedTask = JinnRepoLiveIssueTaskSchema.safeParse(
+        restoration.task.spec,
+      );
+      if (!parsedTask.success || parsedTask.data.relay === undefined) {
+        console.log(
+          `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: malformed source Task`,
+        );
+        return undefined;
+      }
+
+      let parsedEnvelope: ReturnType<typeof SignedEnvelopeSchema.safeParse>;
+      try {
+        parsedEnvelope = SignedEnvelopeSchema.safeParse(JSON.parse(resultData));
+      } catch {
+        console.log(
+          `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: malformed Solution envelope`,
+        );
+        return undefined;
+      }
+      if (
+        !parsedEnvelope.success
+        || parsedEnvelope.data.solverType !== 'jinn-repo.v1'
+        || normalizeEnvelopeRole(parsedEnvelope.data.role) !== 'solution'
+      ) {
+        console.log(
+          `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: invalid Solution envelope`,
+        );
+        return undefined;
+      }
+      const parsedSolution = JinnRepoLegacySolutionPayloadSchema.safeParse(
+        parsedEnvelope.data.payload,
+      );
+      if (!parsedSolution.success) {
+        console.log(
+          `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: invalid repository Solution`,
+        );
+        return undefined;
+      }
+
+      const observation =
+        await this.config.evaluationContextResolvers?.issueRelay?.resolve({
+          task: parsedTask.data as JinnRepoLiveIssueTask & {
+            readonly relay: IssueRelayRoundV1;
+          },
+          solution: parsedSolution.data,
+          taskId: solution.taskId,
+          attemptIndex: solution.attemptIndex,
+          requestId: solution.requestId,
+          solutionEnvelopeCid,
+          solutionOperatorSafe: solution.operator,
+          evaluatorOperatorSafe: this.config.safeAddress,
+        });
+      const admission = admitIssueRelayEvaluationOpportunity({
+        task: parsedTask.data as JinnRepoLiveIssueTask & {
+          readonly relay: IssueRelayRoundV1;
+        },
+        solution: parsedSolution.data,
+        taskId: solution.taskId,
+        attemptIndex: solution.attemptIndex,
+        requestId: solution.requestId,
+        solutionEnvelopeCid,
+        solutionOperatorSafe: solution.operator,
+        evaluatorOperatorSafe: this.config.safeAddress,
+        observation,
+      });
+      if (admission.kind !== 'accepted') {
+        console.log(
+          `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: ${admission.reason}`,
+        );
+        return undefined;
+      }
+      issueRelayEvaluationContext =
+        admission.context as unknown as Record<string, unknown>;
+    }
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
       solutionRequestId: solution.requestId,
@@ -1346,6 +1453,10 @@ export class MechAdapter implements ExecutionAdapter {
       solutionEnvelopeCid,
       taskCid: restoration.taskCid,
       autopilotEvaluationContext,
+      issueRelayEvaluationContext,
+      ...(issueRelayEvaluationContext === undefined
+        ? {}
+        : { evaluationSourceTaskId: solution.taskId }),
     });
     const opportunityId = `evaluation:${solution.taskId}:${solution.attemptIndex}:${solution.requestId}`;
     const announcement: TaskAnnouncement = {

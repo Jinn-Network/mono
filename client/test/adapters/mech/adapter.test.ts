@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import type { Hex } from 'viem';
 import type { MechAdapterConfig } from '../../../src/adapters/mech/types.js';
 import { VerdictCode } from '../../../src/adapters/mech/verdict-code.js';
@@ -313,6 +314,125 @@ function autopilotEvaluationFixtures() {
   return { taskSpec, mutation, context };
 }
 
+function relayEvaluationFixtures() {
+  const snapshotDigest = `sha256:${'a'.repeat(64)}` as const;
+  const baseOid = '1'.repeat(40);
+  const head = '2'.repeat(40);
+  const solutionSafe = `0x${'66'.repeat(20)}`;
+  const solution = {
+    schemaVersion: 'jinn-repo-solution.v1' as const,
+    patch: 'diff --git a/client/src/a.ts b/client/src/a.ts\n',
+  };
+  const round = {
+    schemaVersion: 'jinn-issue-relay-round.v1' as const,
+    generation: `R_kgDOExample:42:${snapshotDigest}`,
+    round: 0,
+    snapshotDigest,
+    targetRepository: 'Jinn-Network/mono',
+    workspaceRepository: 'Jinn-Network/mono',
+    inputHead: baseOid,
+    purpose: 'initial' as const,
+    findings: [],
+  };
+  const correlation = {
+    generation: round.generation,
+    round: round.round,
+    snapshotDigest,
+    taskId: '1',
+    attemptIndex: 0,
+    requestId: REQUEST_ID,
+    deliveryEnvelopeCid: TASK_CID,
+  };
+  const receipt = {
+    schemaVersion: 'jinn-issue-relay-adoption.v1' as const,
+    disposition: 'accepted' as const,
+    correlation,
+    targetRepository: round.targetRepository,
+    workspaceRepository: 'Jinn-Network/mono-relay',
+    issueNumber: 42,
+    prNumber: 314,
+    headRef: 'jinn/issue-relay/example',
+    inputHead: baseOid,
+    resultingHead: head,
+    patchDigest:
+      `sha256:${createHash('sha256').update(solution.patch).digest('hex')}` as const,
+    solutionSafe,
+    adoptedAt: '2026-07-28T12:10:00.000Z',
+  };
+  const canonicalJson = (value: unknown): string => {
+    if (typeof value === 'string') return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value !== null && typeof value === 'object') {
+      return `{${Object.keys(value as Record<string, unknown>).sort()
+        .map((key) => `${JSON.stringify(key)}:${canonicalJson(
+          (value as Record<string, unknown>)[key],
+        )}`)
+        .join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
+  const checksDigest = `sha256:${'b'.repeat(64)}` as const;
+  const anchor = {
+    schemaVersion: 'jinn-issue-relay-evaluation-anchor.v1' as const,
+    correlation,
+    targetRepository: receipt.targetRepository,
+    workspaceRepository: receipt.workspaceRepository,
+    prNumber: receipt.prNumber,
+    targetBase: 'main',
+    baseOid,
+    headRef: receipt.headRef,
+    evaluatedHead: head,
+    adoptionReceiptDigest:
+      `sha256:${createHash('sha256').update(canonicalJson(receipt)).digest('hex')}` as const,
+    checksDigest,
+    anchoredAt: '2026-07-28T12:12:00.000Z',
+  };
+  const taskSpec = {
+    schemaVersion: 'jinn-repo.v1' as const,
+    source: 'live-issue' as const,
+    instance_id: `issue-relay:${round.generation}:round:0`,
+    repo: 'Jinn-Network/mono',
+    base_commit: baseOid,
+    language: 'typescript' as const,
+    problem_statement: 'Frozen Relay goal.',
+    issue_number: 42,
+    relay: round,
+  };
+  const context = {
+    schemaVersion: 'jinn-issue-relay-evaluation-context.v1' as const,
+    goal: {
+      snapshotDigest,
+      problemStatement: taskSpec.problem_statement,
+      acceptanceEvidence: ['The exact cumulative head passes.'],
+      verificationProfile: 'jinn-mono.v1' as const,
+    },
+    operators: {
+      solutionSafe,
+      evaluatorSafe: TEST_CONFIG.safeAddress,
+    },
+    round,
+    correlation,
+    reviewTarget: {
+      targetRepository: receipt.targetRepository,
+      workspaceRepository: receipt.workspaceRepository,
+      issueNumber: receipt.issueNumber,
+      prNumber: receipt.prNumber,
+      targetBase: anchor.targetBase,
+      baseOid,
+      headRef: receipt.headRef,
+      evaluatedHead: head,
+    },
+    adoptionReceipt: receipt,
+    evaluationAnchor: anchor,
+    checks: {
+      digest: checksDigest,
+      required: [{ name: 'relay/typecheck', status: 'passed' as const }],
+      optional: [],
+    },
+  };
+  return { taskSpec, solution, context };
+}
+
 describe('MechAdapter TaskCoordinator flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -525,6 +645,39 @@ describe('MechAdapter TaskCoordinator flow', () => {
     expect(evaluationTask.signedTask?.executionRequest).toBeUndefined();
     expect(parseTask(evaluationTask).executionRequest).toBeUndefined();
 
+    await adapter.stop();
+  });
+
+  it('checks exact funding facts after rate resolution and before createTask', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { submitTask } = await import('../../../src/adapters/mech/contracts.js');
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+    const assertFunding = vi.fn(() => {
+      throw new Error('dry-run spend changed');
+    });
+
+    await expect(adapter.postTask({
+      id: 'prediction-task-1',
+      description: 'Will the test market resolve YES?',
+      solverType: 'prediction.v1',
+      contractId: 'prediction',
+      contractVersion: 'v1',
+      solverNetManifestCid: 'bafyfixturecid',
+      claimPolicy: {
+        mode: 'parallel',
+        maxClaims: 25,
+        maxClaimsPerOperator: 1,
+        claimLeaseTtlSeconds: 600,
+      },
+    }, { assertFunding })).rejects.toThrow('dry-run spend changed');
+
+    expect(assertFunding).toHaveBeenCalledWith({
+      creatorSafe: TEST_CONFIG.safeAddress,
+      solverNetManifestCid: 'bafyfixturecid',
+      proposedSpendWei: 50_000_000n,
+    });
+    expect(submitTask).not.toHaveBeenCalled();
     await adapter.stop();
   });
 
@@ -1558,7 +1711,7 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
-      autopilotEvaluationContextResolver: resolver,
+      evaluationContextResolvers: { autopilot: resolver },
     });
     await adapter.initialize();
     seedCanonicalTaskCreation(adapter);
@@ -1614,11 +1767,13 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     const adapter = new MechAdapter({
       ...TEST_CONFIG,
-      autopilotEvaluationContextResolver: {
-        resolve: vi.fn().mockResolvedValue({
-          state: 'pending',
-          detail: 'accepted Solution adoption receipt not published',
-        }),
+      evaluationContextResolvers: {
+        autopilot: {
+          resolve: vi.fn().mockResolvedValue({
+            state: 'pending',
+            detail: 'accepted Solution adoption receipt not published',
+          }),
+        },
       },
     });
     await adapter.initialize();
@@ -1637,6 +1792,170 @@ describe('MechAdapter TaskCoordinator flow', () => {
 
     expect(announcement).toBeUndefined();
     expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+    await adapter.stop();
+  });
+
+  it('keeps a Relay live-issue Solution pending and never emits the legacy immediate evaluator', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+    const fixtures = relayEvaluationFixtures();
+    const resolver = {
+      resolve: vi.fn().mockResolvedValue({
+        state: 'pending',
+        detail: 'accepted Relay host context not published',
+      }),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({
+      id: fixtures.taskSpec.instance_id,
+      solverType: 'jinn-repo.v1',
+      contractId: 'jinn-repo',
+      contractVersion: 'v1',
+      spec: fixtures.taskSpec,
+    }));
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(
+      solutionEnvelopeFixture(JSON.stringify({ envelope: true })),
+    );
+    vi.mocked(SignedEnvelopeSchema.safeParse).mockReturnValueOnce({
+      success: true,
+      data: {
+        solverType: 'jinn-repo.v1',
+        role: 'solution',
+        payload: fixtures.solution,
+      },
+    } as never);
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      evaluationContextResolvers: { issueRelay: resolver },
+    });
+    await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: `0x${'66'.repeat(20)}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+    (adapter as any).pendingEvaluationSolutions.set(REQUEST_ID, solution);
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement).toBeUndefined();
+    expect(resolver.resolve).toHaveBeenCalledOnce();
+    expect((adapter as any).pendingEvaluationSolutions.has(REQUEST_ID)).toBe(true);
+    await adapter.stop();
+  });
+
+  it('emits a Relay evaluation only after the exact accepted host context is attached', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const { SignedEnvelopeSchema } = await import('../../../src/types/envelope.js');
+    const fixtures = relayEvaluationFixtures();
+    const resolver = {
+      resolve: vi.fn().mockResolvedValue({
+        state: 'accepted',
+        context: fixtures.context,
+      }),
+    };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({
+      id: fixtures.taskSpec.instance_id,
+      solverType: 'jinn-repo.v1',
+      contractId: 'jinn-repo',
+      contractVersion: 'v1',
+      spec: fixtures.taskSpec,
+    }));
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(
+      solutionEnvelopeFixture(JSON.stringify({ envelope: true })),
+    );
+    vi.mocked(SignedEnvelopeSchema.safeParse).mockReturnValueOnce({
+      success: true,
+      data: {
+        solverType: 'jinn-repo.v1',
+        role: 'solution',
+        payload: fixtures.solution,
+      },
+    } as never);
+
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      evaluationContextResolvers: { issueRelay: resolver },
+    });
+    await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: `0x${'66'.repeat(20)}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement?.task.id).toBe('1:evaluation:0');
+    expect(announcement?.task.context?.['issueRelayEvaluation'])
+      .toEqual(fixtures.context);
+    expect(resolver.resolve).toHaveBeenCalledWith(expect.objectContaining({
+      task: fixtures.taskSpec,
+      solution: fixtures.solution,
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      solutionEnvelopeCid: TASK_CID,
+      solutionOperatorSafe: solution.operator,
+      evaluatorOperatorSafe: TEST_CONFIG.safeAddress,
+    }));
+    await adapter.stop();
+  });
+
+  it('preserves ordinary legacy live-issue evaluation without consulting Relay context', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+    const { fetchFromIpfs, fetchSignedTaskFromIpfs } = await import('../../../src/adapters/mech/ipfs.js');
+    const resolver = { resolve: vi.fn() };
+    vi.mocked(fetchSignedTaskFromIpfs).mockResolvedValueOnce(signedTask({
+      id: 'legacy-live-issue',
+      solverType: 'jinn-repo.v1',
+      contractId: 'jinn-repo',
+      contractVersion: 'v1',
+      spec: {
+        schemaVersion: 'jinn-repo.v1',
+        source: 'live-issue',
+        instance_id: 'Jinn-Network__mono-42',
+        repo: 'Jinn-Network/mono',
+        base_commit: '1'.repeat(40),
+        language: 'typescript',
+        problem_statement: 'Legacy live issue.',
+        issue_number: 42,
+      },
+    }));
+    vi.mocked(fetchFromIpfs).mockResolvedValueOnce(
+      solutionEnvelopeFixture('legacy-solution-envelope'),
+    );
+    const adapter = new MechAdapter({
+      ...TEST_CONFIG,
+      evaluationContextResolvers: { issueRelay: resolver },
+    });
+    await adapter.initialize();
+    seedCanonicalTaskCreation(adapter);
+    const solution = {
+      taskId: '1',
+      attemptIndex: 0,
+      requestId: REQUEST_ID,
+      operator: `0x${'66'.repeat(20)}`,
+      transactionHash: TX_HASH,
+      blockNumber: 333,
+    };
+
+    const announcement = await (adapter as any).evaluationAnnouncementForSolution(solution);
+
+    expect(announcement?.task.context?.['restorationResult'])
+      .toBe('legacy-solution-envelope');
+    expect(announcement?.task.context).not.toHaveProperty('issueRelayEvaluation');
+    expect(resolver.resolve).not.toHaveBeenCalled();
     await adapter.stop();
   });
 
