@@ -29,7 +29,7 @@ import {
   canonicalManifestJson,
   type UnsignedSolverNetManifestV1,
 } from '../../src/solvernets/manifest.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   resolveMostRecentWins,
   type SetMetadataEvent,

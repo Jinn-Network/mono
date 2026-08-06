@@ -180,7 +180,7 @@ jobs:
         run: yarn build:sdk
 
       # Since the layer extraction (#1914), client source (e.g.
-      # src/harnesses/engine/canonical-json.ts) imports @jinn-network/core,
+      # src/util/canonical-json.ts) imports @jinn-network/core,
       # which resolves to packages/core/dist and itself imports
       # @jinn-network/plugin (packages/plugin/dist). tsx loads client source on a
       # clean runner in both the preflight and the suite, so build plugin then

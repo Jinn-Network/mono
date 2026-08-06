@@ -37,7 +37,7 @@ import {
 import type { Store } from '../store/store.js';
 import { emitEvent } from '../observability/emit-event.js';
 import { recordLoopTick } from './loop-heartbeat.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import { uploadToIpfs } from '../adapters/mech/ipfs.js';
 
 export type HarvestSource = 'commits' | 'sessions';

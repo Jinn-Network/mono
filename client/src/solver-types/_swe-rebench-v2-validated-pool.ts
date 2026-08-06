@@ -32,7 +32,7 @@ import {
   resolveUpstreamEvalCommit,
   type CommandRunner,
 } from './_swe-rebench-v2-substrate.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import { DifferentialAdmissionPolicyV2 } from './_swe-rebench-v2-differential-admission.js';
 
 // In-process mutex map: serialises concurrent record() calls against the

@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod/v3';
 import { verifyMessage, type Address, type Hex } from 'viem';
-import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 
 export const ENVIRONMENT_BUILD_REQUEST_V1 = 'jinn.environment-build-request.v1' as const;
 export const ENVIRONMENT_BUILD_RECIPE_V1 = 'jinn.environment-build-recipe.v1' as const;

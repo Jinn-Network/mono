@@ -10,7 +10,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { join, resolve as resolvePath } from 'node:path';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import type { DifferentialAdmissionReceiptV2 } from './_swe-rebench-v2-differential-admission.js';
 
 const HARVEST_STATE_FILE = 'harvest-state.json';

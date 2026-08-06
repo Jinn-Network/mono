@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Hex } from 'viem';
 import { rawSha256CidToDigestHex } from '../adapters/mech/ipfs.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   decodeManifestPayload,
   buildManifestMetadataKey,

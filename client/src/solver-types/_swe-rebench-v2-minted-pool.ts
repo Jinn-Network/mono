@@ -12,7 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { dirname, resolve as resolvePath, join } from 'node:path';
 import { z } from 'zod/v3';
 import type { HfRow } from '../harnesses/impls/swe-rebench-v2-evaluator/index.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import type { PoolTask } from './_swe-rebench-v2-pool.js';
 import {
   Eip191EnvironmentAttestationV1Schema,

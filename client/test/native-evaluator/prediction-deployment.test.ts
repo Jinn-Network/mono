@@ -233,6 +233,46 @@ describe("production prediction-market deployment module — real composition pa
     value.store.close();
   });
 
+  // Regression lock for the one-swap P0-5 registration-set relaxation: the committed #2439
+  // artifact must keep loading through the relaxed selector with its bytes untouched, and its
+  // single registration must still be selected without the composition reading durable state.
+  it("keeps loading unedited under the relaxed registration-set selector", async () => {
+    const value = await fixture();
+    const composition = await buildNativeEvaluatorComposition(value.config);
+    const backendConfig = value.backendConfigs[0]!;
+    const module = await import(MODULE_HREF) as {
+      readonly evaluationHarnessDeployment: { readonly registrations: readonly EvaluatorRegistration[] };
+    };
+    expect(module.evaluationHarnessDeployment.registrations).toHaveLength(1);
+    const plan = backendConfig.launchers[0]!.plan(
+      {
+        task: {
+          protocol: "https://spec.jinn.network/profiles/task-execution/v1",
+          profile: {
+            uri: "https://spec.jinn.network/task-profiles/evaluation-task/1.0",
+            digest: { sha256: "c".repeat(64) },
+          },
+          instructions: "evaluate",
+          // Deliberately unresolvable: a one-registration deployment must not need it.
+          payload: { evaluationSpec: `sha256:${"9".repeat(64)}` },
+          outputs: [],
+        },
+        effectiveRequirements: {},
+        profile: { profile: "https://spec.jinn.network/task-profiles/evaluation-task/1.0" },
+      } as never,
+      {
+        root: "/tmp/a", input: "/tmp/a/input", work: "/tmp/a/work", out: "/tmp/a/out",
+        logs: "/tmp/a/logs", tmp: "/tmp/a/tmp", harnessState: "/tmp/a/harness-state",
+        secrets: "/tmp/a/secrets", meta: "/tmp/a/meta",
+      } as never,
+      {} as never,
+    );
+    expect(plan.env!["JINN_ATTEMPT_EVALUATOR_REGISTRATION"]).toBe("prediction-market");
+    expect(plan.env!["JINN_ATTEMPT_EVALUATION_DEPLOYMENT_MODULE"]).toBe(MODULE_HREF);
+    await composition.close();
+    value.store.close();
+  });
+
   it("refuses an evaluationMethodDigest that does not equal the descriptor's digest", async () => {
     const value = await fixture();
     await expect(buildNativeEvaluatorComposition({

@@ -21,7 +21,7 @@ import { sha256, recoverMessageAddress, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { type SolverNetManifestV1 } from '@jinn-network/sdk/solvernets';
 
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

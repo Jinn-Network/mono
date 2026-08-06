@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod/v3';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 
 const MarketplaceTaskSelectionSchema = z.object({
   schemaVersion: z.literal('jinn-task-submit-selection.v1'),

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, it, expect } from 'vitest';
-import { canonicalJson } from '../../../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../../../src/util/canonical-json.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
