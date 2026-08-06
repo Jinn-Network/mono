@@ -10,8 +10,11 @@ import {
   createSolverPluginsCommand,
   PRODUCTION_DEPS,
 } from '../../../src/cli/commands/solver-plugins.js';
-import { DiscoveryUnavailableError } from '../../../src/discovery/types.js';
-import type { DiscoveryAPI, PluginPublication } from '../../../src/discovery/types.js';
+import {
+  PluginPublicationUnavailableError,
+  type PluginPublicationReader,
+  type PluginPublication,
+} from '../../../src/plugin-registry/publication-reader.js';
 import { withTempConfig, makeCtx, parsedLine } from './solver-plugins-test-helpers.js';
 
 function fakePluginRow(cid: string, builderAgentId = '777'): PluginPublication {
@@ -28,18 +31,18 @@ function fakePluginRow(cid: string, builderAgentId = '777'): PluginPublication {
   };
 }
 
-function discoveryWith(rows: PluginPublication[]): DiscoveryAPI {
+function discoveryWith(rows: PluginPublication[]): PluginPublicationReader {
   return {
     listPluginPublications: vi.fn(async () => rows),
-  } as unknown as DiscoveryAPI;
+  } as unknown as PluginPublicationReader;
 }
 
-function discoveryThatThrows(err: Error): DiscoveryAPI {
+function discoveryThatThrows(err: Error): PluginPublicationReader {
   return {
     listPluginPublications: vi.fn(async () => {
       throw err;
     }),
-  } as unknown as DiscoveryAPI;
+  } as unknown as PluginPublicationReader;
 }
 
 describe('jinn solver-plugins (dispatcher)', () => {
@@ -81,7 +84,7 @@ describe('jinn solver-plugins status', () => {
     }));
 
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -109,7 +112,7 @@ describe('jinn solver-plugins status', () => {
   it('returns status="not_published" without erroring when discovery has no row', async () => {
     const configPath = withTempConfig();
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([]),
+      pluginReaderFactory: () => discoveryWith([]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -137,7 +140,7 @@ describe('jinn solver-plugins status', () => {
     const cid = 'bafyRev';
     const row = { ...fakePluginRow(cid, '777'), revoked: true, revokedReason: 'CVE' };
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -162,7 +165,7 @@ describe('jinn solver-plugins status', () => {
       solverPlugins: { blockedCids: [cid] },
     });
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -183,8 +186,8 @@ describe('jinn solver-plugins status', () => {
   it('emits discovery_unavailable when factory throws', async () => {
     const configPath = withTempConfig();
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () =>
-        discoveryThatThrows(new DiscoveryUnavailableError('rpc timeout')),
+      pluginReaderFactory: () =>
+        discoveryThatThrows(new PluginPublicationUnavailableError('rpc timeout')),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -212,8 +215,8 @@ describe('jinn solver-plugins discover', () => {
     ];
     const listPluginPublications = vi.fn(async () => rows);
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () =>
-        ({ listPluginPublications } as unknown as DiscoveryAPI),
+      pluginReaderFactory: () =>
+        ({ listPluginPublications } as unknown as PluginPublicationReader),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -247,8 +250,8 @@ describe('jinn solver-plugins discover', () => {
   it('emits discovery_unavailable when the factory throws', async () => {
     const configPath = withTempConfig();
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () =>
-        discoveryThatThrows(new DiscoveryUnavailableError('unreachable')),
+      pluginReaderFactory: () =>
+        discoveryThatThrows(new PluginPublicationUnavailableError('unreachable')),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -308,7 +311,7 @@ describe('jinn solver-plugins list-feedback', () => {
     });
 
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow(cid, '777')]),
       reputationClientFactory,
     });
 
@@ -335,7 +338,7 @@ describe('jinn solver-plugins list-feedback', () => {
   it('emits agentid_unresolvable when discovery has no row', async () => {
     const configPath = withTempConfig();
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () => discoveryWith([]),
+      pluginReaderFactory: () => discoveryWith([]),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),
@@ -356,11 +359,11 @@ describe('jinn solver-plugins list-feedback', () => {
     expect(exits).toEqual([1]);
   });
 
-  it('emits discovery_unavailable when the factory throws DiscoveryUnavailableError', async () => {
+  it('emits discovery_unavailable when the factory throws PluginPublicationUnavailableError', async () => {
     const configPath = withTempConfig();
     const command = createSolverPluginsCommand({
-      discoveryApiFactory: () =>
-        discoveryThatThrows(new DiscoveryUnavailableError('indexer 503')),
+      pluginReaderFactory: () =>
+        discoveryThatThrows(new PluginPublicationUnavailableError('indexer 503')),
       reputationClientFactory: () =>
         ({
           giveFeedback: vi.fn(),

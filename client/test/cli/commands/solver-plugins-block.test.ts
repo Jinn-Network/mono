@@ -20,7 +20,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createSolverPluginsCommand } from '../../../src/cli/commands/solver-plugins.js';
-import type { DiscoveryAPI, PluginPublication } from '../../../src/discovery/types.js';
+import type {
+  PluginPublicationReader,
+  PluginPublication,
+} from '../../../src/plugin-registry/publication-reader.js';
 import {
   withTempConfig,
   makeCtx,
@@ -55,10 +58,10 @@ function fakePluginRow(cid: string, builderAgentId = '777'): PluginPublication {
   };
 }
 
-function discoveryWith(rows: PluginPublication[]): DiscoveryAPI {
+function discoveryWith(rows: PluginPublication[]): PluginPublicationReader {
   return {
     listPluginPublications: vi.fn(async () => rows),
-  } as unknown as DiscoveryAPI;
+  } as unknown as PluginPublicationReader;
 }
 
 describe('jinn solver-plugins block', () => {
@@ -70,7 +73,7 @@ describe('jinn solver-plugins block', () => {
     const giveFeedback = vi.fn(async () => '0xtxblock' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -120,7 +123,7 @@ describe('jinn solver-plugins block', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -164,7 +167,7 @@ describe('jinn solver-plugins block', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -205,7 +208,7 @@ describe('jinn solver-plugins block', () => {
 
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1 } as any),
-      discoveryApiFactory: () => discoveryWith([row]),
+      pluginReaderFactory: () => discoveryWith([row]),
       reputationClientFactory: () =>
         ({
           giveFeedback,
@@ -242,7 +245,7 @@ describe('jinn solver-plugins block', () => {
     const giveFeedback = vi.fn(async () => '0xtx' as `0x${string}`);
     const command = createSolverPluginsCommand({
       bootstrapperFactory: () => ({ ensureStage1: stage1Ok() } as any),
-      discoveryApiFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
+      pluginReaderFactory: () => discoveryWith([fakePluginRow('bafyCid')]),
       reputationClientFactory: () =>
         ({
           giveFeedback,

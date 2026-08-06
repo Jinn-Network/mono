@@ -26,18 +26,39 @@
 import type { Hono } from 'hono';
 import { DiscoveryUnavailableError } from '../discovery/types.js';
 import type { DiscoveryAPI } from '../discovery/types.js';
+import {
+  PluginPublicationUnavailableError,
+  type PluginPublicationReader,
+} from '../plugin-registry/publication-reader.js';
 
-export type DiscoveryEndpointConfig =
+/**
+ * One-swap R3 (#2461): the three plugin-publication routes read through the
+ * neutral `PluginPublicationReader` (the carved-out host over the
+ * IdentityRegistry log source), injected as `pluginReader`. This decouples them
+ * from `discovery/` so the Build page's plug-in panels survive the D-wave
+ * deletion. When `pluginReader` is absent the routes fall back to the injected
+ * `DiscoveryAPI` (which structurally satisfies the port), so legacy wiring is
+ * unchanged. The `solvernet-operator-count` and `task-post-counts` routes still
+ * read `DiscoveryAPI` directly — their repoint is a separate D-wave concern.
+ */
+export type DiscoveryEndpointConfig = (
   | { discovery: () => DiscoveryAPI }
-  | { getDiscovery: () => DiscoveryAPI | null };
+  | { getDiscovery: () => DiscoveryAPI | null }
+) & {
+  pluginReader?: () => PluginPublicationReader | null;
+};
 
 export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): void {
   const getDiscovery: () => DiscoveryAPI | null =
     'getDiscovery' in config ? config.getDiscovery : () => config.discovery();
+  // Prefer the injected plugin-publication reader; fall back to the DiscoveryAPI
+  // (structural `PluginPublicationReader`) so legacy boots are byte-unchanged.
+  const getPluginReader: () => PluginPublicationReader | null = () =>
+    config.pluginReader?.() ?? getDiscovery();
 
   app.get('/v1/discovery/plugin-publications', async (c) => {
-    const discovery = getDiscovery();
-    if (!discovery) {
+    const reader = getPluginReader();
+    if (!reader) {
       return c.json(
         { error: 'subsystem_not_ready', message: 'DiscoveryAPI still initialising' },
         503,
@@ -48,14 +69,17 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
     const includeRevokedRaw = c.req.query('includeRevoked');
     const includeRevoked = includeRevokedRaw === undefined ? undefined : includeRevokedRaw !== 'false';
     try {
-      const publications = await discovery.listPluginPublications({
+      const publications = await reader.listPluginPublications({
         ...(solverType !== undefined ? { solverType } : {}),
         ...(builderAgentId !== undefined ? { builderAgentId } : {}),
         ...(includeRevoked !== undefined ? { includeRevoked } : {}),
       });
       return c.json({ publications });
     } catch (err) {
-      if (err instanceof DiscoveryUnavailableError) {
+      if (
+        err instanceof PluginPublicationUnavailableError ||
+        err instanceof DiscoveryUnavailableError
+      ) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
       return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
@@ -63,8 +87,8 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
   });
 
   app.get('/v1/discovery/builder-artifacts', async (c) => {
-    const discovery = getDiscovery();
-    if (!discovery) {
+    const reader = getPluginReader();
+    if (!reader) {
       return c.json(
         { error: 'subsystem_not_ready', message: 'DiscoveryAPI still initialising' },
         503,
@@ -77,13 +101,16 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
     const limitRaw = c.req.query('limit');
     const limit = limitRaw === undefined ? undefined : Number(limitRaw);
     try {
-      const artifacts = await discovery.listBuilderArtifacts({
+      const artifacts = await reader.listBuilderArtifacts({
         builderAgentId,
         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
       });
       return c.json({ artifacts });
     } catch (err) {
-      if (err instanceof DiscoveryUnavailableError) {
+      if (
+        err instanceof PluginPublicationUnavailableError ||
+        err instanceof DiscoveryUnavailableError
+      ) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
       return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);
@@ -148,8 +175,8 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
   });
 
   app.get('/v1/discovery/plugin-scores', async (c) => {
-    const discovery = getDiscovery();
-    if (!discovery) {
+    const reader = getPluginReader();
+    if (!reader) {
       return c.json(
         { error: 'subsystem_not_ready', message: 'DiscoveryAPI still initialising' },
         503,
@@ -160,13 +187,16 @@ export function addDiscoveryRoutes(app: Hono, config: DiscoveryEndpointConfig): 
     const limitRaw = c.req.query('limit');
     const limit = limitRaw === undefined ? undefined : Number(limitRaw);
     try {
-      const scores = await discovery.getPluginScores({
+      const scores = await reader.getPluginScores({
         pluginCid: cid,
         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
       });
       return c.json({ scores });
     } catch (err) {
-      if (err instanceof DiscoveryUnavailableError) {
+      if (
+        err instanceof PluginPublicationUnavailableError ||
+        err instanceof DiscoveryUnavailableError
+      ) {
         return c.json({ error: 'discovery_unavailable' }, 503);
       }
       return c.json({ error: 'internal_error', detail: (err as Error).message }, 503);

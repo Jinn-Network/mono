@@ -86,6 +86,11 @@ import { buildSpendCapConfig } from './spend/daemon-config.js';
 import { buildAiUnitsConfig } from './spend/ai-units-config.js';
 import { REFERENCE_CEILING } from './spend/ai-units.js';
 import { createJinnPublicClient, createJinnWalletClient } from './earning/viem-clients.js';
+import type { PluginPublicationReader } from './plugin-registry/publication-reader.js';
+import {
+  createPluginPublicationReader,
+  createRpcPluginLogSource,
+} from './plugin-registry/publication-host.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Address } from 'viem';
 import {
@@ -655,6 +660,14 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     current: import('./discovery/types.js').DiscoveryAPI | undefined;
   } = { current: undefined };
 
+  // One-swap R3 (#2461): the plugin-publication reader backing the /build page's
+  // plug-in routes, carved off `discovery/` onto the IdentityRegistry log source
+  // so those routes survive the D-wave deletion. Populated post-bootstrap
+  // alongside `discoveryApiHolder`; same eager-register / late-populate pattern.
+  const pluginReaderHolder: { current: PluginPublicationReader | undefined } = {
+    current: undefined,
+  };
+
   // #1037: same eager-register / late-populate pattern for the join applier.
   // The join endpoint registers eagerly inside startApiServer; the applier is
   // built only after the latest join-consuming subsystem (the engine view,
@@ -878,6 +891,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       harnessReadinessRegistry: { holder: harnessReadinessRegistryHolder },
       // jinn-mono-u34i: see discoveryApiHolder comment above.
       discovery: { holder: discoveryApiHolder },
+      // One-swap R3 (#2461): plugin-publication routes read through the carved
+      // host reader (IdentityRegistry log source), not `discovery/`.
+      pluginReader: { holder: pluginReaderHolder },
       // Agent-binding retry: re-run the ERC-1271 bind step from the SPA
       // without forcing a daemon restart. Constructs a fresh bootstrapper
       // per call so we don't tangle lifecycle with the long-running one.
@@ -1667,6 +1683,20 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // the panel's next refetch. Before this, the routes 404'd forever and
   // the /build page rendered "Discovery unavailable" permanently.
   discoveryApiHolder.current = sharedDiscoveryApi;
+
+  // One-swap R3 (#2461): populate the carved plugin-publication reader over the
+  // IdentityRegistry log source. Reuses the already-built `publicClient` and the
+  // fallback-chain RPC. When no IdentityRegistry address is known the routes
+  // fall back to `discovery` inside addDiscoveryRoutes.
+  if (identityRegistryAddress) {
+    pluginReaderHolder.current = createPluginPublicationReader({
+      logSource: createRpcPluginLogSource({
+        publicClient,
+        identityRegistry: identityRegistryAddress,
+        chainId: config.network === 'testnet' ? 84532 : 8453,
+      }),
+    });
+  }
 
   // #1037: the live task-discovery descriptor. Always present with a mutable
   // `solverNetManifestCids` array (`taskDiscoveryManifestCids` is a fresh
