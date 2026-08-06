@@ -54,6 +54,7 @@ import {
   getTimeoutBounds,
 } from '../../adapters/mech/contracts.js';
 import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
+import { runTasksLifecycle } from './tasks-lifecycle.js';
 
 function findNamedErrorCause(
   error: unknown,
@@ -1218,6 +1219,9 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'watch') {
     return runTasksWatch({ ...ctx, argv: rest });
   }
+  if (subverb === 'close' || subverb === 'cancel' || subverb === 'release') {
+    return runTasksLifecycle({ ...ctx, argv: rest }, subverb);
+  }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
     emitResult(
@@ -1270,7 +1274,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|watch|observe-autopilot-delivery|list|show',
+        expected: 'submit|watch|observe-autopilot-delivery|list|show|close|cancel|release',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1287,6 +1291,15 @@ const command: CommandModule = {
   jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks list
   jinn tasks show <id>
+  jinn tasks close --task-id <id>
+  jinn tasks cancel --attempt <urn:uuid> --reason <text>
+  jinn tasks release --task-id <id> --attempt-index <n>
+
+\`close\`, \`cancel\`, and \`release\` are the requester lifecycle exits (native mode).
+\`close\` reclaims a posted task's unused budget; \`cancel\` persists a durable
+cancel signal for one in-flight attempt; \`release\` returns a claimed-but-unworked
+attempt to the pool (reported \`unsupported\` on chain generations with no on-chain
+release). Each requires JINN_PASSWORD to open the venue custody.
 
 \`watch\` polls the discovery indexer until the task's solution delivery is
 indexed, emitting NDJSON progress envelopes (type/phase/step/attempt/

@@ -2499,6 +2499,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // closed in `shutdown()` below, alongside the composition the daemon's evaluator loop drives.
   let fleetEvaluator: import('./daemon/native-fleet-evaluator.js').FleetNativeEvaluator | undefined;
   let evaluatorConfig: import('./daemon/daemon.js').DaemonConfig['evaluator'] | undefined;
+  // One-swap M5d (#2461): the native posting loop config. Built only in native mode; the daemon's
+  // `buildPostingLoop` gate then makes it inert unless `posting[]` is non-empty.
+  let postingConfig: import('./daemon/daemon.js').DaemonConfig['posting'] | undefined;
   // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate
   // listener over the native signed solver-records source; closed in `shutdown()` below.
   let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
@@ -2677,6 +2680,32 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         };
       }
     }
+
+    // One-swap M5d (#2461): the native posting loop's host-wire. Native mode only, and same-instance
+    // by construction — the ports read THIS operator's one service Safe + agent EOA balances through
+    // the one `publicClient`, and `config.posting[]`. `buildFleetPostingRuntime` opens no store,
+    // wallet, or discovery consumer (the M5d provenance ledger: it is not a `native_discovery_*`
+    // consumer, so there is nothing to separate from the solver/evaluator queues). The daemon's
+    // `buildPostingLoop` gate then makes the loop inert unless `posting[]` is non-empty.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetPostingRuntime } = await import('./daemon/native-fleet-posting.js');
+      const postingRuntime = buildFleetPostingRuntime({
+        config,
+        safeAddress: safeAddress as `0x${string}`,
+        agentEoaAddress,
+        readBalanceWei: (address) => publicClient.getBalance({ address }),
+      });
+      postingConfig = {
+        compositionMode: COMPOSITION_MODE,
+        postingEntryCount: postingRuntime.postingEntryCount,
+        ports: postingRuntime.ports,
+        intervalMs: config.pollIntervalMs,
+        logger: {
+          info: (message) => console.log(message),
+          warn: (message) => console.warn(message),
+        },
+      };
+    }
   }
 
   const daemon = new Daemon({
@@ -2688,6 +2717,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     composition,
     work: workLoopConfig,
     evaluator: evaluatorConfig,
+    posting: postingConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,

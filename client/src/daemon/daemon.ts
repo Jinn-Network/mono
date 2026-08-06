@@ -45,6 +45,7 @@ import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
 import { EvaluatorLoop } from './evaluator-loop.js';
 import type { NativeEvaluatorComposition } from './native-evaluator-composition.js';
+import { PostingLoop, buildPostingLoop, type PostingLoopPorts } from './posting-loop.js';
 import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
 import type { NativeOperatorHost } from './native-operator-host.js';
@@ -304,6 +305,22 @@ export interface DaemonConfig {
   };
 
   /**
+   * The native posting loop (one-swap M5d, #2461, `client/src/daemon/posting-loop.ts`): drives the
+   * requester's `posting[]` config into posted Submissions. `main.ts` builds the ports
+   * (`native-fleet-posting.ts`) and passes them plus the composition mode and posting-entry count;
+   * the daemon supplies `store` itself and constructs the loop through `buildPostingLoop`, which is
+   * the single boot-inertness gate — a legacy composition or an empty `posting[]` yields no loop,
+   * so this daemon never registers the `posting` heartbeat or watchdog entry on a default boot.
+   */
+  posting?: {
+    readonly compositionMode: 'legacy' | 'native';
+    readonly postingEntryCount: number;
+    readonly ports: PostingLoopPorts;
+    readonly intervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
+  };
+
+  /**
    * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
    * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
    * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
@@ -334,6 +351,7 @@ export class Daemon {
   private checkpointLoop?: CheckpointLoop;
   private workLoop?: WorkLoop;
   private evaluatorLoop?: EvaluatorLoop;
+  private postingLoop?: PostingLoop;
   private projectorLoop?: ProjectorLoop;
   private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
@@ -441,6 +459,20 @@ export class Daemon {
         store: this.store,
         pollIntervalMs: config.evaluator.pollIntervalMs ?? config.pollIntervalMs ?? 5000,
         ...(config.evaluator.logger ? { logger: config.evaluator.logger } : {}),
+      });
+    }
+    if (config.posting) {
+      // `buildPostingLoop` is the boot-inertness gate: legacy composition or empty `posting[]`
+      // returns undefined, so no loop is constructed, heartbeated, or watchdog-registered.
+      this.postingLoop = buildPostingLoop({
+        compositionMode: config.posting.compositionMode,
+        postingEntryCount: config.posting.postingEntryCount,
+        options: {
+          store: this.store,
+          ports: config.posting.ports,
+          ...(config.posting.intervalMs !== undefined ? { intervalMs: config.posting.intervalMs } : {}),
+          ...(config.posting.logger ? { logger: config.posting.logger } : {}),
+        },
       });
     }
     if (config.composition) {
@@ -697,6 +729,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.postingLoop) {
+      this.loopPromises.push(
+        this.postingLoop.run().catch(err => {
+          console.error('[daemon] posting loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'posting loop crashed',
+            errorCode: 'posting_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.projectorLoop) {
       this.loopPromises.push(
         this.projectorLoop.run().catch(err => {
@@ -752,6 +797,7 @@ export class Daemon {
       if (this.harvestLoop) started.add('harvest');
       if (this.workLoop) started.add('work');
       if (this.evaluatorLoop) started.add('evaluator');
+      if (this.postingLoop) started.add('posting');
       if (this.projectorLoop) started.add('projector');
       if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
@@ -764,6 +810,7 @@ export class Daemon {
         harvest: this.config.harvest?.intervalMs,
         work: this.config.work?.pollIntervalMs,
         evaluator: this.config.evaluator?.pollIntervalMs ?? this.config.pollIntervalMs,
+        posting: this.config.posting?.intervalMs,
         'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
@@ -823,6 +870,7 @@ export class Daemon {
     this.checkpointLoop?.stop();
     this.workLoop?.stop();
     this.evaluatorLoop?.stop();
+    this.postingLoop?.stop();
     this.projectorLoop?.stop();
     this.evidenceDriverLoop?.stop();
     this.peerSync?.stop();
