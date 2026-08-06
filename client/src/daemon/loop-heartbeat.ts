@@ -40,6 +40,11 @@ export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
  */
 export const LOOP_REGISTRY = [
   { name: 'creator', intervalMs: 5000, admission: 'ready-only' },
+  // Native posting loop (one-swap M5, #2461). The native counterpart of `creator`: it drives the
+  // requester's `posting[]` config through the marketplace binding. Opt-in — only registered with
+  // the watchdog when a `PostingLoop` is actually started (native mode + non-empty posting[]);
+  // a legacy boot never constructs it. `ready-only` like `creator`.
+  { name: 'posting', intervalMs: 5000, admission: 'ready-only' },
   { name: 'engine-tick', intervalMs: 5000, admission: 'ready-only' },
   { name: 'engine-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
   { name: 'delivery-watcher', intervalMs: 5000, floorMs: 5 * 60_000, admission: 'always' },
