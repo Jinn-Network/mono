@@ -2698,8 +2698,13 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       let fleetPostTask:
         | ((target: import('./daemon/posting-loop.js').PostingLoopTarget) => Promise<{ readonly taskId?: string }>)
         | undefined;
+      // One-swap M5f (#2461): the requester's reconcile step, which recovers durable posting drafts
+      // AND runs the G-loop adopt leg. Wired into the posting loop's reconcile port only on the write
+      // path — a solver-only boot has no posted tasks to adopt.
+      let fleetReconcile: (() => Promise<void>) | undefined;
       if (nativeRuntime.requesterWrite !== undefined) {
         const { buildFleetRequesterWrite } = await import('./daemon/native-fleet-requester-write.js');
+        const { createFileAdoptionReceiptStore } = await import('./daemon/native-adoption-receipt-store.js');
         const { createRegistryPinPort } = await import('@jinn-network/marketplace-binding');
         const ipfsApiUrl = config.ipfs?.apiUrl;
         if (ipfsApiUrl === undefined) {
@@ -2715,8 +2720,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
             registryUrl: ipfsApiUrl,
             fetchImpl: globalThis.fetch.bind(globalThis),
           }),
+          // Durable adoption receipts live next to the requester's associations, under its state dir.
+          adoptionReceipts: createFileAdoptionReceiptStore({
+            dir: join(nativeRuntime.requesterWrite.requesterStateDir, 'adoptions'),
+          }),
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
         });
         fleetPostTask = (target) => requesterWrite.postTarget(target);
+        fleetReconcile = () => requesterWrite.reconcile();
       }
       const postingRuntime = buildFleetPostingRuntime({
         config,
@@ -2725,6 +2739,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         readBalanceWei: (address) => publicClient.getBalance({ address }),
         logger: { warn: (message) => console.warn(message) },
         ...(fleetPostTask === undefined ? {} : { postTask: fleetPostTask }),
+        ...(fleetReconcile === undefined ? {} : { reconcile: fleetReconcile }),
       });
       postingConfig = {
         compositionMode: COMPOSITION_MODE,

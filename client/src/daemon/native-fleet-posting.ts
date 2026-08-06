@@ -98,6 +98,15 @@ export interface FleetPostingRuntimeInput {
    */
   readonly postTask?: (target: PostingLoopTarget) => Promise<{ readonly taskId?: string }>;
   /**
+   * The loop's reconcile step (one-swap M5f, #2461). When present, the posting runtime's `reconcile`
+   * port delegates here — `main.ts` passes the requester write path's `reconcile`, which recovers any
+   * durable posting draft AND runs the G-loop adopt leg (observe + verify + record deliveries for
+   * this operator's own posted tasks) BEFORE the tick admits new posts. When absent (a solver-only
+   * boot, or an operator without requester admission custody), `reconcile` stays the M5d no-op — no
+   * posted tasks exist to reconcile or adopt.
+   */
+  readonly reconcile?: () => Promise<void>;
+  /**
    * Optional warn sink for the per-target launched-record resolution guard. A malformed launched
    * record degrades that entry to `live: false` (skipped) rather than stranding the whole tick; the
    * warn makes the degradation visible instead of silent. `main.ts` passes the daemon logger.
@@ -147,8 +156,10 @@ export function buildFleetPostingRuntime(input: FleetPostingRuntimeInput): Fleet
   const now = input.now ?? (() => Date.now());
 
   const ports: PostingLoopPorts = {
-    // No durable posting draft can exist until `post` is live; the reconcile step is wired for then.
-    reconcile: async () => {},
+    // The loop's first tick step. When the requester write path is wired (M5f), it recovers durable
+    // posting drafts AND runs the adopt leg over this operator's own posted tasks; otherwise it stays
+    // the M5d no-op (a solver-only boot has no posted tasks to reconcile or adopt).
+    reconcile: input.reconcile ?? (async () => {}),
 
     // Per-entry isolation (M5e hardening of the M5d finding): resolving a launched record can throw
     // (unreadable/invalid record). Resolve each entry inside its own try so one malformed record
