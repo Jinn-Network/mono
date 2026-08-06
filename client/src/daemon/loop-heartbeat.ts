@@ -18,7 +18,7 @@ import { emitEvent } from '../observability/emit-event.js';
 export const LOOP_HEARTBEAT_PREFIX = 'loop_heartbeat:';
 
 /**
- * The thirteen canonical long-running loops the watchdog supervises, with their
+ * The fourteen canonical long-running loops the watchdog supervises, with their
  * default poll intervals and (for the for-await polling loops) a staleness
  * floor. The two for-await adapter loops (engine-watcher, delivery-watcher)
  * heartbeat at the poll-cycle tail inside the mech adapter so an
