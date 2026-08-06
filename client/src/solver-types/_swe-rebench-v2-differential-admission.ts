@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { posix as path } from 'node:path';
 import { z } from 'zod/v3';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   DigestQualifiedImageV1Schema,
   TrustedParserIdentityV1Schema,

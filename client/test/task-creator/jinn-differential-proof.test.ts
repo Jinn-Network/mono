@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import type { EvalRunner } from '../../src/harnesses/impls/swe-rebench-v2-evaluator/index.js';
 import {
   createDifferentialAdmissionReceiptV2,

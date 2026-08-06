@@ -16,7 +16,7 @@ import {
   type ManifestPayload,
 } from '../../src/erc8004/manifest-registry.js';
 import { hashLeaf, merkleRoot } from '../../src/erc8004/merkle.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import type { ManifestV0 } from '../../src/types/manifest.js';
 
 const CIDS = ['bafy-member-a', 'bafy-member-b', 'bafy-member-c'];

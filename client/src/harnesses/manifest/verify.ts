@@ -7,7 +7,7 @@
 
 import * as ed from '@noble/ed25519';
 import { sha512 } from '@noble/hashes/sha2.js';
-import { canonicalJson } from '../engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 import type { JinnManifest, SignerTrustEntry } from './types.js';
 
 // @noble/ed25519 v3 needs sha512 wired for synchronous use; the

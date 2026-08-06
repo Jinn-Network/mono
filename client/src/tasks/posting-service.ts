@@ -6,7 +6,7 @@ import type { Store } from '../store/store.js';
 import type { TaskPostRecord, TaskPostingPolicyType } from '../store/store.js';
 import { TransientError, type Task } from '../types/index.js';
 import type { TaskCandidate, TaskPostingPolicy } from './sources.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 
 const GLOBAL_CREATOR_SCOPE = '__global__';
 const POST_LOCK_STALE_AFTER_MS = 60_000;

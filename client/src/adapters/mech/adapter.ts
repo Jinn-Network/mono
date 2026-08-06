@@ -34,7 +34,7 @@ import {
   fetchRawBytesFromIpfs,
   digestHexToGatewayUrl,
 } from './ipfs.js';
-import { canonicalJson } from '../../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../util/canonical-json.js';
 import { normalizeEnvelopeRole, SignedEnvelopeSchema } from '../../types/envelope.js';
 import {
   deliveryClaimEvidenceHash,

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { keccak256, toBytes } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { cidToDigestHex } from '../../src/adapters/mech/ipfs.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import { computeMintedPoolRowV2Hash, type MintedPoolRowV2 } from '../../src/solver-types/_swe-rebench-v2-minted-pool.js';
 import { computeRowHash } from '../../src/solver-types/_swe-rebench-v2-substrate.js';
 import { signTaskV1 } from '../../src/tasks/signing.js';

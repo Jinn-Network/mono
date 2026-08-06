@@ -11,7 +11,7 @@ import { makeCommandCtx } from '@test/cli.js';
 import { LocalAdapter } from '@/adapters/local/adapter.js';
 import { Store } from '@/store/store.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
-import { canonicalJson } from '@/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '@/util/canonical-json.js';
 import {
   executeSafeTransaction,
   SafePostBroadcastHookError,

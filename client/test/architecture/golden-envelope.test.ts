@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { keccak256, recoverAddress } from 'viem';
 import { SignedEnvelopeSchema } from '../../src/types/envelope.js';
-import { canonicalJson } from '../../src/harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../../src/util/canonical-json.js';
 import {
   assembleAndSignEnvelope,
   type EnvelopeInputs,

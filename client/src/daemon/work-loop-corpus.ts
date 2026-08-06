@@ -9,7 +9,7 @@
 import { computeRawCodecCid } from '@jinn-network/marketplace-binding';
 import type { TaskExecutionBackend } from '@jinn-network/task-execution-backend';
 import { sha256Hex } from '@jinn-network/task-execution-protocol';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   loadCorpusKnowledge,
   type CorpusKnowledgeRecordRef,

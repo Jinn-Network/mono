@@ -54,7 +54,7 @@ vi.mock('../../src/adapters/mech/digest.js', () => ({
 }));
 
 // MOCK_JUSTIFICATION: canonical-json is a pure transform; isolated here from adapter routing logic.
-vi.mock('../../src/harnesses/engine/canonical-json.js', () => ({
+vi.mock('../../src/util/canonical-json.js', () => ({
   canonicalJson: vi.fn().mockReturnValue('{"mocked":"jcs"}'),
 }));
 

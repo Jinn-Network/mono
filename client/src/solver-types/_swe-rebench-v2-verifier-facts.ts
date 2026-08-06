@@ -11,7 +11,7 @@ import { z } from 'zod/v3';
 import { keccak256, recoverAddress, sha256, toBytes, type Hex } from 'viem';
 import { SweRebenchV2TaskSchema } from '@jinn-network/sdk/solvernets/swe-rebench-v2';
 import { cidToDigestHex } from '../adapters/mech/ipfs.js';
-import { canonicalJson } from '../harnesses/engine/canonical-json.js';
+import { canonicalJson } from '../util/canonical-json.js';
 import {
   fetchHfWithRetry,
   type FetchHfWithRetryOptions,
