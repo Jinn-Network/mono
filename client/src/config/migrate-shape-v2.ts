@@ -15,6 +15,19 @@
  * fields at all; the host's USD rolling-window gates (kept per spec §6.5)
  * remain the operative spend bound, exactly today's behavior. Caps are set
  * later, explicitly, on the Claim policy & wiring page (Task 17).
+ *
+ * One-swap M1 (umbrella #2461, DR-2026-08-05): the dark native sections
+ * (`evaluator`, `identityStores`, `trustRootsPath`,
+ * `trustPolicyGenesisDigest`, `finality` — see `config/native-sections.ts`)
+ * are deliberately NOT written here, and this file is unchanged by that
+ * milestone. There is nothing to derive them from: no legacy key holds a
+ * deployment-module digest, a role identity-store path, or a trust-roots
+ * catalog, so any value this migration invented would be a guess that reads
+ * as operator intent. They are operator-authored, absent until authored, and
+ * absent is a valid state. `configShapeVersion` therefore does not move —
+ * M1 changes what the loader ACCEPTS, not what the migration WRITES, so an
+ * already-v2 file is byte-identical across it (covered by
+ * `test/config/native-sections-loader.test.ts`).
  */
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
