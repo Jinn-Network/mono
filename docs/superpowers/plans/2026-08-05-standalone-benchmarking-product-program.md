@@ -254,3 +254,15 @@ limitations + claim package; quote presentation (run size, coverage,
 caps, estimate-from-rehearsal only from real timings). Engine gap
 recorded for BP-21: evaluation dispatch does not yet honor minVerdicts
 (quote presents it as committed requirement, honestly framed).
+
+| BP-21 | integrated | `756bd7ac8` | `c3029029e` (worktree bench-bp21) | PASS-WITH-FIXES -> PASS (must-fix resolver negative coverage w/ mutation check; atomic key writes; verdictRule cross-check) | see git log 2026-08-06 |
+
+BP-21 verification: 538/538; all four assurance presets run locally;
+independence gating truthfully satisfied via signature-verified
+agent-distinct evaluator resolution (party-independence disclosed as
+unproven everywhere); strict-agreement conflicted + majority dissent
+proven on the real venue with dissent retained in results/matrix/
+report/claim; minVerdicts engine gap closed; pre-existing fold bug
+(eval legs clobbering solve submissionSha256) fixed via journal leg
+field. Pre-existing generate-architecture --check drift confirmed
+at base via stash test (upstream origin drift, refresh pending).
