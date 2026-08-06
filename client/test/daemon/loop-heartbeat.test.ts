@@ -51,7 +51,7 @@ describe('#1043 loop-heartbeat helper', () => {
     expect(getLoopTick(store, 'creator')).toBeNull();
   });
 
-  it('enumerates the thirteen canonical watchdog loops', () => {
+  it('enumerates the fourteen canonical watchdog loops', () => {
     expect([...LOOP_NAMES].sort()).toEqual(
       [
         'balance-topup',
@@ -64,6 +64,8 @@ describe('#1043 loop-heartbeat helper', () => {
         'eviction-check',
         'harvest',
         'peer-sync',
+        // Native posting loop (one-swap M5, #2461) — opt-in, native mode only.
+        'posting',
         'projector',
         'reward-claim',
         'work',
