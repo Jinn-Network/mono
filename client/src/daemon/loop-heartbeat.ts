@@ -60,6 +60,13 @@ export const LOOP_REGISTRY = [
   { name: 'projector', intervalMs: 5000, floorMs: 300_000, admission: 'always' },
   { name: 'evidence-driver', intervalMs: 30_000, floorMs: 300_000, admission: 'always' },
   { name: 'work', intervalMs: 5000, floorMs: 300_000, admission: 'ready-only' },
+  // Native evaluator loop (one-swap M4a, #2461). The evaluator counterpart of `work`: it drives
+  // the native evaluator composition's tick (acquire subject material → evaluate → deliver+settle
+  // a verdict) and, like `work`, also reconciles in-flight settlements on every tick (the M3 N2
+  // ruling). Opt-in — only registered with the watchdog when an evaluator loop is actually
+  // started (native mode + a configured evaluator deployment/identity store); a legacy or
+  // native-solver-only boot never constructs it. `ready-only` like `work`.
+  { name: 'evaluator', intervalMs: 5000, floorMs: 300_000, admission: 'ready-only' },
 ] as const satisfies readonly { name: string; intervalMs: number; floorMs?: number; admission: 'always' | 'ready-only' }[];
 
 export const LOOP_NAMES = LOOP_REGISTRY.map(r => r.name);

@@ -23,8 +23,12 @@ import {
   type NativeDiscoveryQueuedCard,
 } from './native-discovery.js';
 import type { NativeEvaluatorOpportunitySource } from './native-evaluator-composition.js';
-import type { NativeInfrastructurePrimitives } from './native-infrastructure-bundle.js';
-import type { NativeOperatorConfig } from './native-product-config.js';
+import type {
+  NativeAuthorityTimePrimitives,
+  NativeEvaluatorReadPrimitives,
+  NativePublicRecordTransport,
+} from './native-infrastructure-bundle.js';
+import type { NativeRecordSource } from '../config/native-sections.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { NativeDiscoveryCardProvenance } from './native-submission-facts.js';
 
@@ -75,7 +79,7 @@ function uint(value: unknown, label: string): bigint {
   return BigInt(value);
 }
 
-function sourceId(source: NativeOperatorConfig['sources'][number]): string {
+function sourceId(source: NativeRecordSource): string {
   return `${source.agent}/${source.name}`;
 }
 
@@ -291,9 +295,24 @@ function associationFor(store: Store, taskDigest: `sha256:${string}`): IndexedNa
   };
 }
 
+/**
+ * The exact I/O the evaluator opportunity reader needs, narrowed off the full
+ * `NativeInfrastructurePrimitives` (one-swap M4a, #2461). The standalone host passes the whole
+ * primitive object (its `evaluator` is guaranteed present by an earlier guard); the fleet path
+ * builds these three directly from a plain viem `PublicClient` — the same "one reader, two callers"
+ * seam `createSolverReads`/`createBaseSepoliaEvaluatorReads` already establish. `evaluator` is
+ * REQUIRED here (not optional as on the full bundle): a reader with no chain correspondence has
+ * nothing to prove signed source facts against.
+ */
+export interface NativeEvaluatorOpportunityInfrastructure {
+  readonly records: Pick<NativePublicRecordTransport, 'byLocation' | 'byDigest'>;
+  readonly authorityTime: Pick<NativeAuthorityTimePrimitives, 'verifyFinalized'>;
+  readonly evaluator: NativeEvaluatorReadPrimitives;
+}
+
 function recordFetcher(input: {
   readonly store: Store;
-  readonly infrastructure: NativeInfrastructurePrimitives;
+  readonly infrastructure: NativeEvaluatorOpportunityInfrastructure;
   readonly publicBases: readonly string[];
 }): FetchBytesByDigest {
   const byDigest = async (expected: `sha256:${string}`): Promise<Uint8Array> => {
@@ -338,35 +357,51 @@ export interface NativeEvaluatorOpportunityReader {
  * other.
  */
 export async function buildNativeEvaluatorOpportunityReader(input: {
-  readonly config: NativeOperatorConfig;
+  /** Every configured signed source; exactly one `requester` and one `solver` are consumed. */
+  readonly sources: readonly NativeRecordSource[];
+  /** The JinnRouter the canonical solution-delivery join is scoped to. */
+  readonly jinnRouter: `0x${string}`;
+  /** Shared Store: the evaluator index tables + the `native_evaluations` join live here. */
   readonly store: Store;
+  /**
+   * The Store the two `createNativeDiscoveryConsumer` instances checkpoint and queue against. On
+   * the standalone host this is `input.store` (a private per-evaluator sqlite, no other consumer).
+   * On the ONE fleet daemon it MUST be a DISTINCT store, because the fleet WorkLoop already runs a
+   * `createNativeDiscoveryConsumer` over the SAME requester source and the SAME shared Store's
+   * `native_discovery_*` tables (M3): sharing the source-identity checkpoint there would let the
+   * WorkLoop's acknowledgement/checkpoint advancement starve the evaluator's requester consumer,
+   * and the decode-that-wrote-first would win the shared `card_json` row (M3 review N6). Keying the
+   * evaluator's discovery queue distinctly is the separation; defaults to `store` for the
+   * collision-free standalone path.
+   */
+  readonly discoveryStore?: Store;
   readonly trust: NativeTrustAuthority;
-  readonly infrastructure: NativeInfrastructurePrimitives;
+  readonly infrastructure: NativeEvaluatorOpportunityInfrastructure;
   readonly events: NativeMarketplaceEventRepository;
   readonly syncVenue: () => Promise<void>;
 }): Promise<NativeEvaluatorOpportunityReader> {
-  if (input.infrastructure.evaluator === undefined) throw new Error('evaluator chain reader is unavailable');
+  const discoveryStore = input.discoveryStore ?? input.store;
   installSchema(input.store);
-  const requesterConfigured = input.config.sources.filter(({ role }) => role === 'requester');
-  const solverConfigured = input.config.sources.filter(({ role }) => role === 'solver');
+  const requesterConfigured = input.sources.filter(({ role }) => role === 'requester');
+  const solverConfigured = input.sources.filter(({ role }) => role === 'solver');
   if (requesterConfigured.length !== 1 || solverConfigured.length !== 1) {
     throw new Error('Phase B evaluator requires exactly one requester and one solver signed source');
   }
   const transport = createHttpTransport('');
   const requesterSources = await buildNativeDiscoverySources({
     configured: requesterConfigured,
-    store: input.store,
+    store: discoveryStore,
     transport,
     trust: input.trust,
   });
   const solverSources = await buildNativeDiscoverySources({
     configured: solverConfigured,
-    store: input.store,
+    store: discoveryStore,
     transport,
     trust: input.trust,
   });
   const requester = createNativeDiscoveryConsumer({
-    store: input.store,
+    store: discoveryStore,
     sources: requesterSources,
     transport,
     async decode(discovery) {
@@ -385,7 +420,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
         throw new Error('requester authority time is not canonical and finalized');
       }
       const terms = object(association['postingTerms'], 'requester posting terms');
-      const canonical = await input.infrastructure.evaluator!.canonicalTaskCreated({
+      const canonical = await input.infrastructure.evaluator.canonicalTaskCreated({
         chainId: Number(association['chainId']),
         coordinator: association['coordinator'] as `0x${string}`,
         creator: association['creator'] as `0x${string}`,
@@ -409,7 +444,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     },
   });
   const solver = createNativeDiscoveryConsumer({
-    store: input.store,
+    store: discoveryStore,
     sources: solverSources,
     transport,
     async decode(discovery): Promise<NativePublicRecordCard> {
@@ -427,7 +462,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
   const fetcher = recordFetcher({
     store: input.store,
     infrastructure: input.infrastructure,
-    publicBases: input.config.sources.map(({ baseUrl }) => baseUrl),
+    publicBases: input.sources.map(({ baseUrl }) => baseUrl),
   });
 
   const syncSignedSources = async () => {
@@ -475,7 +510,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
         const result: Array<Awaited<ReturnType<NativeEvaluatorOpportunitySource['read']>>[number]> = [];
         for (const withdrawal of solver.takePendingWithdrawals()) {
           if (!sequenceAfter(withdrawal.sequence, after?.sequence)) continue;
-          const target = input.store.db.prepare(
+          const target = discoveryStore.db.prepare(
             `SELECT card_json FROM native_discovery_cards
               WHERE source_agent = ? AND source_name = ? AND announcement_id = ?
               ORDER BY id DESC LIMIT 1`,
@@ -538,10 +573,10 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
               readonly operator: `0x${string}`;
             };
             // eslint-disable-next-line no-await-in-loop -- ambiguity is security-sensitive and bounded by one Task.
-            const fact = await input.infrastructure.evaluator!.readCanonicalSolutionDelivery({
+            const fact = await input.infrastructure.evaluator.readCanonicalSolutionDelivery({
               chainId: 84532,
               coordinator: association.coordinator,
-              router: input.config.contracts.jinnRouter as `0x${string}`,
+              router: input.jinnRouter,
               taskId: facts.taskId,
               attemptIndex: facts.attemptIndex,
               requestId: facts.requestId,

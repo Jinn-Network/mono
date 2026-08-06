@@ -43,6 +43,8 @@ import { blockIdUtc } from '../spend/ai-units.js';
 import { SkipLogDeduper } from './skip-log-dedup.js';
 import type { OperatorComposition } from './composition-root.js';
 import { WorkLoop, type WorkLoopConfig } from './work-loop.js';
+import { EvaluatorLoop } from './evaluator-loop.js';
+import type { NativeEvaluatorComposition } from './native-evaluator-composition.js';
 import { EvidenceDriverLoop } from './evidence-driver.js';
 import type { ProjectorLoop } from './projector-loop.js';
 import type { NativeOperatorHost } from './native-operator-host.js';
@@ -289,6 +291,19 @@ export interface DaemonConfig {
   work?: Omit<WorkLoopConfig, 'composition' | 'store'>;
 
   /**
+   * The native evaluator loop (one-swap M4a, #2461, `client/src/daemon/evaluator-loop.ts`): drives
+   * the fleet evaluator composition's tick. `composition` is built by `main.ts`
+   * (`buildFleetNativeEvaluator`) and passed in; the daemon supplies `store` itself. Omitted -> the
+   * loop is not started. The composition's own resources (backend, evidence, discovery store) are
+   * closed by `main.ts`'s shutdown handler, not the daemon — the daemon owns only the loop cadence.
+   */
+  evaluator?: {
+    readonly composition: NativeEvaluatorComposition;
+    readonly pollIntervalMs?: number;
+    readonly logger?: { info(message: string): void; warn(message: string): void };
+  };
+
+  /**
    * Evidence-driver loop poll interval (ms), close-out C8. Only meaningful when `composition` is
    * present — the loop drives `composition.evidence`'s local runtime `sync()` and publication
    * policy (contract 6). Defaults to `LOOP_REGISTRY`'s own `evidence-driver` entry (30000).
@@ -318,6 +333,7 @@ export class Daemon {
   private harvestLoop?: HarvestLoop;
   private checkpointLoop?: CheckpointLoop;
   private workLoop?: WorkLoop;
+  private evaluatorLoop?: EvaluatorLoop;
   private projectorLoop?: ProjectorLoop;
   private evidenceDriverLoop?: EvidenceDriverLoop;
   private watchdogLoop?: WatchdogLoop;
@@ -418,6 +434,14 @@ export class Daemon {
     }
     if (config.composition && config.work) {
       this.workLoop = new WorkLoop({ ...config.work, composition: config.composition, store: this.store });
+    }
+    if (config.evaluator) {
+      this.evaluatorLoop = new EvaluatorLoop({
+        composition: config.evaluator.composition,
+        store: this.store,
+        pollIntervalMs: config.evaluator.pollIntervalMs ?? config.pollIntervalMs ?? 5000,
+        ...(config.evaluator.logger ? { logger: config.evaluator.logger } : {}),
+      });
     }
     if (config.composition) {
       // C8: the projector and evidence-driver loops are independent of `work` — both are started
@@ -660,6 +684,19 @@ export class Daemon {
         }),
       );
     }
+    if (this.evaluatorLoop) {
+      this.loopPromises.push(
+        this.evaluatorLoop.run().catch(err => {
+          console.error('[daemon] evaluator loop crashed:', err);
+          emitStructured({
+            kind: 'error',
+            message: 'evaluator loop crashed',
+            errorCode: 'evaluator_crashed',
+            details: { error: err instanceof Error ? err.message : String(err) },
+          });
+        }),
+      );
+    }
     if (this.projectorLoop) {
       this.loopPromises.push(
         this.projectorLoop.run().catch(err => {
@@ -714,6 +751,7 @@ export class Daemon {
       if (this.checkpointLoop) started.add('checkpoint');
       if (this.harvestLoop) started.add('harvest');
       if (this.workLoop) started.add('work');
+      if (this.evaluatorLoop) started.add('evaluator');
       if (this.projectorLoop) started.add('projector');
       if (this.evidenceDriverLoop) started.add('evidence-driver');
       if (peers.length > 0) started.add('peer-sync');
@@ -725,6 +763,7 @@ export class Daemon {
         checkpoint: this.config.checkpoint?.intervalMs,
         harvest: this.config.harvest?.intervalMs,
         work: this.config.work?.pollIntervalMs,
+        evaluator: this.config.evaluator?.pollIntervalMs ?? this.config.pollIntervalMs,
         'evidence-driver': this.config.evidenceDriverIntervalMs,
       };
       const registrations: WatchdogLoopRegistration[] = LOOP_REGISTRY
@@ -783,6 +822,7 @@ export class Daemon {
     this.harvestLoop?.stop();
     this.checkpointLoop?.stop();
     this.workLoop?.stop();
+    this.evaluatorLoop?.stop();
     this.projectorLoop?.stop();
     this.evidenceDriverLoop?.stop();
     this.peerSync?.stop();

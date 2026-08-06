@@ -2494,6 +2494,11 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // `work`/projector/evidence-driver config below is gated on it being defined.
   let composition: import('./daemon/composition-root.js').OperatorComposition | undefined;
   let workLoopConfig: Omit<import('./daemon/work-loop.js').WorkLoopConfig, 'composition' | 'store'> | undefined;
+  // One-swap M4a (#2461): the native evaluator composition + loop. Built only in native mode when
+  // the operator configured an evaluator; its resources (backend, evidence, discovery store) are
+  // closed in `shutdown()` below, alongside the composition the daemon's evaluator loop drives.
+  let fleetEvaluator: import('./daemon/native-fleet-evaluator.js').FleetNativeEvaluator | undefined;
+  let evaluatorConfig: import('./daemon/daemon.js').DaemonConfig['evaluator'] | undefined;
   // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate
   // listener over the native signed solver-records source; closed in `shutdown()` below.
   let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
@@ -2622,6 +2627,45 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         warn: (message) => console.warn(message),
       },
     };
+
+    // One-swap M4a (#2461): mount the native evaluator loop alongside the WorkLoop. Native mode
+    // only, and only when the operator configured an evaluator deployment + identity store — a
+    // native solver-only operator constructs no evaluator composition. The dynamic import keeps the
+    // evaluator graph off a legacy boot's module graph, exactly like `native-fleet-runtime`.
+    if (nativeRuntime !== undefined) {
+      const { buildFleetNativeEvaluator, fleetEvaluatorConfigured } =
+        await import('./daemon/native-fleet-evaluator.js');
+      if (fleetEvaluatorConfigured(config)) {
+        // Reuse the ONE Safe's venue verdict ports rather than opening a second venue on the same
+        // Safe (composition-root.ts's #525/#562/#897 nonce-race warning). `venue.verdict` is
+        // present for the "today" (V3) generation `BASE_SEPOLIA_TODAY` runs against.
+        const verdictPorts = composition.venue.verdict;
+        if (verdictPorts === undefined) {
+          throw new Error('native evaluator loop requires the composition venue to expose V3 verdict ports');
+        }
+        fleetEvaluator = await buildFleetNativeEvaluator({
+          config,
+          store: sharedStore,
+          publicClient,
+          safeAddress: safeAddress as `0x${string}`,
+          agentEoaAddress,
+          trust: nativeRuntime.trust,
+          records: nativeRuntime.records,
+          agentIri: nativeRuntime.agentIri,
+          verdictPorts,
+          password: PASSWORD,
+          stateRoot: join(config.earningDir, '..', 'native'),
+        });
+        evaluatorConfig = {
+          composition: fleetEvaluator.composition,
+          pollIntervalMs: config.pollIntervalMs,
+          logger: {
+            info: (message) => console.log(message),
+            warn: (message) => console.warn(message),
+          },
+        };
+      }
+    }
   }
 
   const daemon = new Daemon({
@@ -2632,6 +2676,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     store: sharedStore,
     composition,
     work: workLoopConfig,
+    evaluator: evaluatorConfig,
     apiServer: setupApiServer,
     pollIntervalMs: config.pollIntervalMs,
     apiPort: config.apiPort,
@@ -2866,6 +2911,9 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         harnessReadinessRegistry.stop();
         await daemon.stop();
         await setupApiServer.close().catch(() => undefined);
+        // Close the evaluator composition's own resources (backend children, evidence runtime,
+        // discovery store) after the loop that drives it has stopped.
+        await fleetEvaluator?.close().catch(() => undefined);
         await publicArchiveServer?.close().catch(() => undefined);
         await closeCaptureReceiver();
       } catch (err) {

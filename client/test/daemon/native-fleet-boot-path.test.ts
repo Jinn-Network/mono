@@ -70,6 +70,11 @@ describe('legacy boot path is unchanged by the native assembly', () => {
     expect(graph).not.toContain('/daemon/native-fleet-runtime.ts');
     expect(graph).not.toContain('/daemon/native-trust-catalog.ts');
     expect(graph).not.toContain('/daemon/native-base-sepolia-infrastructure.ts');
+    // One-swap M4a (#2461): the fleet evaluator module and its assembly are reached ONLY through
+    // `await import('./daemon/native-fleet-evaluator.js')` inside the `COMPOSITION_MODE === 'native'`
+    // branch. A legacy boot never evaluates the evaluator backend/harness/trust graph they pull in.
+    expect(graph).not.toContain('/daemon/native-fleet-evaluator.ts');
+    expect(graph).not.toContain('/daemon/native-evaluator-assembly.ts');
 
     // The mode resolver itself IS statically imported -- it must run on every boot -- so its own
     // import graph is the thing that has to stay small.

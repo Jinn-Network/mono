@@ -51,7 +51,7 @@ describe('#1043 loop-heartbeat helper', () => {
     expect(getLoopTick(store, 'creator')).toBeNull();
   });
 
-  it('enumerates the fourteen canonical watchdog loops', () => {
+  it('enumerates the fifteen canonical watchdog loops', () => {
     expect([...LOOP_NAMES].sort()).toEqual(
       [
         'balance-topup',
@@ -60,6 +60,8 @@ describe('#1043 loop-heartbeat helper', () => {
         'delivery-watcher',
         'engine-tick',
         'engine-watcher',
+        // Native evaluator loop (one-swap M4a, #2461) — opt-in, native mode only.
+        'evaluator',
         'evidence-driver',
         'eviction-check',
         'harvest',
