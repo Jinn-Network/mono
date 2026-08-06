@@ -74,7 +74,7 @@ import { VerdictCode, verdictCodeFromValue } from './verdict-code.js';
 import { manifestDigestForCid } from './digest.js';
 import type { DiscoveryAPI } from '../../discovery/types.js';
 import type { Store } from '../../store/store.js';
-import { TaskRunPersistence } from '../../harnesses/engine/persistence.js';
+import { TaskRunPersistence } from '../../store/task-run-persistence.js';
 import { recordLoopTick } from '../../daemon/loop-heartbeat.js';
 import { emitStructured } from '../../events/emitter.js';
 import { withRecoverableRetry } from '../../tx-retry.js';

@@ -20,7 +20,7 @@
  * not reconstruct either, it only corrects `task_runs.state`.
  *
  * See `client/src/harnesses/engine/backfill-failed-deliveries.ts` and
- * `client/src/harnesses/engine/persistence.ts#reclassifyFailedAsComplete`.
+ * `client/src/store/task-run-persistence.ts#reclassifyFailedAsComplete`.
  */
 
 import type { BaseCommandDeps, CommandContext, CommandModule } from '../command.js';
@@ -32,7 +32,7 @@ import {
   getConfigPathFromArgs as defaultGetConfigPathFromArgs,
 } from '../../config.js';
 import { Store } from '../../store/store.js';
-import { TaskRunPersistence } from '../../harnesses/engine/persistence.js';
+import { TaskRunPersistence } from '../../store/task-run-persistence.js';
 import {
   backfillFailedDeliveries as defaultBackfillFailedDeliveries,
   type BackfillFailedDeliveriesResult,

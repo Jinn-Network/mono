@@ -14,7 +14,7 @@ import {
   loadCorpusKnowledge,
   type CorpusKnowledgeRecordRef,
 } from '../harnesses/engine/corpus-knowledge.js';
-import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import { TaskRunPersistence } from '../store/task-run-persistence.js';
 import { projectEnvelope } from '../corpus/envelope-projection.js';
 import { emitEvent } from '../observability/emit-event.js';
 import type { Store } from '../store/store.js';

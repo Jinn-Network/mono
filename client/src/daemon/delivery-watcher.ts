@@ -5,7 +5,7 @@ import { isRecoverableTransactionError } from '../tx-retry.js';
 import { SignedEnvelopeSchema } from '../types/envelope.js';
 import { validatePayload } from '../types/payloads/index.js';
 import { getSweRebenchV2StateStore, defaultStateDir } from '../solver-types/swe-rebench-v2.js';
-import { TaskRunPersistence } from '../harnesses/engine/persistence.js';
+import { TaskRunPersistence } from '../store/task-run-persistence.js';
 
 export class DeliveryWatcherLoop {
   private stopped = false;
