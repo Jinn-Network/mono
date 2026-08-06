@@ -11,7 +11,7 @@ import {
 import { encryptMnemonic } from '@/earning/wallet.js';
 import { makeCommandCtx } from '@test/cli.js';
 import { marketplaceTaskSelectionSidecarPath } from '@/tasks/submit-selection.js';
-import { MechAdapter } from '@/adapters/mech/adapter.js';
+import { MechRequesterAdapter } from '@/adapters/mech/requester-adapter.js';
 
 vi.mock('@/tasks/submit-preflight.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/tasks/submit-preflight.js')>(),
@@ -161,8 +161,8 @@ describe('machine Task dry-run filesystem behavior', () => {
       dbPath: join(absentDbParent, 'jinn.db'),
       rpcUrl: 'http://127.0.0.1:1',
     }));
-    const initialize = vi.spyOn(MechAdapter.prototype, 'initialize').mockResolvedValue();
-    const postTask = vi.spyOn(MechAdapter.prototype, 'postTask').mockResolvedValue({
+    const initialize = vi.spyOn(MechRequesterAdapter.prototype, 'initialize').mockResolvedValue();
+    const postTask = vi.spyOn(MechRequesterAdapter.prototype, 'postTask').mockResolvedValue({
       taskId: 'must-not-post',
       taskCid: `f01551220${'ab'.repeat(32)}`,
     });
