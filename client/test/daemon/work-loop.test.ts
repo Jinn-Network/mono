@@ -359,18 +359,22 @@ describe('work loop', () => {
       reconcileStartup: vi.fn(async () => []),
       reconcileEngagement: vi.fn(),
     };
+    const corrections = { reconcile: vi.fn(async () => undefined) };
     const { loop } = build({
       composition: { ...composition(), mode: 'native' },
       archive: undefined,
       nativeDiscovery: {
         sync,
         takePending,
+        takePendingWithdrawals: () => [],
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
       nativeClaimCoordinator: coordinator,
       nativeSolutionCoordinator: solutionCoordinator,
+      nativeSolutionCorrections: corrections,
       acceptLegacyCards: false,
     });
 
@@ -381,6 +385,10 @@ describe('work loop', () => {
     expect(coordinator.renewWorker).toHaveBeenCalledOnce();
     expect(solutionCoordinator.reconcileStartup).toHaveBeenCalledOnce();
     expect(archiveSince).not.toHaveBeenCalled();
+    // The signed reorg-correction pass runs once per tick, and NOT during initialize() --
+    // initialization owns the worker and reconciles chain effects; correcting already-published
+    // announcements is per-tick work that must precede each source read.
+    expect(corrections.reconcile).toHaveBeenCalledOnce();
   });
 
   it('initializes native ownership, reconciliation, and verified source sync in that order', async () => {
@@ -391,8 +399,10 @@ describe('work loop', () => {
       acceptLegacyCards: false,
       nativeDiscovery: {
         sync: vi.fn(async () => { order.push('sync'); return { accepted: 0, verifiedSources: 1 }; }),
-        takePending: () => [],
+        takePending: () => { order.push('take-pending'); return []; },
+        takePendingWithdrawals: () => { order.push('withdrawals'); return []; },
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -406,11 +416,27 @@ describe('work loop', () => {
         reconcileStartup: async () => { order.push('solution-reconcile'); return []; },
         reconcileEngagement: vi.fn(),
       },
+      nativeSolutionCorrections: {
+        reconcile: async () => { order.push('corrections'); },
+      },
     });
     await loop.initialize();
     expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync']);
     await loop.tick();
-    expect(order).toEqual(['lease', 'reconcile', 'solution-reconcile', 'sync', 'renew', 'sync']);
+    // Per tick, and every step's position is load-bearing:
+    //   renew        - own the worker lease before touching anything.
+    //   corrections  - correct this operator's own published announcements against the canonical
+    //                  chain BEFORE accepting a source head. Correcting after the read would let a
+    //                  card be admitted while a reorged delivery still advertises as available.
+    //   sync         - the verified signed-head gate. A stale/tampered/rewound head rejects here.
+    //   withdrawals  - drain the requester's signed retractions BEFORE deciding what to claim, so
+    //                  a retracted announcement cannot be picked up in the same pass that learned
+    //                  of its retraction.
+    //   take-pending - only now is the queue read.
+    expect(order).toEqual([
+      'lease', 'reconcile', 'solution-reconcile', 'sync',
+      'renew', 'corrections', 'sync', 'withdrawals', 'take-pending',
+    ]);
   });
 
   it('fails an idle native tick before source sync when lease renewal fails', async () => {
@@ -422,7 +448,9 @@ describe('work loop', () => {
       nativeDiscovery: {
         sync,
         takePending: () => [],
+        takePendingWithdrawals: () => [],
         acknowledge: vi.fn(),
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -436,6 +464,7 @@ describe('work loop', () => {
         reconcileStartup: vi.fn(async () => []),
         reconcileEngagement: vi.fn(),
       },
+      nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
     });
     await loop.initialize();
     sync.mockClear();
@@ -478,7 +507,9 @@ describe('work loop', () => {
       nativeDiscovery: {
         sync: async () => ({ accepted: 0, verifiedSources: 1 }),
         takePending: () => [queued],
+        takePendingWithdrawals: () => [],
         acknowledge,
+        acknowledgeWithdrawal: vi.fn(),
         checkpoint: () => undefined,
         resumeSse: () => ({ close: () => undefined }),
       },
@@ -492,6 +523,7 @@ describe('work loop', () => {
         reconcileStartup: vi.fn(async () => []),
         reconcileEngagement,
       },
+      nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
       readSealedDocuments,
     });
 

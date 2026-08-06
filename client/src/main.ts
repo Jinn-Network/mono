@@ -2569,14 +2569,30 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // a today-generation TaskCreated — a real, documented gap, not a stub this loop introduces.
     // `claimGate`/`ledger` reuse the SAME instances `verifySettlementGrade` already reads
     // (contract 2's dispatch-binding correlation).
+    //
+    // One-swap M3 (#2461): in native mode the SAME loop runs a different set of ports. Every
+    // native port below is the instance the composition (or `buildFleetNativeRuntime`) already
+    // returned — never a second construction — because program contract 2's dispatch-binding
+    // correlation only holds when the coordinator that admitted the claim intent is the one the
+    // loop drives, and `verifySettlementGrade` reads back through those same instances.
+    //
+    // `archive` is omitted and `acceptLegacyCards` is false: `WorkLoop`'s constructor refuses a
+    // native composition that carries either, so the two shapes cannot be mixed by accident.
+    const nativeWorkPorts = nativeRuntime === undefined ? undefined : {
+      nativeDiscovery: nativeRuntime.discovery,
+      nativeClaimCoordinator: composition.nativeClaimCoordinator!,
+      nativeSolutionCoordinator: composition.nativeSolutionCoordinator!,
+      nativeSolutionCorrections: composition.nativeSolutionCorrections!,
+    };
     workLoopConfig = {
-      archive: composition.archive,
+      ...(nativeWorkPorts === undefined
+        ? { archive: composition.archive, acceptLegacyCards: true }
+        : { ...nativeWorkPorts, acceptLegacyCards: false }),
       ledger: composition.engagementLedger,
       claimGate: composition.claimGate,
       estimateAiUnits: () => 0,
       readSealedDocuments: composition.readSealedDocuments,
       pollIntervalMs: config.pollIntervalMs,
-      acceptLegacyCards: true,
       // Finding E39: without a logger, `WorkLoopConfig.logger` falls back to a silent no-op
       // (`work-loop.ts`'s `noopLogger`) and the per-tick outcome line (E39's fix) never reaches
       // an operator. Same console-based shape every other loop in this file wires up.

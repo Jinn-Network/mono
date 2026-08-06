@@ -12,9 +12,10 @@
  * both planes, plus the concurrency posture (WAL + busy timeout) two Store handles on one file
  * actually get.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../../src/store/store.js';
 import {
@@ -58,6 +59,7 @@ const NATIVE_TABLES = [
   'native_solution_executions',
   'native_solution_artifacts',
   'native_solution_retries',
+  'native_solution_discovery_corrections',
   'native_discovery_cards',
 ] as const;
 
@@ -121,18 +123,30 @@ describe('native repositories over the shared daemon Store', () => {
     }
   });
 
-  it('does NOT carry native-solver-production\'s ad hoc corrections table onto the fleet path', () => {
-    // `native_solution_discovery_corrections` is created by an inline `store.db.exec` inside
-    // `native-solver-production.ts`'s host build, NOT by NATIVE_OPERATOR_STATE_SCHEMA. It is
-    // therefore absent from the shared Store, and any fleet-path code that reads it would fail
-    // closed rather than read a stale table. Pinned so the reorg-correction reconciliation is
-    // ported deliberately (with its DDL) rather than assumed present when M3 wires the loops.
+  it('carries the reorg-corrections table on BOTH paths, from Store rather than an ad hoc exec', () => {
+    // M2 pinned the INVERSE of this: `native_solution_discovery_corrections` was created by an
+    // inline `store.db.exec` inside `native-solver-production.ts`'s host build and was therefore
+    // absent from the shared Store, so that M3 would have to port the reorg-correction
+    // reconciliation deliberately, WITH its DDL, rather than assume the table was there.
+    //
+    // M3 did: the DDL moved into NATIVE_OPERATOR_STATE_SCHEMA and the reconciler into the shared
+    // `native-solution-corrections.ts`. This is the same pin, inverted — the table must now come
+    // from `Store` (which both the fleet daemon's `Store(config.dbPath)` and the solver host's
+    // `Store(stateDir/solver.sqlite)` construct) and from nowhere else.
     const store = new Store(dbPath);
     try {
-      expect(tableNames(store)).not.toContain('native_solution_discovery_corrections');
+      expect(tableNames(store)).toContain('native_solution_discovery_corrections');
     } finally {
       store.close();
     }
+    // ... and no source file re-creates it ad hoc, which is what would let the two paths drift
+    // back apart.
+    const src = resolve(dirname(fileURLToPath(import.meta.url)), '../../src');
+    const offenders = readdirSync(join(src, 'daemon'))
+      .filter((file) => file.endsWith('.ts'))
+      .filter((file) => /CREATE TABLE IF NOT EXISTS\s+native_solution_discovery_corrections/u
+        .test(readFileSync(join(src, 'daemon', file), 'utf8')));
+    expect(offenders).toEqual(['native-operator-state.ts']);
   });
 
   it('interleaves native writes with legacy task_runs and activity reads on one connection', () => {

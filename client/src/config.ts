@@ -39,6 +39,7 @@ import {
   NativeIdentityStoresConfigSchema,
   NativeIpfsConfigSchema,
   NativePublicBaseUrlSchema,
+  NativeRecordSourcesSchema,
   NativeTrustPolicyGenesisDigestSchema,
   NativeTrustRootsPathSchema,
 } from './config/native-sections.js';
@@ -562,6 +563,15 @@ export const JinnConfigSchema = z.object({
   agentIri: NativeAgentIriSchema.optional(),
   ipfs: NativeIpfsConfigSchema.optional(),
   publicBaseUrl: NativePublicBaseUrlSchema.optional(),
+
+  /**
+   * One-swap M3 (umbrella #2461) — the signed public record sources the native discovery consumer
+   * pulls from. Absent on a legacy boot and unread there; native mode refuses at boot when it is
+   * missing or carries no `requester` source, for the same reason M2's four keys do.
+   *
+   * See `NativeRecordSourcesSchema` for why this is `recordSources` and not the landed `sources`.
+   */
+  recordSources: NativeRecordSourcesSchema.optional(),
 
   /**
    * Set true once the operator clicks "Enter dashboard" at the end of the

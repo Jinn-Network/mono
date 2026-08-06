@@ -21,7 +21,14 @@
  */
 import { join } from 'node:path';
 import { BASE_SEPOLIA_TODAY } from '@jinn-network/marketplace-binding';
-import type { AnnouncedSubmissionCard } from '@jinn-network/marketplace-pipeline';
+// The LOCAL declaration, deliberately (M3 review note 7). The marketplace pipeline package exports
+// a structurally identical `AnnouncedSubmissionCard`, but that package is confined to a frozen
+// legacy-client inventory by `.github/scripts/phase-d-transition-deletion.test.mjs` — a plain
+// source scan, so even naming it in a comment counts — and importing it here put this file outside
+// that inventory, reddening the platform-architecture-control gate. The local declaration also
+// carries `discovery?`, which is what `nativeDiscoveryDecodeProvedCanonical` reads, so it is the
+// more exact type as well.
+import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
 import { createNativeRequesterSubmissionResolver } from '../native-requester/requester.js';
 import type { Store } from '../store/store.js';
 import type { JinnConfig } from '../config.js';
@@ -35,11 +42,17 @@ import {
   digest,
 } from './native-assembly.js';
 import {
+  createBaseSepoliaAuthorityTime,
   createBaseSepoliaFinalizedAnchorClient,
   createBaseSepoliaRecordTransport,
   createSolverReads,
   createViemBaseSepoliaReadClients,
 } from './native-base-sepolia-infrastructure.js';
+import {
+  buildFleetNativeDiscovery,
+  nativeDiscoveryDecodeProvedCanonical,
+} from './native-fleet-discovery.js';
+import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProjectorExactPorts } from './native-projector-ports.js';
 import { openNativeTrustCatalog } from './native-trust-catalog.js';
@@ -121,6 +134,13 @@ export interface FleetNativeRuntime {
   readonly claimRuntime: NativeClaimRuntimeInput;
   readonly projectorPorts: NativeProjectorExactPorts;
   readonly nativeRequesterStateDir: string;
+  /**
+   * The verified, checkpointed source consumer the fleet WorkLoop polls (one-swap M3, #2461).
+   * Built here rather than in `composition-root.ts` because it needs the trust catalog and the
+   * record transport this module already owns, and because it is a LOOP input, not a composition
+   * input — `buildOperatorComposition` never sees it.
+   */
+  readonly discovery: NativeDiscoveryConsumer;
 }
 
 export interface FleetNativeRuntimeInput {
@@ -251,12 +271,14 @@ export async function buildFleetNativeRuntime(
       },
       transactionCaps: { escrowMaxWei: resolveFleetEscrowMaxWei(config.claimPolicy) },
     }),
-    // Fail-CLOSED, deliberately. `native-solver-production.ts` can pass `true` here because its
-    // discovery consumer's decode already refused any card whose TaskCreated was not canonical and
-    // finalized; the fleet path has no such decode yet — M3 wires the native discovery consumer.
-    // Returning `false` makes `evaluateNativeClaim` refuse the claim, which is the honest answer
-    // until the decode exists. It must NOT become `true` without that decode landing.
-    canonicalFinalized: async () => false,
+    // Honest as of M3, and only because the decode landed WITH it. M2 pinned this to `false`
+    // because the fleet path had no discovery decode, so no card's TaskCreated had been proved
+    // canonical and finalized and refusing every claim was the truthful answer. `discovery` below
+    // now installs `buildNativeRequesterAnnouncementDecode` — the same gate
+    // `native-solver-production.ts` runs — and `nativeDiscoveryDecodeProvedCanonical` answers the
+    // structural question "did that gate admit THIS card?" rather than asserting a blanket `true`.
+    // A card that reached the claim runtime by any other route still gets `false`.
+    canonicalFinalized: async (card) => nativeDiscoveryDecodeProvedCanonical(card),
     activeEngagements: () => countActiveNativeEngagements(state),
     worker: { ownerId: input.workerOwnerId, ttlMs: 30_000 },
     solution: {
@@ -278,5 +300,14 @@ export async function buildFleetNativeRuntime(
     verifyVerdictObservation: refuseNativeVerdictObservation,
   };
 
-  return { identities, claimRuntime, projectorPorts, nativeRequesterStateDir };
+  const discovery = await buildFleetNativeDiscovery({
+    store: input.store,
+    trust,
+    recordSources: config.recordSources,
+    verifyAuthorityTime: createBaseSepoliaAuthorityTime(input.publicClient).verifyFinalized,
+    recordByLocation: (locator) => records.byLocation(locator),
+    canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
+  });
+
+  return { identities, claimRuntime, projectorPorts, nativeRequesterStateDir, discovery };
 }

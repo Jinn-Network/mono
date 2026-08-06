@@ -562,6 +562,26 @@ async function verifyAuthorityTime(
     && new Date(Number(block.timestamp) * 1_000).toISOString() === anchor.timestamp;
 }
 
+/**
+ * Canonical, finalized Base authority-time reads over a plain viem `PublicClient`.
+ *
+ * Exported for the same reason `createSolverReads` is (one-swap M3, #2461): the native discovery
+ * decode needs `verifyFinalized`, and the ONE fleet daemon owns a `PublicClient` and no
+ * `NativeInfrastructurePrimitives`. Same two functions `createNativeInfrastructure` has always
+ * installed on `authorityTime` — this names them rather than duplicating them.
+ */
+export function createBaseSepoliaAuthorityTime(publicClient: PublicClient): {
+  readonly latestFinalized: () => Promise<import('../native-requester/requester.js').NativeAuthorityTimeAnchor>;
+  readonly verifyFinalized: (
+    anchor: import('../native-requester/requester.js').NativeAuthorityTimeAnchor,
+  ) => Promise<boolean>;
+} {
+  return {
+    latestFinalized: () => latestAuthorityTime(publicClient),
+    verifyFinalized: (anchor) => verifyAuthorityTime(publicClient, anchor),
+  };
+}
+
 function createRequesterReads(input: {
   readonly config: NativeInfrastructureFactoryInput;
   readonly publicClient: PublicClient;
@@ -1260,10 +1280,7 @@ export async function createNativeInfrastructure(
   return {
     inspectTarget: () => inspectBaseSepoliaNativeTarget(input, viemReads.target),
     anchorClient,
-    authorityTime: {
-      latestFinalized: () => latestAuthorityTime(publicClient),
-      verifyFinalized: (authority) => verifyAuthorityTime(publicClient, authority),
-    },
+    authorityTime: createBaseSepoliaAuthorityTime(publicClient),
     records,
     ...(requester === undefined ? {} : { requester: requester.reads }),
     ...(evaluator === undefined ? {} : { evaluator }),

@@ -122,6 +122,11 @@ describe('native solution state', () => {
       ).all() as Array<{ name: string }>;
       expect(tables.map(({ name }) => name)).toEqual([
         'native_solution_artifacts',
+        // One-swap M3 (#2461): moved into NATIVE_OPERATOR_STATE_SCHEMA from an inline exec in
+        // `native-solver-production.ts`, so the fleet daemon's shared Store carries it too. It is
+        // additive — an existing v1..v5 database gains the table on reopen and no schema-version
+        // bump is required (the whole schema is `CREATE TABLE IF NOT EXISTS`).
+        'native_solution_discovery_corrections',
         'native_solution_executions',
         'native_solution_retries',
       ]);

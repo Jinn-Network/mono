@@ -173,7 +173,17 @@ export function buildNativeEvaluationSpecResolver(
   };
 }
 
-/** The tier-4 admission policy both callers evaluate every discovered card against. */
+/**
+ * The tier-4 admission policy both callers evaluate every discovered card against.
+ *
+ * `maxConcurrent: 1` and `minDeadlineLeadMs: 5min` are DELIBERATE swap-era defaults, not values
+ * inherited unexamined from the native solver host (coordinator ruling, M3 review note 2;
+ * DR-2026-08-05). Conservative claim concurrency is the right posture through the gate phase, and
+ * the fleet path's exactly-one-requester-source constraint
+ * (`native-fleet-discovery.ts`'s `selectFleetRequesterSources`) may lean on the single-claim
+ * bound. A post-gate operator-facing config surface for both is filed as a follow-up; until it
+ * lands, changing either here is a policy decision, not a tuning knob.
+ */
 export function buildNativeClaimPolicy(config: NativeClaimPolicyConfig): NativeTier4ClaimPolicy {
   return {
     chainId: config.chainId,

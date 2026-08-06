@@ -171,6 +171,23 @@ CREATE TABLE IF NOT EXISTS native_solution_retries (
   retry_deadline  TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
+
+-- Append-only signed corrections to already-published delivery announcements when a reorg
+-- orphans (or re-canonicalises) their settlement event. One-swap M3 (#2461) moved this here
+-- from an inline \`store.db.exec\` inside \`native-solver-production.ts\`'s host build: the fleet
+-- daemon runs the same reconciler (\`native-solution-corrections.ts\`) over the SHARED
+-- \`Store(config.dbPath)\`, so the table has to come from \`Store\` on both paths rather than from
+-- whichever host happened to construct it first. Same columns, same primary key.
+CREATE TABLE IF NOT EXISTS native_solution_discovery_corrections (
+  event_key        TEXT NOT NULL,
+  action           TEXT NOT NULL,
+  delivery_digest  TEXT NOT NULL,
+  announcement_id  TEXT NOT NULL,
+  source_sequence  TEXT NOT NULL,
+  entry_digest     TEXT NOT NULL,
+  created_at       TEXT NOT NULL,
+  PRIMARY KEY (event_key, action)
+);
 `;
 
 export class NativeOperatorStateConflictError extends Error {

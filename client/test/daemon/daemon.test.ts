@@ -319,7 +319,9 @@ describe('Daemon — C8 loop startup', () => {
         nativeDiscovery: {
           sync,
           takePending: () => [],
+          takePendingWithdrawals: () => [],
           acknowledge: vi.fn(),
+          acknowledgeWithdrawal: vi.fn(),
           checkpoint: () => undefined,
           resumeSse: () => ({ close: () => undefined }),
         },
@@ -333,6 +335,7 @@ describe('Daemon — C8 loop startup', () => {
           reconcileStartup: vi.fn(async () => []),
           reconcileEngagement: vi.fn(),
         },
+        nativeSolutionCorrections: { reconcile: vi.fn(async () => undefined) },
         ledger: {} as never,
         claimGate: composition.claimGate,
         estimateAiUnits: () => 0,
