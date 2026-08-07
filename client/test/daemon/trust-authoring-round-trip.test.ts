@@ -63,7 +63,20 @@ function anchorChain(blockSeconds: number) {
   };
 }
 
-/** The only stand-in: the finalized-anchor read. Every declared anchor reads back finalized. */
+/**
+ * The second stand-in: the §2.3c step-5 Safe-ownership read. `SAFE_A` is a plain address here (no
+ * chain in this suite), so this answers the question a deployed Safe would: does it own that EOA.
+ */
+function ownershipFor(safe: `0x${string}`, owners: readonly `0x${string}`[]) {
+  return {
+    async isOwner(candidate: `0x${string}`, signer: `0x${string}`) {
+      return candidate.toLowerCase() === safe.toLowerCase()
+        && owners.some((owner) => owner.toLowerCase() === signer.toLowerCase());
+    },
+  };
+}
+
+/** The only other stand-in: the finalized-anchor read. Every declared anchor reads back finalized. */
 function anchorClientFor(
   observations: readonly { digest: `sha256:${string}`; anchorTime: string; transactionHash: `0x${string}` }[],
 ): NativeFinalizedAnchorReadClient {
@@ -228,6 +241,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
         anchorTime: genesis.anchorTime,
         transactionHash: genesis.anchor.locator.transactionHash,
       }]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address, ceremonyAccountB.address]),
       now,
     });
     expect(trust.newestPolicyVersion).toBe(1);
@@ -243,6 +257,25 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       now: () => now,
     });
     expect(solver.get('solver-settlement').keyId.startsWith('did:key:z')).toBe(true);
+
+    // §2.3c: the settlement ceremony this package authored carries its Safe as the third resource,
+    // and the production check accepts it — the whole point of the amendment, since the Safe itself
+    // could never have signed the ceremony that names it.
+    await expect(trust.verifyOnchainAuthority({
+      key: solver.get('solver-settlement').keyId,
+      agent: AGENT_A,
+      address: SAFE_A,
+      atTime: genesis.anchorTime,
+      purpose: 'native:solver-settlement',
+    })).resolves.toMatchObject({ bindingDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) });
+    // A DIFFERENT Safe is refused even though the binding itself verifies.
+    await expect(trust.verifyOnchainAuthority({
+      key: solver.get('solver-settlement').keyId,
+      agent: AGENT_A,
+      address: '0x000000000000000000000000000000000000dEaD',
+      atTime: genesis.anchorTime,
+      purpose: 'native:solver-settlement',
+    })).rejects.toThrow(/declares settlement resource/u);
 
     const requester = await openRoleIdentitySet({
       agent: AGENT_A,
@@ -276,6 +309,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
         anchorTime: genesis.anchorTime,
         transactionHash: genesis.anchor.locator.transactionHash,
       }]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address, ceremonyAccountB.address]),
       now: new Date(genesis.anchorTime),
     });
     // `policyFor` throws on any absent purpose — these are the entries a hand-authored catalog
@@ -303,6 +337,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
         anchorTime: genesis.anchorTime,
         transactionHash: genesis.anchor.locator.transactionHash,
       }]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address, ceremonyAccountB.address]),
       now: new Date(genesis.anchorTime),
     });
     const roles: readonly NativeRoleIdentityRole[] = ['solver-delivery', 'solver-settlement', 'solver-discovery'];
@@ -340,6 +375,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
         anchorTime: genesis.anchorTime,
         transactionHash: genesis.anchor.locator.transactionHash,
       }]),
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address, ceremonyAccountB.address]),
       now,
     });
     const solver = await openRoleIdentitySet({
@@ -399,6 +435,7 @@ describe('@jinn-network/trust-authoring → production verifiers', () => {
       // A's UNCHANGED pin still opens the rewritten catalog.
       expectedPolicyGenesisDigest: genesis.policyGenesisDigest,
       anchorClient,
+      settlementOwnershipClient: ownershipFor(SAFE_A, [ceremonyAccountA.address, ceremonyAccountB.address]),
       now,
     });
     expect(trust.newestPolicyVersion).toBe(2);

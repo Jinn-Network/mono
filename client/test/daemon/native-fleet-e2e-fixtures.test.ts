@@ -25,6 +25,8 @@ const AGENT = 'urn:jinn:operator:fleet-e2e-a';
 const ADMISSION_AGENT = 'urn:jinn:admission:fleet-e2e-a';
 const NOW = new Date('2026-08-02T00:00:00.000Z');
 const CEREMONY_ACCOUNT = privateKeyToAccount(`0x${'11'.repeat(32)}`);
+/** A contract account, never the ceremony EOA — the §2.3b settlement authority. */
+const SETTLEMENT_SAFE = `0x${'5a'.repeat(20)}` as const;
 
 describe('native-fleet fixtures — identity + trust boot leg', () => {
   it('mints identity stores + a catalog the production loaders accept', async () => {
@@ -54,6 +56,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       path: join(root, 'trust.json'),
       roleKeys,
       ceremonyAccount: CEREMONY_ACCOUNT,
+      settlementSafe: SETTLEMENT_SAFE,
     });
     expect(authored.mockAnchorClient).toBeDefined();
 
@@ -61,6 +64,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       path: authored.path,
       expectedPolicyGenesisDigest: authored.policyGenesisDigest,
       anchorClient: authored.mockAnchorClient!,
+      settlementOwnershipClient: authored.mockSettlementOwnershipClient!,
       now: NOW,
     });
 
@@ -110,11 +114,13 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       path: join(root, 'trust-eval.json'),
       roleKeys: evaluatorStore.keys.map((key) => ({ key, agent: AGENT })),
       ceremonyAccount: CEREMONY_ACCOUNT,
+      settlementSafe: SETTLEMENT_SAFE,
     });
     const trust2 = await openNativeTrustCatalog({
       path: authored2.path,
       expectedPolicyGenesisDigest: authored2.policyGenesisDigest,
       anchorClient: authored2.mockAnchorClient!,
+      settlementOwnershipClient: authored2.mockSettlementOwnershipClient!,
       now: NOW,
     });
     const evaluatorSet = await openRoleIdentitySet({
@@ -141,7 +147,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       // no submitAnchor -> mock anchor path
       aPublicBaseUrl: 'http://127.0.0.1:0/a',
       bPublicBaseUrl: 'http://127.0.0.1:0/b',
-      aSafeAddress: `0x${'11'.repeat(20)}`,
+      aSafeAddress: SETTLEMENT_SAFE,
     });
 
     // Distinct, honestly-separate operators.
@@ -160,6 +166,7 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
       path: setup.trustRootsPath,
       expectedPolicyGenesisDigest: setup.trustPolicyGenesisDigest,
       anchorClient: setup.mockAnchorClientTrust!.mockAnchorClient!,
+      settlementOwnershipClient: setup.mockAnchorClientTrust!.mockSettlementOwnershipClient!,
       now: NOW,
     });
     const aSolver = await openRoleIdentitySet({
@@ -184,5 +191,17 @@ describe('native-fleet fixtures — identity + trust boot leg', () => {
     });
     expect(bSolver.get('solver-delivery').keyId)
       .toBe(setup.operatorB.solverStore.key('solver-delivery').keyId);
+
+    // The fixture no longer conflates A's Safe with the ceremony EOA, so the amended §2.3c check
+    // runs against the real production shape: the ceremony declares the Safe as its third resource
+    // and the Safe owns the EOA that signed it.
+    expect(SETTLEMENT_SAFE.toLowerCase()).not.toBe(CEREMONY_ACCOUNT.address.toLowerCase());
+    await expect(trust.verifyOnchainAuthority({
+      key: aSolver.get('solver-settlement').keyId,
+      agent: setup.operatorA.agentIri,
+      address: SETTLEMENT_SAFE,
+      atTime: NOW.toISOString(),
+      purpose: 'native:solver-settlement',
+    })).resolves.toMatchObject({ bindingDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) });
   });
 });

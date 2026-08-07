@@ -66,11 +66,12 @@ export async function runNativeConsumerCommand(input: {
 }> {
   const config = await loadNativeConsumerConfig(input.configPath);
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http(config.rpcUrl) }) as PublicClient;
-  const { anchor } = createViemBaseSepoliaReadClients(publicClient);
+  const { anchor, settlementOwnership } = createViemBaseSepoliaReadClients(publicClient);
   const trust = await openNativeTrustCatalog({
     path: config.trustRootsPath,
     expectedPolicyGenesisDigest: config.policyGenesisDigest as `sha256:${string}`,
     anchorClient: createBaseSepoliaFinalizedAnchorClient(anchor),
+    settlementOwnershipClient: settlementOwnership,
   });
   const chain = createBaseSepoliaConsumerChainReader({ rpcUrl: config.rpcUrl });
 

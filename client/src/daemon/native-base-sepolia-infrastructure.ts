@@ -54,7 +54,10 @@ import type {
   NativeTargetInspection,
   NativeWriteSession,
 } from './native-infrastructure-bundle.js';
-import type { NativeFinalizedAnchorReadClient } from './native-trust-catalog.js';
+import type {
+  NativeFinalizedAnchorReadClient,
+  NativeSettlementOwnershipReadClient,
+} from './native-trust-catalog.js';
 import type { CanonicalTaskCreated } from '../native-requester/requester.js';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from '../earning/wallet.js';
@@ -242,6 +245,7 @@ export interface NativeBaseSepoliaAnchorReadClient {
 export function createViemBaseSepoliaReadClients(publicClient: PublicClient): {
   readonly target: NativeBaseSepoliaTargetReadClient;
   readonly anchor: NativeBaseSepoliaAnchorReadClient;
+  readonly settlementOwnership: NativeSettlementOwnershipReadClient;
 } {
   const target: NativeBaseSepoliaTargetReadClient = {
     chainId: () => publicClient.getChainId(),
@@ -311,7 +315,20 @@ export function createViemBaseSepoliaReadClients(publicClient: PublicClient): {
       return value.number;
     },
   };
-  return { target, anchor };
+  // The settlement-authority association's one chain read (spec/2026-08-07 §2.3c step 5). No new
+  // dependency: `SAFE_ABI`'s `isOwner(address) → bool` is the ABI the daemon already carries. A
+  // revert or transport failure propagates — `verifyOnchainAuthority` turns it into a refusal.
+  const settlementOwnership: NativeSettlementOwnershipReadClient = {
+    async isOwner(safe, candidate) {
+      return publicClient.readContract({
+        address: safe,
+        abi: SAFE_ABI,
+        functionName: 'isOwner',
+        args: [candidate],
+      });
+    },
+  };
+  return { target, anchor, settlementOwnership };
 }
 
 function sameHex(left: string | null, right: string): boolean {
@@ -1280,6 +1297,7 @@ export async function createNativeInfrastructure(
   return {
     inspectTarget: () => inspectBaseSepoliaNativeTarget(input, viemReads.target),
     anchorClient,
+    settlementOwnership: viemReads.settlementOwnership,
     authorityTime: createBaseSepoliaAuthorityTime(publicClient),
     records,
     ...(requester === undefined ? {} : { requester: requester.reads }),
