@@ -479,6 +479,10 @@ Operator-app deltas ride the stage that forces them: stage 1 the Claim policy & 
 > stage 5's dependency reads "the one-swap deploy PR merged and its gate green." The
 > support/earning loops are **not** in the swap — their re-derivation is stage 6's job
 > (headless design §1).
+>
+> **Corrected 2026-08-07:** G-loop is **not** container-graded — decision 3a decoupled
+> into two artifacts (G-loop on the prediction profile + a separately run container-grade
+> proof); same bar, different shape. See the DR's 2026-08-07 addendum.
 
 **Bridge-era document rules (stages 1–3).** *Amended 2026-08-05 per DR-2026-08-05: with
 stages 2–4 collapsed, "stages 1–3" reads "until the one-swap deploy" and the window
