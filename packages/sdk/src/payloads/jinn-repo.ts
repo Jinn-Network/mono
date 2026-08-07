@@ -29,6 +29,32 @@ import {
   IssueRelayAdoptionReceiptV1Schema,
   IssueRelayVerdictV1Schema,
 } from '../issue-relay.js';
+import { JinnRepoApplicationRefSchema } from '../jinn-repo.js';
+
+const JinnRepoApplicationPayloadFields = {
+  schemaVersion: z.literal('jinn-repo-application-payload.v1'),
+  application: JinnRepoApplicationRefSchema,
+  payload: z.record(z.string(), z.unknown()),
+};
+
+export const JinnRepoApplicationSolutionPayloadSchema = z.object({
+  ...JinnRepoApplicationPayloadFields,
+  role: z.literal('solution'),
+}).strict();
+
+export const JinnRepoApplicationVerdictPayloadSchema = z.object({
+  ...JinnRepoApplicationPayloadFields,
+  role: z.literal('verdict'),
+  /** Generic marketplace settlement projection; applications own the evidence behind it. */
+  projection: z.enum(['pass', 'fail', 'unresolved']),
+}).strict();
+
+export type JinnRepoApplicationSolutionPayload = z.infer<
+  typeof JinnRepoApplicationSolutionPayloadSchema
+>;
+export type JinnRepoApplicationVerdictPayload = z.infer<
+  typeof JinnRepoApplicationVerdictPayloadSchema
+>;
 
 export const JinnRepoLegacySolutionPayloadSchema = z.object({
   schemaVersion: z.literal('jinn-repo-solution.v1'),
@@ -42,6 +68,7 @@ export const JinnRepoIssueRelayAdoptionPayloadSchema =
 
 export const JinnRepoSolutionPayloadSchema = z.union([
   JinnRepoLegacySolutionPayloadSchema,
+  JinnRepoApplicationSolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoIssueRelayAdoptionPayloadSchema,
 ]);
@@ -78,6 +105,7 @@ export type JinnRepoVerdictV2Payload = z.infer<typeof JinnRepoVerdictV2PayloadSc
 export const JinnRepoVerdictPayloadSchema = z.union([
   JinnRepoVerdictV1PayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
+  JinnRepoApplicationVerdictPayloadSchema,
   AutopilotReviewResultSchema,
   IssueRelayVerdictV1Schema,
 ]);

@@ -79,11 +79,12 @@ describe('loadExternalImpl', () => {
     const result = await loadExternalImpl({
       entry: { name: '@fake/harness', entry: PKG_ROOT },
       trustedSigners: [{ alg: 'ed25519', publicKey: PUBKEY_B64 }],
-      env: envFor('@fake/harness'),
+      env: { ...envFor('@fake/harness'), implVersion: '0.0.0' },
     });
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') {
       expect(result.impl.name).toBe('@fake/harness');
+      expect(result.impl.version).toBe('0.1.0');
       expect(result.impl.supports({ solverType: 'prediction.v0' })).toBe(true);
       expect(result.manifest.version).toBe('0.1.0');
     }

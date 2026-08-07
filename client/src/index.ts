@@ -38,6 +38,15 @@ export {
   type IssueRelayMarketplaceDeliveryExpectation,
 } from './issue-relay/delivery-observer.js';
 export {
+  createApplicationDeliveryObserver,
+  parseApplicationTaskCid,
+  type ApplicationDeliveryExpectation,
+  type ApplicationDeliveryObservation,
+  type ApplicationDeliveryObserver,
+  type ApplicationDeliveryObserverDeps,
+  type ApplicationMarketplaceDeliveryExpectation,
+} from './application-delivery/delivery-observer.js';
+export {
   createIssueRelayGitHubRestReadPort,
   observeExactIssueRelayEvaluationReceipts,
   type IssueRelayCheckSummary,

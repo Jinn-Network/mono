@@ -1,4 +1,6 @@
 export {
+  JinnRepoApplicationRefSchema,
+  JinnRepoApplicationTaskExtensionSchema,
   JINN_REPO_SCHEMA_VERSION,
   JinnRepoTaskSchema,
   JinnRepoMergedPrTaskSchema,
@@ -16,6 +18,8 @@ export type {
 } from '../jinn-repo.js';
 
 export {
+  JinnRepoApplicationSolutionPayloadSchema,
+  JinnRepoApplicationVerdictPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoIssueRelayAdoptionPayloadSchema,
@@ -26,6 +30,8 @@ export {
   JinnRepoIssueRelayVerdictPayloadSchema,
 } from '../payloads/jinn-repo.js';
 export type {
+  JinnRepoApplicationSolutionPayload,
+  JinnRepoApplicationVerdictPayload,
   JinnRepoSolutionPayload,
   JinnRepoVerdictPayload,
   JinnRepoVerdictV2Payload,
@@ -131,3 +137,11 @@ export {
 export type {
   ParsedIssueRelayAssuranceComment,
 } from '../issue-relay-comment.js';
+
+export {
+  MARKETPLACE_EVALUATION_PROVENANCE_CONTEXT_KEY,
+  MarketplaceEvaluationProvenanceV1Schema,
+} from '../marketplace-evaluation.js';
+export type {
+  MarketplaceEvaluationProvenanceV1,
+} from '../marketplace-evaluation.js';

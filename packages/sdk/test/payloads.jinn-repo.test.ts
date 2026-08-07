@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
+  JinnRepoApplicationSolutionPayloadSchema,
+  JinnRepoApplicationVerdictPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoAutopilotVerdictPayloadSchema,
   JinnRepoIssueRelayAdoptionPayloadSchema,
@@ -33,6 +35,37 @@ describe('JinnRepoSolutionPayloadSchema', () => {
   it('rejects an empty patch', () => {
     const sol = { schemaVersion: 'jinn-repo-solution.v1', patch: '' };
     expect(() => JinnRepoSolutionPayloadSchema.parse(sol)).toThrow();
+  });
+});
+
+describe('jinn-repo opaque application payloads', () => {
+  const application = { id: 'autopilot.issue-relay', version: 'v2' };
+
+  it('transports creator-owned Solution data without interpreting it', () => {
+    const value = {
+      schemaVersion: 'jinn-repo-application-payload.v1',
+      application,
+      role: 'solution',
+      payload: { schemaVersion: 'creator-solution.v7', patch: 'opaque' },
+    };
+    expect(JinnRepoApplicationSolutionPayloadSchema.parse(value)).toEqual(value);
+    expect(JinnRepoSolutionPayloadSchema.parse(value)).toEqual(value);
+  });
+
+  it('requires only a generic settlement projection on application verdicts', () => {
+    const value = {
+      schemaVersion: 'jinn-repo-application-payload.v1',
+      application,
+      role: 'verdict',
+      projection: 'unresolved',
+      payload: { schemaVersion: 'creator-evidence.v99', lanes: ['anything'] },
+    };
+    expect(JinnRepoApplicationVerdictPayloadSchema.parse(value)).toEqual(value);
+    expect(JinnRepoVerdictPayloadSchema.parse(value)).toEqual(value);
+    expect(JinnRepoApplicationVerdictPayloadSchema.safeParse({
+      ...value,
+      projection: undefined,
+    }).success).toBe(false);
   });
 });
 

@@ -81,7 +81,10 @@ import {
   AUTOPILOT_EVALUATION_CONTEXT_KEY,
   ISSUE_RELAY_EVALUATION_CONTEXT_KEY,
 } from '../../harnesses/impls/evaluation-context.js';
+import { applicationVerdictProjectionCode } from '../../application-delivery/projection.js';
 import {
+  MARKETPLACE_EVALUATION_PROVENANCE_CONTEXT_KEY,
+  MarketplaceEvaluationProvenanceV1Schema,
   JinnRepoAutopilotSessionTaskSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
@@ -874,7 +877,9 @@ export class MechAdapter implements ExecutionAdapter {
 
   private buildEvaluationTask(params: {
     task: Task;
+    sourceTaskId: string;
     solutionRequestId: string;
+    solutionOperatorSafe: string;
     attemptIndex: number;
     resultData: string;
     solutionEnvelopeCid: string;
@@ -910,6 +915,25 @@ export class MechAdapter implements ExecutionAdapter {
       attemptNumber: params.attemptIndex,
       context: {
         ...(params.task.context ?? {}),
+        // Application harnesses need an authenticated bridge back to the
+        // source marketplace Task and Solution delivery. Legacy built-in
+        // evaluators keep their existing context and do not acquire a new
+        // provenance requirement merely because their Task CID is known.
+        ...(params.task.spec?.['application'] === undefined
+          ? {}
+          : {
+              [MARKETPLACE_EVALUATION_PROVENANCE_CONTEXT_KEY]:
+                MarketplaceEvaluationProvenanceV1Schema.parse({
+                  schemaVersion: 'jinn-marketplace-evaluation-provenance.v1',
+                  sourceTaskId: params.sourceTaskId,
+                  sourceTaskCid: params.taskCid,
+                  attemptIndex: params.attemptIndex,
+                  solutionRequestId: params.solutionRequestId,
+                  solutionEnvelopeCid: params.solutionEnvelopeCid,
+                  solutionOperatorSafe: params.solutionOperatorSafe,
+                  evaluatorOperatorSafe: this.config.safeAddress,
+                }),
+            }),
         restorationResult: params.resultData,
         [SOLUTION_TASK_CID_CONTEXT_KEY]:
           params.task.context?.[SOLUTION_TASK_CID_CONTEXT_KEY] ?? params.task.context?.[RESTORATION_TASK_CID_CONTEXT_KEY] ?? params.taskCid,
@@ -1447,7 +1471,9 @@ export class MechAdapter implements ExecutionAdapter {
     }
     const evaluationTask = this.buildEvaluationTask({
       task: restoration.task,
+      sourceTaskId: solution.taskId,
       solutionRequestId: solution.requestId,
+      solutionOperatorSafe: solution.operator,
       attemptIndex: solution.attemptIndex,
       resultData,
       solutionEnvelopeCid,
@@ -1787,6 +1813,8 @@ export class MechAdapter implements ExecutionAdapter {
     const record = payload as Record<string, unknown>;
     const rawVerdict = record['verdict'];
     if (rawVerdict !== undefined) return verdictCodeFromValue(rawVerdict);
+    const applicationProjection = applicationVerdictProjectionCode(payload);
+    if (applicationProjection !== undefined) return applicationProjection;
 
     if (solverType === 'swe-rebench-v2.v1') {
       const passedMatch = record['passed_match'];

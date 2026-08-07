@@ -119,6 +119,23 @@ describe('JinnRepoTaskSchema (SDK) — live-issue branch (prospective)', () => {
     expect(JinnRepoTaskSchema.parse(validLiveIssue)).toEqual(validLiveIssue);
   });
 
+  it('transports an opaque creator-owned application payload', () => {
+    const application = {
+      id: 'autopilot.issue-relay',
+      version: 'v2',
+      payload: {
+        round: { generation: 'g1', round: 0 },
+        evaluation: { policy: 'creator-owned' },
+      },
+    };
+    expect(JinnRepoTaskSchema.parse({ ...validLiveIssue, application }))
+      .toEqual({ ...validLiveIssue, application });
+    expect(JinnRepoTaskSchema.safeParse({
+      ...validLiveIssue,
+      application: { ...application, productSpecificTopLevelField: true },
+    }).success).toBe(false);
+  });
+
   it('accepts a Relay capsule only when its duplicated outer bindings agree', () => {
     expect(JinnRepoTaskSchema.parse({ ...validLiveIssue, relay }).relay)
       .toEqual(relay);
