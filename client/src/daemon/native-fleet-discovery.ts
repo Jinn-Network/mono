@@ -79,7 +79,10 @@ export async function buildFleetNativeDiscovery(
   // `createHttpTransport('')` is the solver host's own construction: each source endpoint carries
   // its absolute serving root, so the transport needs no base of its own.
   const transport = createHttpTransport('');
-  const sources = await buildNativeDiscoverySources({
+  // Construction resolves NO source (#2521): the fleet daemon's own requester source lives behind
+  // the archive listener `main.ts` binds ~250 statements after this call, and a peer's lives behind
+  // an operator that may not be up yet. Introduction resolution happens at first `sync()`.
+  const sources = buildNativeDiscoverySources({
     configured,
     store: input.store,
     transport,

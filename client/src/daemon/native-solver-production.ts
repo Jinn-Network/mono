@@ -137,7 +137,7 @@ export async function buildNativeSolverProductionHost(
   const requesterSources = config.sources.filter(({ role }) => role === 'requester');
   if (requesterSources.length !== 1) throw new Error('native solver requires exactly one requester source');
   const transport = createHttpTransport('');
-  const sources = await buildNativeDiscoverySources({
+  const sources = buildNativeDiscoverySources({
     configured: requesterSources,
     store,
     transport,

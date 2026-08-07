@@ -23,7 +23,10 @@ const transport = createHttpTransport('');
 
 function fakeSource(agent: string, name: string): NativeDiscoverySource {
   return {
-    endpoint: { agent, name, servingRoot: `https://${name}.example`, archiveRootUrl: `https://${name}.example/archive` },
+    identity: { agent, name },
+    resolveEndpoint: async () => ({
+      agent, name, servingRoot: `https://${name}.example`, archiveRootUrl: `https://${name}.example/archive`,
+    }),
     // Never reached by `takePending()` — this suite exercises the durable queue directly, not `sync()`.
     verify: async () => ({ status: 'ok' }),
     verifyHead: async () => ({ status: 'ok' }),

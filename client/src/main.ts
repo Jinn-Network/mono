@@ -2781,11 +2781,17 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     // Structural exposure scoping — the listener carries only archive handlers, never an operator
     // route (headless design §6). Legacy and default boots start nothing here.
     //
-    // M6 mounted ONLY the solver publisher, which is what made a two-operator native boot
-    // impossible: nothing served this operator's requester (or evaluator) archive, so every
-    // `buildNativeDiscoverySources` — including this operator's own, over its own requester source
-    // — failed at the `.well-known` fetch. It runs HERE, after the evaluator and requester-write
-    // legs exist, because those two archives do not exist at composition time.
+    // M6 mounted ONLY the solver publisher, which is what made a two-operator native loop
+    // impossible: nothing served this operator's requester (or evaluator) archive, so no consumer
+    // — including this operator's own, over its own requester source — could resolve those
+    // introductions. It runs HERE, after the evaluator and requester-write legs exist, because
+    // those two archives do not exist at composition time.
+    //
+    // That ordering is now safe rather than merely unavoidable: since #2521 nothing above resolves
+    // a source. `buildFleetNativeRuntime` constructs its consumers with the endpoints deferred, so
+    // this mount reliably precedes the first poll no matter how many statements sit between them,
+    // and a PEER that is not up yet — which no reordering here could ever fix — is refused at that
+    // poll instead of preventing this daemon from starting.
     //
     // ONE listener, not one port per role: every announcement's record locations are stamped
     // against the single `config.publicBaseUrl`, so all three archives must answer on one origin.

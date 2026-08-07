@@ -388,13 +388,17 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     throw new Error('Phase B evaluator requires exactly one requester and one solver signed source');
   }
   const transport = createHttpTransport('');
-  const requesterSources = await buildNativeDiscoverySources({
+  // Neither pair is resolved here (#2521 F2). In the gate's two-operator topology the requester
+  // source belongs to one operator and the solver source to the other, so resolving both at
+  // construction made A's boot wait on B's listener and B's on A's — a deadlock with no valid
+  // start order. Both resolve at the first `syncSignedSources()`, under the same verification.
+  const requesterSources = buildNativeDiscoverySources({
     configured: requesterConfigured,
     store: discoveryStore,
     transport,
     trust: input.trust,
   });
-  const solverSources = await buildNativeDiscoverySources({
+  const solverSources = buildNativeDiscoverySources({
     configured: solverConfigured,
     store: discoveryStore,
     transport,

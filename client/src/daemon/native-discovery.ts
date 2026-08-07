@@ -143,7 +143,23 @@ export interface NativeDiscoveryVerificationInput {
 }
 
 export interface NativeDiscoverySource {
-  readonly endpoint: SourceEndpoint;
+  /**
+   * Who this source is. Known from configuration — no network call, so it is available at
+   * construction, which is what lets the consumer key its durable queue and refuse duplicate
+   * sources without reaching the network (#2521).
+   */
+  readonly identity: SourceIdentity;
+  /**
+   * Resolves WHERE to reach this source's serving-plane objects, from its `.well-known`
+   * introduction. Called at POLL, not at construction, and memoized on success (#2521): a fleet
+   * operator's own requester source lives behind its own archive listener, which binds after
+   * composition, and a peer's source lives behind a peer that may not be up yet. Resolving at
+   * construction made a symmetric two-operator topology unbootable in either order. Every
+   * verification this resolution performs is unchanged — only when it runs moved.
+   *
+   * A failure is NOT memoized: a peer that is down at one poll must be reachable at the next.
+   */
+  readonly resolveEndpoint: () => Promise<SourceEndpoint>;
   /**
    * Host-wired to the discovery client's trust-aware verifier. A non-`ok` result is a hard
    * gate: no checkpoint/card write and no native work for that poll.
@@ -219,10 +235,6 @@ function sourceKey(source: SourceIdentity): string {
   return `${source.agent}/${source.name}`;
 }
 
-function sourceOf(endpoint: SourceEndpoint): SourceIdentity {
-  return { agent: endpoint.agent, name: endpoint.name };
-}
-
 function asCheckpoint(row: RawCheckpoint): NativeDiscoveryCheckpoint {
   const signature = JSON.parse(row.signed_head_json) as NonNullable<SyncedHead['signature']>;
   return {
@@ -293,7 +305,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
   const sources = [...input.sources];
   const keys = new Set<string>();
   for (const source of sources) {
-    const key = sourceKey(sourceOf(source.endpoint));
+    const key = sourceKey(source.identity);
     if (keys.has(key)) throw new Error(`duplicate native discovery source ${key}`);
     keys.add(key);
   }
@@ -383,9 +395,13 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       let accepted = 0;
       let verifiedSources = 0;
       for (const configured of sources) {
-        const source = sourceOf(configured.endpoint);
+        const source = configured.identity;
         const prior = checkpoint(source);
-        const syncedHead = await fetchHead(configured.endpoint, input.transport);
+        // Poll-time introduction resolution (#2521). A source that cannot be resolved — down,
+        // 404, or introducing a different identity — throws here, exactly the refusal that used
+        // to happen at construction, and it names agent/name/baseUrl.
+        const endpoint = await configured.resolveEndpoint();
+        const syncedHead = await fetchHead(endpoint, input.transport);
         if (syncedHead.signature === undefined) {
           throw new NativeDiscoverySyncError(source, 'unsigned-head');
         }
@@ -412,8 +428,8 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
 
         const fetched = await collect(
           prior === undefined
-            ? coldSync(configured.endpoint, { transport: input.transport })
-            : returningSync(configured.endpoint, {
+            ? coldSync(endpoint, { transport: input.transport })
+            : returningSync(endpoint, {
                 sequence: prior.sequence,
                 entry: prior.entryDigest,
               }, { transport: input.transport }),
@@ -544,8 +560,7 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       const subscriptions: StreamSubscription[] = [];
       for (const configured of sources) {
         if (configured.sseUrl === undefined) continue;
-        const source = sourceOf(configured.endpoint);
-        const prior = checkpoint(source);
+        const prior = checkpoint(configured.identity);
         const url = prior === undefined
           ? configured.sseUrl
           : appendCursor(configured.sseUrl, prior.entryDigest);

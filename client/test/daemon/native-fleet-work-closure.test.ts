@@ -153,12 +153,13 @@ function build(input: { readonly entries: readonly AnnouncementEntry[] }) {
   const discovery = createNativeDiscoveryConsumer<AnnouncedSubmissionCard>({
     store,
     sources: [{
-      endpoint: {
+      identity: { agent: AGENT, name: SOURCE_NAME },
+      resolveEndpoint: async () => ({
         agent: AGENT,
         name: SOURCE_NAME,
         servingRoot: ROOT,
         archiveRootUrl: `${ROOT}${archivePagePath(SOURCE_NAME, String(input.entries.length).padStart(16, '0'))}`,
-      },
+      }),
       verify: async ({ entries }) => {
         for await (const _item of entries) { /* drain: the ordered-consumption contract */ }
         return { status: 'ok' };

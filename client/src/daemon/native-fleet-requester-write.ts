@@ -129,9 +129,11 @@ export interface FleetRequesterWrite {
    *
    * All three standalone hosts mount their role's discovery handler; the fleet daemon mounted only
    * the solver's, because this write port surfaced no handler for `main.ts` to mount. Without it a
-   * fleet operator serves no requester archive, so `buildNativeDiscoverySources` cannot resolve
-   * that source's introduction and BOTH operators fail native boot — the operator's own consumer
-   * included. It is the same `handleDiscoveryRequest` the standalone requester host mounts
+   * fleet operator serves no requester archive, so no consumer can ever resolve that source's
+   * introduction and BOTH operators refuse every poll — the operator's own consumer included.
+   * (Since #2521 that resolution happens at poll rather than at boot; the archive is no less
+   * required, the refusal just arrives one poll later.) It is the same `handleDiscoveryRequest`
+   * the standalone requester host mounts
    * (`native-production-deployment.ts`), over the same durable `<requesterStateDir>/discovery`
    * store, so the fleet and standalone serving planes cannot drift.
    */
