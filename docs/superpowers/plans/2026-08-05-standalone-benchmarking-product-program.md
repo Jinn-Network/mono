@@ -343,3 +343,38 @@ issued NEEDS CHANGES, then PASS after correction. Integration used a
 no-commit cherry-pick; its sole conflict retained the complete BP-22 design
 addendum followed by BP-30, and the staged current-lineage diff received a
 separate independent PASS before commit.
+
+| BP-31 | integrated | `a605e0bbc` | `2d71ed409` (worktree bench-bp31) | PASS (fresh independent non-author; full battery + production runtime + coordinator browser evidence) | `670124427` |
+
+BP-31 verification: Node 22.23.1; core immutable install/typecheck/build,
+62 files / 619 tests, generated parity check, packed ESM import plus Node
+22 synchronous `require`, and exact external TypeScript consumer; web
+immutable install/lint/typecheck, 4 files / 18 tests, production Next build;
+family package/source guards 13/13; catalog/architecture/ownership review
+battery 166 tests and generated architecture check; `git diff --check`.
+The web package has exactly one direct Jinn edge (the core public entry),
+while member-specific guards deny browser-side/deep/local/other-product
+imports, API routes, and duplicated semantics. The generated parity artifact
+now gives all 26 operations an explicit GUI disposition: 18 BP-31 action ids,
+five BP-32 run-control deferrals, and three BP-33 result/report/verify
+deferrals.
+
+BP-31 real-path evidence: the Server Action integration used the default
+real local venue to walk a temporary workspace through init, draft, bundled
+sample, two arms, sponsor grant/revoke, a solve-only two-cell rehearsal,
+quote, and gated lock. A separate production `next start` run proved the
+external public core entry loads at request time. The coordinator then used
+the in-app browser-control workflow against another fresh production server:
+the same human flow visibly produced the rehearsal disclosure, two cells,
+six quoted solve cells, a sealed locked state and Run digest. Reload at
+390x844 preserved the state with viewport width equal to document width and
+no console warnings/errors. The server was stopped and its temporary
+workspace moved to Trash for recoverable cleanup.
+
+BP-31 review evidence: the independent reviewer reran both package batteries,
+packed consumers, guards, architecture controls, and production route fetches
+and issued PASS with no blocking findings. Non-blocking presentation debt is
+owned by BP-33/M5: replace raw rich-result JSON with semantic views, give card
+titles heading semantics, automate browser regression, audit keyboard/focus/
+error states, and disable lifecycle-illegal controls where the read model can
+do so without recreating core rules.
