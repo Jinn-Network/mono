@@ -1589,9 +1589,9 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2941,
+      "discoveredFirstPartySurfaces": 2942,
       "generatedOutputSources": 1305,
-      "generatorSources": 603,
+      "generatorSources": 604,
       "marketplaceControl": 2,
       "requiredGates": 21,
       "staticControl": 6
@@ -10199,6 +10199,17 @@
           "@ritsukai"
         ],
         "path": "client/test/e2e/fixtures/native-fleet/launched-record.ts"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces",
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "client/test/e2e/fixtures/native-fleet/safe.ts"
       },
       {
         "categories": [

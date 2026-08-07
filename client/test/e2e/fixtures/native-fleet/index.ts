@@ -8,9 +8,12 @@
  *   - a launched-SolverNet record + posting entry (`launched-record.ts`)
  *   - the on-chain anchor submitter that turns a binding digest into a finalized fork tx
  *     (`anchor.ts`)
+ *   - a real 1-of-1 service Safe on the fork, so the settlement authority is a contract and not the
+ *     ceremony EOA (`safe.ts`, spec/2026-08-07 §2.4)
  */
 export * from './identity.js';
 export * from './trust-catalog.js';
 export * from './launched-record.js';
 export * from './config.js';
 export * from './anchor.js';
+export * from './safe.js';

@@ -66,6 +66,9 @@ describe('first-party Base Sepolia target inspection', () => {
         canonicalTaskCreated: expect.any(Function),
       },
       anchorClient: { lookupFinalizedAnchor: expect.any(Function) },
+      // §2.3c step 5: the deployment path opens the trust catalog with only `infrastructure.*`,
+      // so the Safe-ownership read has to be surfaced here or that path cannot supply it.
+      settlementOwnership: { isOwner: expect.any(Function) },
       records: {
         byLocation: expect.any(Function),
         byDigest: expect.any(Function),

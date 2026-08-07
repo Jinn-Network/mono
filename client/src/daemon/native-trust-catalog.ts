@@ -5,6 +5,7 @@ import {
   dssePreAuthEncoding,
   parseExactDsseEnvelope,
   recordDigest,
+  recoverEip191Address,
   validateKeyBinding,
   validateRevocation,
   verifyEnvelopeBinding,
@@ -225,6 +226,24 @@ export interface NativeFinalizedAnchorReadClient {
   } | null>;
 }
 
+/**
+ * The one on-chain read the settlement-authority association needs (spec/2026-08-07 §2.3c step 5):
+ * does the service Safe list the ceremony's EIP-191 signer as an owner. A REQUIRED input on
+ * `openNativeTrustCatalog`, deliberately — a Safe cannot sign, so without this read the association
+ * has no honest second link, and an optional input would let a construction site leave a silent
+ * runtime hole instead of failing to compile.
+ */
+export interface NativeSettlementOwnershipReadClient {
+  isOwner(safe: `0x${string}`, candidate: `0x${string}`): Promise<boolean>;
+}
+
+/** §2.3b's third ceremony resource: `did:pkh:eip155:84532:0x<EIP-55 Safe>`, authored by `didPkh`. */
+const SETTLEMENT_RESOURCE_PATTERN = /^did:pkh:eip155:84532:(0x[0-9a-fA-F]{40})$/u;
+
+function sameAddress(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 function nativeRolePurpose(role: NativeRoleIdentityRole): string {
   return `native:${role}`;
 }
@@ -235,6 +254,8 @@ export async function openNativeTrustCatalog(input: {
   readonly expectedPolicyGenesisDigest: `sha256:${string}`;
   /** Canonical/finalized chain reader supplied by the bounded infrastructure layer. */
   readonly anchorClient: NativeFinalizedAnchorReadClient;
+  /** Safe-ownership reader for §2.3c step 5. Required: every construction site supplies it. */
+  readonly settlementOwnershipClient: NativeSettlementOwnershipReadClient;
   readonly now?: Date;
 }): Promise<NativeTrustAuthority> {
   const metadata = await lstat(input.path).catch((cause) => {
@@ -408,7 +429,18 @@ export async function openNativeTrustCatalog(input: {
     },
     policy: policyFor,
     verifyRoleBinding: ({ role, ...rest }) => verified({ ...rest, purpose: nativeRolePurpose(role) }),
+    /**
+     * The settlement-authority association (spec/2026-08-07 §2.3c). The pre-amendment check
+     * compared the ceremony's `message.address` to the settlement address itself — unsatisfiable
+     * for a real operator, because a Safe is a contract and cannot produce the EIP-191 signature
+     * the ceremony leg requires (`parseBinding` refuses non-EOA ceremonies; the witness verifier is
+     * closed). It only ever passed because the e2e rig made the ceremony EOA and the "Safe" the
+     * same account. The honest chain of custody is two links, each independently verifiable:
+     * role key ← DSSE + EOA SIWE ceremony over [agent, key, safe] ← agent EOA ← Safe.isOwner ← Safe.
+     */
     async verifyOnchainAuthority(value) {
+      // 1. The unchanged pipeline: policy purpose, `settlements` family, DSSE + ceremony + §7.4a
+      //    consent chain, freshness.
       const result = await verified({
         key: value.key,
         agent: value.agent,
@@ -416,16 +448,66 @@ export async function openNativeTrustCatalog(input: {
         purpose: value.purpose,
         atTime: value.atTime,
       });
+      // 2. Resolve at `atTime`; ceremony evidence is mandatory for a settlement-scoped binding.
       const resolved = await bindingResolver.resolveBinding(
         { key: value.key, agent: value.agent },
         value.atTime,
       );
-      const ceremonyAddress = resolved?.ceremonyEvidence?.message.address;
-      if (ceremonyAddress === undefined || ceremonyAddress.toLowerCase() !== value.address.toLowerCase()) {
+      const ceremonyEvidence = resolved?.ceremonyEvidence;
+      if (ceremonyEvidence === undefined) {
         throw new NativeTrustCatalogError(
-          `settlement authority ${value.key} is not ceremony-bound to ${value.address}`,
+          `settlement authority ${value.key} carries no ceremony evidence`,
         );
       }
+      // 3. The ceremony must not lie about who signed it. `verified()` has already required the
+      //    recovered signer to equal the binding's VOUCHER; this requires it to equal the ceremony's
+      //    own declared `message.address`, which is what the third resource is signed alongside.
+      let signer: `0x${string}`;
+      try {
+        signer = recoverEip191Address(ceremonyEvidence.messageBytes, ceremonyEvidence.signature);
+      } catch (cause) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} ceremony signature is not recoverable: ${String(cause)}`,
+        );
+      }
+      if (!sameAddress(signer, ceremonyEvidence.message.address)) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} ceremony declares signer ${ceremonyEvidence.message.address} `
+          + `but was signed by ${signer}`,
+        );
+      }
+      // 4. The third declared resource names the settlement authority, inside the signed bytes.
+      const declared = ceremonyEvidence.message.resources[2];
+      if (declared === undefined) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} ceremony declares no settlement resource; a `
+          + `settlements-scoped binding must name its Safe as the third ceremony resource`,
+        );
+      }
+      const declaredSafe = SETTLEMENT_RESOURCE_PATTERN.exec(declared)?.[1];
+      if (declaredSafe === undefined || !sameAddress(declaredSafe, value.address)) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} ceremony declares settlement resource ${declared}, `
+          + `not did:pkh:eip155:84532:${value.address}`,
+        );
+      }
+      // 5. The one honestly chain-state-dependent link, read at verification time (matching the
+      //    recorded `ChainFactResolver.ownerOf` precedent, §10 open question c). A `false` and a
+      //    read failure both refuse — fail-closed, with distinct errors.
+      let owns: boolean;
+      try {
+        owns = await input.settlementOwnershipClient.isOwner(value.address, signer);
+      } catch (cause) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key} Safe-ownership read for ${value.address} failed: ${String(cause)}`,
+        );
+      }
+      if (!owns) {
+        throw new NativeTrustCatalogError(
+          `settlement authority ${value.key}: Safe ${value.address} does not own ceremony signer ${signer}`,
+        );
+      }
+      // 6.
       return result;
     },
     resolverFor({ family, purpose }) {

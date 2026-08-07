@@ -21,6 +21,12 @@
  *     production `createBaseSepoliaFinalizedAnchorClient`, and every native role identity
  *     (`openRoleIdentitySet`) proves its effective-time binding for BOTH operators. This is the
  *     single most novel, finality-gated leg of the native boot, and it runs here without any mock.
+ *   - The settlement-authority association (spec/2026-08-07 §2.3c) against a REAL 1-of-1 Safe
+ *     deployed on the fork and owned by the ceremony EOA — Safe != EOA, the shape every real
+ *     operator has. Step 5's `Safe.isOwner` is a live fork read through the production
+ *     `createViemBaseSepoliaReadClients(...).settlementOwnership`, and a Safe the ceremony never
+ *     declared is refused. Until PR2 this rig passed the ceremony EOA as the "Safe", which was the
+ *     only reason the pre-amendment address-equality check ever verified.
  *
  *  SEEDED-fixture / DEPLOY-TIME (documented, not asserted here — see the leg table this prints and
  *  the M7 PR body):
@@ -49,6 +55,7 @@ import { openRoleIdentitySet } from '../../src/daemon/role-identities.js';
 import { ANVIL_PRIVATE_KEYS } from './_daemon-harness-helpers.js';
 import { buildTwoOperatorNativeSetup } from './fixtures/native-fleet/config.js';
 import { createForkAnchorSubmitter } from './fixtures/native-fleet/anchor.js';
+import { deployForkServiceSafe } from './fixtures/native-fleet/safe.js';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -105,6 +112,20 @@ export async function runNativeFleetLoop(): Promise<void> {
     console.log('  ✓ LEG 0 PROVEN — assertNativeDeployment + forked BASE_SEPOLIA_TODAY contract code');
 
     // ── LEG 1: on-chain-anchored trust catalog + role-identity boot, REAL fork finality ──────
+    // A real 1-of-1 Safe FIRST: the settlement authority a real operator carries is a contract, so
+    // the ceremony's §2.3b third resource must name a contract here too (spec §2.4 un-conflation).
+    const serviceSafe = await deployForkServiceSafe({
+      rpcUrl: anvil.rpcUrl,
+      publicClient,
+      walletClient,
+      account,
+      privateKey: ANVIL_PRIVATE_KEYS[0]!,
+    });
+    if (serviceSafe.address.toLowerCase() === account.address.toLowerCase()) {
+      throw new Error('rig still conflates the ceremony EOA with the service Safe');
+    }
+    console.log(`  · deployed a real 1-of-1 Safe ${serviceSafe.address} owned by ceremony EOA ${account.address}`);
+
     const submitAnchor = createForkAnchorSubmitter({ rpcUrl: anvil.rpcUrl, publicClient, walletClient, account });
     const setup = await buildTwoOperatorNativeSetup({
       rootDir: root,
@@ -115,19 +136,19 @@ export async function runNativeFleetLoop(): Promise<void> {
       submitAnchor,
       aPublicBaseUrl: 'http://127.0.0.1:7401/a',
       bPublicBaseUrl: 'http://127.0.0.1:7402/b',
-      aSafeAddress: account.address,
+      aSafeAddress: serviceSafe.address,
     });
     console.log('  · authored trust catalog with an on-chain finalized anchor');
 
     const bootDate = new Date(setup.bootTime);
     const now = () => bootDate;
-    const anchorClient = createBaseSepoliaFinalizedAnchorClient(
-      createViemBaseSepoliaReadClients(publicClient).anchor,
-    );
+    const trustReads = createViemBaseSepoliaReadClients(publicClient);
+    const anchorClient = createBaseSepoliaFinalizedAnchorClient(trustReads.anchor);
     const trust = await openNativeTrustCatalog({
       path: setup.trustRootsPath,
       expectedPolicyGenesisDigest: setup.trustPolicyGenesisDigest,
       anchorClient,
+      settlementOwnershipClient: trustReads.settlementOwnership,
       now: bootDate,
     });
     console.log('  · openNativeTrustCatalog accepted the fork-anchored catalog (production anchor client)');
@@ -177,6 +198,57 @@ export async function runNativeFleetLoop(): Promise<void> {
     }
     console.log('  ✓ LEG 1 PROVEN — fork-finalized trust anchor + every native role identity boots (A + B)');
 
+    // ── LEG 1b: the settlement-authority association against a REAL Safe (spec §2.3c) ─────────
+    // Safe ≠ EOA here, which is the shape every real operator has and the shape the pre-amendment
+    // address-equality check could not satisfy. Step 5's `isOwner` is a real fork read.
+    const aSettlementKey = aSolver.get('solver-settlement').keyId;
+    const association = await trust.verifyOnchainAuthority({
+      key: aSettlementKey,
+      agent: setup.operatorA.agentIri,
+      address: serviceSafe.address,
+      atTime: setup.bootTime,
+      purpose: 'native:solver-settlement',
+    });
+    if (!association.bindingDigest.startsWith('sha256:')) {
+      throw new Error('settlement authority returned no binding digest');
+    }
+    // Fail-closed the other way: a Safe that does NOT own the ceremony signer is refused. Anvil
+    // account 1 deploys its own 1-of-1 Safe, which account 0 (the ceremony EOA) does not own.
+    const foreignAccount = privateKeyToAccount(ANVIL_PRIVATE_KEYS[1]!);
+    await anvil.setBalance(foreignAccount.address, 100n * 10n ** 18n);
+    const foreignSafe = await deployForkServiceSafe({
+      rpcUrl: anvil.rpcUrl,
+      publicClient,
+      walletClient: createWalletClient({ account: foreignAccount, chain: baseSepolia, transport: http(anvil.rpcUrl) }),
+      account: foreignAccount,
+      privateKey: ANVIL_PRIVATE_KEYS[1]!,
+    });
+    // The production read must DISCRIMINATE on the fork, not just answer true: the ceremony EOA owns
+    // its own Safe and does not own a stranger's. Asserted directly, because step 4 refuses the
+    // foreign-Safe probe below before step 5 is ever reached.
+    if (!(await trustReads.settlementOwnership.isOwner(serviceSafe.address, account.address))) {
+      throw new Error(`real isOwner said ${serviceSafe.address} does not own its own deployer`);
+    }
+    if (await trustReads.settlementOwnership.isOwner(foreignSafe.address, account.address)) {
+      throw new Error(`real isOwner said ${foreignSafe.address} owns a stranger EOA`);
+    }
+    let refused = false;
+    try {
+      await trust.verifyOnchainAuthority({
+        key: aSettlementKey,
+        agent: setup.operatorA.agentIri,
+        address: foreignSafe.address,
+        atTime: setup.bootTime,
+        purpose: 'native:solver-settlement',
+      });
+    } catch {
+      refused = true;
+    }
+    if (!refused) throw new Error('settlement authority admitted a Safe the ceremony never declared');
+    console.log(`  ✓ LEG 1b PROVEN — settlement authority binds Safe ${serviceSafe.address} `
+      + `via real isOwner(${account.address}) (true for its own Safe, false for a foreign one); `
+      + 'an undeclared Safe is refused');
+
     // ── LEG 2+: the marketplace + serving legs the fork can seed but not fully self-provide ───
     printLegTable();
     console.log('\n=== native-fleet rig: boot legs PROVEN on fork; loop legs are seeded/deploy-time (table above) ===');
@@ -190,6 +262,7 @@ function printLegTable(): void {
   const rows: Array<[string, string]> = [
     ['LEG 0  boot gate (assertNativeDeployment + forked code)', 'PROVEN-on-fork'],
     ['LEG 1  trust anchor + role-identity boot (A + B)', 'PROVEN-on-fork'],
+    ['LEG 1b settlement authority vs a real Safe (Safe != EOA)', 'PROVEN-on-fork'],
     ['LEG 2  requester source .well-known serving (M6)', 'SEEDED (deploy-time serves it live)'],
     ['LEG 3  operator Safe funded + mech-registered', 'DEPLOY-TIME (FleetBootstrapper on live Sepolia)'],
     ['LEG 4  requester post (M5e) — escrowed createTask', 'DEPLOY-TIME (needs funded Safe)'],
