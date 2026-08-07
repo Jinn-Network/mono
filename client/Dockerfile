@@ -44,6 +44,7 @@ COPY packages/task-execution/protocol/package.json packages/task-execution/proto
 COPY packages/task-execution/backend/package.json packages/task-execution/backend/yarn.lock packages/task-execution/backend/.yarnrc.yml ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/package.json packages/task-execution/profiles/yarn.lock packages/task-execution/profiles/.yarnrc.yml ./packages/task-execution/profiles/
 COPY packages/trust/core/package.json packages/trust/core/yarn.lock packages/trust/core/.yarnrc.yml ./packages/trust/core/
+COPY packages/trust/authoring/package.json packages/trust/authoring/yarn.lock packages/trust/authoring/.yarnrc.yml ./packages/trust/authoring/
 COPY packages/trust/resolve/package.json packages/trust/resolve/yarn.lock packages/trust/resolve/.yarnrc.yml ./packages/trust/resolve/
 COPY packages/environments/record/package.json packages/environments/record/yarn.lock packages/environments/record/.yarnrc.yml ./packages/environments/record/
 COPY packages/task-supply/admission/package.json packages/task-supply/admission/yarn.lock packages/task-supply/admission/.yarnrc.yml ./packages/task-supply/admission/
@@ -91,6 +92,7 @@ COPY packages/task-execution/protocol/tsconfig.json ./packages/task-execution/pr
 COPY packages/task-execution/backend/tsconfig.json ./packages/task-execution/backend/
 COPY packages/task-execution/profiles/tsconfig.json ./packages/task-execution/profiles/
 COPY packages/trust/core/tsconfig.json ./packages/trust/core/
+COPY packages/trust/authoring/tsconfig.json ./packages/trust/authoring/
 COPY packages/policy/identity/tsconfig.json packages/policy/identity/tsconfig.build.json ./packages/policy/identity/
 COPY packages/policy/identity/scripts/ ./packages/policy/identity/scripts/
 COPY packages/trust/resolve/tsconfig.json ./packages/trust/resolve/
@@ -123,6 +125,7 @@ COPY packages/task-execution/protocol/src/ ./packages/task-execution/protocol/sr
 COPY packages/task-execution/backend/src/ ./packages/task-execution/backend/src/
 COPY packages/task-execution/profiles/src/ ./packages/task-execution/profiles/src/
 COPY packages/trust/core/src/ ./packages/trust/core/src/
+COPY packages/trust/authoring/src/ ./packages/trust/authoring/src/
 COPY packages/policy/identity/src/ ./packages/policy/identity/src/
 COPY packages/trust/resolve/src/ ./packages/trust/resolve/src/
 COPY packages/environments/record/src/ ./packages/environments/record/src/
@@ -162,6 +165,7 @@ COPY packages/task-execution/backend-local/supervisor/native/jinn-attempt-shim.c
 COPY packages/task-execution/backend-local/supervisor/README.md ./packages/task-execution/backend-local/supervisor/README.md
 COPY packages/trust/core/fixtures/ ./packages/trust/core/fixtures/
 COPY packages/trust/core/README.md ./packages/trust/core/README.md
+COPY packages/trust/authoring/README.md ./packages/trust/authoring/README.md
 COPY packages/policy/identity/fixtures/ ./packages/policy/identity/fixtures/
 COPY packages/policy/identity/README.md ./packages/policy/identity/README.md
 COPY packages/environments/record/schemas/ ./packages/environments/record/schemas/
