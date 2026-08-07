@@ -499,3 +499,68 @@ product design, or program-ledger path changed. Origin-only watched drift is in
 repository-level workflow/control surfaces, including architecture-control and
 platform-verification selection. The proposed base refresh remains unapproved;
 the program continues on its current lineage.
+
+| BP-40 | integrated | `307737877` | `9bd5b9c4e` (worktree bench-bp40) | NEEDS CHANGES across three review/correction rounds -> PASS on fourth review (9 P1 classes + browser/spec correction) | `4893cb080` |
+
+BP-40 verification: Node 22.23.1; core typecheck and 64 files / 653
+tests under the unchanged two-worker/default-five-second policy, build,
+27-operation generated parity, and packed runtime smoke; web lint/typecheck,
+10 files / 39 tests, and production Next build; local-backend typecheck/build/
+pack smoke and 15 files (116 passed, one platform-specific skip); packed public
+TypeScript consumer; family inventory/source/packed controls 14/14; architecture
+generator 15/15; catalog/control/workflow 166/166; generated architecture and
+`git diff --check`. The real Server Action battery publishes and re-verifies
+both a natural complete two-arm/six-cell run and a drained cancelled run whose
+bundle retains `verification/cancel-requested.json` and all six terminal cells.
+
+BP-40 product evidence: `runPublish` is a gated local-only operation; no upload,
+hosting, deployment, or package publication exists. It shares workspace skeptic,
+Matrix assembly, Report method/trust, and claim-consistency seams with `runVerify`,
+then emits a deterministic allowlisted closure to a manifest-digest-addressed,
+no-overwrite target. Exact evaluation Task and Delivery bytes are now stored and
+journaled for future publishable runs; legacy runs missing mandatory evidence
+refuse honestly. The portable bundle carries canonical records/catalogs/assembly
+facts, public Report/evaluator SPKI trust, and five deterministic neutral assets,
+never private keys or the mutable workspace. A copied bundle passes both library
+and CLI verification after its entire source workspace is deleted. GUI publication
+and re-verification accept only a draft id; standalone arbitrary-path verification
+remains a documented library/CLI exclusion. Reload persists bundle identity,
+relative digest path, timestamp, and all six named checks.
+
+BP-40 hardening evidence: the verifier authenticates one `O_NOFOLLOW`/fstat/
+inode/nlink-checked byte snapshot and never reopens semantic paths. It reconstructs
+one exact bidirectional typed CAS graph across Tasks, EvaluationSpecs, admission
+receipts, solve/evaluation Submissions, solve/evaluation Deliveries, outputs, and
+verdicts; coordinate domains, consumption, role-set equality, SPKI-derived key
+identities, exact evaluator set, claim bytes, cancellation bytes, and every asset
+are independently enforced. Successful evaluation legs require full verdict
+bijection. Three legitimate `could-not-grade` shapes retain exact monotonic partial
+lineage and pass portable verification while nine tamper variants refuse. Manifest,
+Matrix, Report payload/envelope, claim, assembly, trust keys, evidence, assets,
+unsafe path, symlink, hardlink, special-file, missing/extra, substitution, and
+unreachable-record cases fail named checks. Publication uses the already-hardened
+finalization recovery guard for cross-process stale-owner ABA fencing, PID-start/
+tri-state liveness, token/inode/directory-exact release, concurrent convergence,
+crash-hook retry, and atomic RunState/draft finalization.
+
+BP-40 review evidence: the first review found incomplete attacker-authored graph
+closure, pathname TOCTOU/hardlinks, unbound trust identities, unchecked claim/
+asset facts, publication target/finalization races, browser path leakage, and stale
+spec text. The second found forged coordinate edges, unknown raw claim fields, and
+a weaker publication-lock ABA/PID protocol; publication was refactored to reuse
+the hardened guard. The third found that exact successful-lineage rules incorrectly
+rejected supported partial `could-not-grade` terminals. Every finding received a
+deterministic red-first regression, and the fourth independent read-only review
+issued PASS without edits. Earlier full-battery reds caused only by legacy forged
+published fixtures or fixed-path expectations are excluded; final fail-fast runs
+above are the evidence of record.
+
+The implementer completed all code and automated batteries but wedged twice in
+the in-app browser despite repeated report/stop requests. The master interrupted
+those turns, terminated the isolated servers, and performed final assembly on a
+fresh real published workspace: Report sealing, digest-addressed publication,
+portable re-verification, reload-persistent identity/path/six checks, portable
+command visibility, and `innerWidth = clientWidth = document/body scrollWidth =
+390`. No server error was emitted. Viewport/tab/server were reset/stopped and all
+three BP-40 browser workspaces were moved recoverably to Trash. No work was lost,
+and no unreviewed change was committed.
