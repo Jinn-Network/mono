@@ -433,3 +433,69 @@ saw a transient missing portal `dist/` import. It is excluded as invalid evidenc
 per the documented build-order rule; the clean serial platform battery above
 passed. Both coordinator browser workspaces were moved to Trash after their
 servers stopped, preserving recoverable cleanup.
+
+| BP-33 | integrated | `5ba7d3afe` | `4b7328f80` (worktree bench-bp33) | NEEDS CHANGES (4 blockers) -> PASS after correction and production-browser re-walk | `7f9348883` |
+
+BP-33 verification: Node 22.23.1; core immutable install/typecheck, standard
+62-file / 628-test suite with the unchanged five-second timeout, build,
+generated parity, and packed runtime smoke; web immutable install/lint/
+typecheck, 9 files / 37 tests, and production Next build with all seven routes;
+local-venue assembly typecheck/build/pack smoke and 15 files (116 passed, one
+platform-specific skip); packed external TypeScript consumer; package inventory
+5/5; per-member source boundaries 8/8; architecture generator 15/15 plus
+catalog/control 103/103; generated architecture check; `git diff --check`.
+The capability matrix now has all 26 operations shipped in the GUI, zero
+deferrals, and only the two legitimate non-operation exclusions.
+
+BP-33 product evidence: the results route is a semantic projection of the
+core operations library, never a second record reader or statistics engine. It
+shows sealed Matrix completeness, per-arm attrition/asymmetry, every frozen
+cell/verdict/dissent/cost/latency/failure/axis fact, explicit valid-versus-
+rejected verdict membership, venue honesty, the sealed Report's own arm results
+and conflicted cells, the separately stored claim facts/disclosures, and a
+dedicated verification result. Reload after reporting projects the exact
+stored Report/claim through `runResults` with verification honestly `not-run`;
+`runVerify` then exposes the three named matrix-rederivation, report-verification,
+and claim-consistency checks. All Server Actions return recursively plain,
+minimal receipts while rich evidence remains server-loaded.
+
+BP-33 review/correction evidence: the first fresh non-author review found four
+material defects: Report/claim objects with non-plain nested prototypes crashed
+the production Flight response after a durable report write; reported content
+widened a 390px document to 621px; the Report's own result/conflicted block was
+omitted; and frozen verdict validity membership was not presented. Each received
+a red-first regression, including class/null-prototype serialization controls,
+an intentionally inconsistent Report-versus-claim fixture, rejected-verdict
+membership, and hostile long disclosure/link containment. The same reviewer
+re-ran focused core/web/production gates and issued PASS. Coordinator production
+re-verification exercised refresh and verify against the preserved real local-
+venue workspace without a Flight error, displayed all three named checks, and
+measured `innerWidth`, client width, document scroll width, and body scroll width
+as exactly 390; the prior disclosure leak measured 308/308. Viewport, tab, and
+server were reset/stopped, and temporary evidence remained recoverably in Trash.
+
+One four-worker core invocation is excluded from evidence: 624/628 tests passed
+but four deterministic cases exceeded Vitest's default five-second bound under
+resource starvation, and the multiline shell lacked fail-fast semantics so its
+later build/pack output was also invalidated. The four cases passed 30/30 focused.
+The package worker cap was reduced from four to two without widening timeouts;
+the exact standard `yarn test` then passed 628/628 in 117.85 seconds under
+`set -e`, before build/parity/pack ran successfully. The original implementer
+completed code and batteries but wedged on final prose after repeated nudges;
+the master stopped that idle turn, preserved all work, and resumed it for the
+review correction pass. No unreviewed change was committed.
+
+**M3 COMPLETE** (2026-08-07): the production web app is a server-only client of
+the core public entrypoint across setup, real preview/quote/lock, durable launch/
+resume/status/cancel/collect, semantic results/report/verify, and sponsor
+authority controls. GUI parity is complete, production desktop/mobile browser
+paths are verified, and no API route, deep import, client-side core edge, or
+duplicated benchmark semantics exists.
+
+**Base drift record (wave boundary after M3):** the local
+`origin/integration/evidence-v1` ref moved to `103f434d9b`; the session lineage
+is 32 commits ahead / 47 behind. No upstream `packages/benchmark-product`,
+product design, or program-ledger path changed. Origin-only watched drift is in
+repository-level workflow/control surfaces, including architecture-control and
+platform-verification selection. The proposed base refresh remains unapproved;
+the program continues on its current lineage.
