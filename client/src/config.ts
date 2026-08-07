@@ -157,9 +157,16 @@ export const JinnConfigSchema = z.object({
   apiBindHost: z.string().optional(),
 
   /**
-   * The public record-discovery archive plane (headless design §6; one-swap M6). Off by
-   * default. When `enabled`, the native daemon serves its signed solver-records archive on a
-   * SEPARATE listener carrying no other route — never on the operator API. Serving from a
+   * The public record-discovery archive plane (headless design §6; one-swap M6, corrected by
+   * #2519). Off by default. When `enabled`, the native daemon serves EVERY signed source it owns
+   * — requester, solver, and evaluator when configured — on a SEPARATE listener carrying no other
+   * route, never on the operator API.
+   *
+   * One listener for all three, deliberately: every announcement's record locations are stamped
+   * against the single `publicBaseUrl`, so a peer resolves requester, solver and evaluator bytes
+   * from one origin. That is why this block carries no per-role port — see
+   * `daemon/native-fleet-serving-plane.ts`. `publicBaseUrl` must therefore address THIS listener.
+   * Serving from a
    * residential connection discloses this machine's IP address to every consumer; the
    * operator app says so where the opt-in lives, and the daemon logs it on bind. The default
    * host is loopback so an accidental enable stays local; widen it deliberately.

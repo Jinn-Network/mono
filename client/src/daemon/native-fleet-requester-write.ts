@@ -124,6 +124,22 @@ export interface FleetRequesterWriteInput {
 
 export interface FleetRequesterWrite {
   /**
+   * This requester's SERVING plane — the archive handler over its signed source, and the source
+   * identity that handler answers for (#2519 F1).
+   *
+   * All three standalone hosts mount their role's discovery handler; the fleet daemon mounted only
+   * the solver's, because this write port surfaced no handler for `main.ts` to mount. Without it a
+   * fleet operator serves no requester archive, so `buildNativeDiscoverySources` cannot resolve
+   * that source's introduction and BOTH operators fail native boot — the operator's own consumer
+   * included. It is the same `handleDiscoveryRequest` the standalone requester host mounts
+   * (`native-production-deployment.ts`), over the same durable `<requesterStateDir>/discovery`
+   * store, so the fleet and standalone serving planes cannot drift.
+   */
+  readonly discovery: {
+    readonly source: import('@jinn-network/record-discovery-protocol').SourceIdentity;
+    readonly handler: (request: Request) => Promise<Response>;
+  };
+  /**
    * Posts one target as this operator's own today-mode task and returns the on-chain task id. The
    * posting loop calls this AFTER its funds/freshness preflight for the target, so a broadcast here
    * has already cleared preflight. Idempotent per entry (see the module doc): a repeat returns the
@@ -246,6 +262,7 @@ export function buildFleetRequesterWrite(input: FleetRequesterWriteInput): Fleet
   }
 
   return {
+    discovery: { source: requester.source, handler: requester.handleDiscoveryRequest },
     adopt,
     async reconcile() {
       await requester.reconcile();

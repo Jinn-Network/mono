@@ -2532,9 +2532,16 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   // One-swap M5d (#2461): the native posting loop config. Built only in native mode; the daemon's
   // `buildPostingLoop` gate then makes it inert unless `posting[]` is non-empty.
   let postingConfig: import('./daemon/daemon.js').DaemonConfig['posting'] | undefined;
-  // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate
-  // listener over the native signed solver-records source; closed in `shutdown()` below.
+  // One-swap M6 (#2461): the opt-in public record-discovery archive plane. A separate listener
+  // over EVERY native signed source this operator owns — requester, solver and (when configured)
+  // evaluator (#2519); closed in `shutdown()` below.
   let publicArchiveServer: import('./api/public-archive-server.js').PublicArchiveServer | undefined;
+  // #2519 F1: the requester's serving plane, captured where the requester write path is built (it
+  // needs the composition's venue, so it cannot be built at the archive mount) and mounted with
+  // the other archives once every native leg exists.
+  let fleetRequesterDiscovery:
+    | import('./daemon/native-fleet-serving-plane.js').FleetServedSource
+    | undefined;
   if (config.network === 'testnet') {
     const { buildOperatorComposition } = await import('./daemon/composition-root.js');
     const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
@@ -2601,24 +2608,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
     adapter.setBroadcaster(composition.broadcaster);
     deliveryDeps.broadcaster = composition.broadcaster;
     reputationFeedback?.client.setBroadcaster(composition.broadcaster);
-
-    // One-swap M6 (#2461): expose the native signed archive on its OWN listener when the
-    // operator opts in (`publicArchive.enabled`; default off, loopback host). Structural
-    // exposure scoping — the listener carries only the archive handler, never an operator
-    // route (headless design §6). Legacy and default boots start nothing here.
-    if (COMPOSITION_MODE === 'native' && config.publicArchive.enabled) {
-      const publisher = composition.nativeSolutionPublisher;
-      if (publisher === undefined) {
-        console.warn('[archive] publicArchive.enabled but the native solution publisher is absent — not serving.');
-      } else {
-        const { startPublicArchiveServer } = await import('./api/public-archive-server.js');
-        publicArchiveServer = await startPublicArchiveServer({
-          handler: publisher.handler,
-          host: config.publicArchive.host,
-          port: config.publicArchive.port,
-        });
-      }
-    }
 
     // C8: the work loop's own config — `composition`/`store` are supplied by `Daemon` itself.
     // Finding E36 (ruled "build it"): `archive` is now fed from `composition.archive`, the real
@@ -2761,6 +2750,10 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
         });
         fleetPostTask = (target) => requesterWrite.postTarget(target);
         fleetReconcile = () => requesterWrite.reconcile();
+        // #2519 F1: the requester archive this operator must SERVE. Peers resolve the announced
+        // Submission bytes from it, and this operator's own discovery consumer resolves its
+        // `.well-known` introduction from it at boot.
+        fleetRequesterDiscovery = requesterWrite.discovery;
       }
       const postingRuntime = buildFleetPostingRuntime({
         config,
@@ -2781,6 +2774,46 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           warn: (message) => console.warn(message),
         },
       };
+    }
+
+    // One-swap M6 (#2461), corrected by #2519: expose the native signed archives on their OWN
+    // listener when the operator opts in (`publicArchive.enabled`; default off, loopback host).
+    // Structural exposure scoping — the listener carries only archive handlers, never an operator
+    // route (headless design §6). Legacy and default boots start nothing here.
+    //
+    // M6 mounted ONLY the solver publisher, which is what made a two-operator native boot
+    // impossible: nothing served this operator's requester (or evaluator) archive, so every
+    // `buildNativeDiscoverySources` — including this operator's own, over its own requester source
+    // — failed at the `.well-known` fetch. It runs HERE, after the evaluator and requester-write
+    // legs exist, because those two archives do not exist at composition time.
+    //
+    // ONE listener, not one port per role: every announcement's record locations are stamped
+    // against the single `config.publicBaseUrl`, so all three archives must answer on one origin.
+    // See `native-fleet-serving-plane.ts` for the full argument (and for the cold-start
+    // introduction that breaks the "publish before you can boot" deadlock).
+    if (COMPOSITION_MODE === 'native' && config.publicArchive.enabled) {
+      const { buildFleetArchiveHandler, fleetServedSource } =
+        await import('./daemon/native-fleet-serving-plane.js');
+      const served = [
+        ...(fleetRequesterDiscovery === undefined ? [] : [fleetRequesterDiscovery]),
+        ...(composition.nativeSolutionPublisher === undefined
+          ? []
+          : [fleetServedSource(composition.nativeSolutionPublisher)]),
+        ...(fleetEvaluator === undefined ? [] : [fleetServedSource(fleetEvaluator.composition.publisher)]),
+      ];
+      if (served.length === 0) {
+        console.warn('[archive] publicArchive.enabled but this native boot owns no signed source — not serving.');
+      } else {
+        const { startPublicArchiveServer } = await import('./api/public-archive-server.js');
+        publicArchiveServer = await startPublicArchiveServer({
+          handler: buildFleetArchiveHandler(served),
+          host: config.publicArchive.host,
+          port: config.publicArchive.port,
+        });
+        console.log(
+          `[archive] serving ${served.length} signed source(s): ${served.map(({ source }) => source.name).join(', ')}`,
+        );
+      }
     }
   }
 
