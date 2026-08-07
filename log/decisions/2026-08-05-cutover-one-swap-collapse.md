@@ -212,6 +212,24 @@ confirmation (governs decision 7's conditional flip); drain window and rollback 
 pin at deploy-PR open; Class A evidence sufficiency on each retirement-wave manifest
 flip.
 
+> **Addendum 2026-08-07 — gate dependency discovered unbuilt: identity provisioning.**
+> The decision-3 gate (G-loop, two operators natively posting/solving/evaluating on
+> testnet) depends on both operators holding native trust artifacts — role-identity
+> stores, a shared trust catalog, a finalized on-chain anchor. On 2026-08-07 this
+> provisioning path was found to exist **only as e2e fixtures**
+> (`client/test/e2e/fixtures/native-fleet/`): the native estate shipped the trust
+> verification layer complete and the production creation path unbuilt, so the real
+> operators (Base Sepolia services 72/75) have OLAS earning identities but no native
+> identities, and the gate cannot run. The operator ruled for the proper architecture
+> over an expedient script. The work is chartered by
+> [`spec/2026-08-07-native-identity-ceremony.md`](../../spec/2026-08-07-native-identity-ceremony.md)
+> (a `@jinn-network/trust-authoring` package, a `jinn ceremony` CLI, and one trust-layer
+> amendment: the settlement-authority association, whose shipped check compared the
+> ceremony's SIWE `message.address` to the service Safe — satisfiable only by the e2e
+> rig's EOA=="Safe" conflation, never by a real contract-account Safe). The gate's
+> precondition list gains "both operators provisioned via `jinn ceremony`"; nothing else
+> in this record changes.
+
 ## Provenance
 
 In-session ruling (Ritsu, 2026-08-05) following: the #2350 disposition and salvage; the
