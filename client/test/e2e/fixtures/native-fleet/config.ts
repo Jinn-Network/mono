@@ -108,7 +108,13 @@ export async function buildTwoOperatorNativeSetup(input: {
   readonly submitAnchor?: AnchorSubmitter;
   readonly aPublicBaseUrl: string;
   readonly bPublicBaseUrl: string;
-  /** A's service Safe (the launched-record launcher Safe + posting creator Safe). */
+  /**
+   * A's service Safe: the launched-record launcher Safe, the posting creator Safe, AND the §2.3b
+   * settlement authority declared as the third ceremony resource. It is a CONTRACT account — never
+   * the ceremony EOA. The rig un-conflation (spec §2.4) is exactly this: before the amendment the
+   * caller passed `ceremonyAccount.address` here, which is the only reason the old address-equality
+   * `verifyOnchainAuthority` ever passed.
+   */
   readonly aSafeAddress: `0x${string}`;
   readonly workKind?: string;
 }): Promise<TwoOperatorNativeSetup & { readonly mockAnchorClientTrust?: import('./trust-catalog.js').AuthoredTrustCatalog }> {
@@ -142,6 +148,7 @@ export async function buildTwoOperatorNativeSetup(input: {
     path: trustRootsPath,
     roleKeys,
     ceremonyAccount: input.ceremonyAccount,
+    settlementSafe: input.aSafeAddress,
     ...(input.submitAnchor === undefined ? {} : { submitAnchor: input.submitAnchor }),
   });
 

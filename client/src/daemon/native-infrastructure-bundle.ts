@@ -232,6 +232,13 @@ export interface NativeWriteSession {
 export interface NativeInfrastructurePrimitives {
   readonly inspectTarget: () => Promise<NativeTargetInspection>;
   readonly anchorClient: import('./native-trust-catalog.js').NativeFinalizedAnchorReadClient;
+  /**
+   * Safe-ownership read for the settlement-authority association (spec/2026-08-07 §2.3c step 5).
+   * Surfaced here because the parallel native-main deployment path opens the trust catalog with
+   * only `infrastructure.*` and holds no public client of its own. That path retires at stage 5
+   * per DR-2026-08-05; until then it must compile and run.
+   */
+  readonly settlementOwnership: import('./native-trust-catalog.js').NativeSettlementOwnershipReadClient;
   readonly authorityTime: NativeAuthorityTimePrimitives;
   readonly records: NativePublicRecordTransport;
   readonly requester?: NativeRequesterReadPrimitives;

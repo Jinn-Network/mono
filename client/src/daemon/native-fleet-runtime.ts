@@ -292,12 +292,14 @@ export async function buildFleetNativeRuntime(
     ipfsApiUrl,
     fetchImpl: input.fetchImpl ?? globalThis.fetch,
   });
+  // One `createViemBaseSepoliaReadClients` call supplies both trust-catalog chain reads: the
+  // finalized-anchor reader and the §2.3c step-5 Safe-ownership reader.
+  const trustReads = createViemBaseSepoliaReadClients(input.publicClient);
   const trust = await openNativeTrustCatalog({
     path: trustRootsPath,
     expectedPolicyGenesisDigest: trustPolicyGenesisDigest,
-    anchorClient: createBaseSepoliaFinalizedAnchorClient(
-      createViemBaseSepoliaReadClients(input.publicClient).anchor,
-    ),
+    anchorClient: createBaseSepoliaFinalizedAnchorClient(trustReads.anchor),
+    settlementOwnershipClient: trustReads.settlementOwnership,
   });
 
   // Two stores, one Agent, one merged set — see RoleIdentitySet.merge. Every key still proved its

@@ -77,6 +77,7 @@ function isInfrastructure(value: unknown): value is NativeInfrastructurePrimitiv
   const candidate = value as Partial<NativeInfrastructurePrimitives>;
   return typeof candidate.inspectTarget === 'function'
     && typeof candidate.anchorClient?.lookupFinalizedAnchor === 'function'
+    && typeof candidate.settlementOwnership?.isOwner === 'function'
     && typeof candidate.authorityTime?.latestFinalized === 'function'
     && typeof candidate.authorityTime?.verifyFinalized === 'function'
     && typeof candidate.records?.byLocation === 'function'
@@ -400,6 +401,7 @@ export async function createNativeProductionOperatorHost(
           path: config.trustRootsPath,
           expectedPolicyGenesisDigest: config.trustPolicyGenesisDigest as `sha256:${string}`,
           anchorClient: infrastructure.anchorClient,
+          settlementOwnershipClient: infrastructure.settlementOwnership,
         });
         host = await buildRoleHost({ config: input.config, infrastructure, trust, password, lease });
         await host.start();
@@ -495,6 +497,7 @@ export async function loadNativeRequesterCommandExecutor(input: { readonly passw
     path: native.trustRootsPath,
     expectedPolicyGenesisDigest: native.trustPolicyGenesisDigest as `sha256:${string}`,
     anchorClient: infrastructure.anchorClient,
+    settlementOwnershipClient: infrastructure.settlementOwnership,
   });
   const host = await buildRequesterHost({ config, infrastructure, trust, password: input.password, lease });
   scope.defer(host.close);

@@ -27,7 +27,10 @@ import {
   type SealedBindingEntry,
 } from '@jinn-network/trust-authoring';
 import { recordDigest } from '@jinn-network/trust-core';
-import type { NativeFinalizedAnchorReadClient } from '../../../../src/daemon/native-trust-catalog.js';
+import type {
+  NativeFinalizedAnchorReadClient,
+  NativeSettlementOwnershipReadClient,
+} from '../../../../src/daemon/native-trust-catalog.js';
 import type { FixtureRoleKey } from './identity.js';
 
 const CATALOG_CHAIN_ID = NATIVE_ANCHOR_CHAIN_ID;
@@ -72,16 +75,30 @@ export interface AuthoredTrustCatalog {
    * time can drift ahead of wall-clock; booting at `validFrom` keeps the window checks self-consistent.
    */
   readonly bootTime: string;
+  /** The settlement authority declared as every settlements-scoped ceremony's third resource. */
+  readonly settlementSafe: `0x${string}`;
   /** Present only when no `submitAnchor` was supplied — drive `openNativeTrustCatalog` with it. */
   readonly mockAnchorClient?: NativeFinalizedAnchorReadClient;
+  /**
+   * Present only on the mock path, and paired with `mockAnchorClient`. The fork rig uses the
+   * PRODUCTION reader against a real Safe instead; this stands in for the one chain read
+   * `verifyOnchainAuthority` step 5 makes, answering true exactly for the Safe the ceremonies
+   * declared and the EOA that actually signed them.
+   */
+  readonly mockSettlementOwnershipClient?: NativeSettlementOwnershipReadClient;
 }
 
 export async function authorNativeTrustCatalog(input: {
   readonly path: string;
   readonly roleKeys: readonly OwnedRoleKey[];
   readonly ceremonyAccount: CeremonyAccount;
-  /** A's service Safe — the settlement authority declared as the §2.3b third ceremony resource. */
-  readonly settlementSafe?: `0x${string}`;
+  /**
+   * The service Safe declared as the §2.3b third ceremony resource on every settlements-scoped
+   * binding. REQUIRED, and it must not be the ceremony EOA: defaulting it to
+   * `ceremonyAccount.address` was the conflation that made the pre-amendment address-equality
+   * check pass, and a default here would quietly reintroduce it.
+   */
+  readonly settlementSafe: `0x${string}`;
   readonly authority?: CatalogAuthoritySigner;
   readonly submitAnchor?: AnchorSubmitter;
   /** Binding/policy validFrom for the MOCK path; ignored on the fork path (anchor time wins). */
@@ -99,7 +116,13 @@ export async function authorNativeTrustCatalog(input: {
   const validFrom = locator.anchorTime ?? input.validFrom ?? '2026-08-01T00:00:00.000Z';
 
   const authority = input.authority ?? fixtureAuthorityFrom(input.roleKeys);
-  const settlementSafe = input.settlementSafe ?? (input.ceremonyAccount.address);
+  const { settlementSafe } = input;
+  if (settlementSafe.toLowerCase() === input.ceremonyAccount.address.toLowerCase()) {
+    throw new Error(
+      'native trust catalog fixture: settlementSafe equals the ceremony EOA. A Safe is a contract '
+      + 'account and cannot sign; conflating them is the defect spec/2026-08-07 §2.3c removed.',
+    );
+  }
 
   const bindings: SealedBindingEntry[] = [];
   for (const { key, agent } of input.roleKeys) {
@@ -148,8 +171,15 @@ export async function authorNativeTrustCatalog(input: {
     policyGenesisDigest,
     anchorDigest,
     bootTime: validFrom,
+    settlementSafe,
     ...(input.submitAnchor === undefined
       ? {
+          mockSettlementOwnershipClient: {
+            async isOwner(safe, candidate) {
+              return safe.toLowerCase() === settlementSafe.toLowerCase()
+                && candidate.toLowerCase() === input.ceremonyAccount.address.toLowerCase();
+            },
+          },
           mockAnchorClient: {
             async lookupFinalizedAnchor(lookup) {
               if (lookup.digest !== anchorDigest) return null;
