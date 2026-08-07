@@ -163,9 +163,9 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runCancel: { status: "shipped", action: "run.cancel" },
   runStatus: { status: "shipped", action: "run.status" },
   runCollect: { status: "shipped", action: "run.collect" },
-  runResults: { status: "deferred", deferredTo: "BP-33" },
-  runReport: { status: "deferred", deferredTo: "BP-33" },
-  runVerify: { status: "deferred", deferredTo: "BP-33" },
+  runResults: { status: "shipped", action: "run.results" },
+  runReport: { status: "shipped", action: "run.report" },
+  runVerify: { status: "shipped", action: "run.verify" },
 };
 
 /** The facade's own operation exports — every function export not in `EXCLUDED_FACADE_EXPORTS`.

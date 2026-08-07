@@ -22,6 +22,9 @@ import {
   runCollect,
   runPreview,
   runQuote,
+  runReport,
+  runResults,
+  runVerify,
   sampleInit,
   updateDraft,
 } from "@jinn-network/benchmark-product-core";
@@ -208,4 +211,66 @@ export async function runCollectAction(_previous: GuiActionState, formData: Form
     (context) => runCollect(context, { draftId }),
     { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`] },
   );
+}
+
+export async function runResultsAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(
+    (context) => {
+      const outcome = runResults(context, { draftId });
+      if (!outcome.ok) return outcome;
+      return {
+        ok: true as const,
+        result: {
+          draftId: outcome.result.draftId,
+          matrixSha256: outcome.result.matrixSha256,
+          runOutcome: outcome.result.runOutcome,
+          expected: outcome.result.completeness.expected,
+          judged: outcome.result.completeness.judged,
+          reportAvailable: outcome.result.report !== undefined,
+        },
+      };
+    },
+    { revalidate: [`/workspace/${draftId}/results`] },
+  );
+}
+
+export async function runReportAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(
+    async (context) => {
+      const outcome = await runReport(context, { draftId });
+      if (!outcome.ok) return outcome;
+      return {
+        ok: true as const,
+        result: {
+          draftId,
+          state: outcome.result.draft.state,
+          reportSha256: outcome.result.reportSha256,
+          reportEnvelopeSha256: outcome.result.reportEnvelopeSha256,
+          preregistered: outcome.result.preregistered,
+        },
+      };
+    },
+    { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`, `/workspace/${draftId}/results`] },
+  );
+}
+
+export async function runVerifyAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(async (context) => {
+    const outcome = await runVerify(context, { draftId });
+    if (!outcome.ok) return outcome;
+    return {
+      ok: true as const,
+      result: {
+        draftId,
+        checks: [...outcome.result.checks],
+        matrixSha256: outcome.result.matrixSha256,
+        ...(outcome.result.reportEnvelopeSha256 !== undefined
+          ? { reportEnvelopeSha256: outcome.result.reportEnvelopeSha256 }
+          : {}),
+      },
+    };
+  });
 }

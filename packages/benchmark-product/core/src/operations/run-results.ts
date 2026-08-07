@@ -19,19 +19,23 @@
  * "cancelled" — never for a judged or merely-delivered (unjudged) cell.
  */
 
+import { readFileSync } from "node:fs";
 import {
   parseBenchmark,
   parseMatrix,
+  parseReport,
   parseRun,
   type MatrixCell,
   type MatrixRecord,
   type Outcome,
+  type ReportRecord,
 } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { ClaimPackageSchema, type ClaimPackage } from "../report/claim.js";
 import { foldRunJournal, readRunJournalEntries, type CellJournalFold } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
-import { resultsArtifactPath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, resultsArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { readVerdictEnvelope } from "../venue/signing.js";
 import type { OperationContext } from "./context.js";
@@ -92,6 +96,20 @@ export interface VenueHonesty {
   };
 }
 
+/** A read-only projection of the exact Report and claim artifacts already sealed by
+ * `runReport`. `runResults` does not authenticate or recompute them; the explicit status keeps
+ * that distinction visible until the caller invokes `runVerify`. */
+export interface RunResultsReport {
+  readonly reportSha256: string;
+  readonly reportEnvelopeSha256: string;
+  readonly record: ReportRecord;
+  readonly claimPackage: ClaimPackage;
+  readonly verification: {
+    readonly status: "not-run";
+    readonly detail: string;
+  };
+}
+
 export interface RunResultsDocument {
   readonly draftId: string;
   readonly benchmarkSha256: string;
@@ -108,6 +126,9 @@ export interface RunResultsDocument {
    * the Report's own results and in the claim package. */
   readonly dissentCells: readonly string[];
   readonly venueHonesty: VenueHonesty;
+  /** Present only once the draft is durably `reported` (or later). Exact stored facts only: no
+   * scores, claims, signatures, or verification outcomes are derived by this read operation. */
+  readonly report?: RunResultsReport;
 }
 
 /** Plain-language statements of what a local, self-run venue does and does not prove (spec §7.1).
@@ -199,6 +220,60 @@ function dissentCellKeys(cells: readonly RunResultsCell[]): string[] {
     .map((cell) => cell.cellKey);
 }
 
+const REPORT_NOT_VERIFIED_DETAIL =
+  "Run verification to authenticate the sealed envelope and independently re-derive its Matrix, Report, and claim facts.";
+
+function readReportedProjection(
+  workspaceDir: string,
+  draftId: string,
+  runState: ReturnType<typeof requireRunState>,
+): RunResultsReport {
+  if (runState.reportSha256 === undefined || runState.reportEnvelopeSha256 === undefined) {
+    refuse(
+      "conflict",
+      `runs.${draftId}`,
+      `draft ${draftId} is reported but its RunState does not name both sealed Report payload and envelope digests`,
+    );
+  }
+
+  let record: ReportRecord;
+  try {
+    record = parseReport(getSealedBytes(workspaceDir, runState.reportSha256));
+    // This read does not authenticate the signature, but it does re-hash the envelope bytes so
+    // the projection never advertises a missing or digest-corrupt sealed object.
+    getSealedBytes(workspaceDir, runState.reportEnvelopeSha256);
+  } catch (cause) {
+    refuse(
+      "record-integrity",
+      `reports.${draftId}`,
+      `the sealed Report projection is not readable as exact stored records: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  }
+
+  let claimRaw: unknown;
+  try {
+    claimRaw = JSON.parse(readFileSync(claimPackageArtifactPath(workspaceDir, draftId), "utf8"));
+  } catch {
+    refuse("conflict", `claims.${draftId}`, `draft ${draftId} is reported but its stored claim package is not readable JSON`);
+  }
+  const parsedClaim = ClaimPackageSchema.safeParse(claimRaw);
+  if (!parsedClaim.success) {
+    refuse(
+      "record-integrity",
+      `claims.${draftId}`,
+      `draft ${draftId}'s stored claim package does not satisfy its public schema: ${parsedClaim.error.issues[0]?.message ?? "invalid"}`,
+    );
+  }
+
+  return {
+    reportSha256: runState.reportSha256,
+    reportEnvelopeSha256: runState.reportEnvelopeSha256,
+    record,
+    claimPackage: parsedClaim.data,
+    verification: { status: "not-run", detail: REPORT_NOT_VERIFIED_DETAIL },
+  };
+}
+
 export function runResults(
   context: OperationContext,
   input: { readonly draftId: string },
@@ -254,6 +329,9 @@ export function runResults(
           limits: LOCAL_VENUE_LIMITS,
           unverifiableAxisCounts: unverifiableAxisCounts(matrix.cells),
         },
+        ...(document.state === "reported" || document.state === "published-bundle"
+          ? { report: readReportedProjection(context.workspaceDir, input.draftId, runState) }
+          : {}),
       };
 
       atomicWriteFileSync(resultsArtifactPath(context.workspaceDir, input.draftId), JSON.stringify(results, null, 2));

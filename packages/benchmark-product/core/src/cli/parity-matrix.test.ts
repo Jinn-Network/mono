@@ -87,8 +87,17 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       action: "run.launch",
     });
     expect(gui.find((entry) => entry.operation === "runResults")?.gui).toEqual({
-      status: "deferred",
-      deferredTo: "BP-33",
+      status: "shipped",
+      action: "run.results",
     });
+    expect(gui.find((entry) => entry.operation === "runReport")?.gui).toEqual({
+      status: "shipped",
+      action: "run.report",
+    });
+    expect(gui.find((entry) => entry.operation === "runVerify")?.gui).toEqual({
+      status: "shipped",
+      action: "run.verify",
+    });
+    expect(gui.filter((entry) => entry.gui.status === "deferred")).toEqual([]);
   });
 });

@@ -304,7 +304,7 @@ test('web keeps the core edge server-only, has no API routes, and does not dupli
       /\b(?:const|let|var)\s+PRODUCT_BRANDING\b/,
       /\b(?:const|let|var)\s+GATED_OPERATIONS\b/,
       /\b(?:const|let|var)\s+ASSURANCE_PRESETS\b/,
-      /\bfunction\s+(?:runPreview|runQuote|runLock|runLaunch|runResume|runCancel|runStatus|runCollect|createDraft|updateDraft)\b/,
+      /\bfunction\s+(?:runPreview|runQuote|runLock|runLaunch|runResume|runCancel|runStatus|runCollect|runResults|runReport|runVerify|createDraft|updateDraft)\b/,
     ].some((pattern) => pattern.test(source)) ? [relative(root, file)] : [];
   });
   assert.deepEqual(duplicated, [], 'web duplicates core-owned product semantics');

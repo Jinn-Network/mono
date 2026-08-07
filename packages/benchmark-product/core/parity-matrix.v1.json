@@ -198,8 +198,8 @@
       "authorityGated": true,
       "description": "Produces the sealed Report and claim package from the closed run's Matrix (authority-gated).",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-33"
+        "status": "shipped",
+        "action": "run.report"
       }
     },
     {
@@ -208,8 +208,8 @@
       "authorityGated": false,
       "description": "Reads the sealed Matrix as a results document with venue-honesty disclosures.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-33"
+        "status": "shipped",
+        "action": "run.results"
       }
     },
     {
@@ -238,8 +238,8 @@
       "authorityGated": false,
       "description": "Independently re-derives the Matrix (and, once reported, the Report and claim package) from durable workspace state.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-33"
+        "status": "shipped",
+        "action": "run.verify"
       }
     },
     {

@@ -75,12 +75,12 @@ rendered with their retry guidance; unexpected exceptions are redacted to
 a generic invalid-invocation failure, and runtime-origin execution/venue
 details are replaced with safe typed retry guidance at the GUI boundary.
 
-The explicit M3 deferrals are limited to BP-33's result/report/verification
-controls (`results`, `report`, `verify`). The two pre-existing
+BP-33 completes M3 with the result/report/verification route and stable
+`run.results`, `run.report`, and `run.verify` Server Actions. The generated
+matrix now has zero deferred operation rows. The two pre-existing
 non-operation capability exclusions (`unverifiableAxisCounts`, `publish`)
-remain explicit in the generated matrix. Sections 3.1, 3.2, and 3.6 describe
-the currently rendered setup surface; §3.3 is now shipped and §§3.4–3.5 remain
-the target for BP-33.
+remain explicit: the former is a helper and the latter has no shipped
+operation. Sections 3.1–3.6 now describe the rendered M3 surface.
 
 ## 3. Domain model (four axes)
 
@@ -245,9 +245,14 @@ Covers the design spec §4.6 Results (Matrix) row.
 - **Actions** — results → `runResults` / `results`; verify → `runVerify` /
   `verify`; report → `runReport` / `report` (**gated**).
 
-BP-31 renders none of these controls. They are explicitly cataloged as
-deferred to BP-33 so the eventual surface remains a client of the existing
-result/report/verification operations.
+BP-33 renders this surface at `/workspace/[draftId]/results`, linked from
+both the draft and run monitor. The route calls the public `runResults`
+operation server-side and semantically renders its exact returned facts:
+summary cards, locally scrollable named tables, dissent and failure detail,
+axis verification, and local-venue honesty. It does not calculate a score,
+statistic, validity judgment, or replacement value. The result action
+refreshes this durable projection; report is visibly gated; verify has a
+dedicated live result/error region rather than a generic JSON dump.
 
 **Deferred, not renderable:** design spec §4.6 names exports (EvalLog,
 Croissant, static bundle) on this row, but no shipped operation produces
@@ -275,6 +280,16 @@ Covers the design spec §4.6 Report row. The **Claim package** sub-surface
   underlying Matrix is inspected and verified through those same calls,
   not a second implementation); `publish` **reserved** — see below.
 
+Once a draft is durably reported, the public `runResults` document adds an
+exact stored Report/claim projection. It re-reads the sealed payload and
+envelope by digest and validates the claim schema, but explicitly reports
+verification as `not-run`; only `runVerify` authenticates the signature and
+independently re-derives the Matrix, Report, and claim consistency. The
+report action revalidates this route, so a reload shows the same durable
+Report and claim facts. Named verification checks and digests are rendered
+on success; record-integrity or recomputation divergence is a prominent
+typed error and never a passing status.
+
 **Reserved, not renderable:** `publish` is a named lifecycle transition
 (design spec §4.1) and a gated operation, but the parity matrix's
 `exclusions` list confirms no operation ships it yet. The GUI must not
@@ -283,7 +298,9 @@ render a publish control until an operation exists for it to call.
 #### 3.5.1 Claim package (sub-surface of the report)
 
 - **State** — bundle version; digest links to the report, matrix, run, and
-  benchmark records; scope statement.
+  benchmark records; scope statement including each arm's stored pinning;
+  the claim's own completeness, attrition, assurance, disclosures,
+  limitations, venue-honesty, and rehearsal blocks.
 - **State messages** — none — an informational asset; it carries no
   warnings of its own beyond what the Report surface already shows.
 - **Collections** — derived assets (headline, snippet, machine-readable
@@ -325,11 +342,10 @@ it contains no local copy of product identity or other domain semantics.
 The brand-neutrality test proves the web source remains free of the Jinn
 lexicon, sigils, palette, and design-system imports.
 
-The attribution line (`PRODUCT_BRANDING.attribution`) remains deliberately
-**absent from the current routes**. Design spec §9 permits it only in about and
-verification contexts, never in the product name, primary navigation,
-category explanation, or hero copy — and BP-31 has no about or verification
-screen for it to live in. BP-33 renders it in the verification surface.
+The attribution line (`PRODUCT_BRANDING.attribution`) appears only inside the
+results route's verification landmark. Design spec §9 permits it there (and
+in an eventual about surface), never in the product name, primary navigation,
+category explanation, hero copy, Matrix summary, Report, or claim sections.
 
 This product's brand posture is a deliberate departure from root
 `CLAUDE.md`'s Jinn design-system requirements (palette, sigils, lexicon,

@@ -7,6 +7,7 @@ import {
   inspectDraft,
   listDrafts,
   runStatus,
+  runResults,
   type RunStatusResult,
 } from "@jinn-network/benchmark-product-core";
 import { projectProductErrorForGui } from "./gui-error";
@@ -80,6 +81,22 @@ export function loadRunView(draftId: string) {
       status: status.ok
         ? { ...status, result: projectRunStatusForGui(status.result) }
         : { ...status, error: projectProductErrorForGui(status.error) },
+    };
+  } catch (cause) {
+    return { ok: false as const, detail: safeFailureDetail(cause) };
+  }
+}
+
+export function loadResultsView(draftId: string) {
+  try {
+    const context = createProductOperationContext();
+    const results = runResults(context, { draftId });
+    return {
+      ok: true as const,
+      draft: getDraft(context, { draftId }),
+      results: results.ok
+        ? results
+        : { ...results, error: projectProductErrorForGui(results.error) },
     };
   } catch (cause) {
     return { ok: false as const, detail: safeFailureDetail(cause) };

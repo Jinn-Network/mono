@@ -21,7 +21,7 @@ export default async function RunMonitorPage({ params }: { params: Promise<{ dra
   return <main className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6">
     <header className="flex flex-wrap items-center justify-between gap-4">
       <div><p className="text-sm text-muted-foreground">Draft {draftId}</p><h1 className="text-3xl font-semibold">Durable run monitor</h1></div>
-      <div className="flex flex-wrap gap-2"><RunMonitorRefresh poll={poll} /><Button asChild variant="outline"><Link href={`/workspace/${draftId}`}>Draft</Link></Button></div>
+      <div className="flex flex-wrap gap-2"><RunMonitorRefresh poll={poll} /><Button asChild variant="outline"><Link href={`/workspace/${draftId}/results`}>Results</Link></Button><Button asChild variant="outline"><Link href={`/workspace/${draftId}`}>Draft</Link></Button></div>
     </header>
     {!view.ok ? <p role="alert">{view.detail}</p> : !view.status.ok ? (
       <Card><CardHeader><CardTitle>Run unavailable</CardTitle></CardHeader><CardContent role="alert"><p className="font-semibold">{view.status.error.code}</p><p>{view.status.error.detail}</p></CardContent></Card>

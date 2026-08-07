@@ -10,10 +10,11 @@ interface ActionFormProps {
   readonly gated?: boolean;
   readonly disabled?: boolean;
   readonly notice?: string;
+  readonly successMessage?: string;
   readonly children?: React.ReactNode;
 }
 
-export function ActionForm({ action, submitLabel, gated = false, disabled = false, notice, children }: ActionFormProps) {
+export function ActionForm({ action, submitLabel, gated = false, disabled = false, notice, successMessage, children }: ActionFormProps) {
   const [state, formAction, pending] = useActionState(action, IDLE_ACTION_STATE);
   return (
     <form action={formAction} className="flex min-w-0 flex-col gap-3">
@@ -32,7 +33,9 @@ export function ActionForm({ action, submitLabel, gated = false, disabled = fals
           </div>
         ) : null}
         {state.status === "success" ? (
-          <pre className="max-h-72 max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">{JSON.stringify(state.result, null, 2)}</pre>
+          successMessage !== undefined
+            ? <p className="rounded-md border p-3 text-sm">{successMessage}</p>
+            : <pre className="max-h-72 max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">{JSON.stringify(state.result, null, 2)}</pre>
         ) : null}
         {state.status === "scheduled" ? (
           <p className="rounded-md border p-3 text-sm">{state.result.operation} scheduled. Open or refresh the run monitor for durable progress.</p>

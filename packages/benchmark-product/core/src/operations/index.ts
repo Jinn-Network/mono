@@ -90,6 +90,7 @@ export {
   unverifiableAxisCounts,
   type RunResultsCell,
   type RunResultsDocument,
+  type RunResultsReport,
   type RunResultsVerdict,
   type VenueHonesty,
 } from "./run-results.js";

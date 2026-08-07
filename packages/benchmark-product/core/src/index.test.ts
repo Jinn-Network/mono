@@ -13,6 +13,8 @@ import type {
   RunPreviewResult,
   RunDriverStatus,
   RunLaunchDeps,
+  RunResultsDocument,
+  RunResultsReport,
   RunStatusResult,
 } from "./index.js";
 
@@ -28,6 +30,8 @@ type PublicPreviewAndQuoteTypes = [
   RunDriverStatus,
   RunLaunchDeps,
   RunStatusResult,
+  RunResultsDocument,
+  RunResultsReport,
 ];
 
 const publicTypesCompile: PublicPreviewAndQuoteTypes | undefined = undefined;

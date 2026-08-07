@@ -193,6 +193,7 @@ try {
   LOCAL_VENUE_LIMITS,
   PRODUCT_BRANDING,
   runPreview,
+  runResults,
 } from '@jinn-network/benchmark-product-core';
 import type {
   PreviewArtifact,
@@ -205,6 +206,8 @@ import type {
   RunPreviewResult,
   RunDriverStatus,
   RunLaunchDeps,
+  RunResultsDocument,
+  RunResultsReport,
   RunStatusResult,
 } from '@jinn-network/benchmark-product-core';
 
@@ -223,14 +226,21 @@ export type PublicPreviewAndQuoteTypes = [
   RunDriverStatus,
   RunLaunchDeps,
   RunStatusResult,
+  RunResultsDocument,
+  RunResultsReport,
 ];
 export const publicRunPreview: typeof runPreview = runPreview;
+export const publicRunResults: typeof runResults = runResults;
 export const localVenueLimits: readonly string[] = LOCAL_VENUE_LIMITS;
 export const productName: string = PRODUCT_BRANDING.displayName;
 const guiInitCapability = GUI_CAPABILITY_CATALOG.initWorkspace;
 export const guiInitOperation: string = guiInitCapability.status === 'shipped'
   ? guiInitCapability.action
   : guiInitCapability.deferredTo;
+const guiResultsCapability = GUI_CAPABILITY_CATALOG.runResults;
+export const guiResultsOperation: string = guiResultsCapability.status === 'shipped'
+  ? guiResultsCapability.action
+  : guiResultsCapability.deferredTo;
 `,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({

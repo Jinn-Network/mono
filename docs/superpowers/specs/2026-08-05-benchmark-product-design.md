@@ -933,6 +933,49 @@ reopened):**
   forms and terminal JSON output shrink, wrap, or scroll inside their grid
   cell so the monitor remains within a 390 px document viewport.
 
+**Addendum — 2026-08-07, packet BP-33 (M3 result, report, claim, and
+verification surface; no §4/§5/§7/§8 semantics reopened):**
+
+- **M3 GUI parity complete.** The final three dispositions now map to stable
+  Server Actions (`run.results`, `run.report`, `run.verify`). The generated
+  matrix has no deferred operation rows. Its two exclusions remain explicit:
+  `unverifiableAxisCounts` is a helper rather than an operation, and `publish`
+  is reserved until an operation ships. No EvalLog, Croissant, static-bundle,
+  or publish control is rendered ahead of M4.
+- **Core-owned reload projection.** `runResults` remains the one result read
+  authority and now adds an optional reported projection after the durable
+  `reported` transition. It re-reads the exact sealed Report payload and
+  envelope by digest, validates the stored claim package, and returns those
+  facts verbatim. It performs no scoring, claim derivation, signature check,
+  or recomputation and therefore labels verification honestly as `not-run`;
+  the separate `runVerify` operation remains the only skeptic path. This
+  additive projection is exported through source and packed public entries.
+- **Semantic human surface.** `/workspace/[draftId]/results`, linked from the
+  draft and durable run monitor, renders Matrix completeness, attrition and
+  asymmetry, every frozen cell outcome/verdict/dissent/cost/latency/failure,
+  axis visibility, and local-venue limits. After report it renders the sealed
+  Report, exact method/preregistration/disclosures/limitations, and every
+  stored claim-package block (scope/pinning, record links, headline,
+  completeness, attrition, conflicts, assurance, disclosures, rehearsal,
+  venue honesty, and verification instructions). Wide tables scroll locally
+  at narrow widths; headings, captions, live regions, and typed fail-loud
+  errors preserve the accessibility contract. Rich result JSON is not used
+  on this flow.
+- **Verification and trust presentation.** Report is visibly gated and is
+  deliberately non-idempotent. Its action revalidates the current result
+  route so durable Report/claim facts survive and appear after reload.
+  `runVerify` renders its named checks and exact digests on success; a typed
+  record-integrity or recomputation divergence remains prominent and never
+  becomes a passing state. BP-32's browser-safe projection for arbitrary
+  runtime diagnostics remains unchanged. `PRODUCT_BRANDING.attribution`
+  appears only in the verification landmark.
+- **Real composition proof.** Server-Action integration drives the default
+  real local venue through init, draft/sample/two arms, quote, lock, launch,
+  durable status/resume, collect, results, gated report, result reload, and
+  all three verification checks. Returned Matrix, Report, claim, and check
+  facts are the public core results consumed by the route; the web does not
+  read workspace files or import a second implementation.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

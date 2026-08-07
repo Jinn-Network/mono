@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { parseCellKey } from "@jinn-network/benchmarking-records";
+import { parseCellKey, parseReport } from "@jinn-network/benchmarking-records";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
@@ -11,8 +11,8 @@ import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { appendRunJournalEntry, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { resultsArtifactPath, runJournalPath } from "../workspace/layout.js";
-import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { claimPackageArtifactPath, resultsArtifactPath, runJournalPath } from "../workspace/layout.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, loadOrCreateVerdictSigningKey } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
@@ -266,17 +266,63 @@ describe("runResults — full document", () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
 
-    for (const laterState of ["reported", "published-bundle"] as const) {
-      // A later packet would drive this transition; this test only proves run.results does not
-      // gate on "closed" exactly, since the Matrix it reads is immutable once sealed.
-      const document = JSON.parse(readFileSync(join(workspaceDir, "drafts", "draft-1.json"), "utf8")) as { state: string };
-      atomicWriteFileSync(
-        join(workspaceDir, "drafts", "draft-1.json"),
-        JSON.stringify({ ...document, state: laterState }, null, 2),
-      );
-      const outcome = runResults(contextFor(clock), { draftId: "draft-1" });
-      expect(outcome.ok, laterState).toBe(true);
-    }
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok).toBe(true);
+    const reportedResults = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(reportedResults.ok, "reported").toBe(true);
+
+    // M4 owns the real publish transition; this narrow state fixture proves the immutable
+    // Matrix + already-stored Report projection remain readable after that later transition.
+    const document = JSON.parse(readFileSync(join(workspaceDir, "drafts", "draft-1.json"), "utf8")) as { state: string };
+    atomicWriteFileSync(
+      join(workspaceDir, "drafts", "draft-1.json"),
+      JSON.stringify({ ...document, state: "published-bundle" }, null, 2),
+    );
+    const publishedResults = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(publishedResults.ok, "published-bundle").toBe(true);
+  }, 30_000);
+
+  test("reloads the exact sealed Report and stored claim package after reporting without recomputing them", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+
+    const beforeReport = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(beforeReport.ok).toBe(true);
+    if (!beforeReport.ok) return;
+    expect(beforeReport.result.report).toBeUndefined();
+
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+
+    const reloaded = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(reloaded.ok, JSON.stringify(reloaded)).toBe(true);
+    if (!reloaded.ok) return;
+    expect(reloaded.result.report).toEqual({
+      reportSha256: reported.result.reportSha256,
+      reportEnvelopeSha256: reported.result.reportEnvelopeSha256,
+      record: parseReport(getSealedBytes(workspaceDir, reported.result.reportSha256)),
+      claimPackage: reported.result.claimPackage,
+      verification: {
+        status: "not-run",
+        detail: "Run verification to authenticate the sealed envelope and independently re-derive its Matrix, Report, and claim facts.",
+      },
+    });
+
+    expect(JSON.parse(readFileSync(resultsArtifactPath(workspaceDir, "draft-1"), "utf8"))).toEqual(reloaded.result);
+  }, 30_000);
+
+  test("fails closed when a reported draft's stored claim package no longer satisfies its schema", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok).toBe(true);
+
+    atomicWriteFileSync(claimPackageArtifactPath(workspaceDir, "draft-1"), JSON.stringify({ claimSchema: "wrong" }));
+    const reloaded = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(reloaded.ok).toBe(false);
+    if (reloaded.ok) return;
+    expect(reloaded.error).toMatchObject({ code: "record-integrity" });
   }, 30_000);
 });
 

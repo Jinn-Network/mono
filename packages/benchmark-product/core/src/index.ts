@@ -141,6 +141,7 @@ export type {
   RunReportResult,
   RunResultsCell,
   RunResultsDocument,
+  RunResultsReport,
   RunResultsVerdict,
   RunResumeInput,
   RunResumeResult,

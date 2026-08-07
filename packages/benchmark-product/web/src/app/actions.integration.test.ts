@@ -14,6 +14,7 @@ import {
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
+import { loadResultsView } from "@/lib/server/view-models";
 
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -31,6 +32,20 @@ function form(fields: Readonly<Record<string, string>> = {}): FormData {
   const data = new FormData();
   for (const [name, value] of Object.entries(fields)) data.set(name, value);
   return data;
+}
+
+function expectRecursivelyPlain(value: unknown, path = "action result"): void {
+  if (value === null || ["string", "number", "boolean", "undefined"].includes(typeof value)) return;
+  if (Array.isArray(value)) {
+    expect(Object.getPrototypeOf(value), path).toBe(Array.prototype);
+    value.forEach((entry, index) => expectRecursivelyPlain(entry, `${path}[${index}]`));
+    return;
+  }
+  expect(typeof value, path).toBe("object");
+  expect(Object.getPrototypeOf(value), `${path} prototype`).toBe(Object.prototype);
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    expectRecursivelyPlain(entry, `${path}.${key}`);
+  }
 }
 
 async function invoke(action: keyof typeof GUI_SERVER_ACTIONS, fields: Readonly<Record<string, string>> = {}) {
@@ -79,6 +94,13 @@ async function waitForDurableStatus(
 }
 
 describe.sequential("server action layer against a real workspace", () => {
+  test("recursive plain-value assertion rejects nested class and null-prototype values", () => {
+    class NonPlainReceipt {}
+    expect(() => expectRecursivelyPlain({ nested: [new NonPlainReceipt()] })).toThrow();
+    expect(() => expectRecursivelyPlain({ nested: Object.create(null) })).toThrow();
+    expect(() => expectRecursivelyPlain({ nested: [{ digest: "a".repeat(64) }] })).not.toThrow();
+  });
+
   test("a post-ownership delayed failure crosses the response boundary through Next after()", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "bp32-after-failure-"));
     workspaces.push(workspace);
@@ -325,7 +347,7 @@ describe.sequential("server action layer against a real workspace", () => {
     240_000,
   );
 
-  test("natural launch, durable status, resume, and collect use the public core operations", async () => {
+  test("natural launch through results, report reload, and verification uses the public core operations", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "bp32-real-complete-"));
     workspaces.push(workspace);
     process.env[WORKSPACE_ENV] = workspace;
@@ -346,5 +368,47 @@ describe.sequential("server action layer against a real workspace", () => {
     await Promise.all(afterState.tasks.splice(0));
     const collected = await invoke("run.collect", { draftId: "natural-real" });
     expect(collected).toMatchObject({ status: "success", result: { draft: { state: "closed" } } });
+
+    const results = await invoke("run.results", { draftId: "natural-real" });
+    expectRecursivelyPlain(results);
+    expect(results).toMatchObject({
+      status: "success",
+      result: { draftId: "natural-real", runOutcome: "complete", expected: 6, judged: 6 },
+    });
+    expect(JSON.stringify(results)).not.toContain("cells");
+    const reported = await invoke("run.report", { draftId: "natural-real" });
+    expectRecursivelyPlain(reported);
+    expect(reported).toMatchObject({
+      status: "success",
+      result: { draftId: "natural-real", state: "reported", preregistered: true },
+    });
+    expect(JSON.stringify(reported)).not.toContain("claimPackage");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/workspace/natural-real/results");
+    const reloaded = await invoke("run.results", { draftId: "natural-real" });
+    expect(reloaded).toMatchObject({
+      status: "success",
+      result: { draftId: "natural-real", runOutcome: "complete", expected: 6, judged: 6 },
+    });
+    const reloadedView = loadResultsView("natural-real");
+    expect(reloadedView).toMatchObject({
+      ok: true,
+      results: {
+        ok: true,
+        result: {
+          report: {
+            verification: { status: "not-run" },
+            claimPackage: { scope: { draftId: "natural-real" }, completeness: { expected: 6, judged: 6 } },
+          },
+        },
+      },
+    });
+    const verified = await invoke("run.verify", { draftId: "natural-real" });
+    expectRecursivelyPlain(verified);
+    expect(verified).toMatchObject({
+      status: "success",
+      result: {
+        checks: ["matrix-rederivation", "report-verification", "claim-consistency"],
+      },
+    });
   }, 240_000);
 });

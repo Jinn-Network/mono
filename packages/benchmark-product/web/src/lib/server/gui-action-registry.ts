@@ -23,6 +23,9 @@ import {
   runCollectAction,
   runPreviewAction,
   runQuoteAction,
+  runReportAction,
+  runResultsAction,
+  runVerifyAction,
   workspaceInitAction,
 } from "@/app/actions";
 
@@ -50,4 +53,7 @@ export const GUI_SERVER_ACTIONS = {
   "run.cancel": runCancelAction,
   "run.status": runStatusAction,
   "run.collect": runCollectAction,
+  "run.results": runResultsAction,
+  "run.report": runReportAction,
+  "run.verify": runVerifyAction,
 } as const;

@@ -13,20 +13,14 @@ describe("generated library / CLI / GUI parity", () => {
     for (const [operation, capability] of Object.entries(GUI_CAPABILITY_CATALOG)) {
       if (capability.status === "shipped") {
         expect(GUI_SERVER_ACTIONS, `${operation} maps to a missing rendered server action`).toHaveProperty(capability.action);
-      } else {
-        expect(["BP-33"], `${operation} has an unowned GUI deferral`).toContain(capability.deferredTo);
-      }
+      } else expect.fail(`${operation} is still deferred to ${capability.deferredTo}`);
     }
   });
 
-  test("only BP-33 result/report/verify operations remain deferred", () => {
+  test("no shipped operation remains deferred after BP-33", () => {
     const deferred = Object.entries(GUI_CAPABILITY_CATALOG)
       .filter(([, capability]) => capability.status === "deferred")
       .map(([operation, capability]) => [operation, capability.status === "deferred" ? capability.deferredTo : ""]);
-    expect(deferred).toEqual([
-      ["runResults", "BP-33"],
-      ["runReport", "BP-33"],
-      ["runVerify", "BP-33"],
-    ]);
+    expect(deferred).toEqual([]);
   });
 });

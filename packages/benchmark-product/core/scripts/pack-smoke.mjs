@@ -101,6 +101,9 @@ import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBe
 const require = createRequire(import.meta.url);
 const requiredEntry = require("@jinn-network/benchmark-product-core");
 if (typeof requiredEntry.runPreview !== "function") throw new Error("packed require entry lacks runPreview");
+for (const name of ["runResults", "runReport", "runVerify"]) {
+  if (typeof requiredEntry[name] !== "function") throw new Error("packed require entry lacks " + name);
+}
 if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName) {
   throw new Error("packed require/import branding entries diverged");
 }
