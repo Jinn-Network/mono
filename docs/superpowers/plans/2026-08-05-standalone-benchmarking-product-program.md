@@ -113,7 +113,12 @@ Packet IDs `BP-xy` (x = milestone, y = ordinal). Shapes per handbook. Every pack
 | BP-14 | test | CLI e2e walking skeleton: full lifecycle through CLI verbs with `--json`; one REAL 2-arm run (real launcher) captured as evidence | BP-10..13 | Scripted e2e passes; a real run's artifacts recorded in ledger; no GUI required anywhere |
 
 ### M2 — method depth
-Previews (disclosed rehearsal), honest quotes (run-size/cost/coverage/caps via `quoteRun` + venue facts), assurance presets complete, cancellation + infra-failure accounting surfaced, dissent retention. Packets BP-20..BP-24 defined at the M2 boundary.
+
+| ID | Shape | Objective | Depends | Acceptance (binary) |
+|---|---|---|---|---|
+| BP-20 | feat | Disclosed real-venue rehearsal previews + honest quote presentation (run size, coverage/refusal, caps, rehearsal-sourced wall time) | BP-14 | Preview cannot mutate official state; quote facts come from `quoteRun` + venue capabilities; preview disclosure reaches Report/claim; package battery green |
+| BP-21 | feat | Complete all four assurance presets, multi-evaluator execution, dissent retention, and honest local-venue independence disclosure | BP-20 | All presets run on the real local venue; panel/strict reduction is preregistered; dissent/conflict survives Matrix/results/report/claim; only signature-verified agent-distinctness is claimed |
+| BP-22 | feat | Durable typed cancellation + infrastructure/task-failure accounting | BP-21 | Real nonterminal subprocess cancellation reaches the backend terminal boundary; every expected cell is accounted; cancel is gated/idempotent/crash-resumable; collect/cancel serialization and failure-denominator laws are test-proven; CLI/public parity green |
 
 ### M3 — human surface
 `packages/benchmark-product/web` (Next.js + shadcn per CLAUDE.md frontend rules, incl. four-axis app spec alongside source), GUI as client of the operations library, parity matrix generated + tested. BP-30..BP-3x at boundary.
@@ -266,3 +271,44 @@ report/claim; minVerdicts engine gap closed; pre-existing fold bug
 (eval legs clobbering solve submissionSha256) fixed via journal leg
 field. Pre-existing generate-architecture --check drift confirmed
 at base via stash test (upstream origin drift, refresh pending).
+
+| BP-22 | integrated | `bc0868d62` | `971680579` (worktree bench-bp22) | NEEDS CHANGES across repeated independent review/correction rounds -> PASS (11 material concurrency, durability, integrity, and typed-error defects fixed; independent reviewer + read-only lock auditor) | `d765e9716` |
+
+BP-22 verification: Node 22.23.1; typecheck; 62 files / 619 tests;
+real slow local-venue cancellation 3/3; build; generated parity (26
+operations, 2 legitimate exclusions); packed public-entry consumer;
+family guards 11/11; platform catalog/architecture controls 105/105;
+`git diff --check`. The real venue proved a solve subprocess was observed
+nonterminal, cancelled through the backend, terminated by signal, and
+reached durable `cancelled` before launch returned. Six expected cells
+remained accounted (one dispatched, five undispatched); results/report/
+claim denominators included judged cells only; `run.verify` passed.
+Synthetic and real coverage keep task, infrastructure, expired,
+unscorable, and cancellation paths distinct.
+
+BP-22 review evidence: the first review caught collect/cancel TOCTOU,
+buffered-event false live-cancel proof, impossible blame facts, and
+concurrent attribution overwrite. Subsequent review/audit rounds caught
+the submit-to-first-observe lost signal, missing marker-directory fsync,
+stale-owner ABA, paused recovery initializers, unknown-liveness stealing,
+successor-directory cleanup, reverse ownerless-claim transition, and a
+mis-typed failed restoration. Each finding received a deterministic
+red-first regression and an independent final PASS. The original
+implementer completed implementation/battery but initially did not return
+its packet summary after repeated nudges; the master stopped that idle turn,
+took over review coordination, then resumed the same implementer for every
+correction round. No work was lost and no unreviewed change was committed.
+
+**M2 COMPLETE** (2026-08-07): disclosed previews and honest quote depth,
+all assurance presets with retained dissent, durable real-process
+cancellation, complete terminal accounting, and task/infrastructure
+separation are implemented through the agent surface and verified on the
+real local venue. Final M2 core baseline: 619 tests; guards green.
+
+**Base drift record (wave boundary after M2):** the local
+`origin/integration/evidence-v1` ref is `370932061b` and the session lineage
+is 24 commits ahead / 44 behind. No product path differs; drift in the
+program's watched surface is limited to architecture catalog/generated/
+transition files, including the pre-existing `platform-topology.md`
+generator mismatch. The previously proposed base refresh remains
+unapproved, so the program continues on its current lineage.
