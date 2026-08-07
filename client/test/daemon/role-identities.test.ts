@@ -36,7 +36,16 @@ function resolvedBinding(input: {
   } as ResolvedBinding;
 }
 
-const ALL_NATIVE_SCOPES = ['authorizations', 'observations', 'deliveries', 'verdicts', 'settlements'] as const;
+/**
+ * Every scope a native role can require — the "this binding grants everything" fixture. It carries
+ * the Record Discovery announce-plane scope alongside the trust-core families because the three
+ * `*-discovery` roles require both (issue #2525); a binding without it is not a fully authorized
+ * binding for any native deployment.
+ */
+const ALL_NATIVE_SCOPES = [
+  'authorizations', 'observations', 'deliveries', 'verdicts', 'settlements',
+  'jinn:discovery-announcements',
+] as const;
 
 function openAt(root: string, bindingResolver: BindingResolver) {
   return openRoleIdentitySet({
@@ -88,9 +97,13 @@ describe('native persistent role identities', () => {
     expect(identities.get('solver-discovery').role).toBe('solver-discovery');
     expect(() => identities.get('requester-submission')).toThrow(/unavailable/u);
     expect(resolver.resolveBinding).toHaveBeenCalledTimes(2);
+    // One authority gate PER required scope, not per role: `solver-discovery` requires both the
+    // trust-core family it signs under and the announce-plane scope the discovery client filters
+    // on, and each is verified independently.
     expect(verifyRoleBinding.mock.calls.map(([value]) => [value.role, value.agent, value.family])).toEqual([
       ['solver-delivery', 'urn:jinn:solver:scoped', 'deliveries'],
       ['solver-discovery', 'urn:jinn:solver:scoped', 'observations'],
+      ['solver-discovery', 'urn:jinn:solver:scoped', 'jinn:discovery-announcements'],
     ]);
     const encrypted = await readFile(join(root, 'identity', 'roles.enc.json'), 'utf8');
     expect(decryptStoredRoles(encrypted, 'operator-password')).toEqual([

@@ -370,13 +370,43 @@ export async function openNativeTrustCatalog(input: {
     return entry;
   };
 
-  async function verified(inputValue: {
+  /**
+   * `authorize`'s two outcomes. A candidate binding can fail to authorize a family for two
+   * categorically different reasons, and the two consumers of this authority want OPPOSITE
+   * behaviour on them (issue #2525):
+   *
+   *  - **not trustworthy** — bad signature, unresolvable pair (wrong agent / not-yet-effective /
+   *    expired), failed ceremony, broken consent chain, revoked, policy-rejected, or conflicting
+   *    bindings. Nobody may ever proceed past one of these, so `authorize` THROWS: there is no
+   *    "return a value the caller might ignore" for an untrustworthy binding.
+   *  - **not scoped for this family** — the binding is fully valid and fully verified, it simply
+   *    does not carry `family` in its scope. That is trust-core's `scope-violation` (`verify.ts`
+   *    step 4, the ONLY site that produces that reason), and it is an ordinary, expected fact about
+   *    a correctly minted multi-scope agent: the native ceremony mints one narrowly scoped key per
+   *    role, so exactly one of an agent's keys covers any given family and the rest do not.
+   *
+   * `authorize` therefore RETURNS the second case rather than throwing it, and each caller decides:
+   * `verified` (a call site that names one specific key and demands that key cover the family)
+   * re-raises it verbatim; `resolverFor` (whose consumer ENUMERATES an agent's keys looking for the
+   * one that covers the family) skips the candidate and keeps going.
+   *
+   * The discriminator is trust-core's own typed `VerificationFailureReason`, never a string match
+   * on a message: `scope-violation` is emitted at exactly one place in `verifyEnvelopeBinding`, and
+   * only after step 1 (DSSE signature), step 2 (resolve for this exact key+agent), step 3
+   * (ceremony) and the validity-window checks have all already PASSED. So reaching this branch is
+   * itself proof the candidate is authentic and current — the only thing it lacks is this family.
+   */
+  type BindingAuthorization =
+    | { readonly authorized: true; readonly bindingDigest: `sha256:${string}` }
+    | { readonly authorized: false; readonly outOfScopeDetail: string };
+
+  async function authorize(inputValue: {
     readonly key: string;
     readonly agent: string;
     readonly family: string;
     readonly purpose: string;
     readonly atTime: string;
-  }): Promise<{ readonly bindingDigest: `sha256:${string}` }> {
+  }): Promise<BindingAuthorization> {
     await assertFresh();
     const conflictCount = conflicts.length;
     const resolved = await bindingResolver.resolveBinding(
@@ -400,9 +430,25 @@ export async function openNativeTrustCatalog(input: {
       policy: policyFor(inputValue.purpose),
     });
     if (!outcome.ok || outcome.resolvedBinding === undefined) {
-      throw new NativeTrustCatalogError(`binding authority refused for ${inputValue.key}: ${outcome.reason ?? 'unknown'}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`);
+      const detail = `${outcome.reason ?? 'unknown'}${outcome.detail === undefined ? '' : ` (${outcome.detail})`}`;
+      if (outcome.reason === 'scope-violation') return { authorized: false, outOfScopeDetail: detail };
+      throw new NativeTrustCatalogError(`binding authority refused for ${inputValue.key}: ${detail}`);
     }
-    return { bindingDigest: outcome.resolvedBinding.bindingDigest };
+    return { authorized: true, bindingDigest: outcome.resolvedBinding.bindingDigest };
+  }
+
+  async function verified(inputValue: {
+    readonly key: string;
+    readonly agent: string;
+    readonly family: string;
+    readonly purpose: string;
+    readonly atTime: string;
+  }): Promise<{ readonly bindingDigest: `sha256:${string}` }> {
+    const outcome = await authorize(inputValue);
+    if (!outcome.authorized) {
+      throw new NativeTrustCatalogError(`binding authority refused for ${inputValue.key}: ${outcome.outOfScopeDetail}`);
+    }
+    return { bindingDigest: outcome.bindingDigest };
   }
 
   return {
@@ -510,10 +556,26 @@ export async function openNativeTrustCatalog(input: {
       // 6.
       return result;
     },
+    /**
+     * A family-scoped resolver for the ENUMERATE-AND-FILTER consumer (`@jinn-network/
+     * record-discovery-client`'s `KeyResolver.resolve`, which walks every key ever bound to an
+     * agent and keeps the ones that resolve). Its contract requires `resolveBinding` to RETURN for
+     * a candidate that does not apply, so an out-of-scope key is `null` — "not this key", the same
+     * answer `BindingResolver` already gives for an unknown pair — and enumeration continues to the
+     * key that does cover `family`. Throwing there aborted the whole enumeration on candidate #1
+     * and made every multi-scope agent unconsumable (issue #2525, live DR-2026-08-05 round 4).
+     *
+     * `null` here is a SKIP and nothing else: every other refusal — invalid signature, wrong agent,
+     * failed ceremony, out-of-window, broken consent chain, revoked, policy-rejected, conflicting
+     * bindings — still throws out of `authorize`, so it propagates through this resolver and stops
+     * the consumer loud rather than degrading it into a silent filter. See `authorize`'s doc for
+     * why the discriminator is sound.
+     */
     resolverFor({ family, purpose }) {
       return {
         async resolveBinding(query, atTime) {
-          await verified({ ...query, family, purpose, atTime });
+          const outcome = await authorize({ ...query, family, purpose, atTime });
+          if (!outcome.authorized) return null;
           return bindingResolver.resolveBinding(query, atTime);
         },
       };

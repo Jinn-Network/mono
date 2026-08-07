@@ -49,7 +49,10 @@ function binding(key: string): ResolvedBinding {
   return {
     binding: {
       key: { didKey: key, keyid: key },
-      scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements"],
+      // Every scope a native role can require, including the announce-plane scope the three
+      // `*-discovery` roles gained in issue #2525 — a "grants everything" binding must grant it.
+      scope: ["authorizations", "observations", "deliveries", "verdicts", "settlements",
+        "jinn:discovery-announcements"],
       validFrom: "2026-08-01T00:00:00.000Z",
     },
     effectiveStart: "2026-08-01T00:00:00.000Z",

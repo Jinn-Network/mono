@@ -44,6 +44,42 @@ export const DEFAULT_POSTING_TERMS: DefaultPostingTerms = {
 };
 
 /**
+ * How far past the posting's authority instant a freshly sealed Submission's `deadline` is set.
+ *
+ * This exists as a NAMED posting default, beside the terms above, because the alternative is what
+ * shipped: the native requester never set `deadline` at all, so every posting inherited the literal
+ * `2026-08-02T12:00:00Z` from the digest-pinned admission fixture — test data that had silently
+ * become production policy. The live DR-2026-08-05 gate posted task 1218 on 2026-08-07 carrying
+ * that five-day-stale instant verbatim, and no solver could ever claim it (issue #2526).
+ *
+ * ## Why this is NOT `responseTimeoutSeconds`
+ *
+ * The obvious-looking move — reuse the posting terms' own timeout — is wrong, and wrong in a way
+ * that would have reproduced the bug in a subtler form. They are different clocks measuring
+ * different things:
+ *
+ *  - `responseTimeoutSeconds` is the marketplace's per-claim DELIVERY window. It starts when a
+ *    solver claims, and it is capped by the deployed substrate: the Base Sepolia MechMarketplace's
+ *    `maxResponseTimeout()` is 300s, which is exactly the value above.
+ *  - `deadline` is the requester's absolute deadline for the work, in the record plane, read at
+ *    DISCOVERY time by a prospective solver deciding whether the job is still worth claiming.
+ *
+ * The solver's claim gate (`native-claim-policy.ts`) refuses non-retryably when
+ * `deadline - now < minDeadlineLeadMs`, and that minimum is 5 minutes — numerically identical to
+ * the 300s ceiling above. So a deadline derived from `responseTimeoutSeconds` would clear the gate
+ * by exactly zero margin at the instant of posting and fail one millisecond later, before the
+ * announcement was ever polled. The lead has to comfortably exceed the claim minimum AND leave the
+ * whole delivery window inside itself, so it cannot be a marketplace term at all.
+ *
+ * One hour: twelve times the claim gate's minimum lead, and it still contains the minimum lead plus
+ * a full maximum-length delivery window (300s + 300s) many times over, while staying bounded enough
+ * that a post nobody claims releases its escrow the same day rather than sitting open indefinitely.
+ * Raising the claim gate's `minDeadlineLeadMs` above this value would strand postings again, so the
+ * two numbers move together or not at all.
+ */
+export const DEFAULT_SUBMISSION_DEADLINE_LEAD_MS = 60 * 60 * 1000;
+
+/**
  * The escrow formula, in one place: `(solutionMaxDeliveryRateWei + verdictMaxDeliveryRateWei) x
  * maxClaims`. This is the `msg.value` `postTask` sends **when the sealed Submission's
  * `attempts.maxTotal` equals `terms.maxClaims`** -- `postTask` takes its multiplier from the

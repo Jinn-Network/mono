@@ -155,6 +155,8 @@ async function buildCatalog(options: {
   readonly revoked?: boolean;
   readonly conflict?: boolean;
   readonly forgeBindingEnvelope?: boolean;
+  /** Strips the binding envelope's signatures entirely — an UNSIGNED binding, not a forged one. */
+  readonly unsignBindingEnvelope?: boolean;
   readonly settlement?: SettlementShape;
 } = {}): Promise<CatalogFixture> {
   const root = await mkdtemp(join(tmpdir(), 'jinn-native-trust-'));
@@ -198,6 +200,11 @@ async function buildCatalog(options: {
   if (options.forgeBindingEnvelope === true) {
     const parsed = JSON.parse(new TextDecoder().decode(bindingEnvelope)) as { signatures: { sig: string }[] };
     parsed.signatures[0]!.sig = b64(new Uint8Array(64).fill(9));
+    bindingEnvelope = new TextEncoder().encode(JSON.stringify(parsed));
+  }
+  if (options.unsignBindingEnvelope === true) {
+    const parsed = JSON.parse(new TextDecoder().decode(bindingEnvelope)) as { signatures: unknown[] };
+    parsed.signatures = [];
     bindingEnvelope = new TextEncoder().encode(JSON.stringify(parsed));
   }
 
@@ -416,6 +423,108 @@ describe('native trust catalog authority', () => {
 
     await writeFile(fixture.path, `${JSON.stringify(fixture.catalog)}\n`);
     await expect(authority.assertFresh()).rejects.toThrow(/changed after authority load; restart is required/u);
+  });
+});
+
+/**
+ * `resolverFor`'s skip-vs-refuse boundary (issue #2525).
+ *
+ * Its only consumer — `@jinn-network/record-discovery-client`'s `KeyResolver.resolve` — ENUMERATES
+ * every key bound to an agent and filters the results, so it needs `resolveBinding` to RETURN for a
+ * candidate that does not apply. Before the fix this threw on the first out-of-scope candidate,
+ * which aborted the whole enumeration and made every multi-scope agent unconsumable; the live
+ * DR-2026-08-05 round-4 gate logged 44 consecutive refusals on both operators.
+ *
+ * The discriminator is trust-core's typed `scope-violation` reason and nothing else. These tests
+ * exist to hold that line in both directions: exactly one thing skips, and every genuinely
+ * untrustworthy binding still throws. Delete any one guard and its row here goes red.
+ */
+describe('family-scoped resolver skip-vs-refuse boundary (#2525)', () => {
+  async function resolverOver(
+    fixture: CatalogFixture,
+    family: string,
+  ) {
+    const authority = await openNativeTrustCatalog({
+      path: fixture.path,
+      expectedPolicyGenesisDigest: fixture.policyGenesisDigest,
+      anchorClient: anchorClient(fixture, []),
+      settlementOwnershipClient: OWNS,
+      now: new Date(NOW),
+    });
+    return authority.resolverFor({ family, purpose: ROLE_PURPOSE });
+  }
+
+  it('SKIPS an out-of-scope but otherwise valid binding instead of aborting the enumeration', async () => {
+    const fixture = await buildCatalog();
+    // The fixture binding is scoped ['bindings', 'deliveries'] — a perfectly valid, fully verified
+    // binding that simply does not cover `observations`.
+    const outOfScope = await resolverOver(fixture, 'observations');
+    await expect(outOfScope.resolveBinding({ key: fixture.key, agent: AGENT }, NOW)).resolves.toBeNull();
+
+    // The SAME key, resolved for a family it does cover, still resolves — the skip is per-family,
+    // not a blanket "this key is unusable".
+    const inScope = await resolverOver(fixture, FAMILY);
+    const resolved = await inScope.resolveBinding({ key: fixture.key, agent: AGENT }, NOW);
+    expect(resolved?.bindingDigest).toBe(fixture.bindingDigest);
+  });
+
+  it.each([
+    ['a forged binding signature', { forgeBindingEnvelope: true as const }, /envelope-signature-invalid/u],
+    ['a ceremony signature mismatch', { ceremonyMode: 'bad-signature' as const }, /ceremony-verification-failed/u],
+    ['a ceremony that signed a different identity', { ceremonyMode: 'bad-content' as const }, /ceremony-verification-failed/u],
+    ['a ceremony commitment digest mismatch', { ceremonyMode: 'digest-mismatch' as const }, /ceremony evidence digest/u],
+    ['a revoked binding', { revoked: true as const }, /revoked/u],
+    ['an expired binding', { expiresAt: '2026-08-02T00:00:00.000Z' }, /binding did not resolve/u],
+    ['a not-yet-effective binding', { validFrom: '2026-08-03T00:00:00.000Z' }, /binding did not resolve/u],
+    ['conflicting bindings', { conflict: true as const }, /conflicting bindings/u],
+  ])('still REFUSES %s, loudly, rather than skipping it', async (_label, options, expected) => {
+    // Asked for the family this binding DOES carry, so a `scope-violation` can never be the reason
+    // it fails — anything that returns null here would be the fix swallowing a real refusal.
+    const fixture = await buildCatalog(options);
+    const resolver = await resolverOver(fixture, FAMILY);
+    await expect(resolver.resolveBinding({ key: fixture.key, agent: AGENT }, NOW))
+      .rejects.toThrow(expected);
+  });
+
+  it('never opens a catalog containing an UNSIGNED binding, so no resolver exists to skip it', async () => {
+    // The strongest place for this refusal to sit, and where it actually sits: a zero-signature
+    // DSSE envelope is not a conforming sealed KeyBinding, so the whole authority refuses to open.
+    // Recorded at its real boundary rather than asserted at the resolver, which never sees it.
+    const fixture = await buildCatalog({ unsignBindingEnvelope: true });
+    await expect(resolverOver(fixture, FAMILY))
+      .rejects.toThrow(/is not a conforming sealed KeyBinding/u);
+  });
+
+  it('still REFUSES a key presented under the wrong agent', async () => {
+    const fixture = await buildCatalog();
+    const resolver = await resolverOver(fixture, FAMILY);
+    await expect(resolver.resolveBinding(
+      { key: fixture.key, agent: 'https://spec.jinn.network/agents/someone-else' },
+      NOW,
+    )).rejects.toThrow(/binding did not resolve/u);
+  });
+
+  it('still REFUSES when the deployment policy carries no purpose for this call', async () => {
+    const fixture = await buildCatalog({ purpose: 'missing' });
+    const resolver = await resolverOver(fixture, FAMILY);
+    await expect(resolver.resolveBinding({ key: fixture.key, agent: AGENT }, NOW))
+      .rejects.toThrow(/has no native:solver-delivery purpose/u);
+  });
+
+  it('keeps `verified`-shaped callers loud on the very case the resolver skips', async () => {
+    // `verifyRoleBinding` names one key and demands it cover the family; an out-of-scope binding
+    // there is a boot refusal, not a skip. Same underlying decision, opposite handling.
+    const fixture = await buildCatalog();
+    const authority = await openNativeTrustCatalog({
+      path: fixture.path,
+      expectedPolicyGenesisDigest: fixture.policyGenesisDigest,
+      anchorClient: anchorClient(fixture, []),
+      settlementOwnershipClient: OWNS,
+      now: new Date(NOW),
+    });
+    await expect(authority.verifyRoleBinding({
+      role: 'solver-delivery', key: fixture.key, agent: AGENT, family: 'observations', atTime: NOW,
+    })).rejects.toThrow(/scope-violation/u);
   });
 });
 
