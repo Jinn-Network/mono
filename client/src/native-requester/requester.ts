@@ -11,6 +11,7 @@ import { verify as cryptoVerify, type KeyObject } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   BASE_SEPOLIA_TODAY,
+  DEFAULT_SUBMISSION_DEADLINE_LEAD_MS,
   type MarketplaceChainConfig,
   type MarketplaceRequesterBackend,
   type PostingOutcome,
@@ -986,6 +987,33 @@ async function storeExactRecords(
   };
 }
 
+/**
+ * The sealed Submission's `deadline` (issue #2526).
+ *
+ * Derived from the posting's own FINALIZED chain authority time rather than a local wall clock, for
+ * two reasons. It is the same authority every other time-bearing field in this bundle is pinned to
+ * (`authorityTime` is already validated as a canonical finalized Base Sepolia block above, and is
+ * already sealed verbatim into the Submission's `authority-time` annotation). And it keeps sealing
+ * DETERMINISTIC: the Submission's digest is its identity here — `draftKey` is built from it and a
+ * retry of the same run must reproduce the same bytes — which a `Date.now()` reading would break.
+ *
+ * The lead itself is `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`, a named posting default; see its doc
+ * for why it is deliberately not the posting terms' `responseTimeoutSeconds`. Note that a finalized
+ * block lags the head by roughly two epochs, so the lead a solver actually observes at discovery is
+ * this interval minus that lag — another reason the interval is generous rather than tight.
+ */
+function sealedDeadline(authorityTime: NativeAuthorityTimeAnchor): string {
+  const anchored = Date.parse(authorityTime.timestamp);
+  if (!Number.isFinite(anchored)) {
+    throw new Error('native requester cannot derive a Submission deadline from a non-instant authority time');
+  }
+  const deadline = anchored + DEFAULT_SUBMISSION_DEADLINE_LEAD_MS;
+  if (!Number.isSafeInteger(deadline)) {
+    throw new Error('native requester Submission deadline exceeds JavaScript time bounds');
+  }
+  return new Date(deadline).toISOString();
+}
+
 async function sealRunBundle(input: {
   readonly runId: string;
   readonly requesterAgent: string;
@@ -1026,6 +1054,7 @@ async function sealRunBundle(input: {
 
   const templateSubmission = bytesToObject(template.submission, 'B1 Submission template');
   const taskDigest = rawDigest(taskBytes);
+  const deadline = sealedDeadline(input.authorityTime);
   const seed = runSeed(input.runId, taskDigest, sealedReceipt.receiptDigest);
   const annotations = {
     ...(templateSubmission.annotations as Record<string, unknown> ?? {}),
@@ -1044,6 +1073,10 @@ async function sealRunBundle(input: {
     idempotencyKey: `native-prediction-forecast:${input.runId}:${taskDigest.slice(7, 23)}`,
     nonce: seed.slice(0, 32),
     task: { digest: { sha256: taskDigest.slice('sha256:'.length) } },
+    // Set at seal time like every other per-posting field above. Before issue #2526 `deadline` was
+    // the one field NOT overridden here, so it fell through the spread from the pinned fixture as
+    // the literal `2026-08-02T12:00:00Z` and every native posting shipped an already-past deadline.
+    deadline,
     annotations,
   });
   const submissionDigest = rawDigest(submissionBytes);
