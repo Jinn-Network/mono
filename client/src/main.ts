@@ -1426,18 +1426,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       .map((value) => value.trim())
       .filter((value) => value.length > 0)
     ?? [];
-  const issueRelaySecuritySpecification =
-    process.env['JINN_ISSUE_RELAY_SECURITY_SPEC_DIGEST']?.trim();
-  const issueRelayQualitySpecification =
-    process.env['JINN_ISSUE_RELAY_QUALITY_SPEC_DIGEST']?.trim();
-  const issueRelayLaneSpecifications =
-    /^sha256:[0-9a-f]{64}$/.test(issueRelaySecuritySpecification ?? '')
-      && /^sha256:[0-9a-f]{64}$/.test(issueRelayQualitySpecification ?? '')
-      ? {
-          security: issueRelaySecuritySpecification as `sha256:${string}`,
-          quality: issueRelayQualitySpecification as `sha256:${string}`,
-        }
-      : undefined;
   const issueRelayEvaluationContextResolver =
     issueRelayBotLogin === undefined || issueRelayBotLogin.length === 0
       ? undefined
@@ -1446,9 +1434,6 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
           github: createIssueRelayGitHubRestReadPort({
             requiredCheckNames: issueRelayRequiredChecks,
           }),
-          ...(issueRelayLaneSpecifications === undefined
-            ? {}
-            : { laneSpecifications: issueRelayLaneSpecifications }),
         });
 
   const adapter = new MechAdapter({

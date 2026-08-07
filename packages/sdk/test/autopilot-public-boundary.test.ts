@@ -13,7 +13,6 @@ import {
   AutopilotReviewResultSchema,
   AutopilotSessionCapsuleSchema,
   IssueRelayAdoptionReceiptV1Schema,
-  IssueRelayEvaluationBundleV2Schema,
   IssueRelayEvaluationAnchorV1Schema,
   IssueRelayEvaluationContextV1Schema,
   IssueRelayFindingV1Schema,
@@ -72,8 +71,6 @@ const decoderByManifestName = {
     IssueRelayRoundV1Schema.safeParse(JSON.parse(text)).success,
   'IssueRelayAdoptionReceiptV1Schema': (text: string) =>
     IssueRelayAdoptionReceiptV1Schema.safeParse(JSON.parse(text)).success,
-  'IssueRelayEvaluationBundleV2Schema': (text: string) =>
-    IssueRelayEvaluationBundleV2Schema.safeParse(JSON.parse(text)).success,
   'IssueRelayAssuranceComment': (text: string) => {
     try {
       return parseIssueRelayAssuranceComment(text, {

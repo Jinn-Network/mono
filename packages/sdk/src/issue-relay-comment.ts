@@ -3,25 +3,15 @@ import { z } from 'zod/v3';
 import {
   IssueRelayAdoptionReceiptV1Schema,
   IssueRelayCorrelationV1Schema,
-  IssueRelayDecisionRequestV1Schema,
   IssueRelayEvaluationAnchorV1Schema,
-  IssueRelayEvaluationBundleV2Schema,
-  IssueRelayHumanDecisionReceiptV1Schema,
   type IssueRelayAdoptionReceiptV1,
   type IssueRelayCorrelationV1,
-  type IssueRelayDecisionRequestV1,
   type IssueRelayEvaluationAnchorV1,
-  type IssueRelayEvaluationBundleV2,
-  type IssueRelayHumanDecisionReceiptV1,
 } from './issue-relay.js';
 
 const ADOPTION_MARKER = '<!-- jinn-issue-relay:adoption:v1 -->';
 const EVALUATION_ANCHOR_MARKER = '<!-- jinn-issue-relay:evaluation-anchor:v1 -->';
-const EVALUATION_BUNDLE_MARKER = '<!-- jinn-issue-relay:evaluation-bundle:v2 -->';
-const DECISION_REQUEST_MARKER = '<!-- jinn-issue-relay:decision-request:v1 -->';
-const HUMAN_DECISION_MARKER = '<!-- jinn-issue-relay:human-decision:v1 -->';
 const ASSURANCE_MARKER = '<!-- jinn-issue-relay:assurance:v1 -->';
-const ASSURANCE_V2_MARKER = '<!-- jinn-issue-relay:assurance:v2 -->';
 const MAX_ASSURANCE_BYTES = 1024 * 1024;
 const MAX_ASSURANCE_BLOCKS_PER_KIND = 100;
 
@@ -91,63 +81,6 @@ export function parseIssueRelayEvaluationAnchorComment(
     EVALUATION_ANCHOR_MARKER,
     IssueRelayEvaluationAnchorV1Schema,
   ) as IssueRelayEvaluationAnchorV1 | null;
-}
-
-export function formatIssueRelayEvaluationBundleComment(
-  bundle: IssueRelayEvaluationBundleV2,
-): string {
-  return formatCanonicalComment(
-    EVALUATION_BUNDLE_MARKER,
-    IssueRelayEvaluationBundleV2Schema.parse(bundle),
-  );
-}
-
-export function parseIssueRelayEvaluationBundleComment(
-  body: string,
-): IssueRelayEvaluationBundleV2 | null {
-  return parseCanonicalComment(
-    body,
-    EVALUATION_BUNDLE_MARKER,
-    IssueRelayEvaluationBundleV2Schema,
-  ) as IssueRelayEvaluationBundleV2 | null;
-}
-
-export function formatIssueRelayDecisionRequestComment(
-  request: IssueRelayDecisionRequestV1,
-): string {
-  return formatCanonicalComment(
-    DECISION_REQUEST_MARKER,
-    IssueRelayDecisionRequestV1Schema.parse(request),
-  );
-}
-
-export function parseIssueRelayDecisionRequestComment(
-  body: string,
-): IssueRelayDecisionRequestV1 | null {
-  return parseCanonicalComment(
-    body,
-    DECISION_REQUEST_MARKER,
-    IssueRelayDecisionRequestV1Schema,
-  ) as IssueRelayDecisionRequestV1 | null;
-}
-
-export function formatIssueRelayHumanDecisionReceiptComment(
-  receipt: IssueRelayHumanDecisionReceiptV1,
-): string {
-  return formatCanonicalComment(
-    HUMAN_DECISION_MARKER,
-    IssueRelayHumanDecisionReceiptV1Schema.parse(receipt),
-  );
-}
-
-export function parseIssueRelayHumanDecisionReceiptComment(
-  body: string,
-): IssueRelayHumanDecisionReceiptV1 | null {
-  return parseCanonicalComment(
-    body,
-    HUMAN_DECISION_MARKER,
-    IssueRelayHumanDecisionReceiptV1Schema,
-  ) as IssueRelayHumanDecisionReceiptV1 | null;
 }
 
 function sameCorrelation(
@@ -240,14 +173,7 @@ export function parseIssueRelayAssuranceComment(
   body: string,
   expectedCorrelation: IssueRelayCorrelationV1,
 ): ParsedIssueRelayAssuranceComment | null {
-  const assuranceMarker = body === ASSURANCE_MARKER
-    || body.startsWith(`${ASSURANCE_MARKER}\n`)
-    ? ASSURANCE_MARKER
-    : body === ASSURANCE_V2_MARKER
-      || body.startsWith(`${ASSURANCE_V2_MARKER}\n`)
-      ? ASSURANCE_V2_MARKER
-      : undefined;
-  if (assuranceMarker === undefined) {
+  if (!body.startsWith(`${ASSURANCE_MARKER}\n`) && body !== ASSURANCE_MARKER) {
     return null;
   }
   if (new TextEncoder().encode(body).byteLength > MAX_ASSURANCE_BYTES) {
@@ -261,13 +187,8 @@ export function parseIssueRelayAssuranceComment(
   }
   const lines = body.split('\n');
   if (
-    lines[0] !== assuranceMarker
-    || lines.slice(1).includes(assuranceMarker)
-    || lines.includes(
-      assuranceMarker === ASSURANCE_MARKER
-        ? ASSURANCE_V2_MARKER
-        : ASSURANCE_MARKER,
-    )
+    lines[0] !== ASSURANCE_MARKER
+    || lines.slice(1).includes(ASSURANCE_MARKER)
   ) {
     throw new Error('Relay assurance marker is duplicated or misplaced');
   }

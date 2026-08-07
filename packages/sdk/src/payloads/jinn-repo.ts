@@ -27,10 +27,34 @@ import {
 } from '../autopilot-session.js';
 import {
   IssueRelayAdoptionReceiptV1Schema,
-  IssueRelayEvaluationBundleV2Schema,
-  IssueRelaySolutionV2Schema,
   IssueRelayVerdictV1Schema,
 } from '../issue-relay.js';
+import { JinnRepoApplicationRefSchema } from '../jinn-repo.js';
+
+const JinnRepoApplicationPayloadFields = {
+  schemaVersion: z.literal('jinn-repo-application-payload.v1'),
+  application: JinnRepoApplicationRefSchema,
+  payload: z.record(z.string(), z.unknown()),
+};
+
+export const JinnRepoApplicationSolutionPayloadSchema = z.object({
+  ...JinnRepoApplicationPayloadFields,
+  role: z.literal('solution'),
+}).strict();
+
+export const JinnRepoApplicationVerdictPayloadSchema = z.object({
+  ...JinnRepoApplicationPayloadFields,
+  role: z.literal('verdict'),
+  /** Generic marketplace settlement projection; applications own the evidence behind it. */
+  projection: z.enum(['pass', 'fail', 'unresolved']),
+}).strict();
+
+export type JinnRepoApplicationSolutionPayload = z.infer<
+  typeof JinnRepoApplicationSolutionPayloadSchema
+>;
+export type JinnRepoApplicationVerdictPayload = z.infer<
+  typeof JinnRepoApplicationVerdictPayloadSchema
+>;
 
 export const JinnRepoLegacySolutionPayloadSchema = z.object({
   schemaVersion: z.literal('jinn-repo-solution.v1'),
@@ -39,14 +63,12 @@ export const JinnRepoLegacySolutionPayloadSchema = z.object({
 
 export const JinnRepoAutopilotSolutionPayloadSchema = AutopilotMutationResultSchema;
 
-export const JinnRepoIssueRelaySolutionV2PayloadSchema = IssueRelaySolutionV2Schema;
-
 export const JinnRepoIssueRelayAdoptionPayloadSchema =
   IssueRelayAdoptionReceiptV1Schema;
 
 export const JinnRepoSolutionPayloadSchema = z.union([
   JinnRepoLegacySolutionPayloadSchema,
-  JinnRepoIssueRelaySolutionV2PayloadSchema,
+  JinnRepoApplicationSolutionPayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoIssueRelayAdoptionPayloadSchema,
 ]);
@@ -83,16 +105,13 @@ export type JinnRepoVerdictV2Payload = z.infer<typeof JinnRepoVerdictV2PayloadSc
 export const JinnRepoVerdictPayloadSchema = z.union([
   JinnRepoVerdictV1PayloadSchema,
   JinnRepoVerdictV2PayloadSchema,
+  JinnRepoApplicationVerdictPayloadSchema,
   AutopilotReviewResultSchema,
   IssueRelayVerdictV1Schema,
-  IssueRelayEvaluationBundleV2Schema,
 ]);
 
 export const JinnRepoAutopilotVerdictPayloadSchema = AutopilotReviewResultSchema;
 
-export const JinnRepoIssueRelayVerdictPayloadSchema = z.union([
-  IssueRelayVerdictV1Schema,
-  IssueRelayEvaluationBundleV2Schema,
-]);
+export const JinnRepoIssueRelayVerdictPayloadSchema = IssueRelayVerdictV1Schema;
 
 export type JinnRepoVerdictPayload = z.infer<typeof JinnRepoVerdictPayloadSchema>;

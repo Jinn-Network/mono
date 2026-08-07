@@ -648,6 +648,58 @@ describe('MechAdapter TaskCoordinator flow', () => {
     await adapter.stop();
   });
 
+  it('adds exact marketplace provenance only for opaque application evaluation tasks', async () => {
+    const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
+
+    const adapter = new MechAdapter(TEST_CONFIG);
+    await adapter.initialize();
+
+    const solutionRequestId = `0x${'1'.repeat(64)}`;
+    const solutionOperatorSafe = `0x${'2'.repeat(40)}`;
+    const sourceTaskCid = `f01551220${'3'.repeat(64)}`;
+    const solutionEnvelopeCid = `f01551220${'4'.repeat(64)}`;
+    const evaluationTask = (adapter as any).buildEvaluationTask({
+      task: {
+        id: 'application-task-1',
+        description: 'Run an opaque application task.',
+        solverType: 'jinn-repo.v1',
+        contractId: 'jinn-repo',
+        contractVersion: 'v1',
+        solverNetManifestCid: 'bafyfixturecid',
+        role: 'restoration',
+        window: { startTs: 0, endTs: 1 },
+        spec: {
+          application: {
+            id: 'example.application',
+            version: 'v1',
+            payload: { creatorOwned: true },
+          },
+        },
+      },
+      sourceTaskId: '501',
+      solutionRequestId,
+      solutionOperatorSafe,
+      attemptIndex: 2,
+      resultData: '{}',
+      solutionEnvelopeCid,
+      taskCid: sourceTaskCid,
+    });
+
+    expect(evaluationTask.context?.['jinn.marketplace.evaluation-provenance.v1'])
+      .toEqual({
+        schemaVersion: 'jinn-marketplace-evaluation-provenance.v1',
+        sourceTaskId: '501',
+        sourceTaskCid,
+        attemptIndex: 2,
+        solutionRequestId,
+        solutionEnvelopeCid,
+        solutionOperatorSafe,
+        evaluatorOperatorSafe: TEST_CONFIG.safeAddress,
+      });
+
+    await adapter.stop();
+  });
+
   it('checks exact funding facts after rate resolution and before createTask', async () => {
     const { MechAdapter } = await import('../../../src/adapters/mech/adapter.js');
     const { submitTask } = await import('../../../src/adapters/mech/contracts.js');

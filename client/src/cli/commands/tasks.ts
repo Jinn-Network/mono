@@ -56,6 +56,7 @@ import {
 import { resolveMintedTaskDeliveryRate } from '../../solver-types/_swe-rebench-v2-escrow.js';
 import { runObserveAutopilotDelivery } from './tasks-observe-autopilot.js';
 import { runObserveIssueRelayDelivery } from './tasks-observe-issue-relay.js';
+import { runObserveApplicationDelivery } from './tasks-observe-application.js';
 
 function findNamedErrorCause(
   error: unknown,
@@ -1143,6 +1144,9 @@ async function run(ctx: CommandContext): Promise<void> {
   if (subverb === 'observe-issue-relay-delivery') {
     return runObserveIssueRelayDelivery({ ...ctx, argv: rest });
   }
+  if (subverb === 'observe-application-delivery') {
+    return runObserveApplicationDelivery({ ...ctx, argv: rest });
+  }
   if (subverb === 'list') {
     const config = loadConfig(getConfigPathFromArgs(rest));
     emitResult(
@@ -1195,7 +1199,7 @@ async function run(ctx: CommandContext): Promise<void> {
       exampleCli: 'jinn tasks submit --id my-task --description "..." --solver-net prediction',
       details: {
         field: 'subverb',
-        expected: 'submit|observe-autopilot-delivery|observe-issue-relay-delivery|list|show',
+        expected: 'submit|observe-autopilot-delivery|observe-issue-relay-delivery|observe-application-delivery|list|show',
       },
     },
     { writer: ctx.writer, exit: ctx.exit },
@@ -1210,6 +1214,7 @@ const command: CommandModule = {
   jinn tasks submit --request-file <path> [--dry-run] --yes --json
   jinn tasks observe-autopilot-delivery --expectation-file <path> --json
   jinn tasks observe-issue-relay-delivery --expectation-file <absolute-path> --json
+  jinn tasks observe-application-delivery --expectation-file <absolute-path> --json
   jinn tasks list
   jinn tasks show <id>
 

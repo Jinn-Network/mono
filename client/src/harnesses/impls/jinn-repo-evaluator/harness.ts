@@ -27,14 +27,10 @@ import {
   JinnRepoAutopilotSessionTaskSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
-  IssueRelaySolutionV2Schema,
   IssueRelayEvaluationContextV1Schema,
-  IssueRelayEvaluationContextV2Schema,
   type JinnRepoVerdictPayload,
   type IssueRelayEvaluationContextV1,
-  type IssueRelayEvaluationContextV2,
   type IssueRelayRoundV1,
-  type IssueRelayRoundV2,
   type JinnRepoLiveIssueTask as SdkJinnRepoLiveIssueTask,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 import {
@@ -83,23 +79,6 @@ import {
   type IssueRelayRepositoryGit,
   type IssueRelaySemanticAgentRunner,
 } from './issue-relay-semantic.js';
-import {
-  createIssueRelayLaneAdjudicator,
-  runIssueRelayDualLaneReview,
-  type IssueRelayLaneSemanticRunner,
-} from './issue-relay-v2-semantic.js';
-import {
-  ClaudeIssueRelayReviewSkillRunner,
-  type IssueRelayReviewSkillRunner,
-} from './issue-relay-review-skills.js';
-import {
-  snykIssueRelayScannerFromEnvironment,
-  type IssueRelaySecurityScanner,
-} from './issue-relay-security-scanner.js';
-import {
-  createIssueRelayRepositoryGuidanceChecker,
-  type IssueRelayRepositoryGuidanceChecker,
-} from './issue-relay-repository-guidance.js';
 import { VerdictCode } from '../../../adapters/mech/verdict-code.js';
 
 /** The two verdict values emitted by this evaluator. jinn-repo grades are
@@ -249,7 +228,7 @@ function parseAutopilotEvaluationTask(task: Task):
 function parseIssueRelayEvaluationTask(task: Task):
   | {
       ok: true;
-      context: IssueRelayEvaluationContextV1 | IssueRelayEvaluationContextV2;
+      context: IssueRelayEvaluationContextV1;
     }
   | {
       ok: false;
@@ -268,10 +247,10 @@ function parseIssueRelayEvaluationTask(task: Task):
         : `malformed Relay source Task: ${summarizeZodError(parsedTask.error)}`,
     };
   }
-  const rawContext = task.context?.[ISSUE_RELAY_EVALUATION_CONTEXT_KEY];
-  const parsedContextV1 = IssueRelayEvaluationContextV1Schema.safeParse(rawContext);
-  const parsedContextV2 = IssueRelayEvaluationContextV2Schema.safeParse(rawContext);
-  if (!parsedContextV1.success && !parsedContextV2.success) {
+  const parsedContext = IssueRelayEvaluationContextV1Schema.safeParse(
+    task.context?.[ISSUE_RELAY_EVALUATION_CONTEXT_KEY],
+  );
+  if (!parsedContext.success) {
     return {
       ok: false,
       reason:
@@ -304,9 +283,9 @@ function parseIssueRelayEvaluationTask(task: Task):
         `expected jinn-repo.v1/solution envelope, got ${envelope.solverType}/${envelope.role}`,
     };
   }
-  const parsedSolution = parsedContextV2.success
-    ? IssueRelaySolutionV2Schema.safeParse(envelope.payload)
-    : JinnRepoLegacySolutionPayloadSchema.safeParse(envelope.payload);
+  const parsedSolution = JinnRepoLegacySolutionPayloadSchema.safeParse(
+    envelope.payload,
+  );
   if (!parsedSolution.success) {
     return {
       ok: false,
@@ -320,11 +299,7 @@ function parseIssueRelayEvaluationTask(task: Task):
       reason: 'context.solutionEnvelopeCid required for Relay evaluation',
     };
   }
-  const context = (parsedContextV1.success
-    ? parsedContextV1.data
-    : parsedContextV2.success
-      ? parsedContextV2.data
-      : undefined) as IssueRelayEvaluationContextV1 | IssueRelayEvaluationContextV2;
+  const context = parsedContext.data as IssueRelayEvaluationContextV1;
   const attemptIndex = task.attemptNumber;
   if (
     attemptIndex === undefined
@@ -353,7 +328,7 @@ function parseIssueRelayEvaluationTask(task: Task):
   }
   const admission = admitIssueRelayEvaluationOpportunity({
     task: parsedTask.data as SdkJinnRepoLiveIssueTask & {
-      readonly relay: IssueRelayRoundV1 | IssueRelayRoundV2;
+      readonly relay: IssueRelayRoundV1;
     },
     solution: parsedSolution.data,
     taskId: context.correlation.taskId,
@@ -409,14 +384,6 @@ export interface JinnRepoEvaluatorHarnessOptions {
   issueRelayMechanicalRunner?: IssueRelayMechanicalRunner;
   /** Credential-free structured semantic review boundary for Relay. */
   issueRelaySemanticRunner?: IssueRelaySemanticAgentRunner;
-  /** Separate security/quality structured semantic review boundary for Relay V2. */
-  issueRelayLaneRunner?: IssueRelayLaneSemanticRunner;
-  /** Base-revision repository-policy compliance boundary for Relay V2. */
-  issueRelayRepositoryGuidanceChecker?: IssueRelayRepositoryGuidanceChecker;
-  /** Pinned upstream Claude /code-review and /security-review boundary. */
-  issueRelayReviewSkillRunner?: IssueRelayReviewSkillRunner;
-  /** Optional automated security scanner whose evidence is lane-bound. */
-  issueRelaySecurityScanner?: IssueRelaySecurityScanner;
   /** Public Git transport override for hermetic tests. */
   issueRelayGit?: IssueRelayRepositoryGit;
 }
@@ -435,17 +402,9 @@ export class JinnRepoEvaluatorHarness implements Harness {
   private readonly semanticAgentRunnerResolver: SemanticAgentRunnerResolver | undefined;
   private readonly issueRelayMechanicalRunner: IssueRelayMechanicalRunner | undefined;
   private readonly issueRelaySemanticRunner: IssueRelaySemanticAgentRunner | undefined;
-  private readonly issueRelayLaneRunner: IssueRelayLaneSemanticRunner | undefined;
-  private readonly issueRelayRepositoryGuidanceChecker:
-    | IssueRelayRepositoryGuidanceChecker
-    | undefined;
-  private readonly issueRelayReviewSkillRunner: IssueRelayReviewSkillRunner;
-  private readonly issueRelaySecurityScanner: IssueRelaySecurityScanner | undefined;
   private readonly issueRelayGit: IssueRelayRepositoryGit | undefined;
   private readonly issueRelayUsesImmutableVerifier: boolean;
   private readonly verifierReadinessCache: AutopilotReadinessCache = {};
-  private readonly reviewSkillReadinessCache: AutopilotReadinessCache = {};
-  private readonly securityScannerReadinessCache: AutopilotReadinessCache = {};
   private readonly semanticReadinessCache =
     new WeakMap<SemanticAgentRunner, AutopilotReadinessCache>();
 
@@ -477,12 +436,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
           : createIssueRelayMechanicalRunner(opts.immutableMechanicalVerifier)
       );
     this.issueRelaySemanticRunner = opts.issueRelaySemanticRunner;
-    this.issueRelayLaneRunner = opts.issueRelayLaneRunner;
-    this.issueRelayRepositoryGuidanceChecker = opts.issueRelayRepositoryGuidanceChecker;
-    this.issueRelayReviewSkillRunner = opts.issueRelayReviewSkillRunner
-      ?? new ClaudeIssueRelayReviewSkillRunner();
-    this.issueRelaySecurityScanner = opts.issueRelaySecurityScanner
-      ?? snykIssueRelayScannerFromEnvironment();
     this.issueRelayGit = opts.issueRelayGit;
     this.issueRelayUsesImmutableVerifier =
       opts.issueRelayMechanicalRunner === undefined
@@ -608,38 +561,7 @@ export class JinnRepoEvaluatorHarness implements Harness {
           };
         }
       }
-      if (parsed.context.schemaVersion === 'jinn-issue-relay-evaluation-context.v2') {
-        if (this.issueRelayReviewSkillRunner.isReady) {
-          const readiness = await this.cachedReadiness(
-            this.reviewSkillReadinessCache,
-            () => this.issueRelayReviewSkillRunner.isReady!(),
-          );
-          if (!readiness.ready) {
-            return {
-              ok: false,
-              reason: readiness.reason ?? 'Issue Relay review skills are unavailable',
-            };
-          }
-        }
-        if (this.issueRelaySecurityScanner?.isReady) {
-          const readiness = await this.cachedReadiness(
-            this.securityScannerReadinessCache,
-            () => this.issueRelaySecurityScanner!.isReady!(),
-          );
-          if (!readiness.ready) {
-            return {
-              ok: false,
-              reason: readiness.reason ?? 'Issue Relay security scanner is unavailable',
-            };
-          }
-        }
-        if (
-          this.issueRelayLaneRunner !== undefined
-          && this.issueRelayRepositoryGuidanceChecker !== undefined
-        ) return { ok: true };
-      } else if (this.issueRelaySemanticRunner !== undefined) {
-        return { ok: true };
-      }
+      if (this.issueRelaySemanticRunner) return { ok: true };
       if (!this.semanticAgentRunnerResolver) {
         return {
           ok: false,
@@ -839,97 +761,6 @@ export class JinnRepoEvaluatorHarness implements Harness {
           'jinn-repo-evaluator: Issue Relay deterministic evaluator runtime is not configured',
         );
       }
-      if (parsed.context.schemaVersion === 'jinn-issue-relay-evaluation-context.v2') {
-        let laneRunner = this.issueRelayLaneRunner;
-        let guidanceChecker = this.issueRelayRepositoryGuidanceChecker;
-        let semanticRuntimeInfo:
-          | { readonly provider: string; readonly model?: string }
-          | undefined;
-        if (!laneRunner || !guidanceChecker) {
-          const semanticRuntime = await this.semanticAgentRunnerResolver?.resolve({
-            ...(ctx.task.solverNetManifestCid
-              ? { manifestCid: ctx.task.solverNetManifestCid }
-              : {}),
-            ...(ctx.solverNet ? { solverNet: ctx.solverNet } : {}),
-          });
-          if (!semanticRuntime) {
-            throw new SkippableError(
-              'issue_relay_eval_pending',
-              'jinn-repo-evaluator: Issue Relay V2 lane evaluator runtime is not configured',
-            );
-          }
-          laneRunner ??= createIssueRelayLaneAdjudicator({
-              runner: semanticRuntime.runner,
-              abort: ctx.abort,
-              ...(semanticRuntime.model === undefined ? {} : { model: semanticRuntime.model }),
-            });
-          guidanceChecker ??= createIssueRelayRepositoryGuidanceChecker({
-              runner: semanticRuntime.runner,
-              abort: ctx.abort,
-              ...(semanticRuntime.model === undefined ? {} : { model: semanticRuntime.model }),
-            });
-          semanticRuntimeInfo = {
-            provider: semanticRuntime.provider,
-            ...(semanticRuntime.model === undefined ? {} : { model: semanticRuntime.model }),
-          };
-        }
-        const result = await runIssueRelayDualLaneReview({
-          context: parsed.context,
-          runMechanical: mechanicalRunner,
-          runReviewSkill: this.issueRelayReviewSkillRunner,
-          adjudicateLane: laneRunner,
-          checkRepositoryGuidance: guidanceChecker,
-          ...(this.issueRelaySecurityScanner === undefined
-            ? {}
-            : { securityScanner: this.issueRelaySecurityScanner }),
-          abort: ctx.abort,
-          ...(semanticRuntimeInfo?.provider !== 'anthropic'
-            || semanticRuntimeInfo.model === undefined
-            ? {}
-            : { reviewSkillModel: semanticRuntimeInfo.model }),
-          ...(this.issueRelayGit === undefined ? {} : { git: this.issueRelayGit }),
-        });
-        const artifactPath = 'jinn-issue-relay-evaluation-bundle.json';
-        await writeFile(
-          join(ctx.workingDir, artifactPath),
-          `${JSON.stringify(result, null, 2)}\n`,
-          'utf8',
-        );
-        const gating = result.overallProjection === 'pass'
-          ? { passed: true, verdict: 'PASS' as const, verdictCode: VerdictCode.Pass }
-          : result.overallProjection === 'fail'
-            ? { passed: false, verdict: 'FAIL' as const, verdictCode: VerdictCode.Fail }
-            : { passed: false, verdict: 'UNRESOLVED' as const, verdictCode: VerdictCode.Unresolved };
-        return {
-          venueRef: { name: 'jinn-repo' },
-          gating,
-          informational: {
-            instance_id: instanceId,
-            reviewTarget: parsed.context.reviewTarget,
-            correlation: parsed.context.correlation,
-            laneEvaluatorsShareOperator: true,
-            reviewSkills: {
-              security: '/security-review',
-              quality: '/code-review',
-              githubMutationAuthority: false,
-              automatedSecurityEvidence: this.issueRelaySecurityScanner !== undefined,
-            },
-            ...(semanticRuntimeInfo === undefined ? {} : { semanticRuntime: semanticRuntimeInfo }),
-          },
-          verdictPayload: result as unknown as Record<string, unknown>,
-          artifacts: [{
-            path: artifactPath,
-            artifactType: 'jinn_issue_relay_evaluation_bundle',
-            metadata: {
-              overallProjection: result.overallProjection,
-              evaluatedHead: result.evaluatedHead,
-              lanes: ['security', 'quality'],
-              laneEvaluatorsShareOperator: true,
-            },
-            access: { priceUsdc: '0' },
-          }],
-        };
-      }
       let semanticRunner = this.issueRelaySemanticRunner;
       let semanticRuntimeInfo:
         | { readonly provider: string; readonly model?: string }
@@ -1017,7 +848,9 @@ export class JinnRepoEvaluatorHarness implements Harness {
       };
     }
 
-    const solutionPayload = JinnRepoLegacySolutionPayloadSchema.parse(envelope.payload);
+    const solutionPayload = JinnRepoLegacySolutionPayloadSchema.parse(
+      envelope.payload,
+    );
     if (rawSource === 'live-issue') {
       const parsedSpec = JinnRepoTaskSchema.safeParse(ctx.task.spec);
       if (!parsedSpec.success || !isLiveIssueTask(parsedSpec.data)) {

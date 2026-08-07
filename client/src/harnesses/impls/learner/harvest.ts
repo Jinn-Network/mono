@@ -276,14 +276,9 @@ async function maybeMaterializeJinnRepoPatchPayload(
   if (task?.solverType !== 'jinn-repo.v1' || task.role === 'evaluation') {
     return null;
   }
-  if (
-    task.spec?.['relay'] !== null
-    && typeof task.spec?.['relay'] === 'object'
-    && (task.spec?.['relay'] as Record<string, unknown>)['schemaVersion']
-      === 'jinn-issue-relay-round.v2'
-  ) {
-    // Relay V2 requires solver-authored PR metadata as well as a patch. There
-    // is no honest fallback that can infer that metadata from `git diff`.
+  if (task.spec?.['application'] !== undefined) {
+    // Application-extended tasks own their complete typed result. Falling
+    // back to a patch-only payload would silently discard application data.
     return null;
   }
   const repoDir = join(workingDir, 'repo');

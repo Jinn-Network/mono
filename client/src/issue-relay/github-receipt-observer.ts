@@ -7,21 +7,17 @@ import {
   IssueRelayEvaluationAnchorV1Schema,
   IssueRelayFindingV1Schema,
   IssueRelayRoundV1Schema,
-  IssueRelayRoundV2Schema,
   parseIssueRelayAssuranceComment,
   type IssueRelayAdoptionReceiptV1,
   type IssueRelayCorrelationV1,
   type IssueRelayEvaluationAnchorV1,
   type IssueRelayRoundV1,
-  type IssueRelayRoundV2,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 const DEFAULT_MAX_PAGES = 20;
 const MAX_MAX_PAGES = 100;
 const GENERATION_MARKER = '<!-- jinn-issue-relay:generation:v1 -->';
-const GENERATION_V2_MARKER = '<!-- jinn-issue-relay:generation:v2 -->';
 const ASSURANCE_MARKER = '<!-- jinn-issue-relay:assurance:v1 -->';
-const ASSURANCE_V2_MARKER = '<!-- jinn-issue-relay:assurance:v2 -->';
 const MAX_MARKER_BYTES = 256 * 1024;
 const GitOidSchema = z.string().regex(/^[0-9a-f]{40}$/);
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
@@ -58,8 +54,6 @@ export interface IssueRelayCheckSummary {
 
 export interface IssueRelayPullRequestFacts {
   readonly number: number;
-  readonly title: string;
-  readonly body: string;
   readonly targetRepository: string;
   readonly workspaceRepository: string;
   readonly targetBase: string;
@@ -444,10 +438,6 @@ export function createIssueRelayGitHubRestReadPort(
       const optional = sorted.filter(({ name }) => !requiredNames.has(name));
       return {
         number: githubPositiveInteger(raw['number'], 'pull request number'),
-        title: githubString(raw['title'], 'pull request title'),
-        body: typeof raw['body'] === 'string' && raw['body'].length > 0
-          ? raw['body']
-          : (() => { throw new Error('GitHub pull request body is missing'); })(),
         targetRepository,
         workspaceRepository,
         targetBase: githubString(base['ref'], 'pull request base ref'),
@@ -595,102 +585,14 @@ const IssueRelayGenerationMarkerSchema = z.object({
   updatedAt: TimestampSchema,
 }).strict();
 
-const MarkerRoundV2Schema = z.object({
-  round: z.number().int().nonnegative(),
-  purpose: z.enum(['initial', 'repair', 'decision-implementation']),
-  workspaceRepository: NonEmptyStringSchema,
-  inputHead: GitOidSchema,
-  findings: z.array(z.unknown()).max(ISSUE_RELAY_MAX_FINDINGS).optional(),
-  prNumber: z.number().int().positive().optional(),
-  decisionBinding: z.object({
-    decisionKey: DigestSchema,
-    proposalDigest: DigestSchema,
-    requestDigest: DigestSchema.optional(),
-    optionId: NonEmptyStringSchema,
-    authorization: z.enum([
-      'repository-policy-safe-preimplementation',
-      'human-option-intent',
-    ]),
-    sourceHead: GitOidSchema,
-    frozenImplementationBrief: NonEmptyStringSchema,
-  }).strict().optional(),
-  fundingIntent: MarkerRoundSchema.shape.fundingIntent,
-  task: MarkerRoundSchema.shape.task,
-  solution: MarkerRoundSchema.shape.solution,
-  adoption: MarkerRoundSchema.shape.adoption,
-  checks: MarkerRoundSchema.shape.checks,
-  evaluation: MarkerRoundSchema.shape.evaluation,
-  laneAttempts: z.object({
-    security: z.array(z.unknown()).max(100),
-    quality: z.array(z.unknown()).max(100),
-  }).strict(),
-}).strict();
-
-const IssueRelayGenerationMarkerV2Schema = z.object({
-  schemaVersion: z.literal('jinn-issue-relay-generation.v2'),
-  generation: NonEmptyStringSchema,
-  snapshot: SnapshotSchema,
-  phase: z.enum([
-    'awaiting-clarification',
-    'refused',
-    'admitted',
-    'funding',
-    'submitted',
-    'solution-delivered',
-    'draft-open',
-    'evaluating',
-    'human-decision-required',
-    'security-blocked',
-    'superseded',
-    'ready',
-    'cancelling',
-    'closed',
-    'exhausted',
-  ]),
-  executionDeadlineAt: TimestampSchema,
-  rounds: z.array(MarkerRoundV2Schema).max(100),
-  decisions: z.array(z.object({
-    decisionKey: DigestSchema,
-    lane: z.enum(['security', 'quality']),
-    proposalDigest: DigestSchema,
-    proposal: z.unknown(),
-    firstProposedHead: GitOidSchema,
-    status: z.enum(['queued', 'active', 'implementing', 'resolved', 'expired', 'superseded']),
-    request: z.unknown().optional(),
-    receipt: z.unknown().optional(),
-    deferrals: z.number().int().nonnegative(),
-    deferralReceipts: z.array(z.unknown()).max(100),
-    deferredUntil: TimestampSchema.optional(),
-    commissionedOptions: z.array(NonEmptyStringSchema).max(100),
-    implementationRound: z.number().int().nonnegative().optional(),
-    continuationDeadlineAt: TimestampSchema.optional(),
-    resolvedAt: TimestampSchema.optional(),
-  }).strict()).max(100),
-  pr: IssueRelayGenerationMarkerSchema.shape.pr,
-  cancellation: IssueRelayGenerationMarkerSchema.shape.cancellation,
-  supersession: z.object({
-    successorGeneration: NonEmptyStringSchema,
-    successorSnapshotDigest: DigestSchema,
-    requestedByReceiptDigest: DigestSchema,
-    supersededAt: TimestampSchema,
-  }).strict().optional(),
-  updatedAt: TimestampSchema,
-}).strict();
-
 export type IssueRelayGenerationMarker = z.infer<
   typeof IssueRelayGenerationMarkerSchema
 >;
-export type IssueRelayGenerationMarkerV2 = z.infer<
-  typeof IssueRelayGenerationMarkerV2Schema
->;
-export type AnyIssueRelayGenerationMarker =
-  | IssueRelayGenerationMarker
-  | IssueRelayGenerationMarkerV2;
 
 export type IssueRelayEvaluationReceiptObservation =
   | {
       readonly state: 'accepted';
-      readonly marker: AnyIssueRelayGenerationMarker;
+      readonly marker: IssueRelayGenerationMarker;
       readonly receipt: Extract<
         IssueRelayAdoptionReceiptV1,
         { disposition: 'accepted' }
@@ -711,26 +613,15 @@ export type IssueRelayEvaluationReceiptObservation =
       readonly detail: string;
     };
 
-function parseGenerationMarker(body: string): AnyIssueRelayGenerationMarker | null {
+function parseGenerationMarker(body: string): IssueRelayGenerationMarker | null {
   if (new TextEncoder().encode(body).byteLength > MAX_MARKER_BYTES) return null;
-  const v1 = body.match(
-    /^<!-- jinn-issue-relay:generation:v1 -->\n\n```json\n([^\r\n]*)\n```$/,
-  );
-  const v2Prefix = `${GENERATION_V2_MARKER}\n\`\`\`json\n`;
-  const v2 = body.startsWith(v2Prefix) && body.endsWith('\n```')
-    ? body.slice(v2Prefix.length, -4)
-    : undefined;
-  const source = v1?.[1] ?? v2;
-  if (source === undefined) return null;
+  const match = /^<!-- jinn-issue-relay:generation:v1 -->\n\n```json\n([^\r\n]*)\n```$/.exec(body);
+  if (match?.[1] === undefined) return null;
   try {
-    const raw = JSON.parse(source) as unknown;
-    if (v1 !== null) {
-      const decoded = IssueRelayGenerationMarkerSchema.safeParse(raw);
-      if (!decoded.success || JSON.stringify(decoded.data) !== source) return null;
-      return decoded.data;
-    }
-    const decoded = IssueRelayGenerationMarkerV2Schema.safeParse(raw);
-    if (!decoded.success || JSON.stringify(decoded.data, null, 2) !== source) return null;
+    const decoded = IssueRelayGenerationMarkerSchema.safeParse(
+      JSON.parse(match[1]) as unknown,
+    );
+    if (!decoded.success || JSON.stringify(decoded.data) !== match[1]) return null;
     return decoded.data;
   } catch {
     return null;
@@ -810,8 +701,8 @@ function contradictory(detail: string): IssueRelayEvaluationReceiptObservation {
 }
 
 function markerContradiction(input: {
-  readonly marker: AnyIssueRelayGenerationMarker;
-  readonly round: IssueRelayRoundV1 | IssueRelayRoundV2;
+  readonly marker: IssueRelayGenerationMarker;
+  readonly round: IssueRelayRoundV1;
   readonly issueNumber: number;
   readonly correlation: IssueRelayCorrelationV1;
 }): string | null {
@@ -834,30 +725,6 @@ function markerContradiction(input: {
     || markerRound.solution?.envelopeCid !== input.correlation.deliveryEnvelopeCid
   ) {
     return 'Relay issue generation marker round/task/solution binding is contradictory';
-  }
-  if (
-    input.round.schemaVersion === 'jinn-issue-relay-round.v2'
-    && (
-      input.marker.schemaVersion !== 'jinn-issue-relay-generation.v2'
-      || JSON.stringify(
-        input.marker.schemaVersion === 'jinn-issue-relay-generation.v2'
-          ? input.marker.rounds[input.round.round]?.findings ?? []
-          : undefined,
-      ) !== JSON.stringify(input.round.findings)
-      || JSON.stringify(
-        input.marker.schemaVersion === 'jinn-issue-relay-generation.v2'
-          ? input.marker.rounds[input.round.round]?.decisionBinding
-          : undefined,
-      ) !== JSON.stringify(input.round.decisionBinding)
-    )
-  ) {
-    return 'Relay V2 issue generation marker round contract is contradictory';
-  }
-  if (
-    input.round.schemaVersion === 'jinn-issue-relay-round.v1'
-    && input.marker.schemaVersion !== 'jinn-issue-relay-generation.v1'
-  ) {
-    return 'Relay V1 round cannot use a V2 issue generation marker';
   }
   if (
     markerRound.task.taskKey
@@ -895,16 +762,14 @@ function markerContradiction(input: {
  * stale evidence never becomes evaluator context.
  */
 export async function observeExactIssueRelayEvaluationReceipts(input: {
-  readonly round: IssueRelayRoundV1 | IssueRelayRoundV2;
+  readonly round: IssueRelayRoundV1;
   readonly issueNumber: number;
   readonly correlation: IssueRelayCorrelationV1;
   readonly relayBotLogin: string;
   readonly github: IssueRelayGitHubReadPort;
   readonly maxPages?: number;
 }): Promise<IssueRelayEvaluationReceiptObservation> {
-  const parsedRound = input.round.schemaVersion === 'jinn-issue-relay-round.v2'
-    ? IssueRelayRoundV2Schema.safeParse(input.round)
-    : IssueRelayRoundV1Schema.safeParse(input.round);
+  const parsedRound = IssueRelayRoundV1Schema.safeParse(input.round);
   if (!parsedRound.success || input.relayBotLogin.trim().length === 0) {
     return contradictory('Relay round or exact bot identity is invalid');
   }
@@ -927,7 +792,7 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
   const markers = uniqueCanonical(issueComments
     .filter((comment) => normalizedLogin(comment.authorLogin) === bot)
     .map((comment) => parseGenerationMarker(comment.body))
-    .filter((marker): marker is AnyIssueRelayGenerationMarker => marker !== null));
+    .filter((marker): marker is IssueRelayGenerationMarker => marker !== null));
   const exactMarkers = markers.filter((marker) =>
     marker.generation === input.round.generation);
   if (exactMarkers.length === 0) {
@@ -937,7 +802,7 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
     return contradictory('Conflicting service-authored Relay generation markers are observable');
   }
   const marker = exactMarkers[0]!;
-  const round = parsedRound.data as IssueRelayRoundV1 | IssueRelayRoundV2;
+  const round = parsedRound.data as IssueRelayRoundV1;
   const markerProblem = markerContradiction({
     marker,
     round,
@@ -964,9 +829,7 @@ export async function observeExactIssueRelayEvaluationReceipts(input: {
     normalizedLogin(comment.authorLogin) === bot);
   const assuranceComments = authorizedComments.filter((comment) =>
     comment.body === ASSURANCE_MARKER
-    || comment.body.startsWith(`${ASSURANCE_MARKER}\n`)
-    || comment.body === ASSURANCE_V2_MARKER
-    || comment.body.startsWith(`${ASSURANCE_V2_MARKER}\n`));
+    || comment.body.startsWith(`${ASSURANCE_MARKER}\n`));
   if (assuranceComments.length === 0) {
     return { state: 'pending', detail: 'No exact service-authored Relay assurance comment is observable' };
   }

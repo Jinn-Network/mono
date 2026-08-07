@@ -27,10 +27,17 @@ import {
   AutopilotSessionCapsuleSchema,
   GitHubRepositorySlugSchema,
 } from './autopilot-session.js';
-import {
-  IssueRelayRoundV1Schema,
-  IssueRelayRoundV2Schema,
-} from './issue-relay.js';
+import { IssueRelayRoundV1Schema } from './issue-relay.js';
+
+export const JinnRepoApplicationRefSchema = z.object({
+  id: z.string().regex(/^[a-z][a-z0-9.-]{0,127}$/),
+  version: z.string().regex(/^v[1-9][0-9]*$/),
+}).strict();
+
+export const JinnRepoApplicationTaskExtensionSchema = z.object({
+  ...JinnRepoApplicationRefSchema.shape,
+  payload: z.record(z.string(), z.unknown()),
+}).strict();
 
 export const JINN_REPO_SCHEMA_VERSION = 'jinn-repo.v1' as const;
 export const JINN_REPO_LIVE_ISSUE_RELAY_MAX_SPEC_BYTES = 2 * 1024 * 1024;
@@ -84,7 +91,9 @@ const JinnRepoLiveIssueTaskObjectSchema = z.object({
   test_files: z.never().optional(),
   test_cmd: z.never().optional(),
   session: z.never().optional(),
-  relay: z.union([IssueRelayRoundV1Schema, IssueRelayRoundV2Schema]).optional(),
+  relay: IssueRelayRoundV1Schema.optional(),
+  /** Opaque creator-owned application contract transported by Jinn. */
+  application: JinnRepoApplicationTaskExtensionSchema.optional(),
 });
 
 type LiveIssueTaskShape = z.infer<typeof JinnRepoLiveIssueTaskObjectSchema>;

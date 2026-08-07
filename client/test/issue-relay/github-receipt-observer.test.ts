@@ -712,8 +712,6 @@ describe('createIssueRelayGitHubRestReadPort', () => {
               ? { total_count: 0, statuses: [] }
               : {
                   number: prNumber,
-                  title: 'Fix the Relay issue',
-                  body: '## Summary\n\nFixes the Relay issue.',
                   base: {
                     ref: anchor.targetBase,
                     sha: baseOid,
@@ -764,8 +762,6 @@ describe('createIssueRelayGitHubRestReadPort', () => {
     }];
     expect(pullRequest).toEqual({
       number: prNumber,
-      title: 'Fix the Relay issue',
-      body: '## Summary\n\nFixes the Relay issue.',
       targetRepository: round.targetRepository,
       workspaceRepository: receipt.workspaceRepository,
       targetBase: anchor.targetBase,
