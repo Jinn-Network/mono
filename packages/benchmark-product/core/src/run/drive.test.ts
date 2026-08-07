@@ -12,7 +12,7 @@ import type {
 } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { sealTask } from "@jinn-network/task-execution-protocol";
-import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
+import { getSealedBytes, putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
 import {
   createRecordingProxy,
   driveCellEvents,
@@ -148,7 +148,9 @@ function fakeVenue(prepared: { taskBytes: Uint8Array; taskSha256: string }, eval
     backend: undefined as unknown as LocalVenue["backend"],
     verdictKeyId: evaluators[0]!.keyId,
     evaluators,
-    prepareEvaluationCell: () => prepared,
+    // The real venue returns the digest of its exact derived bytes. Preserve that contract in
+    // this fake even when a test's descriptive placeholder passed a different taskSha256.
+    prepareEvaluationCell: () => ({ taskBytes: prepared.taskBytes, taskSha256: sha256Hex(prepared.taskBytes) }),
     async shutdown() {},
   };
 }
@@ -373,9 +375,15 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     const evaluationEntry = entries.find((entry) => entry.kind === "evaluation");
     expect(evaluationEntry).toMatchObject({ cellKey, evalTaskSha256: preparedTaskSha256, evalAttempt: "att-eval-1" });
     if (evaluationEntry?.kind === "evaluation") {
+      expect(evaluationEntry.evalDeliverySha256).toBe(sha256Hex(evalDeliveryBytes));
       expect(evaluationEntry.verdictSha256).toBe(sha256Hex(verdictEnvelopeBytes));
       expect(evaluationEntry.evaluationTerminal).toBeUndefined();
     }
+
+    // BP-40: future public bundles must carry the exact derived evaluation Task and its
+    // evaluation Delivery without scraping the backend's mutable internal state.
+    expect(getSealedBytes(workspaceDir, preparedTaskSha256)).toEqual(preparedTaskBytes);
+    expect(getSealedBytes(workspaceDir, sha256Hex(evalDeliveryBytes))).toEqual(evalDeliveryBytes);
 
     // Exactly one Submission was sealed and submitted for the evaluation leg, pinning EVALUATION_HARNESS_PIN.
     expect(submits).toHaveLength(1);
@@ -468,7 +476,7 @@ describe("driveCellEvents — delivered terminal drives the evaluation leg end t
     );
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     const evaluationEntry = entries.find((entry) => entry.kind === "evaluation");
-    expect(evaluationEntry).toMatchObject({ evaluationTerminal: "could-not-grade", detail: "no evaluation-harness deployment", evalTaskSha256: "9".repeat(64) });
+    expect(evaluationEntry).toMatchObject({ evaluationTerminal: "could-not-grade", detail: "no evaluation-harness deployment", evalTaskSha256: sha256Hex(new Uint8Array([9])) });
   });
 
   test("evaluation attempt reaches a non-delivered terminal -> could-not-grade naming the state", async () => {
@@ -782,7 +790,7 @@ describe("driveEvaluationCatchUp — resumes only the evaluation leg from stored
     const entries = readRunJournalEntries(workspaceDir, "draft-1");
     // No "delivery" entry is re-written — only the evaluation leg runs.
     expect(entries.map((entry) => entry.kind)).toEqual(["evaluation"]);
-    expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: "4".repeat(64) });
+    expect(entries[0]).toMatchObject({ cellKey, evalTaskSha256: sha256Hex(new Uint8Array([4, 5])) });
   });
 
   test("catch-up with missingEvalIndexes [2] re-runs exactly leg 2 (BP-21)", async () => {

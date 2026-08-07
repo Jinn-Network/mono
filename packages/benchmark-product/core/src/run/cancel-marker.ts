@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { fsyncBestEffortSync } from "@jinn-network/task-execution-supervisor";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { z } from "zod";
 import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { fsyncDirectorySync } from "../fs/atomic.js";
@@ -154,7 +155,7 @@ export function writeCancelMarker(
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
       0o600,
     );
-    writeFileSync(fd, JSON.stringify(result.data, null, 2));
+    writeFileSync(fd, canonicalJsonBytes(result.data));
     fsyncBestEffortSync(fd);
     deps.onPublicationStep?.("owner-file-synced");
     closeSync(fd);

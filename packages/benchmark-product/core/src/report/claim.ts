@@ -26,6 +26,7 @@
 
 import { z } from "zod";
 import type { MatrixRecord, ReportRecord, RunRecord } from "@jinn-network/benchmarking-records";
+import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { claimPackageArtifactPath } from "../workspace/layout.js";
 import type { VenueHonesty } from "../operations/run-results.js";
@@ -79,7 +80,7 @@ const DisclosuresSchema = z.object({
 
 /** The fixed sentence every claim package's assurance block carries (BP-21, spec §6/§7.1): what
  * distinct evaluator identities on this venue actually prove. Never softened per-claim. */
-const ASSURANCE_DISCLOSURE =
+export const ASSURANCE_DISCLOSURE =
   "Distinct evaluator identities are workspace-minted keys; they prove agent-distinctness, "
   + "not party-independence, on this self-run venue.";
 
@@ -237,12 +238,16 @@ function summedPinningUnverifiableCounts(perSubject: readonly DisclosurePerSubje
   return counts;
 }
 
-const VERIFICATION_CHECKS: readonly string[] = [
+export const CLAIM_VERIFICATION_CHECKS: readonly string[] = [
   "sealed-store digest re-verification on read (every referenced record's exact bytes are re-hashed against their own digest)",
   "matrix re-derivation (verifyMatrix byte-compare against the exact recomputed Matrix)",
   "report DSSE signature, method recompute, preregistration, and disclosures (verifyReport)",
   "claim-package digest and content consistency against the records it cites",
 ];
+
+export const PUBLIC_BUNDLE_VERIFICATION_COMMAND = `${CLI_BIN_NAME} bundle verify --bundle <bundle-dir> --json`;
+export const SELF_RUN_TRUST_ROOT =
+  "Signatures verify against the bundle-carried public keys minted by this workspace; there is no third-party trust anchor on the self-run venue.";
 
 /** Builds the claim package document (spec §8.2) from explicit, already-sealed record data. Pure
  * — no filesystem access, no recomputation of anything the cited records already settled. */
@@ -314,9 +319,9 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
     limitations: [...(reportRecord.limitations ?? [])],
     venueHonesty: input.venueHonesty,
     verification: {
-      command: `${CLI_BIN_NAME} ${input.verificationCommandVerb} --workspace <dir> --draft ${input.draftId} [--json]`,
-      checks: [...VERIFICATION_CHECKS],
-      trustRoot: "Signatures verify against this workspace's own report key; there is no third-party trust anchor on the self-run venue.",
+      command: PUBLIC_BUNDLE_VERIFICATION_COMMAND,
+      checks: [...CLAIM_VERIFICATION_CHECKS],
+      trustRoot: SELF_RUN_TRUST_ROOT,
     },
     ...(input.previewDisclosure !== undefined
       ? {
@@ -332,5 +337,5 @@ export function buildClaimPackage(input: BuildClaimPackageInput): ClaimPackage {
 /** Validates and atomically writes the claim package to `claimPackageArtifactPath`. */
 export function writeClaimPackage(workspaceDir: string, draftId: string, claim: ClaimPackage): void {
   const validated = ClaimPackageSchema.parse(claim);
-  atomicWriteFileSync(claimPackageArtifactPath(workspaceDir, draftId), JSON.stringify(validated, null, 2));
+  atomicWriteFileSync(claimPackageArtifactPath(workspaceDir, draftId), canonicalJsonBytes(validated));
 }

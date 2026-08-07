@@ -183,6 +183,16 @@
       }
     },
     {
+      "operation": "runPublish",
+      "cliVerb": "publish",
+      "authorityGated": true,
+      "description": "Verifies and emits one immutable deletion-portable public bundle from a reported draft (authority-gated).",
+      "gui": {
+        "status": "shipped",
+        "action": "run.publish"
+      }
+    },
+    {
       "operation": "runQuote",
       "cliVerb": "quote",
       "authorityGated": false,
@@ -269,8 +279,8 @@
       "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
     },
     {
-      "name": "publish",
-      "reason": "\"publish\" is in authority/policy.ts's GATED_OPERATIONS but no shipped operation uses it as an action name yet — reserved for a later packet"
+      "name": "bundle verify",
+      "reason": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal"
     }
   ]
 }

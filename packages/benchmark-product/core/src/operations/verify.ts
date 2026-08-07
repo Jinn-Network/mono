@@ -41,7 +41,6 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { verifyMatrix } from "@jinn-network/benchmarking-run";
 import { verifyReport } from "@jinn-network/benchmarking-aggregate";
-import { canonicalJsonBytes } from "@jinn-network/trust-core";
 import { refuse } from "../errors.js";
 import { ClaimPackageSchema } from "../report/claim.js";
 import { buildMethodPorts } from "../report/ports.js";
@@ -49,9 +48,11 @@ import { buildWorkspaceTrustDeps } from "../report/trust.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
 import { foldRunJournal, readRunJournalEntries } from "../run/journal.js";
+import { readPreviewLog } from "../run/preview-log.js";
 import { requireRunState } from "../run/state.js";
 import { claimPackageArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
+import { assertClaimConsistency } from "../verification/claim-consistency.js";
 import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
@@ -72,44 +73,10 @@ export interface RunVerifyResult {
   readonly reportEnvelopeSha256?: string;
 }
 
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  return left.length === right.length && left.every((byte, index) => byte === right[index]);
-}
-
-/** Exact structural JSON equality via canonical bytes — deliberately not a "deep equal ignoring
- * key order" library semantic. `canonicalJsonBytes` already sorts object keys; requiring the
- * resulting bytes to match exactly is what makes this comparison as strict as the sealed records
- * themselves (module header). */
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return bytesEqual(canonicalJsonBytes(left), canonicalJsonBytes(right));
-}
-
-/** Extracts wilson@1's `results.perSubject[0].results.conflicted` block — the same narrow, local
- * shape check `../report/claim.ts`'s own `wilsonSubjectResults` performs, mirrored rather than
- * imported (that helper is private to claim.ts, and this module only needs the one sub-block). */
-function reportConflictedBlock(
-  results: unknown,
-): { readonly count: number; readonly cellKeys: readonly string[] } | undefined {
-  const perSubject = (
-    results as
-      | { readonly perSubject?: readonly { readonly results?: { readonly conflicted?: { readonly count?: unknown; readonly cellKeys?: unknown } } }[] }
-      | undefined
-  )?.perSubject;
-  const conflicted = perSubject?.[0]?.results?.conflicted;
-  if (typeof conflicted?.count !== "number" || !Array.isArray(conflicted.cellKeys)) return undefined;
-  return { count: conflicted.count, cellKeys: conflicted.cellKeys as readonly string[] };
-}
-
-export function runVerify(
+export async function verifyRunWorkspace(
   context: OperationContext,
   input: RunVerifyInput,
-): Promise<OperationResult<RunVerifyResult>> {
-  return operateAsync({
-    context,
-    action: "run.verify",
-    subject: input.draftId,
-    inputs: input,
-    run: async () => {
+): Promise<RunVerifyResult> {
       const document = readDraftDocument(context.workspaceDir, input.draftId);
       if (document.spec.taskSet.kind !== "benchmark") {
         refuse("conflict", `drafts.${input.draftId}.taskSet`, `draft ${input.draftId} has no attached benchmark`);
@@ -211,62 +178,31 @@ export function runVerify(
       }
       const claim = claimParsed.data;
 
-      const recordChecks: readonly (readonly [string, string | undefined, string])[] = [
-        ["benchmarkSha256", document.spec.taskSet.benchmarkSha256, claim.records.benchmarkSha256],
-        ["runSha256", runState.runSha256, claim.records.runSha256],
-        ["matrixSha256", runState.matrixSha256, claim.records.matrixSha256],
-        ["reportSha256", runState.reportSha256, claim.records.reportSha256],
-        ["reportEnvelopeSha256", runState.reportEnvelopeSha256, claim.records.reportEnvelopeSha256],
-      ];
-      for (const [field, expectedValue, actualValue] of recordChecks) {
-        if (expectedValue !== actualValue) {
-          refuse(
-            "record-integrity",
-            "claim-consistency",
-            `claim package records.${field} ("${actualValue}") does not match the workspace's own value ("${String(expectedValue)}")`,
-          );
-        }
-      }
-
-      if (!jsonEqual(claim.results, reportRecord.results)) {
-        refuse("record-integrity", "claim-consistency", "claim package results do not match the verified Report's own results");
-      }
-
-      if (
-        claim.method.id !== reportRecord.method.id
-        || claim.method.version !== reportRecord.method.version
-        || !jsonEqual(claim.method.parameters, reportRecord.method.parameters)
-        || claim.method.preregistered !== (reportRecord.preregistered ?? false)
-      ) {
-        refuse("record-integrity", "claim-consistency", "claim package method/preregistered does not match the verified Report");
-      }
-
-      if (!jsonEqual(claim.disclosures.perSubject, reportRecord.disclosures?.perSubject ?? [])) {
-        refuse("record-integrity", "claim-consistency", "claim package disclosures do not match the verified Report's own disclosures");
-      }
-      if (!jsonEqual(claim.limitations, reportRecord.limitations ?? [])) {
-        refuse("record-integrity", "claim-consistency", "claim package limitations do not match the verified Report's own limitations");
-      }
-
-      if (!jsonEqual(claim.completeness, matrixRecord.completeness)) {
-        refuse("record-integrity", "claim-consistency", "claim package completeness does not match the verified Matrix's own completeness");
-      }
-      if (!jsonEqual(claim.attrition, matrixRecord.attrition)) {
-        refuse("record-integrity", "claim-consistency", "claim package attrition does not match the verified Matrix's own attrition");
-      }
-
-      const reportConflicted = reportConflictedBlock(reportRecord.results);
-      if (
-        reportConflicted === undefined
-        || claim.conflicted.count !== reportConflicted.count
-        || !jsonEqual(claim.conflicted.cellKeys, reportConflicted.cellKeys)
-      ) {
-        refuse(
-          "record-integrity",
-          "claim-consistency",
-          "claim package conflicted block does not match the verified Report's own results conflicted block",
-        );
-      }
+      const previewLog = readPreviewLog(context.workspaceDir, input.draftId);
+      assertClaimConsistency({
+        claim,
+        identities: {
+          benchmarkSha256: document.spec.taskSet.benchmarkSha256,
+          runSha256: runState.runSha256,
+          matrixSha256: runState.matrixSha256,
+          reportSha256: runState.reportSha256,
+          reportEnvelopeSha256: runState.reportEnvelopeSha256,
+        },
+        matrixRecord,
+        reportRecord,
+        benchmarkRecord: benchRecord,
+        runRecord,
+        draftId: input.draftId,
+        assurancePreset: document.spec.assurance.preset,
+        ...(previewLog === undefined
+          ? {}
+          : {
+              rehearsal: {
+                previewCount: previewLog.count,
+                timestamps: previewLog.previews.map((preview) => preview.at),
+              },
+            }),
+      });
 
       checks.push("claim-consistency");
 
@@ -276,6 +212,17 @@ export function runVerify(
         matrixSha256: runState.matrixSha256,
         reportEnvelopeSha256: runState.reportEnvelopeSha256,
       };
-    },
+}
+
+export function runVerify(
+  context: OperationContext,
+  input: RunVerifyInput,
+): Promise<OperationResult<RunVerifyResult>> {
+  return operateAsync({
+    context,
+    action: "run.verify",
+    subject: input.draftId,
+    inputs: input,
+    run: () => verifyRunWorkspace(context, input),
   });
 }

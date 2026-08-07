@@ -67,6 +67,19 @@ export const RunStateSchema = z.object({
   /** sha256 hex of the sealed Report's DSSE ENVELOPE bytes, set at `report` (BP-13). */
   reportEnvelopeSha256: Sha256HexSchema.optional(),
   reportedAt: Rfc3339Schema.optional(),
+  /** SHA-256 of the exact canonical public bundle manifest bytes (BP-40). */
+  bundleIdentity: Sha256HexSchema.optional(),
+  /** Workspace-relative digest-addressed immutable target, never an absolute path. */
+  bundleRelativePath: z.string().regex(/^artifacts\/[a-z0-9][a-z0-9-]{0,63}\/public-bundles\/[a-f0-9]{64}$/).optional(),
+  bundleChecks: z.array(z.enum([
+    "manifest",
+    "evidence-closure",
+    "trust",
+    "matrix-rederivation",
+    "report-verification",
+    "claim-consistency",
+  ])).optional(),
+  publishedAt: Rfc3339Schema.optional(),
 });
 
 export type RunState = z.infer<typeof RunStateSchema>;

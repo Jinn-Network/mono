@@ -30,6 +30,11 @@
  */
 export const EXCLUDED_FACADE_EXPORTS: readonly string[] = ["unverifiableAxisCounts"];
 
+/** Standalone filesystem helpers deliberately outside the workspace operations/audit boundary. */
+export const STANDALONE_CLI_VERBS: Readonly<Record<string, string>> = {
+  "bundle verify": "portable verifier reads only the caller-selected immutable bundle and requires no workspace or principal",
+};
+
 /**
  * The explicit operation -> verb map. A future facade operation with no entry here (or a verb
  * with no operation behind it) is exactly the drift `./parity.test.ts` exists to catch — the fix
@@ -62,6 +67,7 @@ export const OPERATION_TO_VERB: Readonly<Record<string, string>> = {
   runResults: "results",
   runReport: "report",
   runVerify: "verify",
+  runPublish: "publish",
 };
 
 /** Every operation's own `operate()`/`operateAsync()` `action` literal — see this module's own
@@ -94,6 +100,7 @@ export const OPERATION_TO_ACTION: Readonly<Record<string, string>> = {
   runResults: "run.results",
   runReport: "report",
   runVerify: "run.verify",
+  runPublish: "publish",
 };
 
 /** One-line, hand-authored descriptions — prose, not a fact `GATED_OPERATIONS` or any other live
@@ -128,6 +135,7 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
   runReport: "Produces the sealed Report and claim package from the closed run's Matrix (authority-gated).",
   runVerify:
     "Independently re-derives the Matrix (and, once reported, the Report and claim package) from durable workspace state.",
+  runPublish: "Verifies and emits one immutable deletion-portable public bundle from a reported draft (authority-gated).",
 };
 
 /**
@@ -166,6 +174,7 @@ export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
   runResults: { status: "shipped", action: "run.results" },
   runReport: { status: "shipped", action: "run.report" },
   runVerify: { status: "shipped", action: "run.verify" },
+  runPublish: { status: "shipped", action: "run.publish" },
 };
 
 /** The facade's own operation exports — every function export not in `EXCLUDED_FACADE_EXPORTS`.

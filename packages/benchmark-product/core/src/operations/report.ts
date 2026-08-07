@@ -60,7 +60,7 @@ import type { OperationContext } from "./context.js";
 import { readDraftDocument } from "./drafts.js";
 import { operateAsync } from "./operate-async.js";
 import type { OperationResult } from "./result.js";
-import { LOCAL_VENUE_LIMITS, unverifiableAxisCounts, type VenueHonesty } from "./run-results.js";
+import { LOCAL_VENUE_LIMITS, buildLocalVenueHonesty } from "./run-results.js";
 
 export interface RunReportInput {
   readonly draftId: string;
@@ -161,12 +161,7 @@ export function runReport(
       // Step 3: build AND write the claim package. Both can throw (a results-shape mismatch in
       // buildClaimPackage, a schema violation or disk failure in writeClaimPackage) — that must
       // surface here, before the draft is transitioned, not after.
-      const venueHonesty: VenueHonesty = {
-        venue: "self-run",
-        preRegistration: "structural-and-append-order-only",
-        limits: LOCAL_VENUE_LIMITS,
-        unverifiableAxisCounts: unverifiableAxisCounts(matrixRecord.cells),
-      };
+      const venueHonesty = buildLocalVenueHonesty(matrixRecord.cells);
 
       const claimPackage = buildClaimPackage({
         draftId: input.draftId,

@@ -31,10 +31,51 @@ export interface LocalAdmissionReceiptFact {
   readonly externalCapabilities: boolean;
 }
 
+export interface LocalAdmissionReceiptRecord {
+  readonly sha256: string;
+  readonly fact: LocalAdmissionReceiptFact;
+}
+
+export interface ParsedLocalAdmissionReceipt extends LocalAdmissionReceiptRecord {
+  readonly taskSha256: string;
+}
+
 interface PredictionSnapshotStatementShape {
   readonly _type?: unknown;
   readonly predicateType?: unknown;
   readonly predicate?: unknown;
+}
+
+/** Pure parser used by both workspace scanning and portable graph verification. */
+export function parsePredictionSnapshotAdmissionReceipt(
+  bytes: Uint8Array,
+  sha256 = "",
+): ParsedLocalAdmissionReceipt | undefined {
+  let envelope: ReturnType<typeof parseDsseEnvelope>;
+  try {
+    envelope = parseDsseEnvelope(bytes);
+  } catch {
+    return undefined;
+  }
+  if (envelope.payloadType !== ADMISSION_RECEIPT_MEDIA_TYPE) return undefined;
+  let statement: PredictionSnapshotStatementShape;
+  try {
+    statement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes)) as PredictionSnapshotStatementShape;
+  } catch {
+    return undefined;
+  }
+  if (
+    statement._type !== IN_TOTO_STATEMENT_TYPE
+    || statement.predicateType !== PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1.predicateType
+  ) return undefined;
+  const predicate = statement.predicate as Partial<PredictionSnapshotAdmissionReceiptV1> | undefined;
+  const taskDigest = predicate?.task?.documentDigest;
+  if (typeof taskDigest !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(taskDigest)) return undefined;
+  return {
+    sha256,
+    taskSha256: taskDigest.slice("sha256:".length),
+    fact: { zeroReplayVariance: true, externalCapabilities: false },
+  };
 }
 
 /**
@@ -47,7 +88,17 @@ interface PredictionSnapshotStatementShape {
 export function scanPredictionSnapshotAdmissionReceipts(
   workspaceDir: string,
 ): Map<string, LocalAdmissionReceiptFact> {
-  const byTaskDigestHex = new Map<string, LocalAdmissionReceiptFact>();
+  return new Map(
+    [...scanPredictionSnapshotAdmissionReceiptRecords(workspaceDir)].map(([taskDigest, record]) => [taskDigest, record.fact]),
+  );
+}
+
+/** Same validated scan with the receipt envelope's own CAS digest retained for BP-40's exact
+ * allowlisted evidence closure. */
+export function scanPredictionSnapshotAdmissionReceiptRecords(
+  workspaceDir: string,
+): Map<string, LocalAdmissionReceiptRecord> {
+  const byTaskDigestHex = new Map<string, LocalAdmissionReceiptRecord>();
 
   let fileNames: string[];
   try {
@@ -65,32 +116,9 @@ export function scanPredictionSnapshotAdmissionReceipts(
       continue;
     }
 
-    let envelope: ReturnType<typeof parseDsseEnvelope>;
-    try {
-      envelope = parseDsseEnvelope(bytes);
-    } catch {
-      continue;
-    }
-    if (envelope.payloadType !== ADMISSION_RECEIPT_MEDIA_TYPE) continue;
-
-    let statement: PredictionSnapshotStatementShape;
-    try {
-      statement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(envelope.payloadBytes)) as PredictionSnapshotStatementShape;
-    } catch {
-      continue;
-    }
-    if (
-      statement._type !== IN_TOTO_STATEMENT_TYPE
-      || statement.predicateType !== PREDICTION_SNAPSHOT_ADMISSION_POLICY_V1.predicateType
-    ) {
-      continue;
-    }
-
-    const predicate = statement.predicate as Partial<PredictionSnapshotAdmissionReceiptV1> | undefined;
-    const taskDigest = predicate?.task?.documentDigest;
-    if (typeof taskDigest !== "string" || !taskDigest.startsWith("sha256:")) continue;
-
-    byTaskDigestHex.set(taskDigest.slice("sha256:".length), { zeroReplayVariance: true, externalCapabilities: false });
+    const parsed = parsePredictionSnapshotAdmissionReceipt(bytes, digest);
+    if (parsed === undefined) continue;
+    byTaskDigestHex.set(parsed.taskSha256, { sha256: parsed.sha256, fact: parsed.fact });
   }
 
   return byTaskDigestHex;

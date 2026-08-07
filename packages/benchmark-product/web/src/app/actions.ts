@@ -21,6 +21,7 @@ import {
   runStatus,
   runCollect,
   runPreview,
+  runPublish,
   runQuote,
   runReport,
   runResults,
@@ -39,6 +40,7 @@ import {
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
 import { ProductContextConfigurationError, readRunDriverTestingDeps } from "@/lib/server/product-context";
 import { projectRunStatusForGui } from "@/lib/server/view-models";
+import { projectPublishErrorForGui } from "@/lib/server/gui-error";
 
 export async function workspaceInitAction(_previous: GuiActionState, _formData: FormData): Promise<GuiActionState> {
   void _previous; void _formData;
@@ -273,4 +275,24 @@ export async function runVerifyAction(_previous: GuiActionState, formData: FormD
       },
     };
   });
+}
+
+/** Publishes, or re-verifies the one fixed draft-owned bundle when already published. The
+ * browser supplies only draftId — never a filesystem path — and receives no absolute path. */
+export async function runPublishAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(async (context) => {
+    const outcome = await runPublish(context, { draftId });
+    if (!outcome.ok) return { ...outcome, error: projectPublishErrorForGui(outcome.error) };
+    return {
+      ok: true as const,
+      result: {
+        draftId,
+        state: outcome.result.draft.state,
+        bundleIdentity: outcome.result.bundleIdentity,
+        bundleRelativePath: outcome.result.bundleRelativePath,
+        checks: [...outcome.result.checks],
+      },
+    };
+  }, { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/results`] });
 }

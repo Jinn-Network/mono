@@ -25,6 +25,7 @@
  * registered anywhere. `witnessVerifier` is wired but never reached for this ceremony type.
  */
 
+import { createPublicKey } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { BENCHMARKING_REPORTS_SCOPE } from "@jinn-network/benchmarking-records";
@@ -46,6 +47,73 @@ export interface BuildWorkspaceTrustDepsInput {
   readonly workspaceDir: string;
   /** The Agent IRI this workspace's report key is claimed to bind to (the run owner). */
   readonly author: string;
+}
+
+export interface PublicReportTrustMaterial {
+  readonly author: string;
+  readonly keyId: string;
+  readonly didKey: string;
+  readonly algorithm: "ed25519";
+  readonly spkiDerBase64: string;
+  readonly validFrom: string;
+}
+
+export interface BuildPublicReportTrustDepsInput {
+  readonly report: PublicReportTrustMaterial;
+  /** Exact public trust-document bytes carrying `report`; used as the resolved binding envelope. */
+  readonly bindingEnvelopeBytes: Uint8Array;
+}
+
+/** Public-only counterpart to `buildWorkspaceTrustDeps`, used by deletion-portable bundles. */
+export function buildPublicReportTrustDeps(input: BuildPublicReportTrustDepsInput): VerifyEnvelopeBindingDeps {
+  const { report, bindingEnvelopeBytes } = input;
+  if (report.keyId !== report.didKey) {
+    throw new Error("report trust keyId must equal didKey");
+  }
+  const spkiDer = Buffer.from(report.spkiDerBase64, "base64");
+  const publicKey = createPublicKey({ key: spkiDer, format: "der", type: "spki" });
+  const bindingDigest = `sha256:${sha256Hex(bindingEnvelopeBytes)}` as const;
+  const binding: ResolvedBinding = {
+    binding: {
+      protocol: TRUST_KEY_BINDING_FORMAT,
+      agent: report.author,
+      key: {
+        publicKey: report.spkiDerBase64,
+        keyid: report.keyId,
+        algorithm: report.algorithm,
+        didKey: report.didKey,
+      },
+      voucher: { kind: "agentId", caip19: SYNTHETIC_VOUCHER_CAIP19 },
+      relationship: "controls",
+      scope: [BENCHMARKING_REPORTS_SCOPE],
+      validFrom: report.validFrom,
+      ceremony: { type: "agentId", digest: `sha256:${sha256Hex(spkiDer)}` },
+      strength: "strong",
+      anchors: [],
+    },
+    envelopeBytes: bindingEnvelopeBytes,
+    bindingDigest,
+    effectiveStart: report.validFrom,
+    isGenesis: true,
+    revocations: [],
+  };
+  return {
+    dsseVerifier: (envelopeBytes) => verifyReportEnvelopeSignatures(envelopeBytes, {
+      keyId: report.keyId,
+      publicKey,
+    }),
+    bindingResolver: {
+      async resolveBinding(query) {
+        if (query.key !== report.keyId || query.agent !== report.author) return null;
+        return binding;
+      },
+    },
+    witnessVerifier: {
+      async verify1271Witness() {
+        return { verified: false, reason: "no 1271 witnesses on the local venue" };
+      },
+    },
+  };
 }
 
 /** Builds the `VerifyEnvelopeBindingDeps` bundle for `verifyReport`'s authenticity leg, scoped to

@@ -85,7 +85,8 @@ interface EvaluatorSigningKeySidecar extends SigningKeySidecar {
   readonly evaluatorId: string;
 }
 
-function deriveKeyId(publicKey: KeyObject): string {
+/** The one genuine evaluator key-id derivation, shared by key minting and portable verification. */
+export function verdictKeyIdFromEd25519PublicKey(publicKey: KeyObject): string {
   const spkiDer = publicKey.export({ type: "spki", format: "der" });
   const digest = createHash("sha256").update(spkiDer).digest("hex");
   return `benchmark-product-verdict-${digest.slice(0, 16)}`;
@@ -135,7 +136,7 @@ export function loadOrCreateVerdictSigningKey(workspaceDir: string): VerdictSign
     // Crash recovery: the PEM landed but the sidecar write never did (the mint below writes the
     // PEM first). The key id is derivable from the PEM itself — complete the interrupted mint
     // rather than regenerate; the actual key material is never silently replaced.
-    const keyId = deriveKeyId(createPublicKey(privateKey));
+    const keyId = verdictKeyIdFromEd25519PublicKey(createPublicKey(privateKey));
     writeKeyFileAtomicSync(sidecarPath, `${JSON.stringify({ keyId } satisfies SigningKeySidecar, null, 2)}\n`);
     return toVerdictSigningKey(privateKey, keyId);
   }
@@ -150,7 +151,7 @@ export function loadOrCreateVerdictSigningKey(workspaceDir: string): VerdictSign
   }
 
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const keyId = deriveKeyId(publicKey);
+  const keyId = verdictKeyIdFromEd25519PublicKey(publicKey);
   const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
   // Each file lands atomically (temp + rename), PEM before sidecar — the recovery branch above
   // understands exactly this order's one possible crash residue (PEM without sidecar).
@@ -199,7 +200,7 @@ export function loadOrCreateEvaluatorSigningKeys(
       // the PEM first). No binding was ever recorded for this slot, so completing the
       // interrupted mint — same key, this slot's requested evaluator id — is exactly what the
       // crashed call was doing; the key material is never silently replaced.
-      const keyId = deriveKeyId(createPublicKey(privateKey));
+      const keyId = verdictKeyIdFromEd25519PublicKey(createPublicKey(privateKey));
       writeKeyFileAtomicSync(
         sidecarPath,
         `${JSON.stringify({ keyId, evaluatorId: evaluator.id } satisfies EvaluatorSigningKeySidecar, null, 2)}\n`,
@@ -217,7 +218,7 @@ export function loadOrCreateEvaluatorSigningKeys(
     }
 
     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-    const keyId = deriveKeyId(publicKey);
+    const keyId = verdictKeyIdFromEd25519PublicKey(publicKey);
     const pem = privateKey.export({ type: "pkcs8", format: "pem" }) as string;
     // Each file lands atomically (temp + rename), PEM before sidecar — the recovery branch
     // above understands exactly this order's one possible crash residue (PEM without sidecar).
@@ -238,13 +239,32 @@ export function loadOrCreateEvaluatorSigningKeys(
  * when it exists. Public keys derive from the private PEMs via `createPublicKey` — no new files.
  */
 export function readEvaluatorPublicKeys(workspaceDir: string): Map<string, KeyObject> {
-  const registry = new Map<string, KeyObject>();
+  return new Map(
+    [...readEvaluatorPublicKeyRecords(workspaceDir)].map(([evaluatorId, record]) => [evaluatorId, record.publicKey]),
+  );
+}
+
+export interface EvaluatorPublicKeyRecord {
+  readonly keyId: string;
+  readonly publicKey: KeyObject;
+}
+
+/** Public-key registry with the signer key id retained for BP-40 portable trust export. The
+ * publisher may derive these public keys from workspace-held private PEMs; only SPKI public
+ * bytes and the cross-checked sidecar id enter the bundle. */
+export function readEvaluatorPublicKeyRecords(workspaceDir: string): Map<string, EvaluatorPublicKeyRecord> {
+  const registry = new Map<string, EvaluatorPublicKeyRecord>();
   const venueDir = join(workspaceDir, "venue");
 
   const legacyPemPath = join(venueDir, PEM_FILE_NAME);
   if (existsSync(legacyPemPath)) {
     const privateKey = createPrivateKey({ key: readFileSync(legacyPemPath, "utf8"), format: "pem", type: "pkcs8" });
-    registry.set(LEGACY_VERDICT_EVALUATOR_ID, createPublicKey(privateKey));
+    const sidecarPath = join(venueDir, SIDECAR_FILE_NAME);
+    if (!existsSync(sidecarPath)) {
+      refuse("execution", `venue/${SIDECAR_FILE_NAME}`, "legacy evaluator key is missing its sidecar");
+    }
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as SigningKeySidecar;
+    registry.set(LEGACY_VERDICT_EVALUATOR_ID, { keyId: sidecar.keyId, publicKey: createPublicKey(privateKey) });
   }
 
   const evaluatorsDir = join(venueDir, EVALUATORS_DIR_NAME);
@@ -263,7 +283,7 @@ export function readEvaluatorPublicKeys(workspaceDir: string): Map<string, KeyOb
     }
     const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as EvaluatorSigningKeySidecar;
     const privateKey = createPrivateKey({ key: readFileSync(pemPath, "utf8"), format: "pem", type: "pkcs8" });
-    registry.set(sidecar.evaluatorId, createPublicKey(privateKey));
+    registry.set(sidecar.evaluatorId, { keyId: sidecar.keyId, publicKey: createPublicKey(privateKey) });
   }
   return registry;
 }

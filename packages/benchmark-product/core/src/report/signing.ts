@@ -78,7 +78,7 @@ function rawEd25519PublicKeyBytes(publicKey: KeyObject): Uint8Array {
 
 /** `did:key:z<base58btc(0xed 0x01 || raw 32-byte Ed25519 public key)>` — satisfies
  * `@jinn-network/trust-core`'s `DidKeySchema`. */
-function didKeyFromEd25519PublicKey(publicKey: KeyObject): string {
+export function didKeyFromEd25519PublicKey(publicKey: KeyObject): string {
   const raw = rawEd25519PublicKeyBytes(publicKey);
   const multicodecPrefixed = new Uint8Array(ED25519_MULTICODEC_PREFIX.length + raw.length);
   multicodecPrefixed.set(ED25519_MULTICODEC_PREFIX, 0);

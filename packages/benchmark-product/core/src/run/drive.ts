@@ -183,7 +183,7 @@ function journalCouldNotGrade(
   deps: DriveDeps,
   cellKey: string,
   detail: string,
-  extra: { evalTaskSha256?: string; evalAttempt?: string; evaluator?: string; evalIndex?: number } = {},
+  extra: { evalTaskSha256?: string; evalDeliverySha256?: string; evalAttempt?: string; evaluator?: string; evalIndex?: number } = {},
 ): void {
   appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
     kind: "evaluation",
@@ -192,6 +192,7 @@ function journalCouldNotGrade(
     evaluationTerminal: "could-not-grade",
     detail,
     ...(extra.evalTaskSha256 !== undefined ? { evalTaskSha256: extra.evalTaskSha256 } : {}),
+    ...(extra.evalDeliverySha256 !== undefined ? { evalDeliverySha256: extra.evalDeliverySha256 } : {}),
     ...(extra.evalAttempt !== undefined ? { evalAttempt: extra.evalAttempt } : {}),
     ...(extra.evaluator !== undefined ? { evaluator: extra.evaluator } : {}),
     ...(extra.evalIndex !== undefined ? { evalIndex: extra.evalIndex } : {}),
@@ -300,6 +301,7 @@ async function dispatchEvaluation(
     return;
   }
   const deliveryBytes = await deps.backend.fetchDelivery(deliveryRef);
+  const evalDeliverySha256 = putSealedBytes(deps.workspaceDir, deliveryBytes);
   const delivery = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(deliveryBytes)) as {
     readonly outputs: readonly { readonly name: string; readonly digest?: { readonly sha256?: string } }[];
   };
@@ -307,6 +309,7 @@ async function dispatchEvaluation(
   if (verdictOutput?.digest?.sha256 === undefined) {
     journalCouldNotGrade(deps, cellKey, "evaluation delivery carries no verdict output", {
       ...legExtra,
+      evalDeliverySha256,
       evalAttempt,
     });
     return;
@@ -314,6 +317,7 @@ async function dispatchEvaluation(
   if (deps.backend.fetchArtifact === undefined) {
     journalCouldNotGrade(deps, cellKey, "backend does not support fetchArtifact", {
       ...legExtra,
+      evalDeliverySha256,
       evalAttempt,
     });
     return;
@@ -326,6 +330,7 @@ async function dispatchEvaluation(
     at: deps.liveClock(),
     cellKey,
     evalTaskSha256: prepared.taskSha256,
+    evalDeliverySha256,
     evalAttempt,
     verdictSha256,
     evaluator: evaluator.id,
@@ -368,6 +373,14 @@ async function prepareAndDispatchEvaluation(
     resultArtifacts,
     evaluationSpecBytes,
   });
+  const storedTaskSha256 = putSealedBytes(deps.workspaceDir, prepared.taskBytes);
+  if (storedTaskSha256 !== prepared.taskSha256) {
+    refuse(
+      "record-integrity",
+      "evaluation-task",
+      `prepared evaluation Task digest ${prepared.taskSha256} does not match its exact bytes (${storedTaskSha256})`,
+    );
+  }
 
   for (const evalIndex of evalIndexes) {
     try {

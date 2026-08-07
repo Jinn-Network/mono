@@ -12,6 +12,7 @@ vi.mock("@/lib/server/gui-action-registry", () => ({
     "run.results": vi.fn(),
     "run.report": vi.fn(),
     "run.verify": vi.fn(),
+    "run.publish": vi.fn(),
   },
 }));
 vi.mock("@/components/action-form", () => ({
@@ -120,7 +121,7 @@ function reportedView() {
             disclosures: { perSubject: [{ independence: 0 }], integrityTierCounts: { "re-derivable": 1, "attested-only": 1 }, pinningUnverifiableCounts: { harness: 1, model: 2, loadout: 1, isolation: 2 } },
             limitations: ["Local self-run venue."],
             venueHonesty: { venue: "self-run" },
-            verification: { command: "benchmark-product verify --workspace <dir> --draft draft-1 [--json]", checks: ["matrix re-derivation"], trustRoot: "Workspace-local report key." },
+            verification: { command: "benchmark-product bundle verify --bundle <bundle-dir> --json", checks: ["matrix re-derivation"], trustRoot: "Workspace-local report key." },
             rehearsal: { previewCount: 2, timestamps: ["2026-08-06T00:00:00.000Z", "2026-08-06T00:01:00.000Z"] },
           },
         },
@@ -177,10 +178,12 @@ describe("semantic results and report surface", () => {
     expect(markup).toContain("direct-check");
     expect(markup).toContain("Agent-distinctness is not party-independence.");
     expect(markup).toContain("Preview count");
-    expect(markup).toContain("benchmark-product verify");
+    expect(markup).toContain("benchmark-product bundle verify");
+    expect(markup).toContain("benchmark-product verify --workspace");
     expect(markup).toContain("Workspace-local report key.");
     expect(markup).toContain("Run verification before relying on the signature.");
     expect(markup).toContain("Verify records");
+    expect(markup).toContain("Publish public bundle");
     expect(markup).toContain("Requires authority");
     expect(markup).not.toContain("<pre");
   });
@@ -197,5 +200,25 @@ describe("semantic results and report surface", () => {
     expect(verificationStart).toBeGreaterThan(0);
     expect(markup.slice(verificationStart)).toContain(PRODUCT_BRANDING.attribution);
     expect(markup.slice(0, verificationStart)).not.toContain(PRODUCT_BRANDING.attribution);
+  });
+
+  test("persistently renders the published bundle identity, relative path, and named checks after reload", async () => {
+    const view = reportedView();
+    view.draft.result.draft.state = "published-bundle";
+    Object.assign(view.results.result, {
+      publication: {
+        identity: "9".repeat(64),
+        relativePath: `artifacts/draft-1/public-bundles/${"9".repeat(64)}`,
+        publishedAt: "2026-08-07T01:00:00.000Z",
+        checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+      },
+    });
+    loadResultsViewMock.mockReturnValue(view);
+    const markup = renderToStaticMarkup(await ResultsPage({ params: Promise.resolve({ draftId: "draft-1" }) }));
+    expect(markup).toContain("Published public bundle");
+    expect(markup).toContain("9".repeat(64));
+    expect(markup).toContain(`artifacts/draft-1/public-bundles/${"9".repeat(64)}`);
+    expect(markup).toContain("evidence-closure");
+    expect(markup).toContain("Verify published bundle");
   });
 });

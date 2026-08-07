@@ -83,6 +83,11 @@ export function runFinalizationLockPath(workspaceDir: string, draftId: string): 
   return join(runsDir(workspaceDir), `${draftId}.finalization.lock`);
 }
 
+/** Short-lived cross-process single-writer boundary for the RunState/draft publication pair. */
+export function runPublicationLockPath(workspaceDir: string, draftId: string): string {
+  return join(runsDir(workspaceDir), `${draftId}.publication.lock`);
+}
+
 /** `<ws>/artifacts/<draftId>/results.json` — the derived results artifact (spec §4.5). */
 export function resultsArtifactPath(workspaceDir: string, draftId: string): string {
   return join(artifactsDir(workspaceDir), draftId, "results.json");
@@ -92,6 +97,16 @@ export function resultsArtifactPath(workspaceDir: string, draftId: string): stri
  * spec §8.2). */
 export function claimPackageArtifactPath(workspaceDir: string, draftId: string): string {
   return join(artifactsDir(workspaceDir), draftId, "claim-package.json");
+}
+
+/** Parent for immutable digest-addressed public bundles. */
+export function publicBundlesDir(workspaceDir: string, draftId: string): string {
+  return join(artifactsDir(workspaceDir), draftId, "public-bundles");
+}
+
+/** `<ws>/artifacts/<draftId>/public-bundles/<manifest-sha256>`. */
+export function publicBundlePath(workspaceDir: string, draftId: string, identity: string): string {
+  return join(publicBundlesDir(workspaceDir, draftId), identity);
 }
 
 /**

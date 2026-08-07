@@ -48,6 +48,7 @@ import {
   runLaunch,
   runLock,
   runPreview,
+  runPublish,
   runQuote,
   runReport,
   runResults,
@@ -62,6 +63,7 @@ import {
   type QuotePresentation,
   type RunLaunchDeps,
 } from "../operations/index.js";
+import { verifyPublicBundle } from "../bundle/verify.js";
 import { assertKnownFlags, optional, parseArgs, pathFrom, present, readJsonFile, required, type ParsedArgs } from "./args.js";
 import type { CliContext, CliResult } from "./result.js";
 
@@ -101,6 +103,8 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   results          --workspace <dir> --principal <id> --draft <draftId>
   report           --workspace <dir> --principal <id> --draft <draftId>
   verify           --workspace <dir> --principal <id> --draft <draftId>
+  publish          --workspace <dir> --principal <id> --draft <draftId>
+  bundle verify    --bundle <dir> [--json]
   help                  (also: --help, or no arguments)
 
 Exit codes: 0 success, 2 invalid-invocation, 3 authority-denied, 1 any other typed error.
@@ -134,6 +138,8 @@ const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESULTS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const REPORT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const VERIFY_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const PUBLISH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const BUNDLE_VERIFY_FLAGS = ["bundle", "json"] as const;
 
 /** Exit-code table (spec §4.3, §5.2): distinct codes so a caller can branch without parsing stdout. */
 function exitCodeFor(code: ProductErrorCode): number {
@@ -599,6 +605,29 @@ async function handleVerify(args: ParsedArgs, context: CliContext, jsonMode: boo
   return renderResult(result, jsonMode, (value) => `verified draft ${value.draftId}: ${value.checks.join(", ")}\n`);
 }
 
+async function handlePublish(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, PUBLISH_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+  const result = await runPublish(opContext, { draftId });
+  return renderResult(
+    result,
+    jsonMode,
+    (value) => `published draft ${draftId}: bundle ${value.bundleIdentity} at ${value.bundleRelativePath}\n`,
+  );
+}
+
+async function handleBundleVerify(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, BUNDLE_VERIFY_FLAGS);
+  const bundleDir = pathFrom(context.cwd, required(args, "bundle"));
+  const result = await verifyPublicBundle(bundleDir);
+  return renderResult(
+    { ok: true, result },
+    jsonMode,
+    (value) => `verified public bundle ${value.identity}: ${value.checks.join(", ")}\n`,
+  );
+}
+
 type VerbHandler = (args: ParsedArgs, context: CliContext, jsonMode: boolean) => CliResult | Promise<CliResult>;
 
 const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
@@ -628,6 +657,8 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["results", handleResults],
   ["report", handleReport],
   ["verify", handleVerify],
+  ["publish", handlePublish],
+  ["bundle verify", handleBundleVerify],
 ]);
 
 /** The complete verb surface, derived from `VERBS` — the parity anchor `./parity.test.ts` checks

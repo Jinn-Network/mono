@@ -17,7 +17,7 @@
 import { describe, expect, test } from "vitest";
 import * as operations from "../operations/index.js";
 import { CLI_VERB_NAMES } from "./main.js";
-import { facadeOperationNames, OPERATION_TO_VERB } from "./parity-map.js";
+import { facadeOperationNames, OPERATION_TO_VERB, STANDALONE_CLI_VERBS } from "./parity-map.js";
 
 describe("library-to-CLI parity (M1 capability-parity proof, spec §5.4)", () => {
   test("every non-excluded facade operation export has a verb-map entry, and that verb exists in CLI_VERB_NAMES", () => {
@@ -39,7 +39,7 @@ describe("library-to-CLI parity (M1 capability-parity proof, spec §5.4)", () =>
   });
 
   test("every CLI verb is the target of some OPERATION_TO_VERB entry (no verb without a backing operation)", () => {
-    const mappedVerbs = new Set(Object.values(OPERATION_TO_VERB));
+    const mappedVerbs = new Set([...Object.values(OPERATION_TO_VERB), ...Object.keys(STANDALONE_CLI_VERBS)]);
     for (const verb of CLI_VERB_NAMES) {
       expect(mappedVerbs.has(verb), `CLI verb "${verb}" is registered in main.ts's VERBS map but no OPERATION_TO_VERB entry targets it`).toBe(true);
     }

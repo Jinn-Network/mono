@@ -128,7 +128,18 @@ export function appendPreviewLogEntry(workspaceDir: string, draftId: string, ent
  * appear (module header: honesty about a residual, not an attempt to eliminate it).
  */
 export function previewDisclosureLine(log: PreviewLog): string {
-  const timestamps = log.previews.map((preview) => preview.at).join(", ");
-  return `${log.count} disposable preview rehearsal(s) of this benchmark ran before lock (at ${timestamps}); `
+  return previewDisclosureSummaryLine({
+    previewCount: log.count,
+    timestamps: log.previews.map((preview) => preview.at),
+  });
+}
+
+/** Pure portable form of the same disclosure, usable after the source preview log is gone. */
+export function previewDisclosureSummaryLine(summary: {
+  readonly previewCount: number;
+  readonly timestamps: readonly string[];
+}): string {
+  const timestamps = summary.timestamps.join(", ");
+  return `${summary.previewCount} disposable preview rehearsal(s) of this benchmark ran before lock (at ${timestamps}); `
     + "preview results are rehearsal only and never entered official results.";
 }

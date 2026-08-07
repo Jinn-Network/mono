@@ -101,6 +101,7 @@ export {
 // own durable state.
 export { runReport, type RunReportInput, type RunReportResult } from "./report.js";
 export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResult } from "./verify.js";
+export { runPublish, type RunPublishDeps, type RunPublishInput, type RunPublishResult } from "./publish.js";
 
 // BP-20: disposable previews (spec §7.2) — `preview` rehearses a draft's solve cells against an
 // ephemeral subset benchmark and a disposable scratch venue; it never enters official state.

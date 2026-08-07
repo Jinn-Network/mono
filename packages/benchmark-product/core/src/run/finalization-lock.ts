@@ -19,7 +19,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { fsyncBestEffortSync, readProcessStartTime } from "@jinn-network/task-execution-supervisor";
 import { fsyncDirectorySync } from "../fs/atomic.js";
-import { runFinalizationLockPath, runsDir } from "../workspace/layout.js";
+import { runFinalizationLockPath, runPublicationLockPath, runsDir } from "../workspace/layout.js";
 
 interface LockRecord {
   readonly pid: number;
@@ -201,9 +201,21 @@ function currentRecord(runtime: LockRuntime): LockRecord | undefined {
   return startTime === undefined ? undefined : { pid: process.pid, startTime, token: randomUUID() };
 }
 
-function removePublishedRecord(path: string, token: string, fsyncDirectory: (path: string) => void): void {
+function removePublishedRecord(
+  path: string,
+  token: string,
+  identity: FileIdentity,
+  directoryIdentity: FileIdentity,
+  fsyncDirectory: (path: string) => void,
+): void {
+  try {
+    const directory = lstatSync(dirname(path));
+    if (!directory.isDirectory() || directory.isSymbolicLink() || !sameIdentity(fileIdentity(directory), directoryIdentity)) return;
+  } catch {
+    return;
+  }
   const owned = readRecord(path, "finalization lock");
-  if (owned.kind !== "record" || owned.record.token !== token) return;
+  if (owned.kind !== "record" || owned.record.token !== token || !sameIdentity(owned.identity, identity)) return;
   try {
     unlinkSync(path);
     fsyncDirectory(dirname(path));
@@ -215,12 +227,14 @@ function removePublishedRecord(path: string, token: string, fsyncDirectory: (pat
 function publishRecord(
   path: string,
   record: LockRecord,
+  directoryIdentity: FileIdentity,
   fsyncDirectory: (path: string) => void,
-): { readonly published: true } | { readonly published: false; readonly reason: "contended" | "unavailable" } {
+): { readonly published: true; readonly identity: FileIdentity } | { readonly published: false; readonly reason: "contended" | "unavailable" } {
   const ownerPath = `${path}.owner-${record.token}`;
   let fd: number | undefined;
   let ownerCreated = false;
   let canonicalLinked = false;
+  let canonicalIdentity: FileIdentity | undefined;
   let failure: unknown;
   try {
     fd = openSync(
@@ -235,6 +249,7 @@ function publishRecord(
     fd = undefined;
     linkSync(ownerPath, path);
     canonicalLinked = true;
+    canonicalIdentity = fileIdentity(lstatSync(path));
     fsyncDirectory(dirname(path));
   } catch (error) {
     failure = error;
@@ -263,11 +278,14 @@ function publishRecord(
       }
     }
   }
-  if (failure !== undefined && canonicalLinked) removePublishedRecord(path, record.token, fsyncDirectory);
+  if (failure !== undefined && canonicalLinked && canonicalIdentity !== undefined) {
+    removePublishedRecord(path, record.token, canonicalIdentity, directoryIdentity, fsyncDirectory);
+  }
   if (failure !== undefined) {
     return { published: false, reason: !canonicalLinked && nodeCode(failure) === "EEXIST" ? "contended" : "unavailable" };
   }
-  return { published: true };
+  if (canonicalIdentity === undefined) return { published: false, reason: "unavailable" };
+  return { published: true, identity: canonicalIdentity };
 }
 
 function guardName(kind: "owner" | "claim", record: LockRecord, createdAtMs: number): string {
@@ -703,12 +721,11 @@ function acquireRecoveryGuard(
   }
 }
 
-export function acquireRunFinalizationLock(
+function acquireRunNamedLock(
   workspaceDir: string,
-  draftId: string,
+  path: string,
   deps: RunFinalizationLockDeps = {},
 ): RunFinalizationLockResult {
-  const path = resolve(runFinalizationLockPath(workspaceDir, draftId));
   const recoveryPath = `${path}.recovery`;
   const fsyncDirectory = deps.fsyncDirectory ?? fsyncDirectorySync;
   const runtime: LockRuntime = {
@@ -727,6 +744,11 @@ export function acquireRunFinalizationLock(
       : {}),
   };
   mkdirSync(runsDir(workspaceDir), { recursive: true, mode: 0o700 });
+  const directoryStat = lstatSync(runsDir(workspaceDir));
+  if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+    return { acquired: false, reason: "invalid", detail: "run lock parent must be a regular directory" };
+  }
+  const directoryIdentity = fileIdentity(directoryStat);
 
   if (liveLocks.has(path)) {
     return { acquired: false, reason: "contended", detail: "run finalization is active in this process" };
@@ -761,7 +783,7 @@ export function acquireRunFinalizationLock(
     if (record === undefined) {
       return { acquired: false, reason: "unavailable", detail: "process start marker is unavailable" };
     }
-    const publication = publishRecord(path, record, fsyncDirectory);
+    const publication = publishRecord(path, record, directoryIdentity, fsyncDirectory);
     if (!publication.published) {
       return publication.reason === "contended"
         ? { acquired: false, reason: "contended", detail: "finalization ownership changed during publication" }
@@ -775,8 +797,22 @@ export function acquireRunFinalizationLock(
         if (released) return;
         released = true;
         if (liveLocks.get(path) === record.token) liveLocks.delete(path);
+        let sameDirectory = false;
+        try {
+          const directory = lstatSync(dirname(path));
+          sameDirectory = directory.isDirectory()
+            && !directory.isSymbolicLink()
+            && sameIdentity(fileIdentity(directory), directoryIdentity);
+        } catch {
+          sameDirectory = false;
+        }
         const owned = readRecord(path, "finalization lock");
-        if (owned.kind === "record" && owned.record.token === record.token) {
+        if (
+          sameDirectory
+          && owned.kind === "record"
+          && owned.record.token === record.token
+          && sameIdentity(owned.identity, publication.identity)
+        ) {
           try {
             unlinkSync(path);
             fsyncDirectory(runsDir(workspaceDir));
@@ -791,7 +827,29 @@ export function acquireRunFinalizationLock(
   }
 }
 
+export function acquireRunFinalizationLock(
+  workspaceDir: string,
+  draftId: string,
+  deps: RunFinalizationLockDeps = {},
+): RunFinalizationLockResult {
+  return acquireRunNamedLock(workspaceDir, resolve(runFinalizationLockPath(workspaceDir, draftId)), deps);
+}
+
+/** The publication pair uses the same fenced ownership protocol as collect/cancel finalization. */
+export function acquireRunPublicationGuard(
+  workspaceDir: string,
+  draftId: string,
+  deps: RunFinalizationLockDeps = {},
+): RunFinalizationLockResult {
+  return acquireRunNamedLock(workspaceDir, resolve(runPublicationLockPath(workspaceDir, draftId)), deps);
+}
+
 /** Test/documentation-only path helper for recovery-guard integrity coverage. */
 export function runFinalizationRecoveryPath(workspaceDir: string, draftId: string): string {
   return `${resolve(runFinalizationLockPath(workspaceDir, draftId))}.recovery`;
+}
+
+/** Test/documentation-only path helper for publication recovery-guard integrity coverage. */
+export function runPublicationRecoveryPath(workspaceDir: string, draftId: string): string {
+  return `${resolve(runPublicationLockPath(workspaceDir, draftId))}.recovery`;
 }

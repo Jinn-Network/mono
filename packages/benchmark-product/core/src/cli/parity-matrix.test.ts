@@ -25,6 +25,7 @@ import {
   OPERATION_TO_DESCRIPTION,
   OPERATION_TO_GUI,
   OPERATION_TO_VERB,
+  STANDALONE_CLI_VERBS,
 } from "./parity-map.js";
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -53,6 +54,7 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       operationToDescription: OPERATION_TO_DESCRIPTION,
       operationToGui: OPERATION_TO_GUI,
       excludedFacadeExports: EXCLUDED_FACADE_EXPORTS,
+      standaloneCliVerbs: STANDALONE_CLI_VERBS,
       facadeOperationNames,
     });
     const rendered = renderParityMatrixDocument(document);

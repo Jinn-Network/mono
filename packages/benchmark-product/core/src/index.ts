@@ -90,6 +90,7 @@ export {
   runLaunch,
   runLock,
   runPreview,
+  runPublish,
   runQuote,
   runReport,
   runResults,
@@ -134,6 +135,9 @@ export type {
   RunPreviewDeps,
   RunPreviewInput,
   RunPreviewResult,
+  RunPublishDeps,
+  RunPublishInput,
+  RunPublishResult,
   RunQuoteDeps,
   RunQuoteInput,
   RunQuoteResult,
@@ -159,6 +163,10 @@ export type {
   VenueHonesty,
 } from "./operations/index.js";
 export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
+
+// BP-40: deletion-portable public bundle verification uses only bundle-carried bytes/public keys.
+export { verifyPublicBundle } from "./bundle/verify.js";
+export type { PublicBundleVerificationCheck, PublicBundleVerificationResult } from "./bundle/verify.js";
 
 // The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
 // client can call them directly without a source dependency on ./intake/*.

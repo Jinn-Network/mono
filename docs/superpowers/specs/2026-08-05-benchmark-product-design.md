@@ -976,6 +976,77 @@ verification surface; no §4/§5/§7/§8 semantics reopened):**
   facts are the public core results consumed by the route; the web does not
   read workspace files or import a second implementation.
 
+**Addendum — 2026-08-07, packet BP-40 (portable public-bundle authority;
+no record, aggregation, orchestration, or venue semantics reopened):**
+
+- **Platform projection versus product materialization.** The existing
+  `@jinn-network/benchmarking-interop` `exportStaticBundle` function is the
+  product-neutral metadata projection only: it names the static-bundle format,
+  Matrix digest, conventional files, and Report count. The Tier-4 product owns
+  the gated materialization, immutable local publication, manifest, portable
+  trust material, and standalone verification experience around that exact
+  projection. It does not fork any platform record or verification rule.
+- **Publish means local immutable emission only.** In v1 `publish` emits a
+  complete bundle directory under the workspace and advances `reported` to
+  `published-bundle`; it performs no upload, hosting, deployment, remote write,
+  or package publication. The operation is authority-gated. It runs the same
+  three Matrix-rederivation, Report-verification, and claim-consistency checks
+  as `run.verify` before staging any output.
+- **Allowlisted public evidence closure.** The fixed closure contains only
+  `bundle.json`; the exact `static-bundle.json` platform projection; exact
+  Benchmark, Run, Matrix, Report payload, Report envelope, and claim-package
+  bytes; deterministic verdict and evidence catalogs; exact allowlisted
+  content-addressed records; a privacy-minimized verification assembly journal;
+  an optional validated cancellation marker; public Report/evaluator trust
+  material; and the reserved presentation paths `index.html`, `badge.svg`,
+  `social-card.svg`, `README.md`, and `share.txt`. Mutable drafts, authority and
+  audit state, scratch data, environment data, credentials, private PEMs,
+  absolute workspace paths, and every unexpected file are excluded. Gated
+  publication authorizes disclosure of this explicit closure; it is not a
+  general PII scrubber and makes no promise about arbitrary content already
+  sealed into public records.
+- **Manifest and identity.** `bundle.json` lists every other file exactly once
+  and never lists itself. Paths are normalized relative paths with no absolute,
+  empty, dot, parent, duplicate, symbolic-link, or special-file entries. Each
+  entry binds path, exact byte length, and SHA-256. Bundle identity is the
+  lowercase SHA-256 of the exact canonical manifest bytes. A verifier rejects
+  missing, extra, reordered/duplicate, malformed, or byte-mismatched closure.
+- **Crash safety and immutability.** Publication builds a complete sibling
+  staging tree, fsyncs every file and directory, and atomically renames it to a
+  digest-addressed final target with no overwrite. Only after the final tree is
+  durable does the product record the bundle identity/path in RunState and then
+  perform the lifecycle transition as the last write. Retries converge across
+  faults before rename, after rename, before RunState, and before transition;
+  concurrent identical publishers converge on the same bytes, while an
+  existing different target refuses rather than overwriting.
+- **Portable verification and trust.** Standalone verification consumes bundle
+  bytes only and must still pass after the entire source workspace is removed.
+  The trust document contains the Report author, keyId, matching did:key,
+  Ed25519 SPKI public key, and validity start, plus exactly one public evaluator
+  key for every Matrix-referenced verdict; key ids and evaluator identities are
+  cross-validated against the signed envelopes and catalogs. No standalone path
+  reads a private key. Trust remains honestly self-run: the workspace minted all
+  keys, and distinct evaluator keys demonstrate agent-distinctness only, not
+  custody or party independence.
+- **Complete future-run closure and legacy refusal.** Future real runs persist
+  the exact derived evaluation Task and evaluation Delivery bytes and journal
+  their digests, completing the evidence graph needed by a portable verifier.
+  A pre-BP-40 run missing any mandatory referenced bytes refuses publication
+  honestly; the publisher never fabricates or re-derives absent historical
+  evidence.
+- **Neutral outputs only.** The current `wilson@1` Report contains per-arm facts
+  but no registered comparative winner. BP-40 publication and its reserved
+  assets therefore state neutral scope, completeness, method, limitation, and
+  verification facts only; they never select a winner from point estimates or
+  imply certification.
+- **One operation, three peer surfaces.** `runPublish` is the sole publication
+  operation. The CLI exposes `publish` and standalone `bundle verify --bundle
+  <dir> --json`; the GUI calls `runPublish` server-side and verifies only the
+  current draft-owned bundle identity through the same library verifier. The
+  browser can never supply an arbitrary filesystem path. Public exports, packed
+  types, and the generated capability matrix cover both peer surfaces without a
+  second materializer or verifier.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

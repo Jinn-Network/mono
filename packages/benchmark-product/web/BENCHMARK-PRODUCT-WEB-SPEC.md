@@ -76,11 +76,13 @@ a generic invalid-invocation failure, and runtime-origin execution/venue
 details are replaced with safe typed retry guidance at the GUI boundary.
 
 BP-33 completes M3 with the result/report/verification route and stable
-`run.results`, `run.report`, and `run.verify` Server Actions. The generated
+`run.results`, `run.report`, and `run.verify` Server Actions. BP-40 adds the gated
+`run.publish` Server Action. The generated
 matrix now has zero deferred operation rows. The two pre-existing
-non-operation capability exclusions (`unverifiableAxisCounts`, `publish`)
-remain explicit: the former is a helper and the latter has no shipped
-operation. Sections 3.1–3.6 now describe the rendered M3 surface.
+non-operation capability exclusions remain explicit: `unverifiableAxisCounts`
+is a helper, while standalone `bundle verify` deliberately has no browser
+filesystem-path surface. `run.publish` is a shipped, gated core operation and
+GUI action. Sections 3.1–3.6 now describe the rendered M3 surface.
 
 ## 3. Domain model (four axes)
 
@@ -99,7 +101,7 @@ rather than repeated per component:
   everywhere they appear (button treatment, a persistent "requires
   authority" affordance, or equivalent) — the design spec's approval-gated
   operations (§4.1, §4.2: `lock`, `launch`, `cancel`, `report`; `publish`
-  once it ships) are never presented as if any workspace member can invoke
+  included) are never presented as if any workspace member can invoke
   them.
 - **Every failed action renders its typed error code with retry guidance.**
   Per design spec §4.3, operations return typed results or typed errors,
@@ -243,7 +245,8 @@ Covers the design spec §4.6 Results (Matrix) row.
   (`judged | unjudged | unscorable | expired | invalidated | excluded`),
   verdicts, dissent, cost, and latency; exclusions.
 - **Actions** — results → `runResults` / `results`; verify → `runVerify` /
-  `verify`; report → `runReport` / `report` (**gated**).
+  `verify`; report → `runReport` / `report` (**gated**); publish or re-verify
+  the digest-addressed draft-owned bundle → `runPublish` / `publish` (**gated**).
 
 BP-33 renders this surface at `/workspace/[draftId]/results`, linked from
 both the draft and run monitor. The route calls the public `runResults`
@@ -254,12 +257,8 @@ statistic, validity judgment, or replacement value. The result action
 refreshes this durable projection; report is visibly gated; verify has a
 dedicated live result/error region rather than a generic JSON dump.
 
-**Deferred, not renderable:** design spec §4.6 names exports (EvalLog,
-Croissant, static bundle) on this row, but no shipped operation produces
-them from the GUI's reach today — the interop package's export functions
-(design spec §3) are not yet wired through the operations library for this
-surface. The GUI must not render an export control until an operation
-exists for it to call.
+BP-40's publish control emits the fixed-schema public-bundle closure through the core
+operation; it does not expose arbitrary export paths or call interop directly.
 
 ### 3.5 Report
 
@@ -278,7 +277,7 @@ Covers the design spec §4.6 Report row. The **Claim package** sub-surface
 - **Actions** — inspect / verify → the same `runResults` / `results` and
   `runVerify` / `verify` operations described in §3.4 (a Report's
   underlying Matrix is inspected and verified through those same calls,
-  not a second implementation); `publish` **reserved** — see below.
+  not a second implementation); publish/re-verify → `runPublish` / `publish`.
 
 Once a draft is durably reported, the public `runResults` document adds an
 exact stored Report/claim projection. It re-reads the sealed payload and
@@ -290,10 +289,15 @@ Report and claim facts. Named verification checks and digests are rendered
 on success; record-integrity or recomputation divergence is a prominent
 typed error and never a passing status.
 
-**Reserved, not renderable:** `publish` is a named lifecycle transition
-(design spec §4.1) and a gated operation, but the parity matrix's
-`exclusions` list confirms no operation ships it yet. The GUI must not
-render a publish control until an operation exists for it to call.
+The browser submits only the draft id. The server resolves the immutable
+digest-addressed draft-owned target, and projects only its workspace-relative location,
+identity, and named checks back to the browser. It never accepts an arbitrary
+browser filesystem path. On `published-bundle`, the same action re-verifies
+the existing immutable bundle without re-running orchestration. Every publish
+failure is reduced to a typed browser-safe receipt with logical relative issue
+paths; server filesystem paths and raw filesystem messages never cross the
+browser boundary. Reloading the route reads and renders the durable bundle
+identity, relative path, publication time, and named checks from RunState.
 
 #### 3.5.1 Claim package (sub-surface of the report)
 

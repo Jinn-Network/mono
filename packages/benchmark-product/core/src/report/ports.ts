@@ -29,10 +29,17 @@ function resolveSealedBytes(workspaceDir: string, digest: string): Uint8Array | 
 /** Builds the aggregate `MethodPorts` bundle for `workspaceDir`: the shared §9.2 method registry
  * plus three digest resolvers over this workspace's sealed-record store. */
 export function buildMethodPorts(workspaceDir: string): MethodPorts {
+  return buildMethodPortsFromResolver((digest) => resolveSealedBytes(workspaceDir, digest));
+}
+
+/** Shared report recomputation seam for workspace and portable-bundle verification. */
+export function buildMethodPortsFromResolver(
+  resolveBytes: (digest: string) => Uint8Array | undefined,
+): MethodPorts {
   return {
     registry: BENCHMARKING_METHOD_REGISTRY,
-    resolveVerdictBytes: (digest) => resolveSealedBytes(workspaceDir, digest),
-    resolveRunBytes: (digest) => resolveSealedBytes(workspaceDir, digest),
-    resolveTaskBytes: (digest) => resolveSealedBytes(workspaceDir, digest),
+    resolveVerdictBytes: resolveBytes,
+    resolveRunBytes: resolveBytes,
+    resolveTaskBytes: resolveBytes,
   };
 }

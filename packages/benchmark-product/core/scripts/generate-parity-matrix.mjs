@@ -72,6 +72,7 @@ async function main() {
     operationToDescription: parityMapModule.OPERATION_TO_DESCRIPTION,
     operationToGui: parityMapModule.OPERATION_TO_GUI,
     excludedFacadeExports: parityMapModule.EXCLUDED_FACADE_EXPORTS,
+    standaloneCliVerbs: parityMapModule.STANDALONE_CLI_VERBS,
     facadeOperationNames: parityMapModule.facadeOperationNames,
   });
   const rendered = parityMatrixModule.renderParityMatrixDocument(document);

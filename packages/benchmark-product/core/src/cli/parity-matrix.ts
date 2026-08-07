@@ -52,6 +52,7 @@ export interface BuildParityMatrixInput {
   readonly operationToDescription: Readonly<Record<string, string>>;
   readonly operationToGui: Readonly<Record<string, ParityMatrixEntry["gui"]>>;
   readonly excludedFacadeExports: readonly string[];
+  readonly standaloneCliVerbs: Readonly<Record<string, string>>;
   readonly facadeOperationNames: (operationsModule: Readonly<Record<string, unknown>>) => readonly string[];
 }
 
@@ -74,6 +75,7 @@ export function buildParityMatrixDocument(input: BuildParityMatrixInput): Parity
     operationToDescription,
     operationToGui,
     excludedFacadeExports,
+    standaloneCliVerbs,
     facadeOperationNames,
   } = input;
 
@@ -119,6 +121,7 @@ export function buildParityMatrixDocument(input: BuildParityMatrixInput): Parity
       name,
       reason: "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)",
     })),
+    ...Object.entries(standaloneCliVerbs).map(([name, reason]) => ({ name, reason })),
     ...gatedButUnimplemented.map((operation) => ({
       name: operation,
       reason:

@@ -117,6 +117,9 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
     // EvaluationSpec bound) — recording a placeholder digest there would misrepresent the
     // journal as naming a real evaluation Task that was never actually prepared.
     evalTaskSha256: Sha256HexSchema.optional(),
+    /** Exact evaluation Delivery bytes in the product CAS (BP-40). Optional for pre-BP-40
+     * journals and for failures that terminalize before an evaluation Delivery exists. */
+    evalDeliverySha256: Sha256HexSchema.optional(),
     evalAttempt: z.string().optional(),
     verdictSha256: Sha256HexSchema.optional(),
     evaluationTerminal: z.literal("could-not-grade").optional(),

@@ -22,6 +22,7 @@ import {
   runStatusAction,
   runCollectAction,
   runPreviewAction,
+  runPublishAction,
   runQuoteAction,
   runReportAction,
   runResultsAction,
@@ -56,4 +57,5 @@ export const GUI_SERVER_ACTIONS = {
   "run.results": runResultsAction,
   "run.report": runReportAction,
   "run.verify": runVerifyAction,
+  "run.publish": runPublishAction,
 } as const;

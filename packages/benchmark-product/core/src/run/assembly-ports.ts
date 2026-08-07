@@ -36,7 +36,7 @@ import { localAssemblyPorts } from "@jinn-network/benchmarking-local";
 import type { AssemblyPorts, InScopeCell, InScopeVerdict } from "@jinn-network/benchmarking-run";
 import { dssePreAuthEncoding, parseDsseEnvelope } from "@jinn-network/trust-core";
 import { parseEvaluationSpec, type EvaluationSpec } from "@jinn-network/task-execution-profiles";
-import { readEvaluatorPublicKeys, readVerdictEnvelope } from "../venue/signing.js";
+import { readEvaluatorPublicKeyRecords, readVerdictEnvelope } from "../venue/signing.js";
 import { VENUE_ISOLATION_INVENTORY } from "../venue/venue.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
@@ -99,9 +99,9 @@ function buildVerdicts(workspaceDir: string, cell: CellJournalFold, evaluationSp
  * proceed and derive the honest outcome from an unresolved identity, not crash.
  */
 function resolveEvaluatorClaim(
-  workspaceDir: string,
+  resolveBytes: (digest: string) => Uint8Array,
   evidenceRef: unknown,
-  loadEvaluatorKeys: () => ReadonlyMap<string, KeyObject>,
+  loadEvaluatorKeys: () => ReadonlyMap<string, AssemblyPublicKeyRecord>,
 ): string | "unresolved" {
   try {
     const ref = evidenceRef as { claim?: unknown; verdictDigest?: unknown } | undefined;
@@ -109,13 +109,14 @@ function resolveEvaluatorClaim(
     const verdictDigest = ref?.verdictDigest;
     if (typeof claim !== "string" || claim.length === 0) return "unresolved";
     if (typeof verdictDigest !== "string" || !verdictDigest.startsWith("sha256:")) return "unresolved";
-    const publicKey = loadEvaluatorKeys().get(claim);
-    if (publicKey === undefined) return "unresolved";
-    const envelope = parseDsseEnvelope(getSealedBytes(workspaceDir, verdictDigest.slice("sha256:".length)));
+    const key = loadEvaluatorKeys().get(claim);
+    if (key === undefined) return "unresolved";
+    const envelope = parseDsseEnvelope(resolveBytes(verdictDigest.slice("sha256:".length)));
     const preAuthEncoding = Buffer.from(dssePreAuthEncoding(envelope.payloadType, envelope.payloadBytes));
     const signed = envelope.signatures.some((signature) => {
       try {
-        return cryptoVerify(null, preAuthEncoding, publicKey, Buffer.from(signature.sig, "base64"));
+        return signature.keyid === key.keyId
+          && cryptoVerify(null, preAuthEncoding, key.publicKey, Buffer.from(signature.sig, "base64"));
       } catch {
         return false;
       }
@@ -124,6 +125,59 @@ function resolveEvaluatorClaim(
   } catch {
     return "unresolved";
   }
+}
+
+export interface AssemblyPublicKeyRecord {
+  readonly keyId: string;
+  readonly publicKey: KeyObject;
+}
+
+export interface BuildAssemblyPortsFromFactsInput {
+  readonly runRecord: RunRecord;
+  readonly cells: readonly InScopeCell[];
+  readonly owner: string;
+  readonly runCancelled: boolean;
+  readonly receiptsByTaskDigest: ReadonlyMap<string, LocalAdmissionReceiptFact>;
+  readonly resolveBytes: (digest: string) => Uint8Array;
+  readonly evaluatorKeys: () => ReadonlyMap<string, AssemblyPublicKeyRecord>;
+}
+
+/** Shared Matrix re-derivation seam for workspace and portable-bundle verification. Every
+ * derived port (pinning, admission, cancellation, trust, cost) is built here so the two
+ * skeptic paths cannot silently diverge. */
+export function buildAssemblyPortsFromFacts(input: BuildAssemblyPortsFromFactsInput): AssemblyPorts {
+  return localAssemblyPorts({
+    inputScope: {
+      cellsForRun: () => [...input.cells],
+      ...(input.runCancelled ? { runCancelled: true } : {}),
+    },
+    pinning: {
+      submissionBaseline: input.runRecord.policy.submissionBaseline as Record<string, unknown>,
+      isolationInventory: VENUE_ISOLATION_INVENTORY,
+      evidenceFor: (cellKey) => {
+        const cell = input.cells.find((candidate) => candidate.cellKey === cellKey);
+        if (cell === undefined || cell.dispatches === 0) return { dispatches: 0 };
+        return { dispatches: cell.dispatches, admission: { ready: true } };
+      },
+    },
+    admission: {
+      receiptFor: (cell) => input.receiptsByTaskDigest.get(cell.taskDigest),
+    },
+    cost: {
+      costFor: () => undefined,
+      latencyFor: () => undefined,
+    },
+    trust: {
+      resolveAgent: async (evidenceRef) => {
+        const role = (evidenceRef as { role?: string } | undefined)?.role;
+        if (role === "solver") return input.owner;
+        if (role === "evaluator") {
+          return resolveEvaluatorClaim(input.resolveBytes, evidenceRef, input.evaluatorKeys);
+        }
+        return "unresolved";
+      },
+    },
+  });
 }
 
 /** Builds one `InScopeCell` per expected coordinate, entirely from the journal fold + sealed
@@ -192,51 +246,22 @@ export function buildRunAssemblyPorts(input: BuildRunAssemblyPortsInput): Assemb
   // Loaded lazily and memoized: the registry scan itself can refuse on a broken key slot, and
   // that failure must resolve THIS claim "unresolved" (inside resolveEvaluatorClaim's try/catch),
   // never crash port construction.
-  let evaluatorKeys: Map<string, KeyObject> | undefined;
-  const loadEvaluatorKeys = (): ReadonlyMap<string, KeyObject> =>
-    (evaluatorKeys ??= readEvaluatorPublicKeys(workspaceDir));
+  let evaluatorKeys: Map<string, AssemblyPublicKeyRecord> | undefined;
+  const loadEvaluatorKeys = (): ReadonlyMap<string, AssemblyPublicKeyRecord> =>
+    (evaluatorKeys ??= readEvaluatorPublicKeyRecords(workspaceDir));
 
   // The ONE derivation of `completeness.runOutcome: "cancelled"` (module header, BP-22): the
   // valid cancel marker, read straight from durable state — never threaded through as
   // a caller-supplied flag that `run.collect`/`run.verify`/`run.cancel` could each get wrong.
   const runCancelled = cancelRequested(workspaceDir, draftId);
 
-  return localAssemblyPorts({
-    inputScope: { cellsForRun: () => cells, ...(runCancelled ? { runCancelled: true } : {}) },
-    pinning: {
-      submissionBaseline: runRecord.policy.submissionBaseline as Record<string, unknown>,
-      isolationInventory: VENUE_ISOLATION_INVENTORY,
-      evidenceFor: (cellKey) => {
-        const cell = fold.get(cellKey);
-        if (cell === undefined || cell.dispatches === 0) return { dispatches: 0 };
-        // The backend's launcherDeployments admission gate (verifyRunPinning) ran at
-        // `submit` for every accepted dispatch — a dispatched cell genuinely passed it.
-        return { dispatches: cell.dispatches, admission: { ready: true } };
-      },
-    },
-    admission: {
-      receiptFor: (cell) => receiptsByTaskDigest.get(cell.taskDigest),
-    },
-    cost: {
-      costFor: () => undefined,
-      latencyFor: () => undefined,
-    },
-    trust: {
-      // Solver identity is this run's own owner (the product's deterministic run-owner IRI).
-      // Evaluator identity (BP-21): the verdict's claimed evaluator IRI (`evidenceRef.claim` —
-      // `assemble.ts` passes `verdict.record.evaluator` alongside `verdictDigest`) resolves
-      // ONLY after this resolver verifies the verdict envelope's DSSE signature against that
-      // identity's workspace-registered public key — proof the claimed evaluator identity
-      // actually signed THIS verdict with a workspace-registered key, i.e. genuine
-      // AGENT-distinctness, fail-closed to "unresolved" otherwise. It still cannot and does
-      // not claim party-independence: the same operator mints and holds every evaluator key on
-      // this self-run venue — disclosed rather than dressed up as third-party verification.
-      resolveAgent: async (evidenceRef) => {
-        const role = (evidenceRef as { role?: string } | undefined)?.role;
-        if (role === "solver") return owner;
-        if (role === "evaluator") return resolveEvaluatorClaim(workspaceDir, evidenceRef, loadEvaluatorKeys);
-        return "unresolved";
-      },
-    },
+  return buildAssemblyPortsFromFacts({
+    runRecord,
+    cells,
+    owner,
+    runCancelled,
+    receiptsByTaskDigest,
+    resolveBytes: (digest) => getSealedBytes(workspaceDir, digest),
+    evaluatorKeys: loadEvaluatorKeys,
   });
 }

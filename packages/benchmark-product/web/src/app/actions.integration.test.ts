@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -334,6 +334,18 @@ describe.sequential("server action layer against a real workspace", () => {
         const cells = (terminal.result as { cells: Array<{ status: string }> }).cells;
         expect(cells).toHaveLength(6);
         expect(cells.every((cell) => !["pending", "dispatched", "claimed", "delivered"].includes(cell.status))).toBe(true);
+        const reported = await invoke("run.report", { draftId: "slow-real" });
+        expect(reported).toMatchObject({ status: "success", result: { state: "reported" } });
+        const published = await invoke("run.publish", { draftId: "slow-real" });
+        expect(published).toMatchObject({
+          status: "success",
+          result: {
+            state: "published-bundle",
+            checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+          },
+        });
+        const publishedResult = (published as { result: { bundleRelativePath: string } }).result;
+        expect(existsSync(join(workspace, ...publishedResult.bundleRelativePath.split("/"), "verification", "cancel-requested.json"))).toBe(true);
         finalized = true;
       } finally {
         if (!finalized) await invoke("run.cancel", { draftId: "slow-real" });
@@ -409,6 +421,24 @@ describe.sequential("server action layer against a real workspace", () => {
       result: {
         checks: ["matrix-rederivation", "report-verification", "claim-consistency"],
       },
+    });
+    const published = await invoke("run.publish", { draftId: "natural-real" });
+    expectRecursivelyPlain(published);
+    expect(published).toMatchObject({
+      status: "success",
+      result: {
+        draftId: "natural-real",
+        state: "published-bundle",
+        checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+      },
+    });
+    const publishedResult = (published as { result: { bundleIdentity: string; bundleRelativePath: string } }).result;
+    expect(publishedResult.bundleRelativePath).toBe(`artifacts/natural-real/public-bundles/${publishedResult.bundleIdentity}`);
+    expect(JSON.stringify(published)).not.toContain(workspace);
+    const reverifiedBundle = await invoke("run.publish", { draftId: "natural-real" });
+    expect(reverifiedBundle).toMatchObject({
+      status: "success",
+      result: { state: "published-bundle", bundleIdentity: (published as { result: { bundleIdentity: string } }).result.bundleIdentity },
     });
   }, 240_000);
 });

@@ -23,6 +23,7 @@ import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { runPublish } from "./publish.js";
 import { runReport } from "./report.js";
 import { runResults } from "./run-results.js";
 import { runVerify } from "./verify.js";
@@ -262,7 +263,7 @@ describe("runResults — full document", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(results);
   }, 30_000);
 
-  test("available from 'reported' and 'published-bundle' states too (the Matrix does not change once sealed)", async () => {
+  test("stays available from reported while an incomplete pre-BP-40 closure refuses publication honestly", async () => {
     const clock = makeClock();
     await setUpClosedRun(clock);
 
@@ -271,15 +272,12 @@ describe("runResults — full document", () => {
     const reportedResults = runResults(contextFor(clock), { draftId: "draft-1" });
     expect(reportedResults.ok, "reported").toBe(true);
 
-    // M4 owns the real publish transition; this narrow state fixture proves the immutable
-    // Matrix + already-stored Report projection remain readable after that later transition.
-    const document = JSON.parse(readFileSync(join(workspaceDir, "drafts", "draft-1.json"), "utf8")) as { state: string };
-    atomicWriteFileSync(
-      join(workspaceDir, "drafts", "draft-1.json"),
-      JSON.stringify({ ...document, state: "published-bundle" }, null, 2),
-    );
-    const publishedResults = runResults(contextFor(clock), { draftId: "draft-1" });
-    expect(publishedResults.ok, "published-bundle").toBe(true);
+    // This older fixture did not persist protocol-valid BP-40 evaluation Delivery bytes. It must
+    // remain readable as a Report, but it must not be laundered into a portable publication.
+    const publish = await runPublish(contextFor(clock), { draftId: "draft-1" });
+    expect(publish.ok).toBe(false);
+    if (!publish.ok) expect(publish.error.issues?.[0]?.path).toContain("records/");
+    expect(runResults(contextFor(clock), { draftId: "draft-1" }).ok).toBe(true);
   }, 30_000);
 
   test("reloads the exact sealed Report and stored claim package after reporting without recomputing them", async () => {

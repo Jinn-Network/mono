@@ -39,6 +39,7 @@ import { claimPackageArtifactPath, resultsArtifactPath } from "../workspace/layo
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import { readVerdictEnvelope } from "../venue/signing.js";
 import type { OperationContext } from "./context.js";
+import type { PublicBundleVerificationCheck } from "../bundle/verify.js";
 import { readDraftDocument } from "./drafts.js";
 import { operate } from "./operate.js";
 import type { OperationResult } from "./result.js";
@@ -126,6 +127,12 @@ export interface RunResultsDocument {
    * the Report's own results and in the claim package. */
   readonly dissentCells: readonly string[];
   readonly venueHonesty: VenueHonesty;
+  readonly publication?: {
+    readonly identity: string;
+    readonly relativePath: string;
+    readonly publishedAt: string;
+    readonly checks: readonly PublicBundleVerificationCheck[];
+  };
   /** Present only once the draft is durably `reported` (or later). Exact stored facts only: no
    * scores, claims, signatures, or verification outcomes are derived by this read operation. */
   readonly report?: RunResultsReport;
@@ -207,6 +214,17 @@ export function unverifiableAxisCounts(cells: readonly MatrixCell[]): VenueHones
     }
   }
   return counts;
+}
+
+/** The exact venue-honesty block carried by every claim; shared by report production and
+ * independent claim re-derivation. */
+export function buildLocalVenueHonesty(cells: readonly MatrixCell[]): VenueHonesty {
+  return {
+    venue: "self-run",
+    preRegistration: "structural-and-append-order-only",
+    limits: LOCAL_VENUE_LIMITS,
+    unverifiableAxisCounts: unverifiableAxisCounts(cells),
+  };
 }
 
 /** Dissent (spec §9.2: "Dissenting verdicts remain referenced in the matrix and visible in the
@@ -323,14 +341,25 @@ export function runResults(
         attrition: matrix.attrition,
         cells,
         dissentCells: dissentCellKeys(cells),
-        venueHonesty: {
-          venue: "self-run",
-          preRegistration: "structural-and-append-order-only",
-          limits: LOCAL_VENUE_LIMITS,
-          unverifiableAxisCounts: unverifiableAxisCounts(matrix.cells),
-        },
+        venueHonesty: buildLocalVenueHonesty(matrix.cells),
         ...(document.state === "reported" || document.state === "published-bundle"
           ? { report: readReportedProjection(context.workspaceDir, input.draftId, runState) }
+          : {}),
+        ...(document.state === "published-bundle"
+          ? (() => {
+              if (
+                runState.bundleIdentity === undefined || runState.bundleRelativePath === undefined
+                || runState.bundleChecks === undefined || runState.publishedAt === undefined
+              ) refuse("record-integrity", "publication", "published draft is missing its durable bundle receipt");
+              return {
+                publication: {
+                  identity: runState.bundleIdentity,
+                  relativePath: runState.bundleRelativePath,
+                  publishedAt: runState.publishedAt,
+                  checks: runState.bundleChecks,
+                },
+              };
+            })()
           : {}),
       };
 
