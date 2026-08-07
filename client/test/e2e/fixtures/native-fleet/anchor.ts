@@ -7,10 +7,12 @@
  * Sepolia Anvil fork this is reproducible — Anvil 1.6 advances the `finalized` block tag to
  * `latest - 64`, so a tx mined and then buried under >64 blocks reads back as finalized.
  *
- * This submitter sends `0x<digest>` to a fixed dummy target (the anchor client checks tx.to ===
- * locator.contractAddress and the calldata bytes; a plain data tx to an EOA succeeds on Anvil), then
- * mines past finality so `openNativeTrustCatalog` accepts it.
+ * Transaction construction is the production `submitAnchor` (spec §3.4): same calldata, same
+ * offset, same block-time read. What stays fixture-only is the Anvil-specific finality BURIAL —
+ * `anvil_mine` past the fork's `finalized` tag, standing in for the live
+ * `waitForFinalizedAnchor` poll that a real ceremony waits ~10-20 minutes on.
  */
+import { submitAnchor, type WalletClientLike } from '@jinn-network/trust-authoring';
 import type { Account, PublicClient, WalletClient } from 'viem';
 import { jsonRpc } from '../../../_support/chain/anvil.js';
 import type { AnchorLocator, AnchorSubmitter } from './trust-catalog.js';
@@ -32,25 +34,31 @@ export function createForkAnchorSubmitter(input: {
 }): AnchorSubmitter {
   const target = input.target ?? NATIVE_E2E_ANCHOR_TARGET;
   const bury = input.buryBlocks ?? FINALITY_BURY_BLOCKS;
-  return async (digest): Promise<AnchorLocator> => {
-    const digestHex = digest.slice('sha256:'.length);
-    const data = `0x${digestHex}` as `0x${string}`;
-    const hash = await input.walletClient.sendTransaction({
+  // The authoring port is deliberately viem-free, so the rig supplies the account and the
+  // chain-less signing posture the Anvil fork needs.
+  const walletClient: WalletClientLike = {
+    sendTransaction: ({ to, value, data }) => input.walletClient.sendTransaction({
       account: input.account,
-      to: target,
-      value: 0n,
+      to,
+      value,
       data,
       chain: null,
+    }),
+  };
+  return async (digest): Promise<AnchorLocator> => {
+    const locator = await submitAnchor({
+      walletClient,
+      publicClient: input.publicClient,
+      target,
+      digest,
     });
-    const receipt = await input.publicClient.waitForTransactionReceipt({ hash });
-    // The anchor's on-chain time IS the block timestamp — the catalog binds validFrom to it so
-    // `effectiveStart = max(validFrom, anchorTime)` stays consistent on the fork (a validFrom earlier
-    // than the fork's block time would push effectiveStart to anchorTime and break the §7.4a
-    // incumbent-voucher window check).
-    const block = await input.publicClient.getBlock({ blockNumber: receipt.blockNumber });
-    const anchorTime = new Date(Number(block.timestamp) * 1000).toISOString();
     // Bury it past the finalized tag so the anchor reads back finalized.
     await jsonRpc(input.rpcUrl, 'anvil_mine', [`0x${bury.toString(16)}`]);
-    return { transactionHash: hash, contractAddress: target, inputByteOffset: 0, anchorTime };
+    return {
+      transactionHash: locator.transactionHash,
+      contractAddress: locator.contractAddress,
+      inputByteOffset: locator.inputByteOffset,
+      anchorTime: locator.anchorTime,
+    };
   };
 }

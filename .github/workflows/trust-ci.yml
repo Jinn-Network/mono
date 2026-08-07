@@ -109,6 +109,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  authoring:
+    name: Trust Authoring
+    needs: [foundation]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore Trust Core distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: trust-core-dist
+          path: packages/trust/core/dist
+      - name: Install same-tree portal dependency toolchain (trust-core)
+        working-directory: packages/trust/core
+        run: yarn install --immutable
+      - name: Verify Trust Authoring
+        working-directory: packages/trust/authoring
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn pack:smoke
+      - name: Upload Trust Authoring distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: trust-authoring-dist
+          path: packages/trust/authoring/dist
+          if-no-files-found: error
+          retention-days: 1
+
   testing:
     name: Trust Testing
     needs: [foundation, resolve]
@@ -175,7 +214,7 @@ jobs:
           retention-days: 1
 
   verify:
-    needs: [architecture, foundation, resolve, testing]
+    needs: [architecture, foundation, authoring, resolve, testing]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -183,12 +222,14 @@ jobs:
         env:
           ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
           FOUNDATION_RESULT: ${{ needs.foundation.result }}
+          AUTHORING_RESULT: ${{ needs.authoring.result }}
           RESOLVE_RESULT: ${{ needs.resolve.result }}
           TESTING_RESULT: ${{ needs.testing.result }}
         run: |
           for result in \
             "$ARCHITECTURE_RESULT" \
             "$FOUNDATION_RESULT" \
+            "$AUTHORING_RESULT" \
             "$RESOLVE_RESULT" \
             "$TESTING_RESULT"; do
             test "$result" = "success"
@@ -210,7 +251,7 @@ jobs:
           path: .trust-dist
       - name: Place package distributions
         run: |
-          for package in core resolve testing; do
+          for package in authoring core resolve testing; do
             mkdir -p "packages/trust/${package}/dist"
             cp -R ".trust-dist/trust-${package}-dist/." "packages/trust/${package}/dist/"
           done
