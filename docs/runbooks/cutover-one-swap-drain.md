@@ -22,8 +22,9 @@ step 7 unfinished.
       story, all five status builders)
 - [ ] The e2e re-scope PR (DR-2026-08-05 decision 5) is merged — `e2e:app-flow` points
       at the replacement specs and is green
-- [ ] Grader-container execution proven (DR decision 3a): the container-graded
-      evaluation e2e is green on the train head
+- [ ] Grader-container execution proven (DR decision 3a as decoupled 2026-08-07): the
+      container-grade proof (gate artifact ii below) is recorded — a real container-graded
+      evaluation, not only a green unit suite
 
 ## 1. Freeze evaluator intake (previous canary, no new build)
 
@@ -91,13 +92,23 @@ claimed(requestId)`) IS the loud-stranding record (contract 10 / design §4) —
 - [ ] Dashboard is not dark: event stream renders under the preserved `emitEvent` kinds
 - [ ] Then the fleet, one operator at a time
 
-## 8. Gate (DR-2026-08-05 decision 3)
+## 8. Gate (DR-2026-08-05 decision 3, decision 3a decoupled 2026-08-07)
 
-### G-loop — natively-posted own task, end-to-end, container-graded
+> Decision 3a's container-graded requirement is satisfied by **two artifacts**, not one:
+> a container-graded evaluation cannot occur inside the native G-loop as built (posted
+> task pinned to one fixture, prediction-only claim allowlist, single-registration
+> evaluator deployments — see the DR's 2026-08-07 addendum for the file:line record).
+> **The bar is unchanged: both artifacts must be green before deploy and before any
+> retirement-wave flip.**
+
+### Gate artifact (i) — G-loop, natively-posted own task, end-to-end (prediction profile)
+
+Two real Base Sepolia operators, honestly distinct: A = service 72, B = service 75.
 
 | Field | Value |
 | --- | --- |
 | taskId | |
+| profile | `prediction-forecast` (the only profile the claim allowlist admits) |
 | creationTx | |
 | claimTx (solver, 2nd operator) | |
 | deliverTx | |
@@ -106,9 +117,23 @@ claimed(requestId)`) IS the loud-stranding record (contract 10 / design §4) —
 | claimVerdictDeliveryTx | |
 | verdict announcement id | |
 | decisionGrade | must be `true` |
-| grader | must be container-executed (decision 3a) — record image digest |
 | adoption receipt | |
-| solver Safe / evaluator Safe | distinct operators |
+| solver Safe / evaluator Safe | distinct operators (services 72 / 75) |
+
+### Gate artifact (ii) — container-grade proof, separately run
+
+A **real** container-graded evaluation through the M4c Docker path
+(`client/src/daemon/native-evaluator-container-runtime.ts` with
+`client/deployments/evaluator/swe-rebench-v2-deployment.mjs`). Run outside the G-loop;
+a green unit suite does not satisfy this.
+
+| Field | Value |
+| --- | --- |
+| evaluation subject (instance id) | |
+| grader image digest | |
+| container exit / grader report digest | |
+| resulting verdict `decisionGrade` | |
+| run log location | |
 
 ### G-archive — second-daemon consumption
 

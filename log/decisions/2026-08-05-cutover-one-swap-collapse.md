@@ -230,6 +230,67 @@ flip.
 > precondition list gains "both operators provisioned via `jinn ceremony`"; nothing else
 > in this record changes.
 
+> **Addendum 2026-08-07 — decision 3a decoupled into two evidence artifacts.**
+> Decision 3a (operator ruling, stricter than the coordinator's recommendation) required
+> grader-container execution to **block** the gate: no deploy until container grading
+> works, and G-loop's evidence set must carry a container-graded evaluation, not only a
+> prediction-profile one. On 2026-08-07 a code read established that a container-graded
+> evaluation cannot occur **inside** the native G-loop as built. Three independent hard
+> stops on this branch:
+> 1. **The posted task is pinned to one fixture.**
+>    `client/src/native-requester/requester.ts:97` fixes
+>    `const FIXTURE = 'prediction-forecast-golden.json'`, and `request()` refuses any
+>    other value (`:1916`). `posting[]` supplies run identity, not task content — there
+>    is no surface on which to post a container-graded subject.
+> 2. **The native claim allowlist is prediction-only.**
+>    `client/src/daemon/native-claim-policy.ts:24` declares
+>    `PHASE_B_NATIVE_PROFILE_ALLOWLIST = [PREDICTION_FORECAST_PROFILE_URI]`; it is read
+>    at `:170` and a non-prediction card refuses non-retryably with
+>    `unsupported-profile` (`:172`). The widening hook exists but is never used:
+>    `allowedProfiles` is optional (`:48`) and `buildNativeClaimPolicy`
+>    (`client/src/daemon/native-assembly.ts:187`) never populates it — no config surface
+>    reaches it anywhere in `client/src`.
+> 3. **Each shipped evaluator deployment declares exactly one registration.**
+>    `client/deployments/evaluator/prediction-market-deployment.mjs:182` and
+>    `swe-rebench-v2-deployment.mjs:183` each export `registrations: [registration]`, and
+>    `compatibleRegistration`
+>    (`client/src/daemon/native-evaluator-composition.ts:410`) refuses unless **exactly
+>    one** registration matches the EvaluationSpec — zero and two are both errors. No
+>    multi-registration deployment module exists in-repo.
+>
+> Additionally the prediction profile carries no grader adapter, so supplying
+> `graderReportSources` for it is itself a hard refusal — `bindGraderReportSource`
+> (`client/src/daemon/native-evaluator-composition.ts:298`) throws "is not
+> container-graded and takes no host grader report source" (`:316-320`).
+>
+> **This is deliberate Phase-B scoping, not a defect.** The allowlist constant is
+> literally named `PHASE_B_…`. Nothing is broken; the loop was scoped to one profile on
+> purpose, and 3a asked one gate to prove two things the built system keeps apart.
+>
+> **Operator ruling (Ritsu, 2026-08-07): decouple into two evidence artifacts.** The
+> gate becomes:
+> - **(i) G-loop** — closed end-to-end on the **prediction** profile with two real Base
+>   Sepolia operators (A = service 72, B = service 75): post → claim → deliver →
+>   evaluate → adopt, on-chain, honestly distinct operators.
+> - **(ii) Container-grade proof** — a **separately run, real** container-graded
+>   evaluation through the M4c Docker path
+>   (`client/src/daemon/native-evaluator-container-runtime.ts` with the swe-rebench
+>   deployment), proving container grading genuinely works.
+>
+> Both properties 3a was protecting — a native loop that closes, and grading that really
+> executes in a container — are still proven; they are simply two artifacts rather than
+> one. **G-archive is unchanged.**
+>
+> **The bar does not move.** The retirement wave (Wave 4) still requires **both**
+> artifacts green before any transition-manifest flip, and the deploy still does not
+> happen until container grading is proven. The decoupling changes the **shape** of the
+> evidence, not the standard it must meet. Decision 3's other clauses — verdict
+> `decisionGrade: true`, requester-side adoption, the closure-manifest rejection — stand
+> unchanged. A single-artifact gate becomes possible again only when a container-graded
+> task can flow through the loop: a config surface for the posted task profile, a
+> configurable claim allowlist, and a multi-registration evaluator deployment. That is
+> filed as follow-up work, not a precondition of this gate.
+
 ## Provenance
 
 In-session ruling (Ritsu, 2026-08-05) following: the #2350 disposition and salvage; the

@@ -101,6 +101,10 @@ gates.
 > real Submission and admission receipt with no bridge synthesis) and **G-archive**
 > (second-daemon archive consumption + serving-plane kit). Grader-container execution
 > blocks the gate (DR decision 3a). The closure manifest is non-gating Class O evidence.
+>
+> **Corrected 2026-08-07:** G-loop is **not** container-graded — decision 3a decoupled
+> into two artifacts (G-loop on the prediction profile + a separately run container-grade
+> proof); same bar, different shape. See the DR's 2026-08-07 addendum.
 
 ## 5. Naming decisions (settled here, used everywhere)
 
