@@ -30,17 +30,33 @@ import type { NativeTrustAuthority } from './native-trust-catalog.js';
 export class NativeDiscoverySourceResolutionError extends Error {
   override readonly name = 'NativeDiscoverySourceResolutionError';
 
+  /**
+   * Which side of the degrade-vs-refuse line this resolution failure falls on (#2529).
+   *
+   * - `unreachable` — the transport never got an answer (connection refused, DNS, timeout). The
+   *   source asserted NOTHING, so there is nothing to distrust; the consumer degrades that source
+   *   for the poll and retries at the next one. This is the live F2 failure: a peer that is simply
+   *   not up yet, or restarting, must not kill this operator's daemon.
+   * - `unintroduced` — the serving root ANSWERED, and its answer does not uniquely introduce this
+   *   identity (or has no introduction document at all). That is a statement about identity, so it
+   *   stays the hard refusal it has always been.
+   */
+  readonly kind: 'unreachable' | 'unintroduced';
+
   constructor(
     readonly agent: string,
     readonly sourceName: string,
     readonly baseUrl: string,
     detail: string,
-    options?: { readonly cause?: unknown },
+    options?: { readonly cause?: unknown; readonly kind?: 'unreachable' | 'unintroduced' },
   ) {
     super(
       `native discovery source ${agent}/${sourceName} at ${baseUrl} could not be resolved: ${detail}`,
       options,
     );
+    // Default `unintroduced`: an unclassified resolution failure refuses, which is what this class
+    // has always done. Degrading is opt-in and only the transport-never-answered case opts in.
+    this.kind = options?.kind ?? 'unintroduced';
   }
 }
 
@@ -116,9 +132,14 @@ function absolute(base: string, path: string): string {
  * only its clock position moved. Uniqueness of the introduction is still enforced before an
  * endpoint exists; `verifySourceChain` and the head/entry chain still gate every accepted card at
  * poll; the trust adapter is still constructed from the same policy-scoped resolver. Nothing here
- * is self- or peer-conditional, so there is no "tolerate my own source" hole: a source that is
- * down, serves an unsigned or wrongly-signed chain, or introduces a different identity is refused
- * exactly as before, and the consumer writes no checkpoint and queues no card for that poll.
+ * is self- or peer-conditional, so there is no "tolerate my own source" hole: a source that serves
+ * an unsigned or wrongly-signed chain, or introduces a different identity, is refused exactly as
+ * before, and the consumer writes no checkpoint and queues no card for that poll.
+ *
+ * A source that is DOWN changed category in #2529 — it is now degraded for the poll rather than
+ * fatal to the pass — but not in strength: silence is not a signed statement, so there is nothing
+ * to trust or distrust, and a degraded source still writes no checkpoint and queues no card. See
+ * `NativeDiscoverySourceResolutionError.kind` and `native-discovery.ts`'s `degradedReason`.
  */
 export function buildNativeDiscoverySources(input: {
   readonly configured: readonly NativeOperatorConfig['sources'][number][];
@@ -143,12 +164,18 @@ export function buildNativeDiscoverySources(input: {
       try {
         wellKnownResponse = await input.transport.fetch(`${base}${WELL_KNOWN_PATH}`);
       } catch (cause) {
+        // An HTTP status on the failure means the serving root ANSWERED — with a 404, a 500,
+        // whatever — so this is a statement, not silence, and it refuses. No status at all means
+        // nothing answered: degrade this source for the poll and try again at the next one
+        // (#2529 F2). Duck-typed on `status` exactly as `native-discovery.ts` does, because the
+        // transport is an injected port and this module must not learn one implementation's types.
+        const answered = typeof (cause as { readonly status?: unknown } | null)?.status === 'number';
         throw new NativeDiscoverySourceResolutionError(
           configured.agent,
           configured.name,
           base,
           cause instanceof Error ? cause.message : String(cause),
-          { cause },
+          { cause, kind: answered ? 'unintroduced' : 'unreachable' },
         );
       }
       const wellKnown = parseWellKnownDocument(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(wellKnownResponse.bytes)));

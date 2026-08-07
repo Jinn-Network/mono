@@ -10,6 +10,7 @@ import {
 import type { SourceIdentity } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
 import {
+  NativeDiscoveryLocalAuthorityError,
   NativeDiscoverySyncError,
   createNativeDiscoveryConsumer,
   type NativeDiscoverySource,
@@ -177,7 +178,7 @@ describe('native discovery consumer', () => {
     const store = new Store(':memory:');
 
     const cold = consumer({ store, routes, verify });
-    await expect(cold.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1 });
+    await expect(cold.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
     expect(cold.takePending().map((item) => item.card.chain.taskId)).toEqual([1n, 2n]);
     for (const item of cold.takePending()) cold.acknowledge(item);
     expect(cold.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
@@ -189,7 +190,7 @@ describe('native discovery consumer', () => {
     const third = entry('0000000000000003', sealJson(second).digest, DIGEST_C);
     const resumedRoutes = routesFor([first, second, third]);
     const restarted = consumer({ store, routes: resumedRoutes, verify });
-    await expect(restarted.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    await expect(restarted.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
     expect(restarted.takePending().map((item) => item.card.chain.taskId)).toEqual([3n]);
     expect(verified).toEqual([
       { firstAdoption: true, sequences: ['0000000000000001', '0000000000000002'] },
@@ -210,7 +211,7 @@ describe('native discovery consumer', () => {
     };
     const synced = consumer({ store: new Store(':memory:'), routes, verify: verifier });
 
-    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1 });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
     expect(sequences).toEqual(['0000000000000001', '0000000000000002']);
     expect(synced.takePending()).toHaveLength(2);
   });
@@ -236,7 +237,7 @@ describe('native discovery consumer', () => {
 
     await synced.sync();
     for (const item of synced.takePending()) synced.acknowledge(item);
-    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1 });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
     expect(decode).toHaveBeenCalledOnce();
     expect(verify).toHaveBeenCalledOnce();
     expect(synced.takePending()).toEqual([]);
@@ -346,7 +347,7 @@ describe('native discovery consumer', () => {
       verify: async () => ({ status: 'ok' as const }),
     });
 
-    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1 });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 2, verifiedSources: 1, degraded: [] });
     expect(synced.takePending()).toHaveLength(1);
     expect(synced.takePendingWithdrawals()).toEqual([expect.objectContaining({
       sequence: '0000000000000002',
@@ -494,7 +495,12 @@ describe('native discovery consumer — the never-published source (#2523)', () 
     });
 
     // The cold source counts toward neither `accepted` nor `verifiedSources` — it verified nothing.
-    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    // Since #2529 it is also NAMED in the pass report, as a degraded source rather than a silent skip.
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 1,
+      verifiedSources: 1,
+      degraded: [{ source: COLD, reason: 'unpublished' }],
+    });
     expect(synced.checkpoint(COLD)).toBeUndefined();
     expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
       sequence: '0000000000000001',
@@ -519,11 +525,15 @@ describe('native discovery consumer — the never-published source (#2523)', () 
       now: () => FRESH_FIXTURE_TIME,
     });
 
-    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 0 });
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 0,
+      verifiedSources: 0,
+      degraded: [{ source: { agent: AGENT, name: SOURCE_NAME }, reason: 'unpublished' }],
+    });
     expect(adoptions).toEqual([]);
 
     for (const [url, value] of routesFor([first])) routes.set(url, value);
-    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
     // Polling early skipped no entry: the source is adopted from genesis, not from "now".
     expect(adoptions).toEqual([true]);
   });
@@ -540,7 +550,7 @@ describe('native discovery consumer — the never-published source (#2523)', () 
       decode: async (input) => cardFor(input.entry.sequence),
       now: () => FRESH_FIXTURE_TIME,
     });
-    await expect(initial.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    await expect(initial.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
 
     // Same source, same store — the head object disappears.
     routes.delete(`${ROOT}${headPath(SOURCE_NAME)}`);
@@ -571,19 +581,6 @@ describe('native discovery consumer — the never-published source (#2523)', () 
     expect(synced.checkpoint(COLD)).toBeUndefined();
   });
 
-  it('refuses an unreachable source, which carries no HTTP status at all', async () => {
-    const store = new Store(':memory:');
-    const synced = createNativeDiscoveryConsumer({
-      store,
-      sources: [neverPublished(COLD)],
-      transport: { 'fetch': async () => { throw new TypeError('fetch failed'); } },
-      decode: async () => undefined,
-    });
-
-    await expect(synced.sync()).rejects.toThrow(/fetch failed/u);
-    expect(synced.checkpoint(COLD)).toBeUndefined();
-  });
-
   it('never reaches a cold source that cannot introduce itself', async () => {
     const store = new Store(':memory:');
     const synced = createNativeDiscoveryConsumer({
@@ -597,5 +594,387 @@ describe('native discovery consumer — the never-published source (#2523)', () 
     });
 
     await expect(synced.sync()).rejects.toThrow(/not uniquely introduced/u);
+  });
+});
+
+/**
+ * ## Per-source isolation at boot (#2529)
+ *
+ * `WorkLoop.initialize` awaits `sync()` on the daemon start path, so until now ANY single-source
+ * problem was process-fatal. Three instances of that were found live inside a fortnight — a
+ * never-published source (#2523), an announcement the consumer's own decode rejected (#2529 F1),
+ * and a peer that simply was not up (#2529 F2). These tests pin the CLASS, not the instances: a
+ * source that is unavailable or unintelligible degrades itself and the pass continues; a source
+ * that is untrustworthy still refuses, hard.
+ *
+ * The refusal battery at the bottom is the mutation control. Delete `degradedReason`'s
+ * `NativeDiscoverySyncError` / `NativeDiscoveryLocalAuthorityError` guards, or widen its
+ * status-less-transport branch, and those cases go red rather than quietly widening what boots.
+ */
+describe('native discovery consumer — per-source isolation (#2529)', () => {
+  const PEER: SourceIdentity = { agent: 'did:key:zPeer', name: 'requester' };
+
+  /** Mirrors `createHttpTransport`: a missing object throws carrying its HTTP status. */
+  function statusTransport(routes: Map<string, unknown>, missingStatus = 404) {
+    return {
+      'fetch': async (url: string) => {
+        const value = routes.get(url);
+        if (value === undefined) {
+          throw Object.assign(new Error(`GET ${url} failed with HTTP ${missingStatus}.`), {
+            name: 'TransportHttpError',
+            status: missingStatus,
+            url,
+          });
+        }
+        return {
+          status: 200,
+          contentType: 'application/json',
+          bytes: new TextEncoder().encode(JSON.stringify(value)),
+        };
+      },
+    };
+  }
+
+  /** Serves whatever is in `routes`; anything else is a socket that is not listening. */
+  function silentTransport(routes: Map<string, unknown>) {
+    return {
+      'fetch': async (url: string) => {
+        const value = routes.get(url);
+        if (value === undefined) throw new TypeError('fetch failed');
+        return {
+          status: 200,
+          contentType: 'application/json',
+          bytes: new TextEncoder().encode(JSON.stringify(value)),
+        };
+      },
+    };
+  }
+
+  function peerSource(identity: SourceIdentity, overrides: Partial<NativeDiscoverySource> = {}): NativeDiscoverySource {
+    return {
+      identity,
+      resolveEndpoint: async () => ({
+        agent: identity.agent,
+        name: identity.name,
+        servingRoot: ROOT,
+        archiveRootUrl: `${ROOT}${archivePagePath(SOURCE_NAME, '0000000000000001')}`,
+      }),
+      verify: async (input) => {
+        for await (const item of input.entries) void item;
+        return { status: 'ok' };
+      },
+      verifyHead: async () => ({ status: 'ok' }),
+      ...overrides,
+    };
+  }
+
+  /** The shape `native-discovery-trust.ts` throws when nothing answered at the origin. */
+  function unreachableAtIntroduction(identity: SourceIdentity): NativeDiscoverySource {
+    return peerSource(identity, {
+      resolveEndpoint: async () => {
+        throw Object.assign(
+          new Error(`native discovery source ${identity.agent}/${identity.name} at ${ROOT} `
+            + 'could not be resolved: fetch failed'),
+          { name: 'NativeDiscoverySourceResolutionError', kind: 'unreachable' },
+        );
+      },
+    });
+  }
+
+  it('degrades a peer whose origin is not listening and still syncs the other sources', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const synced = createNativeDiscoveryConsumer({
+      store: new Store(':memory:'),
+      sources: [unreachableAtIntroduction(PEER), source(routes, async () => ({ status: 'ok' }))],
+      transport: silentTransport(routes),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 1,
+      verifiedSources: 1,
+      degraded: [{ source: PEER, reason: 'unreachable' }],
+    });
+    expect(synced.checkpoint(PEER)).toBeUndefined();
+    expect(synced.takePending()).toHaveLength(1);
+    // Loud and legible: agent, name and baseUrl all appear, so an operator never has to reach for
+    // JINN_DEBUG to learn WHICH source is down.
+    const logged = warn.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain(PEER.agent);
+    expect(logged).toContain(ROOT);
+    expect(logged).toContain('unreachable');
+    warn.mockRestore();
+  });
+
+  it('degrades a peer that goes down after its introduction resolved', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const synced = createNativeDiscoveryConsumer({
+      store: new Store(':memory:'),
+      sources: [peerSource(PEER)],
+      transport: {
+        'fetch': async () => {
+          throw Object.assign(new TypeError('fetch failed'), {
+            cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:7401'), { code: 'ECONNREFUSED' }),
+          });
+        },
+      },
+      decode: async () => undefined,
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 0,
+      verifiedSources: 0,
+      degraded: [{ source: PEER, reason: 'unreachable' }],
+    });
+    expect(synced.checkpoint(PEER)).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it('recovers a degraded source at a later poll, adopting from genesis with no gap', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const live = new Map<string, unknown>();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const adoptions: boolean[] = [];
+    const synced = createNativeDiscoveryConsumer({
+      store: new Store(':memory:'),
+      sources: [source(routes, async (input) => {
+        for await (const item of input.entries) void item;
+        adoptions.push(input.firstAdoption);
+        return { status: 'ok' };
+      })],
+      transport: silentTransport(live),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(synced.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unreachable' }] });
+    expect(adoptions).toEqual([]);
+    for (const [url, value] of routes) live.set(url, value);
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    expect(adoptions).toEqual([true]);
+    expect(synced.takePending()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('degrades a source serving an announcement it cannot decode, without advancing past it', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const store = new Store(':memory:');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let undecodable = true;
+    const synced = consumer({
+      store,
+      routes,
+      verify: async (input) => {
+        for await (const item of input.entries) void item;
+        return { status: 'ok' };
+      },
+      decode: async (input) => {
+        // The exact live failure: the requester's own signed announcement, rejected by the
+        // operator's own decode.
+        if (undecodable) throw new Error('chainId is not a canonical unsigned integer');
+        return cardFor(input.entry.sequence);
+      },
+    });
+
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 0,
+      verifiedSources: 0,
+      degraded: [{ source: { agent: AGENT, name: SOURCE_NAME }, reason: 'undecodable' }],
+    });
+    // The load-bearing half: no checkpoint, so the signed announcement is NOT skipped past. A
+    // reader bug must never silently consume append-only history.
+    expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+    expect(synced.takePending()).toHaveLength(0);
+
+    undecodable = false;
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    expect(synced.takePending()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('isolates the undecodable source from its siblings', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const synced = createNativeDiscoveryConsumer({
+      store: new Store(':memory:'),
+      sources: [peerSource(PEER), source(routes, async (input) => {
+        for await (const item of input.entries) void item;
+        return { status: 'ok' };
+      })],
+      transport: silentTransport(routes),
+      decode: async (input) => {
+        if (input.source.agent === PEER.agent) throw new Error('unknown announcement profile');
+        return cardFor(input.entry.sequence);
+      },
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(synced.sync()).resolves.toMatchObject({
+      accepted: 1,
+      verifiedSources: 1,
+      degraded: [{ source: PEER, reason: 'undecodable' }],
+    });
+    expect(synced.takePending()).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it('logs a degraded source once, not once per poll', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const synced = createNativeDiscoveryConsumer({
+      store: new Store(':memory:'),
+      sources: [unreachableAtIntroduction(PEER)],
+      transport: statusTransport(new Map()),
+      decode: async () => undefined,
+    });
+
+    await synced.sync();
+    await synced.sync();
+    await synced.sync();
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  /**
+   * Every case here names a distinct untrust condition and must still throw OUT of `sync()`.
+   */
+  describe('an untrustworthy source still refuses, hard', () => {
+    const chainVerified: NativeDiscoverySource['verify'] = async (input) => {
+      for await (const item of input.entries) void item;
+      return { status: 'ok' };
+    };
+
+    it('refuses an unsigned head', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, head(first));
+      const synced = consumer({ store: new Store(':memory:'), routes, verify: chainVerified });
+      await expect(synced.sync()).rejects.toMatchObject({ reason: 'unsigned-head' });
+    });
+
+    it.each([
+      'bad-signature',
+      'unauthorized-signer',
+      'unknown-agent',
+      'revoked-key',
+      'conflicting-bindings',
+      'scope-violation',
+      'expired-binding',
+    ])('refuses a chain the trust verifier rejects as %s', async (status) => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const synced = consumer({
+        store: new Store(':memory:'),
+        routes,
+        verify: async (input) => {
+          for await (const item of input.entries) void item;
+          return { status };
+        },
+      });
+      await expect(synced.sync()).rejects.toMatchObject({ reason: status });
+    });
+
+    it.each(['unauthorized-signer', 'head-payload-mismatch', 'invalid-head-envelope'])(
+      'refuses a byte-identical head that revalidation rejects as %s',
+      async (status) => {
+        const first = entry('0000000000000001', null, DIGEST_A);
+        const routes = routesFor([first]);
+        const store = new Store(':memory:');
+        await consumer({ store, routes, verify: chainVerified }).sync();
+        const restarted = consumer({
+          store,
+          routes,
+          verify: chainVerified,
+          verifyHead: async () => ({ status }),
+        });
+        await expect(restarted.sync()).rejects.toMatchObject({ reason: status });
+      },
+    );
+
+    it('refuses an entry the source served unsigned', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      routes.set(`${ROOT}${archivePagePath(SOURCE_NAME, '0000000000000001')}`, {
+        protocol: RECORD_DISCOVERY_VERSION,
+        source: SOURCE_NAME,
+        page: '0000000000000001',
+        prevArchive: null,
+        entries: [{ entry: first }],
+      });
+      const synced = consumer({ store: new Store(':memory:'), routes, verify: chainVerified });
+      await expect(synced.sync()).rejects.toMatchObject({ reason: 'unsigned-entry' });
+    });
+
+    it('refuses a head that 404s once a checkpoint exists — a rollback is not an outage', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const store = new Store(':memory:');
+      const build = () => createNativeDiscoveryConsumer({
+        store,
+        sources: [source(routes, chainVerified)],
+        transport: statusTransport(routes),
+        decode: async (input) => cardFor(input.entry.sequence),
+        now: () => FRESH_FIXTURE_TIME,
+      });
+      await build().sync();
+      routes.delete(`${ROOT}${headPath(SOURCE_NAME)}`);
+      await expect(build().sync()).rejects.toThrow(/HTTP 404/u);
+    });
+
+    it('refuses a resolution failure that is not marked unreachable', async () => {
+      const synced = createNativeDiscoveryConsumer({
+        store: new Store(':memory:'),
+        sources: [peerSource(PEER, {
+          resolveEndpoint: async () => {
+            throw Object.assign(
+              new Error('public source did:key:zPeer/requester is not uniquely introduced'),
+              { name: 'NativeDiscoverySourceResolutionError', kind: 'unintroduced' },
+            );
+          },
+        })],
+        transport: statusTransport(new Map()),
+        decode: async () => undefined,
+      });
+      await expect(synced.sync()).rejects.toThrow(/not uniquely introduced/u);
+    });
+
+    it("refuses a decode failure that reports THIS operator's own trust catalog", async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const routes = routesFor([first]);
+      const synced = consumer({
+        store: new Store(':memory:'),
+        routes,
+        verify: chainVerified,
+        decode: async () => {
+          throw new NativeDiscoveryLocalAuthorityError({
+            cause: new Error('native trust catalog changed after authority load'),
+          });
+        },
+      });
+      await expect(synced.sync()).rejects.toThrow(/trust catalog changed after authority load/u);
+    });
+
+    it('refuses a malformed payload rather than mistaking it for silence', async () => {
+      const synced = createNativeDiscoveryConsumer({
+        store: new Store(':memory:'),
+        sources: [peerSource(PEER)],
+        transport: {
+          'fetch': async () => ({
+            status: 200,
+            contentType: 'application/json',
+            bytes: new TextEncoder().encode('{ not json'),
+          }),
+        },
+        decode: async () => undefined,
+        now: () => FRESH_FIXTURE_TIME,
+      });
+      await expect(synced.sync()).rejects.toThrow();
+    });
   });
 });

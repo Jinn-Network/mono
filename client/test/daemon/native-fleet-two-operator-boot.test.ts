@@ -151,6 +151,12 @@ interface Operator {
   mount(served: readonly FleetServedSource[]): void;
   /** Exactly what one-swap M6 mounted: the solver publisher's own handler, and nothing else. */
   mountSolverOnlyAsM6Did(): void;
+  /**
+   * Takes this operator's origin down and brings it back on the SAME port — a peer restart, as
+   * its peers experience it (#2529). Down means ECONNREFUSED, not a 5xx: `jinn run` exiting closes
+   * the socket.
+   */
+  restart(): Promise<{ down: () => Promise<void>; up: () => Promise<void> }>;
   store(): Store;
 }
 
@@ -170,12 +176,16 @@ async function buildOperator(input: {
 }): Promise<Operator> {
   const root = await tempRoot(input.prefix);
   let current: (request: Request) => Promise<Response> = async () => new Response(null, { status: 404 });
-  const server = trackServer(await startPublicArchiveServer({
+  // Not `trackServer`: this listener can be cycled by `restart()`, so teardown closes whichever
+  // instance is live at the end — and closes nothing if the test left it down.
+  let server: PublicArchiveServer | undefined = await startPublicArchiveServer({
     handler: (request) => current(request),
     host: '127.0.0.1',
     port: 0,
-  }));
-  const baseUrl = `http://127.0.0.1:${server.port}`;
+  });
+  cleanups.push(async () => { await server?.close(); server = undefined; });
+  const port = server.port;
+  const baseUrl = `http://127.0.0.1:${port}`;
 
   const intents = createInMemoryPostingIntentStore();
   const requesterWrite = buildFleetRequesterWrite({
@@ -228,6 +238,22 @@ async function buildOperator(input: {
     served,
     mount(next) { current = buildFleetArchiveHandler(next); },
     mountSolverOnlyAsM6Did() { current = solver.handler; },
+    async restart() {
+      return {
+        down: async () => {
+          await server?.close();
+          server = undefined;
+        },
+        up: async () => {
+          if (server !== undefined) return;
+          server = await startPublicArchiveServer({
+            handler: (request) => current(request),
+            host: '127.0.0.1',
+            port,
+          });
+        },
+      };
+    },
     store() {
       const store = new Store(join(root, `discovery-${stores.length}.sqlite`));
       stores.push(store);
@@ -493,7 +519,11 @@ describe('#2521 — cold mutual boot with neither listener serving', () => {
     // The poll accepts nothing — introduction is not history — but it no longer THROWS: since
     // #2523 a source that has never published a head is skipped for that poll rather than aborting
     // it. See the `#2523` describe below for that property and its negative controls.
-    await expect(discoveryA.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 0 });
+    await expect(discoveryA.sync()).resolves.toMatchObject({
+      accepted: 0,
+      verifiedSources: 0,
+      degraded: [{ reason: 'unpublished' }],
+    });
   });
 
   it('names agent, source and baseUrl when the origin refuses the connection (F4)', async () => {
@@ -511,7 +541,14 @@ describe('#2521 — cold mutual boot with neither listener serving', () => {
     const discovery = await bootFleetDiscovery(a, [{
       role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl,
     }]);
-    await expect(discovery.sync()).rejects.toThrow(
+    // #2529 moved this from fatal to degraded — the daemon boots — but F4's whole point was the
+    // LEGIBILITY of the message, and that is unchanged: agent, source name and baseUrl still
+    // appear, now on the degradation's detail instead of on an uncaught throw.
+    const report = await discovery.sync();
+    expect(report).toMatchObject({ accepted: 0, verifiedSources: 0 });
+    expect(report.degraded).toHaveLength(1);
+    expect(report.degraded[0]!.reason).toBe('unreachable');
+    expect(report.degraded[0]!.detail).toMatch(
       new RegExp(`native discovery source ${OPERATOR_B_IRI}/requester at ${baseUrl} could not be resolved`, 'u'),
     );
   });
@@ -596,7 +633,15 @@ describe('#2523 — cold start with every archive mounted and nothing ever publi
     return { requester: build('requester'), solver: build('solver') };
   }
 
-  const COLD = { accepted: 0, verifiedSources: 0 };
+  /**
+   * A clean cold poll: nothing accepted, nothing verified, and every configured source named as
+   * `unpublished` rather than silently skipped (#2529 widened the report; the property is #2523's).
+   */
+  const COLD = {
+    accepted: 0,
+    verifiedSources: 0,
+    degraded: [expect.objectContaining({ reason: 'unpublished' })],
+  };
 
   for (const order of ['A then B', 'B then A'] as const) {
     it(`polls both operators clean (${order}) with neither having published`, async () => {
@@ -711,6 +756,132 @@ describe('#2523 — cold start with every archive mounted and nothing ever publi
     await expect(discovery.sync()).rejects.toThrow(
       new RegExp(`${OPERATOR_B_IRI}/requester at http://127.0.0.1:${dead.port} could not be resolved`, 'u'),
     );
+  });
+});
+
+/**
+ * ## #2529 — restart resilience
+ *
+ * #2521 bought cold mutual boot: neither operator has to be up before the other STARTS. It did not
+ * buy survival: a peer that went down after resolution still killed its peers' next poll, and
+ * because `WorkLoop.initialize` awaits `sync()` on the boot path, that made either operator's
+ * restart fatal to the other and forced strict A-before-B start ordering on the live gate.
+ *
+ * The property that matters here is not "boot works once"; it is that the fleet survives a peer
+ * cycling, in either direction, at any time. So each test takes an operator down AFTER its peer
+ * has already resolved it, and asserts the peer polls on.
+ */
+describe('#2529 — either operator restarting must not kill the other', () => {
+  it('survives operator A restarting, and picks A back up when it returns', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+    const sources = sourcesFor(a, b);
+    // B consumes A's requester source — the gate topology. Resolve it while A is up, so the
+    // failure below is a peer that WENT down, not one that was never there.
+    const discoveryB = await bootFleetDiscovery(b, sources.b);
+    await expect(discoveryB.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unpublished' }] });
+
+    const listener = await a.restart();
+    await listener.down();
+    const outage = await discoveryB.sync();
+    expect(outage).toMatchObject({ accepted: 0, verifiedSources: 0 });
+    expect(outage.degraded).toHaveLength(1);
+    expect(outage.degraded[0]!.reason).toBe('unreachable');
+    expect(outage.degraded[0]!.source).toEqual({ agent: OPERATOR_A_IRI, name: 'requester' });
+
+    await listener.up();
+    // Back to the ordinary cold-start posture the moment A is serving again: same source, same
+    // consumer, no checkpoint gap and no restart of B required.
+    await expect(discoveryB.sync()).resolves.toMatchObject({
+      accepted: 0,
+      verifiedSources: 0,
+      degraded: [{ reason: 'unpublished' }],
+    });
+  });
+
+  it('survives operator B restarting, and picks B back up when it returns', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+    // A consuming B's own requester source — the mirror direction, so the property is symmetric
+    // rather than an accident of which operator the gate happens to start first.
+    const discoveryA = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: b.baseUrl,
+    }]);
+    await expect(discoveryA.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unpublished' }] });
+
+    const listener = await b.restart();
+    await listener.down();
+    await expect(discoveryA.sync()).resolves.toMatchObject({
+      degraded: [{ reason: 'unreachable', source: { agent: OPERATOR_B_IRI, name: 'requester' } }],
+    });
+
+    await listener.up();
+    await expect(discoveryA.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unpublished' }] });
+  });
+
+  it('keeps polling this operator\'s own sources while a peer is down', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+    // Two sources, one healthy (A's own) and one on the peer that is about to vanish. The whole
+    // point of per-source isolation is that the healthy one is still polled.
+    const discoveryA = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_A_IRI, name: 'requester', baseUrl: a.baseUrl,
+    }]);
+    const discoveryPeer = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: b.baseUrl,
+    }]);
+    await discoveryA.sync();
+    await discoveryPeer.sync();
+
+    const listener = await b.restart();
+    await listener.down();
+    await expect(discoveryPeer.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unreachable' }] });
+    // A's own source is untouched by the peer's outage.
+    await expect(discoveryA.sync()).resolves.toMatchObject({ degraded: [{ reason: 'unpublished' }] });
+  });
+
+  it('still refuses a returning peer that comes back serving an unsigned head', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+    // Degradation must not have become a general "tolerate whatever the peer does". A peer that
+    // goes away and returns UNTRUSTWORTHY refuses exactly as it would have without the outage.
+    const hostile = trackServer(await startPublicArchiveServer({
+      handler: async (request) => {
+        const url = new URL(request.url);
+        if (url.pathname === WELL_KNOWN_PATH) {
+          return new Response(JSON.stringify({
+            protocol: RECORD_DISCOVERY_VERSION,
+            sources: [{
+              agent: OPERATOR_B_IRI,
+              name: 'requester',
+              headPath: headPath('requester'),
+              archiveRoot: '/sources/requester/entries/0000000000000001',
+            }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (url.pathname === headPath('requester')) {
+          return new Response(JSON.stringify({
+            protocol: RECORD_DISCOVERY_VERSION,
+            origin: `${OPERATOR_B_IRI}/requester`,
+            sequence: '0000000000000001',
+            entry: `sha256:${'a'.repeat(64)}`,
+            issuedAt: '2026-08-07T12:00:00.000Z',
+            refreshBy: '2099-01-01T00:00:00.000Z',
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(null, { status: 404 });
+      },
+      host: '127.0.0.1',
+      port: 0,
+    }));
+    const discovery = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${hostile.port}`,
+    }]);
+    await expect(discovery.sync()).rejects.toThrow(/unsigned-head/u);
   });
 });
 

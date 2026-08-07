@@ -108,8 +108,9 @@ export async function buildFleetNativeDiscovery(
  * not a heuristic. `createNativeDiscoveryConsumer` stamps `discovery` (source identity, sequence,
  * entry digest and the exact signed high-water it was accepted under) onto every card it queues,
  * and it queues nothing the decode did not return — and the decode
- * (`buildNativeRequesterAnnouncementDecode`) throws, aborting the whole source pass, unless it has
- * independently re-derived a canonical, finalized `TaskCreated` from chain for that announcement.
+ * (`buildNativeRequesterAnnouncementDecode`) throws, degrading that source for the poll, unless it
+ * has independently re-derived a canonical, finalized `TaskCreated` from chain for that
+ * announcement.
  * So a card carrying this provenance is by construction a card whose `TaskCreated` this operator
  * proved canonical and finalized; a card without it never went through that gate and must still be
  * refused.
