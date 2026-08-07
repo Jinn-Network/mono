@@ -64,7 +64,12 @@ interface Harness {
   readonly calls: string[];
 }
 
-function harness(options: { readonly safeOwns?: boolean; readonly custodyThrows?: string } = {}): Harness {
+function harness(options: {
+  readonly safeOwns?: boolean;
+  readonly custodyThrows?: string;
+  /** Simulates a kill during the finality wait: the FIRST wait throws, later ones succeed. */
+  readonly finalityFailsOnce?: boolean;
+} = {}): Harness {
   const home = mkdtempSync(join(tmpdir(), 'ceremony-cli-'));
   const dir = join(home, '.jinn-client');
   mkdirSync(dir, { recursive: true });
@@ -98,6 +103,11 @@ function harness(options: { readonly safeOwns?: boolean; readonly custodyThrows?
         },
         async waitForFinalized(input) {
           calls.push('waitForFinalized');
+          input.onProgress?.(20_000);
+          if (options.finalityFailsOnce === true && !calls.includes('finalityFailed')) {
+            calls.push('finalityFailed');
+            throw new Error('killed during the finality wait');
+          }
           return {
             digest: input.digest,
             anchorTime: ANCHOR_TIME,
@@ -476,9 +486,26 @@ describe('ceremony init --execute', () => {
     expect((result.nextSteps as string[]).join(' ')).toContain('restart');
   });
 
-  it('refuses a second genesis at the same catalog path', async () => {
+  /**
+   * A SECOND operator aiming `init` at someone else's catalog. It has no receipt for that catalog,
+   * so `join` genuinely is what it wants — unlike the operator whose own ceremony sealed the file,
+   * which gets the config-write-back recovery instead (see the interrupted-ceremony suite).
+   */
+  it('refuses a second genesis over a catalog this operator did not author', async () => {
     await execute();
-    const io = await execute();
+    const other = join(h.home, '.jinn-client-op-b');
+    mkdirSync(other, { recursive: true });
+    const { ctx, io } = context({
+      argv: [
+        'init', '--dir', other, '--role-sets', 'requester',
+        '--catalog', join(h.dir, 'trust.json'),
+        '--authority-store', h.authorityStore, '--execute',
+      ],
+      home: h.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(h.deps).run(ctx);
+
     const result = lastEnvelope(io.writes);
     expect(result.code).toBe('invalid_invocation');
     expect(String(result.message)).toContain('genesis never overwrites');
@@ -697,6 +724,255 @@ describe('ceremony show', () => {
     });
     await createCeremonyCommand(a.deps).run(ctx);
     expect(String(lastEnvelope(io.writes).message)).toContain('could not be listed');
+  });
+});
+
+/**
+ * The crash window that matters.
+ *
+ * Everything between `submit()` and the sealed catalog is a 10-45 minute wait on Base Sepolia
+ * finality, and it is the only place a live ceremony realistically dies. Until the receipt was
+ * written at submit time, dying there ORPHANED the anchor: the operator's re-run resolved no
+ * `agentIri` from config (never written) and none from a receipt (never written), so it minted a
+ * fresh `urn:uuid:` identity and sent a SECOND anchor transaction against a real balance.
+ */
+describe('ceremony — interrupted during the finality wait', () => {
+  it('records the anchor receipt BEFORE waiting, so a crash leaves the anchor recoverable', async () => {
+    const h = harness({ finalityFailsOnce: true });
+    const { ctx } = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await expect(createCeremonyCommand(h.deps).run(ctx)).rejects.toThrow(/killed during the finality wait/u);
+
+    const receipt = JSON.parse(readFileSync(join(h.dir, 'ceremony', 'receipt.json'), 'utf-8')) as {
+      agentIri: string; admissionAgent: string; anchorDigest: string; anchorTransactionHash: string;
+      anchorLocator: { transactionHash: string; anchorTime: string }; validFrom: string;
+      policyGenesisDigest?: string; completedAt?: string;
+    };
+    expect(receipt.agentIri).toMatch(/^urn:uuid:/u);
+    expect(receipt.admissionAgent).toMatch(/^urn:uuid:/u);
+    expect(receipt.anchorDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(receipt.anchorLocator.anchorTime).toBe(ANCHOR_TIME);
+    expect(receipt.validFrom).toBe(ANCHOR_TIME);
+    // The later stages genuinely did not happen.
+    expect(receipt.policyGenesisDigest).toBeUndefined();
+    expect(receipt.completedAt).toBeUndefined();
+    // Nothing was authored, so a re-run has real work to do.
+    expect(existsSync(join(h.dir, 'trust.json'))).toBe(false);
+    expect(existsSync(h.configPath)).toBe(false);
+  });
+
+  it('re-runs onto the SAME agent IRI and the SAME anchor — no second identity, no second transaction', async () => {
+    const h = harness({ finalityFailsOnce: true });
+    const first = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await expect(createCeremonyCommand(h.deps).run(first.ctx)).rejects.toThrow();
+
+    const crashed = JSON.parse(readFileSync(join(h.dir, 'ceremony', 'receipt.json'), 'utf-8')) as {
+      agentIri: string; admissionAgent: string; anchorDigest: string; anchorTransactionHash: string;
+    };
+
+    const { ctx, io } = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await createCeremonyCommand(h.deps).run(ctx);
+
+    const result = lastEnvelope(io.writes);
+    expect(result.kind).toBe('ceremony_init_complete');
+    expect(result.agentIri).toBe(crashed.agentIri);
+    expect(result.admissionAgent).toBe(crashed.admissionAgent);
+    expect(result.anchorDigest).toBe(crashed.anchorDigest);
+    expect(result.anchorTransactionHash).toBe(crashed.anchorTransactionHash);
+    expect(result.anchorReused).toBe(true);
+    // The load-bearing assertion: exactly ONE anchor transaction across both runs.
+    expect(h.calls.filter((call) => call.startsWith('submit:'))).toHaveLength(1);
+    // And the reused anchor's block time is still what every binding adopted (§6 law 2).
+    expect(result.validFrom).toBe(ANCHOR_TIME);
+
+    const config = JSON.parse(readFileSync(h.configPath, 'utf-8')) as Record<string, unknown>;
+    expect(config.agentIri).toBe(crashed.agentIri);
+  });
+
+  it('announces the reuse rather than reporting it as a fresh submission', async () => {
+    const h = harness({ finalityFailsOnce: true });
+    const first = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await expect(createCeremonyCommand(h.deps).run(first.ctx)).rejects.toThrow();
+
+    const { ctx, io } = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await createCeremonyCommand(h.deps).run(ctx);
+    expect(envelopes(io.writes).map((entry) => entry.kind)).toContain('ceremony_anchor_reused');
+  });
+
+  /** A re-run after a genuinely different key set must NOT reuse — the digest no longer matches. */
+  it('submits a fresh anchor when the receipt commits to a different key set', async () => {
+    const h = harness({ finalityFailsOnce: true });
+    const first = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await expect(createCeremonyCommand(h.deps).run(first.ctx)).rejects.toThrow();
+
+    // Fewer families than the crashed run provisioned: a different (role -> keyId) commitment.
+    const { ctx, io } = context({
+      argv: [
+        'init', '--dir', h.dir, '--role-sets', 'requester',
+        '--authority-store', h.authorityStore, '--execute',
+      ],
+      home: h.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(h.deps).run(ctx);
+    expect(lastEnvelope(io.writes).anchorReused).toBe(false);
+    expect(h.calls.filter((call) => call.startsWith('submit:'))).toHaveLength(2);
+  });
+
+  /**
+   * The state whose obvious recovery was wrong: catalog sealed, config not yet written. `join`
+   * would append a SECOND set of bindings for an operator already in the catalog.
+   */
+  it('names the outstanding config keys instead of pointing a sealed ceremony at `join`', async () => {
+    const h = harness();
+    const seed = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await createCeremonyCommand(h.deps).run(seed.ctx);
+    const sealed = lastEnvelope(seed.io.writes);
+
+    const { ctx, io } = context({ argv: initArgv(h, ['--execute']), home: h.home, password: PASSWORD });
+    await createCeremonyCommand(h.deps).run(ctx);
+
+    const result = lastEnvelope(io.writes);
+    expect(result.code).toBe('invalid_invocation');
+    expect((result.details as { state: string }).state).toBe('config-write-back-pending');
+    expect(String(result.hint)).toContain('jinn ceremony show');
+    expect(String(result.hint)).not.toContain('ceremony join');
+    // The five values, handed over rather than described.
+    const values = (result.details as { configValues: Record<string, unknown> }).configValues;
+    expect(Object.keys(values).sort()).toEqual([
+      'admissionAgent', 'agentIri', 'identityStores', 'trustPolicyGenesisDigest', 'trustRootsPath',
+    ]);
+    expect(values.trustPolicyGenesisDigest).toBe(sealed.policyGenesisDigest);
+    expect(values.agentIri).toBe(sealed.agentIri);
+  });
+
+  /** The join equivalent: a second append would duplicate bindings under a fresh ceremony nonce. */
+  it('refuses to re-append a join whose bindings already landed', async () => {
+    const a = harness();
+    const seed = context({ argv: initArgv(a, ['--execute']), home: a.home, password: PASSWORD });
+    await createCeremonyCommand(a.deps).run(seed.ctx);
+    const genesis = String(lastEnvelope(seed.io.writes).policyGenesisDigest);
+
+    const bDir = join(a.home, '.jinn-client-op-b');
+    mkdirSync(bDir, { recursive: true });
+    const joinArgv = [
+      'join', '--dir', bDir, '--role-sets', 'requester,solver',
+      '--catalog', join(a.dir, 'trust.json'), '--genesis', genesis,
+      '--authority-store', a.authorityStore, '--execute',
+    ];
+    const firstJoin = context({ argv: joinArgv, home: a.home, password: PASSWORD });
+    await createCeremonyCommand(a.deps).run(firstJoin.ctx);
+    const catalogAfterFirst = readFileSync(join(a.dir, 'trust.json'), 'utf-8');
+
+    const { ctx, io } = context({ argv: joinArgv, home: a.home, password: PASSWORD });
+    await createCeremonyCommand(a.deps).run(ctx);
+    expect((lastEnvelope(io.writes).details as { state: string }).state).toBe('config-write-back-pending');
+    expect(readFileSync(join(a.dir, 'trust.json'), 'utf-8')).toBe(catalogAfterFirst);
+  });
+});
+
+/**
+ * `join`'s finality wait used to print NOTHING for up to 45 minutes, which on a live run is
+ * indistinguishable from a hang — and the only remedies an operator has for a hang are wait blind
+ * or kill a ceremony mid-flight.
+ */
+describe('ceremony join — finality progress', () => {
+  it('reports finality progress the same way init does', async () => {
+    const a = harness();
+    const seed = context({ argv: initArgv(a, ['--execute']), home: a.home, password: PASSWORD });
+    await createCeremonyCommand(a.deps).run(seed.ctx);
+    expect(envelopes(seed.io.writes).map((entry) => entry.kind)).toContain('ceremony_finality_wait');
+    const genesis = String(lastEnvelope(seed.io.writes).policyGenesisDigest);
+
+    const bDir = join(a.home, '.jinn-client-op-b');
+    mkdirSync(bDir, { recursive: true });
+    const { ctx, io } = context({
+      argv: [
+        'join', '--dir', bDir, '--role-sets', 'requester,solver',
+        '--catalog', join(a.dir, 'trust.json'), '--genesis', genesis,
+        '--authority-store', a.authorityStore, '--execute',
+      ],
+      home: a.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(a.deps).run(ctx);
+
+    const kinds = envelopes(io.writes).map((entry) => entry.kind);
+    expect(kinds).toContain('ceremony_anchor_submitted');
+    expect(kinds).toContain('ceremony_finality_wait');
+  });
+});
+
+describe('ceremony --dry-run', () => {
+  /** It parsed and was never read, so `--dry-run --execute` spent gas and minted custody. */
+  it('refuses --dry-run --execute rather than executing', async () => {
+    const h = harness();
+    const { ctx, io } = context({
+      argv: initArgv(h, ['--dry-run', '--execute']),
+      home: h.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(h.deps).run(ctx);
+
+    const result = lastEnvelope(io.writes);
+    expect(result.code).toBe('invalid_invocation');
+    expect(String(result.message)).toContain('mutually exclusive');
+    // Refused before a single chain read, let alone a mint.
+    expect(h.calls).toEqual([]);
+    expect(existsSync(join(h.dir, 'identity'))).toBe(false);
+  });
+
+  it('refuses --dry-run --execute on join too', async () => {
+    const { a, genesis, bDir } = await seededJoinTarget();
+    const { ctx, io } = context({
+      argv: [
+        'join', '--dir', bDir, '--role-sets', 'requester,solver',
+        '--catalog', join(a.dir, 'trust.json'), '--genesis', genesis,
+        '--authority-store', a.authorityStore, '--dry-run', '--execute',
+      ],
+      home: a.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(a.deps).run(ctx);
+    expect(String(lastEnvelope(io.writes).message)).toContain('mutually exclusive');
+    expect(existsSync(join(bDir, 'identity'))).toBe(false);
+  });
+
+  it('plans without side effects on its own', async () => {
+    const h = harness();
+    const { ctx, io } = context({ argv: initArgv(h, ['--dry-run']), home: h.home, password: PASSWORD });
+    await createCeremonyCommand(h.deps).run(ctx);
+    expect(lastEnvelope(io.writes).kind).toBe('ceremony_init_plan');
+    expect(existsSync(join(h.dir, 'identity'))).toBe(false);
+  });
+});
+
+async function seededJoinTarget(): Promise<{ a: Harness; genesis: string; bDir: string }> {
+  const a = harness();
+  const seed = context({ argv: initArgv(a, ['--execute']), home: a.home, password: PASSWORD });
+  await createCeremonyCommand(a.deps).run(seed.ctx);
+  const bDir = join(a.home, '.jinn-client-op-b');
+  mkdirSync(bDir, { recursive: true });
+  return { a, genesis: String(lastEnvelope(seed.io.writes).policyGenesisDigest), bDir };
+}
+
+describe('ceremony --human', () => {
+  /** The completion line was a raw JSON.stringify, so `--human` changed nothing about it. */
+  it('renders the init completion as text, not JSON', async () => {
+    const h = harness();
+    const { ctx, io } = context({
+      argv: initArgv(h, ['--execute', '--human']),
+      home: h.home,
+      password: PASSWORD,
+    });
+    await createCeremonyCommand(h.deps).run(ctx);
+
+    const output = io.writes.join('');
+    expect(output).toContain('jinn ceremony init — COMPLETE');
+    expect(output).toContain('genesis digest');
+    expect(output).toContain('anchor submitted');
+    expect(output).toContain('still waiting for finality');
+    // No line of the run is raw JSON any more.
+    expect(envelopes(io.writes)).toEqual([]);
   });
 });
 

@@ -184,6 +184,43 @@ function defaultOperatorDir(env: NodeJS.ProcessEnv): string {
   return join(env.HOME ?? homedir(), '.jinn-client');
 }
 
+/**
+ * Whether this invocation may take side effects.
+ *
+ * `--dry-run` is the flag an operator reaches for when they want to be CERTAIN nothing happens, so
+ * it forces the plan and refuses loudly rather than quietly losing to `--execute`. (It previously
+ * parsed and was never read, which made `--dry-run --execute` spend gas.)
+ */
+function resolveExecute(ctx: CommandContext, parsed: Parsed): boolean {
+  const dryRun = parsed.values['dry-run'] === true;
+  const execute = parsed.values.execute === true;
+  if (dryRun && execute) {
+    invalid(
+      ctx,
+      '--dry-run and --execute are mutually exclusive',
+      '--dry-run forces the read-only plan. Drop one of the two; without --execute the ceremony is already plan-only.',
+    );
+  }
+  return execute;
+}
+
+/**
+ * Progress lines during the long chain waits, in the mode the operator asked for.
+ *
+ * `emitResult` is for one terminal value; these are a stream, so they are written directly — but
+ * they must still honour `--human`, because an operator watching a 45-minute finality wait on a
+ * live run should not be reading raw JSON.
+ */
+function progressWriter(
+  ctx: CommandContext,
+  parsed: Parsed,
+): (payload: Record<string, unknown>, human: string) => void {
+  const human = Boolean(parsed.values.human);
+  return (payload, line) => {
+    ctx.writer.write(human ? `${line}\n` : `${JSON.stringify(payload)}\n`);
+  };
+}
+
 function resolveDir(ctx: CommandContext, parsed: Parsed): string {
   const dir = parsed.values.dir;
   if (dir === undefined || dir.length === 0) return defaultOperatorDir(ctx.env);
@@ -238,6 +275,12 @@ interface CeremonyReceipt {
   readonly policyGenesisDigest?: string;
   readonly anchorDigest?: string;
   readonly anchorTransactionHash?: string;
+  /**
+   * The whole locator, not just its hash: it is what lets a re-run REUSE the anchor instead of
+   * paying for a second one. `anchorDeclaration` needs every field, so recording only the hash
+   * would make the receipt a record of the anchor rather than a way to resume onto it.
+   */
+  readonly anchorLocator?: AnchorLocator;
   readonly validFrom?: string;
   readonly completedAt?: string;
 }
@@ -257,6 +300,51 @@ function writeReceipt(dir: string, receipt: CeremonyReceipt): void {
   const path = receiptPath(dir);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
+}
+
+/**
+ * Extends the receipt in place.
+ *
+ * The receipt is written in stages (anchor → catalog → config) precisely so that a crash between
+ * two of them leaves a record of what already happened. A merge keeps the earlier stages' fields —
+ * a replace would erase the anchor the later stage is standing on.
+ */
+function extendReceipt(dir: string, patch: Partial<CeremonyReceipt>): void {
+  const existing = readReceipt(dir);
+  if (existing === undefined) return;
+  writeReceipt(dir, { ...existing, ...patch });
+}
+
+/**
+ * The anchor a previous, interrupted run already paid for — or `undefined`.
+ *
+ * The ~10-45 minute finality wait is the only realistic crash window in the whole ceremony, and
+ * until this receipt existed a crash there orphaned the on-chain anchor: the re-run minted a fresh
+ * `urn:uuid:` Agent IRI and sent a SECOND anchor transaction. Reuse is safe because the digest is a
+ * pure function of (agent, admission agent, Safe, role→keyId) and every one of those re-resolves
+ * identically on a re-run — the stores are re-OPENED, never re-minted. So a digest match is proof
+ * that the recorded locator anchors exactly the key set this run is about to bind; a mismatch (an
+ * added role family, a rotated store) correctly falls through to a fresh submit.
+ *
+ * The shape is re-validated rather than trusted: the receipt is an operator-writable file, and a
+ * malformed locator would otherwise reach `anchorDeclaration` as a sealed catalog anchor.
+ */
+function reusableAnchor(
+  receipt: CeremonyReceipt | undefined,
+  anchorDigest: `sha256:${string}`,
+): AnchorLocator | undefined {
+  if (receipt?.anchorDigest !== anchorDigest) return undefined;
+  const locator = receipt.anchorLocator;
+  if (locator === null || typeof locator !== 'object') return undefined;
+  const ok = locator.profile === 'https://spec.jinn.network/trust/anchor-locators/base-sepolia-calldata-v1'
+    && locator.chainId === 84532
+    && /^0x[0-9a-fA-F]{64}$/u.test(String(locator.transactionHash))
+    && /^0x[0-9a-fA-F]{40}$/u.test(String(locator.contractAddress))
+    && Number.isInteger(locator.inputByteOffset) && locator.inputByteOffset >= 0
+    // The block time is the ONE field the ceremony cannot recompute: §6 law 2 makes it every
+    // binding's `validFrom` verbatim, so a resume without it would author a different catalog.
+    && typeof locator.anchorTime === 'string' && locator.anchorTime.length > 0;
+  return ok ? locator : undefined;
 }
 
 function readConfigObject(configPath: string): Record<string, unknown> {
@@ -691,9 +779,99 @@ function humanPlan(plan: ProvisionPlan, verb: 'init' | 'join', extra: readonly s
   return lines.join('\n');
 }
 
+/**
+ * The terminal `--execute` result, through the same `--human` switch every other verb honours.
+ *
+ * It used to be a raw `JSON.stringify`, so the one output an operator most wants to read on a live
+ * run — the genesis digest they have to hand to the next operator — arrived as an unwrapped line of
+ * JSON no matter what they asked for.
+ */
+function emitCompletion(ctx: CommandContext, parsed: Parsed, value: Record<string, unknown>): void {
+  emitResult(
+    value,
+    (raw) => {
+      const v = raw as {
+        kind: string; dir: string; agentIri: string; admissionAgent?: string; catalogPath: string;
+        policyGenesisDigest: string; anchorTransactionHash: string; anchorReused: boolean;
+        validFrom: string; storesCreated: string[]; bindings: { role: string; keyId: string }[];
+        warnings: string[]; nextSteps: string[];
+      };
+      return [
+        `jinn ceremony ${v.kind === 'ceremony_init_complete' ? 'init' : 'join'} — COMPLETE`,
+        '',
+        `operator dir        ${v.dir}`,
+        `agent IRI           ${v.agentIri}`,
+        ...(v.admissionAgent === undefined ? [] : [`admission agent     ${v.admissionAgent}`]),
+        `catalog             ${v.catalogPath}`,
+        `genesis digest      ${v.policyGenesisDigest}`,
+        `anchor tx           ${v.anchorTransactionHash}${v.anchorReused ? ' (reused from a previous run)' : ''}`,
+        `validFrom           ${v.validFrom}`,
+        '',
+        'bindings',
+        ...v.bindings.map((binding) => `  ${binding.role.padEnd(24)} ${binding.keyId}`),
+        ...(v.storesCreated.length === 0 ? [] : ['', 'stores created', ...v.storesCreated.map((path) => `  ${path}`)]),
+        ...(v.warnings.length === 0 ? [] : ['', ...v.warnings.map((warning) => `WARNING: ${warning}`)]),
+        '',
+        'next',
+        ...v.nextSteps.map((step) => `  - ${step}`),
+      ].join('\n');
+    },
+    {
+      json: Boolean(parsed.values.json),
+      human: Boolean(parsed.values.human),
+      writer: ctx.writer,
+      stdoutIsTty: ctx.stdoutIsTty,
+      noColor: Boolean(ctx.env.NO_COLOR),
+    },
+  );
+}
+
 // ── init ───────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The refusal for the one state whose obvious recovery is wrong.
+ *
+ * After the catalog is sealed but before the config write-back lands, `init` sees a catalog that
+ * exists and used to point the operator at `ceremony join` — which would append a SECOND set of
+ * bindings for an operator already in the catalog. Nothing is left to re-run: the remaining work is
+ * five config keys, and they are all already known, so they are handed over verbatim.
+ */
+function refuseConfigWriteBackPending(input: {
+  readonly ctx: CommandContext;
+  readonly verb: 'init' | 'join';
+  readonly plan: ProvisionPlan;
+  readonly policyGenesisDigest: string;
+}): void {
+  const values = {
+    agentIri: input.plan.agentIri,
+    ...(input.plan.admissionAgent === undefined ? {} : { admissionAgent: input.plan.admissionAgent }),
+    identityStores: input.plan.identityStores,
+    trustRootsPath: input.plan.catalogPath,
+    trustPolicyGenesisDigest: input.policyGenesisDigest,
+  };
+  emitEnvelope({
+    code: 'invalid_invocation',
+    message: `this operator's ceremony already anchored and sealed ${input.plan.catalogPath} `
+      + `(genesis ${input.policyGenesisDigest}); re-running ${input.verb} would `
+      + `${input.verb === 'init' ? 'overwrite the genesis' : 'append a second set of bindings for the same operator'}.`,
+    hint: `Nothing on chain is left to do. Only the config write-back is missing: run \`jinn ceremony show --dir `
+      + `${input.plan.dir} --catalog ${input.plan.catalogPath}\` to confirm, then write these keys onto `
+      + `${input.plan.configPath} by hand — ${Object.keys(values).join(', ')} (values in details.configValues). `
+      + `Delete ${receiptPath(input.plan.dir)} only if you intend a genuinely new ceremony.`,
+    exampleCli: EXAMPLE_CLI,
+    details: {
+      feature: 'ceremony',
+      state: 'config-write-back-pending',
+      sideEffects: false,
+      configPath: input.plan.configPath,
+      configValues: values,
+    },
+  }, { writer: input.ctx.writer, exit: input.ctx.exit });
+}
+
 async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
+  const execute = resolveExecute(ctx, parsed);
+  const progress = progressWriter(ctx, parsed);
   const plan = await buildProvisionPlan({ ctx, parsed, deps });
   const rpcUrl = parsed.values['rpc-url'];
   await assertSafeOwnership(ctx, deps, plan, rpcUrl);
@@ -722,7 +900,7 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     },
   });
 
-  if (parsed.values.execute !== true) {
+  if (!execute) {
     emitResult(
       {
         schemaVersion: 1,
@@ -768,6 +946,14 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
   }
 
   if (existsSync(plan.catalogPath)) {
+    // Two different states wear the same symptom. If THIS operator's receipt says it sealed this
+    // catalog, the crash was between the seal and the config write and `join` is the wrong advice.
+    const prior = readReceipt(plan.dir);
+    if (prior?.catalogPath === plan.catalogPath && typeof prior.policyGenesisDigest === 'string') {
+      return refuseConfigWriteBackPending({
+        ctx, verb: 'init', plan, policyGenesisDigest: prior.policyGenesisDigest,
+      });
+    }
     return emitEnvelope({
       code: 'invalid_invocation',
       message: `a trust catalog already exists at ${plan.catalogPath}; genesis never overwrites`,
@@ -786,6 +972,7 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     safeAddress: plan.custody.safeAddress,
     keys: [...signers.values()].map(({ role, keyId }) => ({ role, keyId })),
   });
+  const reusedAnchor = reusableAnchor(readReceipt(plan.dir), anchorDigest);
   const session = await deps.openAnchorSession({
     dir: plan.dir,
     serviceIndex: plan.custody.serviceIndex,
@@ -794,15 +981,33 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     ...(rpcUrl === undefined ? {} : { rpcUrl }),
   });
   try {
-    const locator = await session.submit(anchorDigest);
-    ctx.writer.write(`${JSON.stringify({
+    const locator = reusedAnchor ?? await session.submit(anchorDigest);
+    if (reusedAnchor === undefined) {
+      // §4.1 step 3, made TRUE: the receipt is written the instant the anchor exists, not at the
+      // end. Everything after this point is a crash window minutes long, and a crash inside it used
+      // to orphan the anchor — the re-run minted a fresh Agent IRI and sent a second transaction.
+      writeReceipt(plan.dir, {
+        schemaVersion: 1,
+        agentIri: plan.agentIri,
+        ...(plan.admissionAgent === undefined ? {} : { admissionAgent: plan.admissionAgent }),
+        anchorDigest,
+        anchorTransactionHash: locator.transactionHash,
+        anchorLocator: locator,
+        validFrom: locator.anchorTime,
+      });
+    }
+    progress({
       schemaVersion: 1,
-      kind: 'ceremony_anchor_submitted',
+      kind: reusedAnchor === undefined ? 'ceremony_anchor_submitted' : 'ceremony_anchor_reused',
       anchorDigest,
       transactionHash: locator.transactionHash,
       anchorTime: locator.anchorTime,
       note: 'waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)',
-    })}\n`);
+    }, reusedAnchor === undefined
+      ? `anchor submitted    ${locator.transactionHash} at ${locator.anchorTime}\n`
+        + '  waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)'
+      : `anchor reused       ${locator.transactionHash} at ${locator.anchorTime} (from a previous run's receipt)\n`
+        + '  waiting for the finalized tag');
 
     // §6 law 4 — declaring success before finality hands the operator a catalog that refuses to boot.
     await session.waitForFinalized({
@@ -811,12 +1016,12 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       timeoutMs: plan.finalityTimeoutMs,
       pollMs: FINALITY_POLL_MS,
       onProgress: (elapsedMs) => {
-        ctx.writer.write(`${JSON.stringify({
+        progress({
           schemaVersion: 1,
           kind: 'ceremony_finality_wait',
           anchorDigest,
           elapsedMs,
-        })}\n`);
+        }, `  still waiting for finality — ${Math.round(elapsedMs / 1000)}s elapsed`);
       },
     });
 
@@ -842,6 +1047,10 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       anchors: [anchorDeclaration(anchorDigest, locator)],
     });
 
+    // Stage 2: the catalog is sealed. Recorded BEFORE the config write so that a crash between the
+    // two lands in a state `init` can recognise and give the right recovery for.
+    extendReceipt(plan.dir, { catalogPath: plan.catalogPath, policyGenesisDigest });
+
     const writeResult = writeNativeIdentityConfig({
       configPath: plan.configPath,
       values: {
@@ -853,19 +1062,17 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       },
     });
 
-    writeReceipt(plan.dir, {
-      schemaVersion: 1,
-      agentIri: plan.agentIri,
-      ...(plan.admissionAgent === undefined ? {} : { admissionAgent: plan.admissionAgent }),
-      catalogPath: plan.catalogPath,
-      policyGenesisDigest,
-      anchorDigest,
-      anchorTransactionHash: locator.transactionHash,
-      validFrom,
-      completedAt: new Date().toISOString(),
-    });
+    extendReceipt(plan.dir, { completedAt: new Date().toISOString() });
 
-    ctx.writer.write(`${JSON.stringify({
+    const nextSteps = [
+      `Distribute ${plan.catalogPath} to every operator's trustRootsPath and restart their daemons `
+        + '(assertFresh refuses a changed catalog under a running daemon).',
+      ...(writeResult.outstanding.length === 0
+        ? []
+        : [`Author the remaining native deploy-config by hand: ${writeResult.outstanding.join(', ')}.`]),
+      'Set compositionMode: "native" in the deploy PR — the ceremony deliberately does not flip it.',
+    ];
+    emitCompletion(ctx, parsed, {
       schemaVersion: 1,
       kind: 'ceremony_init_complete',
       executeAuthorized: true,
@@ -878,21 +1085,15 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       refreshBy: refreshByFrom(validFrom),
       anchorDigest,
       anchorTransactionHash: locator.transactionHash,
+      anchorReused: reusedAnchor !== undefined,
       validFrom,
       storesCreated: created,
       bindings: bindings.map(({ role, agent, keyId }) => ({ role, agent, keyId })),
       configWriteBack: writeResult,
       warnings: password.warnings,
       restartRequired: true,
-      nextSteps: [
-        `Distribute ${plan.catalogPath} to every operator's trustRootsPath and restart their daemons `
-          + '(assertFresh refuses a changed catalog under a running daemon).',
-        ...(writeResult.outstanding.length === 0
-          ? []
-          : [`Author the remaining native deploy-config by hand: ${writeResult.outstanding.join(', ')}.`]),
-        'Set compositionMode: "native" in the deploy PR — the ceremony deliberately does not flip it.',
-      ],
-    })}\n`);
+      nextSteps,
+    });
   } finally {
     await session.close?.();
   }
@@ -901,6 +1102,8 @@ async function runInit(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
 // ── join ───────────────────────────────────────────────────────────────────────────────────────
 
 async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyCommandDeps): Promise<void> {
+  const execute = resolveExecute(ctx, parsed);
+  const progress = progressWriter(ctx, parsed);
   const catalogFlag = parsed.values.catalog;
   if (catalogFlag === undefined || catalogFlag.length === 0) {
     return invalid(ctx, 'ceremony join requires --catalog <path to the existing catalog>');
@@ -952,7 +1155,7 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     },
   });
 
-  if (parsed.values.execute !== true) {
+  if (!execute) {
     emitResult(
       {
         schemaVersion: 1,
@@ -1009,6 +1212,20 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     safeAddress: plan.custody.safeAddress,
     keys: [...signers.values()].map(({ role, keyId }) => ({ role, keyId })),
   });
+
+  const prior = readReceipt(plan.dir);
+  // A join whose append already landed must not run again: the ceremony nonce is fresh per run, so
+  // re-authoring the same keys produces DIFFERENT binding digests, which `appendOperator` would
+  // dutifully add as a second set of bindings for one operator.
+  if (prior?.anchorDigest === anchorDigest
+    && prior.catalogPath === plan.catalogPath
+    && typeof prior.policyGenesisDigest === 'string') {
+    return refuseConfigWriteBackPending({
+      ctx, verb: 'join', plan, policyGenesisDigest: prior.policyGenesisDigest,
+    });
+  }
+  const reusedAnchor = reusableAnchor(prior, anchorDigest);
+
   const session = await deps.openAnchorSession({
     dir: plan.dir,
     serviceIndex: plan.custody.serviceIndex,
@@ -1017,19 +1234,45 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
     ...(rpcUrl === undefined ? {} : { rpcUrl }),
   });
   try {
-    const locator = await session.submit(anchorDigest);
-    ctx.writer.write(`${JSON.stringify({
+    const locator = reusedAnchor ?? await session.submit(anchorDigest);
+    if (reusedAnchor === undefined) {
+      writeReceipt(plan.dir, {
+        schemaVersion: 1,
+        agentIri: plan.agentIri,
+        ...(plan.admissionAgent === undefined ? {} : { admissionAgent: plan.admissionAgent }),
+        anchorDigest,
+        anchorTransactionHash: locator.transactionHash,
+        anchorLocator: locator,
+        validFrom: locator.anchorTime,
+      });
+    }
+    progress({
       schemaVersion: 1,
-      kind: 'ceremony_anchor_submitted',
+      kind: reusedAnchor === undefined ? 'ceremony_anchor_submitted' : 'ceremony_anchor_reused',
       anchorDigest,
       transactionHash: locator.transactionHash,
       anchorTime: locator.anchorTime,
-    })}\n`);
+      note: 'waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)',
+    }, reusedAnchor === undefined
+      ? `anchor submitted    ${locator.transactionHash} at ${locator.anchorTime}\n`
+        + '  waiting for the finalized tag (Base Sepolia trails head by roughly 10-20 minutes)'
+      : `anchor reused       ${locator.transactionHash} at ${locator.anchorTime} (from a previous run's receipt)\n`
+        + '  waiting for the finalized tag');
     await session.waitForFinalized({
       digest: anchorDigest,
       locator,
       timeoutMs: plan.finalityTimeoutMs,
       pollMs: FINALITY_POLL_MS,
+      // Without this the join printed NOTHING for up to 45 minutes — indistinguishable from a hang,
+      // and the operator's only options were to wait blind or kill a run mid-ceremony.
+      onProgress: (elapsedMs) => {
+        progress({
+          schemaVersion: 1,
+          kind: 'ceremony_finality_wait',
+          anchorDigest,
+          elapsedMs,
+        }, `  still waiting for finality — ${Math.round(elapsedMs / 1000)}s elapsed`);
+      },
     });
 
     const validFrom = locator.anchorTime;
@@ -1055,6 +1298,8 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       throw new Error(`join moved the genesis digest from ${genesisPin} to ${policyGenesisDigest}`);
     }
 
+    extendReceipt(plan.dir, { catalogPath: plan.catalogPath, policyGenesisDigest });
+
     const writeResult = writeNativeIdentityConfig({
       configPath: plan.configPath,
       values: {
@@ -1066,19 +1311,9 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       },
     });
 
-    writeReceipt(plan.dir, {
-      schemaVersion: 1,
-      agentIri: plan.agentIri,
-      ...(plan.admissionAgent === undefined ? {} : { admissionAgent: plan.admissionAgent }),
-      catalogPath: plan.catalogPath,
-      policyGenesisDigest,
-      anchorDigest,
-      anchorTransactionHash: locator.transactionHash,
-      validFrom,
-      completedAt: new Date().toISOString(),
-    });
+    extendReceipt(plan.dir, { completedAt: new Date().toISOString() });
 
-    ctx.writer.write(`${JSON.stringify({
+    emitCompletion(ctx, parsed, {
       schemaVersion: 1,
       kind: 'ceremony_join_complete',
       executeAuthorized: true,
@@ -1092,6 +1327,7 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
       newestPolicyVersion,
       anchorDigest,
       anchorTransactionHash: locator.transactionHash,
+      anchorReused: reusedAnchor !== undefined,
       validFrom,
       storesCreated: created,
       bindings: bindings.map(({ role, agent, keyId }) => ({ role, agent, keyId })),
@@ -1106,7 +1342,7 @@ async function runJoin(ctx: CommandContext, parsed: Parsed, deps: CeremonyComman
           ? []
           : [`Author the remaining native deploy-config by hand: ${writeResult.outstanding.join(', ')}.`]),
       ],
-    })}\n`);
+    });
   } finally {
     await session.close?.();
   }
@@ -1316,6 +1552,12 @@ Status:
   A rewritten catalog requires a DAEMON RESTART. That is by design: the runtime refuses to authorize
   work over a catalog file that changed underneath it.
 
+  RESUMABLE. The instant the anchor transaction exists, a receipt is written to
+  <dir>/ceremony/receipt.json carrying the Agent IRIs and the full anchor locator. A run interrupted
+  during the finality wait — the only long window in the ceremony — is re-run with the same command:
+  it REUSES that anchor and those IRIs rather than minting a second identity and spending gas twice.
+  After the catalog is sealed, a re-run refuses instead, and names the config keys still outstanding.
+
 Options (init and join):
   --dir <path>               Operator home (default ~/.jinn-client). The keystore, identity stores,
                              and config.json are resolved beneath it.
@@ -1333,6 +1575,8 @@ Options (init and join):
   --service-index <n>        Which earning service supplies the EOA and Safe (default: the primary)
   --finality-timeout-ms <n>  How long to wait for the finalized tag (default 2700000, i.e. 45 min)
   --execute                  Perform the ceremony. Without it, nothing is minted, sent, or written.
+  --dry-run                  Force the read-only plan. Refuses if combined with --execute.
+  --human                    Human-readable output, including the anchor and finality progress lines.
   JINN_PASSWORD              Required unless --dir is the default home AND its keystore-password file
                              exists. The ceremony must run with the password the daemon will later
                              resolve, or it mints custody the daemon cannot decrypt.
