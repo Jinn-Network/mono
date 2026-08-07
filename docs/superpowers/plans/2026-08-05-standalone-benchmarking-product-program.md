@@ -121,7 +121,13 @@ Packet IDs `BP-xy` (x = milestone, y = ordinal). Shapes per handbook. Every pack
 | BP-22 | feat | Durable typed cancellation + infrastructure/task-failure accounting | BP-21 | Real nonterminal subprocess cancellation reaches the backend terminal boundary; every expected cell is accounted; cancel is gated/idempotent/crash-resumable; collect/cancel serialization and failure-denominator laws are test-proven; CLI/public parity green |
 
 ### M3 — human surface
-`packages/benchmark-product/web` (Next.js + shadcn per CLAUDE.md frontend rules, incl. four-axis app spec alongside source), GUI as client of the operations library, parity matrix generated + tested. BP-30..BP-3x at boundary.
+
+| ID | Shape | Objective | Depends | Acceptance (binary) |
+|---|---|---|---|---|
+| BP-30 | design | Register the private Next.js + shadcn/ui web package and neutral cold-start shell with its four-axis app spec | BP-22 | Web install/lint/typecheck/test/build green; brand isolation, package inventory, source boundary, CI, and architecture catalog cover the new member; no operations wiring or core edits |
+| BP-31 | feat | Wire workspace, draft, intake, arms, authority, preview, quote, and lock screens as server-side clients of the core public entry; add generated GUI capability parity | BP-30 | Web has one production Jinn edge (core); no deep/client-side core imports or second semantics; public preview/quote exports pack-consume; every GUI action maps to the library/CLI row; browser flow reaches a locked draft |
+| BP-32 | feat | Wire launch, live status, resume, cancellation, and collect with a durable run monitor | BP-31 | Production browser flow uses the real local venue, observes a real subprocess, survives refresh/resume, exposes typed errors and requested-to-cancelled drain, and accounts every expected cell without GUI recomputation |
+| BP-33 | feat | Wire results, Report, claim, and verification views; complete responsive/accessibility browser coverage | BP-32 | GUI renders sealed core results/report/claim facts and verification outcomes without recomputation; generated GUI parity is complete; a production-build browser walkthrough covers the full real lifecycle at desktop and mobile widths |
 
 ### M4 — public report flagship
 Distribution-ready public report bundle; full scope/method/limitations/failures/dissent; raw-record access; verification path; claim package assets. BP-40..BP-4x at boundary.
@@ -312,3 +318,28 @@ program's watched surface is limited to architecture catalog/generated/
 transition files, including the pre-existing `platform-topology.md`
 generator mismatch. The previously proposed base refresh remains
 unapproved, so the program continues on its current lineage.
+
+| BP-30 | integrated | `bc0868d62` | `7b0ff3de7` (worktree bench-bp30) | NEEDS CHANGES (stale cancellation target-model text) -> PASS; staged integration re-review PASS | `2f4dff4fb` |
+
+BP-30 verification: Node 22.23.1; immutable web install; lint; Next type
+generation + TypeScript; 2 files / 10 tests; production Next build and
+static route generation; package inventory/source-boundary guards 11/11;
+combined catalog/generated-architecture/control battery 131 tests;
+`git diff --check`. The catalog registers the private tier-4 web package,
+CI gives it an isolated gate, and the family packed-consumer guard records
+its no-public-entrypoint exclusion explicitly. The shell has no core edge
+and no operation controls; its neutral placeholder identity is drift-pinned
+to core branding until BP-31 replaces the temporary module with the public
+runtime import.
+
+BP-30 review/integration evidence: independent review found that the
+interrupted pre-BP-22 app spec still called cancellation unshipped. The
+target model now records gated `runCancel` / `cancel`, durable requested-to-
+cancelled draining, and typed contention while preserving BP-30's no-wiring
+scope. The first reviewer completed the battery and found this defect but
+wedged during final rendered inspection despite repeated report requests;
+the master stopped that turn and a second independent non-author reviewer
+issued NEEDS CHANGES, then PASS after correction. Integration used a
+no-commit cherry-pick; its sole conflict retained the complete BP-22 design
+addendum followed by BP-30, and the staged current-lineage diff received a
+separate independent PASS before commit.
