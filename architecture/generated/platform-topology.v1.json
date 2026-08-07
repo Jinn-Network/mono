@@ -2,9 +2,9 @@
   "counts": {
     "adjacentEntries": 6,
     "experimentalEnvironmentSupply": 8,
-    "inventory": 82,
-    "otherPackagesRootEntries": 18,
-    "packagesRootEntries": 76,
+    "inventory": 83,
+    "otherPackagesRootEntries": 19,
+    "packagesRootEntries": 77,
     "platformV1": 50
   },
   "graph": {
@@ -32,7 +32,82 @@
       {
         "from": "@jinn-network/benchmark-product-core",
         "kind": "runtime",
+        "to": "@jinn-network/benchmarking-aggregate"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-interop"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-local"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmarking-run"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-admission"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-backend-local"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluation-harness"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-evaluator-adapters"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-launchers"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-profiles"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-protocol"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-supervisor"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/task-execution-workspace"
+      },
+      {
+        "from": "@jinn-network/benchmark-product-core",
+        "kind": "runtime",
+        "to": "@jinn-network/trust-core"
       },
       {
         "from": "@jinn-network/benchmarking-aggregate",
@@ -1124,6 +1199,7 @@
       "@jinn-network/attestation-issuer",
       "@jinn-network/autopilot",
       "@jinn-network/benchmark-product-core",
+      "@jinn-network/benchmark-product-web",
       "@jinn-network/benchmarking-aggregate",
       "@jinn-network/benchmarking-interop",
       "@jinn-network/benchmarking-local",
@@ -1572,9 +1648,9 @@
   },
   "ownership": {
     "counts": {
-      "authorityDocuments": 26,
+      "authorityDocuments": 27,
       "boundaryPolicies": 23,
-      "catalogManifests": 82,
+      "catalogManifests": 83,
       "catalogPublicSurfaces": 1249,
       "catalogSchema": 2,
       "conformancePackedTargets": 56,
@@ -1582,7 +1658,7 @@
       "decisionRecords": 4,
       "discoveredFirstPartySurfaces": 2868,
       "generatedOutputSources": 1305,
-      "generatorSources": 593,
+      "generatorSources": 595,
       "marketplaceControl": 2,
       "requiredGates": 22,
       "staticControl": 6
@@ -18745,7 +18821,47 @@
           "@oaksprout",
           "@ritsukai"
         ],
+        "path": "packages/benchmark-product/core/scripts/generate-parity-matrix.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/core/scripts/m1-walkthrough.mjs"
+      },
+      {
+        "categories": [
+          "generatorSources"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
         "path": "packages/benchmark-product/core/scripts/pack-smoke.mjs"
+      },
+      {
+        "categories": [
+          "authorityDocuments"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md"
+      },
+      {
+        "categories": [
+          "catalogManifests"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/package.json"
       },
       {
         "categories": [
@@ -40670,7 +40786,23 @@
         "optional": [],
         "peer": [],
         "runtime": [
-          "@jinn-network/benchmarking-records"
+          "@jinn-network/benchmarking-aggregate",
+          "@jinn-network/benchmarking-interop",
+          "@jinn-network/benchmarking-local",
+          "@jinn-network/benchmarking-records",
+          "@jinn-network/benchmarking-run",
+          "@jinn-network/task-admission",
+          "@jinn-network/task-execution-backend",
+          "@jinn-network/task-execution-backend-local",
+          "@jinn-network/task-execution-evaluation-harness",
+          "@jinn-network/task-execution-evaluator-adapters",
+          "@jinn-network/task-execution-launchers",
+          "@jinn-network/task-execution-profiles",
+          "@jinn-network/task-execution-protocol",
+          "@jinn-network/task-execution-supervisor",
+          "@jinn-network/task-execution-workspace",
+          "@jinn-network/trust-core",
+          "zod"
         ]
       },
       "domain": "benchmark-product",
@@ -40690,6 +40822,49 @@
         "benchmark-product-ci"
       ],
       "role": "benchmark product core",
+      "stability": "experimental",
+      "supersedes": [],
+      "tier": 4,
+      "transition": null,
+      "version": "0.1.0"
+    },
+    {
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "classification": "product",
+      "dependencies": {
+        "optional": [],
+        "peer": [],
+        "runtime": [
+          "class-variance-authority",
+          "clsx",
+          "lucide-react",
+          "next",
+          "radix-ui",
+          "react",
+          "react-dom",
+          "tailwind-merge"
+        ]
+      },
+      "domain": "benchmark-product",
+      "name": "@jinn-network/benchmark-product-web",
+      "ownerGroup": "architecture-control",
+      "path": "packages/benchmark-product/web",
+      "publicSurface": {
+        "conformance": [],
+        "fixtures": [],
+        "profiles": [],
+        "schemas": []
+      },
+      "publishPolicy": "never",
+      "releaseGroup": "transitional-or-private",
+      "replacedBy": [],
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "role": "benchmark product web application",
       "stability": "experimental",
       "supersedes": [],
       "tier": 4,
@@ -51868,6 +52043,15 @@
       {
         "conformance": [],
         "fixtures": [],
+        "name": "@jinn-network/benchmark-product-web",
+        "path": "packages/benchmark-product/web",
+        "profiles": [],
+        "releaseGroup": "transitional-or-private",
+        "schemas": []
+      },
+      {
+        "conformance": [],
+        "fixtures": [],
         "name": "@jinn-network/benchmarking-aggregate",
         "path": "packages/benchmarking/aggregate",
         "profiles": [],
@@ -53853,10 +54037,11 @@
         "transitional-or-private"
       ],
       "canary": false,
-      "expectedPackageCount": 11,
+      "expectedPackageCount": 12,
       "packages": [
         "@jinn-network/autopilot",
         "@jinn-network/benchmark-product-core",
+        "@jinn-network/benchmark-product-web",
         "@jinn-network/broadcast-bot",
         "@jinn-network/chain-only-gate-harness",
         "@jinn-network/explorer-spa",

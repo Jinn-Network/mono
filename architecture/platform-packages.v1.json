@@ -5,6 +5,7 @@
       "path": "packages",
       "mode": "recursive",
       "excludedDirectories": [
+        ".next",
         "node_modules"
       ]
     },
@@ -245,7 +246,7 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 11,
+      "expectedPackageCount": 12,
       "publishPolicies": [
         "private",
         "never"
@@ -804,6 +805,50 @@
           {
             "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
             "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmark-product-web",
+      "path": "packages/benchmark-product/web",
+      "domain": "benchmark-product",
+      "role": "benchmark product web application",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
+            "status": "approved"
+          },
+          {
+            "path": "packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md",
+            "status": "draft"
           }
         ],
         "decisionRecord": null

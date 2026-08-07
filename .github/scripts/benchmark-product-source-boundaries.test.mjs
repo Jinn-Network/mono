@@ -37,6 +37,12 @@
 // `specifiers`, `packageSpecifierMatches`, `inside`, `unapprovedImports`); the private-statistics
 // sweep is policy-optimization-specific (that product computes report statistics; this one computes
 // nothing yet) and is deliberately not carried over.
+//
+// As of BP-30 `sourceRoots()` also sweeps `web/src` (the GUI-as-client skeleton, product design
+// §5.3). The web skeleton has zero Jinn imports of its own, so `ALLOWED_JINN_PACKAGES` is
+// deliberately unchanged here -- BP-31 admits `@jinn-network/benchmark-product-core` when the GUI
+// is wired to the operations library, in this allow-list and in the inventory guard's dependency
+// graph together.
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -254,4 +260,13 @@ test('test-only packages are imported by test files alone', () => {
         .some((name) => packageSpecifierMatches(specifier, name)))
       .map((specifier) => `${relative(root, file)} -> ${specifier}`));
   assert.deepEqual(offenders, [], 'a test-only package is imported outside test files');
+});
+
+test('the live sweep is not vacuous for the family', () => {
+  // A renamed or relocated member source root would otherwise silently drop out of the sweep via
+  // the existsSync filter in `sourceRoots()` -- the boundary tests above return early on an empty
+  // sweep, so a family member that quietly lost its `src/` would pass them for the wrong reason.
+  // Extend this list when a member is added.
+  const roots = sourceRoots().map((directory) => relative(packageRoot, directory)).sort();
+  assert.deepEqual(roots, ['core/src', 'web/src']);
 });

@@ -9,11 +9,17 @@
 // package fine, yarn refuses. `npm pack --ignore-scripts` ships whatever `dist/` is already on
 // disk, so CI builds every package (product and its cross-tree portal dependencies) before this
 // script runs; this script does not build anything itself.
+//
+// BP-30 adds the family's second member, `web` -- and deliberately does NOT pack it (see
+// `PACKED_EXCLUDED` below). The family-coverage check that follows keeps that exclusion honest: a
+// member present in the live tree but named in neither `packages` nor `PACKED_EXCLUDED` fails this
+// script before any packing work starts, rather than silently having nothing checked for it.
 
 import { spawn } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -29,6 +35,54 @@ const packages = [
 const codeEntrypoints = [
   '@jinn-network/benchmark-product-core',
 ];
+
+// BP-30: the web skeleton is deliberately excluded from packing, not silently absent from it. It
+// is `private: true` with no public package entrypoint (product design §5.3, GUI-as-client);
+// nothing ever installs it, so there is no packed-consumer type surface to compile. A named,
+// reasoned exclusion here (rather than just missing from `packages`) is what lets the
+// family-coverage check below tell "deliberately excluded" apart from "forgotten".
+const PACKED_EXCLUDED = [
+  ['web', '@jinn-network/benchmark-product-web', 'private: true, no public package entrypoint -- nothing installs it'],
+];
+
+// Same walk as benchmark-product-package-inventory.test.mjs's `packageManifests`: every child
+// directory of the family root with a package.json, recursively, node_modules excluded.
+function familyManifests(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (!entry.isDirectory() || entry.name === 'node_modules') return [];
+    const child = join(directory, entry.name);
+    const packageJsonPath = join(child, 'package.json');
+    return [
+      ...(existsSync(packageJsonPath) ? [packageJsonPath] : []),
+      ...familyManifests(child),
+    ];
+  });
+}
+
+// Run before any packing work. Without this, a family member named in neither `packages` nor
+// `PACKED_EXCLUDED` would never fail this script -- there being nothing to pack for it is silent,
+// not red. This script has no test framework wrapping it, so a thrown error is the failure mode.
+function assertFamilyCoverage() {
+  const discovered = familyManifests(familyRoot).flatMap((manifestPath) => {
+    const { name } = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    return typeof name === 'string' && /^@jinn-network\/benchmark-product-/.test(name)
+      ? [[relative(familyRoot, dirname(manifestPath)), name]]
+      : [];
+  });
+  const registered = new Set(
+    [...packages, ...PACKED_EXCLUDED].map(([directory, name]) => `${directory} ${name}`),
+  );
+  const unregistered = discovered.filter(([directory, name]) => !registered.has(`${directory} ${name}`));
+  if (unregistered.length > 0) {
+    throw new Error(
+      'benchmark-product family member(s) not registered in benchmark-product-packed-types.test.mjs: '
+      + `${unregistered.map(([directory, name]) => `${name} (${directory})`).join(', ')}. `
+      + 'Add each to `packages` (if it should be packed) or `PACKED_EXCLUDED` (with a reason).',
+    );
+  }
+}
+
+assertFamilyCoverage();
 
 // Cross-tree Jinn dependencies the product references, packed as `file:` deps so NodeNext resolves
 // them (program plan §4.1; record-discovery-packed-types.test.mjs precedent). This is the product's

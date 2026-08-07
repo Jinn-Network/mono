@@ -24,6 +24,7 @@ const DEPENDENCY_SECTIONS = [
 
 const PRODUCT_PACKAGES = [
   ['core', '@jinn-network/benchmark-product-core'],
+  ['web', '@jinn-network/benchmark-product-web'],
 ];
 
 // The approved runtime graph. BP-01 wired `benchmarking-records`; BP-11 (task intake) added
@@ -39,8 +40,12 @@ const PRODUCT_PACKAGES = [
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
 // (the real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
 // verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
-// method registry. New edges are added deliberately, one PR at a time, in this map and in the
-// source-boundary guard's allow-list together.
+// method registry. BP-30 registers the second family member, `web` (the GUI-as-client skeleton,
+// product design §5.3): a ZERO-edge row, deliberately -- the GUI shell is not wired to the
+// operations library yet. New edges are added deliberately, one PR at a time, in this map and in
+// the source-boundary guard's allow-list together; BP-31 (the wiring packet) is expected to add
+// `@jinn-network/benchmark-product-core` to `web`'s row here and to the source-boundary allow-list
+// in the same PR.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
@@ -75,6 +80,17 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/evidence-repository',
       '@jinn-network/execution-recorder',
     ],
+  }],
+  // BP-30: zero Jinn edges, on purpose. The web skeleton has no `@jinn-network/*` dependency in any
+  // section and no `resolutions` block -- it renders a placeholder identity, nothing more. BP-31
+  // adds `@jinn-network/benchmark-product-core` here (and to the source-boundary guard's allow-list)
+  // when the GUI is wired to the operations library.
+  ['web', {
+    dependencies: [],
+    devDependencies: [],
+    optionalDependencies: [],
+    peerDependencies: [],
+    portalResolutions: [],
   }],
 ]);
 

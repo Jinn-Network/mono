@@ -817,6 +817,34 @@ reopened):**
   enter score denominators: infrastructure failures and every other
   unjudged/expired cell are never silently converted into score losses.
 
+**Addendum — 2026-08-06, packet BP-30 (web skeleton; no §4/§5/§9 decision
+reopened):**
+
+- **§5.3 partially realized.** `packages/benchmark-product/web`
+  (`@jinn-network/benchmark-product-web`) now exists as the Next.js App
+  Router + shadcn/ui skeleton and is registered as the family's second
+  catalog member (tier 4, product, experimental,
+  `transitional-or-private`, gate `benchmark-product-ci`). It renders the
+  placeholder shell only — NO operations wiring. BP-31+ wire the operations
+  library in-process server-side and add the web→core dependency edge to
+  the inventory graph and the source-boundary allow-list together.
+- **§9 realization note.** The shell renders the placeholder display name
+  and tagline from a local module that TEMPORARILY duplicates two of core
+  `branding.ts`'s strings (the core import is deferred with the rest of the
+  wiring); a web test pins the strings byte-equal to core's source so the
+  §9 single-source rule is drift-guarded until BP-31 replaces the module
+  with the import. The attribution line is deliberately absent from the
+  shell — no about/verification surface exists yet, and §9 forbids it in
+  hero copy.
+- **App spec.** `packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md`
+  (four-axis domain model derived from §4.6) accompanies the source per the
+  repo frontend rules and is registered as an authority document on the web
+  catalog record.
+- **Packed-types decision, recorded.** The web application is deliberately
+  excluded from the family's packed-entrypoint type consumer (`private:
+  true`, no public package entrypoint — nothing installs it); the guard's
+  family-coverage assertion keeps the exclusion explicit rather than
+  silent.
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product
