@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateTrustPolicy, type TrustPolicy } from "@jinn-network/trust-core";
+import { sealTrustPolicy, validateTrustPolicy, type TrustPolicy } from "@jinn-network/trust-core";
 import { describe, expect, it } from "vitest";
+
+import { TrustAuthoringError } from "./errors.js";
 
 import { NATIVE_ANCHOR_CHAIN_ID, NATIVE_ANCHOR_PROFILE, type AnchorDeclaration } from "./anchor.js";
 import { authorRoleBinding, type SealedBindingEntry } from "./binding.js";
@@ -215,6 +217,45 @@ describe("authorCatalog", () => {
     })).rejects.toThrow(/does not accept|has no native:/u);
   });
 
+  /**
+   * §6 law 3's three purposes are bound to NO key, so `assertPurposesCoverBindings` cannot see them
+   * missing. A catalog without `evaluator-eligibility` authors cleanly, boots solver and requester,
+   * and then refuses the evaluator at `createVerdictGate` — the exact LEG 6 gate leg. Until this
+   * assertion, law 3 was enforced only by the CONVENTION of calling `completePolicyPurposes`.
+   */
+  it.each([
+    ["evaluator-eligibility"],
+    ["admission-agent"],
+    ["native:admission"],
+  ])("refuses a policy missing the mandatory %s purpose (§6 law 3)", async (purpose) => {
+    const root = await mkdtemp(join(tmpdir(), "trust-authoring-law3-"));
+    const bindings = await bindingsFor({
+      root,
+      label: "a-solver",
+      agent: AGENT_A,
+      roles: ["solver-delivery"],
+      anchorDigest: ANCHOR_A,
+      validFrom: TIME_A,
+    });
+    const purposes = completePolicyPurposes({
+      roleAgents: bindings.map(({ role, agent }) => ({ role, agent })),
+    });
+    delete purposes[purpose];
+
+    await expect(authorCatalog({
+      path: join(root, "trust.json"),
+      authority: await openCatalogAuthority({
+        storePath: join(root, "authority.enc.json"),
+        password: PASSWORD,
+        create: true,
+      }),
+      purposes,
+      refreshBy: REFRESH_BY,
+      bindings,
+      anchors: [declaration(ANCHOR_A, "ab")],
+    })).rejects.toThrow(new RegExp(`missing the mandatory ${purpose} purpose entry \\(§6 law 3\\)`, "u"));
+  });
+
   it("refuses a binding whose anchor is not declared", async () => {
     const { root, authority, bindings } = await genesis();
     await expect(authorCatalog({
@@ -305,6 +346,16 @@ describe("appendOperator", () => {
     expect(newestPolicyOf(second).version).toBe(3);
   });
 
+  /**
+   * The lock serializes joins that go THROUGH this package; the digest compare is what still
+   * catches a writer that did not — an operator hand-edit, or the §4.2 file-copy distribution
+   * landing a newer catalog from another host while a join is mid-flight.
+   *
+   * The competing write is driven from the authority's own signer, which `sealSuccessor` awaits
+   * strictly between `loadCatalog` and `rewriteAtomically`. That makes the interleaving exact
+   * rather than a bet on microtask ordering — which is what it was before the lock added await
+   * points and quietly stopped reproducing.
+   */
   it("refuses loudly when the catalog changed on disk since it was read", async () => {
     const { root, path, authority } = await genesis();
     const bBindings = await bindingsFor({
@@ -315,20 +366,107 @@ describe("appendOperator", () => {
       anchorDigest: ANCHOR_B,
       validFrom: TIME_B,
     });
-    const raced = appendOperator({
+    const racingAuthority = {
+      keyId: authority.keyId,
+      dsseSigner: async (input: Parameters<typeof authority.dsseSigner>[0]) => {
+        const current = await readFile(path, "utf8");
+        await writeFile(path, `${current} `);
+        return authority.dsseSigner(input);
+      },
+    };
+
+    await expect(appendOperator({
+      catalogPath: path,
+      authority: racingAuthority,
+      newBindings: bBindings,
+      newAnchor: declaration(ANCHOR_B, "cd"),
+      refreshBy: REFRESH_BY,
+    })).rejects.toThrow(/changed on disk/u);
+  });
+
+  /**
+   * The digest compare alone is TOCTOU — two joins that both read version N can both seal a
+   * successor, and the loser's write lands last. That is a LOST UPDATE (a join silently dropped),
+   * not the loud refusal §7 promises. The lock spans read-check-rewrite, so exactly one of two
+   * genuinely concurrent joins proceeds and the other refuses before it reads anything.
+   */
+  it("lets exactly one of two concurrent joins proceed and refuses the other loudly", async () => {
+    const { root, path, authority } = await genesis();
+    const bBindings = await bindingsFor({
+      root,
+      label: "b-solver",
+      agent: AGENT_B,
+      roles: ["solver-delivery"],
+      anchorDigest: ANCHOR_B,
+      validFrom: TIME_B,
+    });
+    const cBindings = await bindingsFor({
+      root,
+      label: "c-solver",
+      agent: "urn:uuid:00000000-0000-4000-8000-00000000000c",
+      roles: ["solver-delivery"],
+      anchorDigest: ANCHOR_B,
+      validFrom: TIME_B,
+    });
+
+    const results = await Promise.allSettled([
+      appendOperator({
+        catalogPath: path,
+        authority,
+        newBindings: bBindings,
+        newAnchor: declaration(ANCHOR_B, "cd"),
+        refreshBy: REFRESH_BY,
+      }),
+      appendOperator({
+        catalogPath: path,
+        authority,
+        newBindings: cBindings,
+        newAnchor: declaration(ANCHOR_B, "cd"),
+        refreshBy: REFRESH_BY,
+      }),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect((rejected as PromiseRejectedResult).reason).toBeInstanceOf(TrustAuthoringError);
+    expect(String((rejected as PromiseRejectedResult).reason)).toMatch(/holds .*\.lock/u);
+    // The winner's successor is intact — a lost update would have left version 2 with the loser's
+    // membership, or version 2 with the winner's write clobbered.
+    expect(newestPolicyOf(await readCatalog(path)).version).toBe(2);
+  });
+
+  it("releases the lock on success, so the next join is not blocked by its predecessor", async () => {
+    const { root, path, authority } = await genesis();
+    const bBindings = await bindingsFor({
+      root,
+      label: "b-solver",
+      agent: AGENT_B,
+      roles: ["solver-delivery"],
+      anchorDigest: ANCHOR_B,
+      validFrom: TIME_B,
+    });
+    await appendOperator({
       catalogPath: path,
       authority,
       newBindings: bBindings,
       newAnchor: declaration(ANCHOR_B, "cd"),
       refreshBy: REFRESH_BY,
     });
-    // Attach the rejection handler before yielding, so the competing write below cannot surface as
-    // an unhandled rejection.
-    const refused = expect(raced).rejects.toThrow(/changed on disk/u);
-    // A competing join lands between this call's read and its rewrite.
-    const current = await readFile(path, "utf8");
-    await writeFile(path, `${current} `);
-    await refused;
+    await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(sealPolicySuccessor({ catalogPath: path, authority, refreshBy: REFRESH_BY }))
+      .resolves.toMatchObject({ newestPolicyVersion: 3 });
+  });
+
+  it("releases the lock when the join refuses, so a corrected re-run is not blocked", async () => {
+    const { path, authority } = await genesis();
+    await expect(appendOperator({
+      catalogPath: path,
+      authority,
+      newBindings: [],
+      newAnchor: declaration(ANCHOR_B, "cd"),
+      refreshBy: REFRESH_BY,
+    })).rejects.toBeInstanceOf(TrustAuthoringError);
+    await expect(stat(`${path}.lock`)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
 
@@ -351,6 +489,45 @@ describe("sealPolicySuccessor", () => {
     expect(newest.refreshBy).toBe("2027-08-07T00:00:00.000Z");
     expect(newest.signerSet.keys).toEqual([authority.keyId, successorAuthority.keyId]);
     expect(newest.purposes["native:solver-delivery"]!.accepted).toEqual([AGENT_A]);
+  });
+
+  /**
+   * `TrustPolicy` is a `z.looseObject`, so a policy legitimately carries fields this package has
+   * never heard of. Reconstructing the successor from a fixed field list silently dropped them —
+   * a successor that quietly deletes a term its predecessor carried is a governance change nobody
+   * authored, and it is invisible until whoever reads that field notices it is gone.
+   */
+  it("carries unknown predecessor fields forward instead of silently dropping them", async () => {
+    const { path, authority } = await genesis();
+    const file = await readCatalog(path);
+    const genesisPolicy = newestPolicyOf(file);
+    // Re-seal the genesis carrying loose fields the authoring package does not model, and put it
+    // back as the catalog's only policy — the shape a policy authored by a later schema has.
+    const resealed = await sealTrustPolicy(
+      {
+        ...genesisPolicy,
+        creditRegime: { "native:solver": "loop-completion" },
+        jurisdiction: "testnet-only",
+        contactOfRecord: "urn:uuid:00000000-0000-4000-8000-00000000000f",
+      } as unknown as TrustPolicy,
+      authority.dsseSigner,
+    );
+    await writeFile(path, JSON.stringify({
+      ...file,
+      policyGenesisDigest: resealed.recordDigest,
+      policies: [{ digest: resealed.recordDigest, envelope: Buffer.from(resealed.envelopeBytes).toString("base64") }],
+    }));
+
+    await sealPolicySuccessor({ catalogPath: path, authority, refreshBy: "2027-08-07T00:00:00.000Z" });
+
+    const successor = newestPolicyOf(await readCatalog(path)) as unknown as Record<string, unknown>;
+    expect(successor.jurisdiction).toBe("testnet-only");
+    expect(successor.contactOfRecord).toBe("urn:uuid:00000000-0000-4000-8000-00000000000f");
+    expect(successor.creditRegime).toEqual({ "native:solver": "loop-completion" });
+    // Succession still owns its own fields.
+    expect(successor.version).toBe(2);
+    expect(successor.predecessor).toBe(resealed.recordDigest);
+    expect(successor.refreshBy).toBe("2027-08-07T00:00:00.000Z");
   });
 });
 

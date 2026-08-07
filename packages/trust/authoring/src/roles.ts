@@ -7,6 +7,8 @@
  * re-exports these names, so every existing daemon importer is unaffected.
  */
 
+import { TrustAuthoringError } from "./errors.js";
+
 export const NATIVE_ROLE_IDENTITY_ROLES = [
   "requester-submission",
   "admission",
@@ -38,11 +40,23 @@ export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdenti
  * The canonical owned-role order a store's `metadata.ownedRoles` must carry. `RoleIdentitySet.open`
  * derives its expected set exactly this way and then byte-compares, so an authoring call that
  * supplied roles in any other order would mint a store the daemon refuses to load.
+ *
+ * A duplicated role is a REFUSAL, not a silent dedupe — symmetric with the verification side, where
+ * `RoleIdentitySet.open` rejects a role requested more than once. The two sides seeing the same
+ * input differently is the whole hazard: this function is what a `--role-sets requester,requester`
+ * invocation lands on, and quietly accepting it would let the CLI report a role set the daemon
+ * would then refuse.
  */
 export function orderedNativeRoles(
   roles: readonly NativeRoleIdentityRole[],
 ): readonly NativeRoleIdentityRole[] {
-  const requested = new Set(roles);
+  const requested = new Set<NativeRoleIdentityRole>();
+  for (const role of roles) {
+    if (requested.has(role)) {
+      throw new TrustAuthoringError(`native role "${role}" is requested more than once`);
+    }
+    requested.add(role);
+  }
   return NATIVE_ROLE_IDENTITY_ROLES.filter((role) => requested.has(role));
 }
 
