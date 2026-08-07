@@ -378,3 +378,58 @@ owned by BP-33/M5: replace raw rich-result JSON with semantic views, give card
 titles heading semantics, automate browser regression, audit keyboard/focus/
 error states, and disable lifecycle-illegal controls where the read model can
 do so without recreating core rules.
+
+| BP-32 | integrated | `0009676d0` | `8061b108d` (worktree bench-bp32) | NEEDS CHANGES (5 blockers) -> PASS after correction and production-browser re-walk | `0e356b6ea` |
+
+BP-32 verification: Node 22.23.1; local-backend immutable install/typecheck/
+build and 15 files (116 passed, 1 platform-specific skip); core immutable
+install/typecheck/build, 62 files / 626 tests, generated parity, packed runtime
+smoke; web immutable install/lint/typecheck/build and 7 files / 32 tests;
+packed external TypeScript consumer; family package/source guards 13/13;
+platform catalog/architecture/workflow controls 166/166 in independent review;
+generated architecture check; `git diff --check`. GUI parity now maps launch,
+resume, status, cancel, and collect to shipped server actions; only BP-33's
+results/report/verify operations remain deferred.
+
+BP-32 runtime architecture/evidence: launch and resume start the exact public
+core promise in-process and retain it with Next `after()` when it crosses the
+response boundary; there is no CLI child, API route, or web-owned driver. A
+narrow synchronous local-backend ownership assertion fences concurrent venue
+contenders before a UUID driver generation is journaled. Async readiness,
+drive, cancellation-wrapper close, and venue shutdown all occur inside that
+generation's terminal accounting, so any failure after a scheduled response
+is durable and refresh-visible. Latest journal order remains authoritative;
+deterministic tests prove a later sequential failure supersedes prior success,
+a concurrent loser creates no generation, and a late shutdown rejection writes
+exactly one `driver-failed`. Submission acceptance now establishes live
+dispatch accounting without double-counting its later cell event.
+
+BP-32 real-path evidence: Server Action integration ran both a natural real
+local-venue launch -> status -> resume -> collect path and a deliberately slow
+real subprocess path. The latter observed a durable active generation and
+dispatch, wrote gated cancel intent while the venue was busy, showed requested/
+draining, and proved the backend attempt journal had exactly one cancel request,
+a SIGTERM/SIGKILL `exec-finished`, and a cancelled terminal. Retry finalized a
+closed cancelled Matrix with all six expected cells terminal. Two exact
+server-only environment opt-ins expose the test delay, capped at the core's
+60-second limit and absent from browser payloads.
+
+BP-32 review/correction evidence: the first fresh non-author review found five
+material defects: terminal cancellation still described as draining; a 390px
+terminal result widened the document to 737px; venue shutdown occurred after a
+durable success entry; arbitrary driver diagnostics reached the browser; and
+the web/core delay ceilings disagreed. Each received a red-first regression.
+The GUI now distinguishes pending from finalized cancellation, contains rich
+action results locally, projects runtime diagnostics to typed safe guidance
+without changing core/CLI records, and rejects 60,001ms before launch. The same
+reviewer rechecked the repaired diff and issued PASS. Coordinator production
+browser verification on a fresh workspace measured scheduled launch in 285ms,
+live and requested states at 390/390 client/document width, then closed/
+finalized cancellation with all six cells terminal, no stale draining copy,
+no test-control leak, and `innerWidth = clientWidth = scrollWidth = 390`.
+
+One pre-review platform test invocation overlapped core package preparation and
+saw a transient missing portal `dist/` import. It is excluded as invalid evidence
+per the documented build-order rule; the clean serial platform battery above
+passed. Both coordinator browser workspaces were moved to Trash after their
+servers stopped, preserving recoverable cleanup.
