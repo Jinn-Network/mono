@@ -177,4 +177,19 @@ describe("openCatalogAuthority", () => {
       create: true,
     })).rejects.toBeInstanceOf(IdentityStoreError);
   });
+
+  /**
+   * The reverse direction, which matters MORE in production than the one above: §5's whole point is
+   * that the policy-signing key is never an operator role key. A ceremony run that pointed
+   * `--authority-store` at an existing role store must refuse, not quietly promote a role key to
+   * catalog authority — which is exactly the fixture expedient (`policySigner = roleKeys[0]`) the
+   * spec forbids. Pinning both directions keeps the store-format tags load-bearing.
+   */
+  it("refuses to open a role store as the catalog authority", async () => {
+    const root = await mkdtemp(join(tmpdir(), "trust-authoring-crosswire-reverse-"));
+    const storePath = join(root, "roles.enc.json");
+    await openRoleSigners({ storePath, password: PASSWORD, ownedRoles: ["admission"], create: true });
+    await expect(openCatalogAuthority({ storePath, password: PASSWORD, create: true }))
+      .rejects.toBeInstanceOf(IdentityStoreError);
+  });
 });

@@ -9,7 +9,8 @@
  * and every later membership change is a hash-linked successor rather than a rewrite — so existing
  * operators' `trustPolicyGenesisDigest` pins stay valid across every join.
  */
-import { open as openFile, readFile, rename, unlink } from "node:fs/promises";
+import { link, open as openFile, readFile, rename, unlink } from "node:fs/promises";
+import { dirname } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
   recordDigest,
@@ -151,6 +152,28 @@ function assertPurposesCoverBindings(
 }
 
 /**
+ * §6 law 3's three non-derivable purposes, asserted rather than merely produced.
+ *
+ * `assertPurposesCoverBindings` already covers every `native:<role>` a binding is authored for, but
+ * these three are bound to NO key — nothing in the binding set implies them — so a caller that
+ * hand-builds `purposes` instead of using `completePolicyPurposes` can omit them and get a catalog
+ * that authors cleanly, boots solver and requester, and then refuses the EVALUATOR: `policyFor`
+ * throws on any absent purpose, and `createVerdictGate` resolves `evaluator-eligibility` eagerly at
+ * evaluator boot. Until now law 3 was enforced only by USING `completePolicyPurposes` — a
+ * convention, not a check.
+ */
+function assertLawThreePurposes(purposes: TrustPolicy["purposes"]): void {
+  const missing = [NATIVE_ADMISSION_PURPOSE, ADMISSION_AGENT_PURPOSE, EVALUATOR_ELIGIBILITY_PURPOSE]
+    .filter((purpose) => purposes[purpose] === undefined);
+  if (missing.length > 0) {
+    throw new TrustAuthoringError(
+      `trust policy is missing the mandatory ${missing.join(", ")} purpose `
+        + `entr${missing.length === 1 ? "y" : "ies"} (§6 law 3); build purposes with completePolicyPurposes`,
+    );
+  }
+}
+
+/**
  * Seals the genesis policy and writes the catalog. Refuses to overwrite an existing path: a second
  * genesis at the same location would strand every pin that named the first one.
  */
@@ -166,6 +189,7 @@ export async function authorCatalog(input: {
   const bindings = dedupeByDigest(input.bindings);
   if (bindings.length === 0) throw new TrustAuthoringError("a trust catalog requires at least one binding");
   if (input.anchors.length === 0) throw new TrustAuthoringError("a trust catalog requires at least one anchor");
+  assertLawThreePurposes(input.purposes);
   assertPurposesCoverBindings(input.purposes, bindings);
   for (const binding of bindings) {
     if (!input.anchors.some(({ digest }) => digest === binding.anchorDigest)) {
@@ -195,21 +219,101 @@ export async function authorCatalog(input: {
   return { policyGenesisDigest: sealed.recordDigest, newestPolicyVersion: 1 };
 }
 
-async function writeExclusive(path: string, contents: string): Promise<void> {
-  let handle;
-  try {
-    handle = await openFile(path, "wx", 0o600);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
-      throw new TrustAuthoringError(`trust catalog already exists at ${path}; genesis never overwrites`);
-    }
-    throw new TrustAuthoringError(`trust catalog cannot be created: ${String(cause)}`);
-  }
+/**
+ * Stages `contents` in a sibling temp file, fully written and fsynced, and returns its path.
+ *
+ * A failed stage removes its own temp file: the caller has no path to clean up yet (this function
+ * has not returned one), so leaving it would strand a partial file next to the catalog on every
+ * interrupted write.
+ */
+async function stageTempFile(path: string, contents: string): Promise<string> {
+  const tempPath = `${path}.tmp-${process.pid}-${randomBytes(8).toString("hex")}`;
+  const handle = await openFile(tempPath, "wx", 0o600);
   try {
     await handle.writeFile(contents, "utf8");
     await handle.sync();
-  } finally {
+  } catch (cause) {
     await handle.close();
+    await unlink(tempPath).catch(() => undefined);
+    throw cause;
+  }
+  await handle.close();
+  return tempPath;
+}
+
+async function syncContainingDir(path: string): Promise<void> {
+  const directory = await openFile(dirname(path), "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+
+/**
+ * Creates the catalog at `path` ATOMICALLY and only if nothing is there yet — staged in a temp file
+ * that is fully written and fsynced first, then hard-linked into place (atomic; EEXIST means the
+ * path was already claimed).
+ *
+ * The temp+link shape, rather than a plain `open(path, "wx")` + write, is what makes the
+ * never-overwrite refusal SAFE. Under `wx`+write, a crash between the two steps leaves a truncated
+ * file that is indistinguishable from a real catalog to the EEXIST check — so every later
+ * re-author refuses, and the operator has to `rm` a file this tool told them never to overwrite.
+ * `link` is used rather than `rename` for the same reason `IdentityStore.createExclusive` does:
+ * rename would silently clobber a concurrent creator's already-won file.
+ */
+async function writeExclusive(path: string, contents: string): Promise<void> {
+  let tempPath: string | undefined;
+  try {
+    tempPath = await stageTempFile(path, contents);
+    try {
+      await link(tempPath, path);
+    } catch (cause) {
+      if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new TrustAuthoringError(`trust catalog already exists at ${path}; genesis never overwrites`);
+      }
+      throw cause;
+    }
+    await syncContainingDir(path);
+  } catch (cause) {
+    if (cause instanceof TrustAuthoringError) throw cause;
+    throw new TrustAuthoringError(`trust catalog cannot be created: ${String(cause)}`);
+  } finally {
+    // `link` leaves the source in place, so the temp is always ours to remove — on success and on
+    // failure alike. A failed genesis therefore leaves neither a catalog nor litter.
+    if (tempPath !== undefined) await unlink(tempPath).catch(() => undefined);
+  }
+}
+
+/**
+ * A whole-file lock around the read-check-rewrite that every join and refresh performs.
+ *
+ * The digest compare alone is TOCTOU: two joins that both read version N can both seal a successor,
+ * and the loser's write lands after the winner's — a LOST UPDATE, not the loud refusal §7 promises.
+ * (Even that is fail-closed downstream — two successors sharing a predecessor trips
+ * `rollback-detected` at every verifier — but a silently dropped join is a worse failure than a
+ * refusal.) The `wx` lock file makes one of the two refuse before it reads anything.
+ */
+async function withCatalogLock<T>(path: string, body: () => Promise<T>): Promise<T> {
+  const lockPath = `${path}.lock`;
+  let handle;
+  try {
+    handle = await openFile(lockPath, "wx", 0o600);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new TrustAuthoringError(
+        `another trust-catalog write holds ${lockPath}; joins are serialized through the coordinator. `
+          + "Re-run once it finishes, or remove the lock file if no write is in progress.",
+      );
+    }
+    throw new TrustAuthoringError(`trust catalog lock cannot be acquired: ${String(cause)}`);
+  }
+  try {
+    await handle.writeFile(`${process.pid}\n`, "utf8");
+    await handle.close();
+    return await body();
+  } finally {
+    await unlink(lockPath).catch(() => undefined);
   }
 }
 
@@ -316,14 +420,19 @@ async function sealSuccessor(input: {
   readonly signerSet?: SignerSet;
 }): Promise<{ readonly digest: `sha256:${string}`; readonly envelopeBytes: Uint8Array; readonly version: number }> {
   const version = input.newest.value.version + 1;
+  // `TrustPolicy` is a `z.looseObject`, so a policy legitimately carries fields this package has
+  // never heard of. Reconstructing the successor from a fixed field list silently DROPPED every one
+  // of them — a successor that quietly deletes a term the predecessor carried is a governance
+  // change nobody authored. Carry the predecessor forward whole and override only what succession
+  // itself owns.
   const successor: TrustPolicy = {
+    ...input.newest.value,
     protocol: TRUST_POLICY_PROTOCOL,
     version,
     predecessor: input.newest.digest as Sha256Digest,
     purposes: input.purposes,
     signerSet: input.signerSet ?? input.newest.value.signerSet,
     refreshBy: input.refreshBy,
-    ...(input.newest.value.creditRegime === undefined ? {} : { creditRegime: input.newest.value.creditRegime }),
   };
   const sealed = await sealTrustPolicy(successor, input.authority.dsseSigner);
   return { digest: sealed.recordDigest, envelopeBytes: sealed.envelopeBytes, version };
@@ -351,60 +460,64 @@ export async function appendOperator(input: {
 }> {
   const newBindings = dedupeByDigest(input.newBindings);
   if (newBindings.length === 0) throw new TrustAuthoringError("a join requires at least one new binding");
-  const loaded = await loadCatalog(input.catalogPath);
+  // The lock spans the whole read-check-rewrite, not just the write: a concurrent join that read
+  // the same predecessor would otherwise seal a successor whose write silently overwrites ours.
+  return withCatalogLock(input.catalogPath, async () => {
+    const loaded = await loadCatalog(input.catalogPath);
 
-  const existingDigests = new Set(
-    loaded.file.bindings.map((entry) => String((entry as { digest?: unknown }).digest)),
-  );
-  const appended = newBindings.filter((binding) => !existingDigests.has(binding.digest));
+    const existingDigests = new Set(
+      loaded.file.bindings.map((entry) => String((entry as { digest?: unknown }).digest)),
+    );
+    const appended = newBindings.filter((binding) => !existingDigests.has(binding.digest));
 
-  const purposes: TrustPolicy["purposes"] = {};
-  for (const [purpose, entry] of Object.entries(loaded.newest.value.purposes)) {
-    purposes[purpose] = { ...entry, accepted: [...entry.accepted] };
-  }
-  const joined = completePolicyPurposes({
-    roleAgents: newBindings.map(({ role, agent }) => ({ role, agent })),
-  });
-  for (const [purpose, entry] of Object.entries(joined)) {
-    unionAccepted(purposes, purpose, entry.accepted, entry.requiredStrength);
-  }
-  for (const [purpose, entry] of Object.entries(input.additionalPurposes ?? {})) {
-    unionAccepted(purposes, purpose, entry.accepted, entry.requiredStrength);
-  }
-  assertPurposesCoverBindings(purposes, newBindings);
-
-  const successor = await sealSuccessor({
-    authority: input.authority,
-    newest: loaded.newest,
-    purposes,
-    refreshBy: input.refreshBy,
-    ...(input.signerSet === undefined ? {} : { signerSet: input.signerSet }),
-  });
-
-  const anchors = loaded.file.anchors.some(({ digest }) => digest === input.newAnchor.digest)
-    ? loaded.file.anchors
-    : [...loaded.file.anchors, input.newAnchor];
-  for (const binding of newBindings) {
-    if (!anchors.some(({ digest }) => digest === binding.anchorDigest)) {
-      throw new TrustAuthoringError(`binding ${binding.digest} references undeclared anchor ${binding.anchorDigest}`);
+    const purposes: TrustPolicy["purposes"] = {};
+    for (const [purpose, entry] of Object.entries(loaded.newest.value.purposes)) {
+      purposes[purpose] = { ...entry, accepted: [...entry.accepted] };
     }
-  }
+    const joined = completePolicyPurposes({
+      roleAgents: newBindings.map(({ role, agent }) => ({ role, agent })),
+    });
+    for (const [purpose, entry] of Object.entries(joined)) {
+      unionAccepted(purposes, purpose, entry.accepted, entry.requiredStrength);
+    }
+    for (const [purpose, entry] of Object.entries(input.additionalPurposes ?? {})) {
+      unionAccepted(purposes, purpose, entry.accepted, entry.requiredStrength);
+    }
+    assertPurposesCoverBindings(purposes, newBindings);
 
-  const rewritten: CatalogFile = {
-    ...loaded.file,
-    policies: [...loaded.file.policies, { digest: successor.digest, envelope: b64(successor.envelopeBytes) }],
-    anchors,
-    bindings: [...loaded.file.bindings, ...appended.map(bindingEntry)],
-  };
-  await rewriteAtomically({
-    path: input.catalogPath,
-    contents: JSON.stringify(rewritten),
-    expectedDigest: loaded.digest,
+    const successor = await sealSuccessor({
+      authority: input.authority,
+      newest: loaded.newest,
+      purposes,
+      refreshBy: input.refreshBy,
+      ...(input.signerSet === undefined ? {} : { signerSet: input.signerSet }),
+    });
+
+    const anchors = loaded.file.anchors.some(({ digest }) => digest === input.newAnchor.digest)
+      ? loaded.file.anchors
+      : [...loaded.file.anchors, input.newAnchor];
+    for (const binding of newBindings) {
+      if (!anchors.some(({ digest }) => digest === binding.anchorDigest)) {
+        throw new TrustAuthoringError(`binding ${binding.digest} references undeclared anchor ${binding.anchorDigest}`);
+      }
+    }
+
+    const rewritten: CatalogFile = {
+      ...loaded.file,
+      policies: [...loaded.file.policies, { digest: successor.digest, envelope: b64(successor.envelopeBytes) }],
+      anchors,
+      bindings: [...loaded.file.bindings, ...appended.map(bindingEntry)],
+    };
+    await rewriteAtomically({
+      path: input.catalogPath,
+      contents: JSON.stringify(rewritten),
+      expectedDigest: loaded.digest,
+    });
+    return {
+      newestPolicyVersion: successor.version,
+      policyGenesisDigest: loaded.file.policyGenesisDigest as `sha256:${string}`,
+    };
   });
-  return {
-    newestPolicyVersion: successor.version,
-    policyGenesisDigest: loaded.file.policyGenesisDigest as `sha256:${string}`,
-  };
 }
 
 /**
@@ -419,24 +532,26 @@ export async function sealPolicySuccessor(input: {
   readonly purposes?: TrustPolicy["purposes"];
   readonly signerSet?: SignerSet;
 }): Promise<{ readonly newestPolicyVersion: number; readonly policyDigest: `sha256:${string}` }> {
-  const loaded = await loadCatalog(input.catalogPath);
-  const successor = await sealSuccessor({
-    authority: input.authority,
-    newest: loaded.newest,
-    purposes: input.purposes ?? loaded.newest.value.purposes,
-    refreshBy: input.refreshBy,
-    ...(input.signerSet === undefined ? {} : { signerSet: input.signerSet }),
+  return withCatalogLock(input.catalogPath, async () => {
+    const loaded = await loadCatalog(input.catalogPath);
+    const successor = await sealSuccessor({
+      authority: input.authority,
+      newest: loaded.newest,
+      purposes: input.purposes ?? loaded.newest.value.purposes,
+      refreshBy: input.refreshBy,
+      ...(input.signerSet === undefined ? {} : { signerSet: input.signerSet }),
+    });
+    const rewritten: CatalogFile = {
+      ...loaded.file,
+      policies: [...loaded.file.policies, { digest: successor.digest, envelope: b64(successor.envelopeBytes) }],
+    };
+    await rewriteAtomically({
+      path: input.catalogPath,
+      contents: JSON.stringify(rewritten),
+      expectedDigest: loaded.digest,
+    });
+    return { newestPolicyVersion: successor.version, policyDigest: successor.digest };
   });
-  const rewritten: CatalogFile = {
-    ...loaded.file,
-    policies: [...loaded.file.policies, { digest: successor.digest, envelope: b64(successor.envelopeBytes) }],
-  };
-  await rewriteAtomically({
-    path: input.catalogPath,
-    contents: JSON.stringify(rewritten),
-    expectedDigest: loaded.digest,
-  });
-  return { newestPolicyVersion: successor.version, policyDigest: successor.digest };
 }
 
 /**
