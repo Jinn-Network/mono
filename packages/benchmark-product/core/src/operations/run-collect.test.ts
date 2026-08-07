@@ -8,6 +8,7 @@ import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
 import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
@@ -204,6 +205,25 @@ describe("runCollect — guards", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
   });
+
+  test("refuses conflict when a cancellation is pending, even once the close boundary has passed (BP-22)", async () => {
+    const clock = makeClock();
+    await setUpDrivenRun(clock);
+    writeCancelMarker(workspaceDir, "draft-1", { requestedAt: clock(), principal: "sponsor-1" });
+
+    // Force closeAt into the past — collect would otherwise happily proceed on this fully
+    // delivered+judged run; the pending marker must refuse it regardless.
+    const runState = readRunState(workspaceDir, "draft-1");
+    expect(runState).toBeDefined();
+    if (runState === undefined) return;
+    writeRunState(workspaceDir, "draft-1", { ...runState, closeAt: "2020-01-01T00:00:00Z" });
+
+    const outcome = await runCollect(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("conflict");
+    expect(readDraftDocument(workspaceDir, "draft-1").state).toBe("running");
+  }, 30_000);
 
   test("refuses conflict when cells remain outstanding and closeAt has not passed", async () => {
     const clock = makeClock();

@@ -19,6 +19,7 @@ import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles
 import { loadOrCreateEvaluatorSigningKeys, type VerdictSigningKey } from "../venue/signing.js";
 import { putSealedBytes } from "../workspace/sealed-store.js";
 import { buildRunAssemblyPorts } from "./assembly-ports.js";
+import { writeCancelMarker } from "./cancel-marker.js";
 
 const EVALUATOR_1 = "urn:jinn:benchmark-product:local-venue:evaluator-1";
 const EVALUATOR_2 = "urn:jinn:benchmark-product:local-venue:evaluator-2";
@@ -36,9 +37,10 @@ afterEach(() => {
 
 /** The trust port only reads `runRecord.policy.submissionBaseline` at construction time, so a
  * minimal cast keeps this a unit test of the resolver, not a full run fixture. */
-function buildPorts(): AssemblyPorts {
+function buildPorts(draftId = "draft-1"): AssemblyPorts {
   return buildRunAssemblyPorts({
     workspaceDir,
+    draftId,
     runRecord: { policy: { submissionBaseline: {} } } as unknown as RunRecord,
     expected: [],
     fold: new Map(),
@@ -109,5 +111,24 @@ describe("buildRunAssemblyPorts trust resolver — signature-verified, fail-clos
     const ports = buildPorts();
 
     await expect(resolveEvaluator(ports, EVALUATOR_1, `sha256:${"e".repeat(64)}`)).resolves.toBe("unresolved");
+  });
+});
+
+describe("buildRunAssemblyPorts — runCancelled derivation (BP-22)", () => {
+  it("is absent from inputScope when no cancel marker exists for the draft", () => {
+    const ports = buildPorts("draft-1");
+    expect(ports.inputScope.runCancelled).toBeUndefined();
+  });
+
+  it("is true once a cancel marker exists for the draft", () => {
+    writeCancelMarker(workspaceDir, "draft-1", { requestedAt: "2026-08-05T00:00:00Z", principal: "sponsor-1" });
+    const ports = buildPorts("draft-1");
+    expect(ports.inputScope.runCancelled).toBe(true);
+  });
+
+  it("does not leak across draftIds — a marker for a different draft leaves this one un-cancelled", () => {
+    writeCancelMarker(workspaceDir, "draft-other", { requestedAt: "2026-08-05T00:00:00Z", principal: "sponsor-1" });
+    const ports = buildPorts("draft-1");
+    expect(ports.inputScope.runCancelled).toBeUndefined();
   });
 });

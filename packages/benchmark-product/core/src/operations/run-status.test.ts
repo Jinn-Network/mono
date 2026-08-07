@@ -1,13 +1,14 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries } from "../run/journal.js";
-import { runJournalPath } from "../workspace/layout.js";
+import { runCancelMarkerPath, runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
 import { armAdd } from "./arms.js";
@@ -241,5 +242,64 @@ describe("runStatus — reflects a driven run", () => {
     expect(pendingCell).toMatchObject({ status: "pending", dispatches: 0 });
     expect(pendingCell?.attempt).toBeUndefined();
     expect(outcome.result.counts).toEqual({ expected: 6, dispatched: 5, delivered: 5, judged: 5, failed: 0 });
+  }, 30_000);
+});
+
+describe("runStatus — cancelRequested flag and blame passthrough (BP-22)", () => {
+  test("cancelRequested is false when no cancel marker exists", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.cancelRequested).toBe(false);
+  });
+
+  test("cancelRequested is true once a cancel marker has been written", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+    writeCancelMarker(workspaceDir, "draft-1", { requestedAt: clock(), principal: "sponsor-1" });
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.cancelRequested).toBe(true);
+  }, 30_000);
+
+  test("fails closed when the durable cancel marker contains malformed bytes", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    writeFileSync(runCancelMarkerPath(workspaceDir, "draft-1"), "not-json");
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("record-integrity");
+    expect(outcome.error.detail).toMatch(/cancel marker/iu);
+  });
+
+  test("a non-error cell-event carrying blame is rejected as journal-integrity", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const [deliveredEntry] = fullEntries.filter((entry) => entry.kind === "cell-event" && entry.event.kind === "delivered");
+    if (deliveredEntry === undefined || deliveredEntry.kind !== "cell-event") throw new Error("unreachable");
+    // Manufacture an impossible durable shape: blame is valid only on an error terminal, never
+    // on a delivered event. The journal reader must reject it before status can surface it.
+    const rewritten = fullEntries.map((entry) => (entry === deliveredEntry ? { ...entry, blame: "infrastructure" as const } : entry));
+    atomicWriteFileSync(runJournalPath(workspaceDir, "draft-1"), `${rewritten.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("journal-integrity");
   }, 30_000);
 });

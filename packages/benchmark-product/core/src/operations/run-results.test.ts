@@ -2,13 +2,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { parseCellKey } from "@jinn-network/benchmarking-records";
 import type { AttemptUri, DeliveryRef, ObservationSnapshot, SubmissionAck, SubmissionUri } from "@jinn-network/task-execution-backend";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { VERDICT_DSSE_PAYLOAD_TYPE } from "@jinn-network/task-execution-profiles";
-import { dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
+import { canonicalJsonBytes, dssePreAuthEncoding, sealDsseEnvelope } from "@jinn-network/trust-core";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import type { ProxiedBackend } from "../run/drive.js";
-import { appendRunJournalEntry, readRunJournalEntries } from "../run/journal.js";
+import { appendRunJournalEntry, readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState, writeRunState } from "../run/state.js";
 import { resultsArtifactPath, runJournalPath } from "../workspace/layout.js";
 import { putSealedBytes, sha256Hex } from "../workspace/sealed-store.js";
@@ -22,7 +23,9 @@ import { runCollect } from "./run-collect.js";
 import { runLaunch } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { runReport } from "./report.js";
 import { runResults } from "./run-results.js";
+import { runVerify } from "./verify.js";
 import { sampleInit } from "./sample.js";
 
 let workspaceDir: string;
@@ -58,11 +61,18 @@ function utf8(json: unknown): Uint8Array {
  * IRI or carrying a garbage signature would (correctly) resolve "unresolved". */
 function buildVerdictEnvelope(input: { verdict?: "pass" | "fail"; evaluationSpecificationSha256: string }): Uint8Array {
   const statement = {
+    _type: "https://in-toto.io/Statement/v1",
+    subject: [
+      { name: "subject-task.json", digest: { sha256: "a".repeat(64) } },
+      { name: "prediction", digest: { sha256: "b".repeat(64) } },
+    ],
     predicateType: "https://spec.jinn.network/attestations/result-evaluation/v1",
     predicate: {
       evaluator: { id: LEGACY_VERDICT_EVALUATOR_ID },
       verdict: input.verdict ?? "pass",
       evaluationSpecification: { digest: { sha256: input.evaluationSpecificationSha256 } },
+      taskSubject: "subject-task.json",
+      resultSubjects: ["prediction"],
       measurements: [
         { name: "integrity", value: true },
         { name: "resolved", value: true },
@@ -71,7 +81,7 @@ function buildVerdictEnvelope(input: { verdict?: "pass" | "fail"; evaluationSpec
     },
   };
   const key = loadOrCreateVerdictSigningKey(workspaceDir);
-  const payloadBytes = utf8(statement);
+  const payloadBytes = canonicalJsonBytes(statement);
   return sealDsseEnvelope({
     payloadBytes,
     payloadType: VERDICT_DSSE_PAYLOAD_TYPE,
@@ -384,5 +394,205 @@ describe("runResults — dissent visibility", () => {
       if (cell.cellKey === firstEvaluation.cellKey) continue;
       expect(cell.verdicts, cell.cellKey).toHaveLength(1);
     }
+  }, 30_000);
+});
+
+describe("runResults — failure block, sourced from the run journal fold (BP-22)", () => {
+  test("expired, subprocess-kill infrastructure failure, task failure, cancelled, and unscorable stay distinct and out of report denominators", async () => {
+    const clock = makeClock();
+    initWorkspace(contextFor(clock));
+    createDraft(contextFor(clock), { draftId: "draft-1", name: "Failure Block" });
+    const sample = await sampleInit(contextFor(clock), { draftId: "draft-1" });
+    expect(sample.ok).toBe(true);
+    if (!sample.ok) return;
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "baseline", pinning: { harness: { id: "prediction-v1-baseline", version: "1.0.0" } } });
+    armAdd(contextFor(clock), { draftId: "draft-1", armId: "sample", pinning: { harness: { id: "sample-uniform", version: "0.1.0" } } });
+    const quoted = await runQuote(contextFor(clock), { draftId: "draft-1" });
+    expect(quoted.ok).toBe(true);
+    const locked = runLock(contextFor(clock), { draftId: "draft-1" });
+    expect(locked.ok).toBe(true);
+
+    const { backend } = makeStatefulFakeBackend(sample.result.evaluationSpecSha256);
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const deliveredCells = fullEntries
+      .filter((entry) => entry.kind === "cell-event" && entry.event.kind === "delivered")
+      .map((entry) => (entry.kind === "cell-event" ? entry.event.cellKey : ""));
+    expect(deliveredCells.length).toBeGreaterThanOrEqual(5);
+    const [expiredCellKey, infrastructureCellKey, taskCellKey, cancelledCellKey, unscorableCellKey] = deliveredCells as [
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+    const solveTerminalKeys = new Set([expiredCellKey, infrastructureCellKey, taskCellKey, cancelledCellKey]);
+
+    // Drop every journal entry naming the four solve-terminal target cells, then splice in
+    // synthetic terminal cell-events — the exact durable shapes each real scenario would leave
+    // behind. For the unscorable target retain its real solve dispatch + Delivery and remove
+    // only the evaluation leg, then add the real could-not-grade terminal shape.
+    const withoutTargets = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") return !solveTerminalKeys.has(entry.event.cellKey);
+      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+        if (solveTerminalKeys.has(entry.cellKey)) return false;
+        if (entry.cellKey !== unscorableCellKey) return true;
+        if (entry.kind === "evaluation") return false;
+        if (entry.kind === "submission-accepted" && entry.leg === "evaluation") return false;
+        return true;
+      }
+      return true;
+    });
+    const synthetic: RunJournalEntry[] = [
+      {
+        kind: "cell-event",
+        at: clock(),
+        event: {
+          cellKey: expiredCellKey,
+          armId: parseCellKey(expiredCellKey).armId,
+          replicate: parseCellKey(expiredCellKey).replicate,
+          dispatch: 1,
+          kind: "error",
+          replaceable: true,
+          replaceableReason: "expired",
+          detail: "expired",
+        },
+      },
+      {
+        kind: "cell-event",
+        at: clock(),
+        event: {
+          cellKey: infrastructureCellKey,
+          armId: parseCellKey(infrastructureCellKey).armId,
+          replicate: parseCellKey(infrastructureCellKey).replicate,
+          dispatch: 1,
+          kind: "error",
+          replaceable: false,
+          detail: "SIGKILL",
+        },
+        blame: "infrastructure",
+      },
+      {
+        kind: "cell-event",
+        at: clock(),
+        event: {
+          cellKey: taskCellKey,
+          armId: parseCellKey(taskCellKey).armId,
+          replicate: parseCellKey(taskCellKey).replicate,
+          dispatch: 1,
+          kind: "error",
+          replaceable: false,
+          detail: "exit 7",
+        },
+        blame: "task",
+      },
+      {
+        kind: "cell-event",
+        at: clock(),
+        event: {
+          cellKey: cancelledCellKey,
+          armId: parseCellKey(cancelledCellKey).armId,
+          replicate: parseCellKey(cancelledCellKey).replicate,
+          dispatch: 1,
+          kind: "cancelled",
+          detail: "drain-to-boundary",
+          cancelledRun: true,
+        },
+      },
+      {
+        kind: "evaluation",
+        at: clock(),
+        cellKey: unscorableCellKey,
+        evaluationTerminal: "could-not-grade",
+        detail: "environment-setup-failure",
+        evaluator: LEGACY_VERDICT_EVALUATOR_ID,
+        evalIndex: 1,
+      },
+    ];
+    atomicWriteFileSync(
+      runJournalPath(workspaceDir, "draft-1"),
+      `${[...withoutTargets, ...synthetic].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+
+    // Force the close boundary into the past — collect must proceed despite the (now
+    // journal-terminal-but-not-delivered) target cells still counting as outstanding.
+    const runState = readRunState(workspaceDir, "draft-1");
+    expect(runState).toBeDefined();
+    if (runState === undefined) return;
+    writeRunState(workspaceDir, "draft-1", { ...runState, closeAt: "2020-01-01T00:00:00Z" });
+
+    const collected = await runCollect(contextFor(clock), { draftId: "draft-1" });
+    expect(collected.ok).toBe(true);
+
+    const outcome = runResults(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+
+    // The sealed Matrix's own outcome vocabulary is untouched: none of these three cells were
+    // ever delivered, so all three still read "expired" there — the failure block is what
+    // distinguishes WHY, sourced from product state the Matrix schema carries no field for.
+    const expiredCell = outcome.result.cells.find((cell) => cell.cellKey === expiredCellKey);
+    expect(expiredCell?.outcome).toBe("expired");
+    expect(expiredCell?.failure).toEqual({ kind: "expired", detail: "expired" });
+
+    const infrastructureCell = outcome.result.cells.find((cell) => cell.cellKey === infrastructureCellKey);
+    expect(infrastructureCell?.outcome).toBe("expired");
+    expect(infrastructureCell?.failure).toEqual({ kind: "failed", blame: "infrastructure", detail: "SIGKILL" });
+
+    const taskCell = outcome.result.cells.find((cell) => cell.cellKey === taskCellKey);
+    expect(taskCell?.outcome).toBe("expired");
+    expect(taskCell?.failure).toEqual({ kind: "failed", blame: "task", detail: "exit 7" });
+
+    const cancelledCell = outcome.result.cells.find((cell) => cell.cellKey === cancelledCellKey);
+    expect(cancelledCell?.outcome).toBe("expired");
+    expect(cancelledCell?.failure).toEqual({ kind: "cancelled", detail: "drain-to-boundary" });
+
+    const unscorableCell = outcome.result.cells.find((cell) => cell.cellKey === unscorableCellKey);
+    expect(unscorableCell?.outcome).toBe("unscorable");
+    expect(unscorableCell?.failure).toBeUndefined();
+
+    // The one remaining cell is judged and carries no failure block at all.
+    const nonJudgedKeys = new Set([...solveTerminalKeys, unscorableCellKey]);
+    for (const cell of outcome.result.cells) {
+      if (nonJudgedKeys.has(cell.cellKey)) continue;
+      expect(cell.outcome, cell.cellKey).toBe("judged");
+      expect(cell.failure, cell.cellKey).toBeUndefined();
+    }
+
+    // Report and claim remain honest about adverse outcomes, while the platform aggregate's
+    // denominator includes only judged cells. Infrastructure failure, task failure, expiry,
+    // cancellation, and could-not-grade attrition are never converted into scored failures.
+    const matrix = outcome.result;
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    expect(reported.result.claimPackage.completeness).toEqual(matrix.completeness);
+    expect(reported.result.claimPackage.attrition).toEqual(matrix.attrition);
+    expect(matrix.completeness).toMatchObject({ expected: 6, judged: 1, runOutcome: "partial" });
+    const attritionTotals = Object.values(matrix.attrition.perArm).reduce(
+      (total, arm) => ({
+        judged: total.judged + arm.judged,
+        unscorable: total.unscorable + arm.unscorable,
+        expired: total.expired + arm.expired,
+      }),
+      { judged: 0, unscorable: 0, expired: 0 },
+    );
+    expect(attritionTotals).toEqual({ judged: 1, unscorable: 1, expired: 4 });
+    for (const arm of Object.keys(matrix.attrition.perArm)) {
+      const judgedForArm = matrix.cells.filter((cell) => cell.armId === arm && cell.outcome === "judged").length;
+      expect(reported.result.claimPackage.headline[arm]?.n, arm).toBe(judgedForArm);
+    }
+    expect(Object.values(reported.result.claimPackage.headline).reduce((sum, arm) => sum + arm.n, 0)).toBe(1);
+
+    const verified = await runVerify(contextFor(clock), { draftId: "draft-1" });
+    expect(verified.ok, JSON.stringify(verified)).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.result.checks).toEqual([
+      "matrix-rederivation",
+      "report-verification",
+      "claim-consistency",
+    ]);
   }, 30_000);
 });

@@ -14,6 +14,14 @@
  * outstanding dispatch (so the backend's own idempotency dedup — same idempotencyKey, same
  * bytes — reunites with in-flight work instead of minting a conflicting resubmission), and then
  * sweeps for delivered-but-unevaluated cells left over from an earlier interruption.
+ *
+ * BP-22: both generators are composed with `../run/cancellation-aware-backend.ts`, which maps a
+ * durable cancel marker to the existing backend cancellation port while preserving the platform
+ * generator as the sole owner of dispatch/watch/drain orchestration. Its AbortSignal flips only
+ * after the active attempt has terminalized, so cancellation cannot take the platform's dynamic
+ * early-close escape from a watch loop and drop an in-flight attempt. `runResume` additionally
+ * refuses `"conflict"` up front when a marker is ALREADY present at call time: an interrupted
+ * cancel resumes by re-running `cancel`, never by running `resume`.
  */
 
 import {
@@ -28,6 +36,8 @@ import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { cancelRequested } from "../run/cancel-marker.js";
+import { createCancellationAwareBackend } from "../run/cancellation-aware-backend.js";
 import {
   createRecordingProxy,
   driveCellEvents,
@@ -56,6 +66,8 @@ export interface RunLaunchDeps {
    * `../run/drive.ts`'s own header for exactly what it emits and when. Optional; absent leaves
    * `runLaunch`/`runResume` byte-identical to before this deliverable. */
   readonly onProgress?: (line: string) => void;
+  /** Test/diagnostic hook fired once when a solve attempt is first observed nonterminal. */
+  readonly onSolveAttemptNonterminal?: (attempt: string) => void;
 }
 
 export interface RunLaunchInput {
@@ -151,6 +163,7 @@ export function runLaunch(
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
 
+      let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
       try {
         const backend = createRecordingProxy(venue.backend, {
           workspaceDir: clockedContext.workspaceDir,
@@ -170,14 +183,27 @@ export function runLaunch(
           onProgress: deps.onProgress,
         };
 
-        const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, backend, {
+        cancellation = createCancellationAwareBackend(backend, {
+          workspaceDir: clockedContext.workspaceDir,
+          draftId: input.draftId,
+          onAttemptNonterminal: deps.onSolveAttemptNonterminal,
+        });
+        const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
           runDigest: `sha256:${loaded.runSha256}`,
           taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
           clock: { now: () => new Date(context.clock()) },
+          signal: cancellation.signal,
+          get earlyClose() {
+            return cancellation!.earlyClose;
+          },
         });
         await driveCellEvents(driveDeps, events);
       } finally {
-        await venue.shutdown();
+        try {
+          await cancellation?.close();
+        } finally {
+          await venue.shutdown();
+        }
       }
 
       return { draft };
@@ -202,6 +228,17 @@ export function runResume(
     run: async () => {
       const loaded = loadLockedOrRunningRun(clockedContext.workspaceDir, input.draftId, "running");
 
+      // BP-22: a pending cancellation is finalized by re-running `cancel`, never by `resume` —
+      // an interrupted cancel left the run mid-drain, and `cancel` is the only operation that
+      // knows how to pick that back up (re-derive outstanding, re-probe the venue, finalize).
+      if (cancelRequested(clockedContext.workspaceDir, input.draftId)) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}`,
+          `draft ${input.draftId} has a pending cancellation — run "cancel" to resume it, not "resume"`,
+        );
+      }
+
       const entries = readRunJournalEntries(clockedContext.workspaceDir, input.draftId);
       const fold = foldRunJournal(entries);
       const expected = expectedCellSet(loaded.benchRecord, loaded.runRecord);
@@ -224,6 +261,7 @@ export function runResume(
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
 
+      let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
       try {
         const backend = createRecordingProxy(venue.backend, {
           workspaceDir: clockedContext.workspaceDir,
@@ -244,11 +282,20 @@ export function runResume(
         };
 
         if (outstanding.length > 0) {
-          const events = resumeRun(loaded.benchRecord, loaded.runRecord, backend, {
+          cancellation = createCancellationAwareBackend(backend, {
+            workspaceDir: clockedContext.workspaceDir,
+            draftId: input.draftId,
+            onAttemptNonterminal: deps.onSolveAttemptNonterminal,
+          });
+          const events = resumeRun(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
             runDigest: `sha256:${loaded.runSha256}`,
             taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
             clock: { now: () => new Date(context.clock()) },
             outstanding,
+            signal: cancellation.signal,
+            get earlyClose() {
+              return cancellation!.earlyClose;
+            },
             acceptedSubmissions: {
               acceptedSubmissionBytes: (_runDigest, cellKey, dispatch) => {
                 const sha256 = journaledSubmissions.get(`${cellKey}::${dispatch}`);
@@ -262,7 +309,9 @@ export function runResume(
         // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as any
         // carried over from before it, without re-driving a solve dispatch for either.
         const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-        const gaps = evaluationGaps(freshFold, minVerdicts).filter(
+        const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
+          ? []
+          : evaluationGaps(freshFold, minVerdicts)).filter(
           (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
             gap.cell.deliverySha256 !== undefined,
         );
@@ -281,7 +330,11 @@ export function runResume(
 
         return { outstandingCount: outstanding.length, evaluationCatchUpCount: gaps.length };
       } finally {
-        await venue.shutdown();
+        try {
+          await cancellation?.close();
+        } finally {
+          await venue.shutdown();
+        }
       }
     },
   });

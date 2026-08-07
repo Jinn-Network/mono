@@ -81,6 +81,12 @@
       "description": "Lists every draft in a workspace."
     },
     {
+      "operation": "runCancel",
+      "cliVerb": "cancel",
+      "authorityGated": true,
+      "description": "Requests an authority-gated stop, drains outstanding work, and seals a completely accounted cancelled Matrix."
+    },
+    {
       "operation": "runCollect",
       "cliVerb": "collect",
       "authorityGated": false,
@@ -157,10 +163,6 @@
     {
       "name": "unverifiableAxisCounts",
       "reason": "facade export is a helper re-export, not an operation invoked directly (see src/cli/parity-map.ts)"
-    },
-    {
-      "name": "cancel",
-      "reason": "\"cancel\" is in authority/policy.ts's GATED_OPERATIONS but no shipped operation uses it as an action name yet — reserved for a later packet"
     },
     {
       "name": "publish",

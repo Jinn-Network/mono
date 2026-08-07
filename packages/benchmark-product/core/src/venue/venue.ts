@@ -78,6 +78,9 @@ export interface LocalVenueOptions {
    * disagreement; production callers never set it.
    */
   readonly evaluationContextVariationForTesting?: (evaluatorId: string, contextBytes: Uint8Array) => Uint8Array;
+  /** TEST-ONLY: blocks each solve launcher's real `node -e` subprocess before its normal runner
+   * starts, allowing cancellation tests to observe and kill a genuinely live process. */
+  readonly solveStartDelayMsForTesting?: number;
 }
 
 export interface EvaluationCellInput {
@@ -228,6 +231,31 @@ function extractInlineRunnerSource(
   return runner;
 }
 
+function withSolveStartDelayForTesting(
+  launcher: LauncherContract,
+  delayMs: number | undefined,
+): LauncherContract {
+  if (delayMs === undefined || delayMs === 0) return launcher;
+  return {
+    id: launcher.id,
+    capabilities: () => launcher.capabilities(),
+    ...(launcher.probe === undefined ? {} : { probe: () => launcher.probe!() }),
+    plan(view, paths, attempt) {
+      const plan = launcher.plan(view, paths, attempt);
+      const source = plan.argv[2];
+      if (plan.argv[0] !== process.execPath || plan.argv[1] !== "-e" || typeof source !== "string") {
+        refuse(
+          "execution",
+          "solveStartDelayMsForTesting",
+          `${launcher.id}: test delay requires the venue's ordinary inline node runner`,
+        );
+      }
+      const delayedSource = `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});\n${source}`;
+      return { ...plan, argv: [plan.argv[0], plan.argv[1], delayedSource, ...plan.argv.slice(3)] };
+    },
+  };
+}
+
 function resolveEvaluatorAdaptersEntryUrl(): string {
   return import.meta.resolve("@jinn-network/task-execution-evaluator-adapters");
 }
@@ -312,6 +340,19 @@ function resolveTaskProfileFor(
 export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   const { workspaceDir } = options;
 
+  if (
+    options.solveStartDelayMsForTesting !== undefined
+    && (!Number.isSafeInteger(options.solveStartDelayMsForTesting)
+      || options.solveStartDelayMsForTesting < 0
+      || options.solveStartDelayMsForTesting > 60_000)
+  ) {
+    refuse(
+      "validation",
+      "solveStartDelayMsForTesting",
+      "solveStartDelayMsForTesting must be an integer between 0 and 60000 milliseconds",
+    );
+  }
+
   const evaluatorCount = options.evaluatorCount ?? 1;
   if (!Number.isSafeInteger(evaluatorCount) || evaluatorCount < 1) {
     refuse("validation", "evaluatorCount", "evaluatorCount must be an integer >= 1");
@@ -344,7 +385,14 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     },
   };
 
-  const sampleLauncher = makeSampleUniformLauncher();
+  const baselineLauncher = withSolveStartDelayForTesting(
+    predictionV1BaselineLauncher,
+    options.solveStartDelayMsForTesting,
+  );
+  const sampleLauncher = withSolveStartDelayForTesting(
+    makeSampleUniformLauncher(),
+    options.solveStartDelayMsForTesting,
+  );
 
   // One prediction registration per evaluator identity, id-matched with the generated deployment
   // module (the spawned harness selects by exact registration id). The factory hardcodes the
@@ -419,7 +467,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   };
 
   const baselineRunnerSource = extractInlineRunnerSource(
-    predictionV1BaselineLauncher,
+    baselineLauncher,
     "prediction-v1-baseline",
     predictionProfile,
   );
@@ -429,7 +477,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
   ));
 
   const launcherDeployments: Readonly<Record<string, LocalLauncherDeployment>> = {
-    [predictionV1BaselineLauncher.id]: {
+    [baselineLauncher.id]: {
       executable: { path: process.execPath, digest: baselineDigest },
       async probe() {
         return {
@@ -475,7 +523,7 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
     executor: "urn:jinn:benchmark-product:local-venue:executor",
     profileStore,
     resolveTaskProfile: resolveTaskProfileFor(predictionProfile, evaluationProfile),
-    launchers: [predictionV1BaselineLauncher, sampleLauncher, evaluationLauncher],
+    launchers: [baselineLauncher, sampleLauncher, evaluationLauncher],
     launcherDeployments,
     provisioner,
     provisionerCapabilities,

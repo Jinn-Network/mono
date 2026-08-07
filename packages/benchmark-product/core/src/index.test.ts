@@ -24,7 +24,7 @@ describe("public surface", () => {
       "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
       "sampleInit", "importSweBenchRows", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
-      "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCollect", "runResults",
+      "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "runReport", "runVerify",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");

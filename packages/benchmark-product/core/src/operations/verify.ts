@@ -136,6 +136,7 @@ export function runVerify(
       const receiptsByTaskDigest = scanPredictionSnapshotAdmissionReceipts(context.workspaceDir);
       const ports = buildRunAssemblyPorts({
         workspaceDir: context.workspaceDir,
+        draftId: input.draftId,
         runRecord,
         expected,
         fold,

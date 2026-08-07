@@ -45,7 +45,7 @@ function fakeDeliveryRef(attempt: string, sha256: string): DeliveryRef {
   return { attempt: attempt as AttemptUri, digest: `sha256:${sha256}` as const };
 }
 
-function fakeSnapshot(attempt: string, state: string): ObservationSnapshot {
+function fakeSnapshot(attempt: string, state: string, blame?: "task" | "infrastructure"): ObservationSnapshot {
   return {
     descriptor: {
       attempt: attempt as `urn:uuid:${string}`,
@@ -58,6 +58,7 @@ function fakeSnapshot(attempt: string, state: string): ObservationSnapshot {
         cancelRequested: false,
         executionIds: [],
         deliveries: [],
+        ...(blame !== undefined ? { blame } : {}),
       },
     },
     cursor: { sequence: "0" },
@@ -249,6 +250,66 @@ describe("driveCellEvents — non-terminal / non-delivered events", () => {
       (async function* () { for (const event of events) yield event; })(),
     );
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toHaveLength(1);
+  });
+});
+
+describe("driveCellEvents — blame observation (BP-22)", () => {
+  test("an error event with an attempt journals the backend's observed blame", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({ observeResult: fakeSnapshot("att-err-1", "failed", "infrastructure") });
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", attempt: "att-err-1", replaceable: false, detail: "SIGKILL" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toEqual([{ kind: "cell-event", at: "2026-08-05T00:00:00Z", event: events[0], blame: "infrastructure" }]);
+  });
+
+  test("an error event whose observe() throws journals with no blame field, and the run is unaffected", async () => {
+    const clock = makeClock();
+    // No observeResult scripted -> makeFakeBackend's observe() throws.
+    const backend = makeFakeBackend({});
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", attempt: "att-err-1", replaceable: false, detail: "exit 7" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toEqual([{ kind: "cell-event", at: "2026-08-05T00:00:00Z", event: events[0] }]);
+    expect(entries[0] && "blame" in entries[0]).toBe(false);
+  });
+
+  test("an error event with no attempt reference never calls observe() and journals with no blame", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({}); // observe() would throw "observe not scripted" if reached.
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false, detail: "rejected" },
+    ];
+    await driveCellEvents(
+      { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+      (async function* () { for (const event of events) yield event; })(),
+    );
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    expect(entries).toEqual([{ kind: "cell-event", at: "2026-08-05T00:00:00Z", event: events[0] }]);
+  });
+
+  test("a non-error event (e.g. dispatch) never calls observe() for blame", async () => {
+    const clock = makeClock();
+    const backend = makeFakeBackend({}); // observe() would throw if reached.
+    const events: CellStatusEvent[] = [
+      { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" },
+    ];
+    await expect(
+      driveCellEvents(
+        { workspaceDir, draftId: "draft-1", venue: fakeVenue({ taskBytes: new Uint8Array(), taskSha256: "0".repeat(64) }), backend, runSha256: "r".repeat(64), owner: "urn:uuid:owner", cellWindowMs: 3_600_000, minVerdicts: 1, liveClock: clock },
+        (async function* () { for (const event of events) yield event; })(),
+      ),
+    ).resolves.toBeUndefined();
   });
 });
 

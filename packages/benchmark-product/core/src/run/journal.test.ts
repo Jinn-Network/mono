@@ -77,6 +77,55 @@ describe("append / read round trip", () => {
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
   });
 
+  test("cancel-requested entries round-trip (BP-22)", () => {
+    const entries: RunJournalEntry[] = [
+      { kind: "launched", at: "2026-08-05T00:00:00Z" },
+      { kind: "cancel-requested", at: "2026-08-05T00:05:00Z" },
+    ];
+    for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
+  });
+
+  test("a cell-event entry carrying blame round-trips; one without blame stays valid (BP-22)", () => {
+    const entries: RunJournalEntry[] = [
+      {
+        kind: "cell-event",
+        at: "2026-08-05T00:00:00Z",
+        event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false, detail: "exit 7" },
+        blame: "task",
+      },
+      {
+        kind: "cell-event",
+        at: "2026-08-05T00:00:01Z",
+        event: { cellKey: CELL_B, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false, detail: "SIGKILL" },
+        blame: "infrastructure",
+      },
+      // No blame at all — the pre-BP-22 shape stays valid.
+      {
+        kind: "cell-event",
+        at: "2026-08-05T00:00:02Z",
+        event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" },
+      },
+    ];
+    for (const entry of entries) appendRunJournalEntry(workspaceDir, "draft-1", entry);
+    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
+  });
+
+  test("blame is rejected unless the cell-event kind is error", () => {
+    expect(() => appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "cell-event",
+      at: "2026-08-05T00:00:00Z",
+      event: {
+        cellKey: CELL_A,
+        armId: "arm-a",
+        replicate: 1,
+        dispatch: 1,
+        kind: "delivered",
+      },
+      blame: "infrastructure",
+    })).toThrow();
+  });
+
   test("appendRunJournalEntry refuses validation on a malformed entry", () => {
     expect(() =>
       // @ts-expect-error deliberately malformed for the refusal test
@@ -151,6 +200,50 @@ describe("foldRunJournal — per-cell status", () => {
       { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "cancelled", detail: "run-cancelled" } },
     ]);
     expect(fold.get(CELL_A)).toMatchObject({ status: "cancelled" });
+  });
+
+  test("blame on an error entry is folded onto the cell (BP-22)", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "cell-event",
+        at: "t0",
+        event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false, detail: "SIGKILL" },
+        blame: "infrastructure",
+      },
+    ]);
+    expect(fold.get(CELL_A)).toMatchObject({ status: "failed", blame: "infrastructure" });
+  });
+
+  test("an error entry with no blame folds with blame absent", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: false, detail: "exit 7" } },
+    ]);
+    expect(fold.get(CELL_A)?.blame).toBeUndefined();
+  });
+
+  test("a fresh dispatch resets blame from the prior (replaceable) attempt", () => {
+    const fold = foldRunJournal([
+      {
+        kind: "cell-event",
+        at: "t0",
+        event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "error", replaceable: true, replaceableReason: "expired", detail: "expired" },
+        blame: "infrastructure",
+      },
+      { kind: "cell-event", at: "t1", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 2, kind: "dispatch", attempt: "att-2" } },
+    ]);
+    const cell = fold.get(CELL_A);
+    expect(cell?.blame).toBeUndefined();
+    expect(cell).toMatchObject({ status: "dispatched", dispatches: 1, lastDispatch: 2 });
+  });
+
+  test("cancel-requested entries carry no per-cell accounting and do not disturb the fold", () => {
+    const fold = foldRunJournal([
+      { kind: "cell-event", at: "t0", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch", attempt: "att-1" } },
+      { kind: "cancel-requested", at: "t1" },
+      { kind: "cell-event", at: "t2", event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "cancelled", detail: "drain-to-boundary" } },
+    ]);
+    expect(fold.size).toBe(1);
+    expect(fold.get(CELL_A)).toMatchObject({ status: "cancelled", dispatches: 1 });
   });
 
   test("a delivered cell with a later evaluation verdict folds to 'judged' and carries the verdict digest", () => {

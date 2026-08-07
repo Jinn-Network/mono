@@ -20,6 +20,14 @@
  * flows into assembly (not just the first — the pre-BP-21 single-verdict bridge), and the trust
  * resolver's evaluator resolution is signature-verified fail-closed (see the resolver comment in
  * `buildRunAssemblyPorts`).
+ *
+ * BP-22 adds a third fact this construction is now the ONE place that derives:
+ * `completeness.runOutcome: "cancelled"` (`@jinn-network/benchmarking-run`'s `assembleMatrix`
+ * reads `ports.inputScope.runCancelled === true`). The durable source of that fact is the cancel
+ * valid marker (`./cancel-marker.ts`'s `cancelRequested`), so `buildRunAssemblyPorts`
+ * reads it itself from the now-required `draftId` input rather than trusting each caller to pass
+ * it — `run.collect`, `run.verify`, and `run.cancel` all call this one function and so can never
+ * drift on the one fact that flips a Matrix's run outcome to cancelled.
  */
 
 import { verify as cryptoVerify, type KeyObject } from "node:crypto";
@@ -32,6 +40,7 @@ import { readEvaluatorPublicKeys, readVerdictEnvelope } from "../venue/signing.j
 import { VENUE_ISOLATION_INVENTORY } from "../venue/venue.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
 import type { LocalAdmissionReceiptFact } from "./admission-receipts.js";
+import { cancelRequested } from "./cancel-marker.js";
 import type { CellJournalFold } from "./journal.js";
 
 /**
@@ -155,6 +164,9 @@ function buildInScopeCells(
 
 export interface BuildRunAssemblyPortsInput {
   readonly workspaceDir: string;
+  /** The draft this run belongs to (BP-22) — used ONLY to derive `runCancelled` from a valid
+   * cancel marker (`./cancel-marker.ts`'s `cancelRequested`); no other port reads it. */
+  readonly draftId: string;
   readonly runRecord: RunRecord;
   /** The full expected cell coordinate set (`expectedCellSet(benchRecord, runRecord)`). */
   readonly expected: readonly CellCoord[];
@@ -174,7 +186,7 @@ export interface BuildRunAssemblyPortsInput {
  * ports.
  */
 export function buildRunAssemblyPorts(input: BuildRunAssemblyPortsInput): AssemblyPorts {
-  const { workspaceDir, runRecord, expected, fold, owner, receiptsByTaskDigest } = input;
+  const { workspaceDir, draftId, runRecord, expected, fold, owner, receiptsByTaskDigest } = input;
   const cells = buildInScopeCells(workspaceDir, expected, fold);
 
   // Loaded lazily and memoized: the registry scan itself can refuse on a broken key slot, and
@@ -184,8 +196,13 @@ export function buildRunAssemblyPorts(input: BuildRunAssemblyPortsInput): Assemb
   const loadEvaluatorKeys = (): ReadonlyMap<string, KeyObject> =>
     (evaluatorKeys ??= readEvaluatorPublicKeys(workspaceDir));
 
+  // The ONE derivation of `completeness.runOutcome: "cancelled"` (module header, BP-22): the
+  // valid cancel marker, read straight from durable state — never threaded through as
+  // a caller-supplied flag that `run.collect`/`run.verify`/`run.cancel` could each get wrong.
+  const runCancelled = cancelRequested(workspaceDir, draftId);
+
   return localAssemblyPorts({
-    inputScope: { cellsForRun: () => cells },
+    inputScope: { cellsForRun: () => cells, ...(runCancelled ? { runCancelled: true } : {}) },
     pinning: {
       submissionBaseline: runRecord.policy.submissionBaseline as Record<string, unknown>,
       isolationInventory: VENUE_ISOLATION_INVENTORY,

@@ -12,6 +12,7 @@ import type {
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { readAuditEntries } from "../audit/journal.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunJournalEntries, type RunJournalEntry } from "../run/journal.js";
 import { readRunState } from "../run/state.js";
@@ -451,6 +452,61 @@ describe("runLaunch — onProgress streaming (BP-13)", () => {
   }, 30_000);
 });
 
+/** Wraps a fake backend's `submit` so the cancel marker is written right after the Nth accepted
+ * submission — a test-only way to prove `launchAndWatch`/`resumeRun`'s own `earlyClose` getter
+ * (`../run/cancel-marker.ts`'s `cancelRequested`, threaded through in `run-launch.ts`) genuinely
+ * reacts to a marker written MID-drive, not only one present before the call started. */
+function withCancelAfterNthSubmit(
+  inner: ProxiedBackend,
+  writeMarkerAt: () => void,
+  n: number,
+): ProxiedBackend {
+  let count = 0;
+  return {
+    ...inner,
+    async submit(taskBytes, submissionBytes, engagement) {
+      const ack = await inner.submit(taskBytes, submissionBytes, engagement);
+      count += 1;
+      if (count === n) writeMarkerAt();
+      return ack;
+    },
+  };
+}
+
+describe("runLaunch — earlyClose getter reacts to a marker written mid-drive (BP-22)", () => {
+  test("a marker written during the first cell's own solve dispatch stops the loop before a second cell is ever touched", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    // Fires after the FIRST accepted submission (the first cell's own solve dispatch) — every
+    // later cell's outer-loop boundary check must then see the marker and stop.
+    const wrapped = withCancelAfterNthSubmit(
+      backend,
+      () => writeCancelMarker(workspaceDir, "draft-1", { requestedAt: "2026-08-05T00:00:00Z", principal: "sponsor-1" }),
+      1,
+    );
+
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(wrapped) });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // The drive stopping early is not itself a failure — launch still returns ok; a later
+    // `run.cancel` is what finalizes the closed state and seals the Matrix.
+    expect(outcome.result.draft.state).toBe("running");
+
+    const entries = readRunJournalEntries(workspaceDir, "draft-1");
+    const touchedCellKeys = new Set(
+      entries
+        .filter((entry) => entry.kind === "cell-event" && entry.event.cellKey !== "*")
+        .map((entry) => (entry.kind === "cell-event" ? entry.event.cellKey : "")),
+    );
+    // Exactly one of the 6 expected cells was ever dispatched.
+    expect(touchedCellKeys.size).toBe(1);
+
+    const finalEvent = entries.find((entry) => entry.kind === "cell-event" && entry.event.cellKey === "*");
+    expect(finalEvent).toMatchObject({ kind: "cell-event", event: { kind: "cancelled", cancelledRun: true } });
+  }, 30_000);
+});
+
 describe("runResume — lifecycle guard", () => {
   test("refuses illegal-transition when the draft is not running", async () => {
     const clock = makeClock();
@@ -461,6 +517,77 @@ describe("runResume — lifecycle guard", () => {
     if (outcome.ok) return;
     expect(outcome.error.code).toBe("illegal-transition");
   });
+
+  test("refuses conflict when a cancel marker is already present (BP-22) — an interrupted cancel resumes via 'cancel', not 'resume'", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(backend) });
+    expect(launched.ok).toBe(true);
+
+    writeCancelMarker(workspaceDir, "draft-1", { requestedAt: clock(), principal: "sponsor-1" });
+
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("conflict");
+  }, 30_000);
+
+  test("a marker written during the first outstanding cell's own dispatch stops the loop before the second outstanding cell is redispatched", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(launchBackend) });
+    expect(launched.ok).toBe(true);
+
+    // Simulate "launch crashed before two cells were ever touched": drop every journal entry
+    // naming either of the first two delivered cells, so runResume has 2 outstanding cells.
+    const fullEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    const deliveredCells = fullEntries
+      .filter((entry) => entry.kind === "cell-event" && entry.event.kind === "delivered")
+      .map((entry) => (entry.kind === "cell-event" ? entry.event.cellKey : ""));
+    const [droppedA, droppedB] = deliveredCells;
+    expect(droppedA).toBeDefined();
+    expect(droppedB).toBeDefined();
+    const truncated = fullEntries.filter((entry) => {
+      if (entry.kind === "cell-event") return entry.event.cellKey !== droppedA && entry.event.cellKey !== droppedB;
+      if (entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") {
+        return entry.cellKey !== droppedA && entry.cellKey !== droppedB;
+      }
+      return true;
+    });
+    overwriteRunJournal("draft-1", truncated);
+
+    const { backend: resumeBackend } = makeStatefulFakeBackend();
+    // Fires after the FIRST accepted submission of this resume call (the first outstanding
+    // cell's own solve dispatch) — the second outstanding cell's boundary check must then see
+    // the marker and drain instead of redispatching.
+    const wrapped = withCancelAfterNthSubmit(
+      resumeBackend,
+      () => writeCancelMarker(workspaceDir, "draft-1", { requestedAt: "2026-08-05T00:00:00Z", principal: "sponsor-1" }),
+      1,
+    );
+
+    const outcome = await runResume(contextFor(clock), { draftId: "draft-1" }, { createVenue: () => fakeVenue(wrapped) });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+
+    const afterEntries = readRunJournalEntries(workspaceDir, "draft-1");
+    // One of the two previously-outstanding cells was re-dispatched to completion; the other
+    // was drained with a "cancelled" terminal instead of being resubmitted.
+    const cancelledDrainEntry = afterEntries.find(
+      (entry) =>
+        entry.kind === "cell-event"
+        && entry.event.kind === "cancelled"
+        && entry.event.detail === "drain-to-boundary"
+        && (entry.event.cellKey === droppedA || entry.event.cellKey === droppedB),
+    );
+    expect(cancelledDrainEntry).toBeDefined();
+    const redeliveredEntry = afterEntries.find(
+      (entry) => entry.kind === "cell-event" && entry.event.kind === "delivered" && (entry.event.cellKey === droppedA || entry.event.cellKey === droppedB),
+    );
+    expect(redeliveredEntry).toBeDefined();
+  }, 30_000);
 
   test("ungated: a bare workspace member with no grants can resume", async () => {
     const clock = makeClock();
@@ -529,10 +656,10 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     for (const cellKey of untouchedCellKeys) {
       const original = fullEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.cellKey === cellKey));
+        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.kind !== "cancel-requested" && entry.cellKey === cellKey));
       const after = afterEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.cellKey === cellKey));
+        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.kind !== "cancel-requested" && entry.cellKey === cellKey));
       expect(after).toEqual(original);
     }
   }, 30_000);

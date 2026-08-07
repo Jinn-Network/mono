@@ -761,6 +761,62 @@ venue; no §4/§6/§7 decision reopened):**
   `evaluationContextVariationForTesting`, used only by tests to manufacture
   controlled evaluator disagreement; it never runs in production paths.
 
+**Addendum — 2026-08-07, packet BP-22 (cancellation + infrastructure
+accounting; no lifecycle, record, or platform-orchestration decision
+reopened):**
+
+- **Durable intent and two-phase finalization (§4.1).** The gated `cancel`
+  operation publishes a write-once, schema-valid per-run marker before
+  probing the venue, fsyncing both the complete owner file and runs directory
+  around exclusive hard-link publication/owner cleanup. Malformed marker
+  bytes fail closed as record-integrity in hot, finalization, status, assembly,
+  and verification paths. If a live driver owns the venue it returns typed `requested`;
+  a retry repairs the independently idempotent journal echo and, once the
+  venue is free, drains every expected cell, seals a Matrix whose
+  `completeness.runOutcome` is `cancelled`, and closes the draft. Terminal
+  idempotency re-reads that sealed Matrix and succeeds only when its outcome
+  is truly cancelled; a stray marker can never bless a naturally completed
+  run.
+- **One finalizer and one attribution.** `collect` and `cancel` share a
+  product-owned, cross-process per-run single-writer boundary (complete
+  owner record, PID-start identity, token-exact publication, and a
+  freshness-aware recovery guard that serializes stale-owner reclamation
+  without displacing a successor). Every guard acquisition is fenced against
+  the same directory inode and a sole exact marker name/token/inode immediately
+  before ownership returns. An apparently crashed ownerless initialization is
+  adoptable only when the exact moved inode still contains the byte-identical
+  invalid snapshot; if initialization completed or changed meanwhile, that
+  exact inode is restored non-overwriting to the fixed ownerless name and the
+  reclaimer yields. Process liveness is tri-state: a missing start-time
+  probe is never treated as death unless a PID existence probe proves `ESRCH`;
+  live, permission-denied, and otherwise unknown owners remain contended.
+  Crashed owners and crashed recovery-guard initialization remain recoverable;
+  malformed, symbolic-link, or non-regular records fail closed. The
+  boundary covers marker inspection/publication through the terminal
+  lifecycle write, eliminating collect/cancel TOCTOU and concurrent-cancel
+  attribution overwrite or duplicate intent facts. Symbolic-link or
+  non-regular intent/lock paths fail closed.
+- **Live-attempt cancellation uses platform ports (§3).** A product-owned
+  backend decorator watches/polls the durable marker and invokes the real
+  backend's existing `cancel(attempt)` port for an observably nonterminal
+  solve attempt. Accepted submissions remain pending through first observe,
+  and active attempts remain tracked through their true terminal snapshot;
+  the marker cannot abort the platform signal across either race window.
+  A marker found at a genuinely idle dispatch boundary is instead exposed
+  through the platform's existing `earlyClose` port. Thus `launchAndWatch` /
+  `resumeRun` remain the sole
+  owners of dispatch, watch, terminal classification, and drain semantics;
+  no second orchestration implementation exists. Real-local-venue coverage
+  proves the subprocess receives SIGTERM/SIGKILL and terminalizes cancelled
+  before undispatched cells are boundary-drained.
+- **Failure-accounting and denominator law (§8.2).** Solve terminal errors
+  may carry only platform-observed `task` or `infrastructure` blame; blame on
+  any non-error journal event is an integrity failure. Subprocess-kill,
+  unscorable, expired, and cancellation-drained cells stay explicit in
+  Matrix completeness/attrition and result/claim surfaces. Only judged cells
+  enter score denominators: infrastructure failures and every other
+  unjudged/expired cell are never silently converted into score losses.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

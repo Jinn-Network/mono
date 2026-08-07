@@ -8,7 +8,7 @@ import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { canonicalJsonBytes, parseDsseEnvelope, sealDsseEnvelope } from "@jinn-network/trust-core";
 import type { ProxiedBackend } from "../run/drive.js";
 import { readRunState, writeRunState } from "../run/state.js";
-import { claimPackageArtifactPath } from "../workspace/layout.js";
+import { claimPackageArtifactPath, runCancelMarkerPath } from "../workspace/layout.js";
 import { getSealedBytes, putSealedBytes, sealedRecordPath, sha256Hex } from "../workspace/sealed-store.js";
 import { LEGACY_VERDICT_EVALUATOR_ID, createVerdictDsseSigner, loadOrCreateVerdictSigningKey, sealVerdictStatement } from "../venue/signing.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -266,6 +266,22 @@ describe("runVerify — happy path", () => {
 });
 
 describe("runVerify — matrix tamper detection", () => {
+  test(
+    "fails closed when Matrix re-derivation encounters malformed cancel-intent bytes",
+    async () => {
+      const clock = makeClock();
+      await setUpClosedRun(clock);
+      writeFileSync(runCancelMarkerPath(workspaceDir, "draft-1"), "not-json");
+
+      const outcome = await runVerify(contextFor(clock), { draftId: "draft-1" });
+      expect(outcome.ok).toBe(false);
+      if (outcome.ok) return;
+      expect(outcome.error.code).toBe("record-integrity");
+      expect(outcome.error.detail).toMatch(/cancel marker/iu);
+    },
+    30_000,
+  );
+
   test(
     "rejects a valid-but-different re-sealed Matrix (matrix-rederivation, strong tamper)",
     async () => {

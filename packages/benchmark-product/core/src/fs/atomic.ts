@@ -45,7 +45,7 @@ function fsyncBestEffortSync(fd: number): void {
   }
 }
 
-function fsyncDirectorySync(directory: string): void {
+export function fsyncDirectorySync(directory: string): void {
   const fd = openSync(directory, "r");
   try {
     fsyncBestEffortSync(fd);

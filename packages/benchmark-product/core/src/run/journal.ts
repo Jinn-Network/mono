@@ -8,13 +8,21 @@
  * `running --resume--> running`: "crash-safe resumption via the records' cell idempotency
  * keys"). One journal per draftId (`runJournalPath`), JSON Lines, entries never rewritten.
  *
- * Six entry kinds:
+ * Seven entry kinds:
  * - `launched` — the run driver started (one per `runLaunch` call).
  * - `cell-event` — a solve-side `CellStatusEvent` from `launchAndWatch`/`resumeRun`, verbatim.
+ *   Optionally carries `blame` (BP-22): for an "error" terminal, the platform-derived
+ *   task-vs-infrastructure attribution `../run/drive.ts` best-effort observed at journal-write
+ *   time (`"task" | "infrastructure"`, absent when unobservable — never a reason to fail the
+ *   write it enriches).
  * - `submission-accepted` — the exact sealed Submission bytes were stored, keyed by dispatch.
  * - `delivery` — the exact sealed Delivery bytes were stored for a dispatch's accounted attempt.
  * - `evaluation` — the evaluation leg reached a terminal (a verdict, or a could-not-grade fact).
- * - `closed` — `run.collect` sealed the Matrix.
+ * - `cancel-requested` (BP-22) — `run.cancel` recorded a cancellation request. Written exactly
+ *   once per run, alongside (never instead of) the durable cancel marker
+ *   (`./cancel-marker.ts`) — the marker is the fact other operations gate on; this entry is the
+ *   audit-trail echo of it inside the same journal every other cell activity lives in.
+ * - `closed` — `run.collect` OR `run.cancel` sealed the Matrix.
  */
 
 import { z } from "zod";
@@ -49,7 +57,15 @@ export type CellStatusEventLike = z.infer<typeof CellStatusEventSchema>;
 
 export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("launched"), at: Rfc3339Schema }),
-  z.object({ kind: z.literal("cell-event"), at: Rfc3339Schema, event: CellStatusEventSchema }),
+  z.object({
+    kind: z.literal("cell-event"),
+    at: Rfc3339Schema,
+    event: CellStatusEventSchema,
+    /** Best-effort task-vs-infrastructure attribution for an "error" terminal (BP-22). Absent
+     * whenever the event isn't an "error" terminal, or the backend observation that would have
+     * supplied it failed or was never attempted. */
+    blame: z.enum(["task", "infrastructure"]).optional(),
+  }),
   z.object({
     kind: z.literal("submission-accepted"),
     at: Rfc3339Schema,
@@ -88,8 +104,20 @@ export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
      * treats an entry without one as leg 1 (the only leg a legacy journal ever ran). */
     evalIndex: z.number().int().min(1).optional(),
   }),
+  /** `run.cancel` recorded a cancellation request (BP-22) — written once per run, alongside the
+   * durable cancel marker (`./cancel-marker.ts`). Carries no per-cell accounting; the fold below
+   * ignores it exactly like "launched". */
+  z.object({ kind: z.literal("cancel-requested"), at: Rfc3339Schema }),
   z.object({ kind: z.literal("closed"), at: Rfc3339Schema, matrixSha256: Sha256HexSchema }),
-]);
+]).superRefine((entry, context) => {
+  if (entry.kind === "cell-event" && entry.blame !== undefined && entry.event.kind !== "error") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["blame"],
+      message: "blame is only valid for an error cell-event",
+    });
+  }
+});
 
 export type RunJournalEntry = z.infer<typeof RunJournalEntrySchema>;
 
@@ -179,6 +207,11 @@ export interface CellJournalFold {
    * could-not-grade entry). Entries without an evalIndex count as index 1 (legacy folds). */
   readonly completedEvalIndexes: readonly number[];
   readonly detail?: string;
+  /** The most recent task-vs-infrastructure attribution journaled for this cell's CURRENT
+   * dispatch (BP-22) — set from a cell-event entry's `blame`, reset (to absent) on a fresh
+   * dispatch alongside the other per-dispatch fields. Absent whenever no "error" terminal on
+   * this dispatch carried an observable blame. */
+  readonly blame?: "task" | "infrastructure";
 }
 
 interface MutableFold {
@@ -197,6 +230,7 @@ interface MutableFold {
   verdicts: CellVerdictFold[];
   evaluationTerminal?: "could-not-grade";
   completedEvalIndexes: Set<number>;
+  blame?: "task" | "infrastructure";
 }
 
 function statusFor(fold: MutableFold): CellStatus {
@@ -258,9 +292,14 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
         fold.verdicts = [];
         fold.evaluationTerminal = undefined;
         fold.completedEvalIndexes = new Set();
+        fold.blame = undefined;
       } else {
         fold.replaceableReason = event.replaceableReason;
         if (event.detail !== undefined) fold.detail = event.detail;
+        // Set from THIS entry's own blame (BP-22) — never inherited past a fresh dispatch
+        // (reset above), and never cleared by a later cell-event on the same dispatch that
+        // simply did not carry one (e.g. this entry's own blame observation failed).
+        if (entry.blame !== undefined) fold.blame = entry.blame;
       }
     } else if (entry.kind === "submission-accepted") {
       const fold = ensure(entry.cellKey, "", 0);
@@ -290,7 +329,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       fold.completedEvalIndexes.add(entry.evalIndex ?? 1);
       if (entry.detail !== undefined) fold.detail = entry.detail;
     }
-    // "launched" and "closed" carry no per-cell accounting.
+    // "launched", "cancel-requested", and "closed" carry no per-cell accounting.
   }
 
   const result = new Map<string, CellJournalFold>();
@@ -311,6 +350,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       ...(fold.evaluationTerminal !== undefined ? { evaluationTerminal: fold.evaluationTerminal } : {}),
       completedEvalIndexes: [...fold.completedEvalIndexes].sort((a, b) => a - b),
       ...(fold.detail !== undefined ? { detail: fold.detail } : {}),
+      ...(fold.blame !== undefined ? { blame: fold.blame } : {}),
     });
   }
   return result;

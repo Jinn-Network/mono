@@ -9,6 +9,14 @@
  * `venueHonesty` carries the local-venue limits spec §7.1 requires "in the product and in every
  * report produced from a local run" — plain-language statements, never hidden behind a claim of
  * stronger guarantees than a self-run local venue actually has.
+ *
+ * BP-22: each cell also carries an optional `failure` block, sourced from the run journal's own
+ * fold (`../run/journal.ts`'s `CellJournalFold`) rather than the sealed Matrix — the Matrix's
+ * `outcome` field stays the platform's frozen six-value vocabulary (judged / unjudged /
+ * unscorable / expired / invalidated / excluded) and carries no blame field at all (design
+ * decision: failure detail is product state, never folded into a score). `failure` is present
+ * exactly when the journal fold's solve-side status for that cell is "failed", "expired", or
+ * "cancelled" — never for a judged or merely-delivered (unjudged) cell.
  */
 
 import {
@@ -21,6 +29,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
+import { foldRunJournal, readRunJournalEntries, type CellJournalFold } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { resultsArtifactPath } from "../workspace/layout.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -61,6 +70,14 @@ export interface RunResultsCell {
   readonly validVerdicts: readonly string[];
   readonly cost?: MatrixCell["cost"];
   readonly latencyMs?: number;
+  /** Present exactly when the run journal's own solve-side fold status for this cell is
+   * "failed" / "expired" / "cancelled" (BP-22) — sourced from product state (the run journal),
+   * never from the sealed Matrix, which carries no blame field at all. */
+  readonly failure?: {
+    readonly kind: "failed" | "expired" | "cancelled";
+    readonly blame?: "task" | "infrastructure";
+    readonly detail?: string;
+  };
 }
 
 export interface VenueHonesty {
@@ -120,7 +137,22 @@ function verdictsFor(workspaceDir: string, digests: readonly string[]): RunResul
   });
 }
 
-function toResultsCell(workspaceDir: string, cell: MatrixCell): RunResultsCell {
+/** BP-22: the journal-fold-sourced failure block for one cell, or `undefined` when the fold's
+ * solve-side status isn't one of "failed" / "expired" / "cancelled" (module header). A cell the
+ * fold has no entry for at all (never touched by any journal write) also reports `undefined` —
+ * there is no fact to surface, honestly, not a failure. */
+function failureFor(fold: CellJournalFold | undefined): RunResultsCell["failure"] {
+  if (fold === undefined) return undefined;
+  if (fold.status !== "failed" && fold.status !== "expired" && fold.status !== "cancelled") return undefined;
+  return {
+    kind: fold.status,
+    ...(fold.blame !== undefined ? { blame: fold.blame } : {}),
+    ...(fold.detail !== undefined ? { detail: fold.detail } : {}),
+  };
+}
+
+function toResultsCell(workspaceDir: string, cell: MatrixCell, journalFold: CellJournalFold | undefined): RunResultsCell {
+  const failure = failureFor(journalFold);
   return {
     cellKey: cell.cellKey,
     armId: cell.armId,
@@ -139,6 +171,7 @@ function toResultsCell(workspaceDir: string, cell: MatrixCell): RunResultsCell {
     validVerdicts: cell.validVerdicts.map(bareSha256),
     ...(cell.cost !== undefined ? { cost: cell.cost } : {}),
     ...(cell.latencyMs !== undefined ? { latencyMs: cell.latencyMs } : {}),
+    ...(failure !== undefined ? { failure } : {}),
   };
 }
 
@@ -199,7 +232,10 @@ export function runResults(
       parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const matrix = parseMatrix(getSealedBytes(context.workspaceDir, runState.matrixSha256));
 
-      const cells = matrix.cells.map((cell) => toResultsCell(context.workspaceDir, cell));
+      // BP-22: the journal fold is the SOURCE of each cell's optional `failure` block — read
+      // once here, alongside the Matrix, never re-derived per cell.
+      const journalFold = foldRunJournal(readRunJournalEntries(context.workspaceDir, input.draftId));
+      const cells = matrix.cells.map((cell) => toResultsCell(context.workspaceDir, cell, journalFold.get(cell.cellKey)));
 
       const results: RunResultsDocument = {
         draftId: input.draftId,

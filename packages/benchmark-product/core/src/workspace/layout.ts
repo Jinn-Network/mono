@@ -66,6 +66,23 @@ export function runJournalPath(workspaceDir: string, draftId: string): string {
   return join(runsDir(workspaceDir), `${draftId}.journal.jsonl`);
 }
 
+/**
+ * `<ws>/runs/<draftId>.cancel-requested.json` — the durable cancel-requested marker (BP-22,
+ * plan decision 1). Written once, atomically, by the gated `run.cancel` operation BEFORE any
+ * other effect, and never removed: its validated presence is the fact `run.collect`/`run.resume`'s
+ * guards and the shared assembly-ports construction (`../run/assembly-ports.ts`) key off, so it
+ * must outlive the run it describes. `../run/cancel-marker.ts` owns reading and writing it.
+ */
+export function runCancelMarkerPath(workspaceDir: string, draftId: string): string {
+  return join(runsDir(workspaceDir), `${draftId}.cancel-requested.json`);
+}
+
+/** `<ws>/runs/<draftId>.finalization.lock` — short-lived cross-process single-writer boundary
+ * shared by natural collect and cancellation finalization (BP-22 review correction). */
+export function runFinalizationLockPath(workspaceDir: string, draftId: string): string {
+  return join(runsDir(workspaceDir), `${draftId}.finalization.lock`);
+}
+
 /** `<ws>/artifacts/<draftId>/results.json` — the derived results artifact (spec §4.5). */
 export function resultsArtifactPath(workspaceDir: string, draftId: string): string {
   return join(artifactsDir(workspaceDir), draftId, "results.json");

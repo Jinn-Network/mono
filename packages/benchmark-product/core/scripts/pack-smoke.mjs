@@ -95,9 +95,10 @@ try {
     smokeScript,
     `
 import { readFile, readdir } from "node:fs/promises";
-import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark } from "@jinn-network/benchmark-product-core";
+import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@jinn-network/benchmark-product-core";
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
+if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");
 // The bundled sample must build from the PACKED graph: this proves the admission package ships
 // its golden fixture in the tarball and the whole intake path works for an external consumer.
 const sample = await buildSampleBenchmark();

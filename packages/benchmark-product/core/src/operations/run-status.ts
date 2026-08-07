@@ -16,6 +16,7 @@ import {
 } from "@jinn-network/benchmarking-records";
 import type { LifecycleState } from "../domain/lifecycle.js";
 import { refuse } from "../errors.js";
+import { cancelRequested } from "../run/cancel-marker.js";
 import { foldRunJournal, readRunJournalEntries, type CellStatus } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
 import { getSealedBytes } from "../workspace/sealed-store.js";
@@ -35,6 +36,10 @@ export interface RunStatusCell {
   readonly deliverySha256?: string;
   readonly verdictSha256?: string;
   readonly detail?: string;
+  /** Task-vs-infrastructure attribution for this cell's most recent "error" terminal (BP-22),
+   * folded from the run journal's own `blame` field (`../run/journal.ts`). Absent whenever no
+   * error terminal on the current dispatch carried an observable blame. */
+  readonly blame?: "task" | "infrastructure";
 }
 
 export interface RunStatusCounts {
@@ -52,6 +57,10 @@ export interface RunStatusCounts {
 export interface RunStatusResult {
   readonly state: LifecycleState;
   readonly closeAt?: string;
+  /** True once a cancellation has been requested (BP-22, `../run/cancel-marker.ts`'s
+   * `cancelRequested`) — a present, schema-valid marker, independent of whether `run.cancel` has
+   * yet finalized it (spec §4.6 Official-run row: the state line shows "cancel requested"). */
+  readonly cancelRequested: boolean;
   readonly cells: readonly RunStatusCell[];
   readonly counts: RunStatusCounts;
 }
@@ -97,6 +106,7 @@ export function runStatus(
           ...(cell?.deliverySha256 !== undefined ? { deliverySha256: cell.deliverySha256 } : {}),
           ...(cell?.verdictSha256 !== undefined ? { verdictSha256: cell.verdictSha256 } : {}),
           ...(cell?.detail !== undefined ? { detail: cell.detail } : {}),
+          ...(cell?.blame !== undefined ? { blame: cell.blame } : {}),
         };
       });
 
@@ -111,6 +121,7 @@ export function runStatus(
       return {
         state: document.state,
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
+        cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
         cells,
         counts,
       };

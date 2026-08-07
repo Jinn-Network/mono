@@ -106,3 +106,7 @@ export { runVerify, type RunVerifyCheck, type RunVerifyInput, type RunVerifyResu
 // Ungated (any workspace member may preview) and non-advancing (draft/quoted lifecycle state is
 // unchanged either way, spec §4.1 assumption A5).
 export { runPreview, type PreviewArtifact, type RunPreviewDeps, type RunPreviewInput, type RunPreviewResult } from "./preview.js";
+
+// BP-22: cancellation (spec §4.1 running --cancel--> closed, GATED) — `cancel` stops dispatch,
+// drains outstanding cells to a boundary, and seals the Matrix with the cancellation accounted.
+export { runCancel, type RunCancelDeps, type RunCancelInput, type RunCancelResult } from "./run-cancel.js";

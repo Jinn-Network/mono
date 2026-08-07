@@ -438,6 +438,30 @@ async function driveEvaluationForDelivery(deps: DriveDeps, event: CellStatusEven
 }
 
 /**
+ * Best-effort task-vs-infrastructure attribution for an "error" terminal (BP-22, plan decision
+ * 8). Re-observes the attempt the event named and reads the platform's own derived blame
+ * (`snapshot.descriptor.derived.blame` — populated by the launcher's own BlameRule at the
+ * attempt's terminal observation: an unmatched exit is "task", `{signal: SIGKILL}` or another
+ * infra-side failure is "infrastructure", and a deadline-expiry terminal carries none). Never an
+ * event kind other than "error", never an event with no attempt reference (a submit rejection,
+ * for instance, has neither) — those return `undefined` without touching the backend at all.
+ * Any observe failure is swallowed: blame is a diagnostic enrichment on top of an already-durable
+ * journal write, never a reason to slow or fail it — an absent blame stays honestly "unknown".
+ */
+async function observeBlame(
+  deps: DriveDeps,
+  event: CellStatusEvent,
+): Promise<"task" | "infrastructure" | undefined> {
+  if (event.kind !== "error" || event.attempt === undefined) return undefined;
+  try {
+    const snapshot = await deps.backend.observe(event.attempt as AttemptUri);
+    return snapshot.descriptor.derived.blame;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Folds a `CellStatusEvent` stream into the run journal, dispatching the evaluation leg
  * in-line on every solve-side `delivered` terminal (module header).
  */
@@ -447,7 +471,13 @@ export async function driveCellEvents(
 ): Promise<void> {
   requireEvaluatorCoverage(deps);
   for await (const event of events) {
-    appendRunJournalEntry(deps.workspaceDir, deps.draftId, { kind: "cell-event", at: deps.liveClock(), event });
+    const blame = await observeBlame(deps, event);
+    appendRunJournalEntry(deps.workspaceDir, deps.draftId, {
+      kind: "cell-event",
+      at: deps.liveClock(),
+      event,
+      ...(blame !== undefined ? { blame } : {}),
+    });
     emitProgress(deps, `${event.cellKey} ${event.kind}`);
     if (event.kind === "delivered") {
       await driveEvaluationForDelivery(deps, event);

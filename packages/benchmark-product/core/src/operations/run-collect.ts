@@ -14,6 +14,11 @@
  * self-consistent, not a genuine third-party integrity concern, but it is refused exactly the
  * same as any other `"record-integrity"` failure (spec §4.3): silently sealing a Matrix this
  * module cannot re-derive itself would be worse than refusing.
+ *
+ * BP-22: refuses `"conflict"` before even reaching the close-boundary check when a cancellation
+ * is already pending (`../run/cancel-marker.ts`'s `cancelRequested`) — `run.cancel` is the sole
+ * finalizer once a cancel has been requested, so collect steps aside rather than racing it to
+ * seal the Matrix first.
  */
 
 import {
@@ -28,6 +33,8 @@ import { refuse } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { scanPredictionSnapshotAdmissionReceipts } from "../run/admission-receipts.js";
 import { buildRunAssemblyPorts } from "../run/assembly-ports.js";
+import { cancelRequested } from "../run/cancel-marker.js";
+import { acquireRunFinalizationLock } from "../run/finalization-lock.js";
 import { appendRunJournalEntry, foldRunJournal, outstandingCells, readRunJournalEntries } from "../run/journal.js";
 import { requireRunState, writeRunState } from "../run/state.js";
 import { draftPath } from "../workspace/layout.js";
@@ -59,7 +66,18 @@ export function runCollect(
     subject: input.draftId,
     inputs: input,
     run: async () => {
-      const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
+      const finalization = acquireRunFinalizationLock(clockedContext.workspaceDir, input.draftId);
+      if (!finalization.acquired) {
+        const code = finalization.reason === "contended"
+          ? "conflict"
+          : finalization.reason === "invalid"
+            ? "record-integrity"
+            : "execution";
+        refuse(code, `runs.${input.draftId}.finalization`, finalization.detail);
+      }
+
+      try {
+        const document = readDraftDocument(clockedContext.workspaceDir, input.draftId);
       if (document.state !== "running") {
         refuse(
           "illegal-transition",
@@ -74,6 +92,14 @@ export function runCollect(
       const runState = requireRunState(clockedContext.workspaceDir, input.draftId);
       if (runState.runSha256 === undefined || runState.closeAt === undefined) {
         refuse("conflict", `runs.${input.draftId}`, `draft ${input.draftId} has no sealed Run record yet`);
+      }
+
+      if (cancelRequested(clockedContext.workspaceDir, input.draftId)) {
+        refuse(
+          "conflict",
+          `runs.${input.draftId}`,
+          `draft ${input.draftId} has a pending cancellation — run "cancel" to finalize it, not "collect"`,
+        );
       }
 
       const runRecord = parseRun(getSealedBytes(clockedContext.workspaceDir, runState.runSha256));
@@ -98,6 +124,7 @@ export function runCollect(
       // rebuild the exact same ports from the exact same durable facts (that module's own header).
       const ports = buildRunAssemblyPorts({
         workspaceDir: clockedContext.workspaceDir,
+        draftId: input.draftId,
         runRecord,
         expected,
         fold,
@@ -124,7 +151,10 @@ export function runCollect(
 
       appendRunJournalEntry(clockedContext.workspaceDir, input.draftId, { kind: "closed", at, matrixSha256 });
 
-      return { draft, matrixSha256 };
+        return { draft, matrixSha256 };
+      } finally {
+        finalization.release();
+      }
     },
   });
 }

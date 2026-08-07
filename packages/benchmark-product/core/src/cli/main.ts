@@ -1,11 +1,11 @@
 /**
  * The CLI's dispatch table (spec §5.2) — the complete agent surface through
- * BP-13. Twenty-four operational verbs over the operations facade (`init`,
+ * BP-22. Twenty-six operational verbs over the operations facade (`init`,
  * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
  * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
  * `arm list`, `authority grant`, `authority revoke`, `authority show`,
  * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
- * `report`, `verify`), plus `help`. Every verb takes `--json` for a
+ * `cancel`, `report`, `verify`), plus `help`. Every verb takes `--json` for a
  * machine-readable envelope; every failure is a typed error envelope with a
  * distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
@@ -44,6 +44,7 @@ import {
   inspectDraft,
   listDrafts,
   runCollect,
+  runCancel,
   runLaunch,
   runLock,
   runPreview,
@@ -94,6 +95,7 @@ Verbs (every verb accepts --json for a machine-readable envelope):
   lock             --workspace <dir> --principal <id> --draft <draftId>
   launch           --workspace <dir> --principal <id> --draft <draftId>
   resume           --workspace <dir> --principal <id> --draft <draftId>
+  cancel           --workspace <dir> --principal <id> --draft <draftId>
   status           --workspace <dir> --principal <id> --draft <draftId>
   collect          --workspace <dir> --principal <id> --draft <draftId>
   results          --workspace <dir> --principal <id> --draft <draftId>
@@ -126,6 +128,7 @@ const QUOTE_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LOCK_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const LAUNCH_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESUME_FLAGS = ["workspace", "principal", "json", "draft"] as const;
+const CANCEL_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const STATUS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const COLLECT_FLAGS = ["workspace", "principal", "json", "draft"] as const;
 const RESULTS_FLAGS = ["workspace", "principal", "json", "draft"] as const;
@@ -525,6 +528,19 @@ async function handleResume(args: ParsedArgs, context: CliContext, jsonMode: boo
   );
 }
 
+async function handleCancel(args: ParsedArgs, context: CliContext, jsonMode: boolean): Promise<CliResult> {
+  assertKnownFlags(args, CANCEL_FLAGS);
+  const opContext = buildOperationContext(args, context);
+  const draftId = required(args, "draft");
+
+  const result = await runCancel(opContext, { draftId });
+  return renderResult(result, jsonMode, (value) =>
+    value.phase === "requested"
+      ? `cancellation requested for draft ${draftId}; the active driver is draining — run cancel again to finalize\n`
+      : `cancelled draft ${draftId}: matrix ${value.matrixSha256}\n`,
+  );
+}
+
 function handleStatus(args: ParsedArgs, context: CliContext, jsonMode: boolean): CliResult {
   assertKnownFlags(args, STATUS_FLAGS);
   const opContext = buildOperationContext(args, context);
@@ -606,6 +622,7 @@ const VERBS: ReadonlyMap<string, VerbHandler> = new Map<string, VerbHandler>([
   ["lock", handleLock],
   ["launch", handleLaunch],
   ["resume", handleResume],
+  ["cancel", handleCancel],
   ["status", handleStatus],
   ["collect", handleCollect],
   ["results", handleResults],
