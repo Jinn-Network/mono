@@ -845,6 +845,50 @@ reopened):**
   true`, no public package entrypoint — nothing installs it); the guard's
   family-coverage assertion keeps the exclusion explicit rather than
   silent.
+
+**Addendum — 2026-08-07, packet BP-31 (M3 setup flow and GUI parity; no
+§4/§5/§7/§9 decision reopened):**
+
+- **§5.3 server-side client realized.** The private web application has
+  exactly one production Jinn dependency, the public package entry of
+  `@jinn-network/benchmark-product-core`. All reads and Server Actions are
+  server-only in-process clients of that entry. There are no HTTP route
+  handlers, deep imports, sibling source escapes, client-side core imports,
+  or duplicated validation/transition/quote/preview semantics. The web
+  dependency's portal closure is pinned, and CI restores the already-built
+  runtime graph before web install/typecheck/test/build.
+- **Fail-closed product context.** A web process must receive an explicit
+  absolute workspace directory and explicit principal. Only those two
+  validated values plus the server clock enter an operation context; no
+  credential, private key, secret, or ambient environment object crosses
+  into browser state. Known configuration/form failures produce safe typed
+  details; unexpected exceptions are redacted. Core `OperationResult`
+  errors retain their typed code, detail, and retry guidance.
+- **§4 setup surface realized.** Routes and accessible forms now cover
+  workspace init; draft create/read/list/edit/inspect; bundled sample and
+  SWE-bench intake; arm add/update/remove/list; authority show plus visibly
+  sponsor-only grant/revoke; real-local-venue preview; quote; and gated
+  lock. Mutations revalidate the affected workspace/draft routes. A
+  temporary-workspace integration test drives the entire Server Action
+  layer through that order; preview exercises the real local venue rather
+  than the in-memory kit backend.
+- **§5.4 GUI parity realized.** The generated capability matrix now carries
+  an explicit GUI cell for every shipped library operation/CLI row. A
+  server-only action registry is checked bidirectionally against the public
+  core GUI catalog: an unregistered rendered action or a silently omitted
+  eligible operation fails. BP-32 explicitly owns `launch`, `resume`,
+  `cancel`, `status`, and `collect`; BP-33 explicitly owns `results`,
+  `report`, and `verify`. Existing non-operation exclusions
+  `unverifiableAxisCounts` and `publish` remain named rather than silently
+  treated as GUI capabilities.
+- **Public consumer/build contract.** Core's root entry now exports
+  `runPreview` and its input/dependency/result/artifact types, quote
+  presentation types and `LOCAL_VENUE_LIMITS`, the GUI capability catalog,
+  and `PRODUCT_BRANDING`. Source-entry tests and packed external consumers
+  cover the additions. Node 22.23's synchronous `require()` of this ESM
+  graph is a deliberate package contract used by the webpack server
+  external; both packed `import`/`require` smoke and production `next start`
+  route loading prove it rather than relying on a build-only assumption.
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

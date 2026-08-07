@@ -5,16 +5,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { WEB_BRANDING } from "@/lib/branding";
+import { Button } from "@/components/ui/button";
+import { PRODUCT_BRANDING } from "@/lib/branding";
+import Link from "next/link";
 
 export default function Page() {
   return (
     <main className="mx-auto flex max-w-4xl flex-col gap-10 px-6 py-16">
       <div className="flex flex-col gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">
-          {WEB_BRANDING.displayName}
+          {PRODUCT_BRANDING.displayName}
         </h1>
-        <p className="text-lg text-muted-foreground">{WEB_BRANDING.tagline}</p>
+        <p className="text-lg text-muted-foreground">{PRODUCT_BRANDING.tagline}</p>
       </div>
 
       <p className="text-base">
@@ -80,10 +82,7 @@ export default function Page() {
         </Card>
       </div>
 
-      <p className="text-sm text-muted-foreground">
-        Workspace screens arrive in a later milestone. The command-line
-        surface is the complete product surface today.
-      </p>
+      <Button asChild className="self-start"><Link href="/workspace">Open workspace</Link></Button>
     </main>
   );
 }

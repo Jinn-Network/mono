@@ -16,7 +16,7 @@ The catalog contains **83** entries: **50** `platform-v1` packages, **8** disabl
 | @jinn-network/operator-spa | client/src/dashboard/spa | operator | 4 | product | operator dashboard product | candidate | transitional-or-private | private | @hookform/resolvers<br>@radix-ui/react-alert-dialog<br>@radix-ui/react-dialog<br>@radix-ui/react-dropdown-menu<br>@radix-ui/react-label<br>@radix-ui/react-popover<br>@radix-ui/react-progress<br>@radix-ui/react-radio-group<br>@radix-ui/react-scroll-area<br>@radix-ui/react-slot<br>@radix-ui/react-switch<br>@radix-ui/react-tabs<br>@radix-ui/react-tooltip<br>@tanstack/react-query<br>@tanstack/react-table<br>class-variance-authority<br>clsx<br>html-to-image<br>lucide-react<br>react<br>react-dom<br>react-hook-form<br>sonner<br>tailwind-merge<br>tailwindcss-animate<br>wouter<br>xterm<br>xterm-addon-fit<br>xterm-addon-web-links<br>zod | — | — |
 | @jinn-network/autopilot | packages/autopilot | autopilot | 4 | transitional | vendored tier-4 product residue | transitional | transitional-or-private | private | @jinn-network/sdk<br>zod | — | — |
 | @jinn-network/benchmark-product-core | packages/benchmark-product/core | benchmark-product | 4 | product | benchmark product core | experimental | transitional-or-private | never | @jinn-network/benchmarking-aggregate<br>@jinn-network/benchmarking-interop<br>@jinn-network/benchmarking-local<br>@jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run<br>@jinn-network/task-admission<br>@jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-evaluation-harness<br>@jinn-network/task-execution-evaluator-adapters<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace<br>@jinn-network/trust-core<br>zod | — | — |
-| @jinn-network/benchmark-product-web | packages/benchmark-product/web | benchmark-product | 4 | product | benchmark product web application | experimental | transitional-or-private | never | class-variance-authority<br>clsx<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>tailwind-merge | — | — |
+| @jinn-network/benchmark-product-web | packages/benchmark-product/web | benchmark-product | 4 | product | benchmark product web application | experimental | transitional-or-private | never | @jinn-network/benchmark-product-core<br>class-variance-authority<br>clsx<br>lucide-react<br>next<br>radix-ui<br>react<br>react-dom<br>server-only<br>tailwind-merge | — | — |
 | @jinn-network/benchmarking-aggregate | packages/benchmarking/aggregate | benchmarking | 3 | platform | aggregation capability | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/trust-core | — | — |
 | @jinn-network/benchmarking-interop | packages/benchmarking/interop | benchmarking | 3 | platform | task-execution import and export | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol | — | — |
 | @jinn-network/benchmarking-local | packages/benchmarking/local | benchmarking | 3 | platform | local venue adapter | candidate | platform-v1 | canary-only | @jinn-network/benchmarking-records<br>@jinn-network/benchmarking-run | — | — |
@@ -119,6 +119,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/benchmark-product-core | runtime | @jinn-network/task-execution-supervisor |
 | @jinn-network/benchmark-product-core | runtime | @jinn-network/task-execution-workspace |
 | @jinn-network/benchmark-product-core | runtime | @jinn-network/trust-core |
+| @jinn-network/benchmark-product-web | runtime | @jinn-network/benchmark-product-core |
 | @jinn-network/benchmarking-aggregate | runtime | @jinn-network/benchmarking-records |
 | @jinn-network/benchmarking-aggregate | runtime | @jinn-network/trust-core |
 | @jinn-network/benchmarking-interop | runtime | @jinn-network/benchmarking-records |
@@ -1460,7 +1461,7 @@ The exact 50-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3613 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3615 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1473,7 +1474,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2868 |
+| discoveredFirstPartySurfaces | 2870 |
 | generatedOutputSources | 1305 |
 | generatorSources | 595 |
 | marketplaceControl | 2 |

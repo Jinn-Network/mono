@@ -21,6 +21,9 @@ export interface ParityMatrixEntry {
   readonly cliVerb: string;
   readonly authorityGated: boolean;
   readonly description: string;
+  readonly gui:
+    | { readonly status: "shipped"; readonly action: string }
+    | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" };
 }
 
 export interface ParityMatrixExclusion {
@@ -47,6 +50,7 @@ export interface BuildParityMatrixInput {
   readonly operationToVerb: Readonly<Record<string, string>>;
   readonly operationToAction: Readonly<Record<string, string>>;
   readonly operationToDescription: Readonly<Record<string, string>>;
+  readonly operationToGui: Readonly<Record<string, ParityMatrixEntry["gui"]>>;
   readonly excludedFacadeExports: readonly string[];
   readonly facadeOperationNames: (operationsModule: Readonly<Record<string, unknown>>) => readonly string[];
 }
@@ -68,6 +72,7 @@ export function buildParityMatrixDocument(input: BuildParityMatrixInput): Parity
     operationToVerb,
     operationToAction,
     operationToDescription,
+    operationToGui,
     excludedFacadeExports,
     facadeOperationNames,
   } = input;
@@ -96,7 +101,11 @@ export function buildParityMatrixDocument(input: BuildParityMatrixInput): Parity
     if (description === undefined) {
       throw new Error(`generate-parity-matrix: facade export "${name}" has no OPERATION_TO_DESCRIPTION entry in parity-map.ts`);
     }
-    return { operation: name, cliVerb, authorityGated: gatedSet.has(action), description };
+    const gui = operationToGui[name];
+    if (gui === undefined) {
+      throw new Error(`generate-parity-matrix: facade export "${name}" has no OPERATION_TO_GUI entry in parity-map.ts`);
+    }
+    return { operation: name, cliVerb, authorityGated: gatedSet.has(action), description, gui };
   });
 
   // GATED_OPERATIONS entries with no operation module behind them yet (e.g. "cancel"/"publish" as

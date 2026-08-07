@@ -40,12 +40,11 @@ const PRODUCT_PACKAGES = [
 // sealing/resolution), `task-execution-evaluation-harness` + `task-execution-evaluator-adapters`
 // (the real evaluation leg), and `trust-core` (DSSE verdict signing). BP-13 (Report production/
 // verification) added `benchmarking-aggregate` for `produceReport`/`verifyReport` and the §9.2
-// method registry. BP-30 registers the second family member, `web` (the GUI-as-client skeleton,
-// product design §5.3): a ZERO-edge row, deliberately -- the GUI shell is not wired to the
-// operations library yet. New edges are added deliberately, one PR at a time, in this map and in
-// the source-boundary guard's allow-list together; BP-31 (the wiring packet) is expected to add
-// `@jinn-network/benchmark-product-core` to `web`'s row here and to the source-boundary allow-list
-// in the same PR.
+// method registry. BP-30 registered the second family member, `web`; BP-31 adds its sole direct
+// production Jinn edge, `@jinn-network/benchmark-product-core`. The matching portal resolutions
+// are core's full private runtime closure so an isolated immutable web install can resolve the
+// public core entry. New edges are added deliberately, in this map and in the source-boundary
+// guard's per-member allow-list together.
 const JINN_DEPENDENCY_GRAPH = new Map([
   ['core', {
     dependencies: [
@@ -81,20 +80,42 @@ const JINN_DEPENDENCY_GRAPH = new Map([
       '@jinn-network/execution-recorder',
     ],
   }],
-  // BP-30: zero Jinn edges, on purpose. The web skeleton has no `@jinn-network/*` dependency in any
-  // section and no `resolutions` block -- it renders a placeholder identity, nothing more. BP-31
-  // adds `@jinn-network/benchmark-product-core` here (and to the source-boundary guard's allow-list)
-  // when the GUI is wired to the operations library.
+  // BP-31: the private GUI is a server-side public-entry client of core. These transitive portal
+  // resolutions are install plumbing, not additional source-import allowances.
   ['web', {
-    dependencies: [],
+    dependencies: ['@jinn-network/benchmark-product-core'],
     devDependencies: [],
     optionalDependencies: [],
     peerDependencies: [],
-    portalResolutions: [],
+    portalResolutions: [
+      '@jinn-network/attestation-issuer',
+      '@jinn-network/benchmarking-aggregate',
+      '@jinn-network/benchmarking-interop',
+      '@jinn-network/benchmarking-local',
+      '@jinn-network/benchmarking-records',
+      '@jinn-network/benchmarking-run',
+      '@jinn-network/environment-record',
+      '@jinn-network/evidence-discovery',
+      '@jinn-network/evidence-protocol',
+      '@jinn-network/evidence-repository',
+      '@jinn-network/execution-recorder',
+      '@jinn-network/task-admission',
+      '@jinn-network/task-execution-backend',
+      '@jinn-network/task-execution-backend-local',
+      '@jinn-network/task-execution-evaluation-harness',
+      '@jinn-network/task-execution-evaluator-adapters',
+      '@jinn-network/task-execution-launchers',
+      '@jinn-network/task-execution-profiles',
+      '@jinn-network/task-execution-protocol',
+      '@jinn-network/task-execution-supervisor',
+      '@jinn-network/task-execution-workspace',
+      '@jinn-network/trust-core',
+    ],
   }],
 ]);
 
 const SIBLING_TREE_DIRS = new Map([
+  ['@jinn-network/benchmark-product-core', join(root, 'packages', 'benchmark-product', 'core')],
   ['@jinn-network/attestation-issuer', join(root, 'packages', 'evidence', 'attestation-issuer')],
   ['@jinn-network/benchmarking-aggregate', join(root, 'packages', 'benchmarking', 'aggregate')],
   ['@jinn-network/benchmarking-interop', join(root, 'packages', 'benchmarking', 'interop')],

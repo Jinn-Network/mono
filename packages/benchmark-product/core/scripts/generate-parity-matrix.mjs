@@ -70,6 +70,7 @@ async function main() {
     operationToVerb: parityMapModule.OPERATION_TO_VERB,
     operationToAction: parityMapModule.OPERATION_TO_ACTION,
     operationToDescription: parityMapModule.OPERATION_TO_DESCRIPTION,
+    operationToGui: parityMapModule.OPERATION_TO_GUI,
     excludedFacadeExports: parityMapModule.EXCLUDED_FACADE_EXPORTS,
     facadeOperationNames: parityMapModule.facadeOperationNames,
   });

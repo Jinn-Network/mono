@@ -89,20 +89,21 @@ jobs:
           yarn typecheck
           yarn test
           yarn build
+          yarn check:parity
           yarn pack:smoke
-      - name: Upload Benchmark Product core distribution
+      - name: Upload Benchmark Product runtime distributions
         uses: actions/upload-artifact@v4
         with:
-          name: benchmark-product-core-dist
-          path: packages/benchmark-product/core/dist
+          name: benchmark-product-runtime-dists
+          path: packages/**/dist
           if-no-files-found: error
           retention-days: 1
 
-  # BP-30: the web skeleton has zero @jinn-network dependencies, so unlike `product` this job needs
-  # no portal builds -- it installs, lints, typechecks, tests, and builds entirely from its own
-  # tree. BP-31 (the wiring packet) adds core's build chain here when the web -> core edge lands.
+  # BP-31: web is a server-side client of core's public built entry. The product
+  # job builds the complete portal graph in dependency order; this job restores
+  # those exact distributions before installing or compiling the web package.
   web:
-    needs: [architecture]
+    needs: [architecture, product]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -116,6 +117,11 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
       - name: Verify Benchmark Product web
         run: |
           yarn install --immutable
@@ -149,41 +155,10 @@ jobs:
         run: |
           corepack enable
           corepack prepare yarn@4.13.0 --activate
-      - name: Restore the product distribution
+      - name: Restore the product runtime distributions
         uses: actions/download-artifact@v4
         with:
-          name: benchmark-product-core-dist
-          path: packages/benchmark-product/core/dist
-      # The packed consumer installs the whole RUNTIME graph from tarballs, and `npm pack
-      # --ignore-scripts` ships whatever `dist/` is on disk — so every runtime portal dependency
-      # needs its build here too, not only the product's. This mirrors
-      # `benchmark-product-packed-types.test.mjs`'s own `CROSS_TREE_PACKAGES` exactly, same order:
-      # every one of the product's 16 direct runtime dependencies plus the 6 transitive-only
-      # portal resolutions (evidence-* / attestation-issuer) that package.json's `resolutions`
-      # block declares for them.
-      - name: Build portal dependencies from source
-        run: |
-          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
-          (cd packages/trust/core && yarn install --immutable && yarn build)
-          (cd packages/environments/record && yarn install --immutable && yarn build)
-          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
-          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
-          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
-          (cd packages/evidence/repository && yarn install --immutable && yarn build)
-          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
-          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
-          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
-          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
-          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
-          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+          name: benchmark-product-runtime-dists
+          path: packages
       - name: Compile the packed public entrypoint consumer
         run: node .github/scripts/benchmark-product-packed-types.test.mjs

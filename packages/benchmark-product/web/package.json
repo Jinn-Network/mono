@@ -1,7 +1,7 @@
 {
   "name": "@jinn-network/benchmark-product-web",
   "version": "0.1.0",
-  "description": "Web (human) surface skeleton of the standalone benchmark product (internal codename benchmark-product): a Next.js App Router + shadcn/ui shell rendering the placeholder identity and cold-start explanation. Not yet wired to the operations library.",
+  "description": "Private Next.js human surface for the standalone benchmark product, implemented as a server-side client of the benchmark-product core operations library.",
   "private": true,
   "type": "module",
   "packageManager": "yarn@4.13.0",
@@ -15,13 +15,14 @@
     "directory": "packages/benchmark-product/web"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@jinn-network/benchmark-product-core": "0.1.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.27.0",
@@ -29,7 +30,34 @@
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "server-only": "^0.0.1",
     "tailwind-merge": "^3.3.1"
+  },
+  "resolutions": {
+    "@noble/hashes": "2.2.0",
+    "@jinn-network/attestation-issuer": "portal:../../evidence/attestation-issuer",
+    "@jinn-network/benchmark-product-core": "portal:../core",
+    "@jinn-network/benchmarking-aggregate": "portal:../../benchmarking/aggregate",
+    "@jinn-network/benchmarking-interop": "portal:../../benchmarking/interop",
+    "@jinn-network/benchmarking-local": "portal:../../benchmarking/local",
+    "@jinn-network/benchmarking-records": "portal:../../benchmarking/records",
+    "@jinn-network/benchmarking-run": "portal:../../benchmarking/run",
+    "@jinn-network/environment-record": "portal:../../environments/record",
+    "@jinn-network/evidence-discovery": "portal:../../evidence/discovery",
+    "@jinn-network/evidence-protocol": "portal:../../evidence/protocol",
+    "@jinn-network/evidence-repository": "portal:../../evidence/repository",
+    "@jinn-network/execution-recorder": "portal:../../evidence/execution-recorder",
+    "@jinn-network/task-admission": "portal:../../task-supply/admission",
+    "@jinn-network/task-execution-backend": "portal:../../task-execution/backend",
+    "@jinn-network/task-execution-backend-local": "portal:../../task-execution/backend-local/assembly",
+    "@jinn-network/task-execution-evaluation-harness": "portal:../../task-execution/evaluation-harness",
+    "@jinn-network/task-execution-evaluator-adapters": "portal:../../task-execution/evaluator-adapters",
+    "@jinn-network/task-execution-launchers": "portal:../../task-execution/backend-local/launchers",
+    "@jinn-network/task-execution-profiles": "portal:../../task-execution/profiles",
+    "@jinn-network/task-execution-protocol": "portal:../../task-execution/protocol",
+    "@jinn-network/task-execution-supervisor": "portal:../../task-execution/backend-local/supervisor",
+    "@jinn-network/task-execution-workspace": "portal:../../task-execution/backend-local/workspace",
+    "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",

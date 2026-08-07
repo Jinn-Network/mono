@@ -23,6 +23,7 @@ import {
   facadeOperationNames,
   OPERATION_TO_ACTION,
   OPERATION_TO_DESCRIPTION,
+  OPERATION_TO_GUI,
   OPERATION_TO_VERB,
 } from "./parity-map.js";
 
@@ -50,6 +51,7 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       operationToVerb: OPERATION_TO_VERB,
       operationToAction: OPERATION_TO_ACTION,
       operationToDescription: OPERATION_TO_DESCRIPTION,
+      operationToGui: OPERATION_TO_GUI,
       excludedFacadeExports: EXCLUDED_FACADE_EXPORTS,
       facadeOperationNames,
     });
@@ -68,5 +70,25 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       committed,
       "parity-matrix.v1.json is stale relative to the operations facade / CLI verb registry / parity-map.ts — run `yarn generate:parity` (after `yarn build`) and commit the result",
     ).toBe(rendered);
+
+    const gui = (JSON.parse(committed) as {
+      entries: Array<{ operation: string; gui: { status: string; action?: string; deferredTo?: string } }>;
+    }).entries;
+    expect(gui.find((entry) => entry.operation === "initWorkspace")?.gui).toEqual({
+      status: "shipped",
+      action: "workspace.init",
+    });
+    expect(gui.find((entry) => entry.operation === "runLock")?.gui).toEqual({
+      status: "shipped",
+      action: "run.lock",
+    });
+    expect(gui.find((entry) => entry.operation === "runLaunch")?.gui).toEqual({
+      status: "deferred",
+      deferredTo: "BP-32",
+    });
+    expect(gui.find((entry) => entry.operation === "runResults")?.gui).toEqual({
+      status: "deferred",
+      deferredTo: "BP-33",
+    });
   });
 });

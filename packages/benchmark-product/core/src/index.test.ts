@@ -2,6 +2,29 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import * as entry from "./index.js";
 import { BENCHMARKING_PROTOCOL, PRODUCT_VERSION } from "./index.js";
+import type {
+  PreviewArtifact,
+  QuoteArmSize,
+  QuoteCoverageRefusal,
+  QuoteEstimatedWallTime,
+  QuotePresentation,
+  RunPreviewDeps,
+  RunPreviewInput,
+  RunPreviewResult,
+} from "./index.js";
+
+type PublicPreviewAndQuoteTypes = [
+  PreviewArtifact,
+  RunPreviewDeps,
+  RunPreviewInput,
+  RunPreviewResult,
+  QuoteArmSize,
+  QuoteCoverageRefusal,
+  QuoteEstimatedWallTime,
+  QuotePresentation,
+];
+
+const publicTypesCompile: PublicPreviewAndQuoteTypes | undefined = undefined;
 
 describe("PRODUCT_VERSION", () => {
   test("mirrors package.json's version field", () => {
@@ -24,12 +47,14 @@ describe("public surface", () => {
       "putSealedBytes", "getSealedBytes", "readAuditEntries", "toErrorEnvelope", "runCli",
       "sampleInit", "importSweBenchRows", "armAdd", "armUpdate", "armRemove", "armList",
       "authorityGrant", "authorityRevoke", "authorityShow", "buildSampleBenchmark", "convertSweBenchRows",
-      "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
+      "runPreview", "runQuote", "runLock", "runLaunch", "runResume", "runStatus", "runCancel", "runCollect", "runResults",
       "runReport", "runVerify",
     ] as const) {
       expect(typeof entry[name], name).toBe("function");
     }
     expect(entry.LIFECYCLE_STATES).toContain("published-bundle");
     expect(entry.GATED_OPERATIONS).toContain("lock");
+    expect(entry.LOCAL_VENUE_LIMITS).toContainEqual(expect.stringContaining("self-run"));
+    expect(publicTypesCompile).toBeUndefined();
   });
 });

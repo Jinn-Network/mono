@@ -38,11 +38,9 @@
 // sweep is policy-optimization-specific (that product computes report statistics; this one computes
 // nothing yet) and is deliberately not carried over.
 //
-// As of BP-30 `sourceRoots()` also sweeps `web/src` (the GUI-as-client skeleton, product design
-// §5.3). The web skeleton has zero Jinn imports of its own, so `ALLOWED_JINN_PACKAGES` is
-// deliberately unchanged here -- BP-31 admits `@jinn-network/benchmark-product-core` when the GUI
-// is wired to the operations library, in this allow-list and in the inventory guard's dependency
-// graph together.
+// BP-30 added `web/src` to `sourceRoots()`. BP-31 admits exactly one edge for that member:
+// `@jinn-network/benchmark-product-core`, from modules marked `server-only` or `use server` and
+// always through the public package root. Core retains its prior, separately checked graph.
 
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -66,7 +64,7 @@ function sourceRoots() {
     .filter((directory) => existsSync(directory));
 }
 
-const ALLOWED_JINN_PACKAGES = [
+const CORE_ALLOWED_JINN_PACKAGES = [
   '@jinn-network/benchmarking-aggregate',
   '@jinn-network/benchmarking-interop',
   '@jinn-network/benchmarking-local',
@@ -84,6 +82,13 @@ const ALLOWED_JINN_PACKAGES = [
   '@jinn-network/task-execution-workspace',
   '@jinn-network/trust-core',
 ];
+
+const WEB_SERVER_ONLY_JINN_PACKAGE = '@jinn-network/benchmark-product-core';
+const MEMBER_ALLOWED_JINN_PACKAGES = new Map([
+  ['core', CORE_ALLOWED_JINN_PACKAGES],
+  ['web', [WEB_SERVER_ONLY_JINN_PACKAGE]],
+]);
+const ALLOWED_JINN_PACKAGES = [...new Set([...CORE_ALLOWED_JINN_PACKAGES, WEB_SERVER_ONLY_JINN_PACKAGE])];
 
 // Packages admitted for test files only (devDependencies): a `.test.ts` may import them, non-test
 // source may not. BP-12 promoted the one prior entry (`task-execution-launchers`) to a real
@@ -220,14 +225,23 @@ test('the allow-list admits its members and refuses everything else, wildcards a
   } finally { rmSync(fixture, { recursive: true, force: true }); }
 });
 
+test('source boundaries are per-member: web has one server-only public core edge', () => {
+  assert.deepEqual(MEMBER_ALLOWED_JINN_PACKAGES.get('web'), ['@jinn-network/benchmark-product-core']);
+  assert.ok(MEMBER_ALLOWED_JINN_PACKAGES.get('core').length > 1);
+  assert.equal(WEB_SERVER_ONLY_JINN_PACKAGE, '@jinn-network/benchmark-product-core');
+});
+
 test('benchmark-product source imports only its approved Jinn dependencies', () => {
-  const roots = sourceRoots();
-  if (roots.length === 0) return;
-  assert.deepEqual(
-    unapprovedImports(roots.flatMap(files), ALLOWED_JINN_PACKAGES, FORBIDDEN_ROOTS),
-    [],
-    'the product crosses its declared dependency boundary',
-  );
+  for (const directory of sourceRoots()) {
+    const member = relative(packageRoot, directory).split('/')[0];
+    const allowed = MEMBER_ALLOWED_JINN_PACKAGES.get(member);
+    assert.ok(allowed, `missing per-member source policy for ${member}`);
+    assert.deepEqual(
+      unapprovedImports(files(directory), allowed, FORBIDDEN_ROOTS),
+      [],
+      `${member} crosses its declared dependency boundary`,
+    );
+  }
 });
 
 test('benchmark-product actually imports the dependencies it declares (positive control)', () => {
@@ -237,15 +251,63 @@ test('benchmark-product actually imports the dependencies it declares (positive 
   // via `packageSpecifierMatches` (bare specifier OR a subpath of it), not exact string equality --
   // `task-execution-evaluation-harness` is imported only via its `/launcher` secondary entry point
   // (`src/venue/venue.ts`), never the bare package specifier.
-  const roots = sourceRoots();
-  if (roots.length === 0) return;
-  const imported = roots.flatMap(files).flatMap((file) => specifiers(readFileSync(file, 'utf8')));
-  for (const name of ALLOWED_JINN_PACKAGES) {
-    assert.ok(
-      imported.some((specifier) => packageSpecifierMatches(specifier, name)),
-      `expected at least one import of ${name}`,
-    );
+  for (const directory of sourceRoots()) {
+    const member = relative(packageRoot, directory).split('/')[0];
+    const allowed = MEMBER_ALLOWED_JINN_PACKAGES.get(member);
+    assert.ok(allowed, `missing per-member source policy for ${member}`);
+    const imported = files(directory).flatMap((file) => specifiers(readFileSync(file, 'utf8')));
+    for (const name of allowed) {
+      assert.ok(
+        imported.some((specifier) => packageSpecifierMatches(specifier, name)),
+        `expected ${member} to import ${name}`,
+      );
+    }
   }
+});
+
+test('web keeps the core edge server-only, has no API routes, and does not duplicate product semantics', () => {
+  const webRoot = join(packageRoot, 'web', 'src');
+  const webFiles = files(webRoot);
+  const clientCoreImports = webFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    if (!/^\s*["']use client["'];/m.test(source)) return [];
+    return specifiers(source)
+      .filter((specifier) => packageSpecifierMatches(specifier, WEB_SERVER_ONLY_JINN_PACKAGE))
+      .map((specifier) => `${relative(root, file)} -> ${specifier}`);
+  });
+  assert.deepEqual(clientCoreImports, [], 'a client module imports product core');
+
+  const unguardedCoreImports = webFiles
+    .filter((file) => !/\.test\.[cm]?[jt]sx?$/.test(file))
+    .filter((file) => specifiers(readFileSync(file, 'utf8'))
+      .some((specifier) => packageSpecifierMatches(specifier, WEB_SERVER_ONLY_JINN_PACKAGE)))
+    .filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return !/^\s*import\s+["']server-only["'];/m.test(source)
+        && !/^\s*["']use server["'];/m.test(source);
+    })
+    .map((file) => relative(root, file));
+  assert.deepEqual(
+    unguardedCoreImports,
+    [],
+    'a non-test core consumer is not protected by server-only/use server',
+  );
+
+  const apiRoutes = webFiles
+    .filter((file) => /(?:^|\/)app(?:\/.*)?\/route\.[cm]?[jt]sx?$/.test(file))
+    .map((file) => relative(root, file));
+  assert.deepEqual(apiRoutes, [], 'v1 forbids HTTP API route handlers');
+
+  const duplicated = webFiles.flatMap((file) => {
+    const source = readFileSync(file, 'utf8');
+    return [
+      /\b(?:const|let|var)\s+PRODUCT_BRANDING\b/,
+      /\b(?:const|let|var)\s+GATED_OPERATIONS\b/,
+      /\b(?:const|let|var)\s+ASSURANCE_PRESETS\b/,
+      /\bfunction\s+(?:runPreview|runQuote|runLock|createDraft|updateDraft)\b/,
+    ].some((pattern) => pattern.test(source)) ? [relative(root, file)] : [];
+  });
+  assert.deepEqual(duplicated, [], 'web duplicates core-owned product semantics');
 });
 
 test('test-only packages are imported by test files alone', () => {

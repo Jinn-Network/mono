@@ -130,6 +130,44 @@ export const OPERATION_TO_DESCRIPTION: Readonly<Record<string, string>> = {
     "Independently re-derives the Matrix (and, once reported, the Report and claim package) from durable workspace state.",
 };
 
+/**
+ * GUI disposition for every shipped library operation. This is the M3 parity
+ * authority: an operation is either backed by one stable GUI action id now or
+ * explicitly assigned to the packet that will ship it. Silence is forbidden.
+ */
+export type GuiCapability =
+  | { readonly status: "shipped"; readonly action: string }
+  | { readonly status: "deferred"; readonly deferredTo: "BP-32" | "BP-33" };
+
+export const OPERATION_TO_GUI: Readonly<Record<string, GuiCapability>> = {
+  initWorkspace: { status: "shipped", action: "workspace.init" },
+  createDraft: { status: "shipped", action: "draft.create" },
+  getDraft: { status: "shipped", action: "draft.show" },
+  listDrafts: { status: "shipped", action: "draft.list" },
+  updateDraft: { status: "shipped", action: "draft.update" },
+  inspectDraft: { status: "shipped", action: "draft.inspect" },
+  sampleInit: { status: "shipped", action: "intake.sample" },
+  importSweBenchRows: { status: "shipped", action: "intake.swebench" },
+  armAdd: { status: "shipped", action: "arm.add" },
+  armUpdate: { status: "shipped", action: "arm.update" },
+  armRemove: { status: "shipped", action: "arm.remove" },
+  armList: { status: "shipped", action: "arm.list" },
+  authorityGrant: { status: "shipped", action: "authority.grant" },
+  authorityRevoke: { status: "shipped", action: "authority.revoke" },
+  authorityShow: { status: "shipped", action: "authority.show" },
+  runPreview: { status: "shipped", action: "run.preview" },
+  runQuote: { status: "shipped", action: "run.quote" },
+  runLock: { status: "shipped", action: "run.lock" },
+  runLaunch: { status: "deferred", deferredTo: "BP-32" },
+  runResume: { status: "deferred", deferredTo: "BP-32" },
+  runCancel: { status: "deferred", deferredTo: "BP-32" },
+  runStatus: { status: "deferred", deferredTo: "BP-32" },
+  runCollect: { status: "deferred", deferredTo: "BP-32" },
+  runResults: { status: "deferred", deferredTo: "BP-33" },
+  runReport: { status: "deferred", deferredTo: "BP-33" },
+  runVerify: { status: "deferred", deferredTo: "BP-33" },
+};
+
 /** The facade's own operation exports — every function export not in `EXCLUDED_FACADE_EXPORTS`.
  * Takes the operations-facade module namespace as a parameter so a caller resolving it from
  * `src/` (vitest, `../operations/index.js`) and one resolving it from `dist/`

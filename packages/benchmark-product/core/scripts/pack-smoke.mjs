@@ -95,7 +95,15 @@ try {
     smokeScript,
     `
 import { readFile, readdir } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { BENCHMARKING_PROTOCOL, PRODUCT_BRANDING, PRODUCT_VERSION, buildSampleBenchmark, runCancel } from "@jinn-network/benchmark-product-core";
+
+const require = createRequire(import.meta.url);
+const requiredEntry = require("@jinn-network/benchmark-product-core");
+if (typeof requiredEntry.runPreview !== "function") throw new Error("packed require entry lacks runPreview");
+if (requiredEntry.PRODUCT_BRANDING.displayName !== PRODUCT_BRANDING.displayName) {
+  throw new Error("packed require/import branding entries diverged");
+}
 
 if (PRODUCT_VERSION !== "0.1.0") throw new Error("product version drifted");
 if (typeof runCancel !== "function") throw new Error("runCancel missing from packed public entrypoint");

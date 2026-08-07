@@ -1,0 +1,43 @@
+import "server-only";
+
+import {
+  armAddAction,
+  armListAction,
+  armRemoveAction,
+  armUpdateAction,
+  authorityGrantAction,
+  authorityRevokeAction,
+  authorityShowAction,
+  draftCreateAction,
+  draftInspectAction,
+  draftListAction,
+  draftShowAction,
+  draftUpdateAction,
+  intakeSampleAction,
+  intakeSweBenchAction,
+  runLockAction,
+  runPreviewAction,
+  runQuoteAction,
+  workspaceInitAction,
+} from "@/app/actions";
+
+export const GUI_SERVER_ACTIONS = {
+  "workspace.init": workspaceInitAction,
+  "draft.create": draftCreateAction,
+  "draft.show": draftShowAction,
+  "draft.list": draftListAction,
+  "draft.update": draftUpdateAction,
+  "draft.inspect": draftInspectAction,
+  "intake.sample": intakeSampleAction,
+  "intake.swebench": intakeSweBenchAction,
+  "arm.add": armAddAction,
+  "arm.update": armUpdateAction,
+  "arm.remove": armRemoveAction,
+  "arm.list": armListAction,
+  "authority.grant": authorityGrantAction,
+  "authority.revoke": authorityRevokeAction,
+  "authority.show": authorityShowAction,
+  "run.preview": runPreviewAction,
+  "run.quote": runQuoteAction,
+  "run.lock": runLockAction,
+} as const;

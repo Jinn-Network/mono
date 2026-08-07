@@ -1,15 +1,19 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 import { Button } from "@/components/ui/button";
-import { WEB_BRANDING } from "@/lib/branding";
+import { PRODUCT_BRANDING } from "@/lib/branding";
 import Page from "./page";
 
 describe("landing page", () => {
   const markup = renderToStaticMarkup(<Page />);
 
   test("renders the product identity", () => {
-    expect(markup).toContain(WEB_BRANDING.displayName);
-    expect(markup).toContain(WEB_BRANDING.tagline);
+    expect(markup).toContain(PRODUCT_BRANDING.displayName);
+    expect(markup).toContain(PRODUCT_BRANDING.tagline);
+  });
+
+  test("links to the configured workspace", () => {
+    expect(markup).toContain('href="/workspace"');
   });
 
   test("explains what the product compares", () => {

@@ -11,6 +11,8 @@
 export type { ProductBranding } from "./branding.js";
 export { PRODUCT_BRANDING } from "./branding.js";
 export { BENCHMARKING_PROTOCOL } from "./platform.js";
+export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js";
+export type { GuiCapability } from "./cli/parity-map.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
 export { BenchmarkProductError, toErrorEnvelope } from "./errors.js";
@@ -87,6 +89,7 @@ export {
   runCollect,
   runLaunch,
   runLock,
+  runPreview,
   runQuote,
   runReport,
   runResults,
@@ -113,6 +116,11 @@ export type {
   ImportSweBenchRowsResult,
   OperationContext,
   OperationResult,
+  PreviewArtifact,
+  QuoteArmSize,
+  QuoteCoverageRefusal,
+  QuoteEstimatedWallTime,
+  QuotePresentation,
   RunCancelDeps,
   RunCancelInput,
   RunCancelResult,
@@ -123,6 +131,9 @@ export type {
   RunLaunchResult,
   RunLockInput,
   RunLockResult,
+  RunPreviewDeps,
+  RunPreviewInput,
+  RunPreviewResult,
   RunQuoteDeps,
   RunQuoteInput,
   RunQuoteResult,
@@ -145,6 +156,7 @@ export type {
   UpdateDraftInput,
   VenueHonesty,
 } from "./operations/index.js";
+export { LOCAL_VENUE_LIMITS } from "./operations/index.js";
 
 // The bundled sample benchmark (BP-11) and SWE-bench row intake, re-exported so a GUI
 // client can call them directly without a source dependency on ./intake/*.

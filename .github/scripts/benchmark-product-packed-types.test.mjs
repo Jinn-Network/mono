@@ -10,7 +10,7 @@
 // disk, so CI builds every package (product and its cross-tree portal dependencies) before this
 // script runs; this script does not build anything itself.
 //
-// BP-30 adds the family's second member, `web` -- and deliberately does NOT pack it (see
+// BP-30 added the family's second member, `web` -- and deliberately does NOT pack it (see
 // `PACKED_EXCLUDED` below). The family-coverage check that follows keeps that exclusion honest: a
 // member present in the live tree but named in neither `packages` nor `PACKED_EXCLUDED` fails this
 // script before any packing work starts, rather than silently having nothing checked for it.
@@ -36,7 +36,7 @@ const codeEntrypoints = [
   '@jinn-network/benchmark-product-core',
 ];
 
-// BP-30: the web skeleton is deliberately excluded from packing, not silently absent from it. It
+// BP-31: the web application remains deliberately excluded from packing, not silently absent. It
 // is `private: true` with no public package entrypoint (product design §5.3, GUI-as-client);
 // nothing ever installs it, so there is no packed-consumer type surface to compile. A named,
 // reasoned exclusion here (rather than just missing from `packages`) is what lets the
@@ -188,13 +188,44 @@ try {
 
   await writeFile(
     join(consumerRoot, 'consumer.ts'),
-    codeEntrypoints
-      .map((specifier, index) => `import type * as Entry${index} from ${JSON.stringify(specifier)};`)
-      .join('\n')
-      + '\n\n'
-      + `export type BenchmarkProductEntrypoints = [\n${codeEntrypoints
-        .map((_, index) => `  typeof Entry${index},`)
-        .join('\n')}\n];\n`,
+    `import {
+  GUI_CAPABILITY_CATALOG,
+  LOCAL_VENUE_LIMITS,
+  PRODUCT_BRANDING,
+  runPreview,
+} from '@jinn-network/benchmark-product-core';
+import type {
+  PreviewArtifact,
+  QuoteArmSize,
+  QuoteCoverageRefusal,
+  QuoteEstimatedWallTime,
+  QuotePresentation,
+  RunPreviewDeps,
+  RunPreviewInput,
+  RunPreviewResult,
+} from '@jinn-network/benchmark-product-core';
+
+export type BenchmarkProductEntrypoints = [
+  typeof import('@jinn-network/benchmark-product-core'),
+];
+export type PublicPreviewAndQuoteTypes = [
+  PreviewArtifact,
+  RunPreviewDeps,
+  RunPreviewInput,
+  RunPreviewResult,
+  QuoteArmSize,
+  QuoteCoverageRefusal,
+  QuoteEstimatedWallTime,
+  QuotePresentation,
+];
+export const publicRunPreview: typeof runPreview = runPreview;
+export const localVenueLimits: readonly string[] = LOCAL_VENUE_LIMITS;
+export const productName: string = PRODUCT_BRANDING.displayName;
+const guiInitCapability = GUI_CAPABILITY_CATALOG.initWorkspace;
+export const guiInitOperation: string = guiInitCapability.status === 'shipped'
+  ? guiInitCapability.action
+  : guiInitCapability.deferredTo;
+`,
   );
   await writeFile(join(consumerRoot, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {

@@ -110,6 +110,11 @@
         "to": "@jinn-network/trust-core"
       },
       {
+        "from": "@jinn-network/benchmark-product-web",
+        "kind": "runtime",
+        "to": "@jinn-network/benchmark-product-core"
+      },
+      {
         "from": "@jinn-network/benchmarking-aggregate",
         "kind": "runtime",
         "to": "@jinn-network/benchmarking-records"
@@ -1656,7 +1661,7 @@
       "conformancePackedTargets": 56,
       "conformanceSources": 28,
       "decisionRecords": 4,
-      "discoveredFirstPartySurfaces": 2868,
+      "discoveredFirstPartySurfaces": 2870,
       "generatedOutputSources": 1305,
       "generatorSources": 595,
       "marketplaceControl": 2,
@@ -18862,6 +18867,26 @@
           "@ritsukai"
         ],
         "path": "packages/benchmark-product/web/package.json"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test"
+      },
+      {
+        "categories": [
+          "discoveredFirstPartySurfaces"
+        ],
+        "owners": [
+          "@oaksprout",
+          "@ritsukai"
+        ],
+        "path": "packages/benchmark-product/web/src/test/server-only.ts"
       },
       {
         "categories": [
@@ -40838,6 +40863,7 @@
         "optional": [],
         "peer": [],
         "runtime": [
+          "@jinn-network/benchmark-product-core",
           "class-variance-authority",
           "clsx",
           "lucide-react",
@@ -40845,6 +40871,7 @@
           "radix-ui",
           "react",
           "react-dom",
+          "server-only",
           "tailwind-merge"
         ]
       },

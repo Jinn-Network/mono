@@ -1,5 +1,5 @@
 /**
- * Brand-neutrality sweep for the web skeleton (see
+ * Brand-neutrality sweep for the web application (see
  * `packages/benchmark-product/core/src/cli/lexicon.test.ts` for the pattern this
  * mirrors -- read, not modified; that file belongs to a sibling packet).
  *
@@ -13,7 +13,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
-import { WEB_BRANDING } from "./lib/branding.js";
+import { PRODUCT_BRANDING } from "./lib/branding.js";
 
 // Fragments, not contiguous literals -- see file header.
 const BANNED_LEXICON = [
@@ -37,7 +37,6 @@ const DESIGN_SYSTEM_REFS = [
 const EMOJI_RE = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/u;
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
-const CORE_BRANDING_PATH = join(SRC_DIR, "..", "..", "core", "src", "branding.ts");
 
 function collectSourceFiles(dir: string): string[] {
   const files: string[] = [];
@@ -100,9 +99,8 @@ describe("web package lexicon and brand-neutrality sweep", () => {
 });
 
 describe("branding drift pin", () => {
-  test("WEB_BRANDING stays byte-equal to core's exported display name and tagline", () => {
-    const coreBranding = readFileSync(CORE_BRANDING_PATH, "utf8");
-    expect(coreBranding).toContain(WEB_BRANDING.displayName);
-    expect(coreBranding).toContain(WEB_BRANDING.tagline);
+  test("the web identity is the public core branding object", () => {
+    expect(PRODUCT_BRANDING.displayName).toBe("Benchmark Product (placeholder name)");
+    expect(PRODUCT_BRANDING.tagline).toContain("hand every number to a verifier");
   });
 });

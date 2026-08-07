@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { WEB_BRANDING } from "@/lib/branding";
+import { PRODUCT_BRANDING } from "@/lib/branding";
 
 export const metadata: Metadata = {
-  title: WEB_BRANDING.displayName,
-  description: WEB_BRANDING.tagline,
+  title: PRODUCT_BRANDING.displayName,
+  description: PRODUCT_BRANDING.tagline,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

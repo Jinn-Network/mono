@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Version** | 0.1 |
-| **Date** | 2026-08-06 |
-| **Author** | Packet BP-30 of the standalone benchmarking product implementation program (Claude Fable 5 session) |
-| **Shape** | `design` |
+| **Version** | 0.2 |
+| **Date** | 2026-08-07 |
+| **Author** | Packet BP-30, amended by packet BP-31 of the standalone benchmarking product implementation program |
+| **Shape** | `feat` |
 | **Status** | draft |
 | **Depends on** | [`../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md`](../../../docs/superpowers/specs/2026-08-05-benchmark-product-design.md) (the product design spec — domain model, surfaces, presets, venue honesty, branding isolation; this document formalizes none of its decisions and reopens none of them) |
 
@@ -35,14 +35,14 @@ it is implemented.
 **Capability parity (design spec §5.4).** Every GUI action must map to a row
 of the generated parity matrix
 (`packages/benchmark-product/core/parity-matrix.v1.json`, CLI verb ↔ library
-operation). From M3 on, the matrix gains a GUI column and a CI test fails
-any GUI action with no CLI/library row. Until the GUI is wired (§2), parity
-holds by construction because the GUI renders no actions at all.
+operation). The matrix's GUI column is authoritative: every rendered server
+action is registered against a shipped operation, and every eligible
+operation is either registered or carries a named packet deferral.
 
 ## 2. M3 scope ladder
 
-Design spec §5.3 names the web app "milestone M3." This packet, BP-30,
-ships only the **skeleton**:
+Design spec §5.3 names the web app "milestone M3." BP-30 shipped the
+**skeleton**:
 
 - Next.js App Router + shadcn/ui toolchain, wired for build, lint, typecheck,
   and test.
@@ -58,25 +58,29 @@ ships only the **skeleton**:
 - CI: the web package's build/lint/typecheck/test steps run under the
   existing `benchmark-product-ci` gate.
 
-**This packet wires no operations.** There is no operations-library
-dependency, no server action, no route beyond the single landing page, and
-no rendering of any part of the domain model in §3 below. BP-31 and later
-packets:
+BP-31 now realizes the setup half of M3. The web app has one production
+Jinn dependency edge, `web` → `@jinn-network/benchmark-product-core`, and
+imports only that package's public entry from server-only modules. Its
+fail-closed product context requires an explicit absolute workspace path
+and principal. No private-key, credential, or ambient environment material
+is copied into browser state.
 
-- add the `@jinn-network/benchmark-product-core` runtime dependency (the
-  web→core edge, added to the package-inventory guard's dependency graph and
-  the source-boundary guard's allow-list together, per the note already
-  recorded in both guard files);
-- replace `src/lib/branding.ts` with the import of core's
-  `PRODUCT_BRANDING`, retiring the temporary duplication (§4);
-- implement the component surfaces described in §3, in whatever order the
-  program plan sequences them.
+The shipped routes cover workspace initialization; draft create/read/list/
+edit/inspect; bundled sample and SWE-bench intake; arm add/update/remove/
+list; authority show plus sponsor-only grant/revoke; real-local-venue
+preview; quote; and authority-gated lock. All facts and transitions come
+from core operations through Server Actions. Successful mutations
+revalidate the workspace and draft surfaces. Typed operation failures are
+rendered with their retry guidance; unexpected exceptions are redacted to
+a generic invalid-invocation failure.
 
-**State explicitly:** as of this packet, no component in §3 is rendered.
-The domain model below is the target model this GUI will grow into, derived
-from the design spec so implementation packets do not re-derive it; it
-describes no shipped screen. A reader auditing what exists today should
-consult §2, not §3.
+The explicit M3 deferrals are limited to BP-32's official-run controls
+(`launch`, `resume`, `cancel`, `status`, `collect`) and BP-33's result/report/
+verification controls (`results`, `report`, `verify`). The two pre-existing
+non-operation capability exclusions (`unverifiableAxisCounts`, `publish`)
+remain explicit in the generated matrix. Sections 3.1, 3.2, and 3.6 describe
+the currently rendered domain surface; §§3.3–3.5 remain the target for the
+named follow-on packets.
 
 ## 3. Domain model (four axes)
 
@@ -194,11 +198,9 @@ Covers the design spec §4.6 Official-run row.
   `runCancel` / `cancel` (**gated**; durable and idempotent, with typed
   `requested` and terminal `cancelled` results).
 
-BP-30 still renders none of these controls: its shipped surface is the
-placeholder shell described in §2. The cancellation action enters the GUI
-only with the M3 operations wiring and generated GUI-parity coverage; this
-target model records the already-shipped BP-22 library/CLI contract rather
-than deferring or reimplementing it.
+BP-31 renders none of these controls. They are explicitly cataloged as
+deferred to BP-32; cancellation enters the GUI there through the existing
+BP-22 library/CLI contract, never through a web implementation.
 
 ### 3.4 Results (Matrix)
 
@@ -216,6 +218,10 @@ Covers the design spec §4.6 Results (Matrix) row.
   verdicts, dissent, cost, and latency; exclusions.
 - **Actions** — results → `runResults` / `results`; verify → `runVerify` /
   `verify`; report → `runReport` / `report` (**gated**).
+
+BP-31 renders none of these controls. They are explicitly cataloged as
+deferred to BP-33 so the eventual surface remains a client of the existing
+result/report/verification operations.
 
 **Deferred, not renderable:** design spec §4.6 names exports (EvalLog,
 Croissant, static bundle) on this row, but no shipped operation produces
@@ -269,9 +275,9 @@ Covers the design spec §4.6 Principals-and-authority row.
   grant action; rendered wherever a principal attempts a gated operation
   they do not (yet) hold the grant for.
 - **Collections** — grants; pending approvals.
-- **Actions** — grant → `authorityGrant` / `authority grant`; revoke →
-  `authorityRevoke` / `authority revoke`; show → `authorityShow` /
-  `authority show`.
+- **Actions** — grant → `authorityGrant` / `authority grant`
+  (**sponsor-only**); revoke → `authorityRevoke` / `authority revoke`
+  (**sponsor-only**); show → `authorityShow` / `authority show`.
 
 **Approval is a permission policy, not a human-only path** (design spec
 §4.2): a delegated agent holding the required grant may execute a gated
@@ -287,23 +293,17 @@ Per design spec §9, this application carries a **neutral visual identity**:
 stock shadcn neutral tokens, no Jinn lexicon, no Jinn sigils, and no Jinn
 palette anywhere in the shell.
 
-The placeholder display name and tagline are read, today, from
-`src/lib/branding.ts` — a **temporary** local module, not the product's
-single branding source. `src/branding-isolation.test.ts` pins its two
-strings byte-equal to the design spec §9 source of truth,
-`packages/benchmark-product/core/src/branding.ts`'s `PRODUCT_BRANDING`, so
-the two cannot silently drift while this duplication exists. BP-31 (§2)
-retires `src/lib/branding.ts` and imports `PRODUCT_BRANDING` from core
-directly — an architectural simplification, not a behavior change, since
-the strings are already pinned identical.
+The display name and tagline are read from the public core entry's
+`PRODUCT_BRANDING`. `src/lib/branding.ts` is only a public-entry re-export;
+it contains no local copy of product identity or other domain semantics.
+The brand-neutrality test proves the web source remains free of the Jinn
+lexicon, sigils, palette, and design-system imports.
 
-The attribution line (`PRODUCT_BRANDING.attribution`) is deliberately
-**absent from this shell**. Design spec §9 permits it only in about and
+The attribution line (`PRODUCT_BRANDING.attribution`) remains deliberately
+**absent from the current routes**. Design spec §9 permits it only in about and
 verification contexts, never in the product name, primary navigation,
-category explanation, or hero copy — and this packet has no about or
-verification screen for it to live in yet. A later packet that adds such a
-screen renders the attribution there; nothing in this packet's scope calls
-for it.
+category explanation, or hero copy — and BP-31 has no about or verification
+screen for it to live in. BP-33 renders it in the verification surface.
 
 This product's brand posture is a deliberate departure from root
 `CLAUDE.md`'s Jinn design-system requirements (palette, sigils, lexicon,
