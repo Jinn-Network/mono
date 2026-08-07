@@ -1,6 +1,6 @@
 # Native Identity Ceremony — production trust-artifact provisioning
 
-**Version:** 0.1
+**Version:** 0.2 (revised 2026-08-07 per independent design review of v0.1; see §10 review record)
 
 **Date:** 2026-08-07
 
@@ -191,12 +191,21 @@ over `NativeTrustAuthority`; neither holds a client. The compositions that build
 authority do: `buildFleetNativeRuntime` holds `input.publicClient` and already derives the
 anchor client from it (`native-fleet-runtime.ts:295-301`), and the consumer's production
 driver creates its own `PublicClient` and does the same
-(`client/src/native-consumer/production.ts:68-69`). The seam is therefore
-**`openNativeTrustCatalog`'s input**: it gains a required
-`settlementOwnershipClient: { isOwner(safe: 0x…, candidate: 0x…): Promise<boolean> }`,
-constructed by both compositions from the same public client that supplies `anchorClient`,
-using the Safe ABI the daemon already carries (`client/src/contracts/abis.ts:60-65`,
-`isOwner(address) → bool`). No new dependency, no client threading through call sites.
+(`client/src/native-consumer/production.ts:68-70`, catalog open at `:70`). The seam is
+therefore **`openNativeTrustCatalog`'s input**: it gains a **required**
+`settlementOwnershipClient: { isOwner(safe: 0x…, candidate: 0x…): Promise<boolean> }` —
+required, not optional, so every construction site must supply the read at compile time and
+no site can leave a silent runtime hole. There are **four** production call sites, not two:
+the fleet runtime (`native-fleet-runtime.ts:295`) and the consumer driver
+(`native-consumer/production.ts:70`) hold a public client directly and construct the read
+from it, using the Safe ABI the daemon already carries (`client/src/contracts/abis.ts:59-66`,
+`isOwner(address) → bool`); the parallel native-main deployment path opens the catalog twice
+more (`native-production-deployment.ts:399` and `:494`) and receives only
+`infrastructure.anchorClient` from `NativeInfrastructurePrimitives` — no public client or
+ownership primitive is surfaced there — so the amendment ALSO extends `openInfrastructure`
+to surface the Safe-ownership read alongside the anchor client. That deployment path retires
+at stage 5 per DR-2026-08-05, but it must compile and run until then. No new dependency, no
+client threading through verification call sites.
 
 **(d) ERC-1271 remains refused.** A contract signature's validity is a function of mutable
 contract state: owners rotate, modules change, the contract upgrades — so an ERC-1271
@@ -321,8 +330,9 @@ export function waitForFinalizedAnchor(input: {
 }): Promise<FinalizedAnchorObservation>;
 
 // ── catalog authoring ───────────────────────────────────────────────────────
-/** Genesis: seals the v1 TrustPolicy (complete purposes per §6 law 3, signerSet =
- * the catalog authority, refreshBy per §5), the given bindings, and the anchor
+/** Genesis: seals the v1 TrustPolicy (complete purposes per §6 law 3 — every
+ * `native:<role>`, both admission spellings, AND `evaluator-eligibility` — with
+ * signerSet = the catalog authority, refreshBy per §5), the given bindings, and the anchor
  * declarations into a jinn.native-trust-catalog/2 file. Refuses to overwrite an
  * existing catalog path. */
 export function authorCatalog(input: {
@@ -422,8 +432,18 @@ Flow (each step idempotent or refusing, in §6's mandatory order):
 7. **Surgical config write-back** of exactly the five native identity keys onto the
    operator's `config.json`: `agentIri`, `admissionAgent`, `identityStores`,
    `trustRootsPath`, `trustPolicyGenesisDigest`. Read-modify-write preserving every other
-   key. Deliberately NOT written: `compositionMode` — the flip stays the deploy PR's one
-   switch (`native-sections.ts:166-186`).
+   key. The ceremony writes the identity keys; the remaining native keys are deploy-config,
+   operator-authored — native boot also hard-requires `ipfs.apiUrl` and `publicBaseUrl`
+   (`native-fleet-runtime.ts:275-276`) and, effectively, `recordSources` (the discovery
+   composition), none of which the ceremony can know. Deliberately NOT written:
+   `compositionMode` — the flip stays the deploy PR's one switch
+   (`native-sections.ts:166-186`).
+
+The ceremony MUST run with the password the daemon will later resolve. The daemon resolves
+`JINN_PASSWORD` first and falls back to the keystore-password file, and the fallback path is
+hard-coded to `~/.jinn-client/keystore-password` (`main.ts:178,198`) — so an operator homed
+anywhere else (§4.4's operator B at `~/.jinn-client-op-b`) can never use the file fallback
+and must supply `JINN_PASSWORD`, at ceremony time and at every daemon start.
 
 `--dry-run` performs steps 1-3's reads plus a full plan print and no chain write, no store
 mint, no config write.
@@ -478,7 +498,8 @@ JINN_PASSWORD=… jinn ceremony join \
 
 # distribute + restart (assertFresh ⇒ restart-required)
 cp ~/.jinn-client/trust.json ~/.jinn-client-op-b/trust.json
-#   (join already updated A's copy in place; B's config gets its 5 keys from join)
+#   (join already updated A's copy in place; B's config gets its four identity keys
+#    from join — no admissionAgent, since B's --role-sets carries no admission family)
 # restart both daemons
 
 jinn ceremony show --catalog ~/.jinn-client/trust.json
@@ -487,7 +508,10 @@ jinn ceremony show --catalog ~/.jinn-client/trust.json
 B runs the requester family too even though solver-only in intent: the fleet runtime always
 opens requester custody (`native-fleet-runtime.ts:277-289`; the projector's
 requester-association resolver needs `requester-submission` — same reasoning as the fixture,
-`fixtures/native-fleet/config.ts:127-131`).
+`fixtures/native-fleet/config.ts:127-131`). Both ceremonies and both daemons run under the
+same supplied `JINN_PASSWORD` per operator: B, homed at `~/.jinn-client-op-b`, is outside
+the hard-coded `~/.jinn-client/keystore-password` fallback (§4.1) and must set the env var
+for every run.
 
 ## 5. Catalog governance
 
@@ -536,16 +560,33 @@ per-relationship model has no consumer, and would multiply the §6 sequencing pe
    the anchor's block time silently shifts `effectiveStart` to `anchorTime` and breaks the
    incumbent-window checks (§7.4a consent-chain failures); a `validFrom` later than it
    delays every role's boot eligibility. Equal is the only correct value — which is only
-   knowable **after** the anchor is mined. This is law 1's reason.
+   knowable **after** the anchor is mined. This is law 1's reason. Equality is textual:
+   `validFrom` MUST be the **verbatim string** `submitAnchor` returns, not merely the same
+   instant — the resolver compares these timestamps lexicographically as raw strings
+   (`binding-resolver.ts`; only trust-core's `verify.ts` step 4 uses calendar comparison),
+   and the production anchor reader emits the millisecond ISO form
+   (`new Date(Number(block.timestamp) * 1000).toISOString()`,
+   `native-base-sepolia-infrastructure.ts:1005`), so a `…00Z` vs `…00.000Z` drift changes
+   lexicographic outcomes.
 3. **Complete policy purposes.** The genesis (and every successor) policy carries an entry
    for every `native:<role>` purpose any bound key will be verified under, **plus
-   `admission-agent`** (the core-registered purpose, `policy.ts:21-31`). Verified against
-   the current tree: the evaluator assembly resolves `admission-agent`
-   (`native-evaluator-assembly.ts:217,349`) and the consumer resolves `native:admission`
+   `admission-agent`** (the core-registered purpose, `policy.ts:21-31`), **plus
+   `evaluator-eligibility`** (accepted = the evaluator operators' Agent IRIs). Verified
+   against the current tree: the evaluator assembly resolves `admission-agent`
+   (`native-evaluator-assembly.ts:217,349`) and eagerly resolves
+   `input.trust.policy('evaluator-eligibility')` inside `createVerdictGate`
+   (`native-evaluator-assembly.ts:350`), executed during
+   `assembleNativeEvaluatorComposition` → `buildFleetNativeEvaluator` at daemon boot
+   whenever the evaluator section is configured; the consumer resolves `native:admission`
    (`native-consumer/trust.ts:19`); `policyFor` throws on any absent purpose
-   (`native-trust-catalog.ts:346-350`). A catalog missing a purpose is a boot-or-verify-time
-   refusal, not a degraded mode — so completeness is authored, not discovered. Both
-   admission spellings are populated with the admission-agent IRIs.
+   (`native-trust-catalog.ts:346-350`). A catalog authored without `evaluator-eligibility`
+   therefore boots solver and requester and then fails operator A's **evaluator** boot — the
+   exact LEG 6 gate leg. The purpose was missed in v0.1 because the e2e rig exercises only
+   LEG 0/1 and never assembles the evaluator, and the fixture authors only `native:<role>`
+   purposes (`fixtures/native-fleet/trust-catalog.ts:150-158`) — motivating evidence for
+   §3.4's fixtures-become-consumers rule. A catalog missing a purpose is a
+   boot-or-verify-time refusal, not a degraded mode — so completeness is authored, not
+   discovered. Both admission spellings are populated with the admission-agent IRIs.
 4. **Wait for `finalized` before declaring success.** The catalog opener accepts only
    anchors below the finalized head (`native-base-sepolia-infrastructure.ts:965-1012`;
    finalized tag read at `:309-311`). On live Base Sepolia that lag is ~10-20 minutes; a
@@ -635,8 +676,12 @@ PR train into `integration/evidence-v1`, stacked, each green alone:
   deletions per §3.4; round-trip tests: authored catalog → `openNativeTrustCatalog` accepts;
   authored store → `RoleIdentitySet.open` accepts.
 - **PR2 — settlement-authority association amendment.** §2.3 in
-  `native-trust-catalog.ts` (+ the `settlementOwnershipClient` input) and both composition
-  wirings; third-resource authoring in PR1's `performEoaCeremony` activates for settlement
+  `native-trust-catalog.ts` (+ the required `settlementOwnershipClient` input) and **all
+  four** catalog-open wirings (§2.3c): fleet runtime, consumer driver, and both
+  `native-production-deployment.ts` sites — the latter two via the `openInfrastructure`
+  extension surfacing the Safe-ownership read on `NativeInfrastructurePrimitives` (the
+  deployment path retires at stage 5 per DR-2026-08-05 but must compile and run until
+  then); third-resource authoring in PR1's `performEoaCeremony` activates for settlement
   roles; e2e rig un-conflation (real 1-of-1 Safe on the fork); unit-test updates per §2.4.
 - **PR3 — `jinn ceremony` CLI + config write-back.** `init | join | show` per §4;
   surgical five-key write-back with a read-back assertion; CLI tests over injected deps
@@ -663,6 +708,25 @@ PRs run both, and PR2's rig changes stay inside `client/test/e2e/`.
 - **(c) At-time Safe ownership.** §2.3c step 5 reads current chain state, matching the
   recorded `ChainFactResolver.ownerOf` finding. Whether Phase B verifiability tiers need
   historical ownership proof (timestamp→block mapping) is open there, not here.
-- **(d) Should `join` author the joiner's `recordSources` entries?** The five identity keys
+- **(d) Should `join` author the joiner's `recordSources` entries?** The identity keys
   are written back; record sources describe peers, not identity, and today's two-operator
   case hand-writes them. Left open until the third operator exists to generalize from.
+
+### Review record (v0.2)
+
+The v0.1 design was independently reviewed on 2026-08-07. Its highest-risk claim — that a
+`join`'s new bindings satisfy the §7.4a consent-chain leg without any incumbent standing in
+their way — was adversarially verified per-agent against the resolver, not assumed:
+`resolveBinding` starts from `listBindingsForAgent(query.agent)` (`binding-resolver.ts:236`),
+and both `isGenesisAmong` (`:217-223`) and `findIncumbentControlVoucher` (`:201-212`)
+operate only within that per-agent set — so a joiner's fresh `urn:uuid:` Agent IRI gets its
+own genesis binding (equal-`effectiveStart` batch settled by the digest tiebreak,
+`:219-221`), same-session peer bindings pass because the incumbent window admits equality
+(`:150-154`) and the voucher is the same EOA (`verify.ts:176-180`), and the first operator's
+bindings are never anyone else's incumbent. Governance succession was verified against the
+dual-threshold chain (`policy.ts:266-271`); the genesis signer set needs no binding or
+anchor of its own (`policy.ts:247-250`). The v0.2 changes are the review's findings: the
+`evaluator-eligibility` purpose (§6 law 3, §3.2), the four-site
+`settlementOwnershipClient` seam scope (§2.3c, §9 PR2), the verbatim-`validFrom` rule
+(§6 law 2), the password-identity and config-write-back completions (§4.1, §4.4), and cite
+corrections (`abis.ts:59-66`, `production.ts:70`).
