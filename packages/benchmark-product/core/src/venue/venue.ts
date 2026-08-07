@@ -98,6 +98,11 @@ export interface PreparedEvaluationCell {
 
 export interface LocalVenue {
   readonly backend: LocalTaskExecutionBackend;
+  /** Synchronously proves this constructor owns the sole durable state-root writer before a run
+   * driver is journaled. Optional only for narrow in-memory unit venues. */
+  readonly assertRunOwnership?: () => void;
+  /** Async launcher/readiness probes, deliberately performed after driver-started is durable. */
+  readonly preflightRun?: () => Promise<void>;
   /** `evaluators[0].keyId`, kept for continuity with the pre-BP-21 single-evaluator surface. */
   readonly verdictKeyId: string;
   /**
@@ -580,6 +585,15 @@ export function createLocalVenue(options: LocalVenueOptions): LocalVenue {
 
   return {
     backend,
+    assertRunOwnership() {
+      backend.assertStateRootOwnership();
+    },
+    async preflightRun() {
+      const preflight = await backend.preflight({});
+      if (!preflight.ready) {
+        throw new Error(preflight.detail ?? preflight.error?.message ?? "local venue is not ready");
+      }
+    },
     verdictKeyId: evaluators[0]!.keyId,
     evaluators: evaluators.map(({ id, keyId }) => ({ id, keyId })),
     prepareEvaluationCell,

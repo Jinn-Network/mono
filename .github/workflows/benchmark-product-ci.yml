@@ -79,7 +79,9 @@ jobs:
           (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
           (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
-          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn build)
+          # BP-32's synchronous ownership assertion is the narrow platform seam that lets a web
+          # response distinguish a rejected contender from a durably-started in-process driver.
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
           (cd packages/benchmarking/run && yarn install --immutable && yarn build)
           (cd packages/benchmarking/local && yarn install --immutable && yarn build)
       - name: Verify Benchmark Product core

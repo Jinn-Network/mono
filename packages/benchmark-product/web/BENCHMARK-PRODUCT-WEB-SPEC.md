@@ -72,15 +72,15 @@ preview; quote; and authority-gated lock. All facts and transitions come
 from core operations through Server Actions. Successful mutations
 revalidate the workspace and draft surfaces. Typed operation failures are
 rendered with their retry guidance; unexpected exceptions are redacted to
-a generic invalid-invocation failure.
+a generic invalid-invocation failure, and runtime-origin execution/venue
+details are replaced with safe typed retry guidance at the GUI boundary.
 
-The explicit M3 deferrals are limited to BP-32's official-run controls
-(`launch`, `resume`, `cancel`, `status`, `collect`) and BP-33's result/report/
-verification controls (`results`, `report`, `verify`). The two pre-existing
+The explicit M3 deferrals are limited to BP-33's result/report/verification
+controls (`results`, `report`, `verify`). The two pre-existing
 non-operation capability exclusions (`unverifiableAxisCounts`, `publish`)
 remain explicit in the generated matrix. Sections 3.1, 3.2, and 3.6 describe
-the currently rendered domain surface; §§3.3–3.5 remain the target for the
-named follow-on packets.
+the currently rendered setup surface; §3.3 is now shipped and §§3.4–3.5 remain
+the target for BP-33.
 
 ## 3. Domain model (four axes)
 
@@ -189,8 +189,9 @@ Covers the design spec §4.6 Official-run row.
   (`unscorable` is a named outcome value, not a failure — design spec §4.1,
   §4.6); cap-approach warning; stall notice; "cancellation requested —
   draining in-flight work" until the operation reaches its terminal
-  `cancelled` result. Venue/finalization contention retains the operation's
-  typed retry guidance rather than being presented as terminal cancellation.
+  `cancelled` result; a closed run with a valid marker says cancellation is
+  finalized, never still draining. Venue/finalization contention retains the
+  operation's typed retry guidance rather than being presented as terminal cancellation.
 - **Collections** — cells, each with its dispatch lineage; live events.
 - **Actions** — launch → `runLaunch` / `launch` (**gated**; spend authority
   on paid venues); watch/status → `runStatus` / `status`; resume →
@@ -198,9 +199,34 @@ Covers the design spec §4.6 Official-run row.
   `runCancel` / `cancel` (**gated**; durable and idempotent, with typed
   `requested` and terminal `cancelled` results).
 
-BP-31 renders none of these controls. They are explicitly cataloged as
-deferred to BP-32; cancellation enters the GUI there through the existing
-BP-22 library/CLI contract, never through a web implementation.
+BP-32 renders these controls at `/workspace/[draftId]/run`. The monitor is a
+durable read: every refresh/poll calls `runStatus` against the sealed Run,
+draft, cancellation marker, and append-only journals; an in-memory promise is
+never rendered as truth. Launch and resume run the exact public core promise
+in-process under Next's request-lifetime `after()` retention. A journaled
+driver generation means the real venue's synchronous state-root ownership
+check succeeded; async readiness/drive failures are paired to that generation
+and remain visible after the response. Cancellation-wrapper close and venue
+shutdown are part of the generation, before its terminal journal event, so a
+late resource-release rejection is durably failed rather than falsely
+successful. Pre-ownership contenders return typed errors without creating a
+generation. A restart may leave an active generation without a terminal
+outcome; Resume recovers through core's durable journal.
+
+The browser view preserves the durable failure's typed code but replaces its
+detail and issues with safe retry guidance at the server-only view projection;
+the core journal and CLI retain the exact diagnostic. This fail-closed boundary
+covers arbitrary execution and venue/preflight errors that can carry paths or
+secret-bearing command material. Action forms are min-width-contained and long
+terminal results wrap or scroll locally so a 390 px viewport does not widen the
+document.
+
+The deliberately slow real-attempt control is server-only and needs two exact
+environment opt-ins. Its default is absent, it is never serialized to browser
+state, it accepts at most core's 60,000 ms maximum, and it injects only core's
+explicitly `ForTesting` delay dependency.
+This exists for production-build browser verification of requested → draining
+→ cancelled; it is not a product setting.
 
 ### 3.4 Results (Matrix)
 

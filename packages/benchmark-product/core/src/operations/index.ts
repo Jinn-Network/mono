@@ -82,7 +82,7 @@ export {
   type RunResumeInput,
   type RunResumeResult,
 } from "./run-launch.js";
-export { runStatus, type RunStatusCell, type RunStatusCounts, type RunStatusResult } from "./run-status.js";
+export { runStatus, type RunDriverStatus, type RunStatusCell, type RunStatusCounts, type RunStatusResult } from "./run-status.js";
 export { runCollect, type RunCollectInput, type RunCollectResult } from "./run-collect.js";
 export {
   runResults,

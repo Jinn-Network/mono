@@ -304,10 +304,22 @@ test('web keeps the core edge server-only, has no API routes, and does not dupli
       /\b(?:const|let|var)\s+PRODUCT_BRANDING\b/,
       /\b(?:const|let|var)\s+GATED_OPERATIONS\b/,
       /\b(?:const|let|var)\s+ASSURANCE_PRESETS\b/,
-      /\bfunction\s+(?:runPreview|runQuote|runLock|createDraft|updateDraft)\b/,
+      /\bfunction\s+(?:runPreview|runQuote|runLock|runLaunch|runResume|runCancel|runStatus|runCollect|createDraft|updateDraft)\b/,
     ].some((pattern) => pattern.test(source)) ? [relative(root, file)] : [];
   });
   assert.deepEqual(duplicated, [], 'web duplicates core-owned product semantics');
+
+  const clientTestControls = webFiles
+    .filter((file) => /^\s*["']use client["'];/m.test(readFileSync(file, 'utf8')))
+    .filter((file) => /BENCHMARK_PRODUCT_(?:ENABLE_TEST_CONTROLS|TEST_SOLVE_DELAY_MS)/.test(readFileSync(file, 'utf8')))
+    .map((file) => relative(root, file));
+  assert.deepEqual(clientTestControls, [], 'server-only real-venue test controls leak into a client module');
+
+  const productContext = readFileSync(join(webRoot, 'lib', 'server', 'product-context.ts'), 'utf8');
+  assert.match(productContext, /ENABLE_TEST_CONTROLS_ENV\]\?\.trim\(\) !== "1"/,
+    'the solve-delay control must fail closed unless its independent enable flag is exact');
+  assert.match(productContext, /delay > 60_000/,
+    'the web solve-delay control must not admit values beyond core local-venue authority');
 });
 
 test('test-only packages are imported by test files alone', () => {

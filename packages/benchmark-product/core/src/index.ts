@@ -15,7 +15,7 @@ export { OPERATION_TO_GUI as GUI_CAPABILITY_CATALOG } from "./cli/parity-map.js"
 export type { GuiCapability } from "./cli/parity-map.js";
 
 // Typed errors (spec §4.3): callers branch on `code`, never on `message`.
-export { BenchmarkProductError, toErrorEnvelope } from "./errors.js";
+export { BenchmarkProductError, PRODUCT_ERROR_CODES, toErrorEnvelope } from "./errors.js";
 export type { ProductErrorCode, ProductErrorEnvelope, ProductIssue } from "./errors.js";
 
 // Lifecycle state machine (spec §4.1).
@@ -146,6 +146,7 @@ export type {
   RunResumeResult,
   RunStatusCell,
   RunStatusCounts,
+  RunDriverStatus,
   RunStatusResult,
   RunVerifyCheck,
   RunVerifyInput,

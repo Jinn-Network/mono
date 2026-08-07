@@ -14,21 +14,16 @@ describe("generated library / CLI / GUI parity", () => {
       if (capability.status === "shipped") {
         expect(GUI_SERVER_ACTIONS, `${operation} maps to a missing rendered server action`).toHaveProperty(capability.action);
       } else {
-        expect(["BP-32", "BP-33"], `${operation} has an unowned GUI deferral`).toContain(capability.deferredTo);
+        expect(["BP-33"], `${operation} has an unowned GUI deferral`).toContain(capability.deferredTo);
       }
     }
   });
 
-  test("deferrals are limited to the named BP-32 and BP-33 spine", () => {
+  test("only BP-33 result/report/verify operations remain deferred", () => {
     const deferred = Object.entries(GUI_CAPABILITY_CATALOG)
       .filter(([, capability]) => capability.status === "deferred")
       .map(([operation, capability]) => [operation, capability.status === "deferred" ? capability.deferredTo : ""]);
     expect(deferred).toEqual([
-      ["runLaunch", "BP-32"],
-      ["runResume", "BP-32"],
-      ["runCancel", "BP-32"],
-      ["runStatus", "BP-32"],
-      ["runCollect", "BP-32"],
       ["runResults", "BP-33"],
       ["runReport", "BP-33"],
       ["runVerify", "BP-33"],

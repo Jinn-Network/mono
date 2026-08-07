@@ -203,6 +203,9 @@ import type {
   RunPreviewDeps,
   RunPreviewInput,
   RunPreviewResult,
+  RunDriverStatus,
+  RunLaunchDeps,
+  RunStatusResult,
 } from '@jinn-network/benchmark-product-core';
 
 export type BenchmarkProductEntrypoints = [
@@ -217,6 +220,9 @@ export type PublicPreviewAndQuoteTypes = [
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
+  RunDriverStatus,
+  RunLaunchDeps,
+  RunStatusResult,
 ];
 export const publicRunPreview: typeof runPreview = runPreview;
 export const localVenueLimits: readonly string[] = LOCAL_VENUE_LIMITS;

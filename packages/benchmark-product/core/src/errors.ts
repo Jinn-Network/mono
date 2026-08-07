@@ -19,29 +19,32 @@
  *   change; BP-10 raises `execution` only as the carrier for untyped throws.
  */
 
-export type ProductErrorCode =
+export const PRODUCT_ERROR_CODES = [
   /** Draft or document content invalid (schema issues carried in `issues`). */
-  | "validation"
+  "validation",
   /** The operation is not valid in the subject's current lifecycle state. */
-  | "illegal-transition"
+  "illegal-transition",
   /** The acting principal is not a workspace member or lacks the required grant. */
-  | "authority-denied"
+  "authority-denied",
   /** Stored sealed bytes fail their digest check on read. */
-  | "record-integrity"
+  "record-integrity",
   /** The audit journal on disk is not well-formed, ordered JSONL. */
-  | "journal-integrity"
+  "journal-integrity",
   /** The named workspace, draft, or record does not exist. */
-  | "not-found"
+  "not-found",
   /** The write collides with existing state (workspace already initialized, draft id taken). */
-  | "conflict"
+  "conflict",
   /** CLI-level: unknown verb, unknown flag, or missing required flag. */
-  | "invalid-invocation"
+  "invalid-invocation",
   /** Reserved for later packets (spec §7.3): the selected venue is not available. */
-  | "venue-unavailable"
+  "venue-unavailable",
   /** Reserved for later packets (spec §7.3): a venue guarantee cannot be verified. */
-  | "venue-unverifiable"
+  "venue-unverifiable",
   /** Backend-reported or untyped failure, carried through rather than swallowed. */
-  | "execution";
+  "execution",
+] as const;
+
+export type ProductErrorCode = (typeof PRODUCT_ERROR_CODES)[number];
 
 export interface ProductIssue {
   readonly path: string;

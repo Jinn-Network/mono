@@ -11,6 +11,9 @@ import type {
   RunPreviewDeps,
   RunPreviewInput,
   RunPreviewResult,
+  RunDriverStatus,
+  RunLaunchDeps,
+  RunStatusResult,
 } from "./index.js";
 
 type PublicPreviewAndQuoteTypes = [
@@ -22,6 +25,9 @@ type PublicPreviewAndQuoteTypes = [
   QuoteCoverageRefusal,
   QuoteEstimatedWallTime,
   QuotePresentation,
+  RunDriverStatus,
+  RunLaunchDeps,
+  RunStatusResult,
 ];
 
 const publicTypesCompile: PublicPreviewAndQuoteTypes | undefined = undefined;

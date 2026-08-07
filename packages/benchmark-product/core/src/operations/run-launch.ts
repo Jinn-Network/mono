@@ -31,10 +31,11 @@ import {
   type BenchmarkRecord,
   type RunRecord,
 } from "@jinn-network/benchmarking-records";
+import { randomUUID } from "node:crypto";
 import { launchAndWatch, resumeRun } from "@jinn-network/benchmarking-run";
 import type { DraftDocument } from "../domain/draft.js";
 import { transition } from "../domain/lifecycle.js";
-import { refuse } from "../errors.js";
+import { refuse, toErrorEnvelope } from "../errors.js";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { cancelRequested } from "../run/cancel-marker.js";
 import { createCancellationAwareBackend } from "../run/cancellation-aware-backend.js";
@@ -68,6 +69,11 @@ export interface RunLaunchDeps {
   readonly onProgress?: (line: string) => void;
   /** Test/diagnostic hook fired once when a solve attempt is first observed nonterminal. */
   readonly onSolveAttemptNonterminal?: (attempt: string) => void;
+  /** TEST-ONLY: delay each real solve subprocess before its runner starts. The web client exposes
+   * this only behind two explicit server-side test-control environment opt-ins. */
+  readonly solveStartDelayMsForTesting?: number;
+  /** TEST-ONLY deterministic generation source. Production uses a core-owned random UUID. */
+  readonly driverGenerationForTesting?: () => string;
 }
 
 export interface RunLaunchInput {
@@ -122,6 +128,62 @@ function taskBytesForFactory(workspaceDir: string): (taskDigestHex: string) => U
   return (taskDigestHex) => getSealedBytes(workspaceDir, taskDigestHex);
 }
 
+function assertVenueOwnership(venue: LocalVenue): void {
+  try {
+    venue.assertRunOwnership?.();
+  } catch (cause) {
+    refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+async function preflightVenue(venue: LocalVenue): Promise<void> {
+  try {
+    await venue.preflightRun?.();
+  } catch (cause) {
+    refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+async function runDriverGeneration<T>(
+  context: OperationContext,
+  draftId: string,
+  operation: "launch" | "resume",
+  generation: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const startedAt = context.clock();
+  appendRunJournalEntry(context.workspaceDir, draftId, {
+    kind: "driver-started",
+    at: startedAt,
+    operation,
+    generation,
+  });
+  try {
+    const result = await run();
+    appendRunJournalEntry(context.workspaceDir, draftId, {
+      kind: "driver-succeeded",
+      at: context.clock(),
+      operation,
+      generation,
+    });
+    return result;
+  } catch (cause) {
+    const failure = toErrorEnvelope(cause);
+    appendRunJournalEntry(context.workspaceDir, draftId, {
+      kind: "driver-failed",
+      at: context.clock(),
+      operation,
+      generation,
+      error: {
+        code: failure.code,
+        detail: failure.detail,
+        ...(failure.issues !== undefined ? { issues: failure.issues.map((issue) => ({ ...issue })) } : {}),
+      },
+    });
+    throw cause;
+  }
+}
+
 export function runLaunch(
   context: OperationContext,
   input: RunLaunchInput,
@@ -158,55 +220,85 @@ export function runLaunch(
 
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock, evaluatorCount: minVerdicts });
+        venue = createVenue({
+          workspaceDir: clockedContext.workspaceDir,
+          now: context.clock,
+          evaluatorCount: minVerdicts,
+          ...(deps.solveStartDelayMsForTesting !== undefined
+            ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
+            : {}),
+        });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
 
-      let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
+      let shutdownAttempted = false;
+      const shutdownVenue = async (): Promise<void> => {
+        shutdownAttempted = true;
+        await venue.shutdown();
+      };
       try {
-        const backend = createRecordingProxy(venue.backend, {
-          workspaceDir: clockedContext.workspaceDir,
-          draftId: input.draftId,
-          liveClock: context.clock,
-        });
-        const driveDeps: DriveDeps = {
-          workspaceDir: clockedContext.workspaceDir,
-          draftId: input.draftId,
-          venue,
-          backend,
-          runSha256: loaded.runSha256,
-          owner: loaded.owner,
-          cellWindowMs: loaded.runRecord.policy.cellWindow,
-          minVerdicts,
-          liveClock: context.clock,
-          onProgress: deps.onProgress,
-        };
+        assertVenueOwnership(venue);
 
-        cancellation = createCancellationAwareBackend(backend, {
-          workspaceDir: clockedContext.workspaceDir,
-          draftId: input.draftId,
-          onAttemptNonterminal: deps.onSolveAttemptNonterminal,
-        });
-        const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
-          runDigest: `sha256:${loaded.runSha256}`,
-          taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
-          clock: { now: () => new Date(context.clock()) },
-          signal: cancellation.signal,
-          get earlyClose() {
-            return cancellation!.earlyClose;
+        return await runDriverGeneration(
+          context,
+          input.draftId,
+          "launch",
+          deps.driverGenerationForTesting?.() ?? randomUUID(),
+          async () => {
+            let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
+            try {
+              await preflightVenue(venue);
+              const backend = createRecordingProxy(venue.backend, {
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                liveClock: context.clock,
+              });
+              const driveDeps: DriveDeps = {
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                venue,
+                backend,
+                runSha256: loaded.runSha256,
+                owner: loaded.owner,
+                cellWindowMs: loaded.runRecord.policy.cellWindow,
+                minVerdicts,
+                liveClock: context.clock,
+                onProgress: deps.onProgress,
+              };
+
+              cancellation = createCancellationAwareBackend(backend, {
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                onAttemptNonterminal: deps.onSolveAttemptNonterminal,
+              });
+              const events = launchAndWatch(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
+                runDigest: `sha256:${loaded.runSha256}`,
+                taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
+                clock: { now: () => new Date(context.clock()) },
+                signal: cancellation.signal,
+                get earlyClose() {
+                  return cancellation!.earlyClose;
+                },
+              });
+              await driveCellEvents(driveDeps, events);
+              return { draft };
+            } finally {
+              try {
+                await cancellation?.close();
+              } finally {
+                // A generation is not successful until every venue resource has closed. Keeping
+                // shutdown inside this callback makes a late rejection a durable driver-failed.
+                await shutdownVenue();
+              }
+            }
           },
-        });
-        await driveCellEvents(driveDeps, events);
+        );
       } finally {
-        try {
-          await cancellation?.close();
-        } finally {
-          await venue.shutdown();
-        }
+        // `driver-started` itself can fail before its callback is entered; that path still owns a
+        // venue and must release it, while every entered generation shuts down exactly once above.
+        if (!shutdownAttempted) await shutdownVenue();
       }
-
-      return { draft };
     },
   });
 }
@@ -256,85 +348,112 @@ export function runResume(
 
       let venue: LocalVenue;
       try {
-        venue = createVenue({ workspaceDir: clockedContext.workspaceDir, now: context.clock, evaluatorCount: minVerdicts });
+        venue = createVenue({
+          workspaceDir: clockedContext.workspaceDir,
+          now: context.clock,
+          evaluatorCount: minVerdicts,
+          ...(deps.solveStartDelayMsForTesting !== undefined
+            ? { solveStartDelayMsForTesting: deps.solveStartDelayMsForTesting }
+            : {}),
+        });
       } catch (cause) {
         refuse("venue-unavailable", "venue", cause instanceof Error ? cause.message : String(cause));
       }
 
-      let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
+      let shutdownAttempted = false;
+      const shutdownVenue = async (): Promise<void> => {
+        shutdownAttempted = true;
+        await venue.shutdown();
+      };
       try {
-        const backend = createRecordingProxy(venue.backend, {
-          workspaceDir: clockedContext.workspaceDir,
-          draftId: input.draftId,
-          liveClock: context.clock,
-        });
-        const driveDeps: DriveDeps = {
-          workspaceDir: clockedContext.workspaceDir,
-          draftId: input.draftId,
-          venue,
-          backend,
-          runSha256: loaded.runSha256,
-          owner: loaded.owner,
-          cellWindowMs: loaded.runRecord.policy.cellWindow,
-          minVerdicts,
-          liveClock: context.clock,
-          onProgress: deps.onProgress,
-        };
+        assertVenueOwnership(venue);
 
-        if (outstanding.length > 0) {
-          cancellation = createCancellationAwareBackend(backend, {
-            workspaceDir: clockedContext.workspaceDir,
-            draftId: input.draftId,
-            onAttemptNonterminal: deps.onSolveAttemptNonterminal,
-          });
-          const events = resumeRun(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
-            runDigest: `sha256:${loaded.runSha256}`,
-            taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
-            clock: { now: () => new Date(context.clock()) },
-            outstanding,
-            signal: cancellation.signal,
-            get earlyClose() {
-              return cancellation!.earlyClose;
-            },
-            acceptedSubmissions: {
-              acceptedSubmissionBytes: (_runDigest, cellKey, dispatch) => {
-                const sha256 = journaledSubmissions.get(`${cellKey}::${dispatch}`);
-                return sha256 === undefined ? undefined : getSealedBytes(clockedContext.workspaceDir, sha256);
-              },
-            },
-          });
-          await driveCellEvents(driveDeps, events);
-        }
+        return await runDriverGeneration(
+          context,
+          input.draftId,
+          "resume",
+          deps.driverGenerationForTesting?.() ?? randomUUID(),
+          async () => {
+            let cancellation: ReturnType<typeof createCancellationAwareBackend> | undefined;
+            try {
+              await preflightVenue(venue);
+              const backend = createRecordingProxy(venue.backend, {
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                liveClock: context.clock,
+              });
+              const driveDeps: DriveDeps = {
+                workspaceDir: clockedContext.workspaceDir,
+                draftId: input.draftId,
+                venue,
+                backend,
+                runSha256: loaded.runSha256,
+                owner: loaded.owner,
+                cellWindowMs: loaded.runRecord.policy.cellWindow,
+                minVerdicts,
+                liveClock: context.clock,
+                onProgress: deps.onProgress,
+              };
 
-        // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as any
-        // carried over from before it, without re-driving a solve dispatch for either.
-        const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
-        const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
-          ? []
-          : evaluationGaps(freshFold, minVerdicts)).filter(
-          (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
-            gap.cell.deliverySha256 !== undefined,
+              if (outstanding.length > 0) {
+                cancellation = createCancellationAwareBackend(backend, {
+                  workspaceDir: clockedContext.workspaceDir,
+                  draftId: input.draftId,
+                  onAttemptNonterminal: deps.onSolveAttemptNonterminal,
+                });
+                const events = resumeRun(loaded.benchRecord, loaded.runRecord, cancellation.backend, {
+                  runDigest: `sha256:${loaded.runSha256}`,
+                  taskBytesFor: taskBytesForFactory(clockedContext.workspaceDir),
+                  clock: { now: () => new Date(context.clock()) },
+                  outstanding,
+                  signal: cancellation.signal,
+                  get earlyClose() {
+                    return cancellation!.earlyClose;
+                  },
+                  acceptedSubmissions: {
+                    acceptedSubmissionBytes: (_runDigest, cellKey, dispatch) => {
+                      const sha256 = journaledSubmissions.get(`${cellKey}::${dispatch}`);
+                      return sha256 === undefined ? undefined : getSealedBytes(clockedContext.workspaceDir, sha256);
+                    },
+                  },
+                });
+                await driveCellEvents(driveDeps, events);
+              }
+
+              // Re-fold fresh: catches gaps left by THIS resume's own new deliveries as well as
+              // any carried over from before it, without re-driving a solve dispatch for either.
+              const freshFold = foldRunJournal(readRunJournalEntries(clockedContext.workspaceDir, input.draftId));
+              const gaps = (cancelRequested(clockedContext.workspaceDir, input.draftId)
+                ? []
+                : evaluationGaps(freshFold, minVerdicts)).filter(
+                (gap): gap is typeof gap & { cell: typeof gap.cell & { deliverySha256: string } } =>
+                  gap.cell.deliverySha256 !== undefined,
+              );
+              if (gaps.length > 0) {
+                await driveEvaluationCatchUp(
+                  driveDeps,
+                  gaps.map((gap) => ({
+                    cellKey: gap.cell.cellKey,
+                    lastDispatch: gap.cell.lastDispatch,
+                    deliverySha256: gap.cell.deliverySha256,
+                    ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
+                    missingEvalIndexes: gap.missingEvalIndexes,
+                  })),
+                );
+              }
+
+              return { outstandingCount: outstanding.length, evaluationCatchUpCount: gaps.length };
+            } finally {
+              try {
+                await cancellation?.close();
+              } finally {
+                await shutdownVenue();
+              }
+            }
+          },
         );
-        if (gaps.length > 0) {
-          await driveEvaluationCatchUp(
-            driveDeps,
-            gaps.map((gap) => ({
-              cellKey: gap.cell.cellKey,
-              lastDispatch: gap.cell.lastDispatch,
-              deliverySha256: gap.cell.deliverySha256,
-              ...(gap.cell.deliveryOutputs !== undefined ? { deliveryOutputs: gap.cell.deliveryOutputs } : {}),
-              missingEvalIndexes: gap.missingEvalIndexes,
-            })),
-          );
-        }
-
-        return { outstandingCount: outstanding.length, evaluationCatchUpCount: gaps.length };
       } finally {
-        try {
-          await cancellation?.close();
-        } finally {
-          await venue.shutdown();
-        }
+        if (!shutdownAttempted) await shutdownVenue();
       }
     },
   });

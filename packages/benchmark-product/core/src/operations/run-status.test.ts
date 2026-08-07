@@ -7,7 +7,7 @@ import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { atomicWriteFileSync } from "../fs/atomic.js";
 import { writeCancelMarker } from "../run/cancel-marker.js";
 import type { ProxiedBackend } from "../run/drive.js";
-import { readRunJournalEntries } from "../run/journal.js";
+import { appendRunJournalEntry, readRunJournalEntries } from "../run/journal.js";
 import { runCancelMarkerPath, runJournalPath } from "../workspace/layout.js";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import type { LocalVenue } from "../venue/venue.js";
@@ -192,6 +192,108 @@ describe("runStatus — guards", () => {
 });
 
 describe("runStatus — reflects a driven run", () => {
+  test("reports only the latest durable driver generation, distinguishing failed, active, and succeeded", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-started",
+      at: clock(),
+      operation: "launch",
+      generation: "launch-generation",
+    });
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-failed",
+      at: clock(),
+      operation: "launch",
+      generation: "launch-generation",
+      error: { code: "venue-unavailable", detail: "local venue unavailable" },
+    });
+    let outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.driver).toMatchObject({
+      operation: "launch",
+      generation: "launch-generation",
+      status: "failed",
+      error: { code: "venue-unavailable" },
+    });
+
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-started",
+      at: clock(),
+      operation: "resume",
+      generation: "resume-generation",
+    });
+    outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.driver).toMatchObject({
+      operation: "resume",
+      generation: "resume-generation",
+      status: "active",
+    });
+    expect(outcome.result.driver).not.toHaveProperty("error");
+
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-succeeded",
+      at: clock(),
+      operation: "resume",
+      generation: "resume-generation",
+    });
+    outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.driver).toMatchObject({
+      operation: "resume",
+      generation: "resume-generation",
+      status: "succeeded",
+    });
+  });
+
+  test("a later sequential resume failure supersedes an earlier successful launch", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const sameAt = "2026-08-05T01:00:00.000Z";
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-started", at: sameAt, operation: "launch", generation: "launch-generation",
+    });
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-succeeded", at: sameAt, operation: "launch", generation: "launch-generation",
+    });
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-started", at: sameAt, operation: "resume", generation: "resume-generation",
+    });
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-failed", at: sameAt, operation: "resume", generation: "resume-generation",
+      error: { code: "execution", detail: "resume failed after ownership" },
+    });
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.driver).toMatchObject({
+      generation: "resume-generation",
+      status: "failed",
+      error: { code: "execution" },
+    });
+  });
+
+  test("fails closed on an orphan durable driver terminal", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    appendRunJournalEntry(workspaceDir, "draft-1", {
+      kind: "driver-failed",
+      at: clock(),
+      operation: "launch",
+      generation: "orphan-generation",
+      error: { code: "execution", detail: "orphan" },
+    });
+    const outcome = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("journal-integrity");
+  });
+
   test("every cell reports delivered+judged status with digests after a full launch", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);

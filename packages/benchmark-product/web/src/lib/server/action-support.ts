@@ -3,6 +3,7 @@ import "server-only";
 import type { OperationContext, OperationResult } from "@jinn-network/benchmark-product-core";
 import { revalidatePath } from "next/cache";
 import type { GuiActionState } from "@/lib/action-state";
+import { projectProductErrorForGui } from "./gui-error";
 import { createProductOperationContext, ProductContextConfigurationError } from "./product-context";
 
 export function field(formData: FormData, name: string): string {
@@ -41,7 +42,7 @@ export async function executeOperation<T>(
 ): Promise<GuiActionState> {
   try {
     const outcome = await operation(createProductOperationContext());
-    if (!outcome.ok) return { status: "error", error: outcome.error };
+    if (!outcome.ok) return { status: "error", error: projectProductErrorForGui(outcome.error) };
     for (const path of options.revalidate ?? []) revalidatePath(path);
     return { status: "success", result: outcome.result };
   } catch (cause) {

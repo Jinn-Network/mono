@@ -77,6 +77,18 @@ describe("append / read round trip", () => {
     expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(entries);
   });
 
+  test("a submission acceptance counts its dispatch before the matching event and never double-counts it", () => {
+    const entries: RunJournalEntry[] = [
+      { kind: "submission-accepted", at: "2026-08-05T00:00:00Z", cellKey: CELL_A, dispatch: 1, submissionSha256: HEX("9"), leg: "solve" },
+      {
+        kind: "cell-event",
+        at: "2026-08-05T00:00:01Z",
+        event: { cellKey: CELL_A, armId: "arm-a", replicate: 1, dispatch: 1, kind: "dispatch" },
+      },
+    ];
+    expect(foldRunJournal(entries).get(CELL_A)?.dispatches).toBe(1);
+  });
+
   test("cancel-requested entries round-trip (BP-22)", () => {
     const entries: RunJournalEntry[] = [
       { kind: "launched", at: "2026-08-05T00:00:00Z" },

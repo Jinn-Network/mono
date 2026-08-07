@@ -863,7 +863,8 @@ reopened):**
   credential, private key, secret, or ambient environment object crosses
   into browser state. Known configuration/form failures produce safe typed
   details; unexpected exceptions are redacted. Core `OperationResult`
-  errors retain their typed code, detail, and retry guidance.
+  errors retain their typed code and retry guidance; runtime-origin
+  `execution`/venue details are redacted only at the GUI trust boundary.
 - **§4 setup surface realized.** Routes and accessible forms now cover
   workspace init; draft create/read/list/edit/inspect; bundled sample and
   SWE-bench intake; arm add/update/remove/list; authority show plus visibly
@@ -889,6 +890,49 @@ reopened):**
   graph is a deliberate package contract used by the webpack server
   external; both packed `import`/`require` smoke and production `next start`
   route loading prove it rather than relying on a build-only assumption.
+
+**Addendum — 2026-08-07, packet BP-32 (M3 durable run control; no
+§4/§5/§7 lifecycle, authority, or venue-orchestration decision reopened):**
+
+- **Official-run GUI parity.** The five prior BP-32 dispositions now map to
+  stable server actions (`run.launch`, `run.resume`, `run.status`,
+  `run.cancel`, `run.collect`). The responsive run monitor renders only
+  public `runStatus` facts: lifecycle, cancellation intent, counts, cell
+  terminals/details/blame, and durable driver outcome. BP-33's
+  results/report/verify rows are the only remaining GUI deferrals.
+- **In-process response lifetime.** Launch/resume start the public core
+  operation promise in the Server Action and retain that exact promise with
+  Next `after()` when it crosses the response boundary. No CLI child, API
+  route, second driver, or web-owned orchestration exists. Immediate
+  configuration/authority/state failures return typed errors; later failures
+  are appended by core to a generation-aware run journal and folded into
+  `runStatus`, so a scheduled response cannot become an invisible failure.
+- **Driver causality and ownership.** A driver generation is journaled only
+  after the real local backend synchronously proves it owns the state-root
+  writer. The narrow public backend assertion performs no launcher probes;
+  readiness remains async inside the journaled generation. Therefore a
+  concurrent writer loser creates no generation, while delayed readiness or
+  drive failure becomes durable. Cancellation-wrapper close and venue
+  shutdown complete before a generation terminal is appended, so a late
+  resource-release rejection becomes the generation's single durable
+  `driver-failed`, never a false success. UUID generations remain distinct
+  under frozen clocks; latest journal event order is the outcome authority.
+- **Real-venue cancellation proof.** Integration coverage starts a delayed
+  real subprocess, observes nonterminal durable state, writes gated cancel
+  intent while the venue is busy, observes requested/draining, confirms the
+  backend signal terminal, and retries finalization to a cancelled Matrix
+  accounting for all expected cells. The delay dependency is explicitly
+  test-only and the web exposes it only behind two independent server-side
+  environment opt-ins, capped at core's 60,000 ms maximum; neither value
+  reaches browser state.
+- **GUI trust and narrow-screen boundary.** Durable driver error details stay
+  exact in core/CLI records but are projected to typed-code-plus-retry text at
+  the server-rendered browser boundary, because backend/preflight exceptions
+  can contain paths or secret-bearing command material. At closed state a
+  valid cancel marker renders finalized cancellation, never draining. Action
+  forms and terminal JSON output shrink, wrap, or scroll inside their grid
+  cell so the monitor remains within a 390 px document viewport.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

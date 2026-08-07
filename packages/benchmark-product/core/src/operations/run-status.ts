@@ -15,7 +15,7 @@ import {
   parseRun,
 } from "@jinn-network/benchmarking-records";
 import type { LifecycleState } from "../domain/lifecycle.js";
-import { refuse } from "../errors.js";
+import { refuse, type ProductErrorEnvelope } from "../errors.js";
 import { cancelRequested } from "../run/cancel-marker.js";
 import { foldRunJournal, readRunJournalEntries, type CellStatus } from "../run/journal.js";
 import { requireRunState } from "../run/state.js";
@@ -54,6 +54,15 @@ export interface RunStatusCounts {
   readonly failed: number;
 }
 
+export interface RunDriverStatus {
+  readonly operation: "launch" | "resume";
+  readonly generation: string;
+  readonly startedAt: string;
+  readonly status: "active" | "failed" | "succeeded";
+  readonly completedAt?: string;
+  readonly error?: ProductErrorEnvelope;
+}
+
 export interface RunStatusResult {
   readonly state: LifecycleState;
   readonly closeAt?: string;
@@ -61,6 +70,9 @@ export interface RunStatusResult {
    * `cancelRequested`) — a present, schema-valid marker, independent of whether `run.cancel` has
    * yet finalized it (spec §4.6 Official-run row: the state line shows "cancel requested"). */
   readonly cancelRequested: boolean;
+  /** Latest durable driver generation. `active` after a restart is intentionally distinct from
+   * an in-memory promise: it means the journal has no terminal outcome and `resume` may recover. */
+  readonly driver?: RunDriverStatus;
   readonly cells: readonly RunStatusCell[];
   readonly counts: RunStatusCounts;
 }
@@ -91,7 +103,60 @@ export function runStatus(
       const runRecord = parseRun(getSealedBytes(context.workspaceDir, runState.runSha256));
       const benchRecord = parseBenchmark(getSealedBytes(context.workspaceDir, document.spec.taskSet.benchmarkSha256));
       const expected = expectedCellSet(benchRecord, runRecord);
-      const fold = foldRunJournal(readRunJournalEntries(context.workspaceDir, input.draftId));
+      const entries = readRunJournalEntries(context.workspaceDir, input.draftId);
+      const fold = foldRunJournal(entries);
+
+      const driverGenerations = new Map<string, RunDriverStatus & { readonly eventIndex: number }>();
+      entries.forEach((entry, eventIndex) => {
+        if (entry.kind === "driver-started") {
+          if (driverGenerations.has(entry.generation)) {
+            refuse(
+              "journal-integrity",
+              `runs.${input.draftId}.${eventIndex}`,
+              `driver generation ${entry.generation} starts more than once`,
+            );
+          }
+          driverGenerations.set(entry.generation, {
+            operation: entry.operation,
+            generation: entry.generation,
+            startedAt: entry.at,
+            status: "active",
+            eventIndex,
+          });
+        } else if (
+          (entry.kind === "driver-failed" || entry.kind === "driver-succeeded")
+        ) {
+          const started = driverGenerations.get(entry.generation);
+          if (started === undefined || started.operation !== entry.operation || started.status !== "active") {
+            refuse(
+              "journal-integrity",
+              `runs.${input.draftId}.${eventIndex}`,
+              `driver terminal ${entry.generation} has no matching active generation`,
+            );
+          }
+          driverGenerations.set(entry.generation, {
+            ...started,
+            status: entry.kind === "driver-failed" ? "failed" : "succeeded",
+            completedAt: entry.at,
+            ...(entry.kind === "driver-failed" ? { error: entry.error } : {}),
+            eventIndex,
+          });
+        }
+      });
+      const generations = [...driverGenerations.values()];
+      // Only venue owners are journaled by runLaunch/runResume, so simple journal order is the
+      // causal order: a later sequential failure must supersede an earlier success.
+      const selectedDriver = generations.sort((left, right) => right.eventIndex - left.eventIndex)[0];
+      const driver: RunDriverStatus | undefined = selectedDriver === undefined
+        ? undefined
+        : {
+            operation: selectedDriver.operation,
+            generation: selectedDriver.generation,
+            startedAt: selectedDriver.startedAt,
+            status: selectedDriver.status,
+            ...(selectedDriver.completedAt !== undefined ? { completedAt: selectedDriver.completedAt } : {}),
+            ...(selectedDriver.error !== undefined ? { error: selectedDriver.error } : {}),
+          };
 
       const cells: RunStatusCell[] = expected.map((coord) => {
         const cell = fold.get(coord.cellKey);
@@ -122,6 +187,7 @@ export function runStatus(
         state: document.state,
         ...(runState.closeAt !== undefined ? { closeAt: runState.closeAt } : {}),
         cancelRequested: cancelRequested(context.workspaceDir, input.draftId),
+        ...(driver !== undefined ? { driver } : {}),
         cells,
         counts,
       };

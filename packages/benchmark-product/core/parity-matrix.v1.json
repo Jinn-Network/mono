@@ -138,8 +138,8 @@
       "authorityGated": true,
       "description": "Requests an authority-gated stop, drains outstanding work, and seals a completely accounted cancelled Matrix.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-32"
+        "status": "shipped",
+        "action": "run.cancel"
       }
     },
     {
@@ -148,8 +148,8 @@
       "authorityGated": false,
       "description": "Assembles and seals the Matrix once the run's close boundary is reached.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-32"
+        "status": "shipped",
+        "action": "run.collect"
       }
     },
     {
@@ -158,8 +158,8 @@
       "authorityGated": true,
       "description": "Launches the locked run on the real local venue (authority-gated).",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-32"
+        "status": "shipped",
+        "action": "run.launch"
       }
     },
     {
@@ -218,8 +218,8 @@
       "authorityGated": false,
       "description": "Resumes an interrupted run, dispatching only outstanding work.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-32"
+        "status": "shipped",
+        "action": "run.resume"
       }
     },
     {
@@ -228,8 +228,8 @@
       "authorityGated": false,
       "description": "Reads per-cell live status folded from the run journal.",
       "gui": {
-        "status": "deferred",
-        "deferredTo": "BP-32"
+        "status": "shipped",
+        "action": "run.status"
       }
     },
     {

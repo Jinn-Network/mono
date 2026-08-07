@@ -83,8 +83,8 @@ describe("parity-matrix.v1.json is generated (BP-14, deliverable 1)", () => {
       action: "run.lock",
     });
     expect(gui.find((entry) => entry.operation === "runLaunch")?.gui).toEqual({
-      status: "deferred",
-      deferredTo: "BP-32",
+      status: "shipped",
+      action: "run.launch",
     });
     expect(gui.find((entry) => entry.operation === "runResults")?.gui).toEqual({
       status: "deferred",

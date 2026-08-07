@@ -27,6 +27,7 @@ import { initWorkspace } from "./init.js";
 import { runLaunch, runResume } from "./run-launch.js";
 import { runLock } from "./run-lock.js";
 import { runQuote } from "./run-quote.js";
+import { runStatus } from "./run-status.js";
 import { sampleInit } from "./sample.js";
 
 let workspaceDir: string;
@@ -264,6 +265,73 @@ describe("runLaunch — gating (authority-denied / grant)", () => {
 });
 
 describe("runLaunch — drives a full 2-arm run to completion (fake backend)", () => {
+  test("a shutdown rejection is the generation's single durable failed terminal", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const venue = fakeVenue(backend);
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => ({
+        ...venue,
+        async shutdown() {
+          throw new Error("late shutdown rejection");
+        },
+      }),
+      driverGenerationForTesting: () => "shutdown-failure-generation",
+    });
+
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "execution", detail: "late shutdown rejection" },
+    });
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status).toMatchObject({
+      ok: true,
+      result: {
+        driver: {
+          generation: "shutdown-failure-generation",
+          status: "failed",
+          error: { code: "execution", detail: "late shutdown rejection" },
+        },
+      },
+    });
+    const terminals = readRunJournalEntries(workspaceDir, "draft-1").filter((entry) =>
+      (entry.kind === "driver-succeeded" || entry.kind === "driver-failed")
+      && entry.generation === "shutdown-failure-generation");
+    expect(terminals).toEqual([
+      expect.objectContaining({ kind: "driver-failed", generation: "shutdown-failure-generation" }),
+    ]);
+  });
+
+  test("a readiness failure after synchronous ownership is a durable failed generation", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    const venue = fakeVenue(backend);
+    const outcome = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => ({
+        ...venue,
+        assertRunOwnership() {},
+        async preflightRun() {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          throw new Error("delayed launcher probe failure");
+        },
+      }),
+      driverGenerationForTesting: () => "delayed-preflight-generation",
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.error.code).toBe("venue-unavailable");
+    const status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.result.driver).toMatchObject({
+      generation: "delayed-preflight-generation",
+      status: "failed",
+      error: { code: "venue-unavailable", detail: "delayed launcher probe failure" },
+    });
+  });
+
   test("every expected cell reaches delivered + judged; RunState.launchedAt set; draft running", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);
@@ -610,6 +678,58 @@ function overwriteRunJournal(draftId: string, entries: readonly unknown[]): void
 }
 
 describe("runResume — re-dispatches only outstanding cells", () => {
+  test("a venue contender returns before ownership and cannot journal or mask the active owner", async () => {
+    const clock = () => "2026-08-05T00:00:00.000Z";
+    await setUpLockedDraft(clock);
+    const { backend } = makeStatefulFakeBackend();
+    let releaseFirstSubmit!: () => void;
+    const submitGate = new Promise<void>((resolve) => { releaseFirstSubmit = resolve; });
+    let firstSubmit = true;
+    const blockingBackend: ProxiedBackend = {
+      ...backend,
+      async submit(taskBytes, submissionBytes) {
+        if (firstSubmit) {
+          firstSubmit = false;
+          await submitGate;
+        }
+        return backend.submit(taskBytes, submissionBytes);
+      },
+    };
+    const ownerVenue = fakeVenue(blockingBackend);
+    const owner = runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => ({ ...ownerVenue, assertRunOwnership() {} }),
+    });
+
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "driver-started"))
+      .toHaveLength(1);
+
+    const contenderVenue = fakeVenue(backend);
+    const contender = await runResume(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => ({
+        ...contenderVenue,
+        assertRunOwnership() { throw new Error("state root locked"); },
+      }),
+    });
+    expect(contender.ok).toBe(false);
+    if (contender.ok) return;
+    expect(contender.error.code).toBe("venue-unavailable");
+    expect(readRunJournalEntries(workspaceDir, "draft-1").filter((entry) => entry.kind === "driver-started"))
+      .toHaveLength(1);
+    let status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.result.driver?.status).toBe("active");
+
+    releaseFirstSubmit();
+    const completed = await owner;
+    expect(completed.ok).toBe(true);
+    status = runStatus(contextFor(clock), { draftId: "draft-1" });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.result.driver?.status).toBe("succeeded");
+  }, 30_000);
+
   test("a cell whose journal entries are entirely missing (crash before it was ever dispatched) is picked up; already-complete cells are untouched", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);
@@ -656,10 +776,10 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     for (const cellKey of untouchedCellKeys) {
       const original = fullEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.kind !== "cancel-requested" && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       const after = afterEntries.filter((entry) =>
         (entry.kind === "cell-event" && entry.event.cellKey === cellKey)
-        || (entry.kind !== "cell-event" && entry.kind !== "launched" && entry.kind !== "closed" && entry.kind !== "cancel-requested" && entry.cellKey === cellKey));
+        || ((entry.kind === "submission-accepted" || entry.kind === "delivery" || entry.kind === "evaluation") && entry.cellKey === cellKey));
       expect(after).toEqual(original);
     }
   }, 30_000);
@@ -679,7 +799,11 @@ describe("runResume — re-dispatches only outstanding cells", () => {
     expect(outcome.result.outstandingCount).toBe(0);
     expect(outcome.result.evaluationCatchUpCount).toBe(0);
     expect(submits).toHaveLength(0);
-    expect(readRunJournalEntries(workspaceDir, "draft-1")).toEqual(before);
+    expect(readRunJournalEntries(workspaceDir, "draft-1").slice(0, before.length)).toEqual(before);
+    expect(readRunJournalEntries(workspaceDir, "draft-1").slice(before.length)).toEqual([
+      expect.objectContaining({ kind: "driver-started", operation: "resume" }),
+      expect.objectContaining({ kind: "driver-succeeded", operation: "resume" }),
+    ]);
   }, 30_000);
 });
 

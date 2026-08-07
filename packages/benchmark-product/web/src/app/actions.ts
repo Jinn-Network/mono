@@ -15,6 +15,11 @@ import {
   inspectDraft,
   listDrafts,
   runLock,
+  runLaunch,
+  runResume,
+  runCancel,
+  runStatus,
+  runCollect,
   runPreview,
   runQuote,
   sampleInit,
@@ -28,7 +33,9 @@ import {
   optionalField,
   positiveIntegerField,
 } from "@/lib/server/action-support";
-import { ProductContextConfigurationError } from "@/lib/server/product-context";
+import { executeBackgroundOperation } from "@/lib/server/background-operation";
+import { ProductContextConfigurationError, readRunDriverTestingDeps } from "@/lib/server/product-context";
+import { projectRunStatusForGui } from "@/lib/server/view-models";
 
 export async function workspaceInitAction(_previous: GuiActionState, _formData: FormData): Promise<GuiActionState> {
   void _previous; void _formData;
@@ -160,4 +167,45 @@ export async function runQuoteAction(_previous: GuiActionState, formData: FormDa
 export async function runLockAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
   const draftId = field(formData, "draftId");
   return executeOperation((context) => runLock(context, { draftId }), { revalidate: ["/workspace", `/workspace/${draftId}`] });
+}
+
+export async function runLaunchAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeBackgroundOperation(
+    "launch",
+    (context) => runLaunch(context, { draftId }, readRunDriverTestingDeps()),
+    { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`] },
+  );
+}
+
+export async function runResumeAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeBackgroundOperation(
+    "resume",
+    (context) => runResume(context, { draftId }, readRunDriverTestingDeps()),
+    { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`] },
+  );
+}
+
+export async function runStatusAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  return executeOperation((context) => {
+    const outcome = runStatus(context, { draftId: field(formData, "draftId") });
+    return outcome.ok ? { ...outcome, result: projectRunStatusForGui(outcome.result) } : outcome;
+  });
+}
+
+export async function runCancelAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(
+    (context) => runCancel(context, { draftId }),
+    { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`] },
+  );
+}
+
+export async function runCollectAction(_previous: GuiActionState, formData: FormData): Promise<GuiActionState> {
+  const draftId = field(formData, "draftId");
+  return executeOperation(
+    (context) => runCollect(context, { draftId }),
+    { revalidate: ["/workspace", `/workspace/${draftId}`, `/workspace/${draftId}/run`] },
+  );
 }

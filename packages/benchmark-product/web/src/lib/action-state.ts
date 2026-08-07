@@ -1,5 +1,9 @@
 export type GuiActionState =
   | { readonly status: "idle" }
+  | {
+      readonly status: "scheduled";
+      readonly result: { readonly phase: "scheduled"; readonly operation: "launch" | "resume" };
+    }
   | { readonly status: "success"; readonly result: unknown }
   | {
       readonly status: "error";

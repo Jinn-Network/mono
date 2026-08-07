@@ -26,7 +26,7 @@
  */
 
 import { z } from "zod";
-import { refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
+import { PRODUCT_ERROR_CODES, refuse, refuseWithIssues, type ProductIssue } from "../errors.js";
 import { appendFsyncedLineSync, readTextIfExistsSync } from "../fs/atomic.js";
 import { runJournalPath } from "../workspace/layout.js";
 
@@ -36,6 +36,11 @@ const Rfc3339Schema = z.string().regex(
 );
 
 const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "must be a lowercase sha256 hex digest");
+const ProductErrorEnvelopeSchema = z.object({
+  code: z.enum(PRODUCT_ERROR_CODES),
+  detail: z.string(),
+  issues: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
+});
 
 /** Mirrors `@jinn-network/benchmarking-run`'s `CellStatusEvent` (launch.ts) — not itself a zod schema there. */
 const CellStatusEventSchema = z.object({
@@ -57,6 +62,25 @@ export type CellStatusEventLike = z.infer<typeof CellStatusEventSchema>;
 
 export const RunJournalEntrySchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("launched"), at: Rfc3339Schema }),
+  z.object({
+    kind: z.literal("driver-started"),
+    at: Rfc3339Schema,
+    operation: z.enum(["launch", "resume"]),
+    generation: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("driver-succeeded"),
+    at: Rfc3339Schema,
+    operation: z.enum(["launch", "resume"]),
+    generation: z.string().min(1),
+  }),
+  z.object({
+    kind: z.literal("driver-failed"),
+    at: Rfc3339Schema,
+    operation: z.enum(["launch", "resume"]),
+    generation: z.string().min(1),
+    error: ProductErrorEnvelopeSchema,
+  }),
   z.object({
     kind: z.literal("cell-event"),
     at: Rfc3339Schema,
@@ -219,6 +243,7 @@ interface MutableFold {
   armId: string;
   replicate: number;
   dispatches: number;
+  seenDispatches: Set<number>;
   lastDispatch: number;
   attempt?: string;
   lastKind?: CellStatusEventLike["kind"];
@@ -267,6 +292,7 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       armId,
       replicate,
       dispatches: 0,
+      seenDispatches: new Set(),
       lastDispatch: 0,
       verdicts: [],
       completedEvalIndexes: new Set(),
@@ -283,7 +309,8 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
       if (event.attempt !== undefined) fold.attempt = event.attempt;
       fold.lastKind = event.kind;
       if (event.kind === "dispatch") {
-        fold.dispatches += 1;
+        fold.seenDispatches.add(event.dispatch);
+        fold.dispatches = fold.seenDispatches.size;
         // A fresh dispatch starts over: any prior terminal accounting described the earlier attempt.
         fold.replaceableReason = undefined;
         fold.detail = undefined;
@@ -304,6 +331,11 @@ export function foldRunJournal(entries: readonly RunJournalEntry[]): Map<string,
     } else if (entry.kind === "submission-accepted") {
       const fold = ensure(entry.cellKey, "", 0);
       if (entry.dispatch > fold.lastDispatch) fold.lastDispatch = entry.dispatch;
+      // Acceptance itself proves this dispatch exists even if the process dies before the
+      // generator yields its corresponding cell-event. Count by dispatch id so the later event
+      // cannot double-count it.
+      fold.seenDispatches.add(entry.dispatch);
+      fold.dispatches = fold.seenDispatches.size;
       // `submissionSha256` is the SOLVE Submission's digest. An entry marked `leg: "evaluation"`
       // must not overwrite it (pre-BP-21, the evaluation Submission's entry clobbered the solve
       // digest here — leg-less legacy entries keep that last-wins behavior verbatim, since a
