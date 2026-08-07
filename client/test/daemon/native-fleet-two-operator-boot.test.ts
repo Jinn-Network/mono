@@ -490,8 +490,10 @@ describe('#2521 — cold mutual boot with neither listener serving', () => {
     });
 
     // A failed resolution is not memoized: the same source object that refused above resolves now.
-    // The poll still refuses, because nothing has published a head — introduction is not history.
-    await expect(discoveryA.sync()).rejects.toThrow(new RegExp(`${headPath('requester')} failed with HTTP 404`, 'u'));
+    // The poll accepts nothing — introduction is not history — but it no longer THROWS: since
+    // #2523 a source that has never published a head is skipped for that poll rather than aborting
+    // it. See the `#2523` describe below for that property and its negative controls.
+    await expect(discoveryA.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 0 });
   });
 
   it('names agent, source and baseUrl when the origin refuses the connection (F4)', async () => {
@@ -548,6 +550,167 @@ describe('#2521 — cold mutual boot with neither listener serving', () => {
       role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${proxy.port}`,
     }]);
     await expect(discovery.sync()).rejects.toThrow(/unsigned-head/u);
+  });
+});
+
+/**
+ * #2523 — the TRUE cold start: every archive mounted, and no source has ever published a head.
+ *
+ * This is the state the live DR-2026-08-05 gate found on 2026-08-07, and it is the residual third
+ * layer of one problem. #2520 made the fleet daemon SERVE every archive it owns; #2521 made source
+ * resolution LAZY so composition order stopped mattering. Both landed, both worked, and both
+ * operators still died — this time on their OWN requester source, whose introduction now resolves
+ * and whose head is still genuinely absent, because publishing a head needs a booted daemon.
+ * `WorkLoop.initialize` awaits `sync()` unguarded on the start path, so that 404 was the process's
+ * last act. A concurrent launch proved it was not an ordering bug: both archives bound, both
+ * processes dead.
+ *
+ * The topology below is the gate's own (A = requester + solver + evaluator, B = solver), on
+ * ephemeral loopback ports rather than the gate's 7401/7402 — a test must never contend for the
+ * live gate's homes.
+ */
+describe('#2523 — cold start with every archive mounted and nothing ever published', () => {
+  /**
+   * The evaluator leg's two consumers, built the way `buildNativeEvaluatorOpportunityReader` builds
+   * them: one `createNativeDiscoveryConsumer` per source set over the same shared transport. The
+   * reader itself additionally wants chain reads, evidence and a pinned Node launcher, none of
+   * which the boot property depends on.
+   */
+  async function bootEvaluatorConsumers(operator: Operator, recordSources: readonly NativeRecordSource[]) {
+    const { createHttpTransport } = await import('@jinn-network/record-discovery-transport-http');
+    const { createNativeDiscoveryConsumer } = await import('../../src/daemon/native-discovery.js');
+    const store = operator.store();
+    const transport = createHttpTransport('');
+    const trust = fakeTrust();
+    const build = (role: NativeRecordSource['role']) => createNativeDiscoveryConsumer({
+      store,
+      sources: buildNativeDiscoverySources({
+        configured: recordSources.filter((configured) => configured.role === role),
+        store,
+        transport,
+        trust,
+      }),
+      transport,
+      decode: async () => { throw new Error('a cold poll must decode nothing'); },
+    });
+    return { requester: build('requester'), solver: build('solver') };
+  }
+
+  const COLD = { accepted: 0, verifiedSources: 0 };
+
+  for (const order of ['A then B', 'B then A'] as const) {
+    it(`polls both operators clean (${order}) with neither having published`, async () => {
+      const { a, b } = await operators();
+      a.mount(a.served);
+      b.mount(b.served);
+      const configured = sourcesFor(a, b);
+
+      // Sequential, so a start-order dependency cannot hide behind interleaving.
+      const first = order === 'A then B'
+        ? await bootFleetDiscovery(a, configured.a)
+        : await bootFleetDiscovery(b, configured.b);
+      const second = order === 'A then B'
+        ? await bootFleetDiscovery(b, configured.b)
+        : await bootFleetDiscovery(a, configured.a);
+
+      // On the current tip both of these reject with
+      // `GET .../sources/requester/head failed with HTTP 404.` — the live gate's stack, exactly.
+      await expect(first.sync()).resolves.toEqual(COLD);
+      await expect(second.sync()).resolves.toEqual(COLD);
+
+      // A's evaluator leg is the half no serving-plane fix could reach: it demands A's own
+      // requester source AND B's solver source, and on a cold start neither has a head.
+      const evaluator = await bootEvaluatorConsumers(a, configured.a);
+      await expect(evaluator.requester.sync()).resolves.toEqual(COLD);
+      await expect(evaluator.solver.sync()).resolves.toEqual(COLD);
+    });
+  }
+
+  it('polls both operators clean when they are launched concurrently', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+    const configured = sourcesFor(a, b);
+
+    const [discoveryA, discoveryB] = await Promise.all([
+      bootFleetDiscovery(a, configured.a),
+      bootFleetDiscovery(b, configured.b),
+    ]);
+    const evaluator = await bootEvaluatorConsumers(a, configured.a);
+
+    await expect(Promise.all([
+      discoveryA.sync(),
+      discoveryB.sync(),
+      evaluator.requester.sync(),
+      evaluator.solver.sync(),
+    ])).resolves.toEqual([COLD, COLD, COLD, COLD]);
+  });
+
+  it('writes no checkpoint for a source it accepted nothing from', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+
+    const discovery = await bootFleetDiscovery(a, sourcesFor(a, b).a);
+    await discovery.sync();
+
+    // A skipped source must leave the durable queue exactly as it found it: no high-water to
+    // resume from, no cards, and therefore nothing that could later be mistaken for adopted state.
+    expect(discovery.checkpoint({ agent: OPERATOR_A_IRI, name: 'requester' })).toBeUndefined();
+    expect(discovery.takePending()).toEqual([]);
+    expect(discovery.takePendingWithdrawals()).toEqual([]);
+  });
+
+  it('still refuses a peer that serves an unsigned head on an otherwise cold poll', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+
+    // Tolerating an ABSENT head must not become tolerating a BAD one. B's real introduction is
+    // proxied verbatim and only its head is replaced with a bare, unsigned `SourceHead`.
+    const proxy = trackServer(await startPublicArchiveServer({
+      handler: async (request) => {
+        const url = new URL(request.url);
+        if (url.pathname === headPath('requester')) {
+          return new Response(JSON.stringify({
+            protocol: RECORD_DISCOVERY_VERSION,
+            origin: `${OPERATOR_B_IRI}/requester`,
+            sequence: '0000000000000001',
+            entry: `sha256:${'a'.repeat(64)}`,
+            issuedAt: '2026-08-07T12:00:00.000Z',
+            refreshBy: '2099-01-01T00:00:00.000Z',
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return fetch(`${b.baseUrl}${url.pathname}${url.search}`);
+      },
+      host: '127.0.0.1',
+      port: 0,
+    }));
+
+    const discovery = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${proxy.port}`,
+    }]);
+    await expect(discovery.sync()).rejects.toThrow(/unsigned-head/u);
+  });
+
+  it('still refuses an origin that serves no introduction at all', async () => {
+    const { a } = await operators();
+    a.mount(a.served);
+
+    // The tolerated path is reachable ONLY through a source that introduced itself and named this
+    // exact identity uniquely. An origin that 404s everything never gets that far — it refuses at
+    // resolution, one step before the head is ever requested.
+    const dead = trackServer(await startPublicArchiveServer({
+      handler: async () => new Response(null, { status: 404 }),
+      host: '127.0.0.1',
+      port: 0,
+    }));
+    const discovery = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${dead.port}`,
+    }]);
+    await expect(discovery.sync()).rejects.toThrow(
+      new RegExp(`${OPERATOR_B_IRI}/requester at http://127.0.0.1:${dead.port} could not be resolved`, 'u'),
+    );
   });
 });
 

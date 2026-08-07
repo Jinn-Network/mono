@@ -13,7 +13,7 @@ import type {
   SourceHead,
   SourceIdentity,
 } from '@jinn-network/record-discovery-protocol';
-import { compareCodeUnitStrings, sealJson } from '@jinn-network/record-discovery-protocol';
+import { compareCodeUnitStrings, headPath, sealJson } from '@jinn-network/record-discovery-protocol';
 import {
   coldSync,
   fetchHead,
@@ -287,6 +287,23 @@ async function* signedEntries(entries: readonly SyncedEntry[]): AsyncIterable<{
   }
 }
 
+/**
+ * Did this failure mean "the head object is not there", as opposed to "the head is bad" or "the
+ * source is unreachable"?
+ *
+ * Duck-typed on the transport's HTTP status rather than on a concrete error class: the consumer is
+ * written against the injected `Transport` port and must not learn one transport implementation's
+ * types. `fetchHead` issues exactly ONE request — the head object — so a 404 raised out of it can
+ * only be that object's absence. Every other failure shape (a refused connection, a `TypeError:
+ * fetch failed`, a JSON/schema parse error, any non-404 status) carries no `status: 404` and is
+ * rethrown untouched.
+ */
+function headObjectAbsent(cause: unknown): boolean {
+  return typeof cause === 'object'
+    && cause !== null
+    && (cause as { readonly status?: unknown }).status === 404;
+}
+
 function appendCursor(url: string, entry: `sha256:${string}`): string {
   const parsed = new URL(url);
   parsed.searchParams.set('cursor', entry);
@@ -390,6 +407,9 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     })();
   }
 
+  /** Sources already reported unpublished, so a poll loop logs the notice once, not every tick. */
+  const reportedUnpublished = new Set<string>();
+
   return {
     async sync() {
       let accepted = 0;
@@ -401,7 +421,54 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         // 404, or introducing a different identity — throws here, exactly the refusal that used
         // to happen at construction, and it names agent/name/baseUrl.
         const endpoint = await configured.resolveEndpoint();
-        const syncedHead = await fetchHead(endpoint, input.transport);
+        let syncedHead: SyncedHead;
+        try {
+          syncedHead = await fetchHead(endpoint, input.transport);
+        } catch (cause) {
+          // ## A source that has never published is skipped, not fatal (#2523)
+          //
+          // #2520 made a mounted archive INTRODUCE every source its operator owns before that
+          // source has published anything, and recorded the consuming-side intent exactly: such a
+          // source "still finds the head and the archive page absent, so it refuses THAT SOURCE at
+          // poll". Refusing the source is right. Throwing out of `sync()` was not — it aborted the
+          // whole pass, and `WorkLoop.initialize` awaits this on the daemon start path, so a fleet
+          // operator died on its OWN requester source: that source is in `recordSources`, it has
+          // published nothing (publishing needs a booted daemon), its head 404s, boot dies. No
+          // configuration escapes it — the evaluator leg REQUIRES exactly one requester and one
+          // solver source (`native-evaluator-opportunity-source.ts`), so the source cannot be
+          // dropped.
+          //
+          // The tolerated condition is deliberately the narrowest one that unblocks boot, and it
+          // is TWO facts, not one:
+          //
+          //  1. the head object is absent (HTTP 404) — not malformed, not unsigned, not
+          //     wrongly-signed, not stale, and not unreachable; and
+          //  2. this consumer holds NO durable checkpoint for the source.
+          //
+          // (2) is the load-bearing half. A source with a checkpoint has published a head this
+          // consumer accepted and recorded; that head 404ing now is a rollback or a disappearance,
+          // never a cold start, and it stays a hard refusal — otherwise a source could retract its
+          // own history by serving 404 and a consumer would shrug. Only (1)-and-(2) together
+          // describe a chain this consumer has never seen a single byte of, where there is
+          // nothing to roll back and nothing to lose: zero cards, NO checkpoint written, and the
+          // remaining sources are polled normally.
+          //
+          // Nothing about verification moves. Reaching this point already required the source's
+          // `.well-known` introduction to resolve and to name this exact identity uniquely, and
+          // the moment a head appears the source takes the ordinary cold path — `coldSync` from
+          // genesis under `verifySourceChain` with `firstAdoption: true` — so no entry is skipped
+          // by having polled early.
+          if (prior !== undefined || !headObjectAbsent(cause)) throw cause;
+          if (!reportedUnpublished.has(sourceKey(source))) {
+            reportedUnpublished.add(sourceKey(source));
+            console.warn(
+              `[native-discovery] source ${sourceKey(source)} has published no head yet at `
+              + `${endpoint.servingRoot}${headPath(source.name)} — accepting nothing from it until it does`,
+            );
+          }
+          continue;
+        }
+        reportedUnpublished.delete(sourceKey(source));
         if (syncedHead.signature === undefined) {
           throw new NativeDiscoverySyncError(source, 'unsigned-head');
         }

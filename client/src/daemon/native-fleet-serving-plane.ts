@@ -62,9 +62,17 @@
  *    trust", `record-discovery-serve/well-known.ts`); acceptance is `verifySourceChain` over the
  *    signed head and entries, which this module never touches;
  *  - a consumer that reaches a synthesized introduction still finds the head and the archive page
- *    absent, so it refuses that source at poll — a peer that has published nothing stays refused,
- *    and a peer serving an unsigned or wrongly-signed chain stays refused. Nothing here is
- *    self/peer-conditional, so there is no "tolerate my own source" hole to widen.
+ *    absent, so it accepts NOTHING from that source — a peer that has published nothing has no
+ *    announcement admitted, and a peer serving an unsigned or wrongly-signed chain stays refused.
+ *    Nothing here is self/peer-conditional, so there is no "tolerate my own source" hole to widen.
+ *
+ *    (#2523 corrected the SHAPE of that non-acceptance on the consuming side, not its strength.
+ *    This header originally said the consumer "refuses that source at poll", and the consumer did
+ *    — by throwing out of `sync()`, which `WorkLoop.initialize` awaits unguarded, so an operator's
+ *    own never-published requester source killed its boot. `native-discovery.ts` now skips a
+ *    source whose head is absent AND for which it holds no durable checkpoint: zero cards, no
+ *    checkpoint, other sources polled normally. A head that is present-but-bad, and an absent head
+ *    on a source this consumer HAS already checkpointed, both stay hard refusals.)
  *
  * What it buys is exactly the boot property the gate needs: an operator's archive introduces every
  * source it owns from the moment it is mounted, so both operators boot before either has posted.

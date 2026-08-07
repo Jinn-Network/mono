@@ -7,6 +7,7 @@ import {
   type AnnouncementEntry,
   type SourceHead,
 } from '@jinn-network/record-discovery-protocol';
+import type { SourceIdentity } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
 import {
   NativeDiscoverySyncError,
@@ -357,6 +358,33 @@ describe('native discovery consumer', () => {
     expect(synced.takePendingWithdrawals()).toEqual([]);
   });
 
+  it('refuses a bare, unsigned head', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, head(first));
+    const synced = consumer({ store: new Store(':memory:'), routes, verify: async () => ({ status: 'ok' }) });
+
+    await expect(synced.sync()).rejects.toMatchObject({ reason: 'unsigned-head' });
+    expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+  });
+
+  it('refuses a head that rewinds below the persisted checkpoint', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+    const store = new Store(':memory:');
+    const verify = async () => ({ status: 'ok' as const });
+    await consumer({ store, routes: routesFor([first, second]), verify }).sync();
+
+    const rewound = routesFor([first, second]);
+    rewound.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead(head(first)));
+    const restarted = consumer({ store, routes: rewound, verify });
+
+    await expect(restarted.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+    expect(restarted.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+      sequence: '0000000000000002',
+    });
+  });
+
   it('isolates durable pending cards when two domain consumers share one product database', () => {
     const store = new Store(':memory:');
     const firstSource = source(new Map(), async () => ({ status: 'ok' as const }));
@@ -393,5 +421,181 @@ describe('native discovery consumer', () => {
 
     expect(first.takePending().map(({ announcementId }) => announcementId)).toEqual(['requester-card']);
     expect(second.takePending().map(({ announcementId }) => announcementId)).toEqual(['solver-card']);
+  });
+});
+
+/**
+ * #2523 — a source that has NEVER published a head.
+ *
+ * The discriminator under test is two facts, not one: the head object is absent (HTTP 404) AND this
+ * consumer holds no durable checkpoint for the source. Only both together mean "a chain we have
+ * never seen a byte of". Every test below either pins that pair or pins one of the refusals that
+ * must survive it — most importantly the rollback case, where a checkpoint EXISTS and the head
+ * 404s, which is a source retracting its own history and stays fatal.
+ */
+describe('native discovery consumer — the never-published source (#2523)', () => {
+  const COLD_AGENT = 'did:key:zNeverPublished';
+  const COLD_NAME = 'requester';
+  const COLD_ROOT = 'https://cold.example';
+
+  /** Mirrors `createHttpTransport`'s contract: a missing object throws carrying its HTTP status. */
+  function httpTransport(routes: Map<string, unknown>, missingStatus = 404) {
+    return {
+      'fetch': async (url: string) => {
+        const value = routes.get(url);
+        if (value === undefined) {
+          throw Object.assign(new Error(`GET ${url} failed with HTTP ${missingStatus}.`), {
+            name: 'TransportHttpError',
+            status: missingStatus,
+            url,
+          });
+        }
+        return {
+          status: 200,
+          contentType: 'application/json',
+          bytes: new TextEncoder().encode(JSON.stringify(value)),
+        };
+      },
+    };
+  }
+
+  /**
+   * A source whose `.well-known` introduction resolves — exactly what #2520's serving plane
+   * synthesizes for a source its operator owns but has not published — and that serves no head.
+   * Its verifiers throw, so any test that passes is a test in which no chain verification was
+   * skipped: the skip happens strictly before verification is reachable.
+   */
+  function neverPublished(identity: SourceIdentity): NativeDiscoverySource {
+    return {
+      identity,
+      resolveEndpoint: async () => ({
+        agent: identity.agent,
+        name: identity.name,
+        servingRoot: COLD_ROOT,
+        archiveRootUrl: `${COLD_ROOT}${archivePagePath(identity.name, '0000000000000001')}`,
+      }),
+      verify: async () => { throw new Error('a never-published source must not reach chain verification'); },
+      verifyHead: async () => { throw new Error('a never-published source must not reach head revalidation'); },
+    };
+  }
+
+  const COLD: SourceIdentity = { agent: COLD_AGENT, name: COLD_NAME };
+
+  it('accepts nothing, writes no checkpoint, and still polls its siblings', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const store = new Store(':memory:');
+    const synced = createNativeDiscoveryConsumer({
+      store,
+      sources: [neverPublished(COLD), source(routes, async () => ({ status: 'ok' }))],
+      transport: httpTransport(routes),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    // The cold source counts toward neither `accepted` nor `verifiedSources` — it verified nothing.
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    expect(synced.checkpoint(COLD)).toBeUndefined();
+    expect(synced.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+      sequence: '0000000000000001',
+    });
+    expect(synced.takePending()).toHaveLength(1);
+  });
+
+  it('takes the ordinary first-adoption cold path the moment a head appears', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = new Map<string, unknown>();
+    const store = new Store(':memory:');
+    const adoptions: boolean[] = [];
+    const synced = createNativeDiscoveryConsumer({
+      store,
+      sources: [source(routes, async (input) => {
+        for await (const item of input.entries) void item;
+        adoptions.push(input.firstAdoption);
+        return { status: 'ok' };
+      })],
+      transport: httpTransport(routes),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(synced.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 0 });
+    expect(adoptions).toEqual([]);
+
+    for (const [url, value] of routesFor([first])) routes.set(url, value);
+    await expect(synced.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+    // Polling early skipped no entry: the source is adopted from genesis, not from "now".
+    expect(adoptions).toEqual([true]);
+  });
+
+  it('REFUSES a source that has a checkpoint and whose head now 404s (rollback, not cold start)', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const routes = routesFor([first]);
+    const store = new Store(':memory:');
+    const verify = async () => ({ status: 'ok' as const });
+    const initial = createNativeDiscoveryConsumer({
+      store,
+      sources: [source(routes, verify)],
+      transport: httpTransport(routes),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+    await expect(initial.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1 });
+
+    // Same source, same store — the head object disappears.
+    routes.delete(`${ROOT}${headPath(SOURCE_NAME)}`);
+    const restarted = createNativeDiscoveryConsumer({
+      store,
+      sources: [source(routes, verify)],
+      transport: httpTransport(routes),
+      decode: async (input) => cardFor(input.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+
+    await expect(restarted.sync()).rejects.toThrow(/HTTP 404/u);
+    expect(restarted.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+      sequence: '0000000000000001',
+    });
+  });
+
+  it.each([500, 403, 502])('refuses a head that fails with HTTP %i even with no checkpoint', async (status) => {
+    const store = new Store(':memory:');
+    const synced = createNativeDiscoveryConsumer({
+      store,
+      sources: [neverPublished(COLD)],
+      transport: httpTransport(new Map(), status),
+      decode: async () => undefined,
+    });
+
+    await expect(synced.sync()).rejects.toThrow(new RegExp(`HTTP ${status}`, 'u'));
+    expect(synced.checkpoint(COLD)).toBeUndefined();
+  });
+
+  it('refuses an unreachable source, which carries no HTTP status at all', async () => {
+    const store = new Store(':memory:');
+    const synced = createNativeDiscoveryConsumer({
+      store,
+      sources: [neverPublished(COLD)],
+      transport: { 'fetch': async () => { throw new TypeError('fetch failed'); } },
+      decode: async () => undefined,
+    });
+
+    await expect(synced.sync()).rejects.toThrow(/fetch failed/u);
+    expect(synced.checkpoint(COLD)).toBeUndefined();
+  });
+
+  it('never reaches a cold source that cannot introduce itself', async () => {
+    const store = new Store(':memory:');
+    const synced = createNativeDiscoveryConsumer({
+      store,
+      sources: [{
+        ...neverPublished(COLD),
+        resolveEndpoint: async () => { throw new Error('source is not uniquely introduced'); },
+      }],
+      transport: httpTransport(new Map()),
+      decode: async () => undefined,
+    });
+
+    await expect(synced.sync()).rejects.toThrow(/not uniquely introduced/u);
   });
 });
