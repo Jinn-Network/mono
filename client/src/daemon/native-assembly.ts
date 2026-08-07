@@ -94,6 +94,40 @@ export function uint(value: unknown, label: string): bigint {
   return BigInt(value);
 }
 
+/**
+ * THE reader for a chain id carried on a signed fact — one helper, three call sites (#2529).
+ *
+ * `uint()` above demands a decimal STRING because it exists for uint256-scale values (`taskId`,
+ * wei amounts) that cannot round-trip through a JS number. A chain id is small and bounded, so a
+ * JSON number is its natural wire form: it is what `native-requester/requester.ts` has always
+ * emitted, and what `native-evaluator-opportunity-source.ts` has always accepted. The solver leg's
+ * decode (`native-requester-decode.ts`) reached for `uint()` instead, so an operator's own
+ * DSSE-signed announcement was undecodable by its own boot path, and — because the fleet path
+ * REQUIRES its own requester source — every subsequent boot died on it.
+ *
+ * The fact is signed, so the READER is what moves: re-emitting `chainId` as a string would change
+ * signed bytes and leave the already-published announcement undecodable forever, i.e. it would
+ * force an append-only signed history to be purged to work around a reader bug.
+ *
+ * Both canonical forms are accepted here, on ONE code path, so the three readers cannot drift
+ * apart again. Nothing is loosened: a float, a negative, NaN/Infinity, a leading-zero or
+ * whitespace-padded string, a value past IEEE-754 exact-integer range, a boolean, `null` and an
+ * object are all refused exactly as `uint()` refuses them.
+ */
+export function chainId(value: unknown, label: string): number {
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`${label} is not a canonical unsigned integer`);
+    }
+    return value;
+  }
+  if (typeof value === 'string' && /^(?:0|[1-9][0-9]*)$/u.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  throw new Error(`${label} is not a canonical unsigned integer`);
+}
+
 export function chain(config: NativeChainIdentityConfig) {
   return {
     chainId: config.chainId,

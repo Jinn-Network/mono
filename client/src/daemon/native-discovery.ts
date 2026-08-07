@@ -188,9 +188,38 @@ export interface NativeDiscoveryDecodeInput {
   readonly signedHighWater: SignedSourceHighWater;
 }
 
+/**
+ * Why a source contributed nothing this pass WITHOUT being distrusted (#2529).
+ *
+ * - `unpublished` — the source's `.well-known` introduces it, its head object is absent (404), and
+ *   this consumer holds no checkpoint for it. A chain this consumer has never seen a byte of
+ *   (#2523).
+ * - `unreachable` — nothing answered: connection refused, DNS failure, timeout. Covers both the
+ *   `.well-known` introduction and every serving-plane fetch after it.
+ * - `undecodable` — the source served a signed announcement this consumer cannot turn into a card.
+ */
+export type NativeDiscoveryDegradedReason = 'unpublished' | 'unreachable' | 'undecodable';
+
+export interface NativeDiscoveryDegradedSource {
+  readonly source: SourceIdentity;
+  readonly reason: NativeDiscoveryDegradedReason;
+  /** The underlying failure, already carrying agent/name/baseUrl where the thrower knew them. */
+  readonly detail: string;
+}
+
+export interface NativeDiscoverySyncReport {
+  readonly accepted: number;
+  readonly verifiedSources: number;
+  /**
+   * Sources skipped this pass. They advanced no checkpoint and queued no card, count toward
+   * neither `accepted` nor `verifiedSources`, and are retried on the next poll.
+   */
+  readonly degraded: readonly NativeDiscoveryDegradedSource[];
+}
+
 export interface NativeDiscoveryConsumer<Card = AnnouncedSubmissionCard> {
   /** Pulls/validates every configured source to a signed head and durably queues new cards. */
-  sync(): Promise<{ readonly accepted: number; readonly verifiedSources: number }>;
+  sync(): Promise<NativeDiscoverySyncReport>;
   /** Durable, unacknowledged cards in source sequence/insertion order. */
   takePending(): readonly NativeDiscoveryQueuedCard<Card>[];
   takePendingWithdrawals(): readonly NativeDiscoveryQueuedWithdrawal[];
@@ -210,6 +239,49 @@ export class NativeDiscoverySyncError extends Error {
   ) {
     super(`native discovery source ${source.agent}/${source.name} refused: ${reason}`);
     this.name = 'NativeDiscoverySyncError';
+  }
+}
+
+/**
+ * The source served a signed announcement this consumer could not turn into a card (#2529).
+ *
+ * Deliberately NOT a `NativeDiscoverySyncError`: that class means "refused", and this means "not
+ * intelligible to me right now". The distinction is the whole point of the degrade-vs-refuse split
+ * — see `degradedReason`.
+ */
+export class NativeDiscoveryUndecodableAnnouncementError extends Error {
+  override readonly name = 'NativeDiscoveryUndecodableAnnouncementError';
+
+  constructor(
+    readonly source: SourceIdentity,
+    readonly announcementId: string,
+    options: { readonly cause: unknown },
+  ) {
+    super(
+      `native discovery source ${source.agent}/${source.name} announcement ${announcementId} `
+      + `could not be decoded: ${options.cause instanceof Error ? options.cause.message : String(options.cause)}`,
+      options,
+    );
+  }
+}
+
+/**
+ * A failure that is THIS operator's, not the source's — never degraded, always fatal.
+ *
+ * The decode's first act is `assertTrustFresh()`: the local trust catalog changed on disk after
+ * the authority was loaded, and the process must restart before authorizing any work. That is a
+ * statement about this machine, and it must not be reported as "that peer is being unintelligible"
+ * — every source would degrade, once per poll, forever, and the real condition would never
+ * surface. So the decode boundary re-throws it untouched.
+ */
+export class NativeDiscoveryLocalAuthorityError extends Error {
+  override readonly name = 'NativeDiscoveryLocalAuthorityError';
+
+  constructor(options: { readonly cause: unknown }) {
+    super(
+      options.cause instanceof Error ? options.cause.message : String(options.cause),
+      options,
+    );
   }
 }
 
@@ -302,6 +374,78 @@ function headObjectAbsent(cause: unknown): boolean {
   return typeof cause === 'object'
     && cause !== null
     && (cause as { readonly status?: unknown }).status === 404;
+}
+
+/**
+ * ## The degrade-vs-refuse discriminator (#2529)
+ *
+ * `WorkLoop.initialize` awaits `sync()` on the daemon boot path, so until now ANY per-source
+ * problem was process-fatal. Three separate instances of that were found live inside a fortnight:
+ * a never-published source (#2523), an announcement this consumer's decode rejected (#2529 F1),
+ * and a peer that simply was not up (#2529 F2). Fixing them one at a time was fixing instances of
+ * a class; this function is the class.
+ *
+ * **The line is whether the source made an authenticatable STATEMENT that failed a check.**
+ *
+ * - It said nothing (nothing answered), or it said "that object is not here" about a chain this
+ *   consumer has never seen a byte of, or it said something this consumer cannot interpret ⇒ the
+ *   source is *unavailable or unintelligible to me right now*. Skip it, log it, keep polling the
+ *   others, retry next poll. No checkpoint advances, no card is queued: a degraded source is
+ *   indistinguishable, downstream, from a source that had nothing new.
+ * - It served bytes that fail authenticity, authority, freshness or ordering ⇒ the source is *not
+ *   to be trusted*. That refuses exactly as it did before this function existed, by throwing out
+ *   of `sync()`.
+ *
+ * **It is fail-CLOSED.** Only the three explicitly-recognised shapes degrade; every other failure
+ * — including every `NativeDiscoverySyncError` (`unsigned-head`, `stale`,
+ * `rewound-or-tampered-head`, `advertised-head-entry-mismatch`, `unsigned-entry`, and any non-`ok`
+ * status out of the injected `verify`/`verifyHead`, which is where bad signatures, wrong agents,
+ * revoked keys, conflicting bindings and scope violations all land), every non-404 HTTP status,
+ * every 404 on a source this consumer HAS a checkpoint for, an introduction that does not
+ * uniquely name the identity, and any failure of this operator's own trust catalog — returns
+ * `undefined` and is re-thrown untouched. A shape nobody anticipated refuses; it does not degrade.
+ */
+function degradedReason(cause: unknown): NativeDiscoveryDegradedReason | undefined {
+  if (cause instanceof NativeDiscoveryUndecodableAnnouncementError) return 'undecodable';
+  // Duck-typed on the shape `native-discovery-trust.ts` stamps, for the same reason
+  // `headObjectAbsent` is duck-typed: this module is written against injected ports and does not
+  // import the host that builds them.
+  if (
+    typeof cause === 'object'
+    && cause !== null
+    && (cause as { readonly name?: unknown }).name === 'NativeDiscoverySourceResolutionError'
+    && (cause as { readonly kind?: unknown }).kind === 'unreachable'
+  ) return 'unreachable';
+  // A transport failure that carries no HTTP status is silence — a refused connection, a DNS
+  // failure, a timeout. A failure that DOES carry one is the serving plane answering, and only the
+  // narrow 404-with-no-checkpoint case (handled at the head fetch, above) tolerates an answer.
+  if (
+    cause instanceof Error
+    && !(cause instanceof NativeDiscoverySyncError)
+    && !(cause instanceof NativeDiscoveryLocalAuthorityError)
+    && (cause as { readonly status?: unknown }).status === undefined
+    && (cause as { readonly name?: unknown }).name !== 'NativeDiscoverySourceResolutionError'
+    && isTransportSilence(cause)
+  ) return 'unreachable';
+  return undefined;
+}
+
+/**
+ * Does this look like "the network never delivered a response", as opposed to "the bytes that
+ * arrived are wrong"?
+ *
+ * Node's global `fetch` rejects with `TypeError: fetch failed` and a system-error `cause`
+ * (`ECONNREFUSED`, `ENOTFOUND`, `UND_ERR_*`); an abort/timeout rejects with a `*AbortError` or a
+ * `TimeoutError`. Matching those shapes — rather than treating every status-less error as silence
+ * — keeps a malformed or schema-invalid payload on the REFUSE side, where a statement belongs.
+ */
+function isTransportSilence(cause: Error): boolean {
+  const code = (cause as { readonly code?: unknown }).code;
+  if (typeof code === 'string' && /^(?:E[A-Z]+|UND_ERR_[A-Z_]+)$/u.test(code)) return true;
+  if (/^(?:Abort|Timeout)Error$/u.test(cause.name)) return true;
+  if (cause instanceof TypeError && /fetch failed|network|load failed/iu.test(cause.message)) return true;
+  const inner: unknown = (cause as { readonly cause?: unknown }).cause;
+  return inner instanceof Error && inner !== cause && isTransportSilence(inner);
 }
 
 function appendCursor(url: string, entry: `sha256:${string}`): string {
@@ -407,170 +551,233 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
     })();
   }
 
-  /** Sources already reported unpublished, so a poll loop logs the notice once, not every tick. */
-  const reportedUnpublished = new Set<string>();
+  /**
+   * Last degradation reported per source, so a poll loop logs a degraded source once rather than
+   * every tick — and logs again the moment its reason CHANGES (unreachable -> undecodable is news).
+   */
+  const reportedDegraded = new Map<string, string>();
+
+  function reportDegraded(source: SourceIdentity, degraded: NativeDiscoveryDegradedSource): void {
+    const key = sourceKey(source);
+    const line = `${degraded.reason}: ${degraded.detail}`;
+    if (reportedDegraded.get(key) === line) return;
+    reportedDegraded.set(key, line);
+    console.warn(
+      `[native-discovery] source ${key} is degraded (${degraded.reason}) — accepting nothing from `
+      + `it until it recovers, retrying next poll: ${degraded.detail}`,
+    );
+  }
+
+  type SourcePollOutcome =
+    | { readonly accepted: number }
+    | { readonly reason: NativeDiscoveryDegradedReason; readonly detail: string };
+
+  async function pollSource(configured: NativeDiscoverySource): Promise<SourcePollOutcome> {
+    const source = configured.identity;
+    const prior = checkpoint(source);
+    // Poll-time introduction resolution (#2521). A source that cannot be resolved — 404, or
+    // introducing a different identity — throws here, exactly the refusal that used to happen
+    // at construction, and it names agent/name/baseUrl. A source that is merely DOWN throws
+    // the same class marked `kind: 'unreachable'`, which `degradedReason` degrades (#2529 F2).
+    const endpoint = await configured.resolveEndpoint();
+    let syncedHead: SyncedHead;
+    try {
+      syncedHead = await fetchHead(endpoint, input.transport);
+    } catch (cause) {
+      // ## A source that has never published is skipped, not fatal (#2523)
+      //
+      // #2520 made a mounted archive INTRODUCE every source its operator owns before that
+      // source has published anything, and recorded the consuming-side intent exactly: such a
+      // source "still finds the head and the archive page absent, so it refuses THAT SOURCE at
+      // poll". Refusing the source is right. Throwing out of `sync()` was not — it aborted the
+      // whole pass, and `WorkLoop.initialize` awaits this on the daemon start path, so a fleet
+      // operator died on its OWN requester source: that source is in `recordSources`, it has
+      // published nothing (publishing needs a booted daemon), its head 404s, boot dies. No
+      // configuration escapes it — the evaluator leg REQUIRES exactly one requester and one
+      // solver source (`native-evaluator-opportunity-source.ts`), so the source cannot be
+      // dropped.
+      //
+      // The tolerated condition is deliberately the narrowest one that unblocks boot, and it
+      // is TWO facts, not one:
+      //
+      //  1. the head object is absent (HTTP 404) — not malformed, not unsigned, not
+      //     wrongly-signed, not stale, and not unreachable; and
+      //  2. this consumer holds NO durable checkpoint for the source.
+      //
+      // (2) is the load-bearing half. A source with a checkpoint has published a head this
+      // consumer accepted and recorded; that head 404ing now is a rollback or a disappearance,
+      // never a cold start, and it stays a hard refusal — otherwise a source could retract its
+      // own history by serving 404 and a consumer would shrug. Only (1)-and-(2) together
+      // describe a chain this consumer has never seen a single byte of, where there is
+      // nothing to roll back and nothing to lose: zero cards, NO checkpoint written, and the
+      // remaining sources are polled normally.
+      //
+      // Nothing about verification moves. Reaching this point already required the source's
+      // `.well-known` introduction to resolve and to name this exact identity uniquely, and
+      // the moment a head appears the source takes the ordinary cold path — `coldSync` from
+      // genesis under `verifySourceChain` with `firstAdoption: true` — so no entry is skipped
+      // by having polled early.
+      if (prior !== undefined || !headObjectAbsent(cause)) throw cause;
+      return {
+        reason: 'unpublished',
+        detail: `${endpoint.servingRoot}${headPath(source.name)} has no head object yet`,
+      };
+    }
+    if (syncedHead.signature === undefined) {
+      throw new NativeDiscoverySyncError(source, 'unsigned-head');
+    }
+
+    // A byte-identical signed head is a no-card-work cycle only after it is revalidated.
+    // A key can have been revoked or the source head can have crossed refreshBy since the
+    // last poll; cached acceptance is never enough to begin work.
+    if (prior !== undefined && sameHead(prior, syncedHead)) {
+      const revalidated = await configured.verifyHead({
+        source,
+        head: syncedHead.head,
+        signature: syncedHead.signature,
+      });
+      if (revalidated.status !== 'ok') throw new NativeDiscoverySyncError(source, revalidated.status);
+      if (new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime()) {
+        throw new NativeDiscoverySyncError(source, 'stale');
+      }
+      return { accepted: 0 };
+    }
+    if (prior !== undefined && compareCodeUnitStrings(syncedHead.head.sequence, prior.sequence) <= 0) {
+      throw new NativeDiscoverySyncError(source, 'rewound-or-tampered-head');
+    }
+
+    const fetched = await collect(
+      prior === undefined
+        ? coldSync(endpoint, { transport: input.transport })
+        : returningSync(endpoint, {
+            sequence: prior.sequence,
+            entry: prior.entryDigest,
+          }, { transport: input.transport }),
+    );
+    // The client sync contract is ordered. Do not merely find a matching item: a verifier
+    // that chooses not to consume its iterator must not let a trailing, mismatched page item
+    // advance the durable high-water.
+    const terminal = fetched.at(-1);
+    if (terminal === undefined || sealJson(terminal.entry).digest !== syncedHead.head.entry) {
+      throw new NativeDiscoverySyncError(source, 'advertised-head-entry-mismatch');
+    }
+    const outcome = await configured.verify({
+      source,
+      head: syncedHead.head,
+      headSignature: syncedHead.signature,
+      entries: signedEntries(fetched),
+      firstAdoption: prior === undefined,
+    });
+    if (outcome.status !== 'ok') throw new NativeDiscoverySyncError(source, outcome.status);
+
+    const highWater: SignedSourceHighWater = {
+      sequence: syncedHead.head.sequence,
+      entry: syncedHead.head.entry,
+      issuedAt: syncedHead.head.issuedAt,
+      refreshBy: syncedHead.head.refreshBy,
+      signature: syncedHead.signature,
+    };
+    const cards: Array<{
+      sequence: string;
+      entryDigest: `sha256:${string}`;
+      announcementId: string;
+      card: Card;
+    }> = [];
+    const withdrawals: Array<{
+      sequence: string;
+      entryDigest: `sha256:${string}`;
+      announcement: WithdrawnAnnouncement;
+    }> = [];
+    for (const item of fetched) {
+      const entryDigest = sealJson(item.entry).digest;
+      for (const announcement of item.entry.announcements) {
+        if (announcement.action === 'withdrawn') {
+          withdrawals.push({ sequence: item.entry.sequence, entryDigest, announcement });
+          continue;
+        }
+        // ## An announcement this consumer cannot decode degrades the SOURCE (#2529 F1)
+        //
+        // It does not kill the pass, and it equally does not get skipped past: nothing is
+        // queued and — because this returns before `queue()` — the durable high-water does NOT
+        // advance over it. A signed announcement this consumer failed to understand stays
+        // exactly where it is, to be re-read at the next poll or by a consumer that
+        // understands it. Advancing past it would silently drop signed history on a reader
+        // bug, which is the failure mode that produced #2529 in the first place.
+        //
+        // The trade this makes is explicit: a permanently-undecodable announcement wedges that
+        // one source's queue rather than that operator's daemon. Loud and stuck beats silent
+        // and lossy — and beats dead.
+        let decoded: Card | undefined;
+        try {
+          decoded = await input.decode({
+            source,
+            entry: item.entry,
+            entryDigest,
+            announcement,
+            signedHighWater: highWater,
+          });
+        } catch (cause) {
+          if (cause instanceof NativeDiscoveryLocalAuthorityError) throw cause;
+          throw new NativeDiscoveryUndecodableAnnouncementError(
+            source,
+            announcement.announcementId,
+            { cause },
+          );
+        }
+        if (decoded === undefined) continue;
+        cards.push({
+          sequence: item.entry.sequence,
+          entryDigest,
+          announcementId: announcement.announcementId,
+          card: {
+            ...decoded,
+            discovery: {
+              source,
+              sequence: item.entry.sequence,
+              entryDigest,
+              signedHighWater: highWater,
+            },
+          } as Card,
+        });
+      }
+    }
+    queue(source, highWater, cards, withdrawals);
+    return { accepted: cards.length + withdrawals.length };
+  }
 
   return {
     async sync() {
       let accepted = 0;
       let verifiedSources = 0;
+      const degraded: NativeDiscoveryDegradedSource[] = [];
       for (const configured of sources) {
         const source = configured.identity;
-        const prior = checkpoint(source);
-        // Poll-time introduction resolution (#2521). A source that cannot be resolved — down,
-        // 404, or introducing a different identity — throws here, exactly the refusal that used
-        // to happen at construction, and it names agent/name/baseUrl.
-        const endpoint = await configured.resolveEndpoint();
-        let syncedHead: SyncedHead;
+        let outcome: SourcePollOutcome;
         try {
-          syncedHead = await fetchHead(endpoint, input.transport);
+          outcome = await pollSource(configured);
         } catch (cause) {
-          // ## A source that has never published is skipped, not fatal (#2523)
-          //
-          // #2520 made a mounted archive INTRODUCE every source its operator owns before that
-          // source has published anything, and recorded the consuming-side intent exactly: such a
-          // source "still finds the head and the archive page absent, so it refuses THAT SOURCE at
-          // poll". Refusing the source is right. Throwing out of `sync()` was not — it aborted the
-          // whole pass, and `WorkLoop.initialize` awaits this on the daemon start path, so a fleet
-          // operator died on its OWN requester source: that source is in `recordSources`, it has
-          // published nothing (publishing needs a booted daemon), its head 404s, boot dies. No
-          // configuration escapes it — the evaluator leg REQUIRES exactly one requester and one
-          // solver source (`native-evaluator-opportunity-source.ts`), so the source cannot be
-          // dropped.
-          //
-          // The tolerated condition is deliberately the narrowest one that unblocks boot, and it
-          // is TWO facts, not one:
-          //
-          //  1. the head object is absent (HTTP 404) — not malformed, not unsigned, not
-          //     wrongly-signed, not stale, and not unreachable; and
-          //  2. this consumer holds NO durable checkpoint for the source.
-          //
-          // (2) is the load-bearing half. A source with a checkpoint has published a head this
-          // consumer accepted and recorded; that head 404ing now is a rollback or a disappearance,
-          // never a cold start, and it stays a hard refusal — otherwise a source could retract its
-          // own history by serving 404 and a consumer would shrug. Only (1)-and-(2) together
-          // describe a chain this consumer has never seen a single byte of, where there is
-          // nothing to roll back and nothing to lose: zero cards, NO checkpoint written, and the
-          // remaining sources are polled normally.
-          //
-          // Nothing about verification moves. Reaching this point already required the source's
-          // `.well-known` introduction to resolve and to name this exact identity uniquely, and
-          // the moment a head appears the source takes the ordinary cold path — `coldSync` from
-          // genesis under `verifySourceChain` with `firstAdoption: true` — so no entry is skipped
-          // by having polled early.
-          if (prior !== undefined || !headObjectAbsent(cause)) throw cause;
-          if (!reportedUnpublished.has(sourceKey(source))) {
-            reportedUnpublished.add(sourceKey(source));
-            console.warn(
-              `[native-discovery] source ${sourceKey(source)} has published no head yet at `
-              + `${endpoint.servingRoot}${headPath(source.name)} — accepting nothing from it until it does`,
-            );
-          }
-          continue;
+          // Fail-CLOSED: only the shapes `degradedReason` recognises as "unavailable or
+          // unintelligible" are isolated to their source. Everything else — every trust, identity,
+          // freshness and ordering refusal — propagates out of `sync()` exactly as it always has.
+          const reason = degradedReason(cause);
+          if (reason === undefined) throw cause;
+          outcome = { reason, detail: cause instanceof Error ? cause.message : String(cause) };
         }
-        reportedUnpublished.delete(sourceKey(source));
-        if (syncedHead.signature === undefined) {
-          throw new NativeDiscoverySyncError(source, 'unsigned-head');
-        }
-
-        // A byte-identical signed head is a no-card-work cycle only after it is revalidated.
-        // A key can have been revoked or the source head can have crossed refreshBy since the
-        // last poll; cached acceptance is never enough to begin work.
-        if (prior !== undefined && sameHead(prior, syncedHead)) {
-          const revalidated = await configured.verifyHead({
+        if ('reason' in outcome) {
+          const entry: NativeDiscoveryDegradedSource = {
             source,
-            head: syncedHead.head,
-            signature: syncedHead.signature,
-          });
-          if (revalidated.status !== 'ok') throw new NativeDiscoverySyncError(source, revalidated.status);
-          if (new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime()) {
-            throw new NativeDiscoverySyncError(source, 'stale');
-          }
-          verifiedSources += 1;
+            reason: outcome.reason,
+            detail: outcome.detail,
+          };
+          degraded.push(entry);
+          reportDegraded(source, entry);
           continue;
         }
-        if (prior !== undefined && compareCodeUnitStrings(syncedHead.head.sequence, prior.sequence) <= 0) {
-          throw new NativeDiscoverySyncError(source, 'rewound-or-tampered-head');
-        }
-
-        const fetched = await collect(
-          prior === undefined
-            ? coldSync(endpoint, { transport: input.transport })
-            : returningSync(endpoint, {
-                sequence: prior.sequence,
-                entry: prior.entryDigest,
-              }, { transport: input.transport }),
-        );
-        // The client sync contract is ordered. Do not merely find a matching item: a verifier
-        // that chooses not to consume its iterator must not let a trailing, mismatched page item
-        // advance the durable high-water.
-        const terminal = fetched.at(-1);
-        if (terminal === undefined || sealJson(terminal.entry).digest !== syncedHead.head.entry) {
-          throw new NativeDiscoverySyncError(source, 'advertised-head-entry-mismatch');
-        }
-        const outcome = await configured.verify({
-          source,
-          head: syncedHead.head,
-          headSignature: syncedHead.signature,
-          entries: signedEntries(fetched),
-          firstAdoption: prior === undefined,
-        });
-        if (outcome.status !== 'ok') throw new NativeDiscoverySyncError(source, outcome.status);
-
-        const highWater: SignedSourceHighWater = {
-          sequence: syncedHead.head.sequence,
-          entry: syncedHead.head.entry,
-          issuedAt: syncedHead.head.issuedAt,
-          refreshBy: syncedHead.head.refreshBy,
-          signature: syncedHead.signature,
-        };
-        const cards: Array<{
-          sequence: string;
-          entryDigest: `sha256:${string}`;
-          announcementId: string;
-          card: Card;
-        }> = [];
-        const withdrawals: Array<{
-          sequence: string;
-          entryDigest: `sha256:${string}`;
-          announcement: WithdrawnAnnouncement;
-        }> = [];
-        for (const item of fetched) {
-          const entryDigest = sealJson(item.entry).digest;
-          for (const announcement of item.entry.announcements) {
-            if (announcement.action === 'withdrawn') {
-              withdrawals.push({ sequence: item.entry.sequence, entryDigest, announcement });
-              continue;
-            }
-            const decoded = await input.decode({
-              source,
-              entry: item.entry,
-              entryDigest,
-              announcement,
-              signedHighWater: highWater,
-            });
-            if (decoded === undefined) continue;
-            cards.push({
-              sequence: item.entry.sequence,
-              entryDigest,
-              announcementId: announcement.announcementId,
-              card: {
-                ...decoded,
-                discovery: {
-                  source,
-                  sequence: item.entry.sequence,
-                  entryDigest,
-                  signedHighWater: highWater,
-                },
-              } as Card,
-            });
-          }
-        }
-        queue(source, highWater, cards, withdrawals);
-        accepted += cards.length + withdrawals.length;
+        reportedDegraded.delete(sourceKey(source));
+        accepted += outcome.accepted;
         verifiedSources += 1;
       }
-      return { accepted, verifiedSources };
+      return { accepted, verifiedSources, degraded };
     },
 
     takePending() {

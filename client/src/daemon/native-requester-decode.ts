@@ -22,7 +22,8 @@ import {
   type CanonicalTaskCreated,
   type NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
-import { address, digest, hash, object, uint } from './native-assembly.js';
+import { address, chainId, digest, hash, object, uint } from './native-assembly.js';
+import { NativeDiscoveryLocalAuthorityError } from './native-discovery.js';
 import type { NativeDiscoveryDecodeInput } from './native-discovery.js';
 import type { AnnouncedSubmissionCard } from './native-submission-facts.js';
 
@@ -56,17 +57,29 @@ export interface NativeRequesterDecodePorts {
 /**
  * Builds the decode both native solver paths install on their discovery consumer.
  *
- * Every refusal here is a HARD refusal: `createNativeDiscoveryConsumer.sync()` does not catch,
- * so a non-canonical, non-finalized, self-evaluation-permitting or location-ambiguous
- * announcement aborts the whole source pass rather than being queued as a card. That is the
- * property `canonicalFinalized` leans on downstream — a queued card is, by construction, a card
- * whose `TaskCreated` this operator independently re-derived from chain.
+ * Every refusal here is a HARD refusal: a non-canonical, non-finalized,
+ * self-evaluation-permitting or location-ambiguous announcement is never queued as a card. That is
+ * the property `canonicalFinalized` leans on downstream — a queued card is, by construction, a
+ * card whose `TaskCreated` this operator independently re-derived from chain.
+ *
+ * What a throw here costs changed in #2529 and the property above did not. It used to abort the
+ * whole `sync()` pass — and, because `WorkLoop.initialize` awaits that on the boot path, the
+ * process. It now degrades THIS SOURCE for the poll: no card queued, and the durable high-water
+ * does not advance over the announcement, so nothing signed is skipped and the source is re-read
+ * next poll. The one exception is `assertTrustFresh` below, which reports this operator's own
+ * catalog rather than the source's content and therefore stays fatal.
  */
 export function buildNativeRequesterAnnouncementDecode(
   ports: NativeRequesterDecodePorts,
 ): (input: NativeDiscoveryDecodeInput) => Promise<AnnouncedSubmissionCard> {
   return async (discoveryInput) => {
-    await ports.assertTrustFresh();
+    // This operator's OWN trust catalog changing under it is not the source being unintelligible,
+    // so it is marked to bypass the consumer's per-source degradation and stay fatal (#2529).
+    try {
+      await ports.assertTrustFresh();
+    } catch (cause) {
+      throw new NativeDiscoveryLocalAuthorityError({ cause });
+    }
     const facts = object(discoveryInput.announcement.facts, 'requester facts');
     const association = object(facts[ASSOCIATION], 'requester association');
     const authorityTime = parseNativeAuthorityTimeAnchor(association['authorityTime']);
@@ -79,7 +92,7 @@ export function buildNativeRequesterAnnouncementDecode(
     }
     const submissionBytes = await ports.recordByLocation(submissionLocation[0]!.locator);
     const lookup = {
-      chainId: Number(uint(association['chainId'], 'chainId')),
+      chainId: chainId(association['chainId'], 'chainId'),
       coordinator: address(association['coordinator'], 'coordinator'),
       creator: address(association['creator'], 'creator'),
       taskId: uint(association['taskId'], 'taskId'),

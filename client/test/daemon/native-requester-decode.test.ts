@@ -13,6 +13,7 @@ import {
   type CanonicalTaskCreated,
 } from '../../src/native-requester/requester.js';
 import { buildNativeRequesterAnnouncementDecode } from '../../src/daemon/native-requester-decode.js';
+import { NativeDiscoveryLocalAuthorityError } from '../../src/daemon/native-discovery.js';
 import type { NativeDiscoveryDecodeInput } from '../../src/daemon/native-discovery.js';
 
 const COORDINATOR = '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98';
@@ -93,6 +94,9 @@ describe('buildNativeRequesterAnnouncementDecode', () => {
     }));
     await expect(decode(decodeInput())).rejects.toThrow('trust catalog is stale');
     expect(recordByLocation).not.toHaveBeenCalled();
+    // #2529: a decode failure normally degrades its source rather than killing the pass. This one
+    // reports THIS operator's catalog, not the source's content, so it is marked to stay fatal.
+    await expect(decode(decodeInput())).rejects.toBeInstanceOf(NativeDiscoveryLocalAuthorityError);
   });
 
   it('refuses an authority-time anchor that is not canonical and finalized', async () => {
@@ -164,6 +168,35 @@ describe('buildNativeRequesterAnnouncementDecode', () => {
         allowSolverSelfEvaluation: false,
       },
     }));
+  });
+
+  /**
+   * The live round-5 gate blocker (#2529 F1). `native-requester/requester.ts` emits
+   * `chainId: association.chainId`, typed `number` — so an operator's own DSSE-signed announcement
+   * was rejected by its own boot path with `chainId is not a canonical unsigned integer`, and
+   * because the fleet path REQUIRES its own requester source, every subsequent boot died on it.
+   */
+  it('decodes the JSON-number chainId the requester signs, on the exact producer shape', async () => {
+    const canonicalTaskCreated = vi.fn(async (expected): Promise<CanonicalTaskCreated> => ({
+      canonical: true,
+      ...expected,
+    }));
+    const decode = buildNativeRequesterAnnouncementDecode(ports({ canonicalTaskCreated }));
+    // As above, the terminal `decodeNativeRequesterAnnouncement` needs a full signed entry this
+    // fixture does not synthesise; what is pinned is that the chainId read no longer throws and
+    // that the canonical lookup is reached with the right value.
+    const failure: unknown = await decode(decodeInput({ association: association({ chainId: 84532 }) }))
+      .then(() => undefined, (cause: unknown) => cause);
+    expect(String(failure)).not.toContain('chainId is not a canonical unsigned integer');
+    expect(canonicalTaskCreated).toHaveBeenCalledWith(expect.objectContaining({ chainId: 84532 }));
+  });
+
+  it('still refuses a non-canonical chainId', async () => {
+    const decode = buildNativeRequesterAnnouncementDecode(ports());
+    for (const bad of [84532.5, -1, '084532', true, null]) {
+      await expect(decode(decodeInput({ association: association({ chainId: bad }) })))
+        .rejects.toThrow('chainId is not a canonical unsigned integer');
+    }
   });
 
   it('refuses non-canonical field spellings rather than coercing them', async () => {

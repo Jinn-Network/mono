@@ -18,7 +18,12 @@ import type { FetchBytesByDigest, SubjectMaterialReferences } from '../evaluator
 import type { Store } from '../store/store.js';
 import type { NativeMarketplaceEventRepository } from './native-canonical-observations.js';
 import { buildNativeDiscoverySources } from './native-discovery-trust.js';
+// One shared chain-id reader across all three readers of the signed requester association
+// (#2529). The other primitives below stay local to this module deliberately — only `chainId`
+// had drifted, and only `chainId` is unified here.
+import { chainId } from './native-assembly.js';
 import {
+  NativeDiscoveryLocalAuthorityError,
   createNativeDiscoveryConsumer,
   type NativeDiscoveryQueuedCard,
 } from './native-discovery.js';
@@ -128,8 +133,8 @@ function parseAssociation(card: NativeDiscoveryQueuedCard): IndexedNativeRequest
   const facts = object(card.card.facts, 'requester facts');
   const value = object(facts[ASSOCIATION], 'requester association');
   const discovery = provenance(card);
-  const chainId = Number(value['chainId']);
-  if (chainId !== 84532) throw new Error('requester association is not Base Sepolia');
+  const declaredChainId = chainId(value['chainId'], 'chainId');
+  if (declaredChainId !== 84532) throw new Error('requester association is not Base Sepolia');
   const coordinator = value['coordinator'];
   const sealedAt = value['sealedAt'];
   const authorityTime = parseNativeAuthorityTimeAnchor(value['authorityTime']);
@@ -409,7 +414,13 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     sources: requesterSources,
     transport,
     async decode(discovery) {
-      await input.trust.assertFresh();
+      // This operator's own catalog changing under it stays fatal rather than degrading the
+      // source it was about to read (#2529) — same marking as `native-requester-decode.ts`.
+      try {
+        await input.trust.assertFresh();
+      } catch (cause) {
+        throw new NativeDiscoveryLocalAuthorityError({ cause });
+      }
       const locations = discovery.announcement.locations ?? [];
       if (locations.length !== 1) {
         throw new Error('requester Submission must advertise exactly one public location');
@@ -425,7 +436,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       }
       const terms = object(association['postingTerms'], 'requester posting terms');
       const canonical = await input.infrastructure.evaluator.canonicalTaskCreated({
-        chainId: Number(association['chainId']),
+        chainId: chainId(association['chainId'], 'chainId'),
         coordinator: association['coordinator'] as `0x${string}`,
         creator: association['creator'] as `0x${string}`,
         taskId: uint(association['taskId'], 'requester task id'),

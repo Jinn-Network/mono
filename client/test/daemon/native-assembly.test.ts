@@ -14,6 +14,7 @@ import {
   buildNativeEvaluationSpecResolver,
   buildNativeExactDocuments,
   chain,
+  chainId,
   closeAll,
   digest,
   hash,
@@ -57,6 +58,37 @@ describe('native assembly field readers', () => {
     // Leading zeroes are not canonical -- two spellings of one integer would be two identities.
     expect(() => uint('007', 'taskId')).toThrow('taskId is not a canonical unsigned integer');
     expect(() => uint(7, 'taskId')).toThrow('taskId is not a canonical unsigned integer');
+  });
+});
+
+/**
+ * #2529: the requester emits `chainId` as a JSON number (it is a small bounded integer), and the
+ * solver leg's decode demanded `uint()`'s decimal string. The announcement is DSSE-signed, so the
+ * reader is what moves — and all three readers of the signed association now move together
+ * through this one helper.
+ */
+describe('chainId', () => {
+  it('accepts the canonical JSON number the requester actually signs', () => {
+    expect(chainId(84532, 'chainId')).toBe(84532);
+    expect(chainId(1, 'chainId')).toBe(1);
+    expect(chainId(0, 'chainId')).toBe(0);
+  });
+
+  it('also accepts a canonical decimal string, so neither wire spelling is a boot failure', () => {
+    expect(chainId('84532', 'chainId')).toBe(84532);
+    expect(chainId('0', 'chainId')).toBe(0);
+  });
+
+  it('refuses every non-canonical spelling, with the caller label', () => {
+    for (const bad of [
+      84532.5, -1, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 2,
+      '007', '', ' 84532', '84532 ', '0x14a34', '8.4532e4', '-1', 'abc',
+      true, false, null, undefined, {}, [], 84532n,
+    ]) {
+      expect(() => chainId(bad, 'chainId'), `expected ${String(bad)} to be refused`)
+        .toThrow('chainId is not a canonical unsigned integer');
+    }
   });
 });
 
