@@ -17,6 +17,7 @@ export type {
 
 export {
   JinnRepoLegacySolutionPayloadSchema,
+  JinnRepoIssueRelaySolutionV2PayloadSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoIssueRelayAdoptionPayloadSchema,
   JinnRepoSolutionPayloadSchema,
@@ -122,11 +123,60 @@ export type {
 } from '../issue-relay.js';
 
 export {
+  IssueRelayDecisionOptionV1Schema,
+  IssueRelayDecisionProposalV1Schema,
+  IssueRelayDecisionRequestV1Schema,
+  IssueRelayAutomatedEvidenceV1Schema,
+  IssueRelayEvaluationBundleV2Schema,
+  IssueRelayEvaluationContextV2Schema,
+  IssueRelayPullRequestMetadataV1Schema,
+  IssueRelaySolutionV2Schema,
+  IssueRelayEvaluationLaneSchema,
+  IssueRelayHumanDecisionReceiptV1Schema,
+  IssueRelayImplementationPolicySchema,
+  IssueRelayLaneAttestationV1Schema,
+  IssueRelayLaneFailureV1Schema,
+  IssueRelayLaneFindingV1Schema,
+  IssueRelayPublicEvidenceDescriptorV1Schema,
+  IssueRelayRoundV2Schema,
+  issueRelayCanonicalDigest,
+  issueRelayDecisionKey,
+  issueRelayDecisionRequestDigest,
+  issueRelayEvaluationContextV2Digest,
+  issueRelayPullRequestMetadataDigest,
+  issueRelayHumanDecisionReceiptDigest,
+} from '../issue-relay.js';
+export type {
+  IssueRelayDecisionOptionV1,
+  IssueRelayDecisionProposalV1,
+  IssueRelayDecisionRequestV1,
+  IssueRelayAutomatedEvidenceV1,
+  IssueRelayEvaluationBundleV2,
+  IssueRelayEvaluationContextV2,
+  IssueRelayPullRequestMetadataV1,
+  IssueRelaySolutionV2,
+  IssueRelayEvaluationLane,
+  IssueRelayHumanDecisionReceiptV1,
+  IssueRelayImplementationPolicy,
+  IssueRelayLaneAttestationV1,
+  IssueRelayLaneFailureV1,
+  IssueRelayLaneFindingV1,
+  IssueRelayPublicEvidenceDescriptorV1,
+  IssueRelayRoundV2,
+} from '../issue-relay.js';
+
+export {
   formatIssueRelayAdoptionReceiptComment,
+  formatIssueRelayDecisionRequestComment,
   formatIssueRelayEvaluationAnchorComment,
+  formatIssueRelayEvaluationBundleComment,
+  formatIssueRelayHumanDecisionReceiptComment,
   parseIssueRelayAssuranceComment,
   parseIssueRelayAdoptionReceiptComment,
+  parseIssueRelayDecisionRequestComment,
   parseIssueRelayEvaluationAnchorComment,
+  parseIssueRelayEvaluationBundleComment,
+  parseIssueRelayHumanDecisionReceiptComment,
 } from '../issue-relay-comment.js';
 export type {
   ParsedIssueRelayAssuranceComment,

@@ -124,6 +124,13 @@ describe('Issue Relay evidence comments', () => {
       receipt,
       anchor,
     });
+    expect(parseIssueRelayAssuranceComment(
+      body.replace(
+        '<!-- jinn-issue-relay:assurance:v1 -->',
+        '<!-- jinn-issue-relay:assurance:v2 -->',
+      ),
+      correlation,
+    )).toEqual({ receipt, anchor });
   });
 
   it('rejects duplicate or contradictory correlations in composed assurance comments', () => {

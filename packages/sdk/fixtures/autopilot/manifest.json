@@ -44,6 +44,13 @@
       "decode": "accept"
     },
     {
+      "path": "issue-relay-evaluation-bundle.v2.json",
+      "schema": "IssueRelayEvaluationBundleV2Schema",
+      "disposition": "pass",
+      "sha256": "94f202cb62ad36dd575212e9d23ccf5f748c5c4ca1d41a0539eb0425ba18543a",
+      "decode": "accept"
+    },
+    {
       "path": "issue-relay-round.v1.json",
       "schema": "IssueRelayRoundV1Schema",
       "disposition": "repair",

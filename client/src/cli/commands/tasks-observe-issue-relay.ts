@@ -4,7 +4,10 @@ import { parseArgs } from 'node:util';
 import { getAddress } from 'viem';
 import { z } from 'zod';
 import {
+  IssueRelaySolutionV2Schema,
   IssueRelayRoundV1Schema,
+  IssueRelayRoundV2Schema,
+  IssueRelayEvaluationBundleV2Schema,
   IssueRelayVerdictV1Schema,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 
@@ -32,8 +35,10 @@ const taskCid = z.string().min(1).refine((value) => {
 }, 'Task CID must be a canonical raw sha2-256 CIDv1');
 const round = z.unknown().transform((value, ctx) => {
   const parsed = IssueRelayRoundV1Schema.safeParse(value);
-  if (!parsed.success) { ctx.addIssue({ code: 'custom', message: 'invalid Relay round' }); return z.NEVER; }
-  return parsed.data;
+  if (parsed.success) return parsed.data;
+  const parsedV2 = IssueRelayRoundV2Schema.safeParse(value);
+  if (!parsedV2.success) { ctx.addIssue({ code: 'custom', message: 'invalid Relay round' }); return z.NEVER; }
+  return parsedV2.data;
 });
 
 export const IssueRelayDeliveryExpectationSchema = z.object({
@@ -48,8 +53,9 @@ export const IssueRelayDeliveryExpectationSchema = z.object({
 });
 
 const relayVerdict = z.unknown().refine(
-  (value) => IssueRelayVerdictV1Schema.safeParse(value).success,
-  'invalid Issue Relay verdict payload',
+  (value) => IssueRelayVerdictV1Schema.safeParse(value).success
+    || IssueRelayEvaluationBundleV2Schema.safeParse(value).success,
+  'invalid Issue Relay verdict or evaluation-bundle payload',
 );
 const verifiedCommon = {
   status: z.literal('verified'),
@@ -64,10 +70,16 @@ const observation = z.union([
   z.object({
     ...verifiedCommon,
     role: z.literal('solution'),
-    payload: z.object({
-      schemaVersion: z.literal('jinn-repo-solution.v1'),
-      patch: z.string().min(1),
-    }).strict(),
+    payload: z.union([
+      z.object({
+        schemaVersion: z.literal('jinn-repo-solution.v1'),
+        patch: z.string().min(1),
+      }).strict(),
+      z.custom(
+        (value) => IssueRelaySolutionV2Schema.safeParse(value).success,
+        'invalid Issue Relay V2 solution payload',
+      ),
+    ]),
   }).strict(),
   z.object({
     ...verifiedCommon,

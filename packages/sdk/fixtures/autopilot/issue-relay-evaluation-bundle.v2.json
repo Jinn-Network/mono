@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "jinn-issue-relay-evaluation-bundle.v2",
+  "correlation": {
+    "generation": "R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "round": 0,
+    "snapshotDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "taskId": "501",
+    "attemptIndex": 0,
+    "requestId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+    "deliveryEnvelopeCid": "bafy-solution"
+  },
+  "evaluatedHead": "2222222222222222222222222222222222222222",
+  "evaluationContextDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "lanes": {
+    "security": {
+      "schemaVersion": "jinn-issue-relay-lane-attestation.v1",
+      "lane": "security",
+      "correlation": {
+        "generation": "R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "round": 0,
+        "snapshotDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "taskId": "501",
+        "attemptIndex": 0,
+        "requestId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "deliveryEnvelopeCid": "bafy-solution"
+      },
+      "evaluatedHead": "2222222222222222222222222222222222222222",
+      "evaluationContextDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "evaluationAnchorDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "adoptionReceiptDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "checksDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "pullRequestMetadataDigest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "evaluationSpecificationDigest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "outcome": {
+        "kind": "pass",
+        "findings": []
+      },
+      "publicSummary": "No blocking security issue was found in the exact cumulative change."
+    },
+    "quality": {
+      "schemaVersion": "jinn-issue-relay-lane-attestation.v1",
+      "lane": "quality",
+      "correlation": {
+        "generation": "R_kgDOExample:42:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "round": 0,
+        "snapshotDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "taskId": "501",
+        "attemptIndex": 0,
+        "requestId": "0x3333333333333333333333333333333333333333333333333333333333333333",
+        "deliveryEnvelopeCid": "bafy-solution"
+      },
+      "evaluatedHead": "2222222222222222222222222222222222222222",
+      "evaluationContextDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "evaluationAnchorDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "adoptionReceiptDigest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "checksDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "pullRequestMetadataDigest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+      "evaluationSpecificationDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "outcome": {
+        "kind": "pass",
+        "findings": []
+      },
+      "publicSummary": "The exact cumulative change satisfies the frozen goal and acceptance evidence."
+    }
+  },
+  "overallProjection": "pass"
+}

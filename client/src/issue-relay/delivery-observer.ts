@@ -1,11 +1,17 @@
 import type { Address, Hex, Log, PublicClient } from 'viem';
 import {
   IssueRelayRoundV1Schema,
+  IssueRelayRoundV2Schema,
+  IssueRelayEvaluationBundleV2Schema,
   IssueRelayVerdictV1Schema,
+  IssueRelaySolutionV2Schema,
   JinnRepoLegacySolutionPayloadSchema,
   JinnRepoTaskSchema,
   type IssueRelayRoundV1,
+  type IssueRelayRoundV2,
+  type IssueRelayEvaluationBundleV2,
   type IssueRelayVerdictV1,
+  type IssueRelaySolutionV2,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 import {
@@ -31,7 +37,7 @@ export interface IssueRelayDeliveryExpectation {
   readonly taskId: string;
   readonly taskCid: string;
   readonly creationBlockNumber: number;
-  readonly round: IssueRelayRoundV1;
+  readonly round: IssueRelayRoundV1 | IssueRelayRoundV2;
   readonly attemptIndex?: number;
   readonly requestId?: string;
   readonly deliveryEnvelopeCid?: string;
@@ -54,10 +60,12 @@ export type IssueRelayDeliveryObservation =
       readonly task: { readonly taskId: string; readonly taskCid: string };
       readonly attempt: { readonly attemptIndex: number; readonly requestId: string; readonly operator: string };
       readonly delivery: { readonly envelopeCid: string; readonly transactionHash: string; readonly blockNumber: number };
-      readonly round: IssueRelayRoundV1;
+      readonly round: IssueRelayRoundV1 | IssueRelayRoundV2;
       readonly payload:
         | { readonly schemaVersion: 'jinn-repo-solution.v1'; readonly patch: string }
-        | IssueRelayVerdictV1;
+        | IssueRelaySolutionV2
+        | IssueRelayVerdictV1
+        | IssueRelayEvaluationBundleV2;
     };
 
 export interface IssueRelayDeliveryObserverDeps {
@@ -88,7 +96,7 @@ export function parseIssueRelayTaskCid(cid: string): Hex {
 
 function validExpectation(expected: IssueRelayMarketplaceDeliveryExpectation): IssueRelayDeliveryObservation | null {
   if (expected.schemaVersion !== 'jinn-issue-relay-delivery-expectation.v1' || !Number.isSafeInteger(expected.chainId) || expected.chainId <= 0 || !Number.isSafeInteger(expected.creationBlockNumber) || expected.creationBlockNumber < 0 || expected.fromBlock !== BigInt(expected.creationBlockNumber) || expected.toBlock < expected.fromBlock || !/^(0|[1-9][0-9]*)$/.test(expected.taskId) || !expected.taskCid || (expected.role !== 'solution' && expected.role !== 'verdict')) return contradiction('invalid-expectation', 'invalid Relay delivery identity or chain bounds');
-  if (!IssueRelayRoundV1Schema.safeParse(expected.round).success) return contradiction('invalid-expectation', 'Relay round is invalid');
+  if (!IssueRelayRoundV1Schema.safeParse(expected.round).success && !IssueRelayRoundV2Schema.safeParse(expected.round).success) return contradiction('invalid-expectation', 'Relay round is invalid');
   try { parseIssueRelayTaskCid(expected.taskCid); } catch (error) { return contradiction('invalid-expectation', `invalid Task CID: ${detail(error)}`); }
   if ((expected.attemptIndex === undefined) !== (expected.requestId === undefined)) return contradiction('invalid-expectation', 'attempt index and request ID must appear together');
   if (expected.attemptIndex !== undefined && (!Number.isSafeInteger(expected.attemptIndex) || expected.attemptIndex < 0 || !/^0x[0-9a-fA-F]{64}$/.test(expected.requestId!))) return contradiction('invalid-expectation', 'persisted attempt correlation is invalid');
@@ -106,11 +114,21 @@ async function exactTask(publicClient: PublicClient, routerAddress: Address, tas
   return results;
 }
 
-function sameRound(expected: IssueRelayRoundV1, actual: IssueRelayVerdictV1['correlation']): boolean {
+function sameRound(
+  expected: IssueRelayRoundV1 | IssueRelayRoundV2,
+  actual: {
+    readonly generation: string;
+    readonly round: number;
+    readonly snapshotDigest: string;
+  },
+): boolean {
   return expected.generation === actual.generation && expected.round === actual.round && expected.snapshotDigest === actual.snapshotDigest;
 }
 
-function exactRound(left: IssueRelayRoundV1, right: IssueRelayRoundV1): boolean {
+function exactRound(
+  left: IssueRelayRoundV1 | IssueRelayRoundV2,
+  right: IssueRelayRoundV1 | IssueRelayRoundV2,
+): boolean {
   return left.schemaVersion === right.schemaVersion
     && left.generation === right.generation
     && left.round === right.round
@@ -120,7 +138,16 @@ function exactRound(left: IssueRelayRoundV1, right: IssueRelayRoundV1): boolean 
     && left.inputHead === right.inputHead
     && left.purpose === right.purpose
     && left.prNumber === right.prNumber
-    && JSON.stringify(left.findings) === JSON.stringify(right.findings);
+    && JSON.stringify(left.findings) === JSON.stringify(right.findings)
+    && JSON.stringify(
+      left.schemaVersion === 'jinn-issue-relay-round.v2'
+        ? left.decisionBinding
+        : undefined,
+    ) === JSON.stringify(
+      right.schemaVersion === 'jinn-issue-relay-round.v2'
+        ? right.decisionBinding
+        : undefined,
+    );
 }
 
 export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserverDeps): IssueRelayDeliveryObserver {
@@ -153,7 +180,10 @@ export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserve
     if (signedTask.solverType !== 'jinn-repo.v1' || signedTask.contractId !== 'jinn-repo' || signedTask.contractVersion !== 'v1') return contradiction('invalid-task', 'exact task.v1 document is not a jinn-repo.v1 Task');
     const parsedTask = JinnRepoTaskSchema.safeParse(signedTask.spec);
     if (!parsedTask.success || parsedTask.data.source !== 'live-issue' || parsedTask.data.relay === undefined) return contradiction('invalid-task', 'exact task.v1 spec is not a Relay live-issue task');
-    if (!exactRound(expected.round, parsedTask.data.relay as IssueRelayRoundV1)) return contradiction('round-mismatch', 'exact Task Relay capsule differs from expected round');
+    if (!exactRound(
+      expected.round,
+      parsedTask.data.relay as IssueRelayRoundV1 | IssueRelayRoundV2,
+    )) return contradiction('round-mismatch', 'exact Task Relay capsule differs from expected round');
     let envelopeDigest: Hex;
     try { envelopeDigest = cidToDigestHex(lookup.envelope.manifestCid); } catch (error) { return contradiction('invalid-envelope-cid', detail(error)); }
     let provenance: Awaited<ReturnType<typeof verifyRouterAttemptProvenance>>;
@@ -170,15 +200,27 @@ export function createIssueRelayDeliveryObserver(deps: IssueRelayDeliveryObserve
     let signed: SignedEnvelope;
     try { signed = await authenticateExecutionEnvelope(raw, `Issue Relay delivery envelope ${lookup.envelope.manifestCid}`); } catch (error) { return contradiction('invalid-envelope', detail(error)); }
     if (signed.solverType !== 'jinn-repo.v1' || signed.role !== expected.role || !signed.task || signed.task.cid !== expected.taskCid || !same(signed.task.onchainCreationTx, created[0]!.transactionHash!) || signed.task.onchainCreationBlock !== created[0]!.blockNumber || !same(signed.task.requestId, lookup.attempt.requestId) || !same(signed.participant.safeAddress, lookup.attempt.operator) || !same(signed.signature.hash, lookup.envelope.manifestHash)) return contradiction('envelope-mismatch', 'authenticated envelope differs from indexed Task, attempt, role, operator, or hash');
-    let payload: { readonly schemaVersion: 'jinn-repo-solution.v1'; readonly patch: string } | IssueRelayVerdictV1;
+    let payload: { readonly schemaVersion: 'jinn-repo-solution.v1'; readonly patch: string } | IssueRelaySolutionV2 | IssueRelayVerdictV1 | IssueRelayEvaluationBundleV2;
     if (expected.role === 'solution') {
-      const parsedPayload = JinnRepoLegacySolutionPayloadSchema.safeParse(signed.payload);
+      const parsedPayload = expected.round.schemaVersion === 'jinn-issue-relay-round.v2'
+        ? IssueRelaySolutionV2Schema.safeParse(signed.payload)
+        : JinnRepoLegacySolutionPayloadSchema.safeParse(signed.payload);
       if (!parsedPayload.success) return contradiction('invalid-result', parsedPayload.error.message);
       payload = parsedPayload.data;
     } else {
-      const parsedPayload = IssueRelayVerdictV1Schema.safeParse(signed.payload);
-      if (!parsedPayload.success) return contradiction('invalid-result', parsedPayload.error.message);
-      const verdict = parsedPayload.data as IssueRelayVerdictV1;
+      const parsedPayloadV1 = IssueRelayVerdictV1Schema.safeParse(signed.payload);
+      const parsedPayloadV2 = IssueRelayEvaluationBundleV2Schema.safeParse(signed.payload);
+      if (!parsedPayloadV1.success && !parsedPayloadV2.success) return contradiction('invalid-result', `${parsedPayloadV1.error.message}; ${parsedPayloadV2.error.message}`);
+      if (
+        expected.round.schemaVersion === 'jinn-issue-relay-round.v1'
+          ? !parsedPayloadV1.success
+          : !parsedPayloadV2.success
+      ) return contradiction('protocol-mismatch', 'V1 verdicts and V2 evaluation bundles cannot cross generation protocols');
+      const verdict = (parsedPayloadV1.success
+        ? parsedPayloadV1.data
+        : parsedPayloadV2.success
+          ? parsedPayloadV2.data
+          : undefined) as IssueRelayVerdictV1 | IssueRelayEvaluationBundleV2;
       if (!sameRound(expected.round, verdict.correlation) || verdict.correlation.taskId !== expected.taskId || verdict.correlation.attemptIndex !== expected.attemptIndex || !same(verdict.correlation.requestId, expected.requestId!) || verdict.correlation.deliveryEnvelopeCid !== expected.deliveryEnvelopeCid) return contradiction('correlation-mismatch', 'verdict correlation differs from the authoritative solution correlation');
       payload = verdict;
     }

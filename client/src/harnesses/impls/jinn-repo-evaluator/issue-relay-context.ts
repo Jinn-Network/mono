@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
   IssueRelayEvaluationContextV1Schema,
+  IssueRelayEvaluationContextV2Schema,
   JinnRepoLegacySolutionPayloadSchema,
+  IssueRelaySolutionV2Schema,
   JinnRepoLiveIssueTaskSchema,
   type IssueRelayEvaluationContextV1,
+  type IssueRelayEvaluationContextV2,
   type IssueRelayRoundV1,
+  type IssueRelayRoundV2,
   type JinnRepoLiveIssueTask,
+  type IssueRelaySolutionV2,
 } from '@jinn-network/sdk/solvernets/jinn-repo';
 
 export type IssueRelayEvaluationContextObservation =
@@ -22,7 +27,7 @@ export type IssueRelayEvaluationContextObservation =
 export type IssueRelayEvaluationAdmission =
   | {
       readonly kind: 'accepted';
-      readonly context: IssueRelayEvaluationContextV1;
+      readonly context: IssueRelayEvaluationContextV1 | IssueRelayEvaluationContextV2;
     }
   | {
       readonly kind: 'pending';
@@ -30,11 +35,13 @@ export type IssueRelayEvaluationAdmission =
     };
 
 export interface IssueRelayEvaluationOpportunityInput {
-  readonly task: JinnRepoLiveIssueTask & { readonly relay: IssueRelayRoundV1 };
+  readonly task: JinnRepoLiveIssueTask & {
+    readonly relay: IssueRelayRoundV1 | IssueRelayRoundV2;
+  };
   readonly solution: {
     readonly schemaVersion: 'jinn-repo-solution.v1';
     readonly patch: string;
-  };
+  } | IssueRelaySolutionV2;
   readonly taskId: string;
   readonly attemptIndex: number;
   readonly requestId: string;
@@ -75,24 +82,31 @@ export function admitIssueRelayEvaluationOpportunity(
   }
 
   const parsedTask = JinnRepoLiveIssueTaskSchema.safeParse(input.task);
-  const parsedSolution = JinnRepoLegacySolutionPayloadSchema.safeParse(
-    input.solution,
+  const parsedSolution = input.task.relay.schemaVersion === 'jinn-issue-relay-round.v2'
+    ? IssueRelaySolutionV2Schema.safeParse(input.solution)
+    : JinnRepoLegacySolutionPayloadSchema.safeParse(input.solution);
+  const parsedContextV1 = IssueRelayEvaluationContextV1Schema.safeParse(
+    input.observation.context,
   );
-  const parsedContext = IssueRelayEvaluationContextV1Schema.safeParse(
+  const parsedContextV2 = IssueRelayEvaluationContextV2Schema.safeParse(
     input.observation.context,
   );
   if (
     !parsedTask.success
     || parsedTask.data.relay === undefined
     || !parsedSolution.success
-    || !parsedContext.success
+    || (!parsedContextV1.success && !parsedContextV2.success)
   ) {
     return pending('Relay Task, Solution, or evaluation context is malformed');
   }
   const task = parsedTask.data as JinnRepoLiveIssueTask & {
-    readonly relay: IssueRelayRoundV1;
+    readonly relay: IssueRelayRoundV1 | IssueRelayRoundV2;
   };
-  const context = parsedContext.data as IssueRelayEvaluationContextV1;
+  const context = (parsedContextV1.success
+    ? parsedContextV1.data
+    : parsedContextV2.success
+      ? parsedContextV2.data
+      : undefined) as IssueRelayEvaluationContextV1 | IssueRelayEvaluationContextV2;
 
   if (
     !sameSafe(input.solutionOperatorSafe, context.operators.solutionSafe)

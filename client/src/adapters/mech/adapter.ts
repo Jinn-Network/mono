@@ -85,6 +85,7 @@ import {
   JinnRepoAutopilotSessionTaskSchema,
   JinnRepoAutopilotSolutionPayloadSchema,
   JinnRepoLegacySolutionPayloadSchema,
+  IssueRelaySolutionV2Schema,
   JinnRepoLiveIssueTaskSchema,
   type IssueRelayRoundV1,
   type JinnRepoLiveIssueTask,
@@ -1400,9 +1401,10 @@ export class MechAdapter implements ExecutionAdapter {
         );
         return undefined;
       }
-      const parsedSolution = JinnRepoLegacySolutionPayloadSchema.safeParse(
-        parsedEnvelope.data.payload,
-      );
+      const parsedSolution = parsedTask.data.relay?.schemaVersion
+        === 'jinn-issue-relay-round.v2'
+        ? IssueRelaySolutionV2Schema.safeParse(parsedEnvelope.data.payload)
+        : JinnRepoLegacySolutionPayloadSchema.safeParse(parsedEnvelope.data.payload);
       if (!parsedSolution.success) {
         console.log(
           `[mech] keeping Relay evaluation opportunity ${solution.requestId} pending: invalid repository Solution`,

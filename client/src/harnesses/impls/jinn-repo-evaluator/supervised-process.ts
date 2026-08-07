@@ -25,6 +25,8 @@ export interface SupervisedProcessOptions {
   maxOutputBytes: number;
   terminationGraceMs?: number;
   reapTimeoutMs?: number;
+  /** Additional successful exit codes for tools such as scanners. */
+  acceptedExitCodes?: readonly number[];
   spawn?: typeof spawn;
   killProcessGroup?: (pid: number, signal: NodeJS.Signals) => void;
 }
@@ -32,6 +34,7 @@ export interface SupervisedProcessOptions {
 export interface SupervisedProcessResult {
   stdout: string;
   stderr: string;
+  exitCode: number;
 }
 
 function abortError(): Error {
@@ -156,8 +159,8 @@ export async function runSupervisedProcess(
         finish(undefined, stoppingError);
         return;
       }
-      if (code === 0) {
-        finish({ stdout, stderr }, undefined);
+      if (code !== null && (code === 0 || options.acceptedExitCodes?.includes(code))) {
+        finish({ stdout, stderr, exitCode: code }, undefined);
         return;
       }
       finish(undefined, new Error(
