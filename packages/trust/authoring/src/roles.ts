@@ -23,17 +23,56 @@ export const NATIVE_ROLE_IDENTITY_ROLES = [
 
 export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number];
 
-/** Trust-core record families each native key is permitted to sign. */
+/**
+ * The Record Discovery announce-plane scope, duplicated here as a literal rather than imported from
+ * `@jinn-network/record-discovery-protocol`.
+ *
+ * The duplication is deliberate and is the same shape the discovery program §7.11 already chose for
+ * this constant elsewhere: a cross-tree parse-assertion fixture rather than a build edge. This
+ * package is the trust tree's authoring half and the discovery tree depends on trust, so importing
+ * discovery from here would invert that dependency. `roles.test.ts` pins the literal in this tree,
+ * and `client/test/daemon/trust-authoring-round-trip.test.ts` — which imports both constants —
+ * compares them, so a drift is a red test rather than a silent divergence.
+ */
+const DISCOVERY_ANNOUNCEMENT_SCOPE = "jinn:discovery-announcements";
+
+/**
+ * Trust-core record families each native key is permitted to sign.
+ *
+ * The three `*-discovery` roles carry TWO scopes, and the second one is not a record family at all:
+ *
+ *  - `observations` is the trust-core family the native stack verifies discovery envelopes under
+ *    (`native-discovery-trust.ts` and `native-consumer/driver.ts` both build their resolver with
+ *    `family: 'observations'`);
+ *  - `jinn:discovery-announcements` is the Record Discovery announce-plane scope. The discovery
+ *    client's `KeyResolver` will not treat a key as able to sign announcements unless its BINDING
+ *    declares that scope (`packages/discovery/client/src/trust-adapter.ts`), which is the ratified
+ *    rule from the discovery program §7.11.
+ *
+ * Both are required because both are checked, at different layers, over the same key. Before issue
+ * #2525's investigation the discovery roles carried only `observations`, so every native discovery
+ * key failed the announce-plane filter and every head resolved to zero authorized signers — the
+ * live DR-2026-08-05 gate's leg 3 could not have worked at any catalog. This is additive: nothing
+ * that was checked before is checked less, the keys simply now DECLARE the announcement authority
+ * they were already being used to exercise.
+ *
+ * This resolves a genuine conflict between two ratified documents — the native identity ceremony
+ * spec (2026-08-07 §3.2, which mapped roles to trust-core families only) and the discovery program
+ * (§7.11, which fixed the announce-plane scope) — in favour of §7.11, on the coordinator's ruling.
+ * Widening a role's scope invalidates already-authored bindings: an existing catalog's discovery
+ * bindings lack this scope, so `RoleIdentitySet.open` refuses them until the bindings are
+ * re-authored. See `docs/runbooks/native-trust-reauthor.md`.
+ */
 export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, readonly string[]>> = {
   "requester-submission": ["authorizations"],
   admission: ["authorizations"],
-  "requester-discovery": ["observations"],
+  "requester-discovery": ["observations", DISCOVERY_ANNOUNCEMENT_SCOPE],
   "solver-delivery": ["deliveries"],
   "solver-settlement": ["settlements"],
-  "solver-discovery": ["observations"],
+  "solver-discovery": ["observations", DISCOVERY_ANNOUNCEMENT_SCOPE],
   "evaluator-verdict": ["verdicts", "deliveries"],
   "evaluator-settlement": ["settlements"],
-  "evaluator-discovery": ["observations"],
+  "evaluator-discovery": ["observations", DISCOVERY_ANNOUNCEMENT_SCOPE],
 };
 
 /**

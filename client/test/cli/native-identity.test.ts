@@ -94,7 +94,10 @@ function alwaysBindingResolver(): BindingResolver {
     resolveBinding: vi.fn(async (query): Promise<ResolvedBinding> => ({
       binding: {
         key: { didKey: query.key, keyid: query.key },
-        scope: ['authorizations', 'observations', 'deliveries', 'verdicts', 'settlements'],
+        // Every scope a native role can require, including the announce-plane scope the three
+        // `*-discovery` roles gained in issue #2525.
+        scope: ['authorizations', 'observations', 'deliveries', 'verdicts', 'settlements',
+          'jinn:discovery-announcements'],
         validFrom: '2026-01-01T00:00:00.000Z',
       },
       effectiveStart: '2026-01-01T00:00:00.000Z',

@@ -21,7 +21,15 @@ import {
 
 const AGENT = 'urn:jinn:operator:fleet';
 const BOOT_TIME = '2026-08-06T12:00:00.000Z';
-const ALL_SCOPES = ['authorizations', 'observations', 'deliveries', 'verdicts', 'settlements'];
+/**
+ * Every scope a native role can require. Includes the Record Discovery announce-plane scope the
+ * three `*-discovery` roles gained in issue #2525 — without it this is not a "grants everything"
+ * binding and `RoleIdentitySet.open` refuses those roles.
+ */
+const ALL_SCOPES = [
+  'authorizations', 'observations', 'deliveries', 'verdicts', 'settlements',
+  'jinn:discovery-announcements',
+];
 
 function resolver(): BindingResolver {
   return {
