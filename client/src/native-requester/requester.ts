@@ -1737,6 +1737,14 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
   request(input: NativeRequesterRequest): Promise<NativeRequesterResult>;
   handleDiscoveryRequest(request: Request): Promise<Response>;
   /**
+   * The signed source identity this requester publishes under, and therefore the identity a host
+   * must introduce when it mounts {@link handleDiscoveryRequest}. Exposed for #2519: the fleet
+   * daemon's serving plane composes several archives behind one listener and needs each handler's
+   * identity to merge the well-known introduction, and re-deriving `name` at the mount site would
+   * be a second copy of a literal that lives here.
+   */
+  readonly source: SourceIdentity;
+  /**
    * Read-only enumeration of this operator's own posted tasks (the durable canonical associations).
    * The one-swap M5f adoption leg reads these to observe + adopt deliveries for tasks THIS requester
    * posted; it opens no new store — it reads the same durable association directory `request` writes.
@@ -2013,6 +2021,7 @@ export function createNativeRequester(deps: NativeRequesterDeps): {
       return { association, reused: false };
     },
     handleDiscoveryRequest: handler,
+    source,
     async postedAssociations(): Promise<readonly NativeRequesterAssociation[]> {
       return state.allAssociations();
     },
