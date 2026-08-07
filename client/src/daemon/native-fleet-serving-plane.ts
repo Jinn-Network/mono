@@ -10,6 +10,11 @@
  * source, which nothing served. Two operators could not boot; the DR-2026-08-05 G-loop gate could
  * not run.
  *
+ * (#2521 subsequently moved that resolution off the boot path and onto the first poll, because
+ * mounting alone could not fix the ORDER problem — see `native-discovery-trust.ts`. Everything
+ * below is unchanged by that: this module is why a mounted archive introduces its sources at all,
+ * and without it the poll refuses instead of the boot.)
+ *
  * This module is the missing wiring, and it is deliberately ONE listener rather than one per role.
  *
  * ## Why one listener, not a port per role
@@ -41,9 +46,9 @@
  * The well-known document is written only from a PUBLISH path — `requester.ts`'s
  * `writeDiscoveryIndex`, and `native-signed-source.ts`'s `syncWellKnown`, which returns early
  * while the source has no committed state. So a source that has never published serves no
- * introduction; a consumer's boot-time `buildNativeDiscoverySources` throws; and publishing needs
- * a booted daemon. That is unbreakable for an operator consuming its own source, and it makes a
- * peer's first boot depend on the other operator having already published.
+ * introduction; a consumer's source resolution throws; and publishing needs a booted daemon. That
+ * is unbreakable for an operator consuming its own source, and it makes a peer's first poll depend
+ * on the other operator having already published.
  *
  * The fix lives here, on the SERVING side, because that is where the gap is and because it then
  * covers all three roles at once instead of patching two publish paths: when a source's own

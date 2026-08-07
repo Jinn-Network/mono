@@ -30,9 +30,10 @@
  *
  *  SEEDED-fixture / DEPLOY-TIME (documented, not asserted here — see the leg table this prints and
  *  the M7 PR body):
- *   - A live requester record source serving a signed `.well-known` introduction: the full
- *     `buildFleetNativeRuntime` boot fetches it at construction (`buildNativeDiscoverySources`), so
- *     the discovery/solve/adopt legs need the M6 serving plane live for both operators.
+ *   - A live requester record source serving a signed `.well-known` introduction: since #2521 the
+ *     `buildFleetNativeRuntime` boot no longer fetches it at construction, but the first poll does
+ *     (`NativeDiscoverySource.resolveEndpoint`), so the discovery/solve/adopt legs still need the
+ *     M6 serving plane live for both operators.
  *   - A funded, mech-registered operator Safe (FleetBootstrapper on a Sepolia fork) and the escrowed
  *     marketplace post/claim/deliver legs.
  *   - Container-graded evaluation (DR decision 3a) — Docker, deploy-time by construction.

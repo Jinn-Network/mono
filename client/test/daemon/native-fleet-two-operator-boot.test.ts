@@ -23,7 +23,18 @@
  * point is to test the serving/consuming pairing at the layer where it broke.
  *
  * The first `describe` is the DEFECT, asserted rather than described: mount what one-swap M6
- * mounted — the solver publisher alone — and neither operator boots.
+ * mounted — the solver publisher alone — and neither operator can consume a requester source.
+ *
+ * ## Extended for #2521 — cold mutual boot
+ *
+ * #2520 made the serving plane correct and still left the daemon unbootable, because source
+ * resolution ran at CONSTRUCTION: `main.ts` builds the discovery consumer ~250 statements before it
+ * binds the listener that serves it, and the evaluator leg additionally demands a peer's solver
+ * source that no start order can have up first. Resolution is now deferred to first poll, so the
+ * boot assertions below take their natural shape: CONSTRUCTION with nothing mounted anywhere
+ * succeeds, and every refusal that used to fire at construction now fires — identically, and more
+ * legibly — at `sync()`. The negative controls are kept verbatim in substance and re-pointed at the
+ * poll, which is the proof that lazy resolution bought boot order and nothing else.
  */
 import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -36,7 +47,7 @@ import {
   createInMemoryMarketplaceObserveStore,
   createInMemoryPostingIntentStore,
 } from '@jinn-network/marketplace-binding';
-import { WELL_KNOWN_PATH } from '@jinn-network/record-discovery-protocol';
+import { RECORD_DISCOVERY_VERSION, WELL_KNOWN_PATH, headPath } from '@jinn-network/record-discovery-protocol';
 import type { BindingResolver, DsseChainVerifier, PolicyCheckInput, WitnessVerifier } from '@jinn-network/trust-core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { startPublicArchiveServer, type PublicArchiveServer } from '../../src/api/public-archive-server.js';
@@ -239,10 +250,10 @@ async function bootFleetDiscovery(operator: Operator, recordSources: readonly Na
 }
 
 /**
- * The evaluator leg's own source resolution — the two `buildNativeDiscoverySources` calls
+ * The evaluator leg's own source construction — the two `buildNativeDiscoverySources` calls
  * `buildNativeEvaluatorOpportunityReader` makes over its exactly-one-requester + exactly-one-solver
- * pair (#2519 F3). Driven directly rather than through the reader, which additionally wants chain
- * reads, evidence and a pinned Node launcher.
+ * pair (#2519 F3, #2521 F2). Driven directly rather than through the reader, which additionally
+ * wants chain reads, evidence and a pinned Node launcher.
  */
 async function bootEvaluatorSources(operator: Operator, recordSources: readonly NativeRecordSource[]) {
   const { createHttpTransport } = await import('@jinn-network/record-discovery-transport-http');
@@ -254,8 +265,8 @@ async function bootEvaluatorSources(operator: Operator, recordSources: readonly 
   expect(requester).toHaveLength(1);
   expect(solver).toHaveLength(1);
   return {
-    requester: await buildNativeDiscoverySources({ configured: requester, store, transport, trust }),
-    solver: await buildNativeDiscoverySources({ configured: solver, store, transport, trust }),
+    requester: buildNativeDiscoverySources({ configured: requester, store, transport, trust }),
+    solver: buildNativeDiscoverySources({ configured: solver, store, transport, trust }),
   };
 }
 
@@ -295,18 +306,18 @@ async function operators(): Promise<{ a: Operator; b: Operator }> {
 }
 
 describe('#2519 — the defect: the fleet daemon served only the solver archive', () => {
-  it('refuses both operators when only the solver publisher is mounted', async () => {
+  it('refuses both operators at poll when only the solver publisher is mounted', async () => {
     const { a, b } = await operators();
     a.mountSolverOnlyAsM6Did();
     b.mountSolverOnlyAsM6Did();
     const configured = sourcesFor(a, b);
 
     // The requester source has no serving plane at all, so its `.well-known` introduction cannot
-    // be resolved — and neither daemon gets past `buildNativeDiscoverySources`. This is verbatim
-    // what the live gate hit on 2026-08-07, and it is the reason this file exists.
+    // be resolved. Since #2521 that refusal lands at the first poll rather than at construction —
+    // same check, same bytes, same outcome, one poll interval later.
     const wellKnown = new RegExp(`${WELL_KNOWN_PATH} failed with HTTP 404`, 'u');
-    await expect(bootFleetDiscovery(a, configured.a)).rejects.toThrow(wellKnown);
-    await expect(bootFleetDiscovery(b, configured.b)).rejects.toThrow(wellKnown);
+    await expect((await bootFleetDiscovery(a, configured.a)).sync()).rejects.toThrow(wellKnown);
+    await expect((await bootFleetDiscovery(b, configured.b)).sync()).rejects.toThrow(wellKnown);
   });
 
   it('leaves a mounted-but-never-published archive unintroduced (the cold-start deadlock)', async () => {
@@ -339,13 +350,13 @@ describe('#2519 — two-operator native boot', () => {
 
     // A also runs the evaluator leg, which resolves its own requester + B's solver source.
     const evaluatorSources = await bootEvaluatorSources(a, configured.a);
-    expect(evaluatorSources.requester[0]!.endpoint).toMatchObject({
+    expect(await evaluatorSources.requester[0]!.resolveEndpoint()).toMatchObject({
       agent: OPERATOR_A_IRI,
       name: 'requester',
       servingRoot: a.baseUrl,
       archiveRootUrl: `${a.baseUrl}/sources/requester/entries/0000000000000001`,
     });
-    expect(evaluatorSources.solver[0]!.endpoint).toMatchObject({
+    expect(await evaluatorSources.solver[0]!.resolveEndpoint()).toMatchObject({
       agent: OPERATOR_B_IRI,
       name: 'solver-records',
       servingRoot: b.baseUrl,
@@ -382,19 +393,21 @@ describe('#2519 — two-operator native boot', () => {
 
     // A peer origin with no archive behind it: unchanged refusal. Cold-start introduction is a
     // SERVING-side courtesy for sources this operator owns, never a consuming-side tolerance.
+    // Since #2521 the refusal is raised at poll instead of at construction; it is the SAME check
+    // over the SAME bytes, so this control is re-pointed rather than relaxed.
     const dead = trackServer(await startPublicArchiveServer({
       handler: async () => new Response(null, { status: 404 }),
       host: '127.0.0.1',
       port: 0,
     }));
-    await expect(bootFleetDiscovery(a, [{
+    await expect((await bootFleetDiscovery(a, [{
       role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${dead.port}`,
-    }])).rejects.toThrow();
+    }])).sync()).rejects.toThrow();
 
     // B serves a real archive, but not under the identity A asked for.
-    await expect(bootFleetDiscovery(a, [{
+    await expect((await bootFleetDiscovery(a, [{
       role: 'requester', agent: OPERATOR_A_IRI, name: 'requester', baseUrl: b.baseUrl,
-    }])).rejects.toThrow(/not uniquely introduced/u);
+    }])).sync()).rejects.toThrow(/not uniquely introduced/u);
   });
 
   it('serves each source only from its own archive, and 404s anything else', async () => {
@@ -408,6 +421,133 @@ describe('#2519 — two-operator native boot', () => {
     // Not one of the five admitted archive shapes: the composite adds no route.
     expect((await fetch(`${a.baseUrl}/v1/status`)).status).toBe(404);
     expect((await fetch(`${a.baseUrl}/records/not-a-digest`)).status).toBe(404);
+  });
+});
+
+/**
+ * #2521 — the cold MUTUAL boot. Neither operator's listener serves anything at construction, which
+ * is the state `main.ts` is genuinely in: `buildFleetNativeRuntime` runs ~250 statements before
+ * `startPublicArchiveServer`, and no reordering fixes it because the listener serves handlers built
+ * from the runtime. A peer's listener is not this process's to bind at all.
+ *
+ * `mount()` is deliberately NOT called in the boot assertions below — the operators' handlers stay
+ * at the 404 default. That is stronger than "the peer is late": it is "nothing anywhere is up".
+ */
+describe('#2521 — cold mutual boot with neither listener serving', () => {
+  for (const order of ['A then B', 'B then A'] as const) {
+    it(`boots both operators (${order}) before either archive is mounted`, async () => {
+      const { a, b } = await operators();
+      const configured = sourcesFor(a, b);
+
+      // Sequential, not `Promise.all` — start ORDER is the property under test, and a concurrent
+      // pair could hide an order dependency behind interleaving.
+      const first = order === 'A then B'
+        ? await bootFleetDiscovery(a, configured.a)
+        : await bootFleetDiscovery(b, configured.b);
+      const second = order === 'A then B'
+        ? await bootFleetDiscovery(b, configured.b)
+        : await bootFleetDiscovery(a, configured.a);
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+
+      // F2: A's evaluator leg wants exactly one requester (A's own) AND one solver (B's). Under
+      // eager resolution this was the half of the deadlock that no serving-plane fix could reach.
+      const evaluatorSources = await bootEvaluatorSources(a, configured.a);
+      expect(evaluatorSources.requester).toHaveLength(1);
+      expect(evaluatorSources.solver).toHaveLength(1);
+      expect(evaluatorSources.requester[0]!.identity).toEqual({ agent: OPERATOR_A_IRI, name: 'requester' });
+      expect(evaluatorSources.solver[0]!.identity).toEqual({ agent: OPERATOR_B_IRI, name: 'solver-records' });
+    });
+  }
+
+  it('resolves the real introduction at the first poll, once the archives are mounted', async () => {
+    const { a, b } = await operators();
+    const configured = sourcesFor(a, b);
+
+    // Construct cold...
+    const discoveryA = await bootFleetDiscovery(a, configured.a);
+    const evaluatorSources = await bootEvaluatorSources(a, configured.a);
+
+    // ...and while still cold, a poll refuses — deferring resolution never means accepting.
+    await expect(discoveryA.sync()).rejects.toThrow(
+      new RegExp(`${OPERATOR_A_IRI}/requester at ${a.baseUrl} could not be resolved`, 'u'),
+    );
+
+    // Now the daemon reaches its `startPublicArchiveServer` statement, and so does the peer.
+    a.mount(a.served);
+    b.mount(b.served);
+    expect(await evaluatorSources.requester[0]!.resolveEndpoint()).toMatchObject({
+      agent: OPERATOR_A_IRI,
+      name: 'requester',
+      servingRoot: a.baseUrl,
+      archiveRootUrl: `${a.baseUrl}/sources/requester/entries/0000000000000001`,
+    });
+    expect(await evaluatorSources.solver[0]!.resolveEndpoint()).toMatchObject({
+      agent: OPERATOR_B_IRI,
+      name: 'solver-records',
+      servingRoot: b.baseUrl,
+      archiveRootUrl: `${b.baseUrl}/sources/solver-records/entries/0000000000000001`,
+    });
+
+    // A failed resolution is not memoized: the same source object that refused above resolves now.
+    // The poll still refuses, because nothing has published a head — introduction is not history.
+    await expect(discoveryA.sync()).rejects.toThrow(new RegExp(`${headPath('requester')} failed with HTTP 404`, 'u'));
+  });
+
+  it('names agent, source and baseUrl when the origin refuses the connection (F4)', async () => {
+    const { a } = await operators();
+    // A bound-then-closed loopback port: ECONNREFUSED, the exact failure the live gate saw as a
+    // bare `TypeError: fetch failed` with no URL in it.
+    const vacant = await startPublicArchiveServer({
+      handler: async () => new Response(null, { status: 404 }),
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const baseUrl = `http://127.0.0.1:${vacant.port}`;
+    await vacant.close();
+
+    const discovery = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl,
+    }]);
+    await expect(discovery.sync()).rejects.toThrow(
+      new RegExp(`native discovery source ${OPERATOR_B_IRI}/requester at ${baseUrl} could not be resolved`, 'u'),
+    );
+  });
+
+  it('still refuses a peer that introduces itself but serves an unsigned head', async () => {
+    const { a, b } = await operators();
+    a.mount(a.served);
+    b.mount(b.served);
+
+    // B's real introduction, proxied verbatim; only its head is replaced with a BARE (unsigned)
+    // SourceHead. Deferring resolution must not defer — or dilute — the signature gate.
+    const unsignedHead = {
+      protocol: RECORD_DISCOVERY_VERSION,
+      origin: `${OPERATOR_B_IRI}/requester`,
+      sequence: '0000000000000001',
+      entry: `sha256:${'a'.repeat(64)}`,
+      issuedAt: '2026-08-07T12:00:00.000Z',
+      refreshBy: '2099-01-01T00:00:00.000Z',
+    };
+    const proxy = trackServer(await startPublicArchiveServer({
+      handler: async (request) => {
+        const url = new URL(request.url);
+        if (url.pathname === headPath('requester')) {
+          return new Response(JSON.stringify(unsignedHead), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return fetch(`${b.baseUrl}${url.pathname}${url.search}`);
+      },
+      host: '127.0.0.1',
+      port: 0,
+    }));
+
+    const discovery = await bootFleetDiscovery(a, [{
+      role: 'requester', agent: OPERATOR_B_IRI, name: 'requester', baseUrl: `http://127.0.0.1:${proxy.port}`,
+    }]);
+    await expect(discovery.sync()).rejects.toThrow(/unsigned-head/u);
   });
 });
 

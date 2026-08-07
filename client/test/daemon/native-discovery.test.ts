@@ -113,12 +113,13 @@ function source(
   verifyHead: NativeDiscoverySource['verifyHead'] = async () => ({ status: 'ok' }),
 ): NativeDiscoverySource {
   return {
-    endpoint: {
+    identity: { agent: AGENT, name: SOURCE_NAME },
+    resolveEndpoint: async () => ({
       agent: AGENT,
       name: SOURCE_NAME,
       servingRoot: ROOT,
       archiveRootUrl: `${ROOT}${archivePagePath(SOURCE_NAME, String(routes.size - 1).padStart(16, '0'))}`,
-    },
+    }),
     verify,
     verifyHead,
   };
@@ -361,7 +362,12 @@ describe('native discovery consumer', () => {
     const firstSource = source(new Map(), async () => ({ status: 'ok' as const }));
     const secondSource: NativeDiscoverySource = {
       ...firstSource,
-      endpoint: { ...firstSource.endpoint, agent: 'did:key:zNativeSolver', name: 'solver' },
+      identity: { agent: 'did:key:zNativeSolver', name: 'solver' },
+      resolveEndpoint: async () => ({
+        ...(await firstSource.resolveEndpoint()),
+        agent: 'did:key:zNativeSolver',
+        name: 'solver',
+      }),
     };
     const first = createNativeDiscoveryConsumer({
       store,
