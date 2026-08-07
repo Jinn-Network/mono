@@ -10,12 +10,14 @@ const DEPENDENCY_SECTIONS = [
 ];
 
 const TRUST_PACKAGES = [
+  ['authoring', '@jinn-network/trust-authoring'],
   ['core', '@jinn-network/trust-core'],
   ['resolve', '@jinn-network/trust-resolve'],
   ['testing', '@jinn-network/trust-testing'],
 ];
 
 const JINN_DEPENDENCY_GRAPH = new Map([
+  ['authoring', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['core', { dependencies: [], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['resolve', { dependencies: ['@jinn-network/trust-core'], devDependencies: [], optionalDependencies: [], peerDependencies: [] }],
   ['testing', { dependencies: ['@jinn-network/trust-core', '@jinn-network/trust-resolve'], devDependencies: ['@jinn-network/evidence-protocol', '@jinn-network/record-discovery-protocol', '@jinn-network/task-execution-profiles', '@jinn-network/task-execution-protocol'], optionalDependencies: [], peerDependencies: [] }],
@@ -65,8 +67,8 @@ function expectedPortal(directory, dependencyName) {
   return `portal:${relative(join(packageRoot, directory), join(root, crossTreePath))}`;
 }
 
-test('the trust package inventory is explicit and has three manifests', () => {
-  assert.equal(TRUST_PACKAGES.length, 3);
+test('the trust package inventory is explicit and has four manifests', () => {
+  assert.equal(TRUST_PACKAGES.length, 4);
   for (const [directory, expectedName] of TRUST_PACKAGES) {
     const manifest = readPackage(directory);
     assert.equal(manifest.name, expectedName);

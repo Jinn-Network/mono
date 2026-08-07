@@ -3,61 +3,39 @@
  * once in an encrypted local store, then each boot proves their real, effective-time trust
  * binding before any native component may use them. Legacy EOA signing deliberately lives in
  * `trust-keys.ts` and is not imported here.
+ *
+ * The encrypted store CODEC — the envelope, the `StoredIdentitySetV3` parse/validate, and
+ * `IdentityStore` with its exclusive-link create and atomic rewrite — now lives in
+ * `@jinn-network/trust-authoring` (spec/2026-08-07-native-identity-ceremony.md §3.1): the format is
+ * a shared artifact, written by the ceremony and read here, so there is exactly one implementation
+ * of it. Everything below is verification-side and unchanged — which store bytes mean what is not a
+ * decision this file makes, but whether a key may sign is.
  */
 import {
-  createCipheriv,
-  createDecipheriv,
   createPrivateKey,
   createPublicKey,
-  generateKeyPairSync,
-  randomBytes,
-  scryptSync,
   sign as cryptoSign,
   verify as cryptoVerify,
   type KeyObject,
 } from 'node:crypto';
-import { chmod, link, mkdir, open as openFile, readFile, rename, stat, unlink } from 'node:fs/promises';
-import { dirname, isAbsolute } from 'node:path';
-import bs58 from 'bs58';
+import { stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
 import type { BindingResolver } from '@jinn-network/trust-core';
+import {
+  IdentityStore,
+  IdentityStoreError,
+  NATIVE_ROLE_IDENTITY_REQUIREMENTS,
+  NATIVE_ROLE_IDENTITY_ROLES,
+  type NativeRoleIdentityRole,
+} from '@jinn-network/trust-authoring';
 
-export const NATIVE_ROLE_IDENTITY_ROLES = [
-  'requester-submission',
-  'admission',
-  'requester-discovery',
-  'solver-delivery',
-  'solver-settlement',
-  'solver-discovery',
-  'evaluator-verdict',
-  'evaluator-settlement',
-  'evaluator-discovery',
-] as const;
-
-export type NativeRoleIdentityRole = (typeof NATIVE_ROLE_IDENTITY_ROLES)[number];
-
-/** Trust-core record families each native key is permitted to sign. */
-export const NATIVE_ROLE_IDENTITY_REQUIREMENTS: Readonly<Record<NativeRoleIdentityRole, readonly string[]>> = {
-  'requester-submission': ['authorizations'],
-  admission: ['authorizations'],
-  'requester-discovery': ['observations'],
-  'solver-delivery': ['deliveries'],
-  'solver-settlement': ['settlements'],
-  'solver-discovery': ['observations'],
-  'evaluator-verdict': ['verdicts', 'deliveries'],
-  'evaluator-settlement': ['settlements'],
-  'evaluator-discovery': ['observations'],
+export {
+  IdentityStore,
+  IdentityStoreError,
+  NATIVE_ROLE_IDENTITY_REQUIREMENTS,
+  NATIVE_ROLE_IDENTITY_ROLES,
 };
-
-const ENVELOPE_VERSION = 1;
-const STORE_VERSION = 3;
-const SCRYPT_KEY_LENGTH = 32;
-const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-/** Bounds the lose-the-create-race retry loop in `IdentityStore.loadOrCreate`. */
-const MAX_CREATE_ATTEMPTS = 5;
-
-export class IdentityStoreError extends Error {
-  override readonly name = 'IdentityStoreError';
-}
+export type { NativeRoleIdentityRole };
 
 export interface NativeRoleIdentity {
   readonly role: NativeRoleIdentityRole;
@@ -98,357 +76,12 @@ export type NativeRoleBindingDecision =
         | 'not-effective' | 'expired' | 'scope-policy-rejected' | 'revoked';
     };
 
-interface StoredRoleIdentity {
-  readonly role: NativeRoleIdentityRole;
-  readonly keyId: string;
-  readonly publicKeyDer: string;
-  readonly privateKeyDer: string;
-  readonly createdAt: string;
-}
-
-interface StoredRoleMetadata {
-  readonly role: NativeRoleIdentityRole;
-  readonly keyId: string;
-  readonly algorithm: 'Ed25519';
-  readonly createdAt: string;
-}
-
-interface StoredIdentitySetV3 {
-  readonly version: 3;
-  readonly metadata: {
-    readonly format: 'jinn.native-role-identities/2';
-    readonly ownedRoles: readonly NativeRoleIdentityRole[];
-    readonly roles: readonly StoredRoleMetadata[];
-  };
-  readonly roles: readonly StoredRoleIdentity[];
-}
-
-interface EncryptedIdentityEnvelope {
-  readonly version: 1;
-  readonly kdf: 'scrypt';
-  readonly cipher: 'aes-256-gcm';
-  readonly salt: string;
-  readonly iv: string;
-  readonly authTag: string;
-  readonly ciphertext: string;
-}
-
-function asNativeRole(value: string): NativeRoleIdentityRole {
-  if ((NATIVE_ROLE_IDENTITY_ROLES as readonly string[]).includes(value)) {
-    return value as NativeRoleIdentityRole;
-  }
-  throw new IdentityStoreError(`identity store contains unknown role "${value}"`);
-}
-
 function parseTime(value: string, label: string): number {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) {
     throw new IdentityStoreError(`${label} is not a valid effective time`);
   }
   return time;
-}
-
-function publicKeyId(publicKey: KeyObject): string {
-  const der = Buffer.from(publicKey.export({ type: 'spki', format: 'der' }));
-  if (der.length !== ED25519_SPKI_PREFIX.length + 32 || !der.subarray(0, ED25519_SPKI_PREFIX.length).equals(ED25519_SPKI_PREFIX)) {
-    throw new IdentityStoreError('identity store key is not an Ed25519 SPKI key');
-  }
-  const multicodec = Buffer.concat([Buffer.from([0xed, 0x01]), der.subarray(ED25519_SPKI_PREFIX.length)]);
-  return `did:key:z${bs58.encode(multicodec)}`;
-}
-
-function createStoredRole(role: NativeRoleIdentityRole, createdAt: string): StoredRoleIdentity {
-  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-  return {
-    role,
-    keyId: publicKeyId(publicKey),
-    publicKeyDer: Buffer.from(publicKey.export({ type: 'spki', format: 'der' })).toString('base64'),
-    privateKeyDer: Buffer.from(privateKey.export({ type: 'pkcs8', format: 'der' })).toString('base64'),
-    createdAt,
-  };
-}
-
-function metadataFor(roles: readonly StoredRoleIdentity[]): readonly StoredRoleMetadata[] {
-  return roles.map((role) => ({
-    role: role.role,
-    keyId: role.keyId,
-    algorithm: 'Ed25519',
-    createdAt: role.createdAt,
-  }));
-}
-
-function validateRoles(
-  roles: readonly StoredRoleIdentity[],
-  expectedRoles: readonly NativeRoleIdentityRole[],
-): readonly StoredRoleIdentity[] {
-  if (roles.length !== expectedRoles.length) {
-    throw new IdentityStoreError('identity store role set does not equal the explicitly owned role set');
-  }
-  const byRole = new Map<NativeRoleIdentityRole, StoredRoleIdentity>();
-  for (const candidate of roles) {
-    const role = asNativeRole(candidate.role);
-    if (byRole.has(role)) throw new IdentityStoreError(`identity store contains duplicate role "${role}"`);
-    if (typeof candidate.keyId !== 'string' || typeof candidate.publicKeyDer !== 'string' || typeof candidate.privateKeyDer !== 'string') {
-      throw new IdentityStoreError(`identity store role "${role}" has invalid key material`);
-    }
-    let privateKey: KeyObject;
-    let publicKey: KeyObject;
-    try {
-      privateKey = createPrivateKey({ key: Buffer.from(candidate.privateKeyDer, 'base64'), format: 'der', type: 'pkcs8' });
-      publicKey = createPublicKey(privateKey);
-    } catch (cause) {
-      throw new IdentityStoreError(`identity store role "${role}" cannot be decoded: ${String(cause)}`);
-    }
-    const derivedPublicDer = Buffer.from(publicKey.export({ type: 'spki', format: 'der' })).toString('base64');
-    if (derivedPublicDer !== candidate.publicKeyDer || publicKeyId(publicKey) !== candidate.keyId) {
-      throw new IdentityStoreError(`identity store role "${role}" has inconsistent public key metadata`);
-    }
-    byRole.set(role, { ...candidate, role });
-  }
-  return expectedRoles.map((role) => {
-    const stored = byRole.get(role);
-    if (stored === undefined) throw new IdentityStoreError(`identity store is missing required role "${role}"`);
-    return stored;
-  });
-}
-
-function parseStoredIdentitySet(
-  bytes: Uint8Array,
-  expectedRoles: readonly NativeRoleIdentityRole[],
-): { readonly value: StoredIdentitySetV3; readonly migrated: boolean } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(bytes));
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store plaintext is invalid JSON: ${String(cause)}`);
-  }
-  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { roles?: unknown }).roles)) {
-    throw new IdentityStoreError('identity store plaintext has no role list');
-  }
-  const version = (parsed as { version?: unknown }).version;
-  if (version === 1 || version === 2) {
-    if (expectedRoles.length !== NATIVE_ROLE_IDENTITY_ROLES.length
-      || expectedRoles.some((role, index) => role !== NATIVE_ROLE_IDENTITY_ROLES[index])) {
-      throw new IdentityStoreError('legacy all-role identity store cannot be narrowed or reused by a scoped production role');
-    }
-    const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
-    // Add metadata only. The stored key bytes/key IDs retain their exact authority; legacy EVM
-    // material is never read, transformed, or treated as a native role identity.
-    return {
-      value: {
-        version: STORE_VERSION,
-        metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: metadataFor(roles) },
-        roles,
-      },
-      migrated: true,
-    };
-  }
-  if (version !== STORE_VERSION) throw new IdentityStoreError(`identity store version ${String(version)} is unsupported`);
-  const metadata = (parsed as Partial<StoredIdentitySetV3>).metadata;
-  if (metadata?.format !== 'jinn.native-role-identities/2'
-    || !Array.isArray(metadata.ownedRoles)
-    || !Array.isArray(metadata.roles)) {
-    throw new IdentityStoreError('identity store key metadata is missing');
-  }
-  if (JSON.stringify(metadata.ownedRoles) !== JSON.stringify(expectedRoles)) {
-    throw new IdentityStoreError('identity store owned role set does not match the process role set');
-  }
-  const roles = validateRoles((parsed as { roles: StoredRoleIdentity[] }).roles, expectedRoles);
-  const expectedMetadata = metadataFor(roles);
-  if (JSON.stringify(metadata.roles) !== JSON.stringify(expectedMetadata)) {
-    throw new IdentityStoreError('identity store key metadata does not match stored role keys');
-  }
-  return {
-    value: {
-      version: STORE_VERSION,
-      metadata: { format: 'jinn.native-role-identities/2', ownedRoles: expectedRoles, roles: expectedMetadata },
-      roles,
-    },
-    migrated: false,
-  };
-}
-
-function encrypt(value: StoredIdentitySetV3, password: string): EncryptedIdentityEnvelope {
-  const salt = randomBytes(16);
-  const iv = randomBytes(12);
-  const key = scryptSync(password, salt, SCRYPT_KEY_LENGTH);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const plaintext = Buffer.from(JSON.stringify(value));
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  return {
-    version: ENVELOPE_VERSION,
-    kdf: 'scrypt',
-    cipher: 'aes-256-gcm',
-    salt: salt.toString('base64'),
-    iv: iv.toString('base64'),
-    authTag: cipher.getAuthTag().toString('base64'),
-    ciphertext: ciphertext.toString('base64'),
-  };
-}
-
-function decrypt(bytes: Uint8Array, password: string): Uint8Array {
-  let envelope: Partial<EncryptedIdentityEnvelope>;
-  try {
-    envelope = JSON.parse(new TextDecoder().decode(bytes)) as Partial<EncryptedIdentityEnvelope>;
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store envelope is invalid JSON: ${String(cause)}`);
-  }
-  if (
-    envelope.version !== ENVELOPE_VERSION
-    || envelope.kdf !== 'scrypt'
-    || envelope.cipher !== 'aes-256-gcm'
-    || typeof envelope.salt !== 'string'
-    || typeof envelope.iv !== 'string'
-    || typeof envelope.authTag !== 'string'
-    || typeof envelope.ciphertext !== 'string'
-  ) {
-    throw new IdentityStoreError('identity store envelope is malformed');
-  }
-  try {
-    const key = scryptSync(password, Buffer.from(envelope.salt, 'base64'), SCRYPT_KEY_LENGTH);
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(envelope.authTag, 'base64'));
-    return Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]);
-  } catch (cause) {
-    throw new IdentityStoreError(`identity store cannot be decrypted: ${String(cause)}`);
-  }
-}
-
-/** Encrypted, durable custody for one explicit process-owned role set. */
-export class IdentityStore {
-  private constructor(
-    private readonly path: string,
-    private readonly password: string,
-  ) {}
-
-  static async open(input: { readonly path: string; readonly password: string }): Promise<IdentityStore> {
-    if (input.password.length === 0) throw new IdentityStoreError('identity store password is required');
-    if (!isAbsolute(input.path)) throw new IdentityStoreError('identity store path must be absolute');
-    // `mkdir` resolves to the first directory path it actually created, or `undefined` when the
-    // whole chain already existed. Only chmod in the former case: an operator-supplied `--store`
-    // path can land inside a pre-existing directory (even $HOME), and this must never silently
-    // narrow that directory's mode.
-    const createdDir = await mkdir(dirname(input.path), { recursive: true, mode: 0o700 });
-    if (createdDir !== undefined) await chmod(dirname(input.path), 0o700);
-    return new IdentityStore(input.path, input.password);
-  }
-
-  /**
-   * Loads the persisted role set, or mints and persists one if absent. `created` reflects
-   * whether *this* call's mint is the one now on disk — never a lost race's in-memory keys (see
-   * `createExclusive`). Bounded retry: losing the create race means someone else's file is now
-   * readable, so the loop falls through to the load branch; it only spins again if that file
-   * vanishes before the reread (a second, rarer race), and gives up loudly past
-   * `MAX_CREATE_ATTEMPTS` rather than spinning forever against an adversarial deleter.
-   */
-  async loadOrCreate(
-    now: Date,
-    ownedRoles: readonly NativeRoleIdentityRole[],
-  ): Promise<{ readonly created: boolean; readonly roles: readonly StoredRoleIdentity[] }> {
-    for (let attempt = 0; attempt < MAX_CREATE_ATTEMPTS; attempt += 1) {
-      let encrypted: Uint8Array | undefined;
-      try {
-        // eslint-disable-next-line no-await-in-loop -- each attempt depends on the previous one's outcome.
-        encrypted = await readFile(this.path);
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw new IdentityStoreError(`identity store cannot be read: ${String(cause)}`);
-        }
-      }
-
-      if (encrypted === undefined) {
-        const createdAt = now.toISOString();
-        const roles = ownedRoles.map((role) => createStoredRole(role, createdAt));
-        const value: StoredIdentitySetV3 = {
-          version: STORE_VERSION,
-          metadata: { format: 'jinn.native-role-identities/2', ownedRoles, roles: metadataFor(roles) },
-          roles,
-        };
-        // eslint-disable-next-line no-await-in-loop -- see loop doc above.
-        const won = await this.createExclusive(value);
-        if (won) return { created: true, roles };
-        continue; // a concurrent creator's exclusive link won; reread and return its content.
-      }
-
-      const parsed = parseStoredIdentitySet(decrypt(encrypted, this.password), ownedRoles);
-      // eslint-disable-next-line no-await-in-loop -- see loop doc above.
-      if (parsed.migrated) await this.write(parsed.value);
-      return { created: false, roles: parsed.value.roles };
-    }
-    throw new IdentityStoreError(
-      `identity store at ${this.path} did not converge after ${MAX_CREATE_ATTEMPTS} concurrent create attempts`,
-    );
-  }
-
-  private async writeTempFile(value: StoredIdentitySetV3): Promise<string> {
-    const tempPath = `${this.path}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
-    const serialized = `${JSON.stringify(encrypt(value, this.password))}\n`;
-    const temporary = await openFile(tempPath, 'wx', 0o600);
-    try {
-      await temporary.writeFile(serialized, 'utf8');
-      await temporary.sync();
-    } finally {
-      await temporary.close();
-    }
-    await chmod(tempPath, 0o600);
-    return tempPath;
-  }
-
-  private async syncContainingDir(): Promise<void> {
-    const directory = await openFile(dirname(this.path), 'r');
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  }
-
-  /**
-   * Rewrites an already-existing store (format migration only). The caller has already
-   * confirmed a store is present, so overwriting it via atomic rename is intentional here —
-   * unlike first-create, there is no "which concurrent writer should win" question to answer.
-   */
-  private async write(value: StoredIdentitySetV3): Promise<void> {
-    let tempPath: string | undefined;
-    try {
-      tempPath = await this.writeTempFile(value);
-      await rename(tempPath, this.path);
-      tempPath = undefined;
-      await chmod(this.path, 0o600);
-      await this.syncContainingDir();
-    } catch (cause) {
-      if (tempPath !== undefined) await unlink(tempPath).catch(() => undefined);
-      throw new IdentityStoreError(`identity store cannot be written atomically: ${String(cause)}`);
-    }
-  }
-
-  /**
-   * Claims `this.path` for `value` only if nothing is persisted there yet. Uses a hard link
-   * (atomic, fails EEXIST if the destination already exists) rather than `rename` (which would
-   * silently clobber a concurrent creator's already-won file with this call's own mint, or vice
-   * versa, depending purely on timing). Returns whether `value` is the one now on disk: `false`
-   * means a concurrent creator's link won this race, and its content — not `value` — is what
-   * `this.path` now holds.
-   */
-  private async createExclusive(value: StoredIdentitySetV3): Promise<boolean> {
-    let tempPath: string | undefined;
-    try {
-      tempPath = await this.writeTempFile(value);
-      try {
-        await link(tempPath, this.path);
-      } catch (cause) {
-        if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false;
-        throw cause;
-      }
-      await chmod(this.path, 0o600);
-      await this.syncContainingDir();
-      return true;
-    } catch (cause) {
-      throw new IdentityStoreError(`identity store cannot be created exclusively: ${String(cause)}`);
-    } finally {
-      if (tempPath !== undefined) await unlink(tempPath).catch(() => undefined);
-    }
-  }
 }
 
 /**

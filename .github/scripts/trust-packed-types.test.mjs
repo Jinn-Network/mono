@@ -13,12 +13,14 @@ const archivesRoot = join(temporaryRoot, 'archives');
 const consumerRoot = join(temporaryRoot, 'consumer');
 
 const packages = [
+  ['authoring', '@jinn-network/trust-authoring'],
   ['core', '@jinn-network/trust-core'],
   ['resolve', '@jinn-network/trust-resolve'],
   ['testing', '@jinn-network/trust-testing'],
 ];
 
 const codeEntrypoints = [
+  '@jinn-network/trust-authoring',
   '@jinn-network/trust-core',
   '@jinn-network/trust-resolve',
   '@jinn-network/trust-testing',

@@ -128,7 +128,7 @@
   },
   "releaseGroups": {
     "platform-v1": {
-      "expectedPackageCount": 50,
+      "expectedPackageCount": 51,
       "publishPolicies": [
         "canary-only"
       ],
@@ -3733,6 +3733,53 @@
       "boundaryPolicy": {
         "kind": "source-boundary",
         "path": ".github/scripts/task-supply-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/trust-authoring",
+      "path": "packages/trust/authoring",
+      "domain": "trust",
+      "role": "trust artifact authoring",
+      "tier": 2,
+      "classification": "platform",
+      "stability": "candidate",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-07-30-jinn-platform-architecture.md",
+            "status": "ratified"
+          },
+          {
+            "path": "docs/superpowers/specs/2026-07-27-trust-and-identity-layer-design.md",
+            "status": "approved"
+          },
+          {
+            "path": "spec/2026-08-07-native-identity-ceremony.md",
+            "status": "ratified"
+          }
+        ],
+        "decisionRecord": {
+          "path": "log/decisions/2026-07-30-platform-boundary-and-topology.md",
+          "status": "ratified"
+        }
+      },
+      "releaseGroup": "platform-v1",
+      "publishPolicy": "canary-only",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "trust-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/trust-source-boundaries.test.mjs"
       },
       "publicSurface": {
         "schemas": [],
