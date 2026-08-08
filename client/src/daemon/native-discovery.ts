@@ -158,13 +158,26 @@ export interface NativeDiscoverySource {
    * verification this resolution performs is unchanged — only when it runs moved.
    *
    * A failure is NOT memoized: a peer that is down at one poll must be reachable at the next.
+   *
+   * `refresh: true` bypasses the memo and re-reads the introduction (#2531 F2). The consumer asks
+   * for it on exactly one condition — see `pollSource`'s advertised-head-entry handling — because
+   * a peer's `archiveRoot` rolls as it appends history and a pinned root silently stops yielding.
    */
-  readonly resolveEndpoint: () => Promise<SourceEndpoint>;
+  readonly resolveEndpoint: (options?: { readonly refresh?: boolean }) => Promise<SourceEndpoint>;
   /**
    * Host-wired to the discovery client's trust-aware verifier. A non-`ok` result is a hard
    * gate: no checkpoint/card write and no native work for that poll.
    */
-  readonly verify: (input: NativeDiscoveryVerificationInput) => Promise<{ readonly status: string }>;
+  readonly verify: (input: NativeDiscoveryVerificationInput) => Promise<{
+    readonly status: string;
+    /**
+     * `verifySourceChain`'s own `at:` discriminator (`linkage`, `sequence-contiguity`,
+     * `issued-at-monotonicity`, …). Carried through to the refusal message (#2531 F6): dropping
+     * it collapsed every broken-chain refusal to the bare word `broken-chain`, which is what
+     * forced an out-of-process reproduction to learn that #2531 F1 was a `linkage` failure.
+     */
+    readonly at?: string;
+  }>;
   /**
    * Revalidates a signed head that still names the persisted chain position. This closes the
    * otherwise-dangerous same-head shortcut: freshness, key rotation and revocation remain a
@@ -646,21 +659,60 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       throw new NativeDiscoverySyncError(source, 'rewound-or-tampered-head');
     }
 
-    const fetched = await collect(
-      prior === undefined
-        ? coldSync(endpoint, { transport: input.transport })
-        : returningSync(endpoint, {
-            sequence: prior.sequence,
-            entry: prior.entryDigest,
-          }, { transport: input.transport }),
-    );
     // The client sync contract is ordered. Do not merely find a matching item: a verifier
     // that chooses not to consume its iterator must not let a trailing, mismatched page item
     // advance the durable high-water.
-    const terminal = fetched.at(-1);
-    if (terminal === undefined || sealJson(terminal.entry).digest !== syncedHead.head.entry) {
+    const syncFrom = async (from: SourceEndpoint) => {
+      const collected = await collect(
+        prior === undefined
+          ? coldSync(from, { transport: input.transport })
+          : returningSync(from, {
+              sequence: prior.sequence,
+              entry: prior.entryDigest,
+            }, { transport: input.transport }),
+      );
+      const last = collected.at(-1);
+      const reachesAdvertisedHead =
+        last !== undefined && sealJson(last.entry).digest === syncedHead.head.entry;
+      return { collected, reachesAdvertisedHead };
+    };
+
+    // ## A peer's archive page roll is not tamper (#2531 F2)
+    //
+    // `archiveRootUrl` names the peer's newest archive page, and it rolls as the peer appends.
+    // A consumer holding a memoized root keeps reading the OLD page, so `returningSync` collects
+    // nothing above its high-water mark and this check fires — under the name
+    // `advertised-head-entry-mismatch`, which reads as equivocation. In the live gate that is
+    // exactly what happened, for 22 consecutive ticks, over a completely benign roll.
+    //
+    // A roll and a tamper are distinguishable, and the peer's own signed introduction is what
+    // distinguishes them: if re-reading `.well-known` yields a DIFFERENT archive root, the peer
+    // moved its page and the correct response is to follow it. If the root is unchanged — or the
+    // sync from the new root still does not reach the advertised head — the mismatch is real and
+    // refuses exactly as before.
+    //
+    // The re-resolve is triggered by this failure alone, never by a timer: a steady-state poll
+    // reads `.well-known` zero times, and a page roll costs exactly one extra introduction GET
+    // (plus re-walking the archive pages from the new root) on the single tick that observes it.
+    let attempt = await syncFrom(endpoint);
+    if (!attempt.reachesAdvertisedHead) {
+      const refreshed = await configured.resolveEndpoint({ refresh: true });
+      if (refreshed.archiveRootUrl !== endpoint.archiveRootUrl) {
+        // Following the new root cannot LOOSEN anything: the result still has to reach the
+        // advertised head below, and `verify` still gates every entry it collected.
+        attempt = await syncFrom(refreshed);
+        if (attempt.reachesAdvertisedHead) {
+          console.info(
+            `[native-discovery] source ${sourceKey(source)} rolled its archive page `
+            + `(${endpoint.archiveRootUrl} -> ${refreshed.archiveRootUrl}); followed it`,
+          );
+        }
+      }
+    }
+    if (!attempt.reachesAdvertisedHead) {
       throw new NativeDiscoverySyncError(source, 'advertised-head-entry-mismatch');
     }
+    const fetched = attempt.collected;
     const outcome = await configured.verify({
       source,
       head: syncedHead.head,
@@ -668,7 +720,12 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       entries: signedEntries(fetched),
       firstAdoption: prior === undefined,
     });
-    if (outcome.status !== 'ok') throw new NativeDiscoverySyncError(source, outcome.status);
+    if (outcome.status !== 'ok') {
+      throw new NativeDiscoverySyncError(
+        source,
+        outcome.at === undefined ? outcome.status : `${outcome.status} (at: ${outcome.at})`,
+      );
+    }
 
     const highWater: SignedSourceHighWater = {
       sequence: syncedHead.head.sequence,

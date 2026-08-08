@@ -155,11 +155,24 @@ export function buildNativeDiscoverySources(input: {
     // Resolved on first poll and memoized on SUCCESS only — a peer that is down now must be
     // reachable at the next poll rather than permanently written off. Memoizing the success keeps
     // the process's introduction-read count at exactly what the eager path had (one per source per
-    // process), so the pre-existing staleness of a pinned `archiveRootUrl` is neither introduced
-    // nor widened here.
+    // process).
+    //
+    // ## The memo is now invalidatable (#2531 F2)
+    //
+    // `archiveRootUrl` is the peer's CURRENT (newest) archive page, and that URL rolls as the peer
+    // appends history: operator A rolled `entries/…0001` → `…0002` mid-run, and a consumer pinned
+    // to page 1 collected nothing from `returningSync` for 22 consecutive ticks. Memoizing it
+    // forever meant a long-running consumer could never follow a peer's page roll — the staleness
+    // this comment used to merely acknowledge.
+    //
+    // Re-resolving on a TIMER, or every tick, would put the introduction read back on the hot path
+    // for every source forever, which is the cost the memo exists to avoid. So the caller drives
+    // it instead: `native-discovery.ts` passes `refresh: true` exactly once, on the one symptom a
+    // roll actually produces (the advertised head entry not matching what the pinned page served).
+    // A steady-state poll still reads `.well-known` zero times.
     let resolved: SourceEndpoint | undefined;
-    const resolveEndpoint = async (): Promise<SourceEndpoint> => {
-      if (resolved !== undefined) return resolved;
+    const resolveEndpoint = async (options?: { readonly refresh?: boolean }): Promise<SourceEndpoint> => {
+      if (resolved !== undefined && options?.refresh !== true) return resolved;
       let wellKnownResponse;
       try {
         wellKnownResponse = await input.transport.fetch(`${base}${WELL_KNOWN_PATH}`);
