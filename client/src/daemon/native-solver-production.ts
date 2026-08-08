@@ -17,6 +17,8 @@ import type {
   NativeInfrastructurePrimitives,
   NativeSolverWritePrimitives,
 } from './native-infrastructure-bundle.js';
+import { PREDICTION_FORECAST_PROFILE_URI } from '@jinn-network/task-execution-profiles';
+import { createNativeWorkLoop } from './native-work-loop.js';
 import { createNativeOperatorHost, type NativeOperatorHost } from './native-operator-host.js';
 import { NativeOperatorStateRepository } from './native-operator-state.js';
 import type { NativeProductConfig } from './native-product-config.js';
@@ -214,10 +216,8 @@ export async function buildNativeSolverProductionHost(
       await input.lease.release();
     },
   };
-  let timer: NodeJS.Timeout | undefined;
   let running = false;
   let stopped = false;
-  let workFailure: unknown;
   const tick = async () => {
     if (running || stopped) return;
     running = true;
@@ -242,8 +242,9 @@ export async function buildNativeSolverProductionHost(
       running = false;
     }
   };
+  const workLoop = createNativeWorkLoop({ label: 'native-solver', tick });
   const stopOwned = closeAll([
-    async () => { stopped = true; if (timer !== undefined) clearInterval(timer); },
+    async () => { stopped = true; workLoop.stop(); },
     endpoint.close,
     publisher.close,
     solver.close,
@@ -293,7 +294,9 @@ export async function buildNativeSolverProductionHost(
       async backend() {
         const capabilities = await solver.backend.capabilities();
         const launcher = await solver.launcher.inspect({
-          profileUri: 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0',
+          // #2534: the constant, not a transcribed copy — this readiness probe decides whether the
+          // solver reports its backend ready at all.
+          profileUri: PREDICTION_FORECAST_PROFILE_URI,
           requirements: {},
         });
         return capabilities.signedDeliveries && launcher.probe.ready;
@@ -305,20 +308,13 @@ export async function buildNativeSolverProductionHost(
       },
       publicSource: endpoint.ready,
     },
+    // #2535: a rejected tick no longer kills the loop in silence. `createNativeWorkLoop` always
+    // logs the cause, retries with backoff, and only latches `failure()` — which `health()` turns
+    // into a throw — once the loop genuinely cannot continue.
     work: {
-      async start() {
-        await tick();
-        timer = setInterval(() => {
-          void tick().catch((cause: unknown) => {
-            workFailure = cause;
-            stopped = true;
-            if (timer !== undefined) clearInterval(timer);
-          });
-        }, 5_000);
-        timer.unref();
-      },
+      start: workLoop.start,
       stop: stopOwned,
-      failure: () => workFailure,
+      failure: workLoop.failure,
     },
   });
   scope.release();

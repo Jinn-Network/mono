@@ -256,8 +256,13 @@ describe('native requester', () => {
     )) as { predicate?: { issuer?: string } };
     expect(admissionPayload.predicate?.issuer).toBe('urn:jinn:admission:test');
     expect(admissionPayload.predicate?.issuer).not.toContain('run-one');
+    // #2534 F3b: was `sha256:5f021ff3…`, the digest of a Task naming the transcribed and by then
+    // stale `sha256:e61dc765…` profile. That is exactly the Task the live gate posted as 1218 /
+    // 1219 / 1220 and that no solver could execute, because no sealed prediction-forecast/1.0
+    // document has carried `e61dc765…` since the profile was re-sealed under spec.jinn.network.
+    // The template now names the derived digest, so the sealed Task digest moved with it.
     expect(recordDigest(postInput.taskBytes)).toBe(
-      'sha256:5f021ff3ba8f132c19d43e0ec4bb927ac53da9f659827e2490c6e181d687fe69',
+      'sha256:c0c3d703b3938a944095dcc91b4ec7da96f1bc10b1bb85b0419440a5f44d1204',
     );
     expect(recordDigest(postInput.evaluationSpecBytes)).toBe(
       'sha256:a6821a066168cb199adf550ec515ad14dc7f9a27587963cbb5cc549732a31e0c',

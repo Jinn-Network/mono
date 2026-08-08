@@ -37,6 +37,19 @@ import type {
 import type { NativeRecordSource } from '../config/native-sections.js';
 import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { NativeDiscoveryCardProvenance } from './native-submission-facts.js';
+// #2533: the requester-association index — posting-keyed, with the tamper guard — lives in its
+// own module now. See its docstring for the collision this fixed and the discriminator it uses.
+import { runIsolatedPasses } from './native-isolated-passes.js';
+import {
+  associationForPosting,
+  associationsForTaskDigest,
+  installAssociationSchema,
+  upsertRequesterAssociation,
+  type IndexedNativeRequesterAssociation,
+  type NativePostingIdentity,
+} from './native-evaluator-association-index.js';
+
+export type { IndexedNativeRequesterAssociation, NativePostingIdentity };
 
 const ASSOCIATION = NATIVE_REQUESTER_ASSOCIATION_FACT;
 const DIGEST = /^sha256:[0-9a-f]{64}$/u;
@@ -51,20 +64,6 @@ interface NativePublicRecordCard {
 }
 
 type NativePublicRecordQueueItem = NativeDiscoveryQueuedCard<NativePublicRecordCard>;
-
-export interface IndexedNativeRequesterAssociation {
-  readonly taskDigest: `sha256:${string}`;
-  readonly submissionDigest: `sha256:${string}`;
-  readonly requesterEnvelopeDigest: `sha256:${string}`;
-  readonly admissionReceiptDigest: `sha256:${string}`;
-  readonly sealedAt: string;
-  readonly authorityTime: NativeAuthorityTimeAnchor;
-  readonly requesterAgent: string;
-  readonly chainId: 84532;
-  readonly coordinator: `0x${string}`;
-  readonly taskId: bigint;
-  readonly responseTimeoutSeconds: bigint;
-}
 
 function object(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -169,13 +168,6 @@ function installSchema(store: Store): void {
       entry_digest  TEXT NOT NULL,
       PRIMARY KEY (record_digest, location)
     );
-    CREATE TABLE IF NOT EXISTS native_evaluator_requester_associations (
-      task_digest TEXT PRIMARY KEY,
-      association_json TEXT NOT NULL,
-      source_id TEXT NOT NULL,
-      source_sequence TEXT NOT NULL,
-      entry_digest TEXT NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS native_evaluator_settlement_declarations (
       delivery_digest TEXT PRIMARY KEY,
       declaration_key TEXT NOT NULL,
@@ -184,6 +176,7 @@ function installSchema(store: Store): void {
       entry_digest TEXT NOT NULL
     );
   `);
+  installAssociationSchema(store);
 }
 
 function indexSettlementDeclaration(store: Store, card: NativePublicRecordQueueItem): void {
@@ -244,34 +237,15 @@ function indexLocation(store: Store, card: NativePublicRecordQueueItem, location
 function indexRequester(store: Store, card: NativeDiscoveryQueuedCard, configuredBase: string): void {
   const association = parseAssociation(card);
   const origin = provenance(card);
-  const id = `${origin.source.agent}/${origin.source.name}`;
-  const encoded = JSON.stringify({
-    ...association,
-    taskId: association.taskId.toString(10),
-    responseTimeoutSeconds: association.responseTimeoutSeconds.toString(10),
+  upsertRequesterAssociation({
+    store,
+    association,
+    provenance: {
+      sourceId: `${origin.source.agent}/${origin.source.name}`,
+      sequence: origin.sequence,
+      entryDigest: origin.entryDigest,
+    },
   });
-  const existing = store.db.prepare(
-    `SELECT association_json, source_id, source_sequence, entry_digest
-       FROM native_evaluator_requester_associations WHERE task_digest = ?`,
-  ).get(association.taskDigest) as {
-    association_json: string;
-    source_id: string;
-    source_sequence: string;
-    entry_digest: string;
-  } | undefined;
-  if (existing !== undefined && (existing.association_json !== encoded
-    || existing.source_id !== id
-    || existing.source_sequence !== origin.sequence
-    || existing.entry_digest !== origin.entryDigest)) {
-    throw new Error(`requester association ${association.taskDigest} changed signed facts`);
-  }
-  if (existing === undefined) {
-    store.db.prepare(
-      `INSERT INTO native_evaluator_requester_associations
-        (task_digest, association_json, source_id, source_sequence, entry_digest)
-       VALUES (?, ?, ?, ?, ?)`,
-    ).run(association.taskDigest, encoded, id, origin.sequence, origin.entryDigest);
-  }
   for (const expected of [
     association.taskDigest,
     association.submissionDigest,
@@ -285,21 +259,6 @@ function indexRequester(store: Store, card: NativeDiscoveryQueuedCard, configure
   }
 }
 
-function associationFor(store: Store, taskDigest: `sha256:${string}`): IndexedNativeRequesterAssociation | undefined {
-  const row = store.db.prepare(
-    `SELECT association_json FROM native_evaluator_requester_associations WHERE task_digest = ?`,
-  ).get(taskDigest) as { association_json: string } | undefined;
-  if (row === undefined) return undefined;
-  const value = JSON.parse(row.association_json) as Omit<IndexedNativeRequesterAssociation, 'taskId' | 'responseTimeoutSeconds'> & {
-    readonly taskId: string;
-    readonly responseTimeoutSeconds: string;
-  };
-  return {
-    ...value,
-    taskId: BigInt(value.taskId),
-    responseTimeoutSeconds: BigInt(value.responseTimeoutSeconds),
-  };
-}
 
 /**
  * The exact I/O the evaluator opportunity reader needs, narrowed off the full
@@ -351,9 +310,15 @@ function recordFetcher(input: {
 export interface NativeEvaluatorOpportunityReader {
   readonly source: NativeEvaluatorOpportunitySource;
   readonly fetcher: FetchBytesByDigest;
-  association(taskDigest: `sha256:${string}`): IndexedNativeRequesterAssociation | undefined;
+  /**
+   * #2533: takes the POSTING, not a Task digest. A deterministic specification means several
+   * postings share one Task digest, so a digest alone cannot select an association. Every caller
+   * already holds the posting identity — the durable evaluation row carries `chainId`,
+   * `coordinator` and `taskId` — so no caller had to reach for anything it did not have.
+   */
+  association(posting: NativePostingIdentity): IndexedNativeRequesterAssociation | undefined;
   settlementDeclarationKey(deliveryDigest: `sha256:${string}`): string;
-  deadline(taskDigest: `sha256:${string}`, admittedAt: string): string;
+  deadline(posting: NativePostingIdentity, admittedAt: string): string;
   syncSignedSources(): Promise<void>;
 }
 
@@ -489,21 +454,44 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     publicBases: input.sources.map(({ baseUrl }) => baseUrl),
   });
 
-  const syncSignedSources = async () => {
-    await requester.sync();
-    for (const card of requester.takePending()) {
-      indexRequester(input.store, card, requesterConfigured[0]!.baseUrl);
-    }
-    await solver.sync();
-    for (const card of solver.takePending()) {
-      for (const location of cardLocations(card)) indexLocation(input.store, card, location);
-    }
-  };
+  /**
+   * #2533, pass-level isolation — the same structural lesson as #2529/#2530, one layer up.
+   *
+   * These two passes were sequential and unguarded, so ANY requester-side throw skipped the
+   * solver sync entirely. Live, the association-key collision threw on every tick, so operator A
+   * never ingested a single one of B's records: 802 consecutive aborted ticks, the association
+   * table pinned to task 1218, and leg 6 blocked no matter what B delivered. One source's problem
+   * must not take out its sibling.
+   *
+   * Isolation, not suppression: both failures are still raised. The first is rethrown after both
+   * passes have had their turn, so the caller sees a failing sync and the loop still reports the
+   * problem — it just no longer costs the other source its progress.
+   */
+  const syncSignedSources = async () => runIsolatedPasses([
+    {
+      name: 'requester',
+      run: async () => {
+        await requester.sync();
+        for (const card of requester.takePending()) {
+          indexRequester(input.store, card, requesterConfigured[0]!.baseUrl);
+        }
+      },
+    },
+    {
+      name: 'solver',
+      run: async () => {
+        await solver.sync();
+        for (const card of solver.takePending()) {
+          for (const location of cardLocations(card)) indexLocation(input.store, card, location);
+        }
+      },
+    },
+  ], { label: 'native-evaluator' });
 
   return {
     fetcher,
     syncSignedSources,
-    association: (taskDigest) => associationFor(input.store, taskDigest),
+    association: (posting) => associationForPosting(input.store, posting),
     settlementDeclarationKey(deliveryDigest) {
       const row = input.store.db.prepare(
         `SELECT declaration_key FROM native_evaluator_settlement_declarations WHERE delivery_digest = ?`,
@@ -511,9 +499,13 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       if (row === undefined) throw new Error(`no signed settlement declaration for ${deliveryDigest}`);
       return row.declaration_key;
     },
-    deadline(taskDigest, admittedAt) {
-      const association = associationFor(input.store, taskDigest);
-      if (association === undefined) throw new Error(`no signed requester deadline authority for ${taskDigest}`);
+    deadline(posting, admittedAt) {
+      const association = associationForPosting(input.store, posting);
+      if (association === undefined) {
+        throw new Error(
+          `no signed requester deadline authority for task ${posting.taskId} on ${posting.coordinator}`,
+        );
+      }
       const base = Date.parse(admittedAt);
       if (!Number.isFinite(base)) throw new Error('evaluation admission time is invalid');
       const deadline = base + Number(association.responseTimeoutSeconds) * 1_000;
@@ -570,21 +562,40 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
           }
           const deliveryBytes = await fetcher.byDigest(deliveryCard.card.record.digest);
           const delivery = exactDelivery(deliveryBytes, deliveryCard.card.record.digest);
-          const association = associationFor(input.store, digest(delivery.task, 'Delivery Task digest'));
-          if (association === undefined) continue;
-          const candidates = input.events.solutionCandidates().filter((event) => {
-            const facts = event.facts as {
-              readonly taskId: bigint;
-              readonly attemptIndex: number;
-            };
-            return facts.taskId === association.taskId
-              && deriveMarketplaceAttemptUri({
-                chainId: association.chainId,
-                coordinator: association.coordinator,
-                taskId: association.taskId,
-                attemptIndex: facts.attemptIndex,
-              }) === delivery.attempt;
-          });
+          // #2533: a Delivery names only its Task digest, and a deterministic specification means
+          // several postings share one. The attempt URI is the disambiguator — it is derived from
+          // (chainId, coordinator, taskId, attemptIndex), so exactly one posting can produce the
+          // attempt this Delivery claims. Nothing here selects a posting by recency or by "the
+          // only row"; a candidate is kept only if the chain-derived attempt URI matches.
+          const postings = associationsForTaskDigest(input.store, digest(delivery.task, 'Delivery Task digest'));
+          if (postings.length === 0) continue;
+          const matched = postings.flatMap((candidate) =>
+            input.events.solutionCandidates()
+              .filter((event) => {
+                const facts = event.facts as {
+                  readonly taskId: bigint;
+                  readonly attemptIndex: number;
+                };
+                return facts.taskId === candidate.taskId
+                  && deriveMarketplaceAttemptUri({
+                    chainId: candidate.chainId,
+                    coordinator: candidate.coordinator,
+                    taskId: candidate.taskId,
+                    attemptIndex: facts.attemptIndex,
+                  }) === delivery.attempt;
+              })
+              .map((event) => ({ association: candidate, event })));
+          if (matched.length === 0) continue;
+          // Two postings answering one attempt URI would mean the derivation is not injective.
+          // That is a substitution risk, not a routing detail, so it refuses rather than picking.
+          const distinctPostings = new Set(matched.map(({ association: a }) => `${a.chainId}/${a.coordinator}/${a.taskId}`));
+          if (distinctPostings.size !== 1) {
+            throw new Error(
+              `solver Delivery attempt ${delivery.attempt} matches ${distinctPostings.size} distinct postings`,
+            );
+          }
+          const association = matched[0]!.association;
+          const candidates = matched.map(({ event }) => event);
           const canonical = [] as Array<{
             readonly event: typeof candidates[number];
             readonly fact: NonNullable<Awaited<ReturnType<NonNullable<typeof input.infrastructure.evaluator>['readCanonicalSolutionDelivery']>>>;
