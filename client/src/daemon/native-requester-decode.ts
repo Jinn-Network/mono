@@ -18,8 +18,10 @@
 import {
   NATIVE_REQUESTER_ASSOCIATION_FACT,
   decodeNativeRequesterAnnouncement,
+  isAwaitingFinality,
   parseNativeAuthorityTimeAnchor,
   type CanonicalTaskCreated,
+  type CanonicalTaskCreatedRead,
   type NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
 import { address, chainId, digest, hash, object, uint } from './native-assembly.js';
@@ -51,7 +53,7 @@ export interface NativeRequesterDecodePorts {
       readonly allowSolverSelfEvaluation: false;
     };
     readonly maxClaims: 1;
-  }) => Promise<CanonicalTaskCreated | null>;
+  }) => Promise<CanonicalTaskCreatedRead>;
 }
 
 /**
@@ -113,6 +115,17 @@ export function buildNativeRequesterAnnouncementDecode(
       maxClaims: 1 as const,
     };
     const canonical = await ports.canonicalTaskCreated(lookup);
+    // #2531 F4, read side. The control flow is unchanged and deliberately so: both branches throw,
+    // the decode boundary in `native-discovery.ts` degrades the source, no checkpoint advances and
+    // the announcement is re-read at the next poll. What changes is that the operator can tell the
+    // two apart — this consumer's own `finalized` view lagging the peer's is not the peer serving
+    // an association that does not exist on chain.
+    if (isAwaitingFinality(canonical)) {
+      throw new Error(
+        `native TaskCreated is mined at block ${canonical.blockNumber} but this consumer's `
+        + `finalized head is ${canonical.finalizedBlock}; re-reading at the next poll`,
+      );
+    }
     if (canonical === null) throw new Error('native TaskCreated is not canonical and finalized');
     return decodeNativeRequesterAnnouncement({
       discovery: discoveryInput,

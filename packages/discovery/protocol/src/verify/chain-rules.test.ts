@@ -121,14 +121,14 @@ describe("walkLinkage", () => {
     const child = entry({ sequence: "0000000000000002", previous: genesisDigested!.digest });
     const digested = digestEntries([genesis, child]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[1]!.digest, stopAtDigest: undefined });
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[1]!.digest, stopAt: undefined });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.walked.map((d) => d.entry.sequence)).toEqual(["0000000000000002", GENESIS_SEQUENCE]);
   });
 
   it("fails with linkage when the head's entry is not resolvable", () => {
     const byDigest = new Map<string, ReturnType<typeof digestEntries>[number]>();
-    const result = walkLinkage({ byDigest, headEntryDigest: `sha256:${"c".repeat(64)}`, stopAtDigest: undefined });
+    const result = walkLinkage({ byDigest, headEntryDigest: `sha256:${"c".repeat(64)}`, stopAt: undefined });
     expect(result).toEqual({ ok: false, failure: { kind: "linkage" } });
   });
 
@@ -138,7 +138,7 @@ describe("walkLinkage", () => {
     const child = entry({ sequence: "0000000000000003", previous: genesisDigested!.digest }); // gap: 1 -> 3
     const digested = digestEntries([genesis, child]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[1]!.digest, stopAtDigest: undefined });
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[1]!.digest, stopAt: undefined });
     expect(result).toEqual({ ok: false, failure: { kind: "sequence-contiguity" } });
   });
 
@@ -150,7 +150,11 @@ describe("walkLinkage", () => {
     const head = entry({ sequence: "0000000000000003", previous: middleDigested!.digest });
     const digested = digestEntries([genesis, middle, head]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[2]!.digest, stopAtDigest: middleDigested!.digest });
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[2]!.digest,
+      stopAt: { digest: middleDigested!.digest, sequence: middle.sequence },
+    });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.walked.map((d) => d.entry.sequence)).toEqual(["0000000000000003", "0000000000000002"]);
   });
@@ -159,7 +163,11 @@ describe("walkLinkage", () => {
     const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null });
     const digested = digestEntries([genesis]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: `sha256:${"f".repeat(64)}` });
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[0]!.digest,
+      stopAt: { digest: `sha256:${"f".repeat(64)}`, sequence: GENESIS_SEQUENCE },
+    });
     expect(result).toEqual({ ok: false, failure: { kind: "linkage" } });
   });
 
@@ -178,7 +186,7 @@ describe("walkLinkage", () => {
     });
     const digested = digestEntries([genesis]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: undefined });
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAt: undefined });
     expect(result).toEqual({ ok: false, failure: { kind: "entry-ceiling" } });
   });
 
@@ -197,7 +205,121 @@ describe("walkLinkage", () => {
     });
     const digested = digestEntries([genesis]);
     const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
-    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAtDigest: undefined });
+    const result = walkLinkage({ byDigest, headEntryDigest: digested[0]!.digest, stopAt: undefined });
     expect(result.ok).toBe(true);
+  });
+});
+
+// #2531 F1. `returningSync` yields entries STRICTLY ABOVE the high-water mark, so the boundary
+// entry is not in the fed set. Before this, the walk could only terminate by walking INTO the
+// boundary, so a returning consumer's every subsequent announcement failed `linkage` -- a
+// broken-chain refusal on a sound chain, unrecoverable because the durable checkpoint keeps the
+// boundary's digest and never its body.
+describe("walkLinkage with a boundary that is NOT in the fed set (#2531 F1)", () => {
+  /** genesis -> second -> third, and the digests of each. */
+  function threeChain() {
+    const genesis = entry({ sequence: GENESIS_SEQUENCE, previous: null });
+    const [genesisDigested] = digestEntries([genesis]);
+    const second = entry({ sequence: "0000000000000002", previous: genesisDigested!.digest });
+    const [secondDigested] = digestEntries([second]);
+    const third = entry({ sequence: "0000000000000003", previous: secondDigested!.digest });
+    return { genesis, genesisDigested: genesisDigested!, second, secondDigested: secondDigested!, third };
+  }
+
+  it("terminates on the boundary named by the oldest fed entry's `previous`", () => {
+    const { second, secondDigested, third } = threeChain();
+    // Exactly what `returningSync` hands over at hwm=second: the new entry ONLY.
+    const digested = digestEntries([third]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[0]!.digest,
+      stopAt: { digest: secondDigested.digest, sequence: second.sequence },
+    });
+    expect(result.ok).toBe(true);
+    // The boundary is not walked into -- it was never fed, and it was already accepted once.
+    if (result.ok) expect(result.walked.map((d) => d.entry.sequence)).toEqual(["0000000000000003"]);
+  });
+
+  it("still refuses `linkage` when the oldest fed entry names a DIFFERENT parent (fork/substitution)", () => {
+    const { secondDigested, third } = threeChain();
+    const forged = { ...third, previous: `sha256:${"e".repeat(64)}` as const };
+    const digested = digestEntries([forged]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[0]!.digest,
+      stopAt: { digest: secondDigested.digest, sequence: "0000000000000002" },
+    });
+    expect(result).toEqual({ ok: false, failure: { kind: "linkage" } });
+  });
+
+  it("still refuses `sequence-contiguity` ACROSS the boundary when the new entry skips a sequence", () => {
+    const { second, secondDigested } = threeChain();
+    // `previous` is the true boundary digest, but the sequence jumps 2 -> 4. Without
+    // `stopAt.sequence` this gap is invisible: the absent parent supplies no sequence to compare.
+    const gapped = entry({ sequence: "0000000000000004", previous: secondDigested.digest });
+    const digested = digestEntries([gapped]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[0]!.digest,
+      stopAt: { digest: secondDigested.digest, sequence: second.sequence },
+    });
+    expect(result).toEqual({ ok: false, failure: { kind: "sequence-contiguity" } });
+  });
+
+  it("still refuses `linkage` on a rollback: the boundary is below everything served", () => {
+    // The consumer's hwm is sequence 9, the source now serves only genesis..2. No fed entry names
+    // the recorded boundary, so the walk runs off the end at genesis and refuses.
+    const { genesis, genesisDigested, second } = threeChain();
+    const digested = digestEntries([genesis, second]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[1]!.digest,
+      stopAt: { digest: `sha256:${"f".repeat(64)}`, sequence: "0000000000000009" },
+    });
+    expect(result).toEqual({ ok: false, failure: { kind: "linkage" } });
+    expect(genesisDigested.entry.previous).toBeNull();
+  });
+
+  it("still enforces the entry ceilings on the new entries it walks", () => {
+    const { second, secondDigested } = threeChain();
+    const oversized = entry({
+      sequence: "0000000000000003",
+      previous: secondDigested.digest,
+      announcements: [
+        {
+          announcementId: "ann-oversized-returning",
+          action: "available",
+          record: { kind: "https://spec.jinn.network/records/submission/v1", digest: `sha256:${"a".repeat(64)}` },
+          facts: { blob: "x".repeat(4200) },
+        },
+      ],
+    });
+    const digested = digestEntries([oversized]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[0]!.digest,
+      stopAt: { digest: secondDigested.digest, sequence: second.sequence },
+    });
+    expect(result).toEqual({ ok: false, failure: { kind: "entry-ceiling" } });
+  });
+
+  it("prefers walking INTO a boundary that IS fed, so the pre-#2531 shape is unchanged", () => {
+    const { second, secondDigested, third } = threeChain();
+    const digested = digestEntries([second, third]);
+    const byDigest = new Map(digested.map((d) => [d.digest, d] as const));
+    const result = walkLinkage({
+      byDigest,
+      headEntryDigest: digested[1]!.digest,
+      stopAt: { digest: secondDigested.digest, sequence: second.sequence },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.walked.map((d) => d.entry.sequence)).toEqual(["0000000000000003", "0000000000000002"]);
+    }
   });
 });

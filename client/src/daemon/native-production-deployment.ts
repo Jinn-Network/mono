@@ -327,7 +327,7 @@ async function buildRequesterHost(input: {
       },
     },
     operations: {
-      reconcileTransactions: () => requester.reconcile(),
+      reconcileTransactions: async () => { await requester.reconcile(); },
       reconcilePublications: async () => undefined,
       uncertainCount: () => 0,
     },

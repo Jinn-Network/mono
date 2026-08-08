@@ -978,3 +978,158 @@ describe('native discovery consumer — per-source isolation (#2529)', () => {
     });
   });
 });
+
+// #2531 F2. `archiveRootUrl` names the peer's NEWEST archive page and rolls as the peer appends.
+// It was memoized per process, so a long-running consumer kept reading the old page: returning
+// sync collected nothing, the terminal check fired, and a benign roll was reported under the
+// tamper-class name `advertised-head-entry-mismatch` — 22 consecutive ticks of it in the live gate.
+describe('a peer rolling its archive page (#2531 F2)', () => {
+  /**
+   * A source whose endpoint memoizes exactly the way production's does, over a MUTABLE
+   * introduction — so `refresh: true` is the only thing that can observe a roll.
+   */
+  function rollingSource(state: { root: string; introductionReads: number }): NativeDiscoverySource {
+    let resolved: { agent: string; name: string; servingRoot: string; archiveRootUrl: string } | undefined;
+    return {
+      identity: { agent: AGENT, name: SOURCE_NAME },
+      resolveEndpoint: async (options) => {
+        if (resolved !== undefined && options?.refresh !== true) return resolved;
+        state.introductionReads += 1;
+        resolved = {
+          agent: AGENT,
+          name: SOURCE_NAME,
+          servingRoot: ROOT,
+          archiveRootUrl: `${ROOT}${archivePagePath(SOURCE_NAME, state.root)}`,
+        };
+        return resolved;
+      },
+      verify: async () => ({ status: 'ok' }),
+      verifyHead: async () => ({ status: 'ok' }),
+    };
+  }
+
+  function rollingConsumer(input: {
+    readonly store: Store;
+    readonly routes: () => Map<string, unknown>;
+    readonly source: NativeDiscoverySource;
+  }) {
+    return createNativeDiscoveryConsumer({
+      store: input.store,
+      sources: [input.source],
+      transport: {
+        'fetch': async (url) => {
+          const value = input.routes().get(url);
+          if (value === undefined) throw new Error(`missing route ${url}`);
+          return { status: 200, contentType: 'application/json', bytes: new TextEncoder().encode(JSON.stringify(value)) };
+        },
+      },
+      decode: async (decodeInput) => cardFor(decodeInput.entry.sequence),
+      now: () => FRESH_FIXTURE_TIME,
+    });
+  }
+
+  it('follows the roll within one process lifetime, and never reports it as tamper', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+    const state = { root: '0000000000000001', introductionReads: 0 };
+    let routes = routesFor([first]);
+    const store = new Store(':memory:');
+    const source = rollingSource(state);
+    const consumerUnderTest = rollingConsumer({ store, routes: () => routes, source });
+
+    // Tick 1: cold sync against page 1. The endpoint is now memoized to page 1.
+    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    expect(state.introductionReads).toBe(1);
+    for (const item of consumerUnderTest.takePending()) consumerUnderTest.acknowledge(item);
+
+    // The peer appends entry 2 and rolls its advertised archive root to page 2.
+    routes = routesFor([first, second]);
+    state.root = '0000000000000002';
+
+    // Tick 2: SAME process, SAME source object. The memoized page-1 root yields nothing above the
+    // high-water mark; the fix re-resolves, sees a different root, and follows it.
+    await expect(consumerUnderTest.sync()).resolves.toEqual({ accepted: 1, verifiedSources: 1, degraded: [] });
+    expect(consumerUnderTest.takePending().map((item) => item.card.chain.taskId)).toEqual([2n]);
+    expect(consumerUnderTest.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+      sequence: '0000000000000002',
+    });
+    // Exactly one extra introduction read, on the tick that observed the roll — not one per tick.
+    expect(state.introductionReads).toBe(2);
+  });
+
+  it('does not re-read the introduction on a steady-state tick that has nothing new', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const state = { root: '0000000000000001', introductionReads: 0 };
+    const routes = routesFor([first]);
+    const consumerUnderTest = rollingConsumer({
+      store: new Store(':memory:'),
+      routes: () => routes,
+      source: rollingSource(state),
+    });
+
+    await expect(consumerUnderTest.sync()).resolves.toMatchObject({ accepted: 1 });
+    await expect(consumerUnderTest.sync()).resolves.toMatchObject({ accepted: 0 });
+    await expect(consumerUnderTest.sync()).resolves.toMatchObject({ accepted: 0 });
+    expect(state.introductionReads).toBe(1);
+  });
+
+  it('STILL refuses `advertised-head-entry-mismatch` when the introduction has not rolled', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+    const state = { root: '0000000000000002', introductionReads: 0 };
+    const routes = routesFor([first, second]);
+    // The head advertises an entry the served pages do not terminate on: real equivocation.
+    routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead({ ...head(second), entry: sealJson(first).digest }));
+    const consumerUnderTest = rollingConsumer({
+      store: new Store(':memory:'),
+      routes: () => routes,
+      source: rollingSource(state),
+    });
+
+    await expect(consumerUnderTest.sync()).rejects.toMatchObject({
+      reason: 'advertised-head-entry-mismatch',
+    });
+    expect(consumerUnderTest.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+    // It tried the re-resolve exactly once, then refused rather than looping.
+    expect(state.introductionReads).toBe(2);
+  });
+
+  it('STILL refuses when the introduction HAS rolled but the new root also misses the advertised head', async () => {
+    const first = entry('0000000000000001', null, DIGEST_A);
+    const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
+    const state = { root: '0000000000000001', introductionReads: 0 };
+    let routes = routesFor([first]);
+    const consumerUnderTest = rollingConsumer({
+      store: new Store(':memory:'),
+      routes: () => routes,
+      source: rollingSource(state),
+    });
+
+    // Tick 1 pins the endpoint to page 1, exactly as the roll case above does.
+    await expect(consumerUnderTest.sync()).resolves.toMatchObject({ accepted: 1 });
+    for (const item of consumerUnderTest.takePending()) consumerUnderTest.acknowledge(item);
+
+    // The root really does roll — but the head names an entry the archive does not terminate on.
+    // A rolled root is not a licence to accept: following it must not turn equivocation into
+    // acceptance, and must not claim in the log to have followed anything.
+    routes = routesFor([first, second]);
+    routes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead({ ...head(second), entry: DIGEST_C }));
+    state.root = '0000000000000002';
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    try {
+      await expect(consumerUnderTest.sync()).rejects.toMatchObject({
+        reason: 'advertised-head-entry-mismatch',
+      });
+      // The durable checkpoint stays exactly where it was: nothing advanced over the refusal.
+      expect(consumerUnderTest.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+        sequence: '0000000000000001',
+      });
+      expect(consumerUnderTest.takePending()).toEqual([]);
+      expect(state.introductionReads).toBe(2);
+      expect(info.mock.calls.flat().join(' ')).not.toContain('rolled its archive page');
+    } finally {
+      info.mockRestore();
+    }
+  });
+});

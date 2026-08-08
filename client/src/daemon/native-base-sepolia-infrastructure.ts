@@ -58,7 +58,7 @@ import type {
   NativeFinalizedAnchorReadClient,
   NativeSettlementOwnershipReadClient,
 } from './native-trust-catalog.js';
-import type { CanonicalTaskCreated } from '../native-requester/requester.js';
+import type { CanonicalTaskCreated, CanonicalTaskCreatedRead } from '../native-requester/requester.js';
 import { createJinnPublicClient, createJinnWalletClient } from '../earning/viem-clients.js';
 import { decryptMnemonic, deriveAgentSigner, deriveMasterSigner } from '../earning/wallet.js';
 import type { NativeClaimBroadcastPort } from './native-claim-coordinator.js';
@@ -378,16 +378,30 @@ interface TodayTaskCreatedFacts {
   };
 }
 
+/**
+ * ## Waiting for finality is not evidence of tampering (#2531 F4)
+ *
+ * `blockNumber > finalizedBlock` used to sit in the same `||` chain as every mismatch predicate
+ * below, so a freshly-mined post -- correct in every respect, just young -- was indistinguishable
+ * from a reverted transaction or a forged taskId. Both returned `null`; the requester raised both
+ * as "refuses non-canonical or mismatched TaskCreated association".
+ *
+ * It is now evaluated LAST and on its own. Order is the whole point: every mismatch predicate is
+ * checked first, so anything genuinely non-canonical still returns `null` and still refuses
+ * loudly, and `awaiting-finality` is reachable ONLY for an association that already agrees with
+ * the durable draft on chain id, transaction hash, canonical block hash, creator, task id, task
+ * digest, maxClaims, both budgets, self-evaluation policy, both delivery rates and the response
+ * timeout. A tampered association can never present itself as merely pending.
+ */
 export function verifyCanonicalTodayTaskCreated(
   expected: ExpectedTodayTaskCreated,
   facts: TodayTaskCreatedFacts,
-): CanonicalTaskCreated | null {
+): CanonicalTaskCreatedRead {
   const sameAddress = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
   const terms = expected.terms;
   if (expected.chainId !== 84532
     || facts.transaction.status !== 'success'
     || !sameHex(facts.transaction.hash, expected.txHash)
-    || facts.transaction.blockNumber > facts.finalizedBlock
     || !sameHex(facts.transaction.blockHash, facts.canonicalBlockHash)
     || !sameAddress(facts.event.creator, expected.creator)
     || facts.event.taskId !== expected.taskId
@@ -405,6 +419,14 @@ export function verifyCanonicalTodayTaskCreated(
     || facts.payment.verdictMaxDeliveryRateWei !== terms.verdictMaxDeliveryRateWei
     || facts.payment.responseTimeoutSeconds !== terms.responseTimeoutSeconds) {
     return null;
+  }
+  if (facts.transaction.blockNumber > facts.finalizedBlock) {
+    return {
+      canonical: false,
+      pending: 'awaiting-finality',
+      blockNumber: facts.transaction.blockNumber,
+      finalizedBlock: facts.finalizedBlock,
+    };
   }
   return { canonical: true, ...expected };
 }
@@ -444,7 +466,7 @@ async function canonicalTodayTaskCreated(
   publicClient: PublicClient,
   chain: MarketplaceChainConfig,
   expected: Parameters<NativeRequesterReadPrimitives['canonicalTaskCreated']>[0],
-): Promise<CanonicalTaskCreated | null> {
+): Promise<CanonicalTaskCreatedRead> {
   if (expected.chainId !== chain.chainId
     || !sameHex(expected.coordinator, chain.taskCoordinator)) return null;
   let receipt;

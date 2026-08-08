@@ -45,6 +45,7 @@ import {
   createNativeRequesterPostTask,
   NATIVE_REQUESTER_FIXTURE,
   type CanonicalTaskCreated,
+  type CanonicalTaskCreatedRead,
   type NativeAuthorityTimeAnchor,
   type NativeRequesterRoles,
 } from '../native-requester/requester.js';
@@ -81,7 +82,7 @@ export type CanonicalTaskCreatedReader = (expected: {
   readonly txHash: `0x${string}`;
   readonly terms: PostingTerms;
   readonly maxClaims: 1;
-}) => Promise<CanonicalTaskCreated | null>;
+}) => Promise<CanonicalTaskCreatedRead>;
 
 export interface FleetRequesterWriteInput {
   /** This operator's requester Agent IRI (the `requester-submission` / `requester-discovery` owner). */
@@ -267,7 +268,18 @@ export function buildFleetRequesterWrite(input: FleetRequesterWriteInput): Fleet
     discovery: { source: requester.source, handler: requester.handleDiscoveryRequest },
     adopt,
     async reconcile() {
-      await requester.reconcile();
+      // #2531 F4: a pending-finality association no longer throws out of `requester.reconcile()`,
+      // so it can no longer take the adopt leg down with it. That mattered more than it sounds:
+      // this is the posting loop's FIRST tick step, so for the ~25 minutes the live gate spent
+      // waiting on Base Sepolia finality, adoption was blocked for EVERY posted task -- including
+      // tasks that had long since finalized and had deliveries waiting to be adopted.
+      const summary = await requester.reconcile();
+      if (summary.awaitingFinality.length > 0) {
+        input.logger?.info(
+          `[posting] awaiting finality for ${summary.awaitingFinality.length} posting(s): `
+          + `${summary.awaitingFinality.join(', ')} — retrying next tick`,
+        );
+      }
       await adopt();
     },
     async postTarget(target) {

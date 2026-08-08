@@ -329,6 +329,66 @@ describe('evaluateNativeClaim', () => {
       // the lead the requester actually seals is not that value.
       expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS).toBeGreaterThan(POLICY.minDeadlineLeadMs * 2);
     });
+
+    // --- issue #2531 F5: the lead is measured from SEAL, but spent before DISCOVERY -------------
+    //
+    // The block above evaluates the deadline at the posting instant, which is the one moment no
+    // solver can ever observe. A task is discoverable only after the post's block finalizes and
+    // the announcement publishes; round 6 measured that at 45 minutes (seal 23:20:46 -> publish
+    // 00:05:26). Under the old 1-hour lead that left ~10 minutes and task 1219 expired unclaimed.
+    // These pin the budget `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`'s doc comment states.
+    describe('the window a solver actually sees, after finality + publish (#2531 F5)', () => {
+      /** Measured round 6, seal -> publish, dominated by ~27 min Base Sepolia finality. */
+      const MEASURED_PRE_DISCOVERY_MS = 45 * 60 * 1_000;
+      /** A slow-finality day, or one missed reconcile tick: the margin the lead is sized for. */
+      const DOUBLE_PRE_DISCOVERY_MS = 2 * MEASURED_PRE_DISCOVERY_MS;
+      /** The delivery window that must fit INSIDE the remaining lead once claimed (300s cap). */
+      const DELIVERY_WINDOW_MS = 300 * 1_000;
+
+      it.each([
+        ['the measured round-6 cost', MEASURED_PRE_DISCOVERY_MS],
+        ['double the measured cost', DOUBLE_PRE_DISCOVERY_MS],
+      ])('still claims when discovery happens %s after seal', async (_label, elapsed) => {
+        await expect(
+          evaluateNativeClaim(
+            atDeadline(freshlySealed, { now: new Date(Date.parse(POSTED_AT) + elapsed) }),
+          ),
+        ).resolves.toMatchObject({ ok: true, policy: { ok: true } });
+      });
+
+      it('leaves a usable window, not a technically-passing sliver', () => {
+        const visible = DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - MEASURED_PRE_DISCOVERY_MS;
+        // The failure this replaces left ~10 minutes. A solver has to read the card, decide, and
+        // claim, then still fit the whole delivery window: an hour of visible window is the bar.
+        expect(visible).toBeGreaterThanOrEqual(60 * 60 * 1_000);
+        // And the budget holds with the margin doubled.
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - DOUBLE_PRE_DISCOVERY_MS)
+          .toBeGreaterThan(POLICY.minDeadlineLeadMs + DELIVERY_WINDOW_MS);
+      });
+
+      it('pins how little the superseded one-hour lead left — the regression this replaces', () => {
+        const supersededLeadMs = 60 * 60 * 1_000;
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS).toBeGreaterThan(supersededLeadMs);
+
+        // At the measured cost the old lead left 15 min of visible window. Five of those are the
+        // claim floor and five more are the delivery window, so a solver had ~5 minutes of real
+        // slack to read the card, decide and claim. That is task 1219.
+        const supersededSlack = supersededLeadMs - MEASURED_PRE_DISCOVERY_MS
+          - POLICY.minDeadlineLeadMs - DELIVERY_WINDOW_MS;
+        expect(supersededSlack).toBe(5 * 60 * 1_000);
+
+        // The same slack under the shipped lead, which is what makes the window usable rather
+        // than technically-nonzero.
+        const shippedSlack = DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - MEASURED_PRE_DISCOVERY_MS
+          - POLICY.minDeadlineLeadMs - DELIVERY_WINDOW_MS;
+        expect(shippedSlack).toBeGreaterThanOrEqual(30 * supersededSlack);
+
+        // And the sharp edge: one slow-finality day and the old lead did not survive to discovery
+        // at all — the deadline had already passed before any solver could see the task.
+        expect(supersededLeadMs - DOUBLE_PRE_DISCOVERY_MS).toBeLessThan(0);
+        expect(DEFAULT_SUBMISSION_DEADLINE_LEAD_MS - DOUBLE_PRE_DISCOVERY_MS).toBeGreaterThan(0);
+      });
+    });
   });
 
   it('rejects a bridge card or any exact-byte identity mismatch', async () => {
