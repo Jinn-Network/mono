@@ -81,7 +81,7 @@ The catalog contains **82** entries: **51** `platform-v1` packages, **8** disabl
 | @jinn-network/task-execution-profiles | packages/task-execution/profiles | task-execution | 1 | platform | task profile family | candidate | platform-v1 | canary-only | @jinn-network/task-execution-protocol<br>@noble/hashes<br>ajv<br>safe-regex<br>zod | — | — |
 | @jinn-network/task-execution-protocol | packages/task-execution/protocol | task-execution | 1 | platform | task-execution protocol | candidate | platform-v1 | canary-only | @noble/hashes<br>zod | — | — |
 | @jinn-network/task-execution-testing | packages/task-execution/testing | task-execution | — | platform-support | task-execution conformance kit | candidate | platform-v1 | canary-only | @jinn-network/task-execution-backend<br>@jinn-network/task-execution-backend-local<br>@jinn-network/task-execution-launchers<br>@jinn-network/task-execution-protocol<br>@jinn-network/task-execution-supervisor<br>@jinn-network/task-execution-workspace | — | vitest |
-| @jinn-network/task-admission | packages/task-supply/admission | task-supply | 3 | platform | task admission capability | candidate | experimental-task-supply | disabled | @jinn-network/environment-record<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>zod | — | vitest |
+| @jinn-network/task-admission | packages/task-supply/admission | task-supply | 3 | platform | task admission capability | candidate | experimental-task-supply | disabled | @jinn-network/environment-record<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@jinn-network/trust-core<br>zod | — | vitest |
 | @jinn-network/chain-scenarios | packages/task-supply/chain-scenarios | task-supply | 3 | platform | verified chain-environment scenario derivation capability | experimental | experimental-task-supply | disabled | @jinn-network/chain-environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-derivation<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
 | @jinn-network/task-curation | packages/task-supply/curation | task-supply | 3 | platform | task curation projection | experimental | experimental-task-supply | disabled | zod | — | — |
 | @jinn-network/task-derivation | packages/task-supply/derivation | task-supply | 3 | platform | task derivation capability | experimental | experimental-task-supply | disabled | @jinn-network/environment-record<br>@jinn-network/task-admission<br>@jinn-network/task-execution-profiles<br>@jinn-network/task-execution-protocol<br>@noble/hashes<br>zod | — | vitest |
@@ -275,6 +275,7 @@ Only `dependencies`, `optionalDependencies`, and `peerDependencies` contribute e
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-protocol |
 | @jinn-network/record-discovery-transport-http | runtime | @jinn-network/record-discovery-serve |
 | @jinn-network/task-admission | runtime | @jinn-network/environment-record |
+| @jinn-network/task-admission | runtime | @jinn-network/task-execution-profiles |
 | @jinn-network/task-admission | runtime | @jinn-network/task-execution-protocol |
 | @jinn-network/task-admission | runtime | @jinn-network/trust-core |
 | @jinn-network/task-derivation | runtime | @jinn-network/environment-record |
@@ -1446,7 +1447,7 @@ The exact 51-package trusted-publisher set is `platform-v1`. Receipt-gated canar
 
 ## Architecture-control ownership
 
-Task 6's validator reports 3683 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
+Task 6's validator reports 3687 controlled paths. Required effective owners: `@oaksprout` `@ritsukai`.
 The exhaustive path-level input and coverage report is the `ownership` object in [`platform-topology.v1.json`](./platform-topology.v1.json); this human view keeps its deterministic category summary.
 
 | Category | Controlled paths |
@@ -1459,7 +1460,7 @@ The exhaustive path-level input and coverage report is the `ownership` object in
 | conformancePackedTargets | 56 |
 | conformanceSources | 28 |
 | decisionRecords | 4 |
-| discoveredFirstPartySurfaces | 2944 |
+| discoveredFirstPartySurfaces | 2948 |
 | generatedOutputSources | 1305 |
 | generatorSources | 604 |
 | marketplaceControl | 2 |
