@@ -1,3 +1,7 @@
+import {
+  PREDICTION_FORECAST_PROFILE_DIGEST_HEX,
+  PREDICTION_FORECAST_PROFILE_URI,
+} from "@jinn-network/task-execution-profiles";
 import type { LauncherContract } from "./contract.js";
 import {
   baseEnv, capabilities, isolation, requireHarness, type LauncherOptions,
@@ -15,7 +19,7 @@ export function makePredictionV1BaselineLauncher(options: LauncherOptions = {}):
     capabilities: () => capabilities([
       { key: "harness", inventory: ["prediction-v1-baseline"] },
       { key: "isolationPolicy", inventory: ["unrestricted"] },
-    ], false, [], ["https://spec.jinn.network/task-profiles/prediction-forecast/1.0"]),
+    ], false, [], [PREDICTION_FORECAST_PROFILE_URI]),
     probe: options.probe ?? (async () => ({ ready: true })),
     plan(view, paths, attempt) {
       requireHarness(view, "prediction-v1-baseline");
@@ -28,8 +32,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const input = process.env.JINN_ATTEMPT_INPUT;
 const out = process.env.JINN_ATTEMPT_OUT;
-const PROFILE_URI = 'https://spec.jinn.network/task-profiles/prediction-forecast/1.0';
-const PROFILE_DIGEST = 'e61dc765d1a93b71639cb566d6bd3ca1335cfd53cb415e904ff840670d212937';
+const PROFILE_URI = '${PREDICTION_FORECAST_PROFILE_URI}';
+const PROFILE_DIGEST = '${PREDICTION_FORECAST_PROFILE_DIGEST_HEX}';
 const PROBABILITY = /^(0(\\.\\d+)?|1(\\.0+)?)$/;
 const UTC = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);

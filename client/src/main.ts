@@ -2545,12 +2545,12 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
   if (config.network === 'testnet') {
     const { buildOperatorComposition } = await import('./daemon/composition-root.js');
     const { BASE_SEPOLIA_TODAY } = await import('@jinn-network/marketplace-binding');
-    const { buildRepositoryWorkProfile, buildEvaluationTaskProfile, sealTaskProfile } =
-      await import('@jinn-network/task-execution-profiles');
-    const profileDocuments = [buildRepositoryWorkProfile(), buildEvaluationTaskProfile()];
-    const profilesByDigest = new Map(
-      profileDocuments.map((doc) => [sealTaskProfile(doc).digest, doc]),
-    );
+    // #2534 F3a: the registered documents and the claim allowlist are one list now, not two that
+    // drift. `prediction-forecast/1.0` — the sole `PHASE_B_NATIVE_PROFILE_ALLOWLIST` entry, i.e.
+    // the only profile a native operator may claim — was missing here, so every claimed
+    // prediction task failed to resolve its own profile and went terminal.
+    const { buildNativeProfileStore } = await import('./daemon/native-profile-documents.js');
+    const nativeProfileStore = buildNativeProfileStore();
     // One-swap M2 (#2461): built ONLY when `compositionMode: "native"` selected it. The dynamic
     // import keeps the native runtime graph (trust catalog, record transport, Base Sepolia read
     // clients) off a legacy boot's module graph entirely — a default config loads none of it.
@@ -2592,7 +2592,7 @@ export async function main(): Promise<DaemonStartupInfo | SetupHaltedInfo | void
       stateRoot: join(config.earningDir, '..', 'engine', 'backend'),
       evidenceRoot: join(config.earningDir, '..', 'evidence'),
       venueStateDbPath: join(config.earningDir, '..', 'venue', 'venue.db'),
-      profileStore: { get: (digest) => profilesByDigest.get(digest) },
+      profileStore: nativeProfileStore,
       store: sharedStore,
       ...(identityRegistryAddress ? { identityRegistryAddress } : {}),
     });
