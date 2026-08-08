@@ -131,10 +131,17 @@ export async function verifySourceChain(opts: {
   // Step 4: linkage from the head's cited entry back to the high-water mark
   // (or genesis on first adoption). Step 6 (contiguity) and the
   // published-source ceilings are enforced along the same walk.
+  //
+  // The boundary carries its SEQUENCE as well as its digest (#2531 F1): a returning consumer is
+  // fed only the entries above its high-water mark, so the boundary entry itself is normally
+  // absent from `byDigest` and the walk cannot read that sequence off a fed node. Supplying it
+  // keeps the increment-by-one check alive across the boundary link.
   const walk = walkLinkage({
     byDigest,
     headEntryDigest: head.entry,
-    stopAtDigest: firstAdoption ? undefined : highWaterMark!.entry,
+    stopAt: firstAdoption
+      ? undefined
+      : { digest: highWaterMark!.entry, sequence: highWaterMark!.sequence },
   });
   if (!walk.ok) {
     return { status: "broken-chain", at: walk.failure.kind };
