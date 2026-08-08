@@ -19,6 +19,7 @@ import type { ProtocolObservation } from '@jinn-network/task-execution-protocol'
 import type { Address, Hex } from 'viem';
 import type {
   CanonicalTaskCreated,
+  CanonicalTaskCreatedRead,
   NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
 import type {
@@ -146,7 +147,7 @@ export interface NativeRequesterReadPrimitives {
     readonly txHash: `0x${string}`;
     readonly terms: PostingTerms;
     readonly maxClaims: 1;
-  }) => Promise<CanonicalTaskCreated | null>;
+  }) => Promise<CanonicalTaskCreatedRead>;
 }
 
 export interface NativeAuthorityTimePrimitives {
@@ -155,14 +156,14 @@ export interface NativeAuthorityTimePrimitives {
 }
 
 export interface NativeSolverReadPrimitives {
-  readonly canonicalTaskCreated: (lookup: Omit<CanonicalTaskCreated, 'canonical'>) => Promise<CanonicalTaskCreated | null>;
+  readonly canonicalTaskCreated: (lookup: Omit<CanonicalTaskCreated, 'canonical'>) => Promise<CanonicalTaskCreatedRead>;
   readonly claimCanonical: NativeClaimCanonicalReader;
   readonly solutionSettlementCanonical: NativeSolutionSettlementPort['readCanonical'];
 }
 
 export interface NativeEvaluatorReadPrimitives {
   /** Independently rechecks the requester source's today-mode Task-to-Submission association. */
-  readonly canonicalTaskCreated: (lookup: Omit<CanonicalTaskCreated, 'canonical'>) => Promise<CanonicalTaskCreated | null>;
+  readonly canonicalTaskCreated: (lookup: Omit<CanonicalTaskCreated, 'canonical'>) => Promise<CanonicalTaskCreatedRead>;
   /**
    * Today mode does not place the solution Delivery digest on the router event. This reader
    * therefore joins the exact Mech delivery payload to the canonical router claim and returns

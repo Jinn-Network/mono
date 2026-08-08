@@ -11,6 +11,7 @@ import {
 import {
   NATIVE_REQUESTER_ASSOCIATION_FACT,
   decodeNativeRequesterAnnouncement,
+  isAwaitingFinality,
   parseNativeAuthorityTimeAnchor,
   type NativeAuthorityTimeAnchor,
 } from '../native-requester/requester.js';
@@ -450,6 +451,14 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
         },
         maxClaims: 1,
       });
+      // #2531 F4, evaluator read side: same split as `native-requester-decode.ts`. Both throw and
+      // both degrade the source for the poll; only one of them is evidence of anything wrong.
+      if (isAwaitingFinality(canonical)) {
+        throw new Error(
+          `requester association is mined at block ${canonical.blockNumber} but this evaluator's `
+          + `finalized head is ${canonical.finalizedBlock}; re-reading at the next poll`,
+        );
+      }
       if (canonical === null) throw new Error('requester association has no canonical finalized TaskCreated');
       return decodeNativeRequesterAnnouncement({
         discovery,

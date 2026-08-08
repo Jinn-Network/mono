@@ -16,6 +16,7 @@ import {
   buildFleetRequesterWrite,
   FLEET_REQUESTER_POSTING_TERMS,
   fleetRequesterRunId,
+  type CanonicalTaskCreatedReader,
 } from '../../src/daemon/native-fleet-requester-write.js';
 import { createFileAdoptionReceiptStore } from '../../src/daemon/native-adoption-receipt-store.js';
 
@@ -54,6 +55,7 @@ function build(input: {
   readonly pinned: Uint8Array[];
   readonly observe?: MarketplaceObservePort;
   readonly logger?: { info(message: string): void; warn(message: string): void };
+  readonly canonicalTaskCreated?: CanonicalTaskCreatedReader;
 }) {
   const intents = createInMemoryPostingIntentStore();
   const observe = input.observe ?? createInMemoryMarketplaceObserveStore(BASE_SEPOLIA_TODAY, { intents });
@@ -70,7 +72,8 @@ function build(input: {
     observe,
     ipfsPin: { pin: async (bytes) => { input.pinned.push(bytes); } },
     authorityTime: async () => AUTHORITY_TIME,
-    canonicalTaskCreated: async (expected) => ({ canonical: true as const, ...expected }),
+    canonicalTaskCreated: input.canonicalTaskCreated
+      ?? (async (expected) => ({ canonical: true as const, ...expected })),
     adoptionReceipts,
     ...(input.logger === undefined ? {} : { logger: input.logger }),
     now: () => new Date('2026-08-02T12:00:00.000Z'),
@@ -263,6 +266,143 @@ describe('buildFleetRequesterWrite.adopt — the G-loop adopt leg (M5f)', () => 
       expect(await adoptionReceipts.all()).toEqual([]);
       expect(warn).not.toHaveBeenCalled();
       expect(broadcast).not.toHaveBeenCalled();
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// #2531 F4. `reconcile()` is the posting loop's FIRST tick step and it runs `requester.reconcile()`
+// before `adopt()`. A freshly-mined post failed `blockNumber > finalizedBlock`, the reader returned
+// the same `null` it returns for a forged association, and the requester threw "refuses
+// non-canonical or mismatched TaskCreated association" — which aborted the pass, so for the ~25
+// minutes of an ordinary Base Sepolia finality wait NOTHING was adopted, including tasks that had
+// finalized long before and had deliveries sitting there.
+describe('a pending-finality association is retryable and blocks nothing (#2531 F4)', () => {
+  const FINALIZED_TARGET = {
+    postingKey: 'repo', workKind: 'repo', profileUri: 'urn:m:repo', live: true, generatorEnabled: true,
+  } as const;
+  const PENDING_TARGET = {
+    postingKey: 'docs', workKind: 'docs', profileUri: 'urn:m:docs', live: true, generatorEnabled: true,
+  } as const;
+
+  /** Canonical for everything except `pendingTaskId`, which is mined-but-not-finalized. */
+  function readerPendingFor(pendingTaskId: bigint): CanonicalTaskCreatedReader {
+    return async (expected) => (
+      expected.taskId === pendingTaskId
+        ? { canonical: false as const, pending: 'awaiting-finality' as const, blockNumber: 900n, finalizedBlock: 880n }
+        : { canonical: true as const, ...expected }
+    );
+  }
+
+  it('does not stop a DIFFERENT posted task from being adopted', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-fleet-pending-finality-'));
+    const pinned: Uint8Array[] = [];
+    let nextTaskId = 4242n;
+    const broadcast = vi.fn(async () => {
+      const taskId = nextTaskId;
+      nextTaskId = 9999n;
+      return { taskId, txHash: `0x${'ab'.repeat(32)}` as const };
+    });
+    const info = vi.fn();
+    const warn = vi.fn();
+    try {
+      const { write, observe, adoptionReceipts } = build({
+        stateDir,
+        broadcast,
+        pinned,
+        canonicalTaskCreated: readerPendingFor(9999n),
+        logger: { info, warn },
+      });
+
+      // Task 4242 posts, finalizes and gets a delivery — it is adoptable.
+      await write.postTarget(FINALIZED_TARGET);
+      const association = await readPostedAssociation(stateDir);
+      const snapshot = await observe.observe(association.submissionUri);
+      const attempt = snapshot.descriptor.attempt;
+      await observe.recordDelivery(attempt, sealDelivery({
+        protocol: 'https://spec.jinn.network/task-execution/v1',
+        attempt,
+        task: association.taskDigest,
+        outputs: [],
+        outcome: 'fulfilled',
+        createdAt: '2026-08-02T12:30:00.000Z',
+      }));
+
+      // Task 9999 posts and is mined but not finalized. `postTarget` cannot return an association
+      // it does not have, so it throws — but with a RETRYABLE, non-tamper error.
+      await expect(write.postTarget(PENDING_TARGET)).rejects.toMatchObject({
+        name: 'NativeRequesterAwaitingFinalityError',
+        retryable: true,
+      });
+      await expect(write.postTarget(PENDING_TARGET)).rejects.not.toThrow(/refuses non-canonical/u);
+
+      // THE PROPERTY: reconcile does not throw, and the finalized task is still adopted even
+      // though a pending-finality draft is sitting in the same reconcile pass.
+      await expect(write.reconcile()).resolves.toBeUndefined();
+      expect(await adoptionReceipts.has('4242')).toBe(true);
+      // And it said so, rather than going quiet or crying tamper.
+      expect(info.mock.calls.flat().join(' ')).toContain('awaiting finality');
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('refuses non-canonical');
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('completes the association on a later tick once the block finalizes, with no re-broadcast', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-fleet-pending-then-final-'));
+    const pinned: Uint8Array[] = [];
+    const broadcast = vi.fn(async () => ({ taskId: 9999n, txHash: `0x${'ab'.repeat(32)}` as const }));
+    let finalized = false;
+    try {
+      const { write } = build({
+        stateDir,
+        broadcast,
+        pinned,
+        canonicalTaskCreated: async (expected) => (
+          finalized
+            ? { canonical: true as const, ...expected }
+            : { canonical: false as const, pending: 'awaiting-finality' as const, blockNumber: 900n, finalizedBlock: 880n }
+        ),
+      });
+
+      await expect(write.postTarget(PENDING_TARGET)).rejects.toMatchObject({
+        name: 'NativeRequesterAwaitingFinalityError',
+      });
+      // Nothing was written while pending: no association, so nothing to adopt or announce.
+      await expect(readdir(join(stateDir, 'associations'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+      finalized = true;
+      await write.reconcile();
+
+      // The association materialised from the DURABLE draft — the post is not re-broadcast.
+      const association = await readPostedAssociation(stateDir);
+      expect(association.taskId).toBe('9999');
+      expect(broadcast).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('STILL refuses loudly when the association is genuinely non-canonical', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'jinn-fleet-noncanonical-'));
+    const pinned: Uint8Array[] = [];
+    const broadcast = vi.fn(async () => ({ taskId: 9999n, txHash: `0x${'ab'.repeat(32)}` as const }));
+    try {
+      const { write } = build({
+        stateDir,
+        broadcast,
+        pinned,
+        // A refusal, not a wait: `null` keeps meaning exactly what it always meant.
+        canonicalTaskCreated: async () => null,
+      });
+
+      await expect(write.postTarget(PENDING_TARGET))
+        .rejects.toThrow(/refuses non-canonical or mismatched TaskCreated association/u);
+      // And it stays fatal to the pass, exactly as before — a non-canonical association is not
+      // something to keep quietly retrying.
+      await expect(write.reconcile())
+        .rejects.toThrow(/refuses non-canonical or mismatched TaskCreated association/u);
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }
