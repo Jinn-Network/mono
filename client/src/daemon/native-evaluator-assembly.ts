@@ -153,7 +153,10 @@ export function buildNativeEvaluatorAuthorityClaim(input: {
   const solverSources = input.sources.filter(({ role }) => role === 'solver');
   if (solverSources.length !== 1) throw new Error('native evaluator requires one solver authority source');
   return async (evaluation: NativeEvaluationRow) => {
-    const association = input.opportunities.association(evaluation.subjectTaskDigest);
+    // #2533: keyed by the posting, which the durable evaluation row already carries. Keying by
+    // `subjectTaskDigest` selected an arbitrary posting once a deterministic specification was
+    // posted more than once.
+    const association = input.opportunities.association(evaluation);
     if (association === undefined) throw new Error('signed requester authority metadata is unavailable');
     const submission = SubmissionRecordSchema.parse(parseJson(
       oneArtifact(input.state, evaluation, 'submission').bytes,
@@ -338,7 +341,7 @@ export async function assembleNativeEvaluatorComposition(
       }),
       dependencies: subjectAuthority,
     },
-    deadline: (evaluation) => input.opportunities.deadline(evaluation.subjectTaskDigest, evaluation.createdAt),
+    deadline: (evaluation) => input.opportunities.deadline(evaluation, evaluation.createdAt),
     verdictPorts: input.verdictPorts,
     chain: input.chainReads.chain,
     verification: {
