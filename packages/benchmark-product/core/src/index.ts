@@ -3,7 +3,7 @@
  *
  * The operations facade is the single trusted boundary (spec §5.1): all validation,
  * authority checks, lifecycle transitions, and audit-journal appends live behind it,
- * and every surface — the CLI here, the GUI in a later milestone — is a client of it.
+ * and every surface — the CLI and the shipped private GUI — is a client of it.
  * The domain vocabulary (draft schemas, lifecycle machine, typed errors) is exported
  * so clients can render and reason about product state without re-deriving it.
  */

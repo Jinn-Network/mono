@@ -1192,6 +1192,55 @@ no lifecycle, authority, record, publication, or deployment semantics reopened):
   malicious local workspace owner, confidential execution, custody independence,
   nor authorization to deploy.
 
+**Addendum — 2026-08-09, packet BP-51 (documentation, cold quickstart, and
+extraction-readiness evidence; no lifecycle, authority, record, publication,
+release, or deployment semantics reopened):**
+
+- **Product-local documentation set.** `packages/benchmark-product/README.md`
+  is the honest product entry point; `core/README.md` documents the complete
+  library and agent surface; `web/README.md` documents the private local human
+  surface; and `PUBLIC-BUNDLE.md` documents the frozen
+  `benchmark-product-public-bundle/1` distribution and verification contract.
+  These documents describe the shipped
+  implementation and link to this authority; they do not create an API, record,
+  bundle role, hosting service, release channel, or deployment authorization.
+- **Machine-checked documentation facts.** Product-local tests derive operation
+  names and CLI mappings from the generated parity artifact, error codes from the
+  public typed-error authority, gated operations from the authority policy, bundle
+  checks and roles from the public-bundle authorities, and commands from package
+  manifests. Documentation that omits, invents, or renames one of those facts fails
+  rather than becoming a second registry.
+- **Cold public quickstart contract.** A package command invokes a user-facing
+  script against the built `benchmark-product` CLI only. It creates an exclusively
+  owned, uniquely named temporary root, requires Node 22, uses no ambient network
+  or credential, and drives the bundled sample through two arms, quote, lock, the
+  default real local venue, terminal collection, results, Report, local immutable
+  publication, and portable verification. It copies the digest-addressed bundle
+  outside the source workspace, removes that exact owner-marked source root, and
+  verifies the copy with the shipped standalone CLI, requiring all six named checks.
+  Cleanup is bounded to exact owner-marked paths and fail-closed; the script cannot
+  accept or derive a broad caller-selected deletion target. The in-memory kit backend
+  remains unit-test-only and is never accepted as this production proof.
+- **Agent-interface behavior documented, not changed.** All 27 generated operation
+  rows remain the capability authority. The standalone bundle verifier remains an
+  explicit path-oriented CLI exclusion from GUI parity. The five gated operations,
+  eleven typed errors, exit classes, JSON envelope, diagnostic-stream behavior,
+  requested-versus-terminal cancellation, resume, and collect/finalizer contention
+  are described from their existing implementation; BP-51 adds no alternate command
+  or state transition.
+- **Extraction gate dry-run.** The dated extraction-readiness note evaluates all
+  eight items of platform architecture §6 against the current tree. Its result is
+  deliberately **not extraction-ready**: stable published platform dependencies,
+  component-only clean-clone CI, deploy configuration, departing-tree CI/conformance,
+  an independent release path, and migrated review protection remain unsatisfied;
+  the tier-1–3 reference prohibition and no-vendoring/public-boundary discipline pass.
+  This is evidence only, never authorization. Any future extraction still requires a
+  dedicated decision record even if every gate later turns green.
+- **Deployment and publication truth.** Deployment status remains `none` and package
+  publication remains disabled. `publish` continues to mean local immutable emission
+  only. Documentation supplies no hosted URL, remote write, npm release, confidentiality
+  promise, or protection from the local process owner.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

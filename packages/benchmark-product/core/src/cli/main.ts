@@ -1,11 +1,12 @@
 /**
  * The CLI's dispatch table (spec §5.2) — the complete agent surface through
- * BP-22. Twenty-six operational verbs over the operations facade (`init`,
+ * BP-51. Twenty-seven parity operations over the operations facade (`init`,
  * `draft create`, `draft update`, `draft show`, `draft list`, `inspect`,
  * `sample init`, `import swebench`, `arm add`, `arm update`, `arm remove`,
  * `arm list`, `authority grant`, `authority revoke`, `authority show`,
  * `quote`, `lock`, `launch`, `resume`, `status`, `collect`, `results`,
- * `cancel`, `report`, `verify`), plus `help`. Every verb takes `--json` for a
+ * `cancel`, `report`, `verify`, `publish`), plus the path-oriented standalone
+ * `bundle verify` exclusion and `help`. Every verb takes `--json` for a
  * machine-readable envelope; every failure is a typed error envelope with a
  * distinct exit code (§4.3). `runCli` never throws and never touches
  * `process` — `bin.ts` is the only file in this package that does.
@@ -23,8 +24,9 @@
  * `bin.ts` wires `progress` to stderr, so even in human mode stdout carries
  * only the final rendered result.
  *
- * `CLI_VERB_NAMES` (BP-13) is the parity anchor `./parity.test.ts` checks
- * against the operations facade's own exports — see that test's header.
+ * `CLI_VERB_NAMES` is the dispatch inventory. The generated parity artifact
+ * checks the 27 workspace operations against the facade and records `bundle
+ * verify` separately because it needs neither workspace nor principal.
  */
 
 import { PRODUCT_BRANDING } from "../branding.js";
