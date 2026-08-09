@@ -24,6 +24,11 @@ const issueDraftsPath = resolve(
   repoRoot,
   "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md",
 );
+const finalVerificationPath = resolve(
+  repoRoot,
+  "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md",
+);
+const productWorkflowPath = resolve(repoRoot, ".github/workflows/benchmark-product-ci.yml");
 
 const requiredDocs = [
   productReadmePath,
@@ -33,6 +38,7 @@ const requiredDocs = [
   securityPath,
   extractionPath,
   issueDraftsPath,
+  finalVerificationPath,
 ] as const;
 
 function read(path: string): string {
@@ -125,5 +131,66 @@ describe("product documentation consistency", () => {
     expect(webReadme).toMatch(/server-only.*public.*benchmark-product-core/is);
     expect(webReadme).toMatch(/private.*local.*deployment status.*none/is);
     expect(webReadme).toMatch(/typed.*redact|redact.*typed/is);
+  });
+
+  it("keeps every extraction gate and no-move boundary machine-visible", () => {
+    const extraction = read(extractionPath);
+    expect(extraction).toContain("**Overall verdict** | **NOT EXTRACTION-READY**");
+    for (const gate of [
+      "## 1. Published platform dependencies — BLOCKED",
+      "## 2. Component-only clean-clone CI — BLOCKED",
+      "## 3. Deploy artifacts and platform configuration — NOT GREEN",
+      "## 4. No tier-1–3 product references — PASS",
+      "## 5. Departing-tree CI and conformance independence — BLOCKED",
+      "## 6. Release, tag, and trusted publisher — BLOCKED / N/A",
+      "## 7. Review protection migration — BLOCKED",
+      "## 8. No vendored platform code — PASS with disclosure",
+    ]) {
+      expect(extraction, gate).toContain(gate);
+    }
+    expect(extraction).toMatch(/does not authorize a move.*repository creation.*package release.*deployment.*remote action/is);
+    expect(extraction).toMatch(/even if all eight.*PASS.*future decision record/is);
+  });
+
+  it("keeps every M2–M5 issue draft complete and all plan authorities inside the product CI trigger", () => {
+    const drafts = read(issueDraftsPath);
+    for (const packet of [
+      "BP-20", "BP-21", "BP-22",
+      "BP-30", "BP-31", "BP-32", "BP-33",
+      "BP-40", "BP-41",
+      "BP-50", "BP-51", "BP-52",
+    ]) {
+      expect(drafts.match(new RegExp(`^## Draft \\d+ — ${packet} \\u00b7 `, "mu")), packet).not.toBeNull();
+    }
+    const workflow = read(productWorkflowPath);
+    for (const path of [
+      "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md",
+      "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md",
+      "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md",
+    ]) {
+      expect(workflow.split(`- "${path}"`).length - 1, path).toBe(2);
+    }
+  });
+
+  it("keeps the final verification record complete and explicitly bounded", () => {
+    const verification = read(finalVerificationPath);
+    for (const heading of [
+      "## 1. Verdict and authority boundary",
+      "## 2. Baseline, resumption, and final local state",
+      "## 3. Product outcome by perspective",
+      "## 4. Milestone and acceptance evidence",
+      "## 5. Packet and review record",
+      "## 6. Architecture, dependency, and interface parity",
+      "## 7. Verification evidence",
+      "## 8. Adversarial, accessibility, and security evidence",
+      "## 9. Extraction, drift, hygiene, and merge-readiness caveats",
+    ]) {
+      expect(verification, heading).toContain(heading);
+    }
+    expect(verification).toContain("BP-00–BP-51 integrated; BP-52 awaiting independent review and integration");
+    expect(verification).toContain("Remote effects: none");
+    expect(verification).toContain("NOT EXTRACTION-READY");
+    expect(verification).toContain("27 generated operations");
+    expect(verification).toContain("six portable checks");
   });
 });

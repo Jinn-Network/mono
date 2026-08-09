@@ -11,7 +11,6 @@ export default defineConfig({
   testDir: "./browser",
   testIgnore: ["**/global-*.ts", "**/runtime-config.ts"],
   globalSetup: "./browser/global-setup.ts",
-  globalTeardown: "./browser/global-teardown.ts",
   fullyParallel: false,
   workers: 1,
   retries: 0,

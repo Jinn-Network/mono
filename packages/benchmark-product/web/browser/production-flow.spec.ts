@@ -7,7 +7,8 @@ import { expect, test, type Locator, type Page, type Response } from "@playwrigh
 import { PINNED_PERMISSIONS_POLICY as PERMISSIONS_POLICY } from "./chromium-policy";
 import { readRuntimeConfig } from "./runtime-config";
 
-const DRAFT_ID = "bp50-browser";
+const COMPLETE_DRAFT_ID = "bp50-browser";
+const CANCELLED_DRAFT_ID = "bp52-browser-cancelled";
 const runtime = readRuntimeConfig();
 const WORKSPACE = runtime.workspaceDir;
 const ORIGIN = "http://127.0.0.1:3017";
@@ -177,7 +178,7 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await expect(page.getByRole("heading", { level: 1, name: "New draft" })).toBeVisible();
 
   await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Hostile <script>alert(1)</script> benchmark");
-  await typeByKeyboard(page, page.getByLabel("Draft ID"), DRAFT_ID);
+  await typeByKeyboard(page, page.getByLabel("Draft ID"), COMPLETE_DRAFT_ID);
   await typeByKeyboard(page, page.getByLabel("Description"), "</script><img src=x onerror=alert(1)> valid operator text");
   await submitAction(page, "Create draft", /bp50-browser/u);
   await activateByKeyboard(page, page.getByRole("link", { name: "Workspace" }));
@@ -239,6 +240,51 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
   await auditState(page, "published results");
 
+  // BP-52 cross-packet proof: the optimized browser must drive the real venue's
+  // requested -> draining -> cancelled boundary and publish that terminal result.
+  await page.goto("/workspace/new");
+  await typeByKeyboard(page, page.getByLabel("Name", { exact: true }), "Cancelled browser benchmark");
+  await typeByKeyboard(page, page.getByLabel("Draft ID"), CANCELLED_DRAFT_ID);
+  await typeByKeyboard(page, page.getByLabel("Description"), "Real venue cancellation acceptance");
+  await submitAction(page, "Create draft", /bp52-browser-cancelled/u);
+  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}`);
+  await submitAction(page, "Attach sample", /sample/u);
+  const cancelledArm = actionForm(page, "Add arm");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "baseline");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "prediction-v1-baseline", version: "1.0.0" } }));
+  await submitAction(page, "Add arm", /baseline/u);
+  await typeByKeyboard(page, cancelledArm.getByLabel("Arm ID"), "sample");
+  await typeByKeyboard(page, cancelledArm.getByLabel("Pinning JSON"), JSON.stringify({ harness: { id: "sample-uniform", version: "0.1.0" } }));
+  await submitAction(page, "Add arm", /sample/u);
+  await submitAction(page, "Quote", /solveCells/u);
+  await submitAction(page, "Lock run", /locked/u);
+  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}/run`);
+  await submitAction(page, "Launch", /scheduled/u);
+  const cancelledLifecycle = page.getByRole("heading", { level: 2, name: "Lifecycle" }).locator("../..");
+  await expect(cancelledLifecycle).toContainText("running", { timeout: 30_000 });
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
+  await expect(page.locator("table tbody tr td:nth-child(4)").filter({ hasText: /^1$/u }).first()).toBeVisible({ timeout: 30_000 });
+  await submitAction(page, "Request / finalize cancel", /requested|cancelled/u);
+  await expect(page.getByText("Cancellation requested; driver is draining.")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Driver generation" }).locator("../..")).not.toContainText("active", { timeout: 60_000 });
+  await submitAction(page, "Request / finalize cancel", /cancelled/u);
+  await expect(cancelledLifecycle).toContainText("closed");
+  await expect(page.getByText("Cancellation finalized; run is cancelled.")).toBeVisible();
+  await auditState(page, "cancelled run monitor");
+  await page.goto(`/workspace/${CANCELLED_DRAFT_ID}/results`);
+  await expect(page.getByRole("heading", { level: 3, name: "Run outcome" }).locator("../..")).toContainText("cancelled");
+  await expect(page.getByRole("heading", { level: 3, name: "Expected" }).locator("../..")).toContainText("6");
+  const cancelledCells = page.locator('[aria-label="Scrollable sealed cells table"]');
+  await expect(cancelledCells.getByRole("row")).toHaveCount(7);
+  await expect(cancelledCells.getByRole("row", { name: /baseline/u })).toHaveCount(3);
+  await expect(cancelledCells.getByRole("row", { name: /sample/u })).toHaveCount(3);
+  await submitAction(page, "Seal report", /Report and claim package sealed/u);
+  await submitAction(page, "Verify records", /Verification passed/u);
+  await submitAction(page, "Publish public bundle", /fixed draft-owned public bundle/u);
+  await expect(page.getByRole("heading", { level: 2, name: "Published public bundle" })).toBeVisible();
+  await expect(page.getByText("claim-consistency", { exact: true }).first()).toBeVisible();
+  await auditState(page, "cancelled published results");
+
   await page.emulateMedia({ reducedMotion: "reduce" });
   const reducedDuration = await page.getByRole("button", { name: "Verify published bundle" }).evaluate((node) => getComputedStyle(node).transitionDuration);
   expect(reducedDuration).toMatch(/0\.00001s|1e-05s|0\.01ms/u);
@@ -298,30 +344,50 @@ test("keyboard-only real lifecycle is accessible, private, responsive, and secur
   expect(staticFiles.some((path) => path.endsWith(".js"))).toBe(true);
   for (const path of staticFiles) expectBuffersAbsent(readFileSync(path), secrets, `static chunk ${path}`);
 
-  const bundleRoot = resolve(WORKSPACE, "artifacts", DRAFT_ID, "public-bundles");
+  const bundleRoot = resolve(WORKSPACE, "artifacts", COMPLETE_DRAFT_ID, "public-bundles");
   const identities = readdirSync(bundleRoot);
   expect(identities).toHaveLength(1);
   expect(identities[0]).toMatch(/^[a-f0-9]{64}$/u);
   const sourceBundle = join(bundleRoot, identities[0]!);
   cpSync(sourceBundle, runtime.copiedBundleDir, { recursive: true, errorOnExist: true, force: false });
-  const copiedFiles = walkFiles(runtime.copiedBundleDir);
-  expect(copiedFiles.some((path) => path.endsWith("bundle.json"))).toBe(true);
-  for (const path of copiedFiles) {
-    const stat = lstatSync(path);
-    expect(stat.isSymbolicLink(), path).toBe(false);
-    expect(stat.nlink, path).toBe(1);
-    expectBuffersAbsent(readFileSync(path), secrets, `copied bundle ${path}`);
+  const cancelledBundleRoot = resolve(WORKSPACE, "artifacts", CANCELLED_DRAFT_ID, "public-bundles");
+  const cancelledIdentities = readdirSync(cancelledBundleRoot);
+  expect(cancelledIdentities).toHaveLength(1);
+  expect(cancelledIdentities[0]).toMatch(/^[a-f0-9]{64}$/u);
+  const cancelledCopy = join(runtime.runRoot, "copied-cancelled-public-bundle");
+  cpSync(join(cancelledBundleRoot, cancelledIdentities[0]!), cancelledCopy, { recursive: true, errorOnExist: true, force: false });
+  expect(existsSync(join(cancelledCopy, "verification", "cancel-requested.json"))).toBe(true);
+  for (const [label, copy] of [["complete", runtime.copiedBundleDir], ["cancelled", cancelledCopy]] as const) {
+    const copiedFiles = walkFiles(copy);
+    expect(copiedFiles.some((path) => path.endsWith("bundle.json"))).toBe(true);
+    for (const path of copiedFiles) {
+      const stat = lstatSync(path);
+      expect(stat.isSymbolicLink(), path).toBe(false);
+      expect(stat.nlink, path).toBe(1);
+      expectBuffersAbsent(readFileSync(path), secrets, `${label} copied bundle ${path}`);
+    }
   }
 
   rmSync(WORKSPACE, { recursive: true, force: false });
   expect(existsSync(WORKSPACE)).toBe(false);
   const cliPath = resolve(process.cwd(), "../core/dist/cli/bin.js");
-  const verification = spawnSync(
-    process.execPath,
-    [cliPath, "bundle", "verify", "--bundle", runtime.copiedBundleDir, "--json"],
-    { cwd: runtime.runRoot, encoding: "utf8", env: { PATH: process.env.PATH ?? "" }, timeout: 30_000, killSignal: "SIGKILL" },
-  );
-  expect(verification.status, verification.stderr).toBe(0);
-  expect(JSON.parse(verification.stdout)).toMatchObject({ ok: true, result: { identity: identities[0] } });
-  expectStringsAbsent(`${verification.stdout}\n${verification.stderr}`, secrets, "standalone verifier receipt");
+  for (const [label, copy, identity] of [
+    ["complete", runtime.copiedBundleDir, identities[0]],
+    ["cancelled", cancelledCopy, cancelledIdentities[0]],
+  ] as const) {
+    const verification = spawnSync(
+      process.execPath,
+      [cliPath, "bundle", "verify", "--bundle", copy, "--json"],
+      { cwd: runtime.runRoot, encoding: "utf8", env: { PATH: process.env.PATH ?? "" }, timeout: 30_000, killSignal: "SIGKILL" },
+    );
+    expect(verification.status, verification.stderr).toBe(0);
+    expect(JSON.parse(verification.stdout)).toMatchObject({
+      ok: true,
+      result: {
+        identity,
+        checks: ["manifest", "evidence-closure", "trust", "matrix-rederivation", "report-verification", "claim-consistency"],
+      },
+    });
+    expectStringsAbsent(`${verification.stdout}\n${verification.stderr}`, secrets, `${label} standalone verifier receipt`);
+  }
 });
