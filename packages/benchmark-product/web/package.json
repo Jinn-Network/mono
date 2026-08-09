@@ -19,7 +19,9 @@
     "build": "next build --webpack",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test --config=playwright.config.ts",
+    "test:browser:production": "BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build && BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser"
   },
   "dependencies": {
     "@jinn-network/benchmark-product-core": "0.1.0",
@@ -60,13 +62,16 @@
     "@jinn-network/trust-core": "portal:../../trust/core"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
     "@eslint/eslintrc": "^3.3.1",
+    "@playwright/test": "1.59.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.0",
     "eslint-config-next": "16.3.0",
+    "playwright-core": "1.59.1",
     "postcss": "^8.5.24",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",

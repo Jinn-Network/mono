@@ -130,7 +130,9 @@ jobs:
           yarn lint
           yarn typecheck
           yarn test
-          yarn build
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build
+          yarn playwright install --with-deps chromium
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser
 
   verify:
     needs: [architecture, product, web]

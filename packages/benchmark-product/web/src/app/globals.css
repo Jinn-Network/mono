@@ -18,7 +18,7 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --destructive: oklch(0.54 0.225 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -116,4 +116,48 @@
   body {
     @apply bg-background text-foreground;
   }
+  :focus-visible {
+    outline: 3px solid var(--foreground);
+    outline-offset: 3px;
+  }
+  button:disabled {
+    background-color: var(--secondary) !important;
+    border-color: var(--input) !important;
+    color: var(--secondary-foreground) !important;
+    opacity: 1 !important;
+  }
+}
+
+.skip-link {
+  position: fixed;
+  inset-block-start: 0.5rem;
+  inset-inline-start: 0.5rem;
+  z-index: 50;
+  transform: translateY(-200%);
+  border-radius: var(--radius);
+  background: var(--foreground);
+  color: var(--background);
+  padding: 0.75rem 1rem;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* The first keyboard action can move focus here through the skip link. The id selector
+ * deliberately outranks any route-local utility so every main landmark keeps a visible target. */
+main#main-content:focus-visible {
+  outline: 3px solid var(--foreground);
+  outline-offset: -3px;
 }

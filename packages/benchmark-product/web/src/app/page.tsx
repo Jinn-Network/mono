@@ -11,7 +11,7 @@ import Link from "next/link";
 
 export default function Page() {
   return (
-    <main className="mx-auto flex max-w-4xl flex-col gap-10 px-6 py-16">
+    <main id="main-content" tabIndex={-1} className="mx-auto flex max-w-4xl flex-col gap-10 px-6 py-16 outline-none">
       <div className="flex flex-col gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">
           {PRODUCT_BRANDING.displayName}

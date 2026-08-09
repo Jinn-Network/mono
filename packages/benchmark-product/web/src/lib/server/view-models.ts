@@ -8,19 +8,23 @@ import {
   listDrafts,
   runStatus,
   runResults,
+  type OperationResult,
   type RunStatusResult,
 } from "@jinn-network/benchmark-product-core";
 import { projectProductErrorForGui } from "./gui-error";
 import {
   createProductOperationContext,
-  ProductContextConfigurationError,
   readProductServerConfiguration,
 } from "./product-context";
 
-function safeFailureDetail(cause: unknown): string {
-  return cause instanceof ProductContextConfigurationError
-    ? cause.message
-    : "The server could not load product state. Retry after checking the server logs.";
+function safeFailureDetail(): string {
+  return "The server could not load product state. Correct the local server setup or retry after checking the server logs.";
+}
+
+function projectOutcomeForGui<T>(outcome: OperationResult<T>): OperationResult<T> {
+  return outcome.ok
+    ? outcome
+    : { ...outcome, error: projectProductErrorForGui(outcome.error) };
 }
 
 /** Durable driver diagnostics can originate in launchers, subprocesses, and filesystem code.
@@ -46,14 +50,16 @@ export function loadWorkspaceView() {
   try {
     const configuration = readProductServerConfiguration();
     const context = createProductOperationContext(configuration);
+    const drafts = listDrafts(context);
+    const authority = authorityShow(context);
     return {
       ok: true as const,
-      configuration,
-      drafts: listDrafts(context),
-      authority: authorityShow(context),
+      configuration: { principal: configuration.principal },
+      drafts: drafts.ok ? drafts : { ...drafts, error: projectProductErrorForGui(drafts.error) },
+      authority: authority.ok ? authority : { ...authority, error: projectProductErrorForGui(authority.error) },
     };
-  } catch (cause) {
-    return { ok: false as const, detail: safeFailureDetail(cause) };
+  } catch {
+    return { ok: false as const, detail: safeFailureDetail() };
   }
 }
 
@@ -62,12 +68,12 @@ export function loadDraftView(draftId: string) {
     const context = createProductOperationContext();
     return {
       ok: true as const,
-      draft: getDraft(context, { draftId }),
-      inspection: inspectDraft(context, { draftId }),
-      arms: armList(context, { draftId }),
+      draft: projectOutcomeForGui(getDraft(context, { draftId })),
+      inspection: projectOutcomeForGui(inspectDraft(context, { draftId })),
+      arms: projectOutcomeForGui(armList(context, { draftId })),
     };
-  } catch (cause) {
-    return { ok: false as const, detail: safeFailureDetail(cause) };
+  } catch {
+    return { ok: false as const, detail: safeFailureDetail() };
   }
 }
 
@@ -77,13 +83,13 @@ export function loadRunView(draftId: string) {
     const status = runStatus(context, { draftId });
     return {
       ok: true as const,
-      draft: getDraft(context, { draftId }),
+      draft: projectOutcomeForGui(getDraft(context, { draftId })),
       status: status.ok
         ? { ...status, result: projectRunStatusForGui(status.result) }
         : { ...status, error: projectProductErrorForGui(status.error) },
     };
-  } catch (cause) {
-    return { ok: false as const, detail: safeFailureDetail(cause) };
+  } catch {
+    return { ok: false as const, detail: safeFailureDetail() };
   }
 }
 
@@ -93,12 +99,12 @@ export function loadResultsView(draftId: string) {
     const results = runResults(context, { draftId });
     return {
       ok: true as const,
-      draft: getDraft(context, { draftId }),
+      draft: projectOutcomeForGui(getDraft(context, { draftId })),
       results: results.ok
         ? results
         : { ...results, error: projectProductErrorForGui(results.error) },
     };
-  } catch (cause) {
-    return { ok: false as const, detail: safeFailureDetail(cause) };
+  } catch {
+    return { ok: false as const, detail: safeFailureDetail() };
   }
 }

@@ -14,7 +14,7 @@ import {
 import { GUI_SERVER_ACTIONS } from "@/lib/server/gui-action-registry";
 import { executeOperation } from "@/lib/server/action-support";
 import { executeBackgroundOperation } from "@/lib/server/background-operation";
-import { loadResultsView } from "@/lib/server/view-models";
+import { loadDraftView, loadResultsView, loadWorkspaceView } from "@/lib/server/view-models";
 
 const revalidatePathMock = vi.hoisted(() => vi.fn());
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
@@ -118,6 +118,10 @@ describe.sequential("server action layer against a real workspace", () => {
   test("fails closed when workspace or principal configuration is absent", async () => {
     const outcome = await invoke("draft.list");
     expect(outcome).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
+    const view = loadWorkspaceView();
+    expect(view).toMatchObject({ ok: false });
+    expect(JSON.stringify(view)).not.toContain(WORKSPACE_ENV);
+    expect(JSON.stringify(view)).not.toContain(PRINCIPAL_ENV);
   });
 
   test("configuration exposes only workspace and principal, never ambient secrets", () => {
@@ -130,6 +134,43 @@ describe.sequential("server action layer against a real workspace", () => {
     });
     expect(configuration).toEqual({ workspaceDir: workspace, principal: "sponsor-1" });
     expect(JSON.stringify(configuration)).not.toContain("PRIVATE KEY");
+  });
+
+  test("the browser workspace view never exposes its absolute server path or ambient secret sentinel", () => {
+    const sentinel = "BP50_PRIVATE_KEY_SENTINEL_7c8ea9";
+    const workspace = mkdtempSync(join(tmpdir(), `bp50-${sentinel}-`));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    process.env.BP50_PRIVATE_KEY = sentinel;
+    try {
+      const view = loadWorkspaceView();
+      expect(view.ok).toBe(true);
+      expect(JSON.stringify(view)).not.toContain(workspace);
+      expect(JSON.stringify(view)).not.toContain(sentinel);
+      expect(view).toMatchObject({ ok: true, configuration: { principal: "sponsor-1" } });
+    } finally {
+      delete process.env.BP50_PRIVATE_KEY;
+    }
+  });
+
+  test("browser view loaders redact hostile typed-error detail and issue paths", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "bp50-view-redaction-"));
+    workspaces.push(workspace);
+    process.env[WORKSPACE_ENV] = workspace;
+    process.env[PRINCIPAL_ENV] = "sponsor-1";
+    expect(await invoke("workspace.init")).toMatchObject({ status: "success" });
+
+    const sentinel = "BP50_PRIVATE_DRAFT_SENTINEL";
+    const view = loadDraftView(sentinel);
+    expect(view).toMatchObject({
+      ok: true,
+      draft: { ok: false, error: { code: "not-found" } },
+      inspection: { ok: false, error: { code: "not-found" } },
+      arms: { ok: false, error: { code: "not-found" } },
+    });
+    expect(JSON.stringify(view)).not.toContain(sentinel);
+    expect(JSON.stringify(view)).not.toContain(workspace);
   });
 
   test("unexpected pre-operation errors do not expose internal details", async () => {
@@ -158,7 +199,7 @@ describe.sequential("server action layer against a real workspace", () => {
         error: { code, detail: sentinel },
       }));
       expect(outcome).toMatchObject({ status: "error", error: { code } });
-      expect(JSON.stringify(outcome)).toContain("server logs");
+      expect(JSON.stringify(outcome)).toContain("detail");
       expect(JSON.stringify(outcome)).not.toContain(sentinel);
       expect(JSON.stringify(outcome)).not.toContain("VERY_SECRET");
     },
@@ -255,7 +296,8 @@ describe.sequential("server action layer against a real workspace", () => {
 
     const denied = await invoke("run.launch", { draftId: "gated-delay" });
     expect(denied).toMatchObject({ status: "error", error: { code: "invalid-invocation" } });
-    expect(JSON.stringify(denied)).toContain(ENABLE_TEST_CONTROLS_ENV);
+    expect(JSON.stringify(denied)).not.toContain(ENABLE_TEST_CONTROLS_ENV);
+    expect(JSON.stringify(denied)).not.toContain(TEST_SOLVE_DELAY_MS_ENV);
   }, 120_000);
 
   test("test-only solve delay accepts the core maximum and refuses one millisecond beyond it", () => {

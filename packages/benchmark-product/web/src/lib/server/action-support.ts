@@ -47,7 +47,7 @@ export async function executeOperation<T>(
     return { status: "success", result: outcome.result };
   } catch (cause) {
     const detail = cause instanceof ProductContextConfigurationError
-      ? cause.message
+      ? "The submitted form or server configuration was not accepted. Correct the named setup and retry."
       : "The server action failed before the product operation could return a typed result.";
     return {
       status: "error",

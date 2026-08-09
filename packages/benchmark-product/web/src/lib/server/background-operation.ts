@@ -4,7 +4,7 @@ import type { OperationContext, OperationResult } from "@jinn-network/benchmark-
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import type { GuiActionState } from "@/lib/action-state";
-import { createProductOperationContext, ProductContextConfigurationError } from "./product-context";
+import { createProductOperationContext } from "./product-context";
 import { projectProductErrorForGui } from "./gui-error";
 
 const STILL_RUNNING = Symbol("still-running");
@@ -40,10 +40,13 @@ export async function executeBackgroundOperation<T>(
     });
     after(completion);
     return { status: "scheduled", result: { phase: "scheduled", operation: operationName } };
-  } catch (cause) {
-    const detail = cause instanceof ProductContextConfigurationError
-      ? cause.message
-      : "The server action failed before the product operation could return a typed result.";
-    return { status: "error", error: { code: "invalid-invocation", detail } };
+  } catch {
+    return {
+      status: "error",
+      error: {
+        code: "invalid-invocation",
+        detail: "The submitted form or server configuration was not accepted. Correct the local server setup and retry.",
+      },
+    };
   }
 }

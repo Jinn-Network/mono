@@ -113,7 +113,8 @@ rather than repeated per component:
 Covers the design spec §4.6 Workspace row and the Audit journal row (the
 journal renders inside the Workspace surface, not as a separate screen).
 
-- **State** — workspace path; storage version; draft count; run count; and,
+- **State** — a server-configured workspace indicator (the absolute path never
+  crosses the browser boundary); storage version; draft count; run count; and,
   for the journal specifically (§4.6 Audit-journal row): entry count, last
   entry.
 - **State messages** — `record-integrity` warning when stored sealed bytes
@@ -390,3 +391,42 @@ Per `CLAUDE.md` §Frontends: a UI change that alters this domain model or
 the action surface lands **with** a spec update to this document, in the
 same PR. A PR that adds, removes, or regates a GUI action without touching
 §3 or §4 is incomplete by definition.
+
+## 7. BP-50 accessibility and private-response contract
+
+The optimized application is exercised through a product-owned Playwright
+gate against `next start`, at desktop and 390-by-844 viewports. `/`,
+`/workspace/new`, both workspace states, invalid action results, all draft/run
+states, and sealed through published results receive an axe audit at both sizes
+with zero violations of any impact; there is no rule filter or waiver. One
+keyboard-only path covers setup, sample intake, two arms, quote, lock, the
+real local venue, results, report, verification, and local publication.
+
+Every page provides one primary heading, logical section headings, a main
+landmark targeted by the first-focusable skip link, named grouped navigation,
+programmatic labels, visible focus, and word-plus-color status. Action results
+are polite atomic live regions; success, scheduled, and error outcomes receive
+focus after completion with a computed visible outline or ring. Activating the
+skip link likewise focuses `main#main-content` with a computed three-pixel
+foreground outline on every route, even where a route retains a local outline
+utility. Lifecycle-illegal controls are disabled. Reduced-motion,
+200% zoom, and 390 px containment are acceptance states rather than visual nits.
+
+Every private route and Server Action response is non-cacheable and carries the
+header policy in the product security note (`../SECURITY.md`). The CSP is
+same-origin and denies active embedded content and off-origin requests while
+retaining only the inline bootstrap/style allowances required by the shipped
+Next App Router and Server Action runtime. The browser never receives the
+absolute workspace path, arbitrary runtime diagnostics, private credentials,
+or an arbitrary filesystem-path control. The gate uses an exact owner-marked UUID
+root per invocation, scans build/runtime/credential sentinels and actual generated
+private-key bytes, then copies and standalone-verifies the publication after
+deleting its source workspace. Deployment status remains none.
+
+The finite Permissions Policy is pinned to Playwright 1.59.1's Chromium
+147.0.7727.15 surface. Its 81 exact denied features live in
+`permissions-policy.mjs` and are reproduced in the product security note. The
+optimized gate requires the runtime-recognized list to match byte-for-byte in
+sorted order, requires `document.featurePolicy.allowedFeatures()` to be empty,
+and rejects every header-parser warning. Browser capability drift is therefore a
+reviewed policy update, never an implicit permission.

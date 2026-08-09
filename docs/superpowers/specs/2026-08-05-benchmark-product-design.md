@@ -1117,6 +1117,81 @@ reopened):**
   requests. Complete and cancelled real-publication paths complement deterministic
   partial/conflicted/asymmetric and hostile-content fixtures.
 
+**Addendum — 2026-08-09, packet BP-50 (accessibility and security hardening;
+no lifecycle, authority, record, publication, or deployment semantics reopened):**
+
+- **Production browser gate.** The private web package owns a repeatable Chromium
+  gate that builds the optimized application, serves it with `next start`, and
+  exercises the human surface at desktop and 390-by-844 viewports. It is wired
+  into the product's own CI after the complete portal dependency graph and core
+  distribution are restored. Development-server behavior and a mocked product
+  state are not acceptance evidence for this gate. Each invocation owns a UUID
+  temporary root with an exact ownership marker; stale crashed roots and parallel
+  invocations cannot collide or authorize cleanup of one another.
+- **Accessible operation contract.** The production gate audits every route and
+  each material lifecycle result with axe and accepts **zero violations across all
+  rules and impact levels**; BP-50 has no silent filter and no waiver ledger. The
+  audited inventory is `/`, `/workspace/new`, uninitialized and initialized
+  `/workspace`, invalid action results, setup/quoted/locked drafts,
+  locked/active/closed run monitors, and sealed/reported/verified/published
+  results, at desktop and 390 px. A
+  keyboard-only flow performs workspace setup, sample intake, two-arm configuration,
+  quote, lock, real-local-venue launch/collection, results, report, verification,
+  and local publication. Pages keep one primary heading and logical heading order,
+  named landmarks and controls, an early skip link, persistent visible focus, and
+  status/error live regions. A completed or failed action moves focus to its
+  actionable result without trapping it. Skip activation moves focus to every
+  route's main landmark with a computed visible indicator in optimized Chromium.
+  Lifecycle-illegal controls are truly
+  disabled; status never relies on color alone; 200% zoom, reduced motion, and the
+  390 px viewport retain content without document-width overflow.
+- **Private-response policy.** Every application and Server Action response is
+  private local-process material and carries `Cache-Control: no-store` plus
+  `X-Content-Type-Options: nosniff`, frame denial (`frame-ancestors 'none'` and
+  `X-Frame-Options: DENY`), `Referrer-Policy: no-referrer`, a deny-by-default
+  `Permissions-Policy` with an empty allowlist and the finite denied-feature list
+  documented in the product security note, and a Content Security Policy limited
+  to this origin.
+  Playwright 1.59.1 pins Chromium 147.0.7727.15 and its 81 recognized feature
+  names. The production gate asserts exact recognized-list equality, zero
+  `allowedFeatures()`, and zero header-parser warnings; browser capability drift
+  therefore fails until the finite policy and version pin receive review.
+  The CSP permits only the inline bootstrap/style behavior required by the shipped
+  Next.js Server Action runtime; it permits no external resource origin, object,
+  embed, frame, base retargeting (`base-uri 'none'`), or off-origin form/connect target. Header
+  acceptance is read from the real `next start` responses, not configuration text.
+- **Browser/server boundary.** Web source retains exactly one production Jinn edge:
+  the server-only public core entry. Route handlers, client imports of core, deep or
+  sibling source imports, browser-supplied filesystem paths, and browser-owned
+  benchmark semantics remain prohibited. Browser receipts contain only the
+  deliberately projected typed facts already specified by BP-31 through BP-40;
+  hostile but schema-valid record strings are text, never markup, paths, URLs, or
+  executable content.
+- **Confidentiality regression boundary.** A build-time sentinel is present before
+  optimization and distinct per-run runtime/credential sentinels are present before
+  `next start`. Those values, the absolute workspace/runtime path, and every actual
+  generated report/verdict private-key byte sequence are swept
+  across rendered HTML, React Flight and Server Action responses, browser console
+  at every log level and every requested URL (including same-origin), optimized
+  static chunks, the public manifest, and every copied bundle byte. All must be
+  absent. The bundle is copied outside the source workspace, the workspace is
+  deleted, and the shipped standalone CLI verifier must accept the copy. Expected public record content is not
+  reclassified as secret: publication remains disclosure of BP-40's fixed closure,
+  not a general PII scrubber.
+- **Adversarial integrity battery.** BP-40/BP-41's path normalization, symbolic-link,
+  hard-link, special-file, key substitution, typed graph closure, Report/claim/asset
+  tamper, and static no-script/object/embed/frame/remote tests remain required.
+  BP-50 adds deterministic hostile-string and browser-safe unexpected-error
+  regressions only where the existing battery has a gap; it does not add a second
+  verifier or sanitize authenticated public facts into different facts.
+- **Threat model and deployment truth.** A product-local security note inventories
+  protected assets, trust boundaries, local-process authority, filesystem and
+  concurrency/cancellation attack surfaces, the browser/server boundary, mitigations,
+  residuals, and non-goals. Deployment status remains **none**: BP-50 claims neither
+  hosted authentication nor a hosted threat boundary, TLS/HSTS, isolation from a
+  malicious local workspace owner, confidential execution, custody independence,
+  nor authorization to deploy.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

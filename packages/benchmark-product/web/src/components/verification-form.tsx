@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { IDLE_ACTION_STATE, type GuiActionState } from "@/lib/action-state";
 
@@ -26,10 +26,14 @@ function isVerificationResult(value: unknown): value is VerificationResult {
 export function VerificationForm({ action, draftId }: VerificationFormProps) {
   const [state, formAction, pending] = useActionState(action, IDLE_ACTION_STATE);
   const result = state.status === "success" && isVerificationResult(state.result) ? state.result : undefined;
+  const resultRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (state.status !== "idle") resultRef.current?.focus();
+  }, [state]);
   return <form action={formAction} className="flex min-w-0 flex-col gap-3">
     <input type="hidden" name="draftId" value={draftId} />
     <Button type="submit" disabled={pending} className="self-start">{pending ? "Verifying" : "Verify records"}</Button>
-    <div aria-live="polite" className="min-w-0">
+    <div ref={resultRef} tabIndex={-1} aria-live="polite" aria-atomic="true" className="min-w-0 rounded-md focus-visible:ring-[3px] focus-visible:ring-foreground focus-visible:ring-offset-2">
       {state.status === "error" ? <div role="alert" className="rounded-md border border-destructive p-3 [overflow-wrap:anywhere]">
         <p className="font-semibold">Verification failed: {state.error.code}</p>
         <p>{state.error.detail}</p>
