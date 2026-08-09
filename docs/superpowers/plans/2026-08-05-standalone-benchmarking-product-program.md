@@ -638,3 +638,61 @@ deployment, private keys, or a second implementation.
 is 36 commits ahead / 54 behind. No upstream watched `packages/benchmark-product`,
 product design, program-ledger, product CI, or product guard path changed. The
 proposed base refresh remains unapproved; M5 continues on the current lineage.
+
+| BP-50 | integrated | `c9f1e942d` | `51054aaf2` (worktree bench-bp50) | NEEDS CHANGES twice -> PASS (eight accessibility/security classes corrected) | `4eb02cff6` |
+
+BP-50 verification: Node 22.23.1; core typecheck and 65 files / 663 tests,
+build, 27-operation parity, and packed runtime smoke; web lint/typecheck, 13
+files / 64 tests, optimized seven-route build, and production Playwright 3/3;
+local-backend typecheck/build/pack and 15 files (116 passed, one platform skip);
+focused bundle/Report/claim/trust/asset adversarial battery 48/48; family package/
+source guards 13/13; packed public TypeScript consumer; generator 15/15;
+catalog/control/workflow 203/203; generated architecture and `git diff --check`.
+
+BP-50 product evidence: the private web application now has product-owned,
+production-build browser acceptance with a keyboard-only real local-venue journey
+from workspace initialization through a six-cell run, collection, semantic results,
+Report, verification, local publication, copied-bundle source deletion, and shipped
+standalone CLI re-verification. Every route and material lifecycle/error state is
+audited at desktop and 390px with zero axe violations and no waiver filter. Skip
+navigation, semantic headings/landmarks/labels, visible result and skip-target focus,
+named focusable scroll regions, disabled lifecycle affordances, reduced motion,
+200%-equivalent reflow, and mobile containment are regression-checked. A scheduled
+launch now performs bounded refreshes only until the existing durable run monitor
+takes over, fixing a real locked-page liveness defect without creating a second
+driver or lifecycle implementation.
+
+BP-50 security evidence: live HTML and Flight responses carry `no-store`,
+`base-uri 'none'` CSP, frame denial, nosniff, no-referrer, and an exact finite
+empty-allowlist Permissions Policy. The policy authority pins Playwright 1.59.1 /
+Chromium 147.0.7727.15 and all 81 sorted runtime-recognized features; production
+tests require exact feature equality, `allowedFeatures() == []`, exact response
+bytes, and zero page policy warnings so browser evolution fails for explicit
+review. GUI view/action/background projections retain typed recovery categories
+but redact absolute workspace paths, draft/configuration identifiers, runtime
+diagnostics, issue text, credentials, and unexpected exceptions. Build-time,
+runtime, workspace, and credential sentinels plus exact generated PEM private-key
+bytes are checked against every console level, every requested URL, every completed
+HTML/Flight body, rendered HTML, static chunks, and the copied bundle. Only request-
+failure-proven `ERR_ABORTED` speculative RSC responses are classified non-delivered.
+The copied bundle is moved outside the source workspace, the source is deleted,
+then the public CLI verifies all six checks. Per-run UUID browser workspaces use
+exclusive creation and exact regular single-link ownership markers; parallel,
+stale, partial-identity, tamper, inherited-identity, and exact-owner teardown cases
+are deterministic and fail closed. The product-local threat model records local-
+process authority, filesystem/concurrency/browser boundaries, non-goals, and
+deployment status `none`.
+
+BP-50 review evidence: the first independent review found silent moderate/minor
+axe waivers, incomplete route/state audits, invisible programmatic focus, weaker
+CSP/Permissions Policy, vacuous confidentiality scans, and a crash-poisonable fixed
+browser workspace. Red-first corrections exercised each gap and the no-waiver gate
+then found and fixed enabled, disabled, and transitioning button contrast defects.
+Re-review cleared four classes but showed that route `<main>` targets still suppressed
+their outline and that numerous Chromium capabilities remained allowed. Final
+runtime reds proved both; a high-specificity three-pixel main focus outline and the
+version-pinned 81-feature policy closed them. The same read-only reviewer issued
+PASS after a fresh optimized build and Chromium run. One preliminary family-guard
+invocation used ambient Node 20 and failed only on unsupported `import.meta.dirname`;
+it is excluded, and the required Node 22.23.1 rerun passed 13/13. No remote effect,
+browser artifact, listener, or temporary BP-50 workspace remained.
