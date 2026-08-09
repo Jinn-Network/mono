@@ -640,6 +640,10 @@ export async function verifyPublicBundle(
     report: verifiedReport.record,
     reportSha256: identities.reportSha256,
     matrixSha256: identities.matrixSha256,
+    recordSha256s: checked.manifest.files.flatMap((file) => {
+      const match = /^records\/([a-f0-9]{64})\.bin$/u.exec(file.path);
+      return match === null ? [] : [match[1]!];
+    }),
     dissentCellKeys,
   });
   for (const [path, bytes] of Object.entries(expectedAssets)) {

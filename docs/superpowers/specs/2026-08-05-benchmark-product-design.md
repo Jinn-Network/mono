@@ -1047,6 +1047,76 @@ no record, aggregation, orchestration, or venue semantics reopened):**
   types, and the generated capability matrix cover both peer surfaces without a
   second materializer or verifier.
 
+**Addendum — 2026-08-07, packet BP-41 (distribution-ready static presentation;
+no public-bundle layout, record, aggregation, verification, or claim semantics
+reopened):**
+
+- **`public-bundle/1` presentation closure frozen.** The five BP-40-reserved
+  paths remain exactly `index.html`, `badge.svg`, `social-card.svg`, `README.md`,
+  and `share.txt`; BP-41 adds no file role, route, schema field, or alternate
+  bundle shape. With this packet's verifier re-derivation and presentation
+  battery green, the complete `public-bundle/1` closure is frozen. A later
+  incompatible presentation or closure change requires a new bundle version.
+- **Verified-fact projection only.** One pure deterministic asset builder receives
+  the already verified sealed Report, Matrix, stored claim package, exact record
+  identities, and dissent coordinates. It copies their stored facts into every
+  presentation byte and performs no aggregation, winner selection, conflict
+  resolution, validity replacement, or new conclusion. The portable verifier
+  invokes the same builder and byte-compares all five assets. An inconsistent
+  Report/claim pair therefore remains visibly distinct at the renderer boundary
+  and is rejected by claim-consistency verification rather than reconciled in
+  presentation code.
+- **Source-labelled mirrors, never a blended story.** The full HTML and README
+  present Matrix accounting, sealed Report facts, stored Claim facts, and
+  verification-assembly dissent in independently labelled blocks. Report and
+  Claim results, method parameters, preregistration, conflicts, disclosures, and
+  limitations remain separate; Matrix, Report-disclosure, and Claim completeness
+  and attrition remain separate. Synthetic inconsistency is therefore visible in
+  presentation bytes before claim-consistency rejects it, with no source silently
+  selected as a replacement for another.
+- **Neutral/adverse publication law.** The current `wilson@1` method has no
+  registered comparative winner, so every headline says that no comparative
+  winner is stated. Complete, partial, cancelled, conflicted, and asymmetric
+  facts remain explicit; compact assets carry the run outcome, scope, Report
+  digest, adverse qualifiers, and a direct relative path to the full limitations
+  and portable verification instructions. No asset implies certification,
+  universal ranking, party independence, or owner-honesty.
+- **Self-contained static report.** `index.html` uses inline CSS only, no script,
+  remote font, external image, stylesheet, network dependency, or active embedded
+  content. It renders benchmark/configuration scope, exact per-arm Report values,
+  method/preregistration, assurance primitives, completeness and attrition,
+  asymmetry, conflicts and dissent, unverifiable axes, rehearsal, limitations,
+  self-run trust boundaries, exact digests, raw relative record links, and the
+  standalone verification command. Platform attribution, when present, is
+  confined to verification/about context and never enters the result headline.
+- **Hostile-content and accessibility boundary.** Record-controlled text is
+  escaped for its destination grammar (HTML/SVG, Markdown, or plain text); links
+  are fixed relative paths to manifest-listed files and never derived from record
+  content. The HTML has one `h1`, semantic landmarks/headings/tables/lists, useful
+  link text, visible keyboard focus, status expressed in words as well as color,
+  print rules, and intrinsic containment at 390 px. Both SVG assets carry text
+  alternatives, relative full-report references, and responsive view boxes.
+- **Detached identity and bounded compact configuration.** Each SVG carries the
+  complete 64-character Report digest plus every exact arm identity in escaped
+  accessible description/metadata; visual digest text may abbreviate. Neutral and
+  adverse status occupy fixed prominent positions before the configuration line.
+  Only that visual configuration summary is deterministically bounded, so even an
+  extreme valid arm identifier cannot displace the no-winner statement or adverse
+  facts; the full identifier remains available in metadata and the full report.
+- **Complete raw-record navigation.** The materializer passes the canonically
+  sorted identities of every emitted content-addressed record into the same pure
+  asset builder used by verification. The verifier independently derives that
+  list from its already authenticated manifest snapshot. HTML and README link
+  every `records/<sha256>.bin` member, in addition to the fixed top-level records
+  and catalogs; tests prove the rendered set is exact, safe, and manifest-listed.
+- **Portable presentation proof.** Acceptance is performed against copied
+  publication directories after deleting their source workspaces: standalone
+  verification must pass, each asset's independent tamper must fail, and a local
+  static server must render the full report plus all compact assets at desktop and
+  390 px without horizontal document overflow, console errors, or external
+  requests. Complete and cancelled real-publication paths complement deterministic
+  partial/conflicted/asymmetric and hostile-content fixtures.
+
 ## 13. Provenance
 
 Authored by packet BP-00 of the standalone benchmarking product

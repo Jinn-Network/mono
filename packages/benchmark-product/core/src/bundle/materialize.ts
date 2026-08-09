@@ -478,6 +478,7 @@ function recordClosure(input: MaterializeBundleInput): {
     report,
     reportSha256: runState.reportSha256,
     matrixSha256: runState.matrixSha256,
+    recordSha256s: evidenceCatalog.records.map((record) => record.sha256),
     dissentCellKeys,
   }))) {
     files.set(path, bytes);

@@ -618,8 +618,12 @@ describe("portable public bundle", () => {
     // A changed closure receives a different digest-addressed target and cannot overwrite the
     // prior immutable target, even when every changed file is otherwise schema-valid.
     const sourceClaimPath = claimPackageArtifactPath(workspaceDir, "draft-1");
-    const sourceClaim = JSON.parse(readFileSync(sourceClaimPath, "utf8")) as { results: unknown };
-    sourceClaim.results = { differentButSchemaValid: true };
+    const sourceClaim = JSON.parse(readFileSync(sourceClaimPath, "utf8")) as {
+      results: { perSubject: Array<{ results: { arms: Record<string, { passRate: string }> } }> };
+    };
+    const sourceArmId = Object.keys(sourceClaim.results.perSubject[0]!.results.arms)[0];
+    if (sourceArmId === undefined) throw new Error("fixture claim has no arm");
+    sourceClaim.results.perSubject[0]!.results.arms[sourceArmId]!.passRate = "0.9998";
     writeCanonical(sourceClaimPath, sourceClaim);
     const different = materializePublicBundle({
       workspaceDir,
@@ -1108,6 +1112,27 @@ describe("portable public bundle", () => {
     const state = readRunState(workspaceDir, "draft-1");
     if (state === undefined) throw new Error("missing run state");
     const base = materializePublicBundle({ workspaceDir, draftId: "draft-1", benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256, runState: state }).bundleDir;
+    const manifest = JSON.parse(readFileSync(join(base, "bundle.json"), "utf8")) as { files: Array<{ path: string }> };
+    const manifestPaths = new Set(manifest.files.map((file) => file.path));
+    const casPaths = [...manifestPaths].filter((path) => /^records\/[a-f0-9]{64}\.bin$/u.test(path)).sort();
+    const renderedLinks = (path: string): string[] => {
+      const body = readFileSync(join(base, path), "utf8");
+      return [
+        ...[...body.matchAll(/href="([^"]+)"/gu)].map((match) => match[1]!),
+        ...[...body.matchAll(/\]\(([^)]+)\)/gu)].map((match) => match[1]!),
+      ];
+    };
+    for (const path of ["index.html", "badge.svg", "social-card.svg", "README.md"]) {
+      const links = renderedLinks(path);
+      for (const link of links) {
+        const target = link.split("#")[0]!;
+        expect(link, `${path}: ${link}`).not.toMatch(/^(?:[a-z]+:|\/|\\)|(?:^|\/)\.\.(?:\/|$)|\/\//iu);
+        expect(manifestPaths.has(target), `${path}: ${link}`).toBe(true);
+      }
+      if (path === "index.html" || path === "README.md") {
+        expect(links.map((link) => link.split("#")[0]!).filter((link) => link.startsWith("records/")).sort()).toEqual(casPaths);
+      }
+    }
     const claimVectors: Array<[string, (claim: Record<string, any>) => void]> = [
       ["scope", (claim) => { claim.scope.taskCount += 1; }],
       ["headline", (claim) => { claim.headline[Object.keys(claim.headline)[0]].passRate = "0.123"; }],
@@ -1141,6 +1166,40 @@ describe("portable public bundle", () => {
       } finally {
         rmSync(copy, { recursive: true, force: true });
       }
+    }
+  }, 30_000);
+
+  test("rejects an inconsistent stored claim mirror instead of replacing sealed Report facts", async () => {
+    const clock = makeClock();
+    await setUpClosedRun(clock);
+    const reported = await runReport(contextFor(clock), { draftId: "draft-1" });
+    expect(reported.ok, JSON.stringify(reported)).toBe(true);
+    if (!reported.ok) return;
+    const state = readRunState(workspaceDir, "draft-1");
+    if (state === undefined) throw new Error("missing run state");
+    const base = materializePublicBundle({
+      workspaceDir,
+      draftId: "draft-1",
+      benchmarkSha256: reported.result.claimPackage.records.benchmarkSha256,
+      runState: state,
+    }).bundleDir;
+    const copy = mkdtempSync(join(tmpdir(), "bp41-inconsistent-claim-"));
+    try {
+      cpSync(base, copy, { recursive: true });
+      const claimPath = join(copy, "claim-package.json");
+      const claim = JSON.parse(readFileSync(claimPath, "utf8")) as {
+        headline: Record<string, { passRate: string }>;
+      };
+      const armId = Object.keys(claim.headline)[0];
+      if (armId === undefined) throw new Error("fixture claim has no arm");
+      claim.headline[armId]!.passRate = "0.9999";
+      writeCanonical(claimPath, claim);
+      rewriteBundleManifest(copy);
+      await expect(verifyPublicBundle(copy)).rejects.toMatchObject({
+        issues: [expect.objectContaining({ path: "claim-consistency" })],
+      });
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
     }
   }, 30_000);
 
