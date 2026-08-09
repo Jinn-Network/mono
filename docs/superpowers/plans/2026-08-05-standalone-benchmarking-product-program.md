@@ -696,3 +696,61 @@ PASS after a fresh optimized build and Chromium run. One preliminary family-guar
 invocation used ambient Node 20 and failed only on unsupported `import.meta.dirname`;
 it is excluded, and the required Node 22.23.1 rerun passed 13/13. No remote effect,
 browser artifact, listener, or temporary BP-50 workspace remained.
+
+| BP-51 | integrated | `b235db6f5` | `0bb71c6eb` (worktree bench-bp51) | NEEDS CHANGES -> PASS (identity-bound quickstart cleanup) | `ce81c175e` |
+
+BP-51 verification: Node 22.23.1; core immutable install/typecheck, 68 files /
+677 tests, build, 27-operation parity, and packed runtime smoke; web immutable
+install/lint/typecheck, 13 files / 64 tests, optimized seven-route build, and
+production Playwright 3/3; local-backend typecheck/build/pack and 15 files (116
+passed, one platform skip); family guards 13/13; packed public TypeScript consumer;
+generator 15/15; catalog/control/workflow 203/203; generated architecture and
+`git diff --check`. The final docs/quickstart focused suite is 3 files / 14 tests.
+
+BP-51 product evidence: product-root, core, web, public-bundle, security, and
+extraction-readiness documentation now describes the complete shipped surface
+without inventing hosting or authority. Machine-checked docs derive all 27 parity
+operations, five gated actions, 11 typed errors, four exit classes, bundle format/
+files/six checks, package commands, and relative links from implementation
+authorities. The public quickstart clean-builds and invokes the built CLI for 17
+steps: init, draft/sample/two arms, quote/lock, real launch/status/resume/status,
+collect/results/report/workspace verification/publish, then copied-bundle standalone
+verification. It accepts no caller path, forwards no ambient credential/network
+configuration, completes six real local cells, copies the digest-addressed public
+bundle outside its source, deletes the source workspace, verifies all six portable
+checks through the shipped CLI, and removes its uniquely owned temporary root.
+
+BP-51 cleanup/review evidence: the first independent review found that replayable
+marker bytes did not bind recursive cleanup to the originally created root,
+workspace, or marker inode. Eight deterministic tests failed first for root and
+workspace replacement, stale/malformed/symlink/hardlink markers, parallel roots,
+and combined primary/cleanup failure. The correction captures root, marker,
+workspace, and copied-bundle device/inode identities, uses `O_NOFOLLOW`/fstat/
+single-link marker validation, atomically quarantines before deletion, fsyncs and
+revalidates moved objects twice, and recursively removes only a proven quarantine.
+Mismatch poisons the owner, retains evidence, and attempts only an exclusive,
+non-overwriting relative restoration symlink; occupied or failed restoration never
+deletes. The read-only reviewer re-ran 14/14 plus a complete real quickstart and
+issued PASS. Final proof identities were run `a6dda1f02bd1643893fa7e4938c8205a491eb3257fa6a77324730499b1322df9`,
+Matrix `00166d519ae7d11227dfc603c5feff8700a7344d67c67d4f02202055115c3332`,
+Report `f5a95a013053649c27a2aa38d44191458823d4c67afc927fcd64bfe6668af39f`,
+and bundle `b50cc89266efe06165a8867b988df82cd613fe2948f9f60c4342116e7c401451`.
+
+The extraction-readiness dry run is explicitly evidence, not authorization:
+gate 1 BLOCKED (portal/unpublished platform dependencies); 2 BLOCKED (sibling
+builds/dist transfer); 3 NOT GREEN (no deploy contract); 4 PASS (no tier-1--3
+product references); 5 BLOCKED (repo-global CI/guards and no extracted-tree
+conformance); 6 BLOCKED/not applicable to the current private `publishPolicy:
+never` posture (no release pipeline); 7 BLOCKED (no product-specific CODEOWNERS/
+target protection evidence); 8 PASS with explicit generic filesystem-helper and
+private structural-type provenance disclosure. Even an all-green future dry run
+would require its own decision record. The issue-drafts ledger now contains all 12
+required M2--M5 drafts BP-20/21/22/30/31/32/33/40/41/50/51/52; no GitHub object
+was created or mutated.
+
+An intermediate generator run classified `core/scripts/public-quickstart.mjs` and
+mechanically changed the two canonical generated architecture views. At the master
+constraint check those exact diffs were reverted, the executable was relocated to
+the product-local `core/quickstart/` path and invoked directly, and fresh generator
+tests/check proved both canonical files byte-clean. No canonical Jinn document,
+remote resource, deployment, package, issue, project, PR, or branch was mutated.
