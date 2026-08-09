@@ -564,3 +564,77 @@ command visibility, and `innerWidth = clientWidth = document/body scrollWidth =
 390`. No server error was emitted. Viewport/tab/server were reset/stopped and all
 three BP-40 browser workspaces were moved recoverably to Trash. No work was lost,
 and no unreviewed change was committed.
+
+| BP-41 | integrated | `080f4d8e2` | `cf043a110` (worktree bench-bp41) | NEEDS CHANGES twice -> PASS (six presentation/a11y findings corrected) | `cefab02ff` |
+
+BP-41 verification: Node 22.23.1; core typecheck and 65 files / 663 tests
+under the unchanged two-worker/default-five-second policy, build, parity, and
+packed runtime smoke; web lint/typecheck, 10 files / 39 tests (including the real
+complete and drained-cancelled publish paths), and optimized production build;
+local-backend typecheck/build/pack smoke and 15 files (116 passed, one platform-
+specific skip); packed public TypeScript consumer; family inventory/source
+controls 13/13; generator 15/15; a broader repository catalog/control/workflow
+battery 366/366; generated architecture and `git diff --check`. Focused final
+review evidence is 2 files / 29 tests.
+
+BP-41 product evidence: the frozen `public-bundle/1` layout and five BP-40 asset
+roles remain unchanged. One pure deterministic `buildPublicAssets` projection is
+used byte-for-byte by both materialization and portable verification. It emits a
+self-contained, no-script/no-remote semantic HTML report, badge and social-card
+SVGs, README, and share text from stored Matrix, Report, Claim, and verification-
+assembly facts only. It never computes a statistic, reconciles inconsistent
+stored sources, chooses a winner, or adds a conclusion. The full report labels
+each authenticated source separately and preserves exact completeness, attrition,
+conflicts, method/preregistration, disclosures, limitations, dissent, trust
+boundary, configuration pins, digests, and every manifest-listed content-addressed
+record link. Compact assets keep neutral/no-winner and adverse facts prominent,
+carry the complete Report identity and exact arm ids in accessible metadata, and
+direct readers to relative limitations and verification paths.
+
+BP-41 review evidence: the first independent review found that several mirrored
+Claim/Report blocks were not independently visible, raw CAS links were absent,
+compact SVGs exposed only a digest prefix, and unbounded arm ids could displace
+adverse qualifiers. Red-first corrections added source-labelled exact mirrors,
+independently derived sorted CAS identities, full accessible digests/ids, and a
+fixed neutral -> adverse -> bounded-configuration SVG structure. Re-review then
+found that 2,048-character valid arm ids were only hidden by page-level overflow
+clipping and that the social-card's 112-codepoint visual summary still exceeded
+its view box. Two additional tests failed exactly (7 pass / 2 fail), then passed
+(9/9) after intrinsic anywhere/break-word containment, fixed local table layout,
+removal of outer overflow masking, and a conservative 40-codepoint visual config
+summary. The same non-author reviewer issued final PASS without edits.
+
+Fresh real evidence published a natural two-arm/six-judged-cell run, copied its
+digest-addressed bundle, deleted the source workspace, and passed library plus
+standalone CLI portable verification with all six named checks. The final bundle
+identity was `6853508ea0de182804e7ebe644b1d13519a724bd627a50a5b6f32079bd9d623b`.
+Coordinator browser verification of that copy at 390x844 measured document/body
+widths 390/390 and every report section `clientWidth == scrollWidth` (350 or 356),
+with one h1/header/main/footer, all 49 raw CAS links, and zero scripts, remote
+resources, warnings, or errors. Social-card fields ended at x=260.94/377.95/
+143.41 and badge fields at x=192.47/298.32/114.05 inside a 390px SVG; both retained
+the full 64-character Report digest. The in-app browser's SVG instrumentation
+emitted its known `animation in undefined` diagnostic although the authenticated
+SVG sources contain no script or animation; the HTML report itself logged zero.
+Server, viewport, and tabs were reset, and the copied bundle was moved recoverably
+to Trash.
+
+The resumption boundary lost the original BP-41 implementer's terminal agent
+status after it reported the corrected focused suite green. The master preserved
+the intact unstaged worktree, re-ran the complete fail-fast battery, coordinated
+the two independent review/correction rounds, and performed final browser
+assembly. No work was lost and no unreviewed change was committed.
+
+**M4 COMPLETE** (2026-08-09): a reported complete, partial, conflicted, adverse,
+or cancelled benchmark can be materialized as an immutable, digest-addressed,
+distribution-ready public bundle. The bundle remains verifiable after source-
+workspace deletion using only its authenticated bytes and public trust material;
+its static public assets preserve neutral findings, scope, limitations, failure,
+dissent, trust boundaries, and exact raw-record access without upload, hosting,
+deployment, private keys, or a second implementation.
+
+**Base drift record (wave boundary after M4):** the local
+`origin/integration/evidence-v1` ref moved to `1980c7e067`; the session lineage
+is 36 commits ahead / 54 behind. No upstream watched `packages/benchmark-product`,
+product design, program-ledger, product CI, or product guard path changed. The
+proposed base refresh remains unapproved; M5 continues on the current lineage.
