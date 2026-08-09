@@ -14,9 +14,10 @@ complete and cancelled real-local-venue journeys through the optimized private
 web app, a complete real-local-venue public CLI quickstart, and portable bundle
 verification after source-workspace deletion.
 
-**Program state:** BP-00–BP-51 integrated; BP-52 awaiting independent review and integration.
-That review is a mandatory gate, so this record does not call BP-52 committed or
-the branch merge-ready.
+**Program state:** BP-00–BP-52 are integrated locally and M0–M5 are complete.
+The fresh program-wide reviewer issued PASS after two red-first correction rounds.
+The branch is implementation-complete but remains subject to the merge-readiness
+caveats in §9.
 
 Local implementation only. No base refresh was performed. No branch or tag was
 pushed; no PR, Issue, Project, release, package, repository, deployment, or live
@@ -52,11 +53,12 @@ infrastructure was created or mutated. Remote effects: none.
   the CI correction but found the filesystem ownership receipt could self-certify
   replacement inodes. Its deterministic probe became a third red-first P1
   correction: setup-controller memory is now the only ownership trust anchor.
-- Intended BP-52 delta is nine files: the product CI path filters, documentation
+- The reviewed BP-52 delta comprised nine files: the product CI path filters, documentation
   consistency tests, optimized production browser journey, Playwright setup/
   configuration, removal of the separate teardown module, browser ownership
-  implementation and tests, and this evidence record. It remains unstaged and
-  uncommitted for independent re-review.
+  implementation and tests, and this evidence record. It was committed in its
+  packet worktree as `52185b1b1` and integrated locally as `c09e89703` only after
+  the final independent PASS.
 
 ## 3. Product outcome by perspective
 
@@ -76,7 +78,7 @@ infrastructure was created or mutated. Remote effects: none.
 | M2 | complete | Pure disclosed previews, honest quotes, all four assurance presets, retained dissent/conflict, durable cancellation, and complete terminal accounting. |
 | M3 | complete | Private Next.js app is a server-side client of the core public entry only; setup through publish is wired without GUI-owned benchmark semantics. |
 | M4 | complete | Frozen `public-bundle/1` with five deterministic assets, authenticated raw-record closure, public trust material, and copied-bundle standalone verification. |
-| M5 | locally complete | Accessibility/security contracts, operator/agent/bundle/security docs, public quickstart, extraction dry run, issue drafts, and BP-52 cross-cutting battery. Independent BP-52 review/integration remains. |
+| M5 | complete | Accessibility/security contracts, operator/agent/bundle/security docs, public quickstart, extraction dry run, issue drafts, BP-52 cross-cutting battery, and fresh program-wide PASS. |
 
 BP-52 acceptance matrix:
 
@@ -118,7 +120,7 @@ The detailed correction evidence is append-only in the
 | BP-41 | static claim assets | NEEDS CHANGES twice → PASS |
 | BP-50 | accessibility/security | NEEDS CHANGES twice → PASS |
 | BP-51 | docs/quickstart/extraction | NEEDS CHANGES → PASS |
-| BP-52 | final cross-cutting verification | NEEDS CHANGES on two P1 blockers, then one receipt-trust P1 on re-review; all corrected red-first; next independent re-review pending; intended delta deliberately uncommitted |
+| BP-52 | final cross-cutting verification | NEEDS CHANGES on two P1 blockers, then one receipt-trust P1 on re-review; all corrected red-first; final independent re-review PASS; integrated locally |
 
 No packet change was integrated without a PASS. Reviews found material defects
 from BP-12 onward, validating the independent-review gate. The coordinator took
@@ -292,8 +294,9 @@ dry run authorizes no move, repository creation, package release, deployment, or
 remote action.
 
 Drift at BP-52: local `origin/integration/evidence-v1` is
-`1980c7e067cd74e601d640df334169dbc6e65605`; the product lineage is 41 commits
-ahead and 54 behind. The merge base remains `1fb3e78f1`. A merge-base-to-origin
+`1980c7e067cd74e601d640df334169dbc6e65605`; the completed session lineage is 43
+commits ahead and 54 behind after BP-52 integration and ledger closure. The merge
+base remains `1fb3e78f1`. A merge-base-to-origin
 path diff found no upstream change to `packages/benchmark-product`, the product
 design/ledger, product CI, or product guard paths. Upstream-only drift remains in
 repository workflows/control selection and the two generated architecture views.
@@ -306,21 +309,16 @@ Hygiene and outstanding local actions:
 - The session permission deny rules remain present and were not weakened.
 - The issue-draft authority contains BP-20/21/22/30/31/32/33/40/41/50/51/52;
   no GitHub Issue or other remote object was created.
-- Integrated legacy packet worktrees BP-00/01/10/11/12/13/20/21 still exist and
-  require the master coordinator's clean-status check and safe removal after
-  BP-52 review. The BP-52 worktree must remain until its fresh review completes.
+- Completed packet worktrees BP-00/01/10/11/12/13/20/21 and BP-52 were each
+  checked clean, removed through Git's worktree mechanism, and pruned. Unrelated
+  active worktrees were not touched.
 
 Merge-readiness caveats:
 
-1. A fresh independent program-wide BP-52 reviewer must issue PASS; then the
-   coordinator must commit/integrate BP-52 and append its exact review/head to the
-   ledger.
-2. Owning Issues do not exist and cannot be created under this session's local-
+1. Owning Issues do not exist and cannot be created under this session's local-
    only authority. Human CODEOWNERS review is required for protected paths.
-3. The 54-commit upstream divergence needs an explicit human decision and normal
+2. The 54-commit upstream divergence needs an explicit human decision and normal
    compatibility review; this program did not refresh or merge the moved base.
-4. Extraction, release, hosting, deployment, package publication, live-market
+3. Extraction, release, hosting, deployment, package publication, live-market
    validation, owner-independent preregistration, and party-independence remain
    unproven or explicitly out of scope. No claim should imply otherwise.
-5. After integration, the coordinator must prove the session worktree clean and
-   remove completed packet worktrees without touching unrelated active worktrees.

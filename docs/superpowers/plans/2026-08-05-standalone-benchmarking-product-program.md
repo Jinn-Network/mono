@@ -754,3 +754,64 @@ constraint check those exact diffs were reverted, the executable was relocated t
 the product-local `core/quickstart/` path and invoked directly, and fresh generator
 tests/check proved both canonical files byte-clean. No canonical Jinn document,
 remote resource, deployment, package, issue, project, PR, or branch was mutated.
+
+| BP-52 | integrated | `cb9cea5a5` | `52185b1b1` (worktree bench-bp52) | NEEDS CHANGES twice -> PASS (final-record CI closure and controller-held browser-cleanup ownership) | `c09e89703` |
+
+BP-52 verification: Node 22.23.1; core typecheck/build, 68 files / 680 tests,
+27-operation parity, and packed runtime smoke; web lint/typecheck, 13 files / 72
+tests, optimized seven-route build, and production Playwright 3/3; local-backend
+typecheck/build/pack and 15 files (116 passed, one platform skip); family package/
+source guards 13/13; packed public TypeScript consumer; generator 15/15;
+catalog/control/workflow 203/203; generated architecture and `git diff --check`.
+The final focused adversarial battery passed 79/79 across records, graph closure,
+trust, cancellation, public assets, path/link, and filesystem-integrity cases.
+Documentation consistency passed 7/7 and the final cleanup-ownership suite passed
+11/11.
+
+BP-52 cross-cutting evidence: the built public CLI quickstart completed all 17
+operations on the real local venue, accounted six cells, copied its digest-addressed
+bundle outside the workspace, deleted the source workspace, and passed all six
+standalone portable checks. Its final identities were run
+`41670341f40dab3457b956bfea1bdbaaf66b027d9180957f13a7395bcea15f84`,
+Matrix `227dbb7329c09dfe178ec2c96980c97afeeada6b3968ac5e82e5eef0c3346d8a`,
+Report `9621850be78be3f44ce4d170ee5bf9e251dd54e79666168c824f1f192ee1921b`,
+and bundle `e0ad39ad69c84304a63f12905c4d51683cf38320182e54e158f16c822ffb34d4`.
+The optimized browser gate now proves both a natural complete journey and a second
+real requested -> draining -> cancelled journey through Report, verification,
+publication, copy, source deletion, cancellation-marker retention, and six-check
+standalone verification. The authority deliberately assigns the complete journey
+to the CLI and the cancelled journey to the optimized browser; shared-core real
+cancellation, typed CLI cancellation, and generated parity cover the surface seam,
+so the absence of a redundant CLI-only cancelled end-to-end journey was independently
+reviewed and accepted.
+
+BP-52 review evidence: the first fresh program-wide review found that the new final
+evidence authority did not itself trigger product CI and that browser teardown
+trusted replayable marker bytes rather than setup-time filesystem identity. Red-first
+corrections added the evidence path to both pull-request and push filters and moved
+cleanup behind captured root/marker identities plus quarantine-before-delete. The
+first re-review then found that a filesystem receipt still self-described its own
+identity. A second deterministic red reproduced that boundary; the receipt and
+separate global teardown were removed. Playwright global setup now returns its
+supported teardown closure and retains the opaque original root/marker identity,
+token, and bytes only in controller memory. Cleanup atomically quarantines, checks
+the marker through `O_NOFOLLOW`/fstat/single-link rules, validates exact identities
+and child allowlist twice immediately before the sole recursive removal, preserves
+new original-path occupants, and retains/restores evidence non-overwriting on any
+identity change. The same read-only reviewer issued final PASS after focused Node
+22 checks and the optimized 3/3 production journeys. The final dated evidence record
+is `docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md`.
+
+**M5 COMPLETE** (2026-08-10): accessibility, keyboard/focus/reflow, security headers
+and browser capability denial, typed error/privacy projection, secret/path/external-
+request sweeps, identity-fenced temporary cleanup, complete product documentation,
+extraction-readiness evidence, real complete and cancelled journeys, adversarial
+portable-bundle verification, and a fresh program-wide review are all green. M0--M5
+are implemented on the local session lineage. This is implementation completion,
+not extraction authorization, deployment, publication, or remote merge readiness.
+
+**Final base-drift record:** local `origin/integration/evidence-v1` remains at
+`1980c7e067`; the completed session lineage is 43 commits ahead / 54 behind with
+merge base `1fb3e78f1`. No origin-side watched product package, design, ledger,
+product CI, or product guard path changed from that merge base. The proposed base
+refresh was never approved and was not performed.

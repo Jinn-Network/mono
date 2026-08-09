@@ -187,7 +187,8 @@ describe("product documentation consistency", () => {
     ]) {
       expect(verification, heading).toContain(heading);
     }
-    expect(verification).toContain("BP-00–BP-51 integrated; BP-52 awaiting independent review and integration");
+    expect(verification).toContain("BP-00–BP-52 are integrated locally and M0–M5 are complete");
+    expect(verification).toContain("final independent re-review PASS; integrated locally");
     expect(verification).toContain("Remote effects: none");
     expect(verification).toContain("NOT EXTRACTION-READY");
     expect(verification).toContain("27 generated operations");
