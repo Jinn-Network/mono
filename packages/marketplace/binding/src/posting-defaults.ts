@@ -119,6 +119,43 @@ export const DEFAULT_POSTING_TERMS: DefaultPostingTerms = {
 export const DEFAULT_SUBMISSION_DEADLINE_LEAD_MS = 4 * 60 * 60 * 1000;
 
 /**
+ * How long a native evaluator has, after admitting an evaluation, before repeated retryable
+ * failures give up and terminally fail it. `native-evaluator-state.ts`'s `recordEvaluationPaused`
+ * checks each scheduled retry against this deadline; once a retry would land past it,
+ * `recordEvaluationFailed(..., "evaluator-retry-deadline")` fires -- and that failure is
+ * permanent: `admitOpportunity` only ever reopens a `withdrawn` evaluation, never a `failed` one
+ * (issue #27).
+ *
+ * ## Why this is NOT `responseTimeoutSeconds`
+ *
+ * Reusing the posting terms' own timeout is the same mistake `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`
+ * above already documents for the Submission deadline, in a different corner of the same code.
+ * The two are different clocks measuring different things:
+ *
+ *  - `responseTimeoutSeconds` is the marketplace's per-claim DELIVERY window. It is forwarded
+ *    verbatim to `JinnRouterV3.createTask` and enforced by the deployed MechMarketplace at CLAIM
+ *    time (`minResponseTimeout() = 60`, `maxResponseTimeout() = 300` on the Base Sepolia substrate
+ *    -- see `posting-defaults.test.ts`). Raising it does not buy a longer window: it posts fine,
+ *    escrows `msg.value`, and then makes every claim on that task revert. 300s is a hard on-chain
+ *    ceiling this constant must never approach, let alone exceed.
+ *  - The evaluator's own response SLA is a LOCAL retry/grading budget with no on-chain
+ *    counterpart: how long the daemon keeps retrying a transient failure (a chain-read hiccup, an
+ *    IPFS miss, a `swe-rebench` container grade that legitimately runs 10-30 minutes) before
+ *    giving up for good.
+ *
+ * `native-evaluator-opportunity-source.ts`'s `deadline()` used to compute this SLA as
+ * `admittedAt + responseTimeoutSeconds * 1000`, so it inherited the marketplace's 300s ceiling by
+ * accident. Round 15 of the live G-loop gate proved that too short: an evaluation admitted in one
+ * run and graded in a later run (the gate's own debug cycle spans ~1h) SLA-expired and
+ * terminal-failed even though nothing about the evaluation itself had failed.
+ *
+ * Four hours matches `DEFAULT_SUBMISSION_DEADLINE_LEAD_MS`'s own reasoning above: coherent with
+ * the existing submission-deadline horizon, generous enough for a container grade plus on-chain
+ * finality plus gate debug slack, and defensible as a real evaluator SLA.
+ */
+export const DEFAULT_EVALUATOR_RESPONSE_SLA_MS = 4 * 60 * 60 * 1000;
+
+/**
  * The escrow formula, in one place: `(solutionMaxDeliveryRateWei + verdictMaxDeliveryRateWei) x
  * maxClaims`. This is the `msg.value` `postTask` sends **when the sealed Submission's
  * `attempts.maxTotal` equals `terms.maxClaims`** -- `postTask` takes its multiplier from the

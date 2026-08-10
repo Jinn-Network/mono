@@ -26,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   BASE_SEPOLIA_TODAY,
+  DEFAULT_EVALUATOR_RESPONSE_SLA_MS,
   deriveMarketplaceAttemptUri,
 } from '@jinn-network/marketplace-binding';
 import { documentDigest, sealDelivery } from '@jinn-network/task-execution-protocol';
@@ -357,6 +358,25 @@ describe('native evaluator opportunity read (#2539)', () => {
     // No source is served in-process, so the ingest brought in nothing this pass — the read is
     // derived entirely from the durable index, and nothing is held.
     expect(errors.filter((line) => line.includes('HELD'))).toStrictEqual([]);
+  });
+
+  // issue #27: the evaluator's own response/retry SLA must be a decoupled, purpose-built budget,
+  // not the marketplace's on-chain per-claim `responseTimeoutSeconds` term (which this fixture's
+  // `association()` deliberately sets to 3_600n -- 1 hour -- to prove the two clocks disagree; the
+  // deployed marketplace caps the real on-chain term at 300s/5min, see `posting-defaults.test.ts`).
+  it("computes the evaluator response deadline from the decoupled evaluator SLA, never the "
+    + "association's on-chain responseTimeoutSeconds term", async () => {
+    seedEngagement(store, lower);
+    const built = await reader({ readCanonicalSolutionDelivery: async () => finalized(lower) });
+    const admittedAt = '2026-08-07T00:00:00.000Z';
+
+    const deadline = built.deadline(
+      { chainId: 84532, coordinator: COORDINATOR, taskId: lower.taskId },
+      admittedAt,
+    );
+
+    expect(deadline).toBe(new Date(Date.parse(admittedAt) + DEFAULT_EVALUATOR_RESPONSE_SLA_MS).toISOString());
+    expect(deadline).not.toBe(new Date(Date.parse(admittedAt) + 3_600 * 1_000).toISOString());
   });
 
   // #2559 sibling (CP6): the delivery payload is served only over the solver's HTTP plane, never
