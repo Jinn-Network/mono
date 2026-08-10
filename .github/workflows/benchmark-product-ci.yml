@@ -140,6 +140,25 @@ jobs:
       - name: Verify Benchmark Product web
         run: |
           yarn install --immutable
+          # Vite intentionally resolves portal packages to their real source paths. Give every
+          # source package the web consumer's one installed dependency tree so the isolated job
+          # needs no sibling installs and runtime registries/classes keep one module identity.
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, symlinkSync } from "node:fs";
+          import { dirname, join, relative, resolve } from "node:path";
+
+          const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+          const consumerModules = resolve("node_modules");
+          for (const resolution of Object.values(manifest.resolutions)) {
+            if (typeof resolution !== "string" || !resolution.startsWith("portal:")) continue;
+            const packageDir = resolve(resolution.slice("portal:".length));
+            const packageModules = join(packageDir, "node_modules");
+            if (existsSync(packageModules)) {
+              throw new Error(`isolated web runner unexpectedly found ${packageModules}`);
+            }
+            symlinkSync(relative(dirname(packageModules), consumerModules), packageModules, "dir");
+          }
+          NODE
           yarn lint
           yarn typecheck
           yarn test
