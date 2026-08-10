@@ -424,8 +424,9 @@ private-key bytes, then copies and standalone-verifies the publication after
 deleting its source workspace. Deployment status remains none.
 
 The finite Permissions Policy is pinned to Playwright 1.59.1's Chromium
-147.0.7727.15 surface. Its 81 exact denied features live in
-`permissions-policy.mjs` and are reproduced in the product security note. The
+147.0.7727.15 surface. Its exact denied features live in
+`permissions-policy.mjs` and are reproduced in the product security note: 80 on
+Linux and 81 on Darwin, where Chromium additionally exposes Web Bluetooth. The
 optimized gate requires the runtime-recognized list to match byte-for-byte in
 sorted order, requires `document.featurePolicy.allowedFeatures()` to be empty,
 and rejects every header-parser warning. Browser capability drift is therefore a

@@ -32,7 +32,7 @@ describe("private production web security contract", () => {
     ]) expect(config, required).toContain(required);
     expect(config).toContain('value: PINNED_PERMISSIONS_POLICY');
     expect(PINNED_CHROMIUM_VERSION).toBe("147.0.7727.15");
-    expect(PINNED_PERMISSIONS_POLICY_FEATURES).toHaveLength(81);
+    expect(PINNED_PERMISSIONS_POLICY_FEATURES).toHaveLength(process.platform === "darwin" ? 81 : 80);
     expect([...PINNED_PERMISSIONS_POLICY_FEATURES].sort()).toEqual(PINNED_PERMISSIONS_POLICY_FEATURES);
     expect(new Set(PINNED_PERMISSIONS_POLICY_FEATURES).size).toBe(PINNED_PERMISSIONS_POLICY_FEATURES.length);
     expect(PINNED_PERMISSIONS_POLICY).toBe(
@@ -40,7 +40,6 @@ describe("private production web security contract", () => {
     );
     for (const capability of [
       "attribution-reporting",
-      "bluetooth",
       "captured-surface-control",
       "compute-pressure",
       "keyboard-map",
@@ -51,6 +50,7 @@ describe("private production web security contract", () => {
       "sync-xhr",
       "translator",
     ]) expect(PINNED_PERMISSIONS_POLICY_FEATURES, capability).toContain(capability);
+    expect(PINNED_PERMISSIONS_POLICY_FEATURES.includes("bluetooth")).toBe(process.platform === "darwin");
     expect(config).not.toMatch(/https?:\/\//u);
   });
 
