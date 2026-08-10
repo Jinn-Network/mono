@@ -307,4 +307,48 @@ describe('createDockerContainerRuntime', () => {
     child.emit('error', new Error('spawn docker ENOENT'));
     await expect(runPromise).rejects.toThrow(/docker/i);
   });
+
+  // #2542: on a host where the docker binary is not under the daemon's inherited PATH (e.g. macOS
+  // Docker Desktop at /usr/local/bin/docker), the spawn fails ENOENT. The error must name the exact
+  // resolved path that was tried and point at the sidecar dockerPath remedy, not just say "docker".
+  it('names the resolved docker path and points at the sidecar dockerPath remedy on ENOENT', async () => {
+    const child = new FakeChild();
+    const { spawn } = recordingSpawner([child]);
+    const runtime = createDockerContainerRuntime({ spawn, dockerPath: '/usr/local/bin/docker' });
+    const runPromise = runtime.run(request());
+    const enoent = Object.assign(new Error('spawn /usr/local/bin/docker ENOENT'), { code: 'ENOENT' });
+    child.emit('error', enoent);
+
+    let caught: Error | undefined;
+    try {
+      await runPromise;
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('/usr/local/bin/docker');
+    expect(caught!.message).toMatch(/dockerPath/);
+    expect(caught!.message).toMatch(/sidecar/i);
+  });
+
+  // A non-ENOENT spawn error (docker found, but refused for some other reason) gets no sidecar
+  // remedy appended -- the remedy is specific to "binary not found", not spawn failures in general.
+  it('does not append the sidecar remedy for a non-ENOENT spawn error', async () => {
+    const child = new FakeChild();
+    const { spawn } = recordingSpawner([child]);
+    const runtime = createDockerContainerRuntime({ spawn, dockerPath: '/usr/bin/docker' });
+    const runPromise = runtime.run(request());
+    const eacces = Object.assign(new Error('spawn /usr/bin/docker EACCES'), { code: 'EACCES' });
+    child.emit('error', eacces);
+
+    let caught: Error | undefined;
+    try {
+      await runPromise;
+    } catch (error) {
+      caught = error as Error;
+    }
+    expect(caught).toBeDefined();
+    expect(caught!.message).toContain('/usr/bin/docker');
+    expect(caught!.message).not.toMatch(/sidecar/i);
+  });
 });

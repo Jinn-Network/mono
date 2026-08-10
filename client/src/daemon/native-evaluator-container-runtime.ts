@@ -341,8 +341,19 @@ export function createDockerContainerRuntime(
 
         child.on('error', (error: Error) => {
           const detail = stderr.text().trim();
+          const code = (error as NodeJS.ErrnoException).code;
+          // ENOENT here means the OS could not find `dockerPath` at all (as opposed to `docker`
+          // rejecting the argv) -- the common case is a daemon whose inherited PATH does not
+          // contain the docker binary (e.g. macOS Docker Desktop, commonly /usr/local/bin/docker,
+          // not /usr/bin/docker). Name the exact path that was tried and point at the fix: an
+          // absolute `dockerPath` in the evaluator deployment's per-operator sidecar file (#2542).
+          const remedy = code === 'ENOENT'
+            ? ` — no "${dockerPath}" binary found; if this host's docker CLI is not on the daemon's `
+              + 'PATH (e.g. Docker Desktop), set an absolute "dockerPath" in the evaluator deployment '
+              + 'module\'s per-operator sidecar file'
+            : '';
           settleReject(new Error(
-            `docker run failed to spawn (${dockerPath}): ${error.message}`
+            `docker run failed to spawn (${dockerPath}): ${error.message}${remedy}`
             + (detail.length > 0 ? ` — ${detail.slice(-512)}` : ''),
           ));
         });
