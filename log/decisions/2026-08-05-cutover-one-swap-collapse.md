@@ -328,17 +328,30 @@ flip.
 > This unblocks the `discovery/` deletion in Wave 4 and sets R3b's shape.
 > Implementation is tracked separately (not in this record's scope).
 >
-> **Decision 3 — loop watchdog defaults on, with legitimate-wait states excluded.**
-> `watchdogAutoRestart` (`client/src/config.ts:323`, env `JINN_WATCHDOG_AUTO_RESTART`)
-> currently defaults `false` — the locked Option A decision from issue #1043's
-> watchdog-lineage design (carried forward through issue
-> [#2540](https://github.com/Jinn-Network/mono/issues/2540)), which is why a frozen
-> engagement can go unrestarted with only a logged/emitted signal. **Ruling: default it
-> `true`**, but exclude legitimate long-wait states (`awaiting_funding` and equivalents —
-> any state a daemon deliberately parks in while waiting on an operator or external
-> input) from staleness detection, so a daemon correctly waiting is never
-> restart-looped. Implementation (the exclusion list and the default flip) is tracked
-> separately (not in this record's scope).
+> **Decision 3 — loop watchdog defaults to armed, with legitimate-wait states excluded
+> (auto-restart untouched).** The loop watchdog has two independent levers. (a)
+> `DaemonConfig.watchdog` (`client/src/daemon/daemon.ts:271`, an optional object; the
+> adjoining comment at `:269` — "Omitted in unit tests, so the watchdog is inert there"
+> — states the consequence of leaving it unsupplied) is what **arms** the supervisor:
+> heartbeat seeding, staleness detection, and the `loop_watchdog_stale` structured event
+> all require it to be supplied. On the real fleet operators it is currently unsupplied,
+> so the watchdog is entirely inert — no detection, zero `loop_watchdog_stale` events.
+> This is what round-8's frozen engagement hit. (b) `watchdogAutoRestart`
+> (`client/src/config.ts:323`, env `JINN_WATCHDOG_AUTO_RESTART`) currently defaults
+> `false` — the locked Option A decision from issue #1043's watchdog-lineage design
+> (carried forward through issue
+> [#2540](https://github.com/Jinn-Network/mono/issues/2540)) — and gates **only** the
+> `process.exit` recovery once the watchdog is armed: off → detect + loud-log + emit
+> only; on → also exit-and-restart. Decision 3's original text conflated these two
+> levers. **Ruling: arm the watchdog by default** — `config.watchdog` defaults to
+> populated (detection/observation on by default), but exclude legitimate long-wait
+> states (`awaiting_funding` and equivalents — any state a daemon deliberately parks in
+> while waiting on an operator or external input) from staleness detection, so a daemon
+> correctly waiting is never flagged stale or restart-looped. **`watchdogAutoRestart`
+> stays default `false` — #1043's Option A decision is NOT reversed; auto-restart
+> remains opt-in via `JINN_WATCHDOG_AUTO_RESTART`.** Implementation (populating
+> `config.watchdog` by default and wiring the exclusion list) is tracked separately (not
+> in this record's scope).
 
 ## Provenance
 
