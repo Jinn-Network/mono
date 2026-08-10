@@ -1,0 +1,81 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { BenchmarkProductError } from "../errors.js";
+import { createLocalVenue, EVALUATOR_REQUIREMENT_KEY, type LocalVenue } from "./venue.js";
+
+const NOW = (): string => new Date().toISOString();
+
+let workspaceDir: string;
+let venue: LocalVenue | undefined;
+
+beforeEach(async () => {
+  workspaceDir = await mkdtemp(join(tmpdir(), "bp21-venue-"));
+  venue = undefined;
+});
+
+afterEach(async () => {
+  await venue?.shutdown();
+  await rm(workspaceDir, { recursive: true, force: true });
+});
+
+describe("createLocalVenue evaluators", () => {
+  it("refuses an evaluatorCount that is not an integer >= 1", () => {
+    for (const evaluatorCount of [0, -1, 1.5, Number.NaN]) {
+      let thrown: unknown;
+      try {
+        createLocalVenue({ workspaceDir, now: NOW, evaluatorCount });
+      } catch (cause) {
+        thrown = cause;
+      }
+      expect(thrown, String(evaluatorCount)).toBeInstanceOf(BenchmarkProductError);
+      expect((thrown as BenchmarkProductError).code).toBe("validation");
+    }
+  });
+
+  it("defaults to one evaluator and keeps verdictKeyId = evaluators[0].keyId", () => {
+    venue = createLocalVenue({ workspaceDir, now: NOW });
+    expect(venue.evaluators.map((evaluator) => evaluator.id)).toEqual([
+      "urn:jinn:benchmark-product:local-venue:evaluator-1",
+    ]);
+    expect(venue.evaluators[0]!.keyId).toMatch(/^benchmark-product-verdict-[0-9a-f]{16}$/);
+    expect(venue.verdictKeyId).toBe(venue.evaluators[0]!.keyId);
+  });
+
+  it("mints N ordered evaluator identities with distinct signing keys", () => {
+    venue = createLocalVenue({ workspaceDir, now: NOW, evaluatorCount: 3 });
+    expect(venue.evaluators.map((evaluator) => evaluator.id)).toEqual([
+      "urn:jinn:benchmark-product:local-venue:evaluator-1",
+      "urn:jinn:benchmark-product:local-venue:evaluator-2",
+      "urn:jinn:benchmark-product:local-venue:evaluator-3",
+    ]);
+    expect(new Set(venue.evaluators.map((evaluator) => evaluator.keyId)).size).toBe(3);
+  });
+
+  it("declares the evaluator requirement key on the backend with the evaluator IRIs as inventory", async () => {
+    venue = createLocalVenue({ workspaceDir, now: NOW, evaluatorCount: 2 });
+    const capabilities = await venue.backend.capabilities();
+    const support = capabilities.runPinning.keys.find((key) => key.key === EVALUATOR_REQUIREMENT_KEY);
+    expect(support).toEqual({
+      key: EVALUATOR_REQUIREMENT_KEY,
+      inventory: [
+        "urn:jinn:benchmark-product:local-venue:evaluator-1",
+        "urn:jinn:benchmark-product:local-venue:evaluator-2",
+      ],
+      posture: "enforced",
+    });
+  });
+
+  it("generates a deployment module carrying one registration per evaluator", async () => {
+    venue = createLocalVenue({ workspaceDir, now: NOW, evaluatorCount: 2 });
+    const source = await readFile(join(workspaceDir, "venue", "evaluation-deployment.mjs"), "utf8");
+    expect(source).toContain("\"prediction-market:evaluator-1\"");
+    expect(source).toContain("\"prediction-market:evaluator-2\"");
+    expect(source).toContain("\"urn:jinn:benchmark-product:local-venue:evaluator-1\"");
+    expect(source).toContain("\"urn:jinn:benchmark-product:local-venue:evaluator-2\"");
+    expect(source).toContain("createPredictionEvaluatorRegistration");
+    expect(source).toContain("validateEvaluatorRegistrationSet");
+    expect(source).toContain("evaluatorAdaptersParserAllowlist");
+  });
+});

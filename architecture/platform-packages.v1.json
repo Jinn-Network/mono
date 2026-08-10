@@ -5,6 +5,7 @@
       "path": "packages",
       "mode": "recursive",
       "excludedDirectories": [
+        ".next",
         "node_modules"
       ]
     },
@@ -80,6 +81,10 @@
     "policy-optimization-ci": {
       "kind": "workflow",
       "path": ".github/workflows/policy-optimization-ci.yml"
+    },
+    "benchmark-product-ci": {
+      "kind": "workflow",
+      "path": ".github/workflows/benchmark-product-ci.yml"
     },
     "autopilot-ci": {
       "kind": "workflow",
@@ -241,13 +246,14 @@
       "stable": false
     },
     "transitional-or-private": {
-      "expectedPackageCount": 10,
+      "expectedPackageCount": 12,
       "publishPolicies": [
         "private",
         "never"
       ],
       "requiredGateIds": [
         "autopilot-ci",
+        "benchmark-product-ci",
         "broadcast-bot-ci",
         "client-ci",
         "environments-ci",
@@ -781,6 +787,90 @@
         "status": "removal tracked",
         "sunsetCondition": "The monorepo no longer needs the vendored copy."
       }
+    },
+    {
+      "name": "@jinn-network/benchmark-product-core",
+      "path": "packages/benchmark-product/core",
+      "domain": "benchmark-product",
+      "role": "benchmark product core",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
+            "status": "approved"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
+    },
+    {
+      "name": "@jinn-network/benchmark-product-web",
+      "path": "packages/benchmark-product/web",
+      "domain": "benchmark-product",
+      "role": "benchmark product web application",
+      "tier": 4,
+      "classification": "product",
+      "stability": "experimental",
+      "authority": {
+        "documents": [
+          {
+            "path": "docs/superpowers/specs/2026-08-05-benchmark-product-design.md",
+            "status": "draft"
+          },
+          {
+            "path": "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md",
+            "status": "approved"
+          },
+          {
+            "path": "packages/benchmark-product/web/BENCHMARK-PRODUCT-WEB-SPEC.md",
+            "status": "draft"
+          }
+        ],
+        "decisionRecord": null
+      },
+      "releaseGroup": "transitional-or-private",
+      "publishPolicy": "never",
+      "ownerGroup": "architecture-control",
+      "requiredGateIds": [
+        "benchmark-product-ci"
+      ],
+      "boundaryPolicy": {
+        "kind": "source-boundary",
+        "path": ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      },
+      "publicSurface": {
+        "schemas": [],
+        "profiles": [],
+        "fixtures": [],
+        "conformance": []
+      },
+      "supersedes": [],
+      "replacedBy": []
     },
     {
       "name": "@jinn-network/benchmarking-aggregate",

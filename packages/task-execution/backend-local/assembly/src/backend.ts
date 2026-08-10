@@ -829,6 +829,13 @@ export class LocalTaskExecutionBackend implements TaskExecutionBackend {
     if (!this.writer.acquired) throw this.writer.error;
   }
 
+  /** Synchronous host seam proving this constructor owns the state-root writer. Unlike
+   * `preflight`, this performs no launcher/readiness probes and therefore cannot cross an async
+   * response boundary before ownership is known. */
+  assertStateRootOwnership(): void {
+    this.assertWriter();
+  }
+
   private recordShutdownDrainFailure(error: unknown): void {
     this.shutdownDrainFailures.push(error instanceof Error ? error : new Error(String(error)));
   }

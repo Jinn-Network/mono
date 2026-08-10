@@ -192,6 +192,17 @@ function deliveryBytes(attempt: string, taskDigest: string): Uint8Array {
 }
 
 describe("writer-lock-safe shutdown (§7.102)", () => {
+  test("exposes synchronous state-root ownership without running readiness probes", async () => {
+    const root = await stateRoot("ownership-assertion");
+    const owner = fixture(root);
+    const contender = fixture(root);
+    expect(() => owner.assertStateRootOwnership()).not.toThrow();
+    expect(() => contender.assertStateRootOwnership()).toThrow(TaskExecutionError);
+    await owner.shutdown();
+    const successor = fixture(root);
+    expect(() => successor.assertStateRootOwnership()).not.toThrow();
+  });
+
   test("retains the writer lock until live workers drain and then releases exactly once", async () => {
     const root = await stateRoot("writer-barrier");
     const pause = barrier();
