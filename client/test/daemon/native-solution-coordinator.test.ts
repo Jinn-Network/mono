@@ -20,6 +20,7 @@ import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-
 import {
   NativeSolutionCoordinator,
   type NativeSolutionSettlementCanonicalFact,
+  type NativeSolutionSettlementPort,
   type NativeSolutionVerificationPort,
 } from '../../src/daemon/native-solution-coordinator.js';
 import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
@@ -186,7 +187,7 @@ function setup(input: {
       settlementBroadcast = true;
       return { txHash: `0x${'7'.repeat(64)}` as const };
     }),
-    readCanonical: vi.fn(async () => {
+    readCanonical: vi.fn(async (_request: Parameters<NativeSolutionSettlementPort['readCanonical']>[0]) => {
       const configured = input.settlementFacts?.[settlementFactIndex++];
       if (configured !== undefined) return configured;
       return settlementBroadcast
@@ -260,6 +261,26 @@ describe('NativeSolutionCoordinator', () => {
     expect(subject.publish).toHaveBeenCalledTimes(4);
     expect(subject.settlement.broadcast).toHaveBeenCalledOnce();
     expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'solution-settled' });
+  });
+
+  // #2561 sibling, solver-side: the settlement reconcile re-fetches the delivery payload to bind
+  // the on-chain settlement to the exact public Delivery. Native records are HTTP-served and never
+  // IPFS-pinned, so the coordinator must hand the settlement reader the solver's OWN published
+  // delivery record location (from the publication outbox) — otherwise the reader falls to the
+  // IPFS-only plane, throws, and the engagement wedges in `solution-settlement-pending`, holding
+  // the operator's concurrency slot forever.
+  it('hands the settlement reader the solver-published delivery record HTTP location', async () => {
+    const subject = setup();
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'solution-settled' });
+
+    const deliveryDigest = documentDigest(subject.deliveryBytes);
+    const expectedLocation = `https://operator.example/records/${deliveryDigest.slice('sha256:'.length)}`;
+    expect(subject.settlement.readCanonical).toHaveBeenCalled();
+    for (const [request] of subject.settlement.readCanonical.mock.calls) {
+      expect(request.deliveryPublicLocations).toContain(expectedLocation);
+    }
   });
 
   it('accepts matching backend recovery without a duplicate submit', async () => {

@@ -82,6 +82,14 @@ export interface NativeSolutionSettlementPort {
   readCanonical(input: {
     readonly operation: NativeOperationRow;
     readonly engagement: NativeEngagementRow;
+    /**
+     * HTTP serving locations the solver advertised when it published its OWN Delivery record.
+     * Native solution records live only on the solver's HTTP serving plane and are never pinned to
+     * IPFS (#2561 sibling), so the settlement re-fetch that binds the on-chain settlement to the
+     * exact public Delivery tries these locations before the IPFS plane. Every plane is
+     * digest-verified against the on-chain-anchored delivery digest; omit for IPFS-only readers.
+     */
+    readonly deliveryPublicLocations?: readonly string[];
   }): Promise<NativeSolutionSettlementCanonicalFact>;
 }
 
@@ -422,12 +430,31 @@ export class NativeSolutionCoordinator {
     }
   }
 
+  /**
+   * HTTP serving locations this solver advertised when it published its own Delivery record. The
+   * settlement reader re-fetches the delivery payload to bind the on-chain settlement to the exact
+   * public Delivery; native records are HTTP-served and never IPFS-pinned (#2561 sibling), so an
+   * IPFS-only re-fetch throws and wedges the engagement in `solution-settlement-pending`, holding
+   * the operator's concurrency slot forever. Handing the reader the record's own advertised
+   * location lets it resolve off the solver's serving plane, digest-verified, before IPFS.
+   */
+  private deliveryPublicLocations(engagementId: NativeOperationId): readonly string[] {
+    const locations: string[] = [];
+    for (const publication of this.input.state.listSolutionPublications(engagementId)) {
+      if (publication.role !== 'delivery' || publication.status !== 'published') continue;
+      const location = (publication.detail as { readonly location?: unknown } | null)?.location;
+      if (typeof location === 'string' && location.length > 0) locations.push(location);
+    }
+    return locations;
+  }
+
   private async settle(engagementId: NativeOperationId): Promise<NativeSolutionCoordinatorResult> {
     const engagement = this.engagement(engagementId);
+    const deliveryPublicLocations = this.deliveryPublicLocations(engagementId);
     const intent = this.input.state.beginSolutionSettlement(engagementId);
     let operation = this.input.state.getOperation(intent.operationId)!;
     let fact = await dependency('solution settlement canonical read', () =>
-      this.input.settlement.readCanonical({ operation, engagement }));
+      this.input.settlement.readCanonical({ operation, engagement, deliveryPublicLocations }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };
@@ -456,7 +483,7 @@ export class NativeSolutionCoordinator {
     this.input.state.recordSolutionSettlementBroadcast(intent.operationId, broadcast.txHash);
     operation = this.input.state.getOperation(intent.operationId)!;
     fact = await dependency('solution settlement canonical read', () =>
-      this.input.settlement.readCanonical({ operation, engagement }));
+      this.input.settlement.readCanonical({ operation, engagement, deliveryPublicLocations }));
     if (fact.kind === 'finalized') {
       this.input.state.recordSolutionSettlementFinalized(intent.operationId, fact);
       return { kind: 'solution-settled', operationId: intent.operationId };

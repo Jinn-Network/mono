@@ -933,7 +933,7 @@ export function createSolverReads(input: {
         return canonical.finalized ? { kind: 'finalized', ...fact } : { kind: 'observed-safe', ...fact };
       },
     },
-    async solutionSettlementCanonical({ operation, engagement }) {
+    async solutionSettlementCanonical({ operation, engagement, deliveryPublicLocations }) {
       if (!hashValue(engagement.requestId)) {
         return { kind: 'absent', checkedAtBlock: (await input.publicClient.getBlock({ blockTag: 'finalized' })).number };
       }
@@ -995,6 +995,11 @@ export function createSolverReads(input: {
           requestId: engagement.requestId,
           operator: input.config.safeAddress,
           advertisedDeliveryDigest: detail.deliveryDigest as `sha256:${string}`,
+          // The solver published this Delivery record to its OWN HTTP serving plane and never
+          // pinned it to IPFS (#2561 sibling), so hand the reader the solver's advertised locations
+          // for the digest-verified re-fetch; the IPFS plane stays the fallback. Every plane is
+          // verified against `advertisedDeliveryDigest`, bound to the on-chain settlement above.
+          deliveryPublicLocations,
         });
         if (correspondence === null || !sameHex(correspondence.transactionHash, event.transactionHash)) {
           return { kind: 'orphaned', txHash: event.transactionHash, reason: 'solution settlement does not bind the exact public Delivery' };

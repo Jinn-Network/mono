@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { JINN_ROUTER_V3_ABI, SAFE_ABI } from '@jinn-network/marketplace-binding';
+import { encodeFunctionData, zeroAddress } from 'viem';
 import {
   createBaseSepoliaFinalizedAnchorClient,
   createBaseSepoliaEvaluatorReads,
   createBaseSepoliaRecordTransport,
   createNativeInfrastructure,
+  createSolverReads,
   createViemBaseSepoliaReadClients,
   mountBaseSepoliaPublicSource,
   verifyCanonicalTodayTaskCreated,
@@ -13,6 +16,7 @@ import {
   type NativeBaseSepoliaTargetReadClient,
 } from '../../src/daemon/native-base-sepolia-infrastructure.js';
 import type { NativeInfrastructureFactoryInput } from '../../src/daemon/native-infrastructure-bundle.js';
+import type { NativeEngagementRow, NativeOperationRow } from '../../src/daemon/native-operator-state.js';
 
 const ADDRESSES = {
   taskCoordinator: '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98',
@@ -382,6 +386,147 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     const { reads, byLocation } = fixture({ ipfsMiss: true, httpBytes: forged });
     await expect(reads.readCanonicalSolutionDelivery({
       ...expected,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/not found locally/u);
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+  });
+});
+
+describe('first-party Base Sepolia solver settlement Delivery re-fetch', () => {
+  // Sibling of #2561 (the evaluator path), solver-side. The solver's OWN settlement reconcile
+  // re-fetches its delivery payload to bind the on-chain settlement to the exact public Delivery.
+  // Native delivery records are published only to the operator's HTTP serving plane and are never
+  // pinned to IPFS, so the re-fetch must resolve via the solver's own advertised HTTP location.
+  const requestId = `0x${'12'.repeat(32)}` as const;
+  const transactionHash = `0x${'34'.repeat(32)}` as const;
+  const routerBlockHash = `0x${'56'.repeat(32)}` as const;
+  const mechBlockHash = `0x${'78'.repeat(32)}` as const;
+  const deliveryMech = '0x9999999999999999999999999999999999999999' as const;
+  const operator = SAFE;
+  const deliveryBytes = new TextEncoder().encode('{"delivery":"exact"}');
+  const advertisedDeliveryDigest = `sha256:${createHash('sha256').update(deliveryBytes).digest('hex')}` as const;
+  const solutionDigest = `0x${'ab'.repeat(32)}` as const;
+  const deliveryLocation = 'https://solver-b.example:7402/records/delivery' as const;
+
+  const innerData = encodeFunctionData({
+    abi: JINN_ROUTER_V3_ABI,
+    functionName: 'claimSolutionDelivery',
+    args: [requestId, solutionDigest],
+  });
+  const settlementInput = encodeFunctionData({
+    abi: SAFE_ABI,
+    functionName: 'execTransaction',
+    args: [ADDRESSES.jinnRouter, 0n, innerData, 0, 0n, 0n, 0n, zeroAddress, zeroAddress, '0x'],
+  });
+
+  const operation = {
+    operationId: 'op-settlement-1',
+    engagementId: 'eng-1',
+    kind: 'solution-settlement',
+    status: 'broadcast',
+    txHash: transactionHash,
+    priorTxHash: null,
+    blockHash: null,
+    blockNumber: null,
+    detail: { attempt: 'urn:jinn:attempt:1', deliveryDigest: advertisedDeliveryDigest },
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeOperationRow;
+  const engagement = {
+    engagementId: 'eng-1',
+    chainId: 84532,
+    coordinator: ADDRESSES.taskCoordinator,
+    taskId: 42n,
+    role: 'solver',
+    operatorAgent: 'did:key:solver',
+    taskDigest: `sha256:${'aa'.repeat(32)}`,
+    submissionUri: 'urn:uuid:11111111-1111-4111-8111-111111111111',
+    submissionDigest: `sha256:${'bb'.repeat(32)}`,
+    state: 'solution-settlement-pending',
+    attemptIndex: 3,
+    attemptUri: 'urn:jinn:attempt:1',
+    requestId,
+    createdAt: '2026-08-10T19:00:00.000Z',
+    updatedAt: '2026-08-10T19:00:00.000Z',
+  } as unknown as NativeEngagementRow;
+
+  function fixture(options: { readonly httpBytes?: Uint8Array } = {}) {
+    // The IPFS plane always misses — the native delivery record was never pinned there.
+    const byDigest = vi.fn(async () => { throw new Error('block was not found locally'); });
+    const byLocation = vi.fn(async () => {
+      if (options.httpBytes === undefined) throw new Error('no public replica in this fixture');
+      return options.httpBytes;
+    });
+    const routerEvent = {
+      args: { operator, requestId, taskId: 42n, attemptIndex: 3 },
+      transactionHash,
+      blockHash: routerBlockHash,
+      blockNumber: 90n,
+    };
+    const publicClient = {
+      async getBlockNumber() { return 100n; },
+      async getTransaction() { return { input: settlementInput }; },
+      async readContract(input: { functionName: string }) {
+        if (input.functionName === 'mapRequestIdInfos') {
+          return [deliveryMech, deliveryMech, operator, 60n, 1n, `0x${'00'.repeat(32)}`] as const;
+        }
+        if (input.functionName === 'getOperator') return operator;
+        if (input.functionName === 'mapAgentMechFactories') return '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+        throw new Error(`unexpected read ${input.functionName}`);
+      },
+      async getContractEvents(input: { eventName: string; address?: string }) {
+        if (input.eventName === 'SolutionDeliveryClaimed') return [routerEvent];
+        expect(input.address!.toLowerCase()).toBe(deliveryMech.toLowerCase());
+        return [{
+          args: { requestId, mechServiceMultisig: operator, data: `0x${advertisedDeliveryDigest.slice(7)}` },
+          transactionHash: `0x${'9a'.repeat(32)}`,
+          blockHash: mechBlockHash,
+          blockNumber: 80n,
+        }];
+      },
+      async getBlock(input: { blockTag?: string; blockNumber?: bigint }) {
+        if (input.blockTag === 'finalized') {
+          return { number: 95n, hash: `0x${'bc'.repeat(32)}`, timestamp: 1_000n };
+        }
+        return {
+          number: input.blockNumber!,
+          hash: input.blockNumber === 90n ? routerBlockHash : input.blockNumber === 80n ? mechBlockHash : `0x${'cd'.repeat(32)}`,
+          timestamp: 0n,
+        };
+      },
+    };
+    const reads = createSolverReads({
+      config: { safeAddress: SAFE, chain: { chainId: 84532, generation: 'today', contracts: ADDRESSES } },
+      publicClient: publicClient as never,
+      records: {
+        byDigest,
+        byLocation,
+        async byRawCid() { throw new Error('unused'); },
+      },
+    });
+    return { reads, byDigest, byLocation };
+  }
+
+  it('resolves the finalized settlement via the solver HTTP locator when the IPFS plane misses', async () => {
+    const { reads, byLocation, byDigest } = fixture({ httpBytes: deliveryBytes });
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toMatchObject({ kind: 'finalized', txHash: transactionHash, blockNumber: 90n });
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+    // The HTTP plane produced the exact bytes, so the IPFS plane is never consulted.
+    expect(byDigest).not.toHaveBeenCalled();
+  });
+
+  it('does not complete settlement on forged HTTP Delivery bytes off the anchored digest', async () => {
+    const forged = new TextEncoder().encode('{"delivery":"forged"}');
+    const { reads, byLocation } = fixture({ httpBytes: forged });
+    // HTTP serves a digest-mismatched payload and IPFS also misses — no plane yields the anchored
+    // bytes, so the reconcile throws (holds the engagement) rather than settling a forged Delivery.
+    await expect(reads.solutionSettlementCanonical({
+      operation,
+      engagement,
       deliveryPublicLocations: [deliveryLocation],
     })).rejects.toThrow(/not found locally/u);
     expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
