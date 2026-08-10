@@ -260,19 +260,32 @@ export interface DaemonConfig {
   aiUnits?: AiUnitsDaemonConfig;
 
   /**
-   * Loop watchdog (#1043). When supplied, the daemon seeds a heartbeat for
-   * every started loop and runs a supervisor that detects any loop whose last
-   * tick has gone stale. `autoRestart` is the flag-gated recovery (default OFF
-   * per the locked Option A decision): off → detect + loud-log + structured
-   * event only; on → non-zero process.exit so Railway's ON_FAILURE policy
-   * restarts the daemon through its existing idempotent boot path. Omitted in
-   * unit tests, so the watchdog is inert there.
+   * Loop watchdog (#1043; defaulted ON 2026-08-10, decision 3 of the
+   * operator standup, #2461/#2540). When armed, the daemon seeds a heartbeat
+   * for every started loop and runs a supervisor that detects any loop whose
+   * last tick has gone stale. `autoRestart` is the separately flag-gated
+   * recovery (default OFF per the locked Option A decision): off → detect +
+   * loud-log + structured `loop_watchdog_stale` event only; on → non-zero
+   * process.exit so Railway's ON_FAILURE policy restarts the daemon through
+   * its existing idempotent boot path.
+   *
+   * DEFAULT: omitting this field now ARMS the watchdog with
+   * `{ autoRestart: false }` — detection defaults on independent of whether a
+   * call site remembers to opt in (round-8's live gate run found zero
+   * `loop_watchdog_stale` events had ever fired because nothing wired
+   * `config.watchdog`). Pass the literal `false` to fully disable — the
+   * escape hatch for unit tests that don't exercise watchdog behavior and
+   * don't want the extra background timer.
+   *
+   * Legitimate long waits (e.g. a `ready-only` loop sitting out a `degraded`
+   * readiness window — funding shortfall, incomplete fleet, spec §5/#2407)
+   * are already excluded from staleness upstream of this flag: `runLoop` and
+   * the inline `engine-tick` loop both stamp their heartbeat every interval
+   * regardless of admission, so an intentionally-paused loop never looks
+   * stale to the watchdog. See `loop-heartbeat.ts` and
+   * `test/daemon/loop-admission.test.ts`.
    */
-  watchdog?: {
-    autoRestart: boolean;
-    stalenessFactor?: number;
-    checkIntervalMs?: number;
-  };
+  watchdog?: { autoRestart: boolean; stalenessFactor?: number; checkIntervalMs?: number } | false;
 
   /**
    * The stage-1 cutover composition root (Task 12, `client/src/daemon/composition-root.ts`):
@@ -768,7 +781,10 @@ export class Daemon {
         }),
       );
     }
-    // #1043 loop watchdog. Inert unless config.watchdog is supplied.
+    // #1043 loop watchdog. Armed by default (2026-08-10 decision 3, #2461/
+    // #2540) — omitting `config.watchdog` no longer means "no watchdog", it
+    // means "watchdog with autoRestart: false". Pass the literal `false` to
+    // opt all the way out (see the DaemonConfig.watchdog docstring above).
     //
     // IDEMPOTENCY (AC#3): the only recovery action is the watchdog's non-zero
     // process.exit (see watchdog-loop.ts WATCHDOG_EXIT_CODE). It does NOT add a
@@ -778,7 +794,8 @@ export class Daemon {
     // engine.recoverInFlight() above (daemon.ts) re-drives in-flight tasks and
     // src/preflight/pidfile-liveness.ts clears a stale lock. Both are already
     // idempotent, so a restart cannot double-claim / double-deliver / double-pay.
-    if (this.config.watchdog) {
+    if (this.config.watchdog !== false) {
+      const watchdogConfig = this.config.watchdog ?? { autoRestart: false };
       const interval = this.config.pollIntervalMs ?? 5000;
       // Derive the watchdog registrations from LOOP_REGISTRY (the single source
       // of loop names + defaults) — filter to the loops actually started, then
@@ -826,9 +843,9 @@ export class Daemon {
       this.watchdogLoop = new WatchdogLoop({
         store: this.store,
         loops: registrations,
-        stalenessFactor: this.config.watchdog.stalenessFactor,
-        checkIntervalMs: this.config.watchdog.checkIntervalMs,
-        autoRestart: this.config.watchdog.autoRestart,
+        stalenessFactor: watchdogConfig.stalenessFactor,
+        checkIntervalMs: watchdogConfig.checkIntervalMs,
+        autoRestart: watchdogConfig.autoRestart,
         isActive: () => this.cachedShutdownState === 'running',
       });
       this.loopPromises.push(

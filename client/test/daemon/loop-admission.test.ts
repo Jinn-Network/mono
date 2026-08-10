@@ -17,6 +17,8 @@ import {
   runLoop,
   setDaemonReadiness,
 } from '../../src/daemon/loop-heartbeat.js';
+import { WatchdogLoop } from '../../src/daemon/watchdog-loop.js';
+import { getEventBuffer } from '../../src/events/emitter.js';
 
 describe('LOOP_REGISTRY admission field (#2407)', () => {
   // `posting` (one-swap M5, #2461) is the native counterpart of `creator` — the claim/work-path
@@ -192,5 +194,91 @@ describe('runLoop admission gating (#2407)', () => {
     stopped = true;
     await vi.advanceTimersByTimeAsync(1000);
     await running;
+  });
+});
+
+/**
+ * Decision 3 (2026-08-10 operator standup, #2461/#2540): the watchdog now
+ * defaults to armed (daemon.ts), so this exclusion — previously moot because
+ * nothing armed the watchdog to observe it — now actually matters in
+ * production. It is NOT new plumbing: `runLoop` (above) already stamps a
+ * `ready-only` loop's heartbeat every interval regardless of admission, so a
+ * loop legitimately sitting out a `degraded` window (funding shortfall,
+ * incomplete fleet, spec §5/#2407) never accumulates heartbeat age. These
+ * tests prove that guarantee end-to-end against a real `WatchdogLoop`, so a
+ * regression in the heartbeat-regardless-of-admission behavior is caught
+ * here, not just at the `runLoop` unit level above.
+ */
+describe('watchdog + admission: a legitimately-paused ready-only loop never looks stale (#2461 decision 3)', () => {
+  let store: Store;
+  const intervalMs = 5000;
+  const stalenessFactor = 6;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    store = new Store(':memory:');
+    setDaemonReadiness('degraded');
+    getEventBuffer().clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setDaemonReadiness('ready');
+    store.close();
+  });
+
+  it('does not emit loop_watchdog_stale even past the staleness threshold while degraded', async () => {
+    const tick = vi.fn().mockResolvedValue(undefined);
+    let stopped = false;
+    // 'work' is ready-only (claim/work path) and uses the shared readiness
+    // holder by default, which this test set to 'degraded'.
+    const running = runLoop({
+      name: 'work',
+      store,
+      tick,
+      intervalMs,
+      stopSignal: () => stopped,
+      emitSource: 'work',
+    });
+
+    // Advance well past the watchdog's staleness threshold. If the loop's
+    // heartbeat were frozen (the pre-decision-3 risk this task calls out),
+    // this alone would be enough to trip the watchdog below.
+    await vi.advanceTimersByTimeAsync(stalenessFactor * intervalMs * 3);
+    expect(tick).not.toHaveBeenCalled(); // never admitted -> never actually ticked
+
+    const wd = new WatchdogLoop({
+      store,
+      loops: [{ name: 'work', intervalMs }],
+      stalenessFactor,
+      isActive: () => true,
+    });
+    wd.check();
+
+    const events = getEventBuffer().snapshot({ limit: 10 });
+    expect(events.find((e) => e.errorCode === 'loop_watchdog_stale')).toBeUndefined();
+
+    stopped = true;
+    await vi.advanceTimersByTimeAsync(intervalMs);
+    await running;
+  });
+
+  it('control: the same threshold DOES trip the watchdog when the heartbeat is not refreshed', () => {
+    // Simulates what round-8 found: a loop whose heartbeat genuinely stopped
+    // advancing. Proves the test above is discriminating, not vacuous.
+    store.setConfigValue(
+      'loop_heartbeat:work',
+      String(Date.now() - stalenessFactor * intervalMs - 1),
+    );
+    const wd = new WatchdogLoop({
+      store,
+      loops: [{ name: 'work', intervalMs }],
+      stalenessFactor,
+      isActive: () => true,
+    });
+    wd.check();
+
+    const events = getEventBuffer().snapshot({ limit: 10 });
+    expect(events.find((e) => e.errorCode === 'loop_watchdog_stale')).toBeDefined();
   });
 });

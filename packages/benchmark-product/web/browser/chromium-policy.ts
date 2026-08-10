@@ -1,0 +1,5 @@
+export {
+  PINNED_CHROMIUM_VERSION,
+  PINNED_PERMISSIONS_POLICY,
+  PINNED_PERMISSIONS_POLICY_FEATURES,
+} from "../permissions-policy.mjs";

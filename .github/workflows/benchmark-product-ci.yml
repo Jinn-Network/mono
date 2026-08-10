@@ -1,0 +1,200 @@
+name: Benchmark Product CI
+
+on:
+  pull_request:
+    paths:
+      - "packages/benchmark-product/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+      - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
+      - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
+      - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+  push:
+    branches: [next]
+    paths:
+      - "packages/benchmark-product/**"
+      - ".github/scripts/benchmark-product-package-inventory.test.mjs"
+      - ".github/scripts/benchmark-product-source-boundaries.test.mjs"
+      - ".github/scripts/benchmark-product-packed-types.test.mjs"
+      - ".github/workflows/benchmark-product-ci.yml"
+      - "docs/superpowers/specs/2026-08-05-benchmark-product-design.md"
+      - "docs/superpowers/plans/2026-08-05-standalone-benchmarking-product-program.md"
+      - "docs/superpowers/plans/2026-08-09-benchmark-product-extraction-readiness.md"
+      - "docs/superpowers/plans/2026-08-05-benchmark-product-issue-drafts.md"
+      - "docs/superpowers/plans/2026-08-10-benchmark-product-final-verification.md"
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify package inventory and dependency graph
+        run: node --test .github/scripts/benchmark-product-package-inventory.test.mjs
+      - name: Verify source boundaries
+        run: node --test .github/scripts/benchmark-product-source-boundaries.test.mjs
+
+  product:
+    needs: [architecture]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      # Cross-tree portal dependencies, built from source in dependency order: each one's `dist/`
+      # is what the next one's type resolution reads. The full graph: BP-11's runtime closure
+      # (protocol, trust-core, environment-record, profiles, records, task-admission, interop),
+      # then BP-12's real local-venue stack (backend, supervisor, workspace, launchers -- all now
+      # real runtime dependencies, not the prior test-only `task-execution-launchers`
+      # devDependency) plus its evidence-* / attestation-issuer transitives and the evaluation
+      # leg (evaluation-harness, evaluator-adapters, backend-local, benchmarking-run,
+      # benchmarking-local), then BP-13's `benchmarking-aggregate` (Report production/
+      # verification -- depends only on records + trust-core, both already built earlier).
+      - name: Build portal dependencies from source
+        run: |
+          (cd packages/task-execution/protocol && yarn install --immutable && yarn build)
+          (cd packages/trust/core && yarn install --immutable && yarn build)
+          (cd packages/environments/record && yarn install --immutable && yarn build)
+          (cd packages/task-execution/profiles && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/records && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/aggregate && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/supervisor && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/workspace && yarn install --immutable && yarn build)
+          (cd packages/task-execution/backend-local/launchers && yarn install --immutable && yarn build)
+          (cd packages/task-supply/admission && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/interop && yarn install --immutable && yarn build)
+          (cd packages/evidence/protocol && yarn install --immutable && yarn build)
+          (cd packages/evidence/repository && yarn install --immutable && yarn build)
+          (cd packages/evidence/discovery && yarn install --immutable && yarn build)
+          (cd packages/evidence/execution-recorder && yarn install --immutable && yarn build)
+          (cd packages/evidence/attestation-issuer && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluation-harness && yarn install --immutable && yarn build)
+          (cd packages/task-execution/evaluator-adapters && yarn install --immutable && yarn build)
+          # BP-32's synchronous ownership assertion is the narrow platform seam that lets a web
+          # response distinguish a rejected contender from a durably-started in-process driver.
+          (cd packages/task-execution/backend-local/assembly && yarn install --immutable && yarn vitest run src/backend.shutdown.test.ts && yarn build)
+          (cd packages/benchmarking/run && yarn install --immutable && yarn build)
+          (cd packages/benchmarking/local && yarn install --immutable && yarn build)
+      - name: Verify Benchmark Product core
+        working-directory: packages/benchmark-product/core
+        run: |
+          yarn install --immutable
+          yarn typecheck
+          yarn test
+          yarn build
+          yarn check:parity
+          yarn pack:smoke
+      - name: Upload Benchmark Product runtime distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: |
+            packages/**/dist
+            !packages/**/node_modules/**
+          if-no-files-found: error
+          retention-days: 1
+
+  # BP-31: web is a server-side client of core's public built entry. The product
+  # job builds the complete portal graph in dependency order; this job restores
+  # those exact distributions before installing or compiling the web package.
+  web:
+    needs: [architecture, product]
+    runs-on: ubuntu-latest
+    # The web package consumes core through a Yarn portal. Preserve the portal path so Node
+    # resolves core's transitive portal dependencies from this isolated consumer install rather
+    # than from core's source directory (which intentionally has no node_modules in this job).
+    env:
+      NODE_OPTIONS: --preserve-symlinks
+    defaults:
+      run:
+        working-directory: packages/benchmark-product/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      - name: Verify Benchmark Product web
+        run: |
+          yarn install --immutable
+          # Vite intentionally resolves portal packages to their real source paths. Give every
+          # source package the web consumer's one installed dependency tree so the isolated job
+          # needs no sibling installs and runtime registries/classes keep one module identity.
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, symlinkSync } from "node:fs";
+          import { dirname, join, relative, resolve } from "node:path";
+
+          const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+          const consumerModules = resolve("node_modules");
+          for (const resolution of Object.values(manifest.resolutions)) {
+            if (typeof resolution !== "string" || !resolution.startsWith("portal:")) continue;
+            const packageDir = resolve(resolution.slice("portal:".length));
+            const packageModules = join(packageDir, "node_modules");
+            if (existsSync(packageModules)) {
+              throw new Error(`isolated web runner unexpectedly found ${packageModules}`);
+            }
+            symlinkSync(relative(dirname(packageModules), consumerModules), packageModules, "dir");
+          }
+          NODE
+          yarn lint
+          yarn typecheck
+          yarn test
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn build
+          yarn playwright install --with-deps chromium
+          BP50_BUILD_SECRET_SENTINEL=BP50_BUILD_SECRET_SENTINEL_25763a50f8b04e7a yarn test:browser
+
+  verify:
+    needs: [architecture, product, web]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every Benchmark Product CI stage to succeed
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          PRODUCT_RESULT: ${{ needs.product.result }}
+          WEB_RESULT: ${{ needs.web.result }}
+        run: |
+          for result in \
+            "$ARCHITECTURE_RESULT" \
+            "$PRODUCT_RESULT" \
+            "$WEB_RESULT"; do
+            test "$result" = "success"
+          done
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enable Yarn 4.13.0
+        run: |
+          corepack enable
+          corepack prepare yarn@4.13.0 --activate
+      - name: Restore the product runtime distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-product-runtime-dists
+          path: packages
+      - name: Compile the packed public entrypoint consumer
+        run: node .github/scripts/benchmark-product-packed-types.test.mjs
