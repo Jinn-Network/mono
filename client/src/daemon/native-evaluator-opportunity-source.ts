@@ -560,6 +560,12 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
          * those is a statement about ONE engagement's evidence, and every one of them used to take
          * the whole pass down with it, along with the checkpoint of every unrelated engagement in
          * the same tick.
+         *
+         * Those three refusals are deterministic, but this function also awaits two NETWORK reads —
+         * `fetcher.byDigest` and `readCanonicalSolutionDelivery` — and those fail transiently and
+         * independently per engagement, which is exactly the distribution that produces "A fails
+         * while B succeeds". Isolation on its own would then lose A forever, so it is paired with
+         * the checkpoint hold below; neither half is correct without the other.
          */
         const readGroup = async (cards: readonly NativePublicRecordQueueItem[]): Promise<void> => {
           const deliveries = cards.filter((card) => role(card) === 'delivery');
@@ -672,22 +678,71 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
             references,
           });
         };
+        /**
+         * Where a failed engagement sits in the source's sequence, so the checkpoint can be held
+         * at it. `0n` — hold everything — is the deliberate answer whenever that position cannot
+         * be read, because a failure we cannot place is a failure we cannot safely skip past.
+         */
+        const groupSequence = (cards: readonly NativePublicRecordQueueItem[]): bigint => {
+          try {
+            const delivery = cards.find((card) => role(card) === 'delivery');
+            return delivery === undefined ? 0n : BigInt(provenance(delivery).sequence);
+          } catch {
+            return 0n;
+          }
+        };
+        const held: bigint[] = [];
         for (const [engagementId, cards] of groups.entries()) {
           try {
             // eslint-disable-next-line no-await-in-loop -- engagements share one store and one venue read.
             await readGroup(cards);
           } catch (cause) {
+            const at = groupSequence(cards);
+            held.push(at);
             console.error(
               `[native-evaluator] engagement ${engagementId} could not be read this pass — every `
-              + `other engagement still ran, retrying next poll: `
+              + `other engagement still ran, and the source checkpoint is HELD at sequence ${at} `
+              + `until it does, so nothing at or above it is emitted: `
               + `${cause instanceof Error ? cause.message : String(cause)}`,
             );
           }
         }
-        return result.sort((left, right) => {
-          const leftSequence = left.kind === 'solution-available' ? left.observation.sourceSequence : left.sourceSequence;
-          const rightSequence = right.kind === 'solution-available' ? right.observation.sourceSequence : right.sourceSequence;
-          return BigInt(leftSequence) < BigInt(rightSequence) ? -1 : BigInt(leftSequence) > BigInt(rightSequence) ? 1 : 0;
+        /**
+         * The checkpoint hold — the half that makes per-engagement isolation safe.
+         *
+         * Isolation alone would lose a transient failure PERMANENTLY. The source checkpoint is one
+         * scalar advanced per emitted event, and `sequenceAfter` is strict: engagement A failing at
+         * sequence 5 on a 429 from a canonical read while B succeeds at 7 would emit B, advance the
+         * checkpoint to 7, and filter A out of every subsequent pass. Both recovery locks are shut
+         * behind that — `reconcileStartup()` walks evaluations that exist, and a never-admitted
+         * opportunity has no row; and the state layer refuses late admission outright ("evaluation
+         * source sequence did not advance"). For an evaluator that is a silently missing verdict,
+         * which is strictly worse than the wedge the isolation removes.
+         *
+         * So: unrelated engagements BELOW a failure still progress, and nothing at or above one is
+         * emitted. A permanently-refusing engagement therefore walls the ones above it — loudly,
+         * with its sequence named on every pass — which is the stance `native-discovery.ts` already
+         * takes for an announcement this consumer cannot decode: loud and stuck beats silent and
+         * lossy. The retry story is simply the next poll.
+         */
+        const holdFrom = held.length === 0
+          ? undefined
+          : held.reduce((lowest, at) => (at < lowest ? at : lowest));
+        const sequenceOf = (event: typeof result[number]): bigint =>
+          BigInt(event.kind === 'solution-available' ? event.observation.sourceSequence : event.sourceSequence);
+        const emitted = holdFrom === undefined
+          ? result
+          : result.filter((event) => sequenceOf(event) < holdFrom);
+        if (holdFrom !== undefined && emitted.length !== result.length) {
+          console.error(
+            `[native-evaluator] holding ${result.length - emitted.length} readable source event(s) `
+            + `at or above sequence ${holdFrom} until the engagement that failed there can be read`,
+          );
+        }
+        return emitted.sort((left, right) => {
+          const leftSequence = sequenceOf(left);
+          const rightSequence = sequenceOf(right);
+          return leftSequence < rightSequence ? -1 : leftSequence > rightSequence ? 1 : 0;
         });
       },
     },

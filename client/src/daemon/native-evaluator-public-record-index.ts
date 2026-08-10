@@ -24,9 +24,16 @@
  * - **the same source, at the same sequence, now carrying a different signed log entry** — that
  *   is equivocation over an append-only history. Refuse, loudly.
  *
- * Nothing here weakens the second case: the `entry_digest` equality is byte-for-byte exactly as
- * before, and the `source_id` a row is pinned to still cannot change. Only the row the check runs
- * against moved, from "whatever shares this digest" to "this exact signed statement".
+ * The `entry_digest` equality is byte-for-byte exactly as before; only the row it runs against
+ * moved, from "whatever shares this digest" to "this exact signed statement".
+ *
+ * What DID loosen, stated plainly rather than glossed: a DIFFERENT configured source announcing
+ * the same `(digest, location)` was refused on the old key and now gets its own row. That is
+ * harmless here, and deliberately so — the sources are a configured, trust-verified pair, this
+ * table holds nothing but retrieval hints, and every byte fetched from any location in it is
+ * re-checked against the content digest before it is used (`recordFetcher`). A second source
+ * agreeing on where a record lives is corroboration; a second source LYING about it costs an
+ * attacker nothing more than a location that fails the digest check on read.
  */
 import type { Store } from '../store/store.js';
 
@@ -43,6 +50,11 @@ export interface NativePublicRecordProvenance {
  * re-derives nothing: the two new key columns already exist as ordinary columns on the old table,
  * every row moves verbatim, and because the old key was a strict prefix of the new one the copy
  * cannot collide.
+ *
+ * All four statements run in ONE transaction. A crash between the DROP and the RENAME would
+ * otherwise leave the live table gone and the rebuilt rows stranded in `_v2`, and the next boot
+ * would create a fresh empty table by `CREATE TABLE IF NOT EXISTS` and never adopt the leftover —
+ * silent data loss on exactly the reboot an operator performs to recover from a crash.
  */
 function migrateToStatementKey(store: Store): void {
   const columns = store.db
@@ -51,23 +63,25 @@ function migrateToStatementKey(store: Store): void {
   if (columns.length === 0) return;
   if (columns.some(({ name, pk }) => name === 'source_sequence' && pk > 0)) return;
 
-  store.db.exec(`
-    CREATE TABLE native_evaluator_public_records_v2 (
-      record_digest   TEXT NOT NULL,
-      location        TEXT NOT NULL,
-      source_id       TEXT NOT NULL,
-      source_sequence TEXT NOT NULL,
-      entry_digest    TEXT NOT NULL,
-      PRIMARY KEY (record_digest, location, source_id, source_sequence)
-    );
-    INSERT INTO native_evaluator_public_records_v2
-      (record_digest, location, source_id, source_sequence, entry_digest)
-    SELECT record_digest, location, source_id, source_sequence, entry_digest
-      FROM native_evaluator_public_records;
-    DROP TABLE native_evaluator_public_records;
-    ALTER TABLE native_evaluator_public_records_v2
-      RENAME TO native_evaluator_public_records;
-  `);
+  store.db.transaction(() => {
+    store.db.exec(`
+      CREATE TABLE native_evaluator_public_records_v2 (
+        record_digest   TEXT NOT NULL,
+        location        TEXT NOT NULL,
+        source_id       TEXT NOT NULL,
+        source_sequence TEXT NOT NULL,
+        entry_digest    TEXT NOT NULL,
+        PRIMARY KEY (record_digest, location, source_id, source_sequence)
+      );
+      INSERT INTO native_evaluator_public_records_v2
+        (record_digest, location, source_id, source_sequence, entry_digest)
+      SELECT record_digest, location, source_id, source_sequence, entry_digest
+        FROM native_evaluator_public_records;
+      DROP TABLE native_evaluator_public_records;
+      ALTER TABLE native_evaluator_public_records_v2
+        RENAME TO native_evaluator_public_records;
+    `);
+  })();
 }
 
 /**
