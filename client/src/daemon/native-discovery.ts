@@ -774,6 +774,32 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
       firstAdoption: prior === undefined,
     });
     if (outcome.status !== 'ok') {
+      // ## The self-hosted degrade also covers the COLD verify path (#2547 residual, #2549)
+      //
+      // #2548 degraded a self-hosted source's lapsed head only at the `sameHead` revalidation
+      // branch above, which requires `prior !== undefined` — a checkpoint from a previous poll.
+      // A co-located requester+evaluator that has never before completed a poll for its own
+      // requester source (no row in `native_discovery_source_checkpoints`) never reaches that
+      // branch: `prior === undefined` sends it straight here, to `verifySourceChain` via
+      // `configured.verify`, which reports the same lapsed-`refreshBy` condition as `{ status:
+      // 'stale' }` (`packages/discovery/protocol/src/verify/source-chain.ts`). Before this fix
+      // that was thrown as a fatal `NativeDiscoverySyncError('stale')`, aborting
+      // `WorkLoop.initialize` on first boot after any idle stretch past `refreshBy` — the exact
+      // deadlock #2548 closed at the OTHER call site, still open here.
+      //
+      // The discriminator is identical to #2548's: `configured.selfServed === true` only for a
+      // source this operator serves from its own archive (`buildNativeDiscoverySources`), never
+      // for a peer. Only `status === 'stale'` degrades — every other verify failure (`forked`,
+      // `broken-chain` at any `at:`, `unauthorized-signer`, etc.) still throws, fail-closed, for
+      // self and peer alike, exactly as it always has.
+      if (outcome.status === 'stale' && configured.selfServed === true) {
+        return {
+          reason: 'self-source-stale',
+          detail: `self-hosted source head lapsed refreshBy ${syncedHead.head.refreshBy} at cold `
+            + 'verify (no prior checkpoint); degrading this poll rather than refusing this '
+            + 'operator its own boot',
+        };
+      }
       throw new NativeDiscoverySyncError(
         source,
         outcome.at === undefined ? outcome.status : `${outcome.status} (at: ${outcome.at})`,
