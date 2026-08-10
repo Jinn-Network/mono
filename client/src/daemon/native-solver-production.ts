@@ -90,7 +90,10 @@ export async function buildNativeSolverProductionHost(
   scope.defer(solver.close);
   const verification = buildNativeSolutionVerification({
     identities: input.roles,
-    resolveEvaluationSpec: buildNativeEvaluationSpecResolver(input.infrastructure.records),
+    resolveEvaluationSpec: buildNativeEvaluationSpecResolver(
+      input.infrastructure.records,
+      config.sources.filter(({ role }) => role === 'requester').map(({ baseUrl }) => baseUrl),
+    ),
   });
   const writeSession = await input.infrastructure.activateWrites({
     role: 'solver',
