@@ -155,6 +155,21 @@ function sha256Descriptor(descriptor: ResourceDescriptor): `sha256:${string}` {
   return `sha256:${sha256}`;
 }
 
+/** Minimum representable ISO gap between two adjacent record announcements (1ms). */
+const RECORD_ANNOUNCEMENT_STEP_MS = 1;
+
+/**
+ * Announcement timestamp for the record at `ordinal` in an engagement's publication set, based at
+ * the outbox-shared `createdAt`. Distinct ordinals yield strictly-increasing instants so each
+ * record advances the append-only signed source head; the value is a pure function of the persisted
+ * base and ordinal, so a resumed publish recomputes the identical timestamp.
+ */
+function advanceAnnouncementTimestamp(base: string, ordinal: number): string {
+  const baseMs = Date.parse(base);
+  if (!Number.isFinite(baseMs)) throw new NativeSolutionFailure('publication-timestamp-invalid', base);
+  return new Date(baseMs + ordinal * RECORD_ANNOUNCEMENT_STEP_MS).toISOString();
+}
+
 export class NativeSolutionCoordinator {
   constructor(private readonly input: {
     readonly state: NativeOperatorStateRepository;
@@ -374,14 +389,32 @@ export class NativeSolutionCoordinator {
 
   private async publish(engagementId: NativeOperationId): Promise<void> {
     const artifacts = this.input.state.listSolutionArtifacts(engagementId);
+    // A solution publishes several records (evidence, outputs, Delivery, Delivery envelope) into
+    // ONE append-only signed source whose head must STRICTLY advance per announcement (see
+    // packages/discovery/serve/src/source-writer.ts). The outbox stamps every record of an
+    // engagement with the same createdAt, so announcing them all at that shared instant collides
+    // on record 2+. Derive each record's announcement timestamp from its stable ordinal over the
+    // full publication set, based at the shared createdAt: distinct ordinals give strictly-
+    // increasing timestamps in publish order, they advance past whatever the head already holds
+    // (including a partially-published solution whose first record already advanced the head), and
+    // the derivation is deterministic — a resumed publish reproduces the exact timestamp, so any
+    // record already committed to the source reconciles idempotently instead of re-colliding.
+    const ordinals = new Map<string, number>(
+      this.input.state.listSolutionPublications(engagementId)
+        .map((publication, index) => [publication.publicationKey, index] as const),
+    );
     for (const publication of this.input.state.listPendingPublications()
       .filter((candidate) => candidate.engagementId === engagementId)) {
       const artifact = artifacts.find(
         (candidate) => candidate.role === publication.role && candidate.digest === publication.recordDigest,
       );
       if (artifact === undefined) throw new NativeSolutionFailure('publication-artifact-missing');
+      const announceAt = advanceAnnouncementTimestamp(
+        publication.createdAt,
+        ordinals.get(publication.publicationKey) ?? 0,
+      );
       const receipt = await dependency('solution publication', () => this.input.publisher.publish({
-        publication,
+        publication: { ...publication, createdAt: announceAt },
         artifact,
         bytes: artifact.bytes,
       }));

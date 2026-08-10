@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { generateKeyPairSync, sign as cryptoSign, verify as cryptoVerify } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   ReconciliationReport,
   TaskExecutionBackend,
@@ -10,6 +14,7 @@ import {
   sealTask,
   serializeCanonicalJson,
 } from '@jinn-network/task-execution-protocol';
+import { archivePagePath } from '@jinn-network/record-discovery-protocol';
 import { Store } from '../../src/store/store.js';
 import { NativeOperatorStateRepository } from '../../src/daemon/native-operator-state.js';
 import {
@@ -17,6 +22,7 @@ import {
   type NativeSolutionSettlementCanonicalFact,
   type NativeSolutionVerificationPort,
 } from '../../src/daemon/native-solution-coordinator.js';
+import { openNativeSolutionPublisher } from '../../src/daemon/native-solution-publisher.js';
 
 const COORDINATOR = '0x8a34793e10595c89B7e41Cc7Ff0F76850F44AD98';
 const SUBMISSION = 'urn:uuid:33333333-3333-4333-8333-333333333333' as const;
@@ -104,20 +110,26 @@ function setup(input: {
   readonly evidenceFailure?: () => Error | undefined;
   readonly publicationFailure?: () => Error | undefined;
   readonly settlementFailure?: () => Error | undefined;
+  readonly outputs?: ReadonlyArray<{ readonly name: string; readonly bytes: Uint8Array }>;
+  readonly publisher?: ConstructorParameters<typeof NativeSolutionCoordinator>[0]['publisher'];
 } = {}) {
   let nowMs = Date.parse('2026-08-02T00:00:00Z');
   const now = () => new Date(nowMs);
   const subject = finalizedClaim(now);
   const engagement = subject.state.getEngagement(subject.engagementId)!;
+  const outputs = input.outputs ?? [{ name: 'prediction', bytes: outputBytes }];
+  const outputByDigest = new Map(
+    outputs.map(({ bytes }) => [documentDigest(bytes), bytes] as const),
+  );
   const deliveryBytes = sealDelivery({
     protocol: 'https://spec.jinn.network/profiles/task-execution/v1',
     attempt: engagement.attemptUri!,
     task: documentDigest(subject.documents.taskBytes),
-    outputs: [{
-      name: 'prediction',
+    outputs: outputs.map(({ name, bytes }) => ({
+      name,
       mediaType: 'application/json',
-      digest: { sha256: documentDigest(outputBytes).slice('sha256:'.length) },
-    }],
+      digest: { sha256: documentDigest(bytes).slice('sha256:'.length) },
+    })),
     evidenceRecords: [{ family: 'execution-evidence', digest: documentDigest(evidenceBytes) }],
     executionIds: ['urn:uuid:55555555-5555-4555-8555-555555555555'],
     outcome: 'fulfilled',
@@ -149,7 +161,11 @@ function setup(input: {
     })),
     deliveries: vi.fn(async () => [{ attempt: engagement.attemptUri!, digest: documentDigest(deliveryBytes) }]),
     fetchDelivery: vi.fn(async () => deliveryBytes),
-    fetchArtifact: vi.fn(async () => outputBytes),
+    fetchArtifact: vi.fn(async (descriptor: { digest?: { sha256?: string } }) => {
+      const bytes = outputByDigest.get(`sha256:${descriptor.digest?.sha256 ?? ''}`);
+      if (bytes === undefined) throw new Error('unexpected output descriptor');
+      return bytes;
+    }),
   };
   const verify = vi.fn(async () => input.verification ?? ({ ok: true as const }));
   const publish = vi.fn(async ({ publication }: Parameters<NonNullable<ConstructorParameters<typeof NativeSolutionCoordinator>[0]['publisher']['publish']>>[0]) => {
@@ -197,7 +213,7 @@ function setup(input: {
       },
     },
     verification: { verify },
-    publisher: { sourceId: 'urn:jinn:source:solver-records', publish },
+    publisher: input.publisher ?? { sourceId: 'urn:jinn:source:solver-records', publish },
     settlement,
     retry: {
       now,
@@ -393,3 +409,123 @@ describe('NativeSolutionCoordinator', () => {
 function subjectDeliverySentinel(): Uint8Array {
   return new TextEncoder().encode('{"this":"is not the referenced evidence"}');
 }
+
+// A five-record solution (2 outputs + evidence + Delivery + Delivery envelope) published into ONE
+// append-only signed source: the source-writer's head must strictly advance per announcement, so
+// the coordinator must give distinct records distinct, strictly-increasing announcement timestamps.
+// Regression for the CP5 delivery blocker where every record inherited the same outbox createdAt
+// and records 2+ were rejected with SourceWriterIntegrityError (integration/evidence-v1 round 12).
+describe('NativeSolutionCoordinator multi-record publication (CP5 delivery)', () => {
+  const secondOutputBytes = new TextEncoder().encode('{"probability":0.31}');
+  const fiveRecordOutputs = [
+    { name: 'prediction', bytes: outputBytes },
+    { name: 'prediction-alt', bytes: secondOutputBytes },
+  ];
+  const roots: string[] = [];
+  const closers: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    await Promise.all(closers.splice(0).map((close) => close().catch(() => undefined)));
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  function realSigner() {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    return {
+      keyId: 'did:key:z6MkRealSolverDiscovery',
+      sign: (payload: Uint8Array) => new Uint8Array(cryptoSign(null, payload, privateKey)),
+      verify: (payload: Uint8Array, signature: Uint8Array) => cryptoVerify(null, payload, publicKey, signature),
+    };
+  }
+
+  async function realPublisher() {
+    const rootDir = await mkdtemp(join(tmpdir(), 'jinn-solution-cp5-'));
+    roots.push(rootDir);
+    const publisher = await openNativeSolutionPublisher({
+      rootDir,
+      publicBaseUrl: 'https://operator.example/native',
+      source: { agent: 'urn:jinn:operator:solver-a', name: 'solver-records' },
+      signer: realSigner(),
+      settlementDeclarationKey: 'did:key:z6MkSolverSettlement',
+    });
+    closers.push(() => publisher.close());
+    return publisher;
+  }
+
+  async function announcementTimestamps(publisher: Awaited<ReturnType<typeof realPublisher>>, count: number): Promise<string[]> {
+    const timestamps: string[] = [];
+    for (let sequence = 1; sequence <= count; sequence += 1) {
+      const page = String(sequence).padStart(16, '0');
+      const response = await publisher.handler(new Request(
+        `https://operator.example/native${archivePagePath('solver-records', page)}`,
+      ));
+      expect(response.status).toBe(200);
+      const parsed = JSON.parse(await response.text()) as { entries: Array<{ entry: { timestamp: string } }> };
+      timestamps.push(parsed.entries[0]!.entry.timestamp);
+    }
+    return timestamps;
+  }
+
+  it('publishes all five records with strictly-advancing announcement timestamps', async () => {
+    const publisher = await realPublisher();
+    const subject = setup({ outputs: fiveRecordOutputs, publisher });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'solution-settled' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'solution-settled' });
+
+    // Every record committed to the one signed source: the head reached sequence five, which the
+    // source-writer would have refused had any two announcements shared a timestamp.
+    const timestamps = await announcementTimestamps(publisher, 5);
+    expect(timestamps).toHaveLength(5);
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
+  });
+
+  it('resumes a partially-published solution past the already-advanced head (task 1223)', async () => {
+    // Reproduce the wedged durable state: the first record already advanced the signed head on a
+    // failed attempt, the remaining records are still `intent`, and the engagement is paused. A
+    // one-record-then-fault publisher wrapper drives the coordinator into exactly that state.
+    const publisher = await realPublisher();
+    let published = 0;
+    let faulting = true;
+    const faultingPublisher = {
+      sourceId: publisher.sourceId,
+      publish: async (value: Parameters<typeof publisher.publish>[0]) => {
+        if (faulting && published >= 1) throw new Error('publisher briefly unavailable');
+        published += 1;
+        return publisher.publish(value);
+      },
+    };
+    const subject = setup({ outputs: fiveRecordOutputs, publisher: faultingPublisher });
+
+    await expect(subject.coordinator.reconcileEngagement(subject.engagementId))
+      .resolves.toMatchObject({ kind: 'paused', reason: 'solution-dependency-failed' });
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'paused' });
+    // One record committed; head is now at that first announcement's timestamp.
+    const [headTimestamp] = await announcementTimestamps(publisher, 1);
+    const pendingBefore = subject.state.listPendingPublications()
+      .filter((row) => row.engagementId === subject.engagementId);
+    expect(pendingBefore).toHaveLength(4);
+    // Every still-pending record carries the SAME outbox createdAt as the published one — the exact
+    // condition that made naive re-publishing collide with the advanced head forever.
+    expect(new Set(pendingBefore.map((row) => row.createdAt)).size).toBe(1);
+    expect(pendingBefore[0]!.createdAt).toBe(headTimestamp);
+
+    // Retry with the source healthy: the remaining four records must advance strictly past the head.
+    faulting = false;
+    subject.advanceRetry();
+    await expect(subject.coordinator.reconcileStartup())
+      .resolves.toEqual([expect.objectContaining({ kind: 'solution-settled' })]);
+    expect(subject.state.getEngagement(subject.engagementId)).toMatchObject({ state: 'solution-settled' });
+
+    const timestamps = await announcementTimestamps(publisher, 5);
+    for (let index = 1; index < timestamps.length; index += 1) {
+      expect(Date.parse(timestamps[index]!)).toBeGreaterThan(Date.parse(timestamps[index - 1]!));
+    }
+    // No duplicate settlement, and exactly five distinct records reached the source.
+    expect(subject.state.listOperations(subject.engagementId)
+      .filter(({ kind }) => kind === 'solution-settlement')).toHaveLength(1);
+  });
+});
