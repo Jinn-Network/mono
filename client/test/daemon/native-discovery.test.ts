@@ -113,9 +113,11 @@ function source(
   routes: Map<string, unknown>,
   verify: NativeDiscoverySource['verify'],
   verifyHead: NativeDiscoverySource['verifyHead'] = async () => ({ status: 'ok' }),
+  selfServed = false,
 ): NativeDiscoverySource {
   return {
     identity: { agent: AGENT, name: SOURCE_NAME },
+    selfServed,
     resolveEndpoint: async () => ({
       agent: AGENT,
       name: SOURCE_NAME,
@@ -147,10 +149,11 @@ function consumer(input: {
   readonly verifyHead?: NativeDiscoverySource['verifyHead'];
   readonly decode?: ReturnType<typeof createNativeDiscoveryConsumer>['decode'];
   readonly now?: () => Date;
+  readonly selfServed?: boolean;
 }) {
   return createNativeDiscoveryConsumer({
     store: input.store,
-    sources: [source(input.routes, input.verify, input.verifyHead)],
+    sources: [source(input.routes, input.verify, input.verifyHead, input.selfServed ?? false)],
     transport: {
       'fetch': async (url) => {
         const value = input.routes.get(url);
@@ -269,6 +272,167 @@ describe('native discovery consumer', () => {
     await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale' });
     expect(verifyHead).toHaveBeenCalledOnce();
     expect(restarted.takePending()).toEqual([]);
+  });
+
+  // #2547 — a co-located requester+evaluator lists its OWN requester source in `recordSources`. At
+  // boot its evaluator opportunity reader synchronously `sync()`s it. When the operator has idled
+  // past `refreshBy` (>24h — nothing re-stamps an idle head), the served head is byte-identical to
+  // the durable checkpoint, so the `sameHead` revalidation runs and the head is stale. For a PEER
+  // that is a fail-closed refusal; for the operator's OWN self-hosted source it is a self-inflicted
+  // boot deadlock, so it must degrade instead.
+  describe('self-hosted source lapsed-head degrade (#2547)', () => {
+    // A helper that reproduces the round-9 scenario: a checkpoint written when the head was fresh,
+    // then a restart where the SAME (byte-identical) head is now past `refreshBy` — exactly the
+    // idle self-consume the gate hit. `production` mirrors the live trust adapter, which returns
+    // `verifyHead: { status: 'stale' }` for a lapsed head (`trust-adapter.ts` `isFresh`).
+    async function idledSelfSource(selfServed: boolean, production = true) {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      let now = new Date('2026-08-02T01:00:00.000Z');
+      const store = new Store(':memory:');
+      const initial = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => now,
+      });
+      await initial.sync();
+      for (const item of initial.takePending()) initial.acknowledge(item);
+
+      // >24h later the operator has posted nothing new; its own head has lapsed refreshBy.
+      now = new Date('2026-08-04T01:00:00.000Z');
+      const restarted = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        // Production: the trust adapter itself reports the lapse via `verifyHead`. The `ok` variant
+        // exercises the redundant consumer-side `refreshBy <= now` guard on the same path.
+        verifyHead: async () => ({ status: production ? 'stale' as const : 'ok' as const }),
+        now: () => now,
+        selfServed,
+      });
+      return restarted;
+    }
+
+    it('cold-boots a >24h-idle self-hosted source: degrades, does not throw, leaves the checkpoint intact', async () => {
+      const restarted = await idledSelfSource(true);
+      const report = await restarted.sync();
+      expect(report.degraded).toEqual([
+        { source: { agent: AGENT, name: SOURCE_NAME }, reason: 'self-source-stale', detail: expect.any(String) },
+      ]);
+      expect(report.accepted).toBe(0);
+      expect(report.verifiedSources).toBe(0);
+      // The checkpoint is untouched — a degrade advances nothing; the next appended entry resumes it.
+      expect(restarted.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toMatchObject({
+        sequence: '0000000000000001',
+      });
+      expect(restarted.takePending()).toEqual([]);
+    });
+
+    it('also degrades via the redundant refreshBy guard when verifyHead reports ok', async () => {
+      const restarted = await idledSelfSource(true, false);
+      const report = await restarted.sync();
+      expect(report.degraded).toMatchObject([{ reason: 'self-source-stale' }]);
+    });
+
+    // MUTATION GUARD: a genuinely stale PEER head (selfServed === false) MUST still refuse, exactly
+    // as before this fix. Deleting the `configured.selfServed === true` discriminator in
+    // `native-discovery.ts` (so every stale head degrades) turns this rejection into a resolve —
+    // this test goes red. That is the precise line between "my own idle head" and "a peer that may
+    // be partitioned or withholding".
+    it('still refuses a genuinely stale PEER head — fail-closed, red if the discriminator is removed', async () => {
+      const restarted = await idledSelfSource(false);
+      await expect(restarted.sync()).rejects.toMatchObject({ reason: 'stale' });
+      expect(restarted.takePending()).toEqual([]);
+    });
+
+    it('refuses a self-hosted source whose head is wrongly-signed — only staleness degrades, never a bad signature', async () => {
+      const restarted = await idledSelfSource(true);
+      // Reissue the consumer with a self-hosted source whose head fails signature revalidation.
+      const first = entry('0000000000000001', null, DIGEST_A);
+      let now = new Date('2026-08-02T01:00:00.000Z');
+      const store = new Store(':memory:');
+      const seeded = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => now,
+      });
+      await seeded.sync();
+      for (const item of seeded.takePending()) seeded.acknowledge(item);
+      now = new Date('2026-08-04T01:00:00.000Z');
+      const badlySigned = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'unauthorized-signer' }),
+        now: () => now,
+        selfServed: true,
+      });
+      await expect(badlySigned.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+      void restarted;
+    });
+
+    it('a fresh self-hosted head boots unchanged — no degrade, no card work', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const initial = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => FRESH_FIXTURE_TIME,
+        selfServed: true,
+      });
+      await initial.sync();
+      for (const item of initial.takePending()) initial.acknowledge(item);
+
+      const restarted = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => FRESH_FIXTURE_TIME,
+        selfServed: true,
+      });
+      await expect(restarted.sync()).resolves.toEqual({ accepted: 0, verifiedSources: 1, degraded: [] });
+    });
+
+    // FINDING (#2547): the alternative "refresh the served head at boot" does NOT work with this
+    // consumer. A head re-signed at the SAME sequence (issuedAt/refreshBy bumped, entry unchanged)
+    // is not `sameHead`, so it falls to the sequence guard and trips `rewound-or-tampered-head` for
+    // ANY consumer already checkpointed at that sequence — self OR peer. Degrading the self-consume
+    // is the change that closes the deadlock without touching a byte of peer trust.
+    it('demonstrates why refreshing the served head instead trips rewound-or-tampered-head', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const initial = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'ok' }),
+        now: () => new Date('2026-08-02T01:00:00.000Z'),
+        selfServed: true,
+      });
+      await initial.sync();
+      for (const item of initial.takePending()) initial.acknowledge(item);
+
+      // "Refresh" the head: same sequence and entry, later issuedAt and refreshBy.
+      const refreshedRoutes = routesFor([first]);
+      refreshedRoutes.set(`${ROOT}${headPath(SOURCE_NAME)}`, wireHead({
+        ...head(first, '2026-08-04T00:00:00.000Z'),
+        refreshBy: '2026-08-05T00:00:00.000Z',
+      }));
+      const afterRefresh = consumer({
+        store,
+        routes: refreshedRoutes,
+        verify: async () => ({ status: 'ok' }),
+        verifyHead: async () => ({ status: 'ok' }),
+        now: () => new Date('2026-08-04T01:00:00.000Z'),
+        selfServed: true,
+      });
+      await expect(afterRefresh.sync()).rejects.toMatchObject({ reason: 'rewound-or-tampered-head' });
+    });
   });
 
   it('refuses an advertised head whose terminal entry is absent or has a different digest even when the injected verifier returns ok', async () => {

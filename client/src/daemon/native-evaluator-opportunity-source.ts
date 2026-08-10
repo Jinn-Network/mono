@@ -336,6 +336,13 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
   readonly infrastructure: NativeEvaluatorOpportunityInfrastructure;
   readonly events: NativeMarketplaceEventRepository;
   readonly syncVenue: () => Promise<void>;
+  /**
+   * This operator's own `publicBaseUrl` (#2547). When the co-located operator serves its own
+   * requester source, that source's idle-lapsed head degrades rather than deadlocking the
+   * evaluator's boot `sync()`. Omitted on the standalone evaluator host (its requester source is a
+   * peer's), where every stale head stays a fail-closed refusal.
+   */
+  readonly selfBaseUrl?: string;
 }): Promise<NativeEvaluatorOpportunityReader> {
   const discoveryStore = input.discoveryStore ?? input.store;
   installSchema(input.store);
@@ -354,12 +361,16 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     store: discoveryStore,
     transport,
     trust: input.trust,
+    ...(input.selfBaseUrl === undefined ? {} : { selfBaseUrl: input.selfBaseUrl }),
   });
   const solverSources = buildNativeDiscoverySources({
     configured: solverConfigured,
     store: discoveryStore,
     transport,
     trust: input.trust,
+    // A co-located operator does not serve the solver source (that is a peer's), so this never marks
+    // it self-hosted; threaded for symmetry so the discriminator is uniform across both consumers.
+    ...(input.selfBaseUrl === undefined ? {} : { selfBaseUrl: input.selfBaseUrl }),
   });
   const requester = createNativeDiscoveryConsumer({
     store: discoveryStore,
