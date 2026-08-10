@@ -1348,6 +1348,29 @@ export class NativeOperatorStateRepository {
     ).all() as RawPublication[]).map(publicationRow);
   }
 
+  /**
+   * Every publication of one engagement in the SAME deterministic order the publish loop drains
+   * `listPendingPublications` in — including already-published rows. The index of a record in this
+   * ordering is its stable announcement ordinal, which survives status transitions and partial
+   * publishing (a resumed solution reproduces the exact ordinals). The publisher derives a
+   * strictly-advancing announcement timestamp from that ordinal so distinct records never collide
+   * on the append-only source head.
+   */
+  listSolutionPublications(engagement: NativeOperationId): NativePublicationRow[] {
+    return (this.store.db.prepare(
+      `SELECT * FROM native_publication_outbox WHERE engagement_id = ?
+       ORDER BY created_at,
+         CASE role
+           WHEN 'output' THEN 0
+           WHEN 'evidence' THEN 1
+           WHEN 'delivery-envelope' THEN 2
+           WHEN 'delivery' THEN 3
+           ELSE 4
+         END,
+         publication_key`,
+    ).all(engagement) as RawPublication[]).map(publicationRow);
+  }
+
   recordPublicationPublished(
     key: NativeOperationId,
     input: {
