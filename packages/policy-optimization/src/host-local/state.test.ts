@@ -42,8 +42,13 @@ describe("private host state", () => {
   test("holds a process-visible advisory lock across the whole operation", async () => {
     const root = mkdtempSync(join(tmpdir(), "jinn-host-lock-"));
     let release!: () => void;
-    const held = withHostAdvisoryLock(root, async () => new Promise<void>((resolve) => { release = resolve; }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    let signalAcquired!: () => void;
+    const acquired = new Promise<void>((resolve) => { signalAcquired = resolve; });
+    const held = withHostAdvisoryLock(root, async () => {
+      signalAcquired();
+      return new Promise<void>((resolve) => { release = resolve; });
+    });
+    await acquired;
     await expect(withHostAdvisoryLock(root, async () => undefined)).rejects.toThrow(/holds this campaign/u);
     release();
     await held;
