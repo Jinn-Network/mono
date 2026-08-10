@@ -10,6 +10,12 @@ import { join } from "node:path";
 import type {
   CapabilityGrant, ProvisionerContract, TaskView, WorkspacePaths,
 } from "@jinn-network/task-execution-workspace";
+// #2538: the conformance kit asserts against the provisioner's own filename contract, not a
+// transcribed copy of it. The literal value is pinned once, in the workspace package's own test.
+import {
+  STAGED_DISPATCH_CONTEXT_FILENAME,
+  STAGED_SEALED_TASK_FILENAME,
+} from "@jinn-network/task-execution-workspace";
 import { describe, expect, test } from "vitest";
 import { loadWorkspaceFixture } from "./fixtures.js";
 import { makeSampleLauncherInputs } from "./launcher-contract.js";
@@ -79,11 +85,11 @@ export function describeWorkspaceContract(subject: WorkspaceContractSubject): vo
       });
       await provisioner.setup(view(inputBytes), target, []);
       expect(provisioner.workspaceKind(view())).toBe(subject.kind);
-      expect(await readFile(join(target.input, "task.sealed"))).toEqual(taskBytes);
-      expect(await readFile(join(target.input, "dispatch-context.json"))).toEqual(dispatchBytes);
+      expect(await readFile(join(target.input, STAGED_SEALED_TASK_FILENAME))).toEqual(taskBytes);
+      expect(await readFile(join(target.input, STAGED_DISPATCH_CONTEXT_FILENAME))).toEqual(dispatchBytes);
       expect(await readFile(join(target.input, "payload.bin"))).toEqual(inputBytes);
       expect((await stat(target.input)).mode & 0o777).toBe(0o500);
-      expect((await stat(join(target.input, "task.sealed"))).mode & 0o777).toBe(0o400);
+      expect((await stat(join(target.input, STAGED_SEALED_TASK_FILENAME))).mode & 0o777).toBe(0o400);
       expect((await stat(target.secrets)).mode & 0o777).toBe(0o700);
       if (subject.kind === "worktree") {
         expect(expectedOid).toMatch(/^[0-9a-f]{40}$/u);
@@ -147,10 +153,10 @@ export function describeWorkspaceContract(subject: WorkspaceContractSubject): vo
         assertHarnessGroupEmpty: () => undefined, shouldEvictWork: () => false,
       });
       await provisioner.setup(view(), target, [{ key: "token", descriptor: "opaque" }]);
-      await chmod(join(target.input, "task.sealed"), 0o600);
-      await writeFile(join(target.input, "task.sealed"), "mutated");
+      await chmod(join(target.input, STAGED_SEALED_TASK_FILENAME), 0o600);
+      await writeFile(join(target.input, STAGED_SEALED_TASK_FILENAME), "mutated");
       const result = await provisioner.harvest(target, []);
-      expect(result.integrityViolations).toContainEqual({ path: "task.sealed", reason: "input-mutated" });
+      expect(result.integrityViolations).toContainEqual({ path: STAGED_SEALED_TASK_FILENAME, reason: "input-mutated" });
       await expect(stat(target.secrets)).rejects.toThrow();
       await expect(stat(target.tmp)).rejects.toThrow();
       for (const retained of [target.meta, target.logs, target.out, target.harnessState, target.work]) {

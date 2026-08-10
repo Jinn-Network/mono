@@ -34,6 +34,8 @@ import {
   type AttemptIdentity,
 } from "@jinn-network/task-execution-supervisor";
 import type { WorkspacePaths } from "@jinn-network/task-execution-workspace";
+// #2538: one source for the provisioner's staged filenames — never a literal repeated per reader.
+import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import {
   EvaluationOperationalError,
   validateCompletedEvaluation,
@@ -211,7 +213,7 @@ async function readEvaluationTask(
   paths: WorkspacePaths,
 ): Promise<EvaluationTaskBindings> {
   const task = object(
-    parseJson(await readFile(join(paths.input, "task.sealed")), "evaluation Task"),
+    parseJson(await readFile(join(paths.input, STAGED_SEALED_TASK_FILENAME)), "evaluation Task"),
     "evaluation Task",
   );
   const profile = object(task["profile"], "evaluation Task profile");
@@ -711,7 +713,7 @@ export async function runEvaluationHarness(
         "evaluation Task crosswalk digest does not match evaluation-spec.json",
       );
     }
-    const evaluationTaskBytes = await readFile(join(paths.input, "task.sealed"));
+    const evaluationTaskBytes = await readFile(join(paths.input, STAGED_SEALED_TASK_FILENAME));
     const verifiedSubject = verifyEvaluationSubject({
       taskBytes: task.bytes,
       deliveryBytes: delivery.bytes,

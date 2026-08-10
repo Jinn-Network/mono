@@ -17,6 +17,12 @@ import {
 } from "@jinn-network/execution-recorder";
 import type { AttemptUri } from "@jinn-network/task-execution-backend";
 import type { HarvestResult, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+// #2538: the staged input filenames come from the provisioner's own contract, never a literal
+// repeated here. These strings become entity ids inside published evidence records.
+import {
+  STAGED_DISPATCH_CONTEXT_FILENAME,
+  STAGED_SEALED_TASK_FILENAME,
+} from "@jinn-network/task-execution-workspace";
 
 export type EvidenceIndexingOutcome =
   | {
@@ -105,6 +111,23 @@ function inputCapture(
   };
 }
 
+/**
+ * Resolve a harvested manifest path back to the file it names.
+ *
+ * `harvest()` collects from TWO roots: `out/` with no prefix, and `logs/` under a literal `logs/`
+ * prefix. Every manifest path was being resolved against `out/` alone, so a `logs/*` entry pointed
+ * at `out/logs/*` — a file that does not exist. That went unnoticed because nothing on this path
+ * ever wrote to `logs/`; the moment #2538 F5 started capturing harness stdio there, evidence
+ * capture failed to snapshot it and turned a plain launcher failure into
+ * `dependency-unavailable`. Found by the F5 change, pre-existing, fixed here rather than dodged by
+ * writing the logs somewhere harvest ignores.
+ */
+function harvestedArtifactPath(paths: WorkspacePaths, artifactPath: string): string {
+  return artifactPath === "logs" || artifactPath.startsWith("logs/")
+    ? join(realpathSync(paths.logs), artifactPath.slice("logs/".length))
+    : join(realpathSync(paths.out), artifactPath);
+}
+
 function results(
   paths: WorkspacePaths,
   harvest: HarvestResult,
@@ -125,7 +148,7 @@ function results(
     kind: "file" as const,
     entityId: `results/${artifact.path}`,
     source: {
-      path: join(realpathSync(paths.out), artifact.path),
+      path: harvestedArtifactPath(paths, artifact.path),
       mediaType: artifact.mediaType ?? "application/octet-stream",
       name: artifact.path.split("/").at(-1),
     },
@@ -215,12 +238,12 @@ export function createEvidenceJoin(options: EvidenceJoinOptions): EvidenceJoin {
           }],
         },
         task: {
-          entityId: "input/task.sealed",
+          entityId: `input/${STAGED_SEALED_TASK_FILENAME}`,
           name: "Sealed Task",
           source: {
             bytes: input.taskBytes,
             mediaType: TASK_MEDIA_TYPE,
-            name: "task.sealed",
+            name: STAGED_SEALED_TASK_FILENAME,
           },
           identifiers: [{
             propertyId: "https://spec.jinn.network/schemes/task-digest",
@@ -230,7 +253,7 @@ export function createEvidenceJoin(options: EvidenceJoinOptions): EvidenceJoin {
         },
         initialInputs: [
           inputCapture(
-            "input/dispatch-context.json",
+            `input/${STAGED_DISPATCH_CONTEXT_FILENAME}`,
             input.dispatchContextBytes,
             DISPATCH_MEDIA_TYPE,
           ),
