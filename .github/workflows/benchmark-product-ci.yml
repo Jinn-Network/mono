@@ -103,7 +103,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-product-runtime-dists
-          path: packages/**/dist
+          path: |
+            packages/**/dist
+            !packages/**/node_modules/**
           if-no-files-found: error
           retention-days: 1
 
