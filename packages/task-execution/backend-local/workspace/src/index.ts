@@ -17,6 +17,19 @@ export type {
   WorkspaceKind,
   WorkspacePaths,
 } from "./contract.js";
+// #2538: the single source for the provisioned `input/` filenames. Launchers and every other
+// reader of the staged Task import these instead of repeating a literal or globbing a pattern.
+export {
+  STAGED_DISPATCH_CONTEXT_FILENAME,
+  STAGED_SEALED_TASK_FILENAME,
+} from "./staged-input.js";
+// #2538 F5: the backend's own capture of the harness's stdio — named here so the backend that
+// writes it and the harvest that excludes it read the same two strings.
+export {
+  BACKEND_WRITTEN_LOG_FILENAMES,
+  HARNESS_STDERR_LOG,
+  HARNESS_STDOUT_LOG,
+} from "./harness-logs.js";
 export { makeDirProvisioner } from "./dir-provisioner.js";
 export { ProvisioningRejectedError } from "./dir-provisioner.js";
 export type { DirProvisionerOptions } from "./dir-provisioner.js";

@@ -2,6 +2,7 @@ import {
   PREDICTION_FORECAST_PROFILE_DIGEST_HEX,
   PREDICTION_FORECAST_PROFILE_URI,
 } from "@jinn-network/task-execution-profiles";
+import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import type { LauncherContract } from "./contract.js";
 import {
   baseEnv, capabilities, isolation, requireHarness, type LauncherOptions,
@@ -12,6 +13,13 @@ import {
  * sealed native forecast Task JSON from the attempt input dir and emits the profile's one
  * deterministic `prediction` output. No legacy task syntax, ambient clock, or extra fields
  * are admitted on this native launcher path.
+ *
+ * #2538: the Task is read at the provisioner's contracted path
+ * (`STAGED_SEALED_TASK_FILENAME`), not found by walking the input tree for `*.json`. The glob
+ * never matched the staged `task.sealed`, so this launcher exited 2 on every real attempt while
+ * its own test — which hand-wrote `task.json` — stayed green. Reading the contracted path also
+ * removes the substitution surface the glob had: a materialized input that happens to parse as a
+ * native Task can no longer stand in for the sealed one.
  */
 export function makePredictionV1BaselineLauncher(options: LauncherOptions = {}): LauncherContract {
   return {
@@ -34,6 +42,7 @@ const input = process.env.JINN_ATTEMPT_INPUT;
 const out = process.env.JINN_ATTEMPT_OUT;
 const PROFILE_URI = '${PREDICTION_FORECAST_PROFILE_URI}';
 const PROFILE_DIGEST = '${PREDICTION_FORECAST_PROFILE_DIGEST_HEX}';
+const TASK_FILE = ${JSON.stringify(STAGED_SEALED_TASK_FILENAME)};
 const PROBABILITY = /^(0(\\.\\d+)?|1(\\.0+)?)$/;
 const UTC = /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$/;
 const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -60,23 +69,19 @@ function isNativeTask(doc) {
     && typeof forecast.observedAt === 'string' && UTC.test(forecast.observedAt) && !Number.isNaN(Date.parse(forecast.observedAt))
     && typeof forecast.resolvesAt === 'string' && UTC.test(forecast.resolvesAt) && !Number.isNaN(Date.parse(forecast.resolvesAt)) && Date.parse(forecast.resolvesAt) > Date.parse(forecast.observedAt);
 }
-function walk(dir, matches) {
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  for (const e of entries) {
-    const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, matches);
-    else if (e.name.endsWith('.json')) {
-      try {
-        const doc = JSON.parse(fs.readFileSync(p, 'utf8'));
-        if (isNativeTask(doc)) matches.push(doc);
-      } catch {}
-    }
-  }
+const taskPath = path.join(input, TASK_FILE);
+let task;
+try {
+  task = JSON.parse(fs.readFileSync(taskPath, 'utf8'));
+} catch (error) {
+  console.error('prediction-v1-baseline: cannot read the staged native Task at input/' + TASK_FILE + ': ' + ((error && error.message) || String(error)));
+  process.exit(2);
 }
-const tasks = [];
-walk(input, tasks);
-if (tasks.length !== 1) { console.error('prediction-v1-baseline: expected exactly one native prediction-forecast Task'); process.exit(2); }
-const payload = { probabilityYes: tasks[0].payload.forecast.consensusProbabilityYes, submittedAt: tasks[0].payload.forecast.observedAt };
+if (!isNativeTask(task)) {
+  console.error('prediction-v1-baseline: input/' + TASK_FILE + ' is not a native prediction-forecast Task');
+  process.exit(2);
+}
+const payload = { probabilityYes: task.payload.forecast.consensusProbabilityYes, submittedAt: task.payload.forecast.observedAt };
 fs.mkdirSync(out, { recursive: true });
 fs.writeFileSync(path.join(out, 'prediction.json'), JSON.stringify(payload));
 fs.writeFileSync(path.join(out, 'structured-output.json'), JSON.stringify({

@@ -39,7 +39,14 @@ import type { NativeTrustAuthority } from './native-trust-catalog.js';
 import type { NativeDiscoveryCardProvenance } from './native-submission-facts.js';
 // #2533: the requester-association index — posting-keyed, with the tamper guard — lives in its
 // own module now. See its docstring for the collision this fixed and the discriminator it uses.
-import { runIsolatedPasses } from './native-isolated-passes.js';
+import { runIsolatedIngest, runIsolatedItems, runIsolatedPasses } from './native-isolated-passes.js';
+// #2539: the public-record location index — signed-statement-keyed, with the tamper guard — lives
+// in its own module now. See its docstring for the collision this fixed and the key it uses.
+import {
+  installPublicRecordSchema,
+  publicRecordLocations,
+  upsertPublicRecordLocation,
+} from './native-evaluator-public-record-index.js';
 import {
   associationForPosting,
   associationsForTaskDigest,
@@ -159,15 +166,8 @@ function parseAssociation(card: NativeDiscoveryQueuedCard): IndexedNativeRequest
 }
 
 function installSchema(store: Store): void {
+  installPublicRecordSchema(store);
   store.db.exec(`
-    CREATE TABLE IF NOT EXISTS native_evaluator_public_records (
-      record_digest TEXT NOT NULL,
-      location      TEXT NOT NULL,
-      source_id     TEXT NOT NULL,
-      source_sequence TEXT NOT NULL,
-      entry_digest  TEXT NOT NULL,
-      PRIMARY KEY (record_digest, location)
-    );
     CREATE TABLE IF NOT EXISTS native_evaluator_settlement_declarations (
       delivery_digest TEXT PRIMARY KEY,
       declaration_key TEXT NOT NULL,
@@ -211,27 +211,16 @@ function indexSettlementDeclaration(store: Store, card: NativePublicRecordQueueI
 
 function indexLocation(store: Store, card: NativePublicRecordQueueItem, location: string): void {
   const origin = provenance(card);
-  const existing = store.db.prepare(
-    `SELECT source_id, source_sequence, entry_digest FROM native_evaluator_public_records
-      WHERE record_digest = ? AND location = ?`,
-  ).get(card.card.record.digest, location) as {
-    source_id: string;
-    source_sequence: string;
-    entry_digest: string;
-  } | undefined;
-  const signedSource = `${origin.source.agent}/${origin.source.name}`;
-  if (existing !== undefined) {
-    if (existing.source_id !== signedSource
-      || existing.source_sequence !== origin.sequence
-      || existing.entry_digest !== origin.entryDigest) {
-      throw new Error(`public record ${card.card.record.digest} changed signed provenance`);
-    }
-    return;
-  }
-  store.db.prepare(
-    `INSERT INTO native_evaluator_public_records
-      (record_digest, location, source_id, source_sequence, entry_digest) VALUES (?, ?, ?, ?, ?)`,
-  ).run(card.card.record.digest, location, signedSource, origin.sequence, origin.entryDigest);
+  upsertPublicRecordLocation({
+    store,
+    digest: card.card.record.digest,
+    location,
+    provenance: {
+      sourceId: `${origin.source.agent}/${origin.source.name}`,
+      sequence: origin.sequence,
+      entryDigest: origin.entryDigest,
+    },
+  });
 }
 
 function indexRequester(store: Store, card: NativeDiscoveryQueuedCard, configuredBase: string): void {
@@ -281,11 +270,8 @@ function recordFetcher(input: {
   readonly publicBases: readonly string[];
 }): FetchBytesByDigest {
   const byDigest = async (expected: `sha256:${string}`): Promise<Uint8Array> => {
-    const rows = input.store.db.prepare(
-      `SELECT location FROM native_evaluator_public_records WHERE record_digest = ? ORDER BY location`,
-    ).all(expected) as Array<{ location: string }>;
     const locations = [...new Set([
-      ...rows.map(({ location }) => location),
+      ...publicRecordLocations(input.store, expected),
       ...input.publicBases.map((base) => exactLocation(base, expected)),
     ])];
     for (const location of locations) {
@@ -472,18 +458,31 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
       name: 'requester',
       run: async () => {
         await requester.sync();
-        for (const card of requester.takePending()) {
-          indexRequester(input.store, card, requesterConfigured[0]!.baseUrl);
-        }
+        // #2539: per-CARD isolation inside the pass. Nothing acknowledges a card that failed to
+        // index, so the queue is re-walked from the front every tick — one permanently-refusing
+        // card at the head is a permanent wall in front of every card behind it. Live, card 2 of
+        // the requester queue refused on the digest-keyed collision and cards 3+ were never
+        // reached, which is why task 1221 was never enqueued at all.
+        const failures = runIsolatedItems(requester.takePending(), {
+          label: 'native-evaluator/requester',
+          name: (card) => `announcement ${card.announcementId}`,
+          run: (card) => { indexRequester(input.store, card, requesterConfigured[0]!.baseUrl); },
+        });
+        if (failures.length > 0) throw failures[0];
       },
     },
     {
       name: 'solver',
       run: async () => {
         await solver.sync();
-        for (const card of solver.takePending()) {
-          for (const location of cardLocations(card)) indexLocation(input.store, card, location);
-        }
+        const failures = runIsolatedItems(solver.takePending(), {
+          label: 'native-evaluator/solver',
+          name: (card) => `announcement ${card.announcementId}`,
+          run: (card) => {
+            for (const location of cardLocations(card)) indexLocation(input.store, card, location);
+          },
+        });
+        if (failures.length > 0) throw failures[0];
       },
     },
   ], { label: 'native-evaluator' });
@@ -515,8 +514,12 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
     source: {
       sourceId: sourceId(solverConfigured[0]!),
       async read({ after }) {
-        await syncSignedSources();
-        await input.syncVenue();
+        // #2539: ingest is isolated from the read it feeds — see `runIsolatedIngest` for why a
+        // failed intake must not cost the checkpoint the material already verified into the index.
+        await runIsolatedIngest([
+          { name: 'signed-source ingest', run: syncSignedSources },
+          { name: 'canonical venue sync', run: input.syncVenue },
+        ], { label: 'native-evaluator' });
         const pending = solver.takePending();
         const groups = new Map<string, NativePublicRecordQueueItem[]>();
         for (const card of pending) {
@@ -548,14 +551,30 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
             reason: withdrawal.reason,
           });
         }
-        for (const cards of groups.values()) {
+        /**
+         * One engagement's delivery/envelope pair, resolved to at most one source event.
+         *
+         * #2539: this is a function so its failures can be isolated per engagement. Everything it
+         * refuses is refused for that engagement alone — a Delivery published before its envelope,
+         * an attempt URI matching two postings, an ambiguous canonical correspondence. Every one of
+         * those is a statement about ONE engagement's evidence, and every one of them used to take
+         * the whole pass down with it, along with the checkpoint of every unrelated engagement in
+         * the same tick.
+         *
+         * Those three refusals are deterministic, but this function also awaits two NETWORK reads —
+         * `fetcher.byDigest` and `readCanonicalSolutionDelivery` — and those fail transiently and
+         * independently per engagement, which is exactly the distribution that produces "A fails
+         * while B succeeds". Isolation on its own would then lose A forever, so it is paired with
+         * the checkpoint hold below; neither half is correct without the other.
+         */
+        const readGroup = async (cards: readonly NativePublicRecordQueueItem[]): Promise<void> => {
           const deliveries = cards.filter((card) => role(card) === 'delivery');
           const envelopes = cards.filter((card) => role(card) === 'delivery-envelope');
-          if (deliveries.length !== 1 || envelopes.length !== 1) continue;
+          if (deliveries.length !== 1 || envelopes.length !== 1) return;
           const deliveryCard = deliveries[0]!;
           indexSettlementDeclaration(input.store, deliveryCard);
           const deliveryProvenance = provenance(deliveryCard);
-          if (!sequenceAfter(deliveryProvenance.sequence, after?.sequence)) continue;
+          if (!sequenceAfter(deliveryProvenance.sequence, after?.sequence)) return;
           const envelope = envelopes[0]!;
           if (BigInt(provenance(envelope).sequence) >= BigInt(deliveryProvenance.sequence)) {
             throw new Error('solver Delivery was not published after its exact envelope');
@@ -568,7 +587,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
           // attempt this Delivery claims. Nothing here selects a posting by recency or by "the
           // only row"; a candidate is kept only if the chain-derived attempt URI matches.
           const postings = associationsForTaskDigest(input.store, digest(delivery.task, 'Delivery Task digest'));
-          if (postings.length === 0) continue;
+          if (postings.length === 0) return;
           const matched = postings.flatMap((candidate) =>
             input.events.solutionCandidates()
               .filter((event) => {
@@ -585,7 +604,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
                   }) === delivery.attempt;
               })
               .map((event) => ({ association: candidate, event })));
-          if (matched.length === 0) continue;
+          if (matched.length === 0) return;
           // Two postings answering one attempt URI would mean the derivation is not injective.
           // That is a substitution risk, not a routing detail, so it refuses rather than picking.
           const distinctPostings = new Set(matched.map(({ association: a }) => `${a.chainId}/${a.coordinator}/${a.taskId}`));
@@ -620,7 +639,7 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
             });
             if (fact !== null) canonical.push({ event, fact });
           }
-          if (canonical.length === 0) continue;
+          if (canonical.length === 0) return;
           if (canonical.length !== 1) throw new Error('solution Delivery has ambiguous canonical chain correspondence');
           const joined = canonical[0]!;
           const facts = joined.event.facts as {
@@ -658,11 +677,72 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
             },
             references,
           });
+        };
+        /**
+         * Where a failed engagement sits in the source's sequence, so the checkpoint can be held
+         * at it. `0n` — hold everything — is the deliberate answer whenever that position cannot
+         * be read, because a failure we cannot place is a failure we cannot safely skip past.
+         */
+        const groupSequence = (cards: readonly NativePublicRecordQueueItem[]): bigint => {
+          try {
+            const delivery = cards.find((card) => role(card) === 'delivery');
+            return delivery === undefined ? 0n : BigInt(provenance(delivery).sequence);
+          } catch {
+            return 0n;
+          }
+        };
+        const held: bigint[] = [];
+        for (const [engagementId, cards] of groups.entries()) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- engagements share one store and one venue read.
+            await readGroup(cards);
+          } catch (cause) {
+            const at = groupSequence(cards);
+            held.push(at);
+            console.error(
+              `[native-evaluator] engagement ${engagementId} could not be read this pass — every `
+              + `other engagement still ran, and the source checkpoint is HELD at sequence ${at} `
+              + `until it does, so nothing at or above it is emitted: `
+              + `${cause instanceof Error ? cause.message : String(cause)}`,
+            );
+          }
         }
-        return result.sort((left, right) => {
-          const leftSequence = left.kind === 'solution-available' ? left.observation.sourceSequence : left.sourceSequence;
-          const rightSequence = right.kind === 'solution-available' ? right.observation.sourceSequence : right.sourceSequence;
-          return BigInt(leftSequence) < BigInt(rightSequence) ? -1 : BigInt(leftSequence) > BigInt(rightSequence) ? 1 : 0;
+        /**
+         * The checkpoint hold — the half that makes per-engagement isolation safe.
+         *
+         * Isolation alone would lose a transient failure PERMANENTLY. The source checkpoint is one
+         * scalar advanced per emitted event, and `sequenceAfter` is strict: engagement A failing at
+         * sequence 5 on a 429 from a canonical read while B succeeds at 7 would emit B, advance the
+         * checkpoint to 7, and filter A out of every subsequent pass. Both recovery locks are shut
+         * behind that — `reconcileStartup()` walks evaluations that exist, and a never-admitted
+         * opportunity has no row; and the state layer refuses late admission outright ("evaluation
+         * source sequence did not advance"). For an evaluator that is a silently missing verdict,
+         * which is strictly worse than the wedge the isolation removes.
+         *
+         * So: unrelated engagements BELOW a failure still progress, and nothing at or above one is
+         * emitted. A permanently-refusing engagement therefore walls the ones above it — loudly,
+         * with its sequence named on every pass — which is the stance `native-discovery.ts` already
+         * takes for an announcement this consumer cannot decode: loud and stuck beats silent and
+         * lossy. The retry story is simply the next poll.
+         */
+        const holdFrom = held.length === 0
+          ? undefined
+          : held.reduce((lowest, at) => (at < lowest ? at : lowest));
+        const sequenceOf = (event: typeof result[number]): bigint =>
+          BigInt(event.kind === 'solution-available' ? event.observation.sourceSequence : event.sourceSequence);
+        const emitted = holdFrom === undefined
+          ? result
+          : result.filter((event) => sequenceOf(event) < holdFrom);
+        if (holdFrom !== undefined && emitted.length !== result.length) {
+          console.error(
+            `[native-evaluator] holding ${result.length - emitted.length} readable source event(s) `
+            + `at or above sequence ${holdFrom} until the engagement that failed there can be read`,
+          );
+        }
+        return emitted.sort((left, right) => {
+          const leftSequence = sequenceOf(left);
+          const rightSequence = sequenceOf(right);
+          return leftSequence < rightSequence ? -1 : leftSequence > rightSequence ? 1 : 0;
         });
       },
     },
