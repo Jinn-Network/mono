@@ -435,6 +435,74 @@ describe('native discovery consumer', () => {
     });
   });
 
+  // #2548 degraded the self-hosted lapsed-head only at the `sameHead` revalidation branch, which
+  // requires a PRIOR checkpoint. A co-located requester+evaluator that cold-boots with NO checkpoint
+  // for its own requester source (`prior === undefined`) skips that branch entirely and lands on the
+  // cold `configured.verify(...)` call instead — the live crash `#2547`/`#2549` traced to: PROVEN LIVE
+  // against operator A (`urn:uuid:44cfb891-…-a5520`), which had no
+  // `native_discovery_source_checkpoints` row for its own requester source and crashed at boot with
+  // `native discovery source …/requester refused: stale`.
+  describe('checkpoint-less cold-path self-source stale (#2547 residual, #2549)', () => {
+    it('cold-boots a self-hosted source with NO prior checkpoint and a stale cold-verify outcome: degrades, does not throw, writes no checkpoint', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const store = new Store(':memory:');
+      const cold = consumer({
+        store,
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'stale' }),
+        selfServed: true,
+      });
+      const report = await cold.sync();
+      expect(report.degraded).toEqual([
+        { source: { agent: AGENT, name: SOURCE_NAME }, reason: 'self-source-stale', detail: expect.any(String) },
+      ]);
+      expect(report.accepted).toBe(0);
+      expect(report.verifiedSources).toBe(0);
+      expect(cold.checkpoint({ agent: AGENT, name: SOURCE_NAME })).toBeUndefined();
+      expect(cold.takePending()).toEqual([]);
+    });
+
+    // MUTATION GUARD: a genuinely stale PEER head at the cold path (no checkpoint, selfServed ===
+    // false) MUST still refuse, fail-closed. Red if the `configured.selfServed === true` guard is
+    // dropped from the cold verify-outcome branch in `pollSource`.
+    it('still refuses a genuinely stale PEER head at the cold path — fail-closed, red if the discriminator is removed', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const cold = consumer({
+        store: new Store(':memory:'),
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'stale' }),
+        selfServed: false,
+      });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'stale' });
+      expect(cold.takePending()).toEqual([]);
+    });
+
+    // MUTATION GUARD: only `status === 'stale'` degrades. A self-hosted source whose cold verify
+    // fails for a NON-staleness reason (forked, broken-chain, unauthorized-signer, …) still refuses.
+    // Red if the carve-out is broadened beyond exact `'stale'` equality.
+    it('refuses a self-hosted source whose cold verify reports a non-stale failure', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const cold = consumer({
+        store: new Store(':memory:'),
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'unauthorized-signer' }),
+        selfServed: true,
+      });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'unauthorized-signer' });
+    });
+
+    it('also refuses a self-hosted source whose cold verify reports forked', async () => {
+      const first = entry('0000000000000001', null, DIGEST_A);
+      const cold = consumer({
+        store: new Store(':memory:'),
+        routes: routesFor([first]),
+        verify: async () => ({ status: 'forked' }),
+        selfServed: true,
+      });
+      await expect(cold.sync()).rejects.toMatchObject({ reason: 'forked' });
+    });
+  });
+
   it('refuses an advertised head whose terminal entry is absent or has a different digest even when the injected verifier returns ok', async () => {
     const first = entry('0000000000000001', null, DIGEST_A);
     const second = entry('0000000000000002', sealJson(first).digest, DIGEST_B);
