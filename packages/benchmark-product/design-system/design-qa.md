@@ -2,7 +2,7 @@
 
 Status: **PASS**
 
-Date: 2026-08-10  
+Date: 2026-08-10
 Reference: user-supplied `Colophon Design System.zip`, SHA-256 `1e01ec1ef9f2db4b2862996fe401231785e98801d96706c679c67e1bb4330a50`
 
 ## Compared views
