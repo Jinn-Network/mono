@@ -1,10 +1,18 @@
 /**
  * #1043 — Daemon wiring for the loop watchdog.
  *
- * When DaemonConfig.watchdog is supplied, start() seeds a heartbeat for every
- * loop it actually started (so first boot never trips) and runs the watchdog;
- * stop() stops it cleanly. When watchdog is omitted (the default in unit
- * tests), the daemon constructs no watchdog and nothing changes.
+ * start() seeds a heartbeat for every loop it actually started (so first
+ * boot never trips) and runs the watchdog; stop() stops it cleanly.
+ *
+ * DEFAULT (2026-08-10, decision 3 of the operator standup, #2461/#2540):
+ * omitting DaemonConfig.watchdog now ARMS the watchdog with
+ * `{ autoRestart: false }` — detection defaults on regardless of whether a
+ * call site remembers to opt in. This was previously the opposite (omission
+ * meant "no watchdog"); round-8's live gate run found zero
+ * `loop_watchdog_stale` events had ever fired because nothing wired
+ * `config.watchdog`. `watchdog: false` is the new explicit escape hatch for
+ * callers that truly want no watchdog (e.g. a test irrelevant to watchdog
+ * behavior that wants no extra background timer).
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +25,7 @@ import { SimpleRunner } from '../../src/runner/simple.js';
 import { HarnessRegistry } from '../../src/harnesses/engine/registry.js';
 import { Store } from '../../src/store/store.js';
 import { getLoopTick } from '../../src/daemon/loop-heartbeat.js';
+import { getEventBuffer } from '../../src/events/emitter.js';
 
 function minimalEngineConfig(root: string): DaemonConfig['restorationEngine'] {
   const implRegistry = new HarnessRegistry({ default: 'legacy-claude' });
@@ -77,8 +86,52 @@ describe('#1043 Daemon watchdog wiring', () => {
     daemon = undefined;
   });
 
-  it('does not seed heartbeats or trip when watchdog config is omitted', async () => {
+  it('seeds heartbeats and arms the watchdog by default when watchdog config is omitted', async () => {
     daemon = makeDaemon(store, tmp, undefined);
+    await daemon.start();
+
+    // Omitted watchdog config now defaults to armed — same boot-seed
+    // behavior as passing `{ autoRestart: false }` explicitly.
+    expect(getLoopTick(store, 'creator')).not.toBeNull();
+    expect(getLoopTick(store, 'engine-tick')).not.toBeNull();
+    expect(getLoopTick(store, 'engine-watcher')).not.toBeNull();
+    expect(getLoopTick(store, 'delivery-watcher')).not.toBeNull();
+
+    expect(daemon.getShutdownState()).toBe('running');
+
+    await daemon.stop();
+    expect(daemon.getShutdownState()).toBe('clean');
+    daemon = undefined;
+  });
+
+  it('emits loop_watchdog_stale for a genuinely stale loop when watchdog config is omitted', async () => {
+    getEventBuffer().clear();
+    daemon = makeDaemon(store, tmp, undefined);
+    await daemon.start();
+
+    // Force 'creator' far enough back that it exceeds the default staleness
+    // threshold (stalenessFactor 6 * its LOOP_REGISTRY intervalMs 5000ms).
+    store.setConfigValue('loop_heartbeat:creator', String(Date.now() - 6 * 5000 - 1));
+    // Drive the watchdog's own check directly instead of waiting out its real
+    // 30s check interval: with LocalAdapter's creator loop genuinely running
+    // in this Daemon, waiting would let creator's own next tick re-freshen
+    // the heartbeat we just forced stale before the watchdog ever saw it.
+    // This still proves the thing under test — that omitting `config.watchdog`
+    // constructs a live, checkable WatchdogLoop at all (before this change,
+    // `daemon.watchdogLoop` stayed undefined and `check()` never existed to call).
+    (daemon as unknown as { watchdogLoop?: { check(): void } }).watchdogLoop?.check();
+
+    const events = getEventBuffer().snapshot({ limit: 20 });
+    const stale = events.find((e) => e.errorCode === 'loop_watchdog_stale');
+    expect(stale).toBeDefined();
+    expect(stale?.details?.['loopName']).toBe('creator');
+
+    await daemon.stop();
+    daemon = undefined;
+  });
+
+  it('watchdog: false fully disables the watchdog (explicit opt-out)', async () => {
+    daemon = makeDaemon(store, tmp, false);
     await daemon.start();
 
     // No watchdog → no boot-seed of heartbeats by the watchdog wiring.
