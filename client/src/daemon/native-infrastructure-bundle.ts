@@ -178,6 +178,13 @@ export interface NativeEvaluatorReadPrimitives {
     readonly requestId: `0x${string}`;
     readonly operator: `0x${string}`;
     readonly advertisedDeliveryDigest: `sha256:${string}`;
+    /**
+     * HTTP serving locations advertised by the delivery card the caller already consumed. Native
+     * solution records are published only to the operator's HTTP records plane and are never pinned
+     * to IPFS (#2559 sibling), so the payload re-fetch tries these locations before the IPFS plane.
+     * Every plane is digest-verified against `advertisedDeliveryDigest`; omit for IPFS-only callers.
+     */
+    readonly deliveryPublicLocations?: readonly string[];
   }) => Promise<{
     readonly transactionHash: `0x${string}`;
     readonly blockHash: `0x${string}`;

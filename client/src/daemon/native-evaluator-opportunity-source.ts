@@ -647,6 +647,9 @@ export async function buildNativeEvaluatorOpportunityReader(input: {
               requestId: facts.requestId,
               operator: facts.operator,
               advertisedDeliveryDigest: deliveryCard.card.record.digest,
+              // Native records live only on the solver's HTTP serving plane (never IPFS), so hand
+              // the reader the delivery card's advertised locations for its digest-verified re-fetch.
+              deliveryPublicLocations: cardLocations(deliveryCard),
             });
             if (fact !== null) canonical.push({ event, fact });
           }
