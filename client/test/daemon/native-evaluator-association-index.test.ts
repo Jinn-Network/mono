@@ -329,4 +329,53 @@ describe('native evaluator requester-association index', () => {
     installAssociationSchema(store);
     expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
   });
+
+  // Fast-follow to #2562: the column migration above re-keys `coordinator` on the ROW but leaves
+  // the coordinator embedded inside the stored `association_json` body checksummed. A later
+  // out-of-band replay of the SAME posting (checkpoint reset, source re-key, or a second requester
+  // source re-serving the posting) calls `upsertRequesterAssociation`, which always
+  // lowercase-canonicalizes the coordinator before encoding — so it compares its freshly-encoded
+  // LOWERCASE body against the stored CHECKSUMMED body and throws "changed signed facts" for a
+  // posting whose signed facts never actually changed. Part of #2461.
+  it('migrates the coordinator inside association_json too, so a replayed posting is a clean no-op (#2461)', () => {
+    const CHECKSUMMED = `0x8A34${'0'.repeat(32)}AD98` as const;
+    const LOWERCASE = `0x8a34${'0'.repeat(32)}ad98` as const;
+    const stored = association({ coordinator: CHECKSUMMED, taskId: 1223n });
+
+    // Simulate a row written BEFORE the fix: coordinator checksummed in BOTH the column and the
+    // encoded JSON body — exactly what a requester's signed association looks like on disk before
+    // any canonicalization ran.
+    store.db.prepare(
+      `INSERT INTO native_evaluator_requester_associations
+        (chain_id, coordinator, task_id, task_digest, association_json, source_id, source_sequence, entry_digest)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      '84532',
+      CHECKSUMMED,
+      '1223',
+      stored.taskDigest,
+      encodeAssociation(stored),
+      'did:jinn:requester-a/postings',
+      '1',
+      `sha256:${'1'.padStart(64, '0')}`,
+    );
+
+    installAssociationSchema(store);
+
+    // Replay the identical posting, exactly as the signed source would re-serve it under
+    // out-of-band replay — this must be a clean no-op, not a "changed signed facts" refusal.
+    expect(() => upsertRequesterAssociation({
+      store,
+      association: stored,
+      provenance: provenanceAt('1'),
+    })).not.toThrow();
+    expect(associationsForTaskDigest(store, SHARED_TASK_DIGEST)).toHaveLength(1);
+
+    // The migrated body is now byte-identical to what a fresh upsert of this posting would encode.
+    const row = store.db.prepare(
+      `SELECT association_json FROM native_evaluator_requester_associations
+        WHERE chain_id = ? AND coordinator = ? AND task_id = ?`,
+    ).get('84532', LOWERCASE, '1223') as { association_json: string };
+    expect(row.association_json).toBe(encodeAssociation({ ...stored, coordinator: LOWERCASE }));
+  });
 });

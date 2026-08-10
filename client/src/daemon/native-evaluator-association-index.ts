@@ -138,12 +138,28 @@ function migrateToPostingKey(store: Store): void {
  * persisted-once and never self-heals — it must be re-keyed here. `lower()` over ASCII hex is
  * exact; the guard makes an already-lowercase table a no-op, and one row per posting means the
  * update cannot collide on the primary key.
+ *
+ * The `coordinator` COLUMN is only the lookup key; the coordinator ALSO lives inside the stored
+ * `association_json` body (`encodeAssociation` serializes the whole association, coordinator
+ * included, at the top-level `$.coordinator` path). `upsertRequesterAssociation` canonicalizes to
+ * lowercase before encoding (#26), so a row whose body is still checksummed byte-mismatches a
+ * freshly-encoded re-upsert of the SAME posting and trips the "changed signed facts" refusal on
+ * out-of-band replay (checkpoint reset, source re-key, a second requester source re-serving the
+ * posting) — a fast-follow to #2562, which lowercased the column but left the body untouched. Both
+ * parts are rewritten together so a migrated row is byte-identical to what a fresh upsert would
+ * produce. The `OR` guard (rather than just the column check) is what makes this self-healing for
+ * a store that already ran the column-only migration: the column half is already lowercase there,
+ * so only the body-mismatch arm of the guard fires.
  */
 function canonicalizeStoredCoordinatorKeys(store: Store): void {
   store.db.exec(`
     UPDATE native_evaluator_requester_associations
-       SET coordinator = lower(coordinator)
-     WHERE coordinator <> lower(coordinator);
+       SET coordinator = lower(coordinator),
+           association_json = json_set(
+             association_json, '$.coordinator', lower(json_extract(association_json, '$.coordinator'))
+           )
+     WHERE coordinator <> lower(coordinator)
+        OR json_extract(association_json, '$.coordinator') <> lower(json_extract(association_json, '$.coordinator'));
   `);
 }
 
