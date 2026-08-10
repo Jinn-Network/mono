@@ -491,6 +491,42 @@ describe("runCancel — cell-level outcomes are decided independently of the run
 });
 
 describe("runCancel — marker-resume: a busy venue records the request without finalizing", () => {
+  test("recognizes a typed contention error loaded through a second portal module identity", async () => {
+    const clock = makeClock();
+    await setUpLockedDraft(clock);
+    const { backend: launchBackend } = makeStatefulFakeBackend();
+    const launched = await runLaunch(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => fakeVenue(launchBackend),
+    });
+    expect(launched.ok).toBe(true);
+
+    class PortalTaskExecutionError extends Error {
+      readonly category = "backend-unavailable";
+      readonly retryable = true;
+      readonly detail = "state root writer already held through portal";
+      readonly annotations = { reason: "state-root-locked" };
+
+      constructor() {
+        super("backend-unavailable");
+        this.name = "TaskExecutionError";
+      }
+    }
+
+    const outcome = await runCancel(contextFor(clock), { draftId: "draft-1" }, {
+      createVenue: () => {
+        throw new PortalTaskExecutionError();
+      },
+    });
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result).toMatchObject({
+      phase: "requested",
+      reason: "venue-contention",
+      detail: "state root writer already held through portal",
+    });
+  });
+
   test("phase 'requested' when the venue is busy; resume/collect refuse conflict; second and terminal-idempotent third cancels never duplicate durable facts", async () => {
     const clock = makeClock();
     await setUpLockedDraft(clock);

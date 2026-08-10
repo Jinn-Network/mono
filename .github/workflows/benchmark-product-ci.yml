@@ -140,10 +140,6 @@ jobs:
       - name: Verify Benchmark Product web
         run: |
           yarn install --immutable
-          # The portal's source realpath is ../core. Install its dependency links in this fresh
-          # runner as well as the web consumer's links; restored dist/ bytes remain the only
-          # compiled inputs, and no sibling source is rebuilt here.
-          (cd ../core && yarn install --immutable)
           yarn lint
           yarn typecheck
           yarn test
