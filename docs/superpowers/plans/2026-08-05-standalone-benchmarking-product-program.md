@@ -810,8 +810,16 @@ portable-bundle verification, and a fresh program-wide review are all green. M0-
 are implemented on the local session lineage. This is implementation completion,
 not extraction authorization, deployment, publication, or remote merge readiness.
 
-**Final base-drift record:** local `origin/integration/evidence-v1` remains at
-`1980c7e067`; the completed session lineage is 43 commits ahead / 54 behind with
-merge base `1fb3e78f1`. No origin-side watched product package, design, ledger,
-product CI, or product guard path changed from that merge base. The proposed base
-refresh was never approved and was not performed.
+**Final compatibility record:** after M0--M5 completion and final independent PASS,
+the human explicitly authorized merging the remote base and opening a full PR.
+`origin/integration/evidence-v1` was still exactly `1980c7e067`; it was merged
+without rebasing as `9e878c61b`, preserving every packet and review hash. The only
+conflicts were the two generated architecture views and were resolved mechanically
+from the merged catalog. Upstream's added `task-admission` ->
+`task-execution-profiles` dependency produced an exact immutable-install red in
+both independent product lockfiles; each lock gained that one portal edge. The
+post-merge battery passed core 680/680, web 72/72 and production browser 3/3,
+backend 116 plus one platform skip, family 13/13, generator 15/15, merged
+catalog/control/workflow 222/222, packed consumers, generated checks, and the real
+17-step public quickstart with source deletion and six portable checks. After the
+compatibility commit the branch is 45 commits ahead / 0 behind the remote target.
