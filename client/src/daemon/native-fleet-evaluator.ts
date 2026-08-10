@@ -219,6 +219,10 @@ export async function buildFleetNativeEvaluator(
       events: marketplaceEvents,
       // Marketplace events arrive via the projector's tee; the evaluator never polls the venue.
       syncVenue: async () => undefined,
+      // #2547: on the ONE fleet daemon the evaluator consumes THIS operator's own requester source,
+      // served from `publicBaseUrl`. Passing it lets that self-hosted source's idle-lapsed head
+      // degrade rather than deadlock the evaluator's boot `sync()` after >24h idle.
+      selfBaseUrl: publicBaseUrl,
     });
 
     composition = await assembleNativeEvaluatorComposition({

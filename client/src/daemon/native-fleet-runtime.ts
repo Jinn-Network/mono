@@ -397,6 +397,9 @@ export async function buildFleetNativeRuntime(
     store: input.store,
     trust,
     recordSources: config.recordSources,
+    // #2547: this operator's own archive origin, so a self-hosted requester source's idle-lapsed
+    // head degrades rather than deadlocking the solver loop's boot `sync()`.
+    selfBaseUrl: publicBaseUrl,
     verifyAuthorityTime: createBaseSepoliaAuthorityTime(input.publicClient).verifyFinalized,
     recordByLocation: (locator) => records.byLocation(locator),
     canonicalTaskCreated: (expected) => solverReads.canonicalTaskCreated(expected),
