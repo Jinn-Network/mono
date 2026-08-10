@@ -32,6 +32,19 @@
 // inlining it: inlining the driver would fold security-critical, separately-reviewed code into these
 // digest-pinned bytes, defeating its in-place reviewability without adding any real protection.
 //
+// OPTIONAL SIDECAR "dockerPath" (#2542) — the daemon spawns `docker` bare by default, which relies
+// on the daemon process's inherited `PATH` containing it. That holds on most Linux hosts (`/usr/bin`
+// or `/usr/local/bin` is normally on PATH) but not on macOS Docker Desktop, where the CLI lives at
+// `/usr/local/bin/docker` and a daemon launched from, say, a login item or a service manager with a
+// minimal PATH never finds it — `spawn docker ENOENT`. Rather than widen the spawned child's closed
+// env allowlist to carry PATH through (a materially bigger trust surface for every other spawn in the
+// stack, not just this one), the fix is operator-declared: an optional absolute `dockerPath` in this
+// same per-operator sidecar, threaded into `createDockerContainerRuntime`'s `dockerPath` option. Unset
+// (the default) preserves today's bare-`docker`-on-PATH behavior unchanged. A relative value is
+// refused loudly at sidecar-read time — see `readSidecar()` — because the daemon (parent) and the
+// spawned evaluation-harness child do not share a working directory, so a relative path would resolve
+// to two different places (or nowhere) depending which process read the sidecar.
+//
 // WHY THE RELATIVE DIST PATH (`../../dist/daemon/...`), not a package specifier: `@jinn-network/client`
 // ships no exports map, so `import('@jinn-network/client/...')` does not resolve. The published
 // tarball ships both `deployments/` and `dist/`, so `../../dist/daemon/native-evaluator-container-runtime.js`
@@ -43,7 +56,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   containerGraderReportSource,
@@ -97,7 +110,26 @@ function readSidecar() {
     throw new Error(`${SIDECAR_PATH}'s "claimEvidenceDir", if present, must be a string`);
   }
   const claimEvidenceDir = trimmedString(parsed.claimEvidenceDir);
-  return { agent, claimEvidenceDir: claimEvidenceDir.length === 0 ? undefined : claimEvidenceDir };
+  if (parsed.dockerPath !== undefined && typeof parsed.dockerPath !== 'string') {
+    throw new Error(`${SIDECAR_PATH}'s "dockerPath", if present, must be a string`);
+  }
+  const dockerPathRaw = trimmedString(parsed.dockerPath);
+  let dockerPath;
+  if (dockerPathRaw.length > 0) {
+    if (!isAbsolute(dockerPathRaw)) {
+      throw new Error(
+        `${SIDECAR_PATH}'s "dockerPath" must be an absolute path (got ${JSON.stringify(dockerPathRaw)}); `
+        + 'a relative path is not portable between the daemon process and the spawned evaluation-harness '
+        + 'child, which do not share a working directory',
+      );
+    }
+    dockerPath = dockerPathRaw;
+  }
+  return {
+    agent,
+    claimEvidenceDir: claimEvidenceDir.length === 0 ? undefined : claimEvidenceDir,
+    dockerPath,
+  };
 }
 
 // The evaluation-method descriptor is hashed live, from the sibling file, so the published
@@ -139,7 +171,10 @@ const evidenceWriter = {
 // them on any instance whose base image lacks pytest. Every OTHER bound stays at the driver default
 // (--network none, --cap-drop ALL, --no-new-privileges, --pids-limit, --memory, --cpus, a
 // noexec/nosuid /tmp tmpfs), so the container is still resource-capped and confined.
-const runtime = createDockerContainerRuntime({ readOnlyRootfs: false });
+const runtime = createDockerContainerRuntime({
+  readOnlyRootfs: false,
+  ...(sidecar.dockerPath === undefined ? {} : { dockerPath: sidecar.dockerPath }),
+});
 
 /**
  * The deployment-owned container grader source. `workspaceRoot` is the attempt's writable `work`

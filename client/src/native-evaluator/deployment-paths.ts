@@ -99,14 +99,21 @@ export async function sweRebenchEvaluatorMethodDigest(): Promise<`sha256:${strin
  * Writes the per-operator sidecar the swe-rebench deployment module requires. Exposed for
  * tests and operator tooling (including re-creating it after an upgrade); the same effect
  * as hand-authoring the JSON file per `docs/operator/native-evaluator-deployment.md`.
+ *
+ * `dockerPath` (#2542) is optional and must be an absolute path when given -- the deployment
+ * module's `readSidecar()` refuses a relative one loudly. Absent, the driver spawns bare
+ * `docker` (unchanged default), which relies on the daemon process's inherited `PATH`; set it
+ * on hosts (e.g. macOS Docker Desktop, `/usr/local/bin/docker`) where that PATH lookup fails.
  */
 export async function writeSweRebenchEvaluatorSidecar(input: {
   readonly agent: string;
   readonly claimEvidenceDir?: string;
+  readonly dockerPath?: string;
   readonly path?: string;
 }): Promise<void> {
-  const body: { agent: string; claimEvidenceDir?: string } = { agent: input.agent };
+  const body: { agent: string; claimEvidenceDir?: string; dockerPath?: string } = { agent: input.agent };
   if (input.claimEvidenceDir !== undefined) body.claimEvidenceDir = input.claimEvidenceDir;
+  if (input.dockerPath !== undefined) body.dockerPath = input.dockerPath;
   const path = input.path ?? SWE_REBENCH_EVALUATOR_DEPLOYMENT_SIDECAR_PATH;
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(body, null, 2)}\n`);
