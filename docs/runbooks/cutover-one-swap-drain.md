@@ -127,6 +127,14 @@ A **real** container-graded evaluation through the M4c Docker path
 `client/deployments/evaluator/swe-rebench-v2-deployment.mjs`). Run outside the G-loop;
 a green unit suite does not satisfy this.
 
+> **Correction (DR-2026-08-05 addendum, 2026-08-10 — operator ruling, strict reading):**
+> a run against a **minimal** grader image (proving the container-runtime machinery
+> only, because no image implementing `jinn.grader-context.v1` exists yet — issue
+> [#2543](https://github.com/Jinn-Network/mono/issues/2543)) does **not** satisfy this
+> artifact. The grader image digest recorded below must be a **real** swe-rebench
+> grader image grading a **real** instance. Wave 4 does not proceed on a minimal-image
+> mechanism-proof alone.
+
 | Field | Value |
 | --- | --- |
 | evaluation subject (instance id) | |

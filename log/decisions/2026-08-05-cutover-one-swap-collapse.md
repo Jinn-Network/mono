@@ -291,6 +291,55 @@ flip.
 > configurable claim allowlist, and a multi-registration evaluator deployment. That is
 > filed as follow-up work, not a precondition of this gate.
 
+> **Addendum 2026-08-10 — three operator rulings: DR-3a gate scope, #2494 D-wave split,
+> watchdog default.**
+>
+> **Decision 1 — DR-3a gate scope: artifact (ii) mechanism-proof is necessary but not
+> sufficient (Ritsu chose the strict reading).** Gate artifact (ii) (the standalone
+> container-grade proof introduced by the 2026-08-07 decoupling addendum above) proved
+> the container-grading **machinery** end to end, but against a **minimal** grader image
+> — no image implementing `jinn.grader-context.v1`
+> (`packages/task-execution/evaluator-adapters/src/container-grader-source.ts:30`) exists
+> yet (issue [#2543](https://github.com/Jinn-Network/mono/issues/2543)). **Ruling: 3a is
+> not satisfied by the mechanism-proof alone.** The retirement wave (Wave 4) additionally
+> requires #2543 — a **real** swe-rebench grader image grading a **real** instance,
+> container-graded end to end through the M4c Docker path
+> (`client/src/daemon/native-evaluator-container-runtime.ts` with
+> `client/deployments/evaluator/swe-rebench-v2-deployment.mjs`). Until #2543 is green,
+> the retirement wave does **not** proceed even with gate artifact (i) complete. Net:
+> #2543 moves from follow-up to a gate-critical retirement-wave precondition. The
+> two-artifact **shape** set by the 2026-08-07 decoupling is unchanged; artifact (ii) now
+> means "real grader image," not "minimal-image mechanism-proof."
+>
+> **Decision 2 — issue [#2494](https://github.com/Jinn-Network/mono/issues/2494) D-wave
+> scoping: split (retire 3, relocate 3).** The 6 legacy-indexer HTTP consumers blocking
+> `client/src/discovery/` deletion are resolved as:
+> - **Retire** (legacy-era, superseded by the tokenless-OLAS/native model):
+>   `cli/codedigest-revert-check.ts` (`getCodeDigestRewards` — JINN-token/phase-1a era),
+>   `cli/tasks-observe-autopilot.ts` (`getAutopilotDeliveryCandidates` — legacy-SolverNet
+>   autopilot), and the HTTP `listLaunchedSolverNets` path in `cli/tasks.ts` (launched
+>   records are native now). Also `learner/verification-gate.ts` (test-only, no
+>   production caller).
+> - **Relocate** (still load-bearing, no native replacement yet): `cli/evidence.ts`,
+>   `mcp/server.ts`, `tasks/submit-preflight.ts` — move `createHttpDiscoveryAPI` and the
+>   `DiscoveryAPI` interface to a surviving neutral module (R3b type relocation), so these
+>   keep working against the HTTP indexer post-swap.
+>
+> This unblocks the `discovery/` deletion in Wave 4 and sets R3b's shape.
+> Implementation is tracked separately (not in this record's scope).
+>
+> **Decision 3 — loop watchdog defaults on, with legitimate-wait states excluded.**
+> `watchdogAutoRestart` (`client/src/config.ts:323`, env `JINN_WATCHDOG_AUTO_RESTART`)
+> currently defaults `false` — the locked Option A decision from issue #1043's
+> watchdog-lineage design (carried forward through issue
+> [#2540](https://github.com/Jinn-Network/mono/issues/2540)), which is why a frozen
+> engagement can go unrestarted with only a logged/emitted signal. **Ruling: default it
+> `true`**, but exclude legitimate long-wait states (`awaiting_funding` and equivalents —
+> any state a daemon deliberately parks in while waiting on an operator or external
+> input) from staleness detection, so a daemon correctly waiting is never
+> restart-looped. Implementation (the exclusion list and the default flip) is tracked
+> separately (not in this record's scope).
+
 ## Provenance
 
 In-session ruling (Ritsu, 2026-08-05) following: the #2350 disposition and salvage; the
