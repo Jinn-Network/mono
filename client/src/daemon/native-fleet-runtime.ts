@@ -57,6 +57,7 @@ import {
 import {
   buildFleetNativeDiscovery,
   nativeDiscoveryDecodeProvedCanonical,
+  selectFleetRequesterSources,
 } from './native-fleet-discovery.js';
 import type { NativeDiscoveryConsumer } from './native-discovery.js';
 import type { NativePublicRecordTransport } from './native-infrastructure-bundle.js';
@@ -373,7 +374,10 @@ export async function buildFleetNativeRuntime(
       publisherRootDir: join(input.stateRoot, 'native-public', 'solver'),
       publicBaseUrl,
       exactDocuments: exactDocumentsByDigest,
-      resolveEvaluationSpec: buildNativeEvaluationSpecResolver(records),
+      resolveEvaluationSpec: buildNativeEvaluationSpecResolver(
+        records,
+        selectFleetRequesterSources(config.recordSources).map(({ baseUrl }) => baseUrl),
+      ),
     },
   };
 

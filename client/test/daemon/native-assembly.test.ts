@@ -6,8 +6,9 @@
  * previously covered only indirectly, through the solver host; these tests pin it directly so a
  * later edit to the shared copy cannot quietly change either caller.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { documentDigest } from '@jinn-network/task-execution-protocol';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
 import {
   address,
   buildNativeClaimPolicy,
@@ -161,22 +162,64 @@ describe('buildNativeExactDocuments', () => {
 describe('buildNativeEvaluationSpecResolver', () => {
   const bytes = new TextEncoder().encode('{"kind":"evaluation-spec"}');
   const specDigest = documentDigest(bytes);
+  const throwingLocation = async (): Promise<Uint8Array> => { throw new Error('serving plane unused'); };
+  const BASE = 'https://requester.example.test';
 
-  it('returns bytes on an exact digest match', async () => {
-    const resolve = buildNativeEvaluationSpecResolver({ byDigest: async () => bytes });
+  it('returns bytes on an exact IPFS digest match without touching the serving plane', async () => {
+    const byLocation = vi.fn(throwingLocation);
+    const resolve = buildNativeEvaluationSpecResolver({ byDigest: async () => bytes, byLocation }, [BASE]);
     await expect(resolve(specDigest)).resolves.toEqual(bytes);
+    expect(byLocation).not.toHaveBeenCalled();
   });
 
-  it('returns undefined -- never a substitute -- on mismatch or transport failure', async () => {
+  it('returns undefined -- never a substitute -- on IPFS mismatch/failure with no serving origins', async () => {
     const mismatched = buildNativeEvaluationSpecResolver({
       byDigest: async () => new TextEncoder().encode('{"kind":"other"}'),
-    });
+      byLocation: throwingLocation,
+    }, []);
     await expect(mismatched(specDigest)).resolves.toBeUndefined();
 
     const failing = buildNativeEvaluationSpecResolver({
       byDigest: async () => { throw new Error('gateway down'); },
-    });
+      byLocation: throwingLocation,
+    }, []);
     await expect(failing(specDigest)).resolves.toBeUndefined();
+  });
+
+  // CP5 gate regression (#2461): native records (EvaluationSpec included) are published only to the
+  // requester HTTP serving plane, never to IPFS, so the IPFS `byDigest` misses. The fallback fetches
+  // `<base>/records/<digest>` and re-verifies. Without the fallback these reduce to the byDigest-only
+  // path and redden — the mutation check.
+  it('falls back to the requester HTTP serving plane when the IPFS block is absent', async () => {
+    const byDigest = vi.fn(async (): Promise<Uint8Array> => { throw new Error('ipfs block/get: not found'); });
+    const byLocation = vi.fn(async (url: string): Promise<Uint8Array> => {
+      if (url === `${BASE}${recordPath(specDigest)}`) return bytes;
+      throw new Error(`unexpected URL ${url}`);
+    });
+    const resolve = buildNativeEvaluationSpecResolver({ byDigest, byLocation }, [BASE]);
+    await expect(resolve(specDigest)).resolves.toEqual(bytes);
+    expect(byLocation).toHaveBeenCalledWith(`${BASE}${recordPath(specDigest)}`);
+  });
+
+  it('re-verifies the digest of HTTP-served bytes and rejects a substitute (fail-closed)', async () => {
+    const resolve = buildNativeEvaluationSpecResolver({
+      byDigest: async () => { throw new Error('ipfs block/get: not found'); },
+      byLocation: async () => new TextEncoder().encode('{"kind":"tampered"}'),
+    }, [BASE]);
+    await expect(resolve(specDigest)).resolves.toBeUndefined();
+  });
+
+  it('tries each configured serving origin until one yields the exact bytes', async () => {
+    const byLocation = vi.fn(async (url: string): Promise<Uint8Array> => {
+      if (url === `https://second.example.test${recordPath(specDigest)}`) return bytes;
+      throw new Error('serving-plane miss');
+    });
+    const resolve = buildNativeEvaluationSpecResolver({
+      byDigest: async () => { throw new Error('ipfs down'); },
+      byLocation,
+    }, ['https://first.example.test/', 'https://second.example.test']);
+    await expect(resolve(specDigest)).resolves.toEqual(bytes);
+    expect(byLocation).toHaveBeenCalledTimes(2);
   });
 });
 
