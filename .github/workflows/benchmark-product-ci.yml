@@ -103,7 +103,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-product-runtime-dists
-          path: packages/**/dist
+          path: |
+            packages/**/dist
+            !packages/**/node_modules/**
           if-no-files-found: error
           retention-days: 1
 
@@ -113,6 +115,11 @@ jobs:
   web:
     needs: [architecture, product]
     runs-on: ubuntu-latest
+    # The web package consumes core through a Yarn portal. Preserve the portal path so Node
+    # resolves core's transitive portal dependencies from this isolated consumer install rather
+    # than from core's source directory (which intentionally has no node_modules in this job).
+    env:
+      NODE_OPTIONS: --preserve-symlinks
     defaults:
       run:
         working-directory: packages/benchmark-product/web
@@ -133,6 +140,25 @@ jobs:
       - name: Verify Benchmark Product web
         run: |
           yarn install --immutable
+          # Vite intentionally resolves portal packages to their real source paths. Give every
+          # source package the web consumer's one installed dependency tree so the isolated job
+          # needs no sibling installs and runtime registries/classes keep one module identity.
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync, symlinkSync } from "node:fs";
+          import { dirname, join, relative, resolve } from "node:path";
+
+          const manifest = JSON.parse(readFileSync("package.json", "utf8"));
+          const consumerModules = resolve("node_modules");
+          for (const resolution of Object.values(manifest.resolutions)) {
+            if (typeof resolution !== "string" || !resolution.startsWith("portal:")) continue;
+            const packageDir = resolve(resolution.slice("portal:".length));
+            const packageModules = join(packageDir, "node_modules");
+            if (existsSync(packageModules)) {
+              throw new Error(`isolated web runner unexpectedly found ${packageModules}`);
+            }
+            symlinkSync(relative(dirname(packageModules), consumerModules), packageModules, "dir");
+          }
+          NODE
           yarn lint
           yarn typecheck
           yarn test

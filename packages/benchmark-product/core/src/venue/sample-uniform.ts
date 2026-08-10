@@ -21,7 +21,11 @@ import type {
   ProbeResult,
 } from "@jinn-network/task-execution-launchers";
 import { PREDICTION_FORECAST_PROFILE_URI } from "@jinn-network/task-execution-profiles";
-import type { TaskView, WorkspacePaths } from "@jinn-network/task-execution-workspace";
+import {
+  STAGED_SEALED_TASK_FILENAME,
+  type TaskView,
+  type WorkspacePaths,
+} from "@jinn-network/task-execution-workspace";
 import type { AttemptIdentity } from "@jinn-network/task-execution-supervisor";
 
 export const SAMPLE_UNIFORM_LAUNCHER_ID = "sample-uniform";
@@ -30,8 +34,8 @@ export const SAMPLE_UNIFORM_HARNESS_VERSION = "0.1.0";
 /**
  * The inline runner, spawned via `node -e`. Unlike the platform's `prediction-v1-baseline`
  * launcher — which defensively walks its input directory and validates the full native Task
- * shape — this runner reads the ONE fixed path the product's own provisioner contract writes
- * (`input/task.json`, venue/provisioner.ts) and performs only the minimal sanity check it
+ * shape — this runner reads the ONE shared fixed path the product's provisioner contract writes
+ * (`input/${STAGED_SEALED_TASK_FILENAME}`, venue/provisioner.ts) and performs only the minimal sanity check it
  * needs: the prediction-forecast profile URI and a string `payload.forecast.observedAt`.
  * Full Task validity is the platform's job (sealed digests, admission receipts); duplicating
  * its acceptance predicate here would be copied platform code (spec §3/§11 refusal).
@@ -42,17 +46,18 @@ const path = require('node:path');
 const input = process.env.JINN_ATTEMPT_INPUT;
 const out = process.env.JINN_ATTEMPT_OUT;
 const PROFILE_URI = '${PREDICTION_FORECAST_PROFILE_URI}';
+const TASK_FILE = ${JSON.stringify(STAGED_SEALED_TASK_FILENAME)};
 let doc;
 try {
-  doc = JSON.parse(fs.readFileSync(path.join(input, 'task.json'), 'utf8'));
+  doc = JSON.parse(fs.readFileSync(path.join(input, TASK_FILE), 'utf8'));
 } catch (error) {
-  console.error('sample-uniform: could not read input/task.json: ' + (error && error.message ? error.message : String(error)));
+  console.error('sample-uniform: could not read input/' + TASK_FILE + ': ' + (error && error.message ? error.message : String(error)));
   process.exit(2);
 }
 const forecast = doc && doc.payload && doc.payload.forecast;
 const observedAt = forecast && typeof forecast.observedAt === 'string' && forecast.observedAt.length > 0 ? forecast.observedAt : undefined;
 if (!doc || !doc.profile || doc.profile.uri !== PROFILE_URI || observedAt === undefined) {
-  console.error('sample-uniform: input/task.json is not a prediction-forecast Task with payload.forecast.observedAt');
+  console.error('sample-uniform: input/' + TASK_FILE + ' is not a prediction-forecast Task with payload.forecast.observedAt');
   process.exit(2);
 }
 const payload = { probabilityYes: '0.5', submittedAt: observedAt };

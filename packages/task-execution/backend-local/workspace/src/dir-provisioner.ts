@@ -4,6 +4,10 @@ import { join } from "node:path";
 import type { ResourceDescriptor } from "@jinn-network/task-execution-protocol";
 import { materializeInput, materializeLoadout } from "./materialize.js";
 import { harvest } from "./harvest.js";
+import {
+  STAGED_DISPATCH_CONTEXT_FILENAME,
+  STAGED_SEALED_TASK_FILENAME,
+} from "./staged-input.js";
 import type { LaunchEnv, ProvisionerContract, WorkspacePaths } from "./contract.js";
 import type { TaskView } from "./task-view.js";
 
@@ -102,8 +106,10 @@ export function makeDirProvisioner(options: DirProvisionerOptions): ProvisionerC
         await mkdir(paths.secrets, { recursive: true, mode: 0o700 });
         await chmod(paths.secrets, 0o700);
         await options.runtime.ensureMetaReserve(paths);
-        await writeFile(join(paths.input, "task.sealed"), options.sealedTaskBytes, { mode: 0o400 });
-        await writeFile(join(paths.input, "dispatch-context.json"), options.dispatchContextBytes, { mode: 0o400 });
+        // #2538: the staged names come from the shared `staged-input.ts` contract, never from a
+        // literal repeated here. Every reader of the staged Task imports the same constant.
+        await writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), options.sealedTaskBytes, { mode: 0o400 });
+        await writeFile(join(paths.input, STAGED_DISPATCH_CONTEXT_FILENAME), options.dispatchContextBytes, { mode: 0o400 });
         for (const input of view.task.inputs ?? []) await materializeInput(input, paths.input, options.fetchInput ?? (async () => { throw new Error("input fetcher unavailable"); }));
         const loadout = ((view.effectiveRequirements ?? {}) as Record<string, unknown>).loadout;
         if (loadout !== undefined) await materializeLoadout(loadout, paths.input, options.fetchInput ?? (async () => { throw new Error("loadout fetcher unavailable"); }));

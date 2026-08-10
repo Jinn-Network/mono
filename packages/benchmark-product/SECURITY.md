@@ -50,9 +50,11 @@ connections.
 The `Permissions-Policy` allowlist is empty. It is version-pinned to Chromium
 `147.0.7727.15` through Playwright `1.59.1`; the optimized runtime asserts both
 that Chromium recognizes exactly the following finite list and that
-`document.featurePolicy.allowedFeatures()` is empty:
+`document.featurePolicy.allowedFeatures()` is empty. Chromium's Linux build
+recognizes the 80 common entries below; its Darwin build additionally recognizes
+and denies `bluetooth`:
 
-`accelerometer`, `aria-notify`, `attribution-reporting`, `autoplay`, `bluetooth`,
+`accelerometer`, `aria-notify`, `attribution-reporting`, `autoplay`,
 `browsing-topics`, `camera`, `captured-surface-control`, `ch-device-memory`,
 `ch-downlink`, `ch-dpr`, `ch-ect`, `ch-prefers-color-scheme`,
 `ch-prefers-reduced-motion`, `ch-prefers-reduced-transparency`, `ch-rtt`,

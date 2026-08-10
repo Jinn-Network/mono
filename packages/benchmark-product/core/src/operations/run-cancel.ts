@@ -82,6 +82,25 @@ export interface RunCancelInput {
   readonly draftId: string;
 }
 
+function taskExecutionErrorAcrossPortalBoundary(cause: unknown): TaskExecutionError | undefined {
+  if (cause instanceof TaskExecutionError) return cause;
+  if (
+    cause instanceof Error
+    && cause.name === "TaskExecutionError"
+    && "category" in cause
+    && typeof cause.category === "string"
+    && "retryable" in cause
+    && typeof cause.retryable === "boolean"
+  ) {
+    // An isolated portal consumer can load the backend contract through more than one ESM
+    // identity. Preserve the contract's typed fields across that packaging boundary instead of
+    // treating a genuine operational error as an unrelated exception solely because instanceof
+    // observes the constructor copy rather than the public shape.
+    return cause as TaskExecutionError;
+  }
+  return undefined;
+}
+
 export type RunCancelResult =
   | {
     /** A live driver or another finalizer owns the relevant single-writer boundary. */
@@ -135,14 +154,14 @@ async function acquireFreeVenue(
         // Best-effort: the venue never became usable, so there is nothing more to unwind.
       }
     }
-    const contention = cause instanceof TaskExecutionError
-      && cause.category === "backend-unavailable"
-      && cause.annotations?.["reason"] === "state-root-locked";
+    const taskExecutionError = taskExecutionErrorAcrossPortalBoundary(cause);
+    const contention = taskExecutionError?.category === "backend-unavailable"
+      && taskExecutionError.annotations?.["reason"] === "state-root-locked";
     return {
       ok: false,
       reason: contention ? "contention" : "unavailable",
-      detail: cause instanceof TaskExecutionError
-        ? cause.detail ?? cause.message
+      detail: taskExecutionError !== undefined
+        ? taskExecutionError.detail ?? taskExecutionError.message
         : cause instanceof Error
           ? cause.message
           : String(cause),

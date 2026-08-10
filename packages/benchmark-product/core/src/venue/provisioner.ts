@@ -1,13 +1,12 @@
 /**
  * The G1 custom provisioner (spec
  * `docs/superpowers/plans/2026-08-05-benchmark-product-m1-composition-dossier.md` §2 G1): the
- * platform's generic `makeDirProvisioner` writes `input/task.sealed`, but the baseline launcher's
- * runner parses only `*.json` files — a mismatch that produces zero native Tasks and exit 2. This
- * module is the product's own `ProvisionerContract` factory, branching on the sealed Task's own
- * profile URI:
+ * platform's generic `makeDirProvisioner` and launchers share one canonical sealed-Task filename.
+ * This module is the product's own `ProvisionerContract` factory, branching on the sealed Task's
+ * own profile URI while preserving that shared staging contract:
  *
- * - solve cells (prediction-forecast) write `input/task.json` = the sealed Task bytes verbatim,
- *   and nothing else parseable as a native Task.
+ * - solve cells (prediction-forecast) write the sealed Task bytes verbatim to the platform's
+ *   `STAGED_SEALED_TASK_FILENAME`, and nothing else parseable as a native Task.
  * - evaluation cells (evaluation-task) write the full evaluation-harness input set from the
  *   materials `../venue.ts`'s `prepareEvaluationCell` registered ahead of submission.
  *
@@ -21,6 +20,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   harvest as workspaceHarvest,
+  STAGED_SEALED_TASK_FILENAME,
   type DeclaredOutputSlot,
   type HarvestResult,
   type ProvisionerContract,
@@ -114,7 +114,7 @@ function solveProvisionerContract(sealedTaskBytes: Uint8Array): ProvisionerContr
     workspaceKind: (): WorkspaceKind => "dir",
     async setup(_view, paths) {
       await ensureWorkspaceDirectories(paths);
-      await writeFile(join(paths.input, "task.json"), sealedTaskBytes);
+      await writeFile(join(paths.input, STAGED_SEALED_TASK_FILENAME), sealedTaskBytes);
     },
     executionEnv: ({ env }) => ({ ...env }),
     async harvest(paths, declaredOutputs: readonly DeclaredOutputSlot[]): Promise<HarvestResult> {

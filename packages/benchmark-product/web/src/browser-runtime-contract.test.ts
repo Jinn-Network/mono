@@ -170,7 +170,9 @@ describe("production browser workspace ownership", () => {
     });
     const owner = prepareRuntimeWorkspace(runtime);
     const replayedMarker = readFileSync(runtime.ownershipMarker, "utf8");
-    rmSync(runtime.ownershipMarker);
+    // Keep the original inode allocated so filesystems that eagerly reuse a just-unlinked inode
+    // cannot make this replacement accidentally share the captured setup identity.
+    renameSync(runtime.ownershipMarker, join(baseDir, "displaced-original-marker"));
     writeFileSync(runtime.ownershipMarker, replayedMarker, { flag: "wx", mode: 0o600 });
 
     expect(() => cleanupRuntimeWorkspace(runtime, owner)).toThrow(/marker identity.*retained|retained.*marker identity/iu);

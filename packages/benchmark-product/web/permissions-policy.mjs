@@ -1,16 +1,16 @@
 /**
  * Exact feature-policy surface recognized by Chromium 147.0.7727.15, the browser
- * pinned by @playwright/test 1.59.1. The optimized runtime gate requires this list
- * to equal document.featurePolicy.features() and allowedFeatures() to be empty.
+ * pinned by @playwright/test 1.59.1. Chromium exposes Web Bluetooth's policy on
+ * Darwin but not Linux, so the optimized runtime gate pins that one platform
+ * difference while still requiring every recognized feature to be denied.
  */
 export const PINNED_CHROMIUM_VERSION = "147.0.7727.15";
 
-export const PINNED_PERMISSIONS_POLICY_FEATURES = Object.freeze([
+const PINNED_PERMISSIONS_POLICY_COMMON_FEATURES = [
   "accelerometer",
   "aria-notify",
   "attribution-reporting",
   "autoplay",
-  "bluetooth",
   "browsing-topics",
   "camera",
   "captured-surface-control",
@@ -87,7 +87,13 @@ export const PINNED_PERMISSIONS_POLICY_FEATURES = Object.freeze([
   "usb",
   "window-management",
   "xr-spatial-tracking",
-]);
+];
+
+export const PINNED_PERMISSIONS_POLICY_FEATURES = Object.freeze(
+  process.platform === "darwin"
+    ? [...PINNED_PERMISSIONS_POLICY_COMMON_FEATURES, "bluetooth"].sort()
+    : PINNED_PERMISSIONS_POLICY_COMMON_FEATURES,
+);
 
 export const PINNED_PERMISSIONS_POLICY = PINNED_PERMISSIONS_POLICY_FEATURES
   .map((feature) => `${feature}=()`)

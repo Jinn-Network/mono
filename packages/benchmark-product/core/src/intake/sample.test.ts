@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { predictionV1BaselineLauncher } from "@jinn-network/task-execution-launchers";
+import { STAGED_SEALED_TASK_FILENAME } from "@jinn-network/task-execution-workspace";
 import { afterEach, describe, expect, test } from "vitest";
 import { sha256Hex } from "../workspace/sealed-store.js";
 import { buildSampleBenchmark } from "./sample.js";
@@ -104,7 +105,7 @@ describe("buildSampleBenchmark — launcher shape contract", () => {
       mkdirSync(inputDir, { recursive: true });
       mkdirSync(outDir, { recursive: true });
       mkdirSync(workDir, { recursive: true });
-      writeFileSync(join(inputDir, "task.json"), task.bytes);
+      writeFileSync(join(inputDir, STAGED_SEALED_TASK_FILENAME), task.bytes);
 
       const view = {
         task: { instructions: "x", outputs: [] },

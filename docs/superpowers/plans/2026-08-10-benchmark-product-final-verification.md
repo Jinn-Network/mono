@@ -231,8 +231,9 @@ Production Playwright additionally swept every route and material state at deskt
 and 390px, with keyboard-only traversal, visible focus/skip targets, responsive
 containment, and zero axe violations without waivers. Exact response headers were
 pinned: `no-store`, CSP with `base-uri 'none'`, frame denial, nosniff, no-referrer,
-and an 81-feature empty Permissions Policy whose runtime-recognized set matched
-exactly and whose allowed set was empty.
+and an exact empty Permissions Policy whose runtime-recognized set matched the
+platform pin (80 Linux features; 81 Darwin features including Web Bluetooth)
+and whose allowed set was empty.
 
 Unique build/runtime/workspace/credential sentinels, generated private-key bytes,
 absolute paths, secrets, unexpected diagnostics, HTML/Flight payloads, static

@@ -14,6 +14,19 @@ import { loadResultsView } from "@/lib/server/view-models";
 const ATTRITION_FIELDS = ["expected", "judged", "unjudged", "unscorable", "expired", "invalidated", "excluded", "replacements"] as const;
 const AXES = ["harness", "model", "loadout", "isolation"] as const;
 
+type AttritionField = (typeof ATTRITION_FIELDS)[number];
+
+interface PresentedClaimArm {
+  readonly armId: string;
+  readonly pinning: unknown;
+}
+
+interface PresentedClaimHeadline {
+  readonly n: number;
+  readonly passRate: string;
+  readonly wilsonInterval: { readonly low: string; readonly high: string };
+}
+
 function formatFact(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
@@ -50,13 +63,13 @@ function Attrition({ results }: { readonly results: RunResultsDocument }) {
   return <Card className="min-w-0"><CardHeader><h2 className="text-xl font-semibold">Completeness and attrition</h2></CardHeader><CardContent className="min-w-0 space-y-5">
     {results.attrition.asymmetryFlags.length > 0 ? <div role="status" className="rounded-md border border-destructive p-3">
       <h3 className="font-semibold">Asymmetry and validity warnings</h3>
-      <ul className="list-disc pl-5">{results.attrition.asymmetryFlags.map((flag) => <li key={flag}>{flag}</li>)}</ul>
+      <ul className="list-disc pl-5">{results.attrition.asymmetryFlags.map((flag: string) => <li key={flag}>{flag}</li>)}</ul>
     </div> : <p>No attrition asymmetry warning was recorded.</p>}
     <div tabIndex={0} aria-label="Scrollable results table" className="max-w-full overflow-x-auto">
       <table className="w-full min-w-max text-left text-sm">
         <caption className="pb-2 text-left font-semibold">Attrition by arm</caption>
         <thead><tr><th scope="col">Arm</th>{ATTRITION_FIELDS.map((field) => <th scope="col" key={field} className="px-2">{field}</th>)}</tr></thead>
-        <tbody>{Object.entries(results.attrition.perArm).map(([armId, counts]) => <tr key={armId} className="border-t"><th scope="row" className="py-2 pr-2">{armId}</th>{ATTRITION_FIELDS.map((field) => <td key={field} className="px-2">{counts[field]}</td>)}</tr>)}</tbody>
+        <tbody>{Object.entries(results.attrition.perArm).map(([armId, counts]) => <tr key={armId} className="border-t"><th scope="row" className="py-2 pr-2">{armId}</th>{ATTRITION_FIELDS.map((field) => <td key={field} className="px-2">{(counts as Readonly<Record<AttritionField, number>>)[field]}</td>)}</tr>)}</tbody>
       </table>
     </div>
   </CardContent></Card>;
@@ -106,16 +119,16 @@ function Claim({ report }: { readonly report: RunResultsReport }) {
     <Card className="min-w-0 overflow-hidden"><CardHeader><h2 id="claim-heading" className="text-xl font-semibold">Claim package</h2></CardHeader><CardContent className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
       <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Schema</dt><dd>{claim.claimSchema}</dd></div><div><dt className="font-medium">Draft</dt><dd>{claim.scope.draftId}</dd></div><div><dt className="font-medium">Scope</dt><dd>{claim.scope.taskCount} tasks, {claim.scope.arms.length} arms, {claim.scope.replicates} replicates, {claim.scope.venue}</dd></div><div><dt className="font-medium">Assurance preset</dt><dd>{claim.assurance.preset}</dd></div></dl>
       <p>{claim.assurance.disclosure}</p>
-      <div tabIndex={0} aria-label="Claim scope arms and pinning table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim scope arms and pinning</caption><thead><tr><th scope="col">Arm</th><th scope="col">Stored pinning</th></tr></thead><tbody>{claim.scope.arms.map((arm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{formatFact(arm.pinning)}</td></tr>)}</tbody></table></div>
-      <div tabIndex={0} aria-label="Claim record links table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim record links</caption><tbody>{Object.entries(claim.records).map(([name, digest]) => <tr key={name} className="border-t"><th scope="row" className="py-2 pr-4">{name}</th><td><Digest>{digest}</Digest></td></tr>)}</tbody></table></div>
-      <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headline]) => <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>)}</tbody></table></div>
+      <div tabIndex={0} aria-label="Claim scope arms and pinning table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim scope arms and pinning</caption><thead><tr><th scope="col">Arm</th><th scope="col">Stored pinning</th></tr></thead><tbody>{claim.scope.arms.map((arm: PresentedClaimArm) => <tr key={arm.armId} className="border-t"><th scope="row" className="py-2 pr-4">{arm.armId}</th><td>{formatFact(arm.pinning)}</td></tr>)}</tbody></table></div>
+      <div tabIndex={0} aria-label="Claim record links table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Claim record links</caption><tbody>{Object.entries(claim.records).map(([name, digest]) => <tr key={name} className="border-t"><th scope="row" className="py-2 pr-4">{name}</th><td><Digest>{String(digest)}</Digest></td></tr>)}</tbody></table></div>
+      <div tabIndex={0} aria-label="Headline results by arm table" className="min-w-0 max-w-full overflow-x-auto"><table className="w-max min-w-full text-left text-sm"><caption className="pb-2 text-left font-semibold">Headline results by arm</caption><thead><tr><th scope="col">Arm</th><th scope="col">Judged n</th><th scope="col">Pass rate</th><th scope="col">Wilson interval</th></tr></thead><tbody>{Object.entries(claim.headline).map(([arm, headlineValue]) => { const headline = headlineValue as PresentedClaimHeadline; return <tr key={arm} className="border-t"><th scope="row" className="py-2 pr-4">{arm}</th><td>{headline.n}</td><td>{headline.passRate}</td><td>{headline.wilsonInterval.low} to {headline.wilsonInterval.high}</td></tr>; })}</tbody></table></div>
       <div><h3 className="font-semibold">Stored claim completeness</h3><p>{formatFact(claim.completeness)}</p></div>
       <div><h3 className="font-semibold">Stored claim attrition</h3><p>{formatFact(claim.attrition)}</p></div>
       <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="font-medium">Conflicted cells</dt><dd>{claim.conflicted.count}: {claim.conflicted.cellKeys.join(", ") || "none"}</dd></div><div><dt className="font-medium">Integrity tiers</dt><dd>{formatFact(claim.disclosures.integrityTierCounts)}</dd></div><div><dt className="font-medium">Pinning unverifiable counts</dt><dd>{formatFact(claim.disclosures.pinningUnverifiableCounts)}</dd></div><div><dt className="font-medium">Assurance primitives</dt><dd>{formatFact(claim.assurance.resolved)}</dd></div></dl>
-      <div className="min-w-0"><h3 className="font-semibold">Stored claim per-subject disclosures</h3>{claim.disclosures.perSubject.length === 0 ? <p>None</p> : <ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{claim.disclosures.perSubject.map((disclosure, index) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol>}</div>
+      <div className="min-w-0"><h3 className="font-semibold">Stored claim per-subject disclosures</h3>{claim.disclosures.perSubject.length === 0 ? <p>None</p> : <ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{claim.disclosures.perSubject.map((disclosure: unknown, index: number) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol>}</div>
       <div><h3 className="font-semibold">Stored claim venue honesty</h3><p>{formatFact(claim.venueHonesty)}</p></div>
-      {claim.rehearsal ? <div><h3 className="font-semibold">Disclosed rehearsal</h3><p>Preview count: {claim.rehearsal.previewCount}</p><ul className="list-disc pl-5">{claim.rehearsal.timestamps.map((at) => <li key={at}>{at}</li>)}</ul></div> : <p>No preview rehearsal is recorded in this claim.</p>}
-      <div><h3 className="font-semibold">Limitations</h3><ul className="list-disc pl-5">{claim.limitations.map((limit) => <li key={limit}>{limit}</li>)}</ul></div>
+      {claim.rehearsal ? <div><h3 className="font-semibold">Disclosed rehearsal</h3><p>Preview count: {claim.rehearsal.previewCount}</p><ul className="list-disc pl-5">{claim.rehearsal.timestamps.map((at: string) => <li key={at}>{at}</li>)}</ul></div> : <p>No preview rehearsal is recorded in this claim.</p>}
+      <div><h3 className="font-semibold">Limitations</h3><ul className="list-disc pl-5">{claim.limitations.map((limit: string) => <li key={limit}>{limit}</li>)}</ul></div>
     </CardContent></Card>
   </section>;
 }
@@ -197,9 +210,9 @@ function Report({ report }: { readonly report: RunResultsReport }) {
     <Card className="min-w-0 overflow-hidden"><CardHeader><h2 id="report-heading" className="text-xl font-semibold">Sealed report</h2></CardHeader><CardContent className="min-w-0 space-y-5 [overflow-wrap:anywhere]">
       <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Report digest</dt><dd><Digest>{report.reportSha256}</Digest></dd></div><div><dt className="font-medium">Envelope digest</dt><dd><Digest>{report.reportEnvelopeSha256}</Digest></dd></div><div><dt className="font-medium">Method</dt><dd>{report.record.method.id} version {report.record.method.version}</dd></div><div><dt className="font-medium">Method parameters</dt><dd>{formatFact(report.record.method.parameters)}</dd></div><div><dt className="font-medium">Preregistered</dt><dd>{report.record.preregistered === true ? "Yes" : "No"}</dd></div><div><dt className="font-medium">Report disclosures</dt><dd>{report.record.disclosures.perSubject.length} subject disclosure block(s)</dd></div></dl>
       <StoredReportResults report={report} />
-      <div className="min-w-0"><h3 className="font-semibold">Stored report per-subject disclosures</h3><ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{report.record.disclosures.perSubject.map((disclosure, index) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol></div>
+      <div className="min-w-0"><h3 className="font-semibold">Stored report per-subject disclosures</h3><ol className="min-w-0 list-decimal pl-5 [overflow-wrap:anywhere]">{report.record.disclosures.perSubject.map((disclosure: unknown, index: number) => <li className="min-w-0 break-words" key={index}>{formatFact(disclosure)}</li>)}</ol></div>
       <div role="status" className="rounded-md border p-3"><p className="font-semibold">Signature / verification status: {report.verification.status}</p><p>{report.verification.detail}</p></div>
-      <div><h3 className="font-semibold">Report limitations</h3><ul className="list-disc pl-5">{(report.record.limitations ?? []).map((limit) => <li key={limit}>{limit}</li>)}</ul></div>
+      <div><h3 className="font-semibold">Report limitations</h3><ul className="list-disc pl-5">{(report.record.limitations ?? []).map((limit: string) => <li key={limit}>{limit}</li>)}</ul></div>
     </CardContent></Card>
     <Claim report={report} />
   </section>;
@@ -222,7 +235,7 @@ export default async function ResultsPage({ params }: { readonly params: Promise
       <Venue results={results} />
       {results.publication ? <Card className="min-w-0"><CardHeader><h2 className="text-xl font-semibold">Published public bundle</h2></CardHeader><CardContent className="min-w-0 space-y-4 [overflow-wrap:anywhere]">
         <dl className="grid min-w-0 gap-3 sm:grid-cols-2"><div><dt className="font-medium">Bundle identity</dt><dd><Digest>{results.publication.identity}</Digest></dd></div><div><dt className="font-medium">Workspace-relative path</dt><dd className="break-all font-mono text-xs">{results.publication.relativePath}</dd></div><div><dt className="font-medium">Published at</dt><dd>{results.publication.publishedAt}</dd></div></dl>
-        <div><h3 className="font-semibold">Portable verification checks</h3><ul className="list-disc pl-5">{results.publication.checks.map((check) => <li key={check}>{check}</li>)}</ul></div>
+        <div><h3 className="font-semibold">Portable verification checks</h3><ul className="list-disc pl-5">{results.publication.checks.map((check: string) => <li key={check}>{check}</li>)}</ul></div>
       </CardContent></Card> : null}
       <Card className="min-w-0"><CardHeader><h2 className="text-xl font-semibold">Result and report actions</h2></CardHeader><CardContent className="grid min-w-0 gap-6 md:grid-cols-2 [&>*]:min-w-0">
         <ActionForm action={GUI_SERVER_ACTIONS["run.results"]} submitLabel="Refresh sealed results" successMessage="Sealed results refreshed from the core operation."><HiddenDraft draftId={draftId} /></ActionForm>
