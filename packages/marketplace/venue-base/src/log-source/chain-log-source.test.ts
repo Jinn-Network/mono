@@ -402,6 +402,39 @@ describe("chain log source (design §7 ruling 2)", () => {
     expect(tailReads).toBeLessThan(Number(gap));
   });
 
+  test("the catch-up jump still INGESTS marketplace logs from the skipped immutable region (logs not dropped)", async () => {
+    // The catch-up jump skips per-block HASH sampling of `(persisted.live, finalized]`, but the
+    // region's marketplace LOGS are the operator's idle-window events and must still be returned.
+    // A mutation that makes the jump return `[]` (no-op its getLogs) must redden this test.
+    const chain = buildScriptedChain();
+    chain.mine(50);
+    chain.setFinalized(40n);
+    const s = source(chain, { startBlock: 0n });
+    await s.poll();
+    expect(s.cursor()!.blockNumber).toBe(50n);
+
+    // Open a >chunk-sized idle gap and place a marketplace log at a block BELOW finalized,
+    // inside the region the jump skips for hash sampling.
+    chain.mine(12_000); // latest = 12,050
+    chain.setFinalized(12_000n); // finalized - live = 11,950 > chunk (1000) → catch-up jump
+    const idleWindowTx = `0x${"e".repeat(64)}` as Hex;
+    chain.addLog(6_000n, {
+      address: BASE_SEPOLIA_TODAY.jinnRouter,
+      topics: [`0x${"f".repeat(64)}` as Hex],
+      data: "0x" as Hex,
+      transactionHash: idleWindowTx,
+      logIndex: 0,
+    });
+
+    const catchUp = await s.poll();
+    expect(catchUp.cursor.blockNumber).toBe(12_000n); // took the jump path
+    const ingested = catchUp.logs.find((log) => log.blockNumber === 6_000n);
+    expect(ingested).toBeDefined();
+    expect(ingested!.transactionHash).toBe(idleWindowTx);
+    // The whole skipped region is at/below finalized, so the event is tagged `finalized`.
+    expect(ingested!.finalityTier).toBe("finalized");
+  });
+
   test("a transient hash-read error during catch-up loses no progress: the next poll resumes past the immutable region", async () => {
     const chain = buildScriptedChain();
     chain.mine(50);

@@ -236,6 +236,12 @@ export function createChainLogSource(input: {
       // few blocks (< a chunk), so the very next poll takes the steady-state branch below and
       // advances to `latest`, scanning the tail exactly as before -- never sticky at `finalized`.
       if (finalized.blockNumber - persisted.live.blockNumber > chunkBlocks) {
+        // On this path `checkpoint` provably resolves to `finalized`: the branch condition gives
+        // `finalized > persisted.live`, and the cursor invariant gives `persisted.live >=
+        // persisted.finalized`, so `finalized > persisted.finalized`. The ternary is kept (rather
+        // than hardcoding `finalized`) so the near-head path below still sees the monotone guard.
+        // Fetch the immutable region's logs -- they are marketplace events in the operator's idle
+        // window and MUST be ingested; only their per-block hash provenance is skipped, not their logs.
         const logs = await fetchChunked(
           persisted.live.blockNumber + 1n,
           finalized.blockNumber,
