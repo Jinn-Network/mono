@@ -7,8 +7,10 @@ import {
   sealTask,
   serializeCanonicalJson,
 } from '@jinn-network/task-execution-protocol';
+import { recordPath } from '@jinn-network/record-discovery-protocol';
 import { dssePreAuthEncoding } from '@jinn-network/trust-core';
 import { buildNativeSolutionVerification } from '../../src/daemon/native-solution-verification.js';
+import { buildNativeEvaluationSpecResolver } from '../../src/daemon/native-assembly.js';
 
 const PAYLOAD_TYPE = 'application/vnd.jinn.marketplace.executor-binding.v1+json';
 const ATTEMPT = 'urn:uuid:11111111-1111-4111-8111-111111111111' as const;
@@ -17,7 +19,10 @@ const EVALUATION_SPEC = new TextEncoder().encode('{"evaluation":"spec"}');
 const OUTPUT = new TextEncoder().encode('{"probability":0.62}');
 const EVIDENCE = new TextEncoder().encode('{"execution":"evidence"}');
 
-function fixture(binding = { ok: true as const, bindingDigest: `sha256:${'9'.repeat(64)}` }) {
+function fixture(
+  binding = { ok: true as const, bindingDigest: `sha256:${'9'.repeat(64)}` },
+  resolveEvaluationSpecOverride?: (digest: `sha256:${string}`) => Promise<Uint8Array | undefined>,
+) {
   const keys = generateKeyPairSync('ed25519');
   const keyId = 'did:key:z6MksolverDelivery';
   const evaluationDigest = documentDigest(EVALUATION_SPEC);
@@ -60,7 +65,9 @@ function fixture(binding = { ok: true as const, bindingDigest: `sha256:${'9'.rep
     signatures: [{ keyid: keyId, sig: signature.toString('base64') }],
   }));
   const resolveEffective = vi.fn(async () => binding);
-  const resolveEvaluationSpec = vi.fn(async () => EVALUATION_SPEC);
+  const resolveEvaluationSpec = vi.fn(
+    resolveEvaluationSpecOverride ?? (async (): Promise<Uint8Array | undefined> => EVALUATION_SPEC),
+  );
   const verification = buildNativeSolutionVerification({
     identities: {
       agent: 'urn:jinn:operator:solver-a',
@@ -142,6 +149,43 @@ describe('native solution verification', () => {
   it('fails when the Task evaluation specification cannot be resolved exactly', async () => {
     const subject = fixture();
     subject.resolveEvaluationSpec.mockResolvedValueOnce(undefined);
+    await expect(subject.verification.verify(subject.input)).resolves.toEqual({
+      ok: false,
+      reason: 'evaluation-spec-unavailable',
+    });
+  });
+
+  // CP5 gate regression (#2461): the EvaluationSpec is a native record served ONLY over the
+  // requester's HTTP plane and never pushed to IPFS. Before the HTTP-locator fallback the
+  // production resolver (`buildNativeEvaluationSpecResolver`) tried IPFS only, so the solver's own
+  // delivery self-verification aborted with `evaluation-spec-unavailable` and never published.
+  const REQUESTER_BASE = 'https://requester.example.test';
+
+  it('resolves the EvaluationSpec via the requester HTTP serving plane when IPFS misses', async () => {
+    const evaluationDigest = documentDigest(EVALUATION_SPEC);
+    const byDigest = vi.fn(async (): Promise<Uint8Array> => { throw new Error('ipfs block/get: not found'); });
+    const byLocation = vi.fn(async (url: string): Promise<Uint8Array> => {
+      if (url === `${REQUESTER_BASE}${recordPath(evaluationDigest)}`) return EVALUATION_SPEC;
+      throw new Error(`unexpected serving-plane URL ${url}`);
+    });
+    const subject = fixture(
+      undefined,
+      buildNativeEvaluationSpecResolver({ byDigest, byLocation }, [REQUESTER_BASE]),
+    );
+
+    await expect(subject.verification.verify(subject.input)).resolves.toEqual({ ok: true });
+    expect(byDigest).toHaveBeenCalledWith(evaluationDigest);
+    expect(byLocation).toHaveBeenCalledWith(`${REQUESTER_BASE}${recordPath(evaluationDigest)}`);
+  });
+
+  it('fails closed when the HTTP serving plane returns wrong bytes for the EvaluationSpec digest', async () => {
+    const byDigest = vi.fn(async (): Promise<Uint8Array> => { throw new Error('ipfs block/get: not found'); });
+    const byLocation = vi.fn(async (): Promise<Uint8Array> => new TextEncoder().encode('{"evaluation":"tampered"}'));
+    const subject = fixture(
+      undefined,
+      buildNativeEvaluationSpecResolver({ byDigest, byLocation }, [REQUESTER_BASE]),
+    );
+
     await expect(subject.verification.verify(subject.input)).resolves.toEqual({
       ok: false,
       reason: 'evaluation-spec-unavailable',
