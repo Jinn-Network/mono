@@ -7,6 +7,7 @@ import type {
   DeclaredOutputSlot, HarvestResult, IntegrityViolation, OutputArtifact, WorkspacePaths,
 } from "./contract.js";
 import { compareCodeUnitStrings } from "./order.js";
+import { BACKEND_WRITTEN_LOG_FILENAMES } from "./harness-logs.js";
 
 function contained(path: string, root: string): boolean {
   const rel = relative(root, path);
@@ -96,6 +97,14 @@ export async function harvest(
   if (existsSync(paths.logs)) {
     const logsRoot = realpathSync(paths.logs);
     walk(logsRoot, logsRoot, "logs", manifest, integrityViolations);
+    // #2538 F5: the backend's own capture of the harness's stdio is backend state, like `meta/`,
+    // not an executor Result. Collecting it would put whatever the harness printed into every
+    // signed Delivery's `outputs`. Anything the HARNESS writes under `logs/` is still collected.
+    for (const name of BACKEND_WRITTEN_LOG_FILENAMES) {
+      const reported = `logs/${name}`;
+      const index = manifest.findIndex((entry) => entry.path === reported);
+      if (index >= 0) manifest.splice(index, 1);
+    }
   }
   manifest.sort((a, b) => compareCodeUnitStrings(a.path, b.path));
   integrityViolations.push(...inputViolations(paths));

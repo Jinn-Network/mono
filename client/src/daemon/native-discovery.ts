@@ -150,6 +150,14 @@ export interface NativeDiscoverySource {
    */
   readonly identity: SourceIdentity;
   /**
+   * Does THIS operator serve this source from its own archive (#2547)? Set only when the source's
+   * configured `baseUrl` is this operator's own `publicBaseUrl` — a source it both configures in
+   * `recordSources` AND hosts itself. A self-hosted source cannot equivocate against itself, so its
+   * own idle-lapsed head degrades this poll instead of refusing (see `pollSource`). Absent/`false`
+   * for every peer source, which keeps a peer's stale head a fail-closed refusal exactly as before.
+   */
+  readonly selfServed?: boolean;
+  /**
    * Resolves WHERE to reach this source's serving-plane objects, from its `.well-known`
    * introduction. Called at POLL, not at construction, and memoized on success (#2521): a fleet
    * operator's own requester source lives behind its own archive listener, which binds after
@@ -210,8 +218,13 @@ export interface NativeDiscoveryDecodeInput {
  * - `unreachable` — nothing answered: connection refused, DNS failure, timeout. Covers both the
  *   `.well-known` introduction and every serving-plane fetch after it.
  * - `undecodable` — the source served a signed announcement this consumer cannot turn into a card.
+ * - `self-source-stale` — a source THIS operator serves from its own archive is advertising a head
+ *   it has not re-signed past `refreshBy` (#2547). A self-hosted source cannot equivocate against
+ *   itself, so its own idle-lapsed head degrades this poll rather than refusing — otherwise a
+ *   co-located requester+evaluator that idles >24h deadlocks its own boot. A PEER's lapsed head is
+ *   NEVER this: it stays the hard `stale` refusal. See `pollSource` and `buildNativeDiscoverySources`.
  */
-export type NativeDiscoveryDegradedReason = 'unpublished' | 'unreachable' | 'undecodable';
+export type NativeDiscoveryDegradedReason = 'unpublished' | 'unreachable' | 'undecodable' | 'self-source-stale';
 
 export interface NativeDiscoveryDegradedSource {
   readonly source: SourceIdentity;
@@ -649,8 +662,48 @@ export function createNativeDiscoveryConsumer<Card extends object = AnnouncedSub
         head: syncedHead.head,
         signature: syncedHead.signature,
       });
-      if (revalidated.status !== 'ok') throw new NativeDiscoverySyncError(source, revalidated.status);
-      if (new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime()) {
+      // A revalidation failure that is NOT freshness — a bad signature, a wrong or revoked key, a
+      // head/payload mismatch — refuses for EVERY source, self-hosted or peer alike: a source
+      // serving a wrongly-signed head is a real fault, never idle staleness. Only `stale` is
+      // eligible for the self-source degrade below.
+      if (revalidated.status !== 'ok' && revalidated.status !== 'stale') {
+        throw new NativeDiscoverySyncError(source, revalidated.status);
+      }
+      const stale = revalidated.status === 'stale'
+        || new Date(syncedHead.head.refreshBy).getTime() <= (input.now ?? (() => new Date()))().getTime();
+      if (stale) {
+        // ## A self-hosted source's lapsed head degrades; a peer's still refuses (#2547)
+        //
+        // A source THIS operator serves from its OWN archive cannot equivocate against itself, so
+        // its own not-yet-refreshed idle head is not a trust signal — it is the operator waiting on
+        // itself. Nothing re-stamps an idle head's `refreshBy` (it advances only on append,
+        // `serve/src/head.ts`), so a co-located requester+evaluator that idles past `refreshBy`
+        // (>24h — a normal condition, not an edge case) would DEADLOCK its own boot: the evaluator's
+        // first `sync()` reads the operator's own lapsed requester head and a fatal `stale` here
+        // aborts `WorkLoop.initialize`, exit 50. Degrading skips that source for the poll — it
+        // advances no checkpoint and queues no card, exactly as an idle no-change cycle would — and
+        // boot proceeds. The moment the requester appends a new entry the head's sequence advances
+        // and the ordinary returning-sync path resumes, so nothing is lost.
+        //
+        // A PEER's lapsed head stays a hard, fail-closed refusal: a peer serving a head it has not
+        // re-signed past `refreshBy` may be partitioned, withholding, or replaying an old head, and
+        // this consumer cannot tell that from honest liveness. The discriminator is precise —
+        // `selfServed` is set ONLY for a source whose configured `baseUrl` is this operator's own
+        // `publicBaseUrl` (`buildNativeDiscoverySources`). Delete it and the peer path degrades too,
+        // which the peer-refusal test forbids.
+        //
+        // (Refreshing the served head at boot instead — "make the head current" — does NOT work with
+        // this consumer: a re-signed head at the SAME sequence is not `sameHead` and trips the
+        // `rewound-or-tampered-head` guard below for every consumer already checkpointed at that
+        // sequence, self AND peer. Degrading the self-consume is the change that closes the deadlock
+        // without touching a byte of peer trust.)
+        if (configured.selfServed === true) {
+          return {
+            reason: 'self-source-stale',
+            detail: `self-hosted source head lapsed refreshBy ${syncedHead.head.refreshBy}; `
+              + 'degrading this poll rather than refusing this operator its own boot',
+          };
+        }
         throw new NativeDiscoverySyncError(source, 'stale');
       }
       return { accepted: 0 };

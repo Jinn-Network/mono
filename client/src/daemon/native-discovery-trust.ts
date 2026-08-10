@@ -146,12 +146,25 @@ export function buildNativeDiscoverySources(input: {
   readonly store: Store;
   readonly transport: Transport;
   readonly trust: NativeTrustAuthority;
+  /**
+   * This operator's own `publicBaseUrl` (#2547). A configured source whose `baseUrl` equals it is a
+   * source this operator serves from its own archive; the consumer degrades — rather than refuses —
+   * such a source's idle-lapsed head, so a co-located requester+evaluator can boot after >24h idle
+   * without deadlocking on its own not-yet-refreshed head. Omitted on standalone single-role hosts
+   * (which never consume a source they also serve), where NO source is self-hosted and every stale
+   * head stays a fail-closed refusal exactly as before.
+   */
+  readonly selfBaseUrl?: string;
   readonly now?: () => Date;
 }): readonly NativeDiscoverySource[] {
   const now = input.now ?? (() => new Date());
+  const selfBase = input.selfBaseUrl?.replace(/\/+$/u, '');
   const result: NativeDiscoverySource[] = [];
   for (const configured of input.configured) {
     const base = configured.baseUrl.replace(/\/+$/u, '');
+    // Precise self-hosted-source discriminator (#2547): the source's serving root is this operator's
+    // own archive origin. A peer cannot match — two distinct operators serve distinct origins.
+    const selfServed = selfBase !== undefined && base === selfBase;
     // Resolved on first poll and memoized on SUCCESS only — a peer that is down now must be
     // reachable at the next poll rather than permanently written off. Memoizing the success keeps
     // the process's introduction-read count at exactly what the eager path had (one per source per
@@ -219,6 +232,7 @@ export function buildNativeDiscoverySources(input: {
     });
     const source: NativeDiscoverySource = {
       identity: { agent: configured.agent, name: configured.name },
+      selfServed,
       resolveEndpoint,
       async verify(candidate) {
         return verifySourceChain({

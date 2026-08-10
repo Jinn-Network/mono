@@ -39,6 +39,12 @@ export interface FleetNativeDiscoveryInput {
   readonly trust: NativeTrustAuthority;
   /** Every `recordSources` entry as configured; only the `requester` ones are consumed here. */
   readonly recordSources: readonly NativeRecordSource[] | undefined;
+  /**
+   * This operator's own `publicBaseUrl` (#2547). For a co-located requester+solver operator the
+   * solver loop consumes THIS operator's own requester source; passing it lets that self-hosted
+   * source's idle-lapsed head degrade rather than deadlock `WorkLoop.initialize`'s boot `sync()`.
+   */
+  readonly selfBaseUrl?: string;
   readonly verifyAuthorityTime: NativeRequesterDecodePorts['verifyAuthorityTime'];
   readonly recordByLocation: NativeRequesterDecodePorts['recordByLocation'];
   readonly canonicalTaskCreated: NativeRequesterDecodePorts['canonicalTaskCreated'];
@@ -87,6 +93,7 @@ export async function buildFleetNativeDiscovery(
     store: input.store,
     transport,
     trust: input.trust,
+    ...(input.selfBaseUrl === undefined ? {} : { selfBaseUrl: input.selfBaseUrl }),
   });
   return createNativeDiscoveryConsumer<AnnouncedSubmissionCard>({
     store: input.store,
