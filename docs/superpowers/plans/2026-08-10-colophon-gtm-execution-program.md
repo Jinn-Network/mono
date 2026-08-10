@@ -41,7 +41,9 @@ End-of-program gates — all within our control:
 1. Merge train closed: #2541 → colophon design-system → #2551 ratified.
 2. Public surface live on Colophon's own origin.
 3. ≥2 published demo reports.
-4. ≥20 Track-1 conversations logged across ≥3 of the five pools.
+4. ≥15 Track-1 conversations logged across ≥3 of the five pools (revised
+   from 20 with the 2026-08-10 cold-only amendment — no warm-network day-1
+   volume; 20 remains the stretch).
 5. ≥5 one-page campaign proposals delivered to proposal-qualified prospects
    (live claim + real deadline; see Lane C).
 6. Every attempt recorded per Lane D/E — written prediction first, no
@@ -97,14 +99,23 @@ must-not-imply list before publication.
 
 ## 3. Lane B — demand (Track 1)
 
+**Cold-only, pseudonymous** (amended 2026-08-10: the warm network is
+excluded — the GTM runs under the operator's pseudonymous persona, and the
+warm network knows the operator otherwise. Persona setup and deliverability
+mechanics live in the operator-private identity checklist under
+`growth/.local/colophon/`). Conversations are **async-first**: DM and email
+threads are the default "20-minute conversation"; calls only if the
+operator decides the persona does calls.
+
 **Channel staging** (each launch is an engine attempt with its own written
 prediction):
 
 | Channel | Opens | Condition |
 |---|---|---|
-| Warm network | Day 1 | None — no artifact needed with people who know you |
-| Trigger-scan cold outbound | ~Day 5 | Demo report #1 live |
-| Ecosystem embedding (Inspect community, evals discourse) | Week 2 | Background thread; contributor posture, never advertiser |
+| Trigger scanning + prospect list-building | Day 1 | None — research needs no identity or artifact |
+| Ecosystem embedding (Inspect community, evals discourse) | Day 1 | The persona account exists (it does); contributor posture, never advertiser — now the reputation channel, not a week-2 background thread |
+| Cold sends — X DMs first | ~Day 5 | Demo report #1 live (the artifact is the credibility; DMs need no domain warmup) |
+| Cold sends — email | ~Day 8–10 | Demo #1 live + send-domain warmup ≥5 days in |
 | Public push (X thread, launch-adjacent posts) | When surface + both demos are live | The launch moment; spent once |
 
 **Mechanics.** An agent-run trigger scanner sweeps X/GitHub/HN/release posts
@@ -218,18 +229,21 @@ Decided at program end, not before.
 
 **Week 1**
 
-- Days 1–2: merge train; demo-topic spike (agents, parallel); warm-network
-  sends begin; domain picked; surface build starts; GROWTH.md Discussion
-  opened (blocks nothing); Lane E helper built.
-- Days 3–5: demo report #1 produced + published; surface live; trigger
-  scanner running; first cold batch approved.
-- **Gate:** train merged, surface live, demo #1 up, ≥3 conversations logged.
+- Days 1–2: merge train; demo-topic spike (agents, parallel); trigger
+  scanning + prospect list-building begin; ecosystem embedding starts from
+  the persona account; identity checklist executed (send domain, mailbox,
+  SPF/DKIM/DMARC, warmup start); domain picked; surface build starts;
+  GROWTH.md Discussion opened (blocks nothing); Lane E helper built.
+- Days 3–5: demo report #1 produced + published; surface live; first cold
+  DM batch approved and sent.
+- **Gate:** train merged, surface live, demo #1 up, ≥40 trigger-qualified
+  prospects listed, email warmup underway.
 
 **Week 2**
 
 - Demo report #2; cold outbound at full cadence; ecosystem embedding begins;
   first proposals out; public push (X thread) once both demos live.
-- **Gate:** ≥10 cumulative conversations, ≥2 proposals delivered.
+- **Gate:** ≥6 cumulative conversations, ≥2 proposals delivered.
 
 **Week 3**
 
@@ -237,8 +251,8 @@ Decided at program end, not before.
   lands; cadence continues; end-of-program review — rubric scored
   (qualitative), engine log read, gap log triaged into issues, program v2
   decided.
-- **Gate:** ≥20 conversations, ≥5 proposals. (≥1 commitment: pursued
-  outcome.)
+- **Gate:** ≥15 conversations (stretch 20), ≥5 proposals. (≥1 commitment:
+  pursued outcome.)
 
 ## 8. Risks and firebreaks
 
@@ -246,8 +260,11 @@ Decided at program end, not before.
    campaign runs wait on it; every other lane proceeds.
 2. **Spike finds no exciting topic** — generic comparisons are the accepted
    fallback; weaker ammunition beats none.
-3. **Warm network yields conversations but no live claims** — lean into
-   trigger-scan, which selects on claims by construction.
+3. **Cold reply rates too low** (no warm-network floor under the funnel) —
+   the persona's established account age and DM-first sends mitigate the
+   fresh-identity cold-start; if replies still lag, shift weight to
+   ecosystem embedding and let the demo reports pull inbound rather than
+   raising send volume.
 4. **Claim discipline** — every outward artifact passes the product design
    §8.1 must-not-imply list; demo reports lead with the self-run disclosure.
    The pitch through this program is disciplined, verifiable
