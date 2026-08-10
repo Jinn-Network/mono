@@ -753,11 +753,26 @@ export function createBaseSepoliaEvaluatorReads(input: {
       });
       if (!mechCanonical.canonical || !mechCanonical.finalized) return null;
 
-      // Fetch the exact public payload after the on-chain raw digest agrees.
-      // Re-hash defensively even though the production transport already does so.
-      const bytes = await input.records.byDigest(expected.advertisedDeliveryDigest);
-      const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-      if (actual !== expected.advertisedDeliveryDigest) return null;
+      // Fetch the exact public payload after the on-chain raw digest agrees. Native solution
+      // records are published only to the operator's HTTP records plane and are never pinned to
+      // IPFS (#2559 sibling), so try the delivery card's advertised HTTP locations first and fall
+      // back to the marketplace IPFS plane. Every plane is digest-verified against
+      // `advertisedDeliveryDigest` — which is bound to the on-chain `SolutionDeliveryClaimed`/Mech
+      // `Deliver` event above — so a substituted response is rejected exactly as a tampered IPFS
+      // block is; the transport stays untrusted. A total transient failure still throws so the
+      // caller holds its checkpoint rather than skipping the engagement.
+      const matchesDigest = (bytes: Uint8Array): boolean =>
+        `sha256:${createHash('sha256').update(bytes).digest('hex')}` === expected.advertisedDeliveryDigest;
+      let resolved = false;
+      for (const location of expected.deliveryPublicLocations ?? []) {
+        try {
+          // eslint-disable-next-line no-await-in-loop -- alternate content-addressed public replicas.
+          if (matchesDigest(await input.records.byLocation(location))) { resolved = true; break; }
+        } catch { /* serving-plane miss/failure — try the next location, then the IPFS plane */ }
+      }
+      if (!resolved && !matchesDigest(await input.records.byDigest(expected.advertisedDeliveryDigest))) {
+        return null;
+      }
 
       return {
         transactionHash: router.transactionHash!,

@@ -262,12 +262,25 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     advertisedDeliveryDigest,
   };
 
+  const deliveryLocation = 'https://solver-b.example/records/delivery' as const;
+
   function fixture(options: {
     readonly duplicateRouter?: boolean;
     readonly mechDigest?: `0x${string}`;
     readonly bytes?: Uint8Array;
+    /** When set, the IPFS plane (`byDigest`) misses — mirrors a native record never pinned to IPFS. */
+    readonly ipfsMiss?: boolean;
+    /** What the HTTP serving plane (`byLocation`) returns; absent means the plane is never reachable. */
+    readonly httpBytes?: Uint8Array;
   } = {}) {
-    const byDigest = vi.fn(async () => options.bytes ?? deliveryBytes);
+    const byDigest = vi.fn(async () => {
+      if (options.ipfsMiss) throw new Error('block was not found locally');
+      return options.bytes ?? deliveryBytes;
+    });
+    const byLocation = vi.fn(async () => {
+      if (options.httpBytes === undefined) throw new Error('no public replica in this fixture');
+      return options.httpBytes;
+    });
     const routerEvent = {
       args: { operator, requestId, taskId: 42n, attemptIndex: 3 },
       transactionHash,
@@ -316,11 +329,11 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
       publicClient: publicClient as never,
       records: {
         byDigest,
-        async byLocation() { throw new Error('unused'); },
+        byLocation,
         async byRawCid() { throw new Error('unused'); },
       },
     });
-    return { reads, byDigest };
+    return { reads, byDigest, byLocation };
   }
 
   it('joins one canonical finalized router settlement to the exact Mech digest and public Delivery bytes', async () => {
@@ -341,6 +354,37 @@ describe('first-party Base Sepolia evaluator Delivery correspondence', () => {
     await expect(mechMismatch.reads.readCanonicalSolutionDelivery(expected)).resolves.toBeNull();
     expect(mechMismatch.byDigest).not.toHaveBeenCalled();
     await expect(fixture({ bytes: new TextEncoder().encode('tampered') }).reads.readCanonicalSolutionDelivery(expected)).resolves.toBeNull();
+  });
+
+  // #2559 sibling (CP6): the delivery payload is a native record published ONLY to the solver's
+  // HTTP serving plane and NEVER pinned to IPFS. The re-fetch must resolve it via the delivery
+  // card's advertised HTTP locations, not the IPFS-only `byDigest`.
+  it('resolves the exact public Delivery via the HTTP locator when the IPFS plane misses', async () => {
+    const { reads, byLocation, byDigest } = fixture({ ipfsMiss: true, httpBytes: deliveryBytes });
+    await expect(reads.readCanonicalSolutionDelivery({
+      ...expected,
+      deliveryPublicLocations: [deliveryLocation],
+    })).resolves.toEqual({
+      transactionHash,
+      blockHash: routerBlockHash,
+      blockNumber: 90n,
+      finalized: true,
+    });
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
+    // The HTTP plane produced the exact bytes, so the IPFS plane is never consulted.
+    expect(byDigest).not.toHaveBeenCalled();
+  });
+
+  it('rejects forged HTTP Delivery bytes and never accepts a payload off the anchored digest', async () => {
+    const forged = new TextEncoder().encode('{"delivery":"forged"}');
+    // HTTP serves a digest-mismatched payload and IPFS also misses — no plane yields the anchored
+    // bytes, so no canonical fact is returned and no verdict can form on a forged payload.
+    const { reads, byLocation } = fixture({ ipfsMiss: true, httpBytes: forged });
+    await expect(reads.readCanonicalSolutionDelivery({
+      ...expected,
+      deliveryPublicLocations: [deliveryLocation],
+    })).rejects.toThrow(/not found locally/u);
+    expect(byLocation).toHaveBeenCalledWith(deliveryLocation);
   });
 });
 

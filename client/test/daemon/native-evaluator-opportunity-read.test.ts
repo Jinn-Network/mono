@@ -284,7 +284,11 @@ describe('native evaluator opportunity read (#2539)', () => {
   });
 
   async function reader(input: {
-    readonly readCanonicalSolutionDelivery: (expected: { readonly taskId: bigint }) => Promise<unknown>;
+    readonly readCanonicalSolutionDelivery: (expected: {
+      readonly taskId: bigint;
+      readonly advertisedDeliveryDigest?: `sha256:${string}`;
+      readonly deliveryPublicLocations?: readonly string[];
+    }) => Promise<unknown>;
     readonly byDigest?: (digest: `sha256:${string}`) => Promise<Uint8Array>;
   }) {
     const bytes = new Map<`sha256:${string}`, Uint8Array>();
@@ -353,6 +357,29 @@ describe('native evaluator opportunity read (#2539)', () => {
     // No source is served in-process, so the ingest brought in nothing this pass — the read is
     // derived entirely from the durable index, and nothing is held.
     expect(errors.filter((line) => line.includes('HELD'))).toStrictEqual([]);
+  });
+
+  // #2559 sibling (CP6): the delivery payload is served only over the solver's HTTP plane, never
+  // IPFS. The reader must hand the canonical read the delivery card's advertised HTTP locations so
+  // its digest-verified payload re-fetch can resolve off the serving plane, not IPFS-only byDigest.
+  it('passes the delivery card HTTP locations to the canonical read', async () => {
+    seedEngagement(store, lower);
+    seedCanonicalEvent(store, lower);
+    const seen: Array<{ readonly taskId: bigint; readonly deliveryPublicLocations?: readonly string[] }> = [];
+    const built = await reader({
+      readCanonicalSolutionDelivery: async (expected) => {
+        seen.push(expected);
+        return finalized(lower);
+      },
+    });
+
+    await built.source.read({});
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.advertisedDeliveryDigest).toBe(lower.deliveryDigest);
+    expect(seen[0]!.deliveryPublicLocations).toStrictEqual([
+      `https://solver-b.example/records/${lower.deliveryDigest.slice(7)}`,
+    ]);
   });
 
   /**
